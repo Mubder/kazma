@@ -15,8 +15,14 @@ logger = logging.getLogger(__name__)
 # Public API
 # ---------------------------------------------------------------------------
 
-SUBCMDS = ["serve", "status", "help", "completion", "wizard", "hub", "docs", "project", "gateway", "swarm", "update"]
-FLAGS = ["--model", "--provider", "--yolo", "--verbose", "--no-banner", "--help", "-h"]
+SUBCMDS = [
+    "serve", "status", "help", "completion", "wizard", "hub", "docs",
+    "project", "gateway", "swarm", "update", "migrate", "ask", "acp",
+]
+FLAGS = [
+    "--model", "--provider", "--yolo", "--verbose", "--no-banner",
+    "--help", "-h", "--plan", "--json", "--no-stream", "--workspace", "--acp", "--thread",
+]
 
 __all__ = [
     "FLAGS",
@@ -218,6 +224,9 @@ def _zsh_subcmd_descs() -> list[str]:
         "gateway[Gateway control]",
         "swarm[Swarm orchestration]",
         "update[Check for and install CLI updates]",
+        "migrate[Export/import a Kazma installation]",
+        "ask[Run the agent on a prompt (no web server)]",
+        "acp[Agent Client Protocol JSON-RPC on stdio]",
     ]
 
 

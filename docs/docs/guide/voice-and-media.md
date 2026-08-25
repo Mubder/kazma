@@ -13,6 +13,37 @@ the Web UI. This page covers how to enable and use voice and media.
 
 ## Voice (STT + TTS)
 
+Kazma voice is **turn-based by default** (STT → LangGraph → TTS) on every
+platform. On the **Web UI**, Live **duplex** (interrupt while it speaks) is
+opt-in via LiveKit WebRTC. The supervisor graph is still the brain — this is
+not OpenAI Realtime replacing LangGraph.
+
+Energy VAD is the default; `KAZMA_SILERO_VAD=1` tries Silero when torch is
+installed.
+
+### LiveKit duplex (web only)
+
+You need a LiveKit server (self-host or [LiveKit Cloud](https://livekit.io)).
+Kazma does not start one.
+
+```bash
+LIVEKIT_URL=wss://your-project.livekit.cloud
+LIVEKIT_API_KEY=APIxxxx
+LIVEKIT_API_SECRET=...
+# Kill-switch: KAZMA_VOICE_DUPLEX=0
+```
+
+Or ConfigStore `voice.livekit.url` / `api_key` / `api_secret`. Then the Live
+button on `/` joins a room (`POST /api/voice/livekit/token`) and barge-in
+cancels TTS when you speak. When duplex is on, the browser also **publishes
+TTS into the room** (`publishTrack`) so the media loop is honest (`tts_in_room`
+on `/api/voice/livekit/status`). Telegram / Discord / Slack are still voice notes.
+
+OpenAI Realtime and Gemini Live are **not** the conversation brain. Optional
+REST STT/TTS codec: `KAZMA_REALTIME_CODEC=1` (`kazma_core.voice.realtime_codec`).
+Those two providers are skipped because they cannot stay codec-only without
+owning the tool loop.
+
 Voice is a **single config block that controls all platforms**. When enabled,
 inbound audio is transcribed to text before reaching the agent. Optional
 **auto voice-note replies** (`tts_reply`) synthesize the agent's reply back to

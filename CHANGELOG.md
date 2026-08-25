@@ -1,5 +1,350 @@
 # CHANGELOG
 
+## Unreleased — post-industry leftovers (non-SaaS GOAL, 2026-08-25)
+
+Closed the remainder list except the SaaS park. Brain is still LangGraph.
+
+- **B1 429 backoff:** Retry-After + 3-attempt exponential backoff on
+  generic `LLMProvider` *and* native Anthropic `/messages`. Exhausted 429
+  stays `transient=True` with `kind=rate_limit_exhausted` (supervisor skips
+  same-provider re-retry, failover still fires). Bedrock throttling tagged
+  the same kind. Azure/Gemini inherit the generic path.
+- **B2 router honesty:** `ModelRouter.classify` uses word boundaries
+  (`barcode` is not coding). Supervisor honors `models.defaults.<kind>`
+  over YAML keyword routing. Turn-model pin still wins. Env-lock still wins.
+- **A1 MCP spec client:** initialize advertises resources/prompts/sampling/
+  roots/elicitation. `mcp_list_resources` / `mcp_read_resource` (fenced) /
+  `mcp_list_prompts` / `mcp_get_prompt` (user-visible, not system).
+  Sampling/elicitation **deny without HITL** (default off:
+  `KAZMA_MCP_SAMPLING`). roots/list = active workspace. Not an MCP server.
+- **A2 CUA planners:** optional Anthropic/Gemini action mapping behind
+  `computer_use`. Fallback remains vision-JSON + Playwright.
+  `KAZMA_CUA_PLANNER=0`. No desktop VM.
+- **A3 LiveKit TTS in-room:** browser publishes TTS as a LiveKit audio
+  track when duplex is on (`tts_in_room` on status). Brain unchanged.
+- **A4 Realtime codec:** `KAZMA_REALTIME_CODEC=1` uses REST STT/TTS only.
+  OpenAI Realtime and Gemini Live are skipped (cannot stay codec-only).
+- **B3 eval pack:** frozen `tool_trace` (file_read then answer) +
+  `computer_use` HITL interrupt. No live LLM.
+- **C3** Bright Data / Oxylabs `ProxyProvider` stubs + Settings dropdown
+  (unconfigured = direct).
+- **C4** SessionStore 5-min TTL honesty (`kazma_core.sessions.ttl`); cron
+  still uses `delivery_target`.
+- **C1/C2/B4 capped:** no `chat.js` rewrite; Ruff/Bandit stay advisory;
+  Playwright e2e stays out of CI (boot-wait still flaky).
+- **D wontfix-here:** LiteLLM-only egress; Realtime-as-brain; chat-platform
+  duplex; CUA Firecracker VM; re-add OpenTelemetry; TUI-as-Claude-Code;
+  MCP server for other IDEs. SaaS park untouched.
+
+Plan: `docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md`. Tests: `test_llm_rate_limit`,
+`test_routing`, `test_mcp_spec_client`, `test_computer_use`, `test_eval_pack`,
+`test_livekit_duplex`, `test_voice_mode`, `test_proxy_scraping_coverage`,
+`test_session_ttl`.
+
+Restart the server for MCP tools, computer_use planners, LiveKit TTS publish,
+and Settings proxy dropdown. Router/429 apply on the next LLM call.
+
+## Unreleased — LiveKit duplex voice (2026-08-25)
+
+Web live voice can be a call you interrupt. The **brain is still LangGraph**
+(STT → graph → TTS). LiveKit is WebRTC (AEC, room, mic). Telegram/Discord/
+Slack stay voice-note turn-based.
+
+- Opt-in: `LIVEKIT_URL` + `LIVEKIT_API_KEY` + `LIVEKIT_API_SECRET`.
+  Kill-switch `KAZMA_VOICE_DUPLEX=0`.
+- `GET /api/voice/livekit/status` · `POST /api/voice/livekit/token`
+  (HS256 room JWT). Browser loads `livekit-client` from CDN when enabled.
+- `/ws/voice` barge-in: client RMS while TTS plays, or a new utterance,
+  sends `interrupt` and cancels in-flight TTS. Graph HITL is unchanged.
+- `voice_product_mode()` is `duplex` only when credentials are set.
+- You must run a LiveKit server (or LiveKit Cloud). Kazma does not start one.
+- Tests: `tests/test_livekit_duplex.py`.
+
+Restart the server to pick up the new routes. Set LiveKit env first.
+
+## Unreleased — LiteLLM optional gateway (2026-08-25)
+
+OpenAI-compatible calls can go through a LiteLLM *proxy* when you want
+spend/failover in one place. This is **not** exclusive egress and does
+**not** `import litellm`.
+
+- Live-read SoT: `kazma_core.llm_gateway` (`KAZMA_LITELLM_URL` or
+  ConfigStore/YAML `llm.gateway.url`). Next `chat()` picks it up.
+- **Native four-branch stays direct** (Anthropic / Azure / Bedrock / Gemini).
+- Local Ollama / LM Studio stay direct unless `KAZMA_LITELLM_LOCAL=1`.
+- Kill-switch `KAZMA_LITELLM=0`. Optional `KAZMA_LITELLM_FALLBACK_DIRECT=1`
+  retries the original URL if the proxy is down.
+- Master key: `LITELLM_MASTER_KEY` (or `llm.gateway.api_key`).
+- `/health/details` reports `llm_gateway` (host only, no secrets).
+- Tests: `tests/test_llm_gateway.py`.
+
+No server restart required for env; ConfigStore keys apply on the next LLM call.
+
+## Unreleased — leftover industry gaps (2026-08-25)
+
+Computer use, observability that turns on, memory fleet embeds, product
+hygiene, and hard-PDF extract — still on the 0.10.0 public base.
+
+- **Computer use:** `computer_use` tool is a screenshot→click/type/key loop
+  (Playwright actuator + vision model). HITL danger-tier. Plan mode strips
+  it. Kill-switch `KAZMA_COMPUTER_USE=0`. Not a desktop CUA VM.
+- **Langfuse auto-on:** `logging.langfuse.enabled: auto` — public+secret
+  keys (env or YAML) select the Langfuse backend. `enabled: false` and
+  `KAZMA_LANGFUSE=0` stay off. Console remains the no-key default.
+- **Hosted embed fleet (#78):** `KAZMA_EMBED_FLEET=1` + OpenAI/Voyage key
+  switches the embedder off local bge-m3. `provider: openai|voyage` fills
+  URL/model/dim. Does **not** surprise-switch a laptop store (dim mismatch).
+- **Hygiene:** `models.router: kazma` (fallback no longer gated on the
+  lying `litellm` label). Tools-catalog danger list is
+  `CANONICAL_DANGER_TOOLS`.
+- **Docs extract:** after a weak PyMuPDF score, parent-process salvage
+  tries Docling (`kazma[docling]`) then LlamaParse/Reducto when API keys
+  exist. Keys never enter the parser sandbox. `KAZMA_DOCLING=0` /
+  `KAZMA_REMOTE_PARSE=0`.
+- **Voice honesty:** product mode is turn-based STT→LLM→TTS, not
+  LiveKit/Realtime. Optional Silero VAD via `KAZMA_SILERO_VAD=1`.
+
+Restart the server to pick Langfuse auto-on, computer_use, and salvage.
+CLI `kazma ask` picks tools on the next process.
+
+## 0.10.0 (2026-08-25)
+
+Public base **0.9.4 → 0.10.0**. Display remains `{base}+gSHORTSHA`.
+
+Milestone for the industry-stack freeze and coding-agent depth landed
+2026-08-25: streaming LLM, graph split, prompt cache, eval pack, OIDC
+fail-closed, pgvector, Monaco + `file_apply_patch`, E2B + Temporal,
+codebase index, strict tool schemas, Pre/Post tool hooks, plan mode,
+IDE LSP, and `kazma ask` / `kazma acp` with live tokens and HITL.
+
+Detail is in the dated notes immediately below.
+
+## kazma ask streaming + ACP HITL (2026-08-25)
+
+The CLI can run the agent without the web server. Tokens stream; danger
+tools can be approved.
+
+- ``kazma ask "…"`` builds the LangGraph supervisor in-process (same
+  tools, workspace, commitment). Does **not** start uvicorn. Tokens go
+  to stdout; tool lines to stderr. ``--json`` is NDJSON events
+  (token/tool/hitl/done). ``--no-stream`` waits for the full reply.
+- HITL: MemorySaver + graph ``interrupt()``. On a TTY, danger tools
+  prompt ``y/N/a=always``. Piped stdin / ``kazma ask -`` fail closed
+  unless ``--yolo``.
+- ``kazma acp`` (or ``kazma ask --acp``) is an **Agent Client Protocol**
+  JSON-RPC server on stdio: ``initialize``, ``session/new``,
+  ``session/prompt``, ``session/cancel``, plus ``session/update``
+  (``agent_message_chunk``, ``tool_call``, ``tool_call_update``) and
+  ``session/request_permission`` (allow-once / allow-always / reject).
+- Tests: `tests/test_cli_ask.py`.
+
+Restart is not required for the CLI; the web server is unchanged.
+
+## Unreleased — IDE language intelligence (LSP) (2026-08-25)
+
+`/ide` Monaco is no longer syntax-only. Hover, complete, go-to-definition,
+outline, and syntax diagnostics run through a workspace-scoped LSP façade
+(`POST /api/ide/lsp`) on the existing code index — not a long-lived
+pylsp/tsserver (Windows SelectorEventLoop cannot host asyncio
+subprocesses).
+
+- Completions: buffer identifiers + keywords + indexed symbols.
+- Hover / definition / document symbols from local AST/regex + the index.
+- Diagnostics: ``ast.parse`` (Python) and ``json.loads`` (JSON).
+- Paths go through ``IdeService.resolve`` (workspace + path grants).
+  Kill-switch: ``KAZMA_IDE_LSP=0``. Tests: `tests/test_ide_lsp.py`.
+
+Restart the server to pick this up.
+
+## Unreleased — First-class plan mode (2026-08-25)
+
+Inspect and propose, then execute on approve — not a prompt-only nudge.
+
+- `/plan on` · `/plan <task>` enter plan mode. Write/exec/patch/shell tools
+  are **structurally** removed (existing `read_only` / `no_writes`
+  hard_constraints + tool-worker allowlist). YOLO cannot expand that list.
+- `/plan go` or **Proceed** approves: plan mode off, mutating tools back
+  (HITL still gates danger tools), execute the plan just written.
+- Web: Plan pill on the composer bar; slash autocomplete. SSE / WS /
+  Telegram share `apply_plan_command`.
+- `codebase_search` / `codebase_status` / `read_url` added to the
+  audit-only allowlist so planning can inspect the repo.
+- Kill-switch: `KAZMA_PLAN_MODE=0`. Tests: `tests/test_plan_mode.py`.
+
+Restart the server to pick this up.
+
+## Unreleased — Pre/Post tool hooks (2026-08-25)
+
+Claude Code–style PreToolUse / PostToolUse on the single execute path.
+This is **not** a fourth permission system: HITL, commitment, and the YAML
+allowlist still gate danger tools. Hooks cannot auto-approve.
+
+- Pre-hooks may **deny** or **rewrite** arguments (rewritten args still go
+  through commitment + HITL). Post-hooks observe and may append a short
+  note; they cannot undo a tool that already ran.
+- In-process: `register_pre_tool_hook` / `register_post_tool_hook`.
+- Operator commands: `agent.hooks.pre_tool` / `post_tool` in YAML or
+  ConfigStore (JSON on stdin/stdout; exit 2 = deny). Spawned via
+  ``asyncio.to_thread(subprocess.run)`` (Windows SelectorEventLoop).
+- Default is enabled with empty lists (no-op). Kill-switch:
+  `KAZMA_TOOL_HOOKS=0`. Fail-open if a hook crashes.
+- Wired on `LocalToolRegistry.execute` and MCP unified execute.
+- Tests: `tests/test_tool_hooks.py`.
+
+Restart the server to pick this up.
+
+## Unreleased — Strict tool schemas + structured outputs (2026-08-25)
+
+Models can no longer invent extra tool arguments. OpenAI Structured
+Outputs stay opt-in so local / Anthropic / Gemini endpoints do not 400.
+
+- Generated tool JSON Schema always has ``additionalProperties: false``
+  on closed objects. ``required`` is still parameters without defaults.
+- ``KAZMA_STRICT_TOOLS=1`` stamps OpenAI ``function.strict: true``
+  (every property required; optionals are ``T | null``). Tools with
+  free-form ``dict`` parameters stay unstrict.
+- ``LLMProvider.chat`` / ``chat_stream`` accept ``response_format``
+  (``json_schema`` / ``json_object``). Not attached on supervisor turns.
+  Unsupported providers retry once without it.
+- Execute drops invented keys and treats JSON ``null`` on defaulted
+  params as omitted (Python defaults still apply).
+- Tests: `tests/test_tool_schema.py`.
+
+Restart the server to pick this up.
+
+## Unreleased — Codebase index (ripgrep + symbols) (2026-08-25)
+
+The agent can find definitions instead of guessing paths. Read-only;
+workspace-scoped; no HITL.
+
+- SQLite symbol index under `kazma-data/code-index/` (tree-sitter when
+  `kazma[index]` is installed, regex fallback otherwise).
+- Live **ripgrep** for text (`rg -F`); Python walk if `rg` is missing.
+- Tools: `codebase_search` (auto/symbol/text), `codebase_status`.
+- Incremental refresh after `file_write` / `file_apply_patch` / append / delete.
+- IDE: `GET /api/ide/codebase?q=`. Kill-switch: `KAZMA_CODE_INDEX=0`.
+
+Restart the server to pick this up.
+
+## Unreleased — E2B sandbox + Temporal durable swarm (industry stack part 8) (2026-08-25)
+
+Opt-in adapters so untrusted code and multi-hour swarm work don't force a
+rebuild. Defaults unchanged: Docker/local ``python_exec``, in-process swarm.
+
+- **E2B:** when ``KAZMA_E2B_API_KEY`` / ``E2B_API_KEY`` is set, HITL-approved
+  ``python_exec`` runs in a Firecracker microVM. Kill-switch ``KAZMA_E2B=0``.
+  ``pip install 'kazma[sandbox]'``. Production without E2B/Docker still
+  refuses host-local fallback.
+- **Temporal:** when ``KAZMA_TEMPORAL_HOST`` is set, swarm ``dispatch`` wraps
+  ``_dispatch_inner`` in a Temporal workflow (crash-resume). Planner / HITL /
+  breakers stay Kazma. Kill-switch ``KAZMA_TEMPORAL=0``. Required (no
+  in-process fallback): ``KAZMA_TEMPORAL_REQUIRED=1``.
+  ``pip install 'kazma[durable]'``. Worker starts from app lifespan (fail-open).
+- Tests: `tests/test_e2b_temporal.py`.
+
+Restart the server after installing extras / setting keys.
+
+## Unreleased — Monaco editor + file_apply_patch (industry stack part 7) (2026-08-25)
+
+Coding IDE is no longer CodeMirror 5 from a CDN. Web `/ide` uses **Monaco**
+(the VS Code engine), with a textarea fallback if the CDN is offline.
+
+- New danger-tier tool ``file_apply_patch``: unique ``old_string`` /
+  ``new_string`` (Aider-style) or a unified diff / Morph ``Begin Patch``.
+  HITL-gated like ``file_write``. Prefer this for edits to existing files.
+- ``IdeService.apply_patch`` + ``POST /api/ide/apply_patch`` — same registry
+  path, no bypass.
+- Tests: `tests/test_file_apply_patch.py`; IDE fail-closed HITL test.
+
+Restart the server to pick this up.
+
+## Unreleased — Postgres + pgvector as memory/search primary (industry stack part 6) (2026-08-25)
+
+When you already run Postgres (`KAZMA_DATABASE_URL` or
+`memory.backends.state.url`), dense recall uses **pgvector** instead of
+sqlite-vec. The V2 cognitive model is unchanged.
+
+- Auto-select: sqlite-vec stays the one-node default; a Postgres DSN
+  promotes vector provider to `pgvector` (hybrid dual-write, or
+  remote-first when `state.role=primary`). Explicit Qdrant is never
+  overridden. Kill-switch: `KAZMA_PGVECTOR=0`.
+- Postgres-primary recall is **ILIKE + pgvector RRF**, not ILIKE-only.
+- Beliefs and episodes upsert `kind` into the vector index; belief dense
+  no longer caps at 400 rows when pgvector is on.
+- HNSW index is created best-effort on `kazma_memory_vectors`.
+- Tests: `tests/test_memory_pgvector.py`.
+
+Restart the server to pick this up. Enable the `vector` extension on the
+Postgres database (`CREATE EXTENSION IF NOT EXISTS vector`).
+
+## Unreleased — OIDC fail-closed + SSE as the only graph client (industry stack part 5) (2026-08-25)
+
+SSO no longer accepts an unverified `id_token` when JWKS verify fails.
+Web chat turns and HITL resume always use SSE; `/ws/chat/{session_id}` stays
+the Turn Delivery V2 telemetry / cursor bus.
+
+- `exchange_code` verifies `id_token` (JWKS for RS/ES/PS, client secret for
+  HS*). `alg: none`, missing JWKS, and signature errors raise
+  `PermissionError`. UserInfo is used only when the IdP omitted `id_token`.
+- WS `send_prompt` / `approve_tool` are rejected (`reason=sse_only`) unless
+  `KAZMA_WS_GRAPH=1` (debug / emergency). `chat.js` never prefers WS for
+  turns or HITL.
+- Tests: `tests/test_oidc.py`; WS delivery tests expect the SSE-only ack.
+
+Restart the server to pick this up.
+
+## Unreleased — Eval pack in CI (industry stack part 4) (2026-08-25)
+
+Golden trajectories for load-bearing policies (no live LLM): routing,
+turn_failed honesty, HITL interrupt, system-at-head hoist, prompt-cache
+prefix, Arabic language lock, DSML leak filter, ⚠️ error prefix.
+
+- Fixture: `tests/fixtures/eval_pack.json`
+- Runner: `tests/test_eval_pack.py` (pytest marker `eval`)
+- Operator: `python scripts/eval_pack.py`
+- CI: already gated by `scripts/fast_test.py` collecting `tests/`
+
+## Unreleased — Prompt cache prefix + semantic compact (industry stack part 3) (2026-08-25)
+
+- Pack system notes into a **stable identity prefix** + one **dynamic** blob
+  so OpenAI/Gemini automatic prefix cache and Anthropic `cache_control`
+  can hit. `hoist_system_messages()` still puts system at the head (LM Studio
+  / llama.cpp). Kill-switch: `KAZMA_PROMPT_CACHE=0`.
+- Anthropic `/messages` sends cached system blocks + last-tool cache breakpoint.
+- Context overflow and `/compact` (80% budget) now **summarize dropped
+  history** (CompactionEngine) instead of only deleting the middle.
+  Kill-switch: `KAZMA_SEMANTIC_COMPACT=0`.
+- CompactionEngine accepts `LLMResponse` from `llm.chat()` (was assuming str).
+
+## Unreleased — Split graph_builder + tool_registry (industry stack part 2) (2026-08-25)
+
+Behavior-preserving extract of the two god files. Public import paths unchanged
+(`kazma_core.agent.graph_builder`, `kazma_core.agent.tool_registry`).
+
+- Graph: `graph_helpers.py`, `graph_supervisor.py`, `graph_tool_worker.py`,
+  `graph_respond.py`. `graph_builder.py` compiles the graph and re-exports.
+- Tools: `tool_schema.py`, `tool_scope.py`, `tool_builtins.py`. HITL execute
+  chokepoint and ContextVars stay in `tool_registry.py`.
+
+## Unreleased — Streaming LLM adapter (industry stack part 1) (2026-08-25)
+
+True token streaming for the supervisor path. Custom `LLMProvider` is not a
+LangChain `BaseChatModel`, so LangGraph never emitted `on_chat_model_stream`
+and the UI backfilled the whole answer at the end.
+
+- `LLMProvider.chat_stream()` — OpenAI-compatible SSE (`stream: true`),
+  including LiteLLM proxy / OpenAI / DeepSeek / Groq / NIM / Ollama / LM Studio.
+  Falls back to blocking `chat()` when the server rejects streaming.
+- `AnthropicProvider.chat_stream()` — native `/messages` SSE.
+- Azure inherits the OpenAI SSE path; Bedrock is a one-chunk fallback (SigV4).
+- `invoke_llm_chat()` is the supervisor / nudge / respond / failover entry.
+  Token deltas are injected as synthetic `on_chat_model_stream` events.
+- SSE + WS already map that event to `token` / `llm_delta` frames.
+- Kill-switch: `KAZMA_LLM_STREAM=0`.
+- LiteLLM proxy egress: `KAZMA_LITELLM_URL` rewrites the **generic**
+  OpenAI-compatible client only (AGENTS.md §1 four-branch stays).
+- Tests: `tests/test_llm_stream.py`.
+
 ## Unreleased — Ego-graph: stop minting payload objects; hub-reach not any-entity (2026-08-24)
 
 Write-time orphan factory was still live after M-03: `resolve_entity` minted

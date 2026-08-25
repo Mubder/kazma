@@ -110,8 +110,8 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 
 ## Version status
 
-- `pyproject.toml`: **0.9.4**
-- `kazma.yaml` `agent.version`: **0.9.4**
+- `pyproject.toml`: **0.10.0**
+- `kazma.yaml` `agent.version`: **0.10.0**
 - CLI help string: **n/a**
 
 ---

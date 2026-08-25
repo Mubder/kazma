@@ -92,8 +92,8 @@ Configurable via Settings UI (**Settings → Agent → Non-Stop & Self-Healing**
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `models.default` | string | `gpt-4o-mini` | Default model id. |
-| `models.router` | string | `litellm` | **String only.** Gates the fallback-model branch in `llm_provider.py:336`. Kazma does **not** `import litellm` — it treats LiteLLM as a compatible proxy endpoint on port 4000. |
-| `models.fallback` | string | `gpt-4o-mini` | Model used on retry if `router == "litellm"` and a request fails (`llm_provider.py:335-347`). |
+| `models.router` | string | `kazma` | Label for Kazma's own router. **Not** an `import litellm`. Point `base_url` at a LiteLLM proxy if you run one. |
+| `models.fallback` | string | `gpt-4o-mini` | Model used on retry when the primary HTTP call fails. |
 
 ### `llm` (lines 10-18)
 
@@ -107,6 +107,10 @@ Configurable via Settings UI (**Settings → Agent → Non-Stop & Self-Healing**
 | `llm.timeout` | float | `60.0` | Per-request timeout (seconds). |
 | `llm.input_cost_per_1m` | float | `0.15` | USD per 1M input tokens — used for cost accounting. |
 | `llm.output_cost_per_1m` | float | `0.6` | USD per 1M output tokens. |
+| `llm.gateway.url` | string | `''` | Optional LiteLLM **proxy** for OpenAI-compatible providers. Env `KAZMA_LITELLM_URL` wins. Native four-branch never uses this. |
+| `llm.gateway.api_key` | string | `''` | Proxy master key (`LITELLM_MASTER_KEY`). Vault-encrypted. |
+| `llm.gateway.include_local` | bool | `false` | Also send Ollama/LM Studio through the proxy (`KAZMA_LITELLM_LOCAL=1`). |
+| `llm.gateway.fallback_direct` | bool | `false` | If the proxy is down, retry the original URL once (`KAZMA_LITELLM_FALLBACK_DIRECT=1`). |
 
 ### `mcp` (lines 19-32)
 
@@ -275,7 +279,7 @@ Notifications route through the SwarmMessageBus (no parallel path). Set `connect
 |---|---|---|---|
 | `logging.level` | string | `INFO` | Log level. |
 | `logging.format` | string | `json` | `json` or plain. |
-| `logging.langfuse.enabled` | bool | `false` | Langfuse tracing. **Roadmap** — dependency present, integration not active. |
+| `logging.langfuse.enabled` | `auto` / bool | `auto` | `auto` = Langfuse when public+secret keys exist. `false` / `KAZMA_LANGFUSE=0` = off. |
 | `logging.langfuse.public_key` | string | `''` | |
 | `logging.langfuse.secret_key` | string | `''` | |
 
@@ -470,7 +474,7 @@ Hardcoded `GEMINI_MODELS` (Vertex AI has no static `/models` endpoint): `gemini-
 | `providers.list` | Stored provider array. |
 | `providers.health.*` | Per-provider health. |
 | `models.saved.*` | Saved model profiles. |
-| `models.defaults.*` | Per-task defaults (`chat`, `code`, `summarize`, `translate`). |
+| `models.defaults.*` | Per-task defaults (`chat`, `code`, `research`, `fast`, `vision`, `general`). **Wins over** keyword `ModelRouter.classify` (e.g. `"code"` in a prompt cannot override `models.defaults.code`). Env `KAZMA_MODEL` still wins. |
 | `llm.model`, `llm.base_url`, `llm.api_key` | Legacy fallbacks. |
 | `registry.active_provider`, `registry.active_model`, `registry.discovered_models` | Active selection + cache. |
 

@@ -196,6 +196,7 @@ class TestHitlConfig:
     def test_tool_tiers(self):
         assert get_tool_tier("file_read") == "read"
         assert get_tool_tier("file_write") == "danger"
+        assert get_tool_tier("file_apply_patch") == "danger"
         assert get_tool_tier("unknown_tool") == "unknown"
 
 

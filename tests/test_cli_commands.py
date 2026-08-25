@@ -680,7 +680,7 @@ class TestCompletionsSubcmds:
         assert "swarm" in SUBCMDS
 
     def test_core_commands_present(self) -> None:
-        for cmd in ("serve", "status", "help", "completion", "wizard", "hub", "docs"):
+        for cmd in ("serve", "status", "help", "completion", "wizard", "hub", "docs", "ask", "acp"):
             assert cmd in SUBCMDS, f"{cmd} missing from SUBCMDS"
 
     def test_bash_script_has_new_commands(self) -> None:

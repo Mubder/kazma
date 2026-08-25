@@ -21,6 +21,19 @@ the deep docs when you need detail.
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Post-industry leftovers (2026-08-25)** | MCP resources/prompts (fenced; sampling HITL). CUA planner adapters on `computer_use`. LiveKit TTS published into the room. 429 backoff on Anthropic. Router word-boundaries + `models.defaults`. Eval tool-trace. Bright Data/Oxylabs stubs. | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md); [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots) |
+| **LiveKit duplex (web) (2026-08-25)** | Live button: WebRTC AEC + barge-in (interrupt TTS). Brain is still LangGraph. Needs `LIVEKIT_URL` + API key/secret. Telegram stays voice notes. | [Voice](./voice-and-media); `KAZMA_VOICE_DUPLEX=0` |
+| **LiteLLM optional gateway (2026-08-25)** | `KAZMA_LITELLM_URL` (or `llm.gateway.url`) sends OpenAI-compatible calls through a LiteLLM proxy. Native Anthropic/Azure/Bedrock/Gemini stay direct. Locals stay direct. Not exclusive. | [FAQ](./faq#do-i-need-litellm); `KAZMA_LITELLM=0` |
+| **Computer use + leftover polish (2026-08-25)** | `computer_use` screenshot→action loop (HITL). Langfuse **auto-on** with keys. Hosted embed fleet (`KAZMA_EMBED_FLEET=1`). Docling/LlamaParse salvage for hard PDFs. Voice is **turn-based**, not Realtime. | [Tools](../reference/tools-catalog); `KAZMA_COMPUTER_USE=0`; [Voice](./voice-and-media) |
+| **kazma ask + ACP (2026-08-25)** | `kazma ask "…"` runs the graph without the web server. Tokens stream; TTY HITL (`y/N`). `kazma acp` is ACP stdio with `session/update` + `session/request_permission`. `--yolo` is headless. | [Quickstart](./quickstart); `kazma ask --help` |
+| **IDE LSP (2026-08-25)** | Monaco hover, complete, Ctrl+click definition, Python/JSON diagnostics. Workspace-scoped; uses the code index. | `/ide`; `KAZMA_IDE_LSP=0`; [IDE](../products/ide) |
+| **Plan mode (2026-08-25)** | `/plan on` inspects (write/exec blocked). `/plan go` or **Proceed** executes. HITL still on. | Plan pill; [Slash commands](../reference/slash-commands); `KAZMA_PLAN_MODE=0` |
+| **Pre/Post tool hooks (2026-08-25)** | Claude Code–style PreToolUse / PostToolUse (deny, rewrite, observe). Not a permission system — HITL still gates danger tools. | `agent.hooks.*`; `KAZMA_TOOL_HOOKS=0`; [Architecture](./architecture#56-tool-hooks) · [Security](./security-and-safety) |
+| **Strict tool schemas (2026-08-25)** | Tool JSON Schema is closed (`additionalProperties: false`). OpenAI `strict` tools + `response_format` are opt-in. | `KAZMA_STRICT_TOOLS=1`; [Tools catalog](../reference/tools-catalog); [Architecture](./architecture#55-strict-schemas--structured-outputs) |
+| **Codebase index (2026-08-25)** | `codebase_search` finds functions/classes (tree-sitter or regex) plus live ripgrep. Index refreshes on write/patch. | extra `kazma[index]`; `KAZMA_CODE_INDEX=0`; [IDE](../products/ide) |
+| **E2B + Temporal (2026-08-25)** | Opt-in Firecracker `python_exec` (`E2B_API_KEY`) and Temporal-wrapped swarm dispatch (`KAZMA_TEMPORAL_HOST`). Defaults unchanged. | extras `kazma[sandbox]` / `kazma[durable]`; [env vars](../reference/environment-variables) |
+| **Monaco + apply-patch (2026-08-25)** | `/ide` uses the VS Code Monaco engine (textarea fallback). Agent edits use `file_apply_patch` (HITL) instead of rewriting whole files. | `/ide`; [IDE](../products/ide); [Tools catalog](../reference/tools-catalog) |
+| **pgvector memory search (2026-08-25)** | When Postgres is on, dense recall uses pgvector (auto). Postgres-primary is ILIKE + vector RRF, not ILIKE-only. `KAZMA_PGVECTOR=0` keeps sqlite-vec. | Settings → Memory; [Memory & RAG](./memory-and-rag); [Postgres & SaaS](../ops/postgres-and-saas) |
 | **Memory system audit (2026-08-24)** | Ego-graph hub anchors (no more floating concept nodes), PG-mirror tombstones + `scripts/reconcile_memory_mirror.py`, tenant-scoped graph-clear (no all-tenants wipe), FTS drift rebuild on the 6h sweep, merge-ledger archive, Ungroup, honest truncation banner | `/memory`; restart after `git pull` |
 | **Universal backup** | One unified backup of ALL data: every SQLite DB (WAL-safe), all assets (document-store, workspace, attachments, vectors), and Postgres — with auto (24h) + manual triggers, progress bar, and delete/archive/download | Settings → **Backup tab**; `POST /api/backup/now` |
 | **Postgres backup** | Nightly automatic `pg_dump` of Kazma's tables (atomic, validated, 7-day retention) + boot-time schema verification + one-command restore | `kazma-data/backups/pg/`; `python scripts/pg_backup.py backup\|restore --latest\|list` |
@@ -31,8 +44,16 @@ the deep docs when you need detail.
 | **429 failover restored** | A rate-limited primary model now fails over to the backup chain instead of hard-failing the turn | transparent |
 | **Boot fixes** | Paused-task restore no longer hangs (deferred timeout arming); PG schema guard actually verifies; research export fixed | transparent |
 
-**Operator actions after `git pull`:** restart the server to activate the
-memory audit fixes (hub anchors, FTS sweep, graph-clear bind), the
+**Operator actions after `git pull`:** `kazma ask` / `kazma acp` work
+without a restart (CLI; tokens stream, TTY HITL). Restart the server to activate
+**computer_use**, **Langfuse auto-on**, Docling/LlamaParse salvage,
+**IDE LSP** (hover/complete on `/ide`), **plan mode** (`/plan on` · Plan
+pill), **tool hooks** (`agent.hooks.*`;
+`KAZMA_TOOL_HOOKS=0` disables), the
+**closed tool schemas** (`additionalProperties: false`; optional
+`KAZMA_STRICT_TOOLS=1` for OpenAI `strict`), the memory audit fixes (hub
+anchors, FTS sweep, graph-clear bind), **pgvector dense recall** (when
+`KAZMA_DATABASE_URL` is set — run `CREATE EXTENSION vector` first), the
 template fixes (MCP/skills buttons), the backup system (first universal
 backup ~2 min after boot), and the Windows tool fixes. Full engineering
 detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:

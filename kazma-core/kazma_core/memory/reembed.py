@@ -140,6 +140,31 @@ def _encode_text(emb: Any, text: str) -> bytes | None:
         return None
 
 
+def _upsert_remote_vector(
+    conn: sqlite3.Connection,
+    emb: Any,
+    item_id: str,
+    text: str,
+    *,
+    tenant_id: str,
+    meta: dict[str, Any],
+) -> None:
+    """Best-effort pgvector/Qdrant upsert so rebuild fills the scale index."""
+    try:
+        vec = emb.encode(text)
+        if not vec:
+            return
+        from kazma_core.memory.backends import get_vector_backend
+
+        get_vector_backend(conn).upsert(
+            item_id, list(vec), tenant_id=tenant_id, meta=meta
+        )
+    except Exception:
+        logger.debug(
+            "[reembed] remote vector upsert failed for %s", item_id, exc_info=True
+        )
+
+
 def _backup(db_path: str) -> None:
     """Native sqlite backup to ``<db>.pre_reembed`` (once per run)."""
     backup_path = db_path + ".pre_reembed"
@@ -212,7 +237,7 @@ def rebuild_embeddings(
 
         # ── Episodes ────────────────────────────────────────────────────
         rows = conn.execute(
-            "SELECT id, summary_text, user_text, assistant_text "
+            "SELECT id, tenant_id, summary_text, user_text, assistant_text, tier "
             "FROM episodes WHERE embedding IS NULL"
         ).fetchall()
         total = len(rows)
@@ -225,6 +250,14 @@ def rebuild_embeddings(
                         "UPDATE episodes SET embedding = ?, embedding_model_version = ? WHERE id = ?",
                         (blob, target_model, row["id"]),
                     )
+                _upsert_remote_vector(
+                    conn,
+                    emb,
+                    str(row["id"]),
+                    text,
+                    tenant_id=str(row["tenant_id"] or "default"),
+                    meta={"kind": "episode", "tier": row["tier"] or "episodic"},
+                )
             if i % _BATCH_SIZE == 0:
                 conn.commit()
                 if progress:
@@ -236,7 +269,7 @@ def rebuild_embeddings(
 
         # ── Beliefs ─────────────────────────────────────────────────────
         rows = conn.execute(
-            "SELECT id, subject, predicate, object FROM beliefs WHERE embedding IS NULL"
+            "SELECT id, tenant_id, subject, predicate, object FROM beliefs WHERE embedding IS NULL"
         ).fetchall()
         total = len(rows)
         for i, row in enumerate(rows, 1):
@@ -247,6 +280,14 @@ def rebuild_embeddings(
                     "UPDATE beliefs SET embedding = ?, embedding_model_version = ? WHERE id = ?",
                     (blob, target_model, row["id"]),
                 )
+            _upsert_remote_vector(
+                conn,
+                emb,
+                str(row["id"]),
+                text,
+                tenant_id=str(row["tenant_id"] or "default"),
+                meta={"kind": "belief", "tier": "semantic"},
+            )
             if i % _BATCH_SIZE == 0:
                 conn.commit()
                 if progress:

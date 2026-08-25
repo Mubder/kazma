@@ -22,6 +22,31 @@ Arabic, RTL (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English. 
 
 **Kazma** in Latin script; Arabic brand **كاظمه** (preferred) or **كاظمة**. The spelling **كازما** is wrong. The Majlis protocol (`majlis.py`) implements Gulf Arabic conversational rhythms.
 
+### Is web live voice a phone-call (duplex)?
+
+On the Web UI Live button, **yes if LiveKit is configured** (`LIVEKIT_URL` +
+API key/secret): you can interrupt while it talks. The brain is still
+LangGraph (tools/HITL/memory). Telegram/Discord/Slack stay voice notes.
+See [Voice & media](voice-and-media). TTS is published into the LiveKit room
+when duplex is on. OpenAI Realtime / Gemini Live are **not** used as the
+brain (and are skipped as codecs).
+
+### Does `"barcode"` pick the coding model?
+
+No. Classification uses word boundaries. An explicit
+`models.defaults.code` (Settings → Models) wins over keyword routing.
+`KAZMA_MODEL` still wins over both.
+
+### Can an MCP server make Kazma call the LLM (sampling)?
+
+Not automatically. `sampling/createMessage` is denied without HITL
+(`KAZMA_MCP_SAMPLING` default off). Resource reads are fenced as untrusted
+data. See [Skills, MCP & tools](skills-mcp-and-tools#57-resources-prompts-sampling-roots).
+
+### Can I run the agent without the web server?
+
+Yes. `kazma ask "…"` runs the LangGraph supervisor in-process (no uvicorn). Tokens stream to stdout; tool lines go to stderr. On a TTY, danger tools prompt `y/N`. Piped stdin / `kazma ask -` fail closed unless `--yolo`. Editors host Kazma with `kazma acp` (Agent Client Protocol: live `session/update` + `session/request_permission`). See [Quickstart](quickstart#kazma-ask-no-web-server) and [CLI Reference](cli-reference).
+
 ### How do I connect Gmail or Microsoft email?
 
 See [Email integration](email-integration). Sandbox works with no setup.
@@ -92,7 +117,12 @@ Ten presets ship: OpenAI, Anthropic, DeepSeek, Google Gemini (ADC), xAI, OpenRou
 
 ### Do I need LiteLLM?
 
-No. `models.router: litellm` is a **string** that only gates the fallback-model branch. Kazma never imports LiteLLM. If you run a LiteLLM proxy, point `base_url` at `http://host:4000/v1`.
+No. Kazma never `import litellm`. An optional **proxy** is enough: set
+`KAZMA_LITELLM_URL=http://127.0.0.1:4000` (or `llm.gateway.url`). Only
+OpenAI-compatible providers (OpenAI, DeepSeek, Groq, NIM, …) go through it.
+Anthropic / Azure / Bedrock / Gemini stay native. Local Ollama / LM Studio
+stay direct unless `KAZMA_LITELLM_LOCAL=1`. Kill-switch: `KAZMA_LITELLM=0`.
+You can still point a single provider's `base_url` at the proxy instead.
 
 ### Why doesn't `DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` work?
 
@@ -126,7 +156,7 @@ That was the **V1** stack (`UnifiedMemoryAdapter`: Chroma L1 + graph L2 + FTS5 L
 
 ### Do I need to install ChromaDB?
 
-V2 recall runs on **sqlite-vec** (bundled via the `[rag]` extra), not ChromaDB. Install `pip install -e ".[rag]"` for the full vector stack (sqlite-vec + sentence-transformers; chromadb is still pulled in for the embedder types and the semantic router). Without it, V2 degrades to FTS5-only episode search; the Dashboard memory health board shows what is available.
+V2 recall on **one node** uses **sqlite-vec** (bundled via the `[rag]` extra), not ChromaDB. When `KAZMA_DATABASE_URL` (or the memory state DSN) is set, dense search auto-selects **pgvector** (`KAZMA_PGVECTOR=0` keeps sqlite-vec). Install `pip install -e ".[rag]"` for local embeddings (sqlite-vec + sentence-transformers; chromadb is still pulled in for embedder types and the semantic router). Without embeddings, V2 degrades to FTS5-only episode search; the Dashboard memory health board shows what is available.
 
 ### Why is `tiktoken` mentioned if it's not a dependency?
 

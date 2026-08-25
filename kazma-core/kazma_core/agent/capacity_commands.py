@@ -178,6 +178,13 @@ def snapshot_capacity(thread_id: str) -> dict[str, Any]:
     budgets = resolve_turn_budgets(thread_id)
     long_st = long_task_status(thread_id)
     yolo_st = yolo_status(thread_id)
+    plan_active = False
+    try:
+        from kazma_core.agent.plan_mode import is_plan_mode
+
+        plan_active = is_plan_mode(thread_id)
+    except Exception:
+        plan_active = False
     return {
         "thread_id": thread_id,
         "max_iterations": int(budgets.get("max_iterations") or 15),
@@ -191,6 +198,7 @@ def snapshot_capacity(thread_id: str) -> dict[str, Any]:
         "yolo_active": bool(yolo_st.get("active")),
         "yolo_allowed": bool(yolo_allowed()),
         "yolo_remaining_seconds": yolo_st.get("remaining_seconds"),
+        "plan_active": plan_active,
     }
 
 

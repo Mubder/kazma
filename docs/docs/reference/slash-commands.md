@@ -35,6 +35,24 @@ API: [API routes — Documents](./api-routes.md#documents--document-intelligence
 
 ---
 
+## 📋 Plan mode {#plan-mode}
+
+Inspect and propose, then execute on approve. Mutating tools are **structurally**
+blocked while plan mode is on (not a prompt nudge). HITL still applies after
+approve.
+
+| Subcommand | Usage | Description |
+|---|---|---|
+| *(status)* | `/plan` | Show whether plan mode is on |
+| `on` | `/plan on` | Enter plan mode (write/exec/patch/shell blocked) |
+| *(task)* | `/plan <task>` | Enter and plan that task in the same turn |
+| `go` | `/plan go` | Approve the plan and execute (alias: **Proceed**) |
+| `off` | `/plan off` | Leave without executing |
+
+Kill-switch: `KAZMA_PLAN_MODE=0`. Web: Plan pill on the composer bar.
+
+---
+
 ## 🔄 Session Commands
 
 ### `/new`

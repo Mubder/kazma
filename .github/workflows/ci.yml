@@ -68,6 +68,8 @@ jobs:
         # stabilized; torch-bearing extras (rag) are too heavy for CI.
         run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy
       - name: Run tests (GATE — failures fail CI)
+        # Industry eval pack (tests/test_eval_pack.py, marker `eval`) is in
+        # tests/ and is collected by fast_test.py — do not exclude it.
         # Crash-tolerant chunked runner (scripts/fast_test.py): the bare
         # monolithic pytest run takes 20+ min and intermittently segfaults
         # (native lib), killing the run with no results. The chunked runner

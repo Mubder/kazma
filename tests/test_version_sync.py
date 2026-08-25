@@ -1,7 +1,7 @@
 """Assert version bases stay in sync across the monorepo.
 
 Canonical source of truth is the **public base** in root ``pyproject.toml``
-(e.g. ``0.9.4`` — no ``+gSHA`` in committed files).
+(e.g. ``0.10.0`` — no ``+gSHA`` in committed files).
 
 Display version is always ``{base}+g{shortsha}`` at runtime via
 ``kazma_core.version.get_version()`` — that is not stored in these files.

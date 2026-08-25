@@ -119,14 +119,15 @@ All packages are in scope. The four main packages:
 There are **three independent** HITL mechanisms. Breaking any one creates an
 unattended-danger-tool security gap:
 
-**A. Graph interrupt() — single-agent chat (Web SSE/WS + Telegram/Discord/Slack)**
+**A. Graph interrupt() — single-agent chat (Web SSE + Telegram/Discord/Slack)**
 - `graph_builder.py:tool_worker_node` calls LangGraph `interrupt()` for danger tools
 - Gate is active ONLY when `hitl_config` is passed to `build_supervisor_graph()`
 - Required build sites: `agent_runner.get_streaming_graph()`, `agent_runner._ensure_graph`,
   and `app.py` startup recompile into `_graph_holder`. Omitting HITL on any site =
   dormant gate on that path.
 - Resume: `graph.ainvoke(Command(resume=…), config)` via `POST /api/approve/{thread_id}`
-  (SSE), WS `approve_tool`, or gateway `/hitl approve|deny {thread_id}`
+  (SSE — the Web SoT), or gateway `/hitl approve|deny {thread_id}`. WS
+  `approve_tool` is off unless `KAZMA_WS_GRAPH=1`.
 - State persists in the checkpointer — paused turns survive restarts
 - Double-gating prevention: graph sets ContextVars (`_graph_hitl_gate_ctx` /
   `_hitl_approved_ctx`) so `LocalToolRegistry.execute` does **not** re-prompt the bus
@@ -218,10 +219,11 @@ workspace. Three new modules; understanding their interaction is essential.
   `normpath` `..` check + containment backstop (symlink/junction-aware).
 
 **B. HITL routing — no parallel write/exec path**
-- All mutating/exec IDE operations (`write_file`, `delete_file`, `run`,
-  `run_file`, `git`) delegate to `LocalToolRegistry.execute()` via
+- All mutating/exec IDE operations (`write_file`, `apply_patch`, `delete_file`,
+  `run`, `run_file`, `git`) delegate to `LocalToolRegistry.execute()` via
   `IdeService._call_tool()`. The HITL gate lives in `tool_registry.py:execute()`
   (§7B). Never call the underlying tool functions directly from the IDE layer.
+  Prefer `file_apply_patch` for edits to existing files (not whole-file write).
 
 **C. Awareness injection — `ide/env_context.py`**
 - `build_env_context()` resolves workspace root, repo slug (from WorkspaceStore

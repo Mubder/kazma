@@ -8,7 +8,7 @@ description: Map of all Kazma documentation — start here
 
 # Kazma documentation
 
-**Single source of truth** for the Kazma agent framework (v0.9+).  
+**Single source of truth** for the Kazma agent framework (v0.10+).  
 Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical audits live in [`docs/audits/archive/`](https://github.com/Mubder/kazma/tree/main/docs/audits/archive).
 
 ## Start here
@@ -16,6 +16,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | I want to… | Go to |
 |------------|--------|
 | Install and send a first message | [Quickstart](guide/quickstart) |
+| Run the agent from the terminal (no web server) | `kazma ask "…"` · `kazma acp` (ACP stdio) — [Quickstart](guide/quickstart) |
 | Understand the engine | [Architecture](guide/architecture) |
 | Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
 | Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) · [Kazma Update](ops/kazma-update) · [Smoke matrix](ops/smoke-matrix) |
@@ -72,8 +73,8 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 
 | Path | Purpose |
 |------|---------|
-| `docs/audits/` | Security & architecture audits ([memory system 2026-08-24](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md) — M-01..M-17 closed) |
-| `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md), [Document docs goal](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md), [Document residuals](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_RESIDUALS_GOAL.md)) |
+| `docs/audits/` | Security & architecture audits ([industry stack 2026-08-25](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_INDUSTRY_STACK_2026-08-25.md) — keep/upgrade/replace vs world-class; parts 1–8 done; [memory system 2026-08-24](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md) — M-01..M-17 closed) |
+| `docs/plans/` | Implementation plans (email, [KB + research](https://github.com/Mubder/kazma/blob/main/docs/plans/KB_AND_RESEARCH_DEPTH_PLAN.md), [**Memory remaining**](https://github.com/Mubder/kazma/blob/main/docs/plans/MEMORY_REMAINING.md), [**Post-industry leftovers GOAL**](https://github.com/Mubder/kazma/blob/main/docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md) (done 2026-08-25; SaaS still parked), [Document docs goal](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md), [Document residuals](https://github.com/Mubder/kazma/blob/main/docs/plans/DOCUMENT_RESIDUALS_GOAL.md)) |
 | `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` | Document Intelligence certification report |
 | `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` | Full monorepo map (linked from [System map](reference/system-map)) |
 | `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` | This docs consolidation plan (completed) |

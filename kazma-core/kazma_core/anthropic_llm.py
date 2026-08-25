@@ -14,6 +14,7 @@ when the active provider is ``"anthropic"``.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -22,7 +23,15 @@ from typing import Any
 
 import httpx
 
-from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
+from kazma_core.llm_provider import (
+    LLMConfig,
+    LLMError,
+    LLMProvider,
+    LLMResponse,
+    ToolCall,
+    retry_after_seconds,
+)
+from kazma_core.llm_stream import StreamDelta
 
 logger = logging.getLogger(__name__)
 
@@ -152,19 +161,34 @@ class AnthropicProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float | None = None,
         model: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
-        """Send a Messages-API request and return an :class:`LLMResponse`."""
-        system, convo = self._split_system(messages)
+        """Send a Messages-API request and return an :class:`LLMResponse`.
+
+        ``response_format`` is accepted for signature parity with
+        ``LLMProvider.chat`` (structured outputs). Anthropic Messages has
+        no equivalent field — it is ignored here.
+        """
+        _ = response_format
+        from kazma_core.prompt_cache import build_anthropic_system, pack_system_messages, stamp_anthropic_tool_cache
+
+        packed = pack_system_messages(messages)
+        system = build_anthropic_system(packed)
+        convo = [
+            m for m in packed
+            if isinstance(m, dict) and m.get("role") not in ("system", "developer")
+        ]
         payload: dict[str, Any] = {
             "model": model or self.config.model,
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,
-            "system": system,
             "messages": [self._convert_message(m) for m in convo],
         }
+        if system:
+            payload["system"] = system
         anthropic_tools = self._convert_tools(tools) if tools else None
         if anthropic_tools:
-            payload["tools"] = anthropic_tools
+            payload["tools"] = stamp_anthropic_tool_cache(anthropic_tools)
 
         client = await self._get_client()
         start = time.monotonic()
@@ -178,12 +202,49 @@ class AnthropicProvider(LLMProvider):
                 body = exc.response.text[:400]
             except Exception:  # noqa: BLE001
                 pass
-            # Mirror the generic LLMProvider classification (AGENTS.md §3):
-            # 429 + 5xx are transient (retryable); 4xx content/auth/schema are
-            # permanent. Previously this branch *returned* the error string as
-            # LLMResponse.content, making a failure indistinguishable from a
-            # model reply and bypassing retry / turn_failed / friendly_llm_error.
-            transient = status_code == 429 or status_code >= 500
+            # Mirror LLMProvider: 429 is transient with bounded Retry-After
+            # backoff here; kind=rate_limit_exhausted so the supervisor does
+            # not re-retry this provider (failover may still fire).
+            if status_code == 429:
+                retry_after = retry_after_seconds(
+                    exc.response.headers if exc.response is not None else None
+                )
+                logger.warning(
+                    "[Anthropic] Rate limited (429) — retrying after %.1fs",
+                    retry_after,
+                )
+                for retry_attempt in range(3):
+                    await asyncio.sleep(retry_after * (1.5 ** retry_attempt))
+                    try:
+                        resp = await client.post("/messages", json=payload)
+                        if resp.status_code != 429:
+                            resp.raise_for_status()
+                            data = resp.json()
+                            return self._parse_response(data, payload["model"], start)
+                    except httpx.HTTPStatusError as retry_err:
+                        sc = (
+                            retry_err.response.status_code
+                            if retry_err.response is not None
+                            else 0
+                        )
+                        if sc != 429:
+                            _detail = ""
+                            try:
+                                _detail = retry_err.response.text[:300]
+                            except Exception:
+                                _detail = ""
+                            raise LLMError(
+                                f"Anthropic API error during 429 backoff "
+                                f"(HTTP {sc}): {_detail}",
+                                transient=(sc >= 500),
+                            ) from retry_err
+                        continue
+                raise LLMError(
+                    f"Anthropic rate-limited after 3 retries: {body}",
+                    transient=True,
+                    kind="rate_limit_exhausted",
+                ) from exc
+            transient = status_code >= 500
             logger.error("[Anthropic] HTTP %d: %s", status_code, body)
             raise LLMError(
                 f"Anthropic API error (HTTP {status_code}): {body}",
@@ -207,6 +268,177 @@ class AnthropicProvider(LLMProvider):
 
         data = resp.json()
         return self._parse_response(data, payload["model"], start)
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> Any:
+        """Native Anthropic SSE (``stream: true`` on ``/messages``)."""
+        from kazma_core.llm_stream import stream_enabled
+
+        if not stream_enabled():
+            resp = await self.chat(
+                messages, tools, max_tokens, temperature, model, response_format
+            )
+            if resp.content:
+                yield StreamDelta(content=resp.content)
+            yield StreamDelta(response=resp)
+            return
+
+        from kazma_core.prompt_cache import build_anthropic_system, pack_system_messages, stamp_anthropic_tool_cache
+
+        packed = pack_system_messages(messages)
+        system = build_anthropic_system(packed)
+        convo = [
+            m for m in packed
+            if isinstance(m, dict) and m.get("role") not in ("system", "developer")
+        ]
+        payload: dict[str, Any] = {
+            "model": model or self.config.model,
+            "max_tokens": max_tokens or self.config.max_tokens,
+            "temperature": temperature if temperature is not None else self.config.temperature,
+            "messages": [self._convert_message(m) for m in convo],
+            "stream": True,
+        }
+        if system:
+            payload["system"] = system
+        anthropic_tools = self._convert_tools(tools) if tools else None
+        if anthropic_tools:
+            payload["tools"] = stamp_anthropic_tool_cache(anthropic_tools)
+
+        client = await self._get_client()
+        start = time.monotonic()
+        text_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        current_tool: dict[str, Any] | None = None
+        stop_reason = ""
+        usage_in = 0
+        usage_out = 0
+
+        try:
+            async with client.stream("POST", "/messages", json=payload) as resp:
+                if resp.status_code >= 400:
+                    body = ""
+                    try:
+                        body = (await resp.aread()).decode("utf-8", errors="replace")
+                    except Exception:
+                        body = ""
+                    transient = resp.status_code == 429 or resp.status_code >= 500
+                    raise LLMError(
+                        f"Anthropic stream error (HTTP {resp.status_code}): {body[:400]}",
+                        transient=transient,
+                    )
+                event_name = ""
+                async for line in resp.aiter_lines():
+                    if not line:
+                        continue
+                    stripped = line.strip()
+                    if stripped.startswith("event:"):
+                        event_name = stripped[6:].strip()
+                        continue
+                    if not stripped.startswith("data:"):
+                        continue
+                    raw = stripped[5:].strip()
+                    if not raw or raw == "[DONE]":
+                        continue
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(data, dict):
+                        continue
+                    etype = event_name or str(data.get("type") or "")
+                    if etype == "content_block_start":
+                        block = data.get("content_block") or {}
+                        if block.get("type") == "tool_use":
+                            current_tool = {
+                                "id": block.get("id", ""),
+                                "name": block.get("name", ""),
+                                "arguments": "",
+                            }
+                    elif etype == "content_block_delta":
+                        delta = data.get("delta") or {}
+                        dtype = delta.get("type")
+                        if dtype == "text_delta":
+                            piece = str(delta.get("text") or "")
+                            if piece:
+                                text_parts.append(piece)
+                                yield StreamDelta(content=piece)
+                        elif dtype == "input_json_delta" and current_tool is not None:
+                            current_tool["arguments"] += str(delta.get("partial_json") or "")
+                    elif etype == "content_block_stop":
+                        if current_tool is not None:
+                            args_raw = current_tool.get("arguments") or "{}"
+                            try:
+                                args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                                if not isinstance(args, dict):
+                                    args = {"_malformed": args}
+                            except json.JSONDecodeError:
+                                args = {"raw": args_raw}
+                            tool_calls.append(
+                                ToolCall(
+                                    id=str(current_tool.get("id") or ""),
+                                    name=str(current_tool.get("name") or ""),
+                                    arguments=args,
+                                )
+                            )
+                            current_tool = None
+                    elif etype in ("message_delta", "message_stop"):
+                        delta = data.get("delta") or {}
+                        if delta.get("stop_reason"):
+                            stop_reason = str(delta["stop_reason"])
+                        usage = data.get("usage") or {}
+                        if usage.get("input_tokens") is not None:
+                            usage_in = int(usage.get("input_tokens") or 0)
+                        if usage.get("output_tokens") is not None:
+                            usage_out = int(usage.get("output_tokens") or usage_out)
+        except LLMError:
+            raise
+        except (
+            httpx.ConnectError,
+            httpx.TimeoutException,
+            httpx.ReadError,
+            httpx.RemoteProtocolError,
+        ) as exc:
+            raise LLMError(
+                f"Anthropic stream failed (network): {exc}",
+                transient=True,
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Anthropic] stream failed (%s) — falling back to chat()", exc)
+            resp = await self.chat(messages, tools, max_tokens, temperature, model)
+            if resp.content:
+                yield StreamDelta(content=resp.content)
+            yield StreamDelta(response=resp)
+            return
+
+        finish = {
+            "end_turn": "stop",
+            "tool_use": "tool_calls",
+            "max_tokens": "length",
+            "stop_sequence": "stop",
+        }.get(stop_reason, stop_reason or ("tool_calls" if tool_calls else "stop"))
+        in_cost, out_cost = _MODEL_COSTS.get(payload["model"], (3.0, 15.0))
+        cost = (usage_in / 1_000_000) * in_cost + (usage_out / 1_000_000) * out_cost
+        assembled = LLMResponse(
+            content="".join(text_parts),
+            tool_calls=tool_calls,
+            finish_reason=finish,
+            model=payload["model"],
+            usage={
+                "input_tokens": usage_in,
+                "output_tokens": usage_out,
+                "total_tokens": usage_in + usage_out,
+            },
+            cost_usd=cost,
+            duration_ms=(time.monotonic() - start) * 1000,
+        )
+        yield StreamDelta(response=assembled)
 
     def _parse_response(
         self, data: dict[str, Any], model: str, start: float

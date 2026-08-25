@@ -3,8 +3,8 @@
 
 CI no longer auto-bumps. Preferred practice (``docs/VERSIONING.md``):
 
-* Keep public base fixed in ``pyproject.toml`` (e.g. ``0.9.4``).
-* Runtime always shows ``0.9.4+gSHORTSHA`` via ``kazma_core.version``.
+* Keep public base fixed in ``pyproject.toml`` (e.g. ``0.10.0``).
+* Runtime always shows ``0.10.0+gSHORTSHA`` via ``kazma_core.version``.
 * Change the base only for a deliberate milestone (hand-edit or this script).
 
 This script still exists for operators who want a CLI to move the base

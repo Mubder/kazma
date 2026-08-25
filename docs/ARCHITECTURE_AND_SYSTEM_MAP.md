@@ -1,9 +1,10 @@
 # Kazma — Architecture & System Map
 
 **Single source of truth for system architecture**  
-**Version:** 0.9.x (one-brain mouths + audit F remaining: soft-nav inspectors, swarm notify hook)  
+**Version:** 0.10.x (one-brain mouths + audit F remaining: soft-nav inspectors, swarm notify hook)  
 **Date:** 2026-08-19 (July 21 production audit is historical, not current SoT)  
 **Latest deep audit:** `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` (22 findings, full change-impact map, CI recovery §13–§19, Telegram desync §20)  
+**Industry stack audit:** `docs/audits/AUDIT_INDUSTRY_STACK_2026-08-25.md` (keep/upgrade/replace vs 2026 world-class agents; frozen stack so we do not rebuild layers; parts 1–8 done 2026-08-25)  
 **Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
 `docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/archive/REMEDIATION_PLAN_2026-07-21.md`,  
 `docs/docs/ops/*`, `AGENTS.md`
@@ -16,7 +17,7 @@
 
 ### Philosophy
 
-Kazma is a **multi-platform autonomous agent framework**: one **LangGraph supervisor brain**, many **mouths** (Telegram/Discord/Slack/Web/TUI), one **IDE/tool execution layer**, and optional **swarm multi-worker orchestration**. Platform IDs never enter LangGraph state. Danger tools require **HITL** (graph interrupt, swarm bus, or pipeline checkpoint). Config is runtime-mutable via **ConfigStore** (SQLite or Postgres).
+Kazma is a **multi-platform autonomous agent framework**: one **LangGraph supervisor brain**, many **mouths** (Telegram/Discord/Slack/Web/TUI/`kazma ask`/`kazma acp`), one **IDE/tool execution layer**, and optional **swarm multi-worker orchestration**. Platform IDs never enter LangGraph state. Danger tools require **HITL** (graph interrupt, swarm bus, or pipeline checkpoint). Config is runtime-mutable via **ConfigStore** (SQLite or Postgres).
 
 ### Runtime requirements
 
@@ -40,7 +41,7 @@ Kazma is a **multi-platform autonomous agent framework**: one **LangGraph superv
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ CLIENT INPUTS                                                                │
-│  Web UI / SSE / WS   CLI (kazma)   TUI (textual)   Gateway adapters          │
+│  Web UI / SSE (graph) / WS (telemetry)   CLI   TUI   Gateway adapters        │
 │  Telegram/Discord/Slack   GitHub OAuth/webhooks   MCP IDE bridge             │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │
@@ -363,7 +364,7 @@ kazma/
 | App factory | FastAPI + lifespan shutdown drain |
 | Auth | Secret / opaque session / API token / OIDC |
 | Chat | SSE primary (`/api/chat/stream`), WS legacy |
-| IDE | `/ide` page + `/api/ide/*` + CodeMirror-style `ide.js` |
+| IDE | `/ide` page + `/api/ide/*` + Monaco `ide.js` |
 | Swarm panel | `/swarm` + `/api/swarm/*` |
 | Settings | Alpine + masked secrets + SaaS user admin |
 | Health | `/health`, `/health/live`, `/health/ready` |
@@ -415,7 +416,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 
 | Tool / Command Name | Type | Default Danger | Sandbox | Module |
 | :--- | :--- | :--- | :--- | :--- |
-| `file_read` / `file_list` / `file_search` | Local | safe | Workspace scope | `tool_registry` |
+| `file_read` / `file_list` / `file_search` / `codebase_search` | Local | safe | Workspace scope | `tool_registry` + `code_index` |
 | `file_write` / `file_delete` | Local | **danger** | Workspace + HITL | `tool_registry` |
 | `shell_exec` | Local | **danger** | Allowlist + env scrub + HITL | `tool_registry` |
 | `python_exec` / `code_exec` | Local | **danger** | Docker jail / blocklist + HITL | `code_exec` |
@@ -464,7 +465,12 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_MCP_SAFE_ALLOWLIST` | empty | Optional | MCP tools skip HITL (prod) |
 | `KAZMA_ALLOW_PRIVATE_LLM` | unset | No | Private URL discovery opt-in |
 | `KAZMA_MULTI_USER` | unset | SaaS | Force multi-user mode |
-| `KAZMA_OIDC_*` | unset | SaaS SSO | OIDC issuer/client/secret/redirect/role claim |
+| `KAZMA_OIDC_*` | unset | SaaS SSO | OIDC issuer/client/secret/redirect/role claim (id_token verified; no unverified fallback) |
+| `KAZMA_WS_GRAPH` | unset | No | `1` restores WS as a second graph client; default SSE-only |
+| `KAZMA_PGVECTOR` | auto on Postgres DSN | No | `0` keeps sqlite-vec; unset auto-selects pgvector for dense recall |
+| `KAZMA_E2B_API_KEY` / `E2B_API_KEY` | unset | Untrusted code | Firecracker `python_exec`; `KAZMA_E2B=0` kill-switch |
+| `KAZMA_TEMPORAL_HOST` | unset | Multi-hour swarm | Temporal wrap of swarm dispatch; `KAZMA_TEMPORAL=0` kill-switch |
+| `KAZMA_CODE_INDEX` | on | No | `0` disables symbol index / `codebase_search` |
 | `KAZMA_PROVIDER` / `KAZMA_MODEL` | unset | No | Boot provider/model |
 | `KAZMA_API_KEY` / `OPENAI_API_KEY` | unset | Provider | LLM keys (prefer ConfigStore/vault) |
 | `TELEGRAM_BOT_TOKEN` | unset | Telegram | Adapter |
@@ -554,7 +560,7 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 | Feature area | Modules / surfaces |
 |--------------|-------------------|
 | Command Center / swarm live | `swarm.html`, `swarm.js`, `swarm_panel/*`, `swarm_sse.py` |
-| IDE CodeMirror-style editor | `ide.html`, `ide.js`, `ide_api.py`, `ide/service.py` |
+| IDE Monaco editor | `ide.html`, `ide.js`, `ide_api.py`, `ide/service.py`, `tools/file_apply_patch.py` |
 | SSE streaming chat | `sse_chat.py`, `streaming.js` |
 | WebSocket voice | `routes_voice_ws.py`, `voice.js` |
 | Document Intelligence | `documents/*`, `documents_api.py`, `documents.html`/`js`, gateway `/documents`, `document_platform` skill, TUI `DocumentsPanel`, `scripts/certify_documents.py` |

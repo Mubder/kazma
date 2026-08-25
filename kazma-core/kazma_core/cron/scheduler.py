@@ -661,6 +661,9 @@ class CronScheduler:
         try:
             from kazma_core.tools.send_message import send_message
 
+            # Never consult SessionStore here — TTL is 5 minutes
+            # (kazma_core.sessions.ttl.SESSION_TTL_SECONDS). delivery_target
+            # was captured at schedule time.
             target_id = job.delivery_target or job.thread_id or f"{job.platform}:unknown"
             await send_message(target_id, text, backend=job.platform)
         except Exception as exc:

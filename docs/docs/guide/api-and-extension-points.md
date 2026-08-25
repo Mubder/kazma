@@ -45,7 +45,7 @@ Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `
 | `DELETE` | `/api/chat/sessions/\{session_id\}` | Delete session. (line 555) |
 | `GET` | `/api/chat/sessions/\{session_id\}/messages` | Session history. (line 561) |
 
-> **Legacy:** `GET /ws/chat` returns **410 Gone** (`chat.py:4`). Do not use.
+> **Graph transport:** `POST /api/chat/stream`. `/ws/chat/{session_id}` is telemetry / cursor resume only unless `KAZMA_WS_GRAPH=1`.
 
 ### 2.2 Providers
 
@@ -190,7 +190,23 @@ async def weather_lookup(city: str) -> str:
     return f"Weather in {city}: sunny, 25C"
 ```
 
-Register during startup (or via a skill entry point). The supervisor exposes it to the LLM automatically.
+Register during startup (or via a skill entry point). The supervisor exposes it to the LLM automatically. Schemas are generated from type hints with `additionalProperties: false`. Optional parameters stay optional unless `KAZMA_STRICT_TOOLS=1`. For a one-off JSON reply (not a tool call), pass `response_format=` to `LLMProvider.chat` — do not put it on every supervisor turn.
+
+### 4.1b Tool hooks (PreToolUse / PostToolUse)
+
+```python
+from kazma_core.agent.tool_hooks import register_pre_tool_hook, ToolHookDecision
+
+def block_shell(event):
+    cmd = str((event.tool_input or {}).get("command") or "")
+    if "rm -rf" in cmd:
+        return ToolHookDecision(decision="deny", reason="blocked pattern")
+    return None
+
+register_pre_tool_hook(block_shell, matcher="shell_exec")
+```
+
+Or YAML (`agent.hooks.pre_tool` / `post_tool`): each entry is `{matcher, command, timeout_seconds?}`. The command receives JSON on stdin (`hook_event_name`, `tool_name`, `tool_input`, and for post `tool_response`) and may print JSON (`decision`, `tool_input` / `updatedInput`, `reason`, `extra`) or exit `2` to deny. **Hooks cannot auto-approve HITL.** Kill-switch: `KAZMA_TOOL_HOOKS=0`.
 
 ### 4.2 Add a provider
 
@@ -299,7 +315,7 @@ See [Memory & RAG](memory-and-rag).
 
 ## Documentation Audit Notes
 
-- **The WebSocket chat endpoint is dead** (410 Gone). All API consumers should use SSE.
+- **Graph transport is SSE** (`POST /api/chat/stream`). `/ws/chat/{session_id}` is telemetry / cursor resume only unless `KAZMA_WS_GRAPH=1`.
 - **The SSE `approval_required` event** is the canonical way for frontends to surface HITL pauses; pair it with `POST /api/approve/\{thread_id\}`.
 - **`/api/approve` ownership enforcement** (403 on cross-user) means approval tokens are per-user — an admin can't approve another user's task without matching identity fields.
 - **V2 is the single memory stack** — per-turn recall, tools, auto-store, and compaction all use `recall()` from `memory/recall.py`. The V1 4-layer adapter (`get_adapter()`) was removed in the V1→V2 cutover.

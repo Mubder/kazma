@@ -229,8 +229,9 @@ export function initSoftNav() {
 
         for (const s of pageScripts) {
             const src = s.getAttribute('src') || '';
-            // CodeMirror / mermaid are sticky globals — reloading them mid-session
+            // Monaco / mermaid are sticky globals — reloading them mid-session
             // resets the constructor. Skip if the previous page already loaded them.
+            if (/monaco-editor/i.test(src) && window.monaco) continue;
             if (/codemirror/i.test(src) && window.CodeMirror) continue;
             if (/mermaid\.min/i.test(src) && window.mermaid) continue;
             const fullSrc = src.includes('?')

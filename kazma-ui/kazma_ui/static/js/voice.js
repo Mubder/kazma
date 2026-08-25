@@ -273,6 +273,9 @@
   var micStream = null;
   var isStreaming = false;
   var ttsAudioChunks = [];
+  var ttsPlayer = null;
+  var lkRoom = null;
+  var bargeFrames = 0;
 
   async function startStreaming() {
     if (isStreaming) return;
@@ -295,8 +298,9 @@
         };
         ws.send(JSON.stringify(startMsg));
         _captureAudioForStreaming();
+        _maybeJoinLiveKit(sessionId);
         isStreaming = true;
-        showToast('Live voice mode active — speak naturally', 'success', 3000);
+        showToast('Live voice mode active — speak; you can interrupt', 'success', 3000);
         updateStreamingUI(true);
       };
 
@@ -361,6 +365,20 @@
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         var input = e.inputBuffer.getChannelData(0);
 
+        if (ttsPlayer && !ttsPlayer.paused) {
+          var sum = 0;
+          for (var bi = 0; bi < input.length; bi++) sum += input[bi] * input[bi];
+          var rms = Math.sqrt(sum / Math.max(1, input.length));
+          if (rms > 0.045) bargeFrames += 1;
+          else bargeFrames = 0;
+          if (bargeFrames >= 3) {
+            bargeFrames = 0;
+            _bargeIn();
+          }
+        } else {
+          bargeFrames = 0;
+        }
+
         // Convert float32 [-1,1] to 16-bit PCM
         var pcm = new Int16Array(input.length);
         for (var i = 0; i < input.length; i++) {
@@ -415,6 +433,10 @@
     else if (type === 'tts_done') {
       _playTtsChunks();
     }
+    else if (type === 'interrupted') {
+      if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} ttsPlayer = null; }
+      ttsAudioChunks = [];
+    }
     else if (type === 'done') {
       if (window.KazmaChat && window.KazmaChat.onStreamDone) {
         window.KazmaChat.onStreamDone();
@@ -432,10 +454,85 @@
     if (!ttsAudioChunks.length) return;
     var blob = new Blob(ttsAudioChunks, { type: 'audio/mpeg' });
     var url = URL.createObjectURL(blob);
+    if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} }
     var audio = new Audio(url);
-    audio.onended = function() { URL.revokeObjectURL(url); };
+    ttsPlayer = audio;
+    audio.onended = function() {
+      URL.revokeObjectURL(url);
+      if (ttsPlayer === audio) ttsPlayer = null;
+    };
     audio.play();
+    _publishTtsToLiveKit(blob);
     ttsAudioChunks = [];
+  }
+
+  async function _publishTtsToLiveKit(blob) {
+    if (!lkRoom || !blob) return;
+    try {
+      var LK = window.LivekitClient || window.livekit;
+      if (!LK) return;
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var buf = await blob.arrayBuffer();
+      var audioBuf = await ctx.decodeAudioData(buf.slice(0));
+      var dest = ctx.createMediaStreamDestination();
+      var src = ctx.createBufferSource();
+      src.buffer = audioBuf;
+      src.connect(dest);
+      src.start();
+      var mediaTrack = dest.stream.getAudioTracks()[0];
+      if (!mediaTrack) { ctx.close(); return; }
+      var track = new LK.LocalAudioTrack(mediaTrack);
+      await lkRoom.localParticipant.publishTrack(track);
+      src.onended = function() {
+        try { lkRoom.localParticipant.unpublishTrack(track); } catch (e) {}
+        try { ctx.close(); } catch (e) {}
+      };
+    } catch (err) {
+      console.warn('[Voice] TTS room publish skip:', err);
+    }
+  }
+
+  function _bargeIn() {
+    if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} ttsPlayer = null; }
+    ttsAudioChunks = [];
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'interrupt' }));
+    }
+  }
+
+  function _loadLiveKit() {
+    return new Promise(function(resolve, reject) {
+      if (window.LivekitClient) { resolve(window.LivekitClient); return; }
+      var s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.js';
+      s.onload = function() { resolve(window.LivekitClient || window.livekit); };
+      s.onerror = function() { reject(new Error('livekit-client CDN failed')); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function _maybeJoinLiveKit(sessionId) {
+    try {
+      var st = await fetch('/api/voice/livekit/status');
+      if (!st.ok) return;
+      var info = await st.json();
+      if (!info || !info.enabled) return;
+      var tokResp = await fetch('/api/voice/livekit/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId || 'web', identity: 'web-user' })
+      });
+      if (!tokResp.ok) return;
+      var data = await tokResp.json();
+      var LK = await _loadLiveKit();
+      if (!LK || !LK.Room) return;
+      lkRoom = new LK.Room();
+      await lkRoom.connect(data.url, data.token);
+      await lkRoom.localParticipant.setMicrophoneEnabled(true);
+      showToast('Duplex: LiveKit WebRTC (brain is still Kazma)', 'success', 2500);
+    } catch (err) {
+      console.warn('[Voice] LiveKit optional skip:', err);
+    }
   }
 
   function _cleanupStreaming() {
@@ -443,7 +540,13 @@
     if (mediaStreamSource) { try { mediaStreamSource.disconnect(); } catch (e) {} mediaStreamSource = null; }
     if (audioContext) { try { audioContext.close(); } catch (e) {} audioContext = null; }
     if (micStream) { micStream.getTracks().forEach(function(t) { t.stop(); }); micStream = null; }
+    if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} ttsPlayer = null; }
+    if (lkRoom) {
+      try { lkRoom.disconnect(); } catch (e) {}
+      lkRoom = null;
+    }
     ttsAudioChunks = [];
+    bargeFrames = 0;
   }
 
   function updateStreamingUI(streaming) {

@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -19,6 +20,32 @@ from typing import Any
 __all__ = ["ModelRouter", "ModelSpec", "TaskProfile", "classify_prompt"]
 
 logger = logging.getLogger(__name__)
+
+_TOKEN_RE_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _has_signal(text: str, keywords: list[str]) -> bool:
+    """True when any keyword hits as a word (or a multi-word phrase).
+
+    Single tokens use word boundaries so ``code`` does not match
+    ``barcode`` and ``hi`` does not match ``this``.
+    """
+    for raw in keywords:
+        kw = (raw or "").lower()
+        if not kw.strip():
+            continue
+        token = kw.strip()
+        if " " in token:
+            if token in text:
+                return True
+            continue
+        pat = _TOKEN_RE_CACHE.get(token)
+        if pat is None:
+            pat = re.compile(rf"\b{re.escape(token)}\b")
+            _TOKEN_RE_CACHE[token] = pat
+        if pat.search(text):
+            return True
+    return False
 
 
 class TaskProfile(StrEnum):
@@ -96,17 +123,17 @@ class ModelRouter:
             "image", "photo", "picture", "screenshot", "diagram",
             "what does this show", "ocr", "read the image", "look at this",
         ]
-        if any(kw in msg_lower for kw in vision_keywords):
+        if _has_signal(msg_lower, vision_keywords):
             return TaskProfile.VISION
 
         # Coding signals
         coding_keywords = [
             "code", "function", "bug", "fix", "refactor",
-            "python", "class", "import", "def ", "test",
+            "python", "class", "import", "def", "test",
             "error", "traceback", "debug", "commit", "git",
             "implement", "write a", "create a", "build a",
         ]
-        if any(kw in msg_lower for kw in coding_keywords):
+        if _has_signal(msg_lower, coding_keywords):
             return TaskProfile.CODING
 
         # Reasoning signals
@@ -116,7 +143,7 @@ class ModelRouter:
             "research", "evaluate", "assess", "think",
             "reason", "consider", "trade-off", "pros and cons",
         ]
-        if any(kw in msg_lower for kw in reasoning_keywords):
+        if _has_signal(msg_lower, reasoning_keywords):
             return TaskProfile.REASONING
 
         # Fast signals — short messages, greetings, status checks
@@ -124,7 +151,7 @@ class ModelRouter:
             "hi", "hello", "status", "ok", "thanks", "bye",
             "yes", "no", "ping", "test",
         ]
-        if len(message.split()) <= 5 and any(kw in msg_lower for kw in fast_keywords):
+        if len(message.split()) <= 5 and _has_signal(msg_lower, fast_keywords):
             return TaskProfile.FAST
 
         # Anything else with substance is general-purpose work. Threshold is

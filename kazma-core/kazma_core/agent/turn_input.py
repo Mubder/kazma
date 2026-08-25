@@ -605,6 +605,8 @@ AUDIT_ONLY_ALLOWLIST = frozenset(
         "file_search",
         "file_view",
         "read_file_part",
+        "codebase_search",
+        "codebase_status",
         "current_datetime",
         "context_info",
         "memory_list_entities",
@@ -612,6 +614,7 @@ AUDIT_ONLY_ALLOWLIST = frozenset(
         "memory_search",
         "update_scratchpad",  # typed findings only — does not mutate files
         "web_search",  # optional; still no writes
+        "read_url",
     }
 )
 
@@ -622,6 +625,7 @@ WRITE_EXECUTE_TOOL_NAMES = frozenset(
         "shell_exec",
         "python_exec",
         "file_write",
+        "file_apply_patch",
         "file_create",
         "file_delete",
         "file_edit",
@@ -647,6 +651,7 @@ WRITE_EXECUTE_TOOL_NAMES = frozenset(
         "browser_click",
         "browser_type",
         "browser_screenshot",
+        "computer_use",
     }
 )
 

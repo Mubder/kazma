@@ -23,6 +23,10 @@ for _dsn_key in (
     "KAZMA_DATABASE_URL",
     "DATABASE_URL",
     "KAZMA_DOCUMENTS_METADATA_BACKEND",
+    "E2B_API_KEY",
+    "KAZMA_E2B_API_KEY",
+    "KAZMA_TEMPORAL_HOST",
+    "TEMPORAL_ADDRESS",
 ):
     os.environ.pop(_dsn_key, None)
 

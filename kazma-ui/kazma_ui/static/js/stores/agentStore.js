@@ -454,6 +454,9 @@ document.addEventListener('alpine:init', () => {
     },
 
     // ── WebSocket Actions ────────────────────────────────────
+    // sendPrompt / submitApproval stay on the bus for KAZMA_WS_GRAPH=1
+    // (debug). The live chat UI uses SSE; the server rejects these
+    // actions unless that env is set.
     sendPrompt(text, model, attachments, opts) {
       if (!text || !text.trim()) return;
       this.pendingApproval = null;

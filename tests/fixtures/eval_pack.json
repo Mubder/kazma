@@ -1,0 +1,201 @@
+{
+  "version": 1,
+  "description": "Industry eval pack — golden trajectories for load-bearing supervisor/HITL/honesty policies. No live LLM. CI-gated via tests/test_eval_pack.py.",
+  "cases": [
+    {
+      "id": "qa_respond",
+      "kind": "supervisor",
+      "user": "What is 2+2? Answer in one short sentence.",
+      "llm": [
+        {
+          "content": "2+2 equals 4.",
+          "tool_calls": []
+        }
+      ],
+      "expect": {
+        "next_node": "respond",
+        "pending_tools": [],
+        "content_contains": "4"
+      }
+    },
+    {
+      "id": "tool_file_read",
+      "kind": "supervisor",
+      "user": "Read the file README.md and tell me the title.",
+      "llm": [
+        {
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_read_1",
+              "name": "file_read",
+              "arguments": { "path": "README.md" }
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "next_node": "tool_worker",
+        "pending_tools": ["file_read"]
+      }
+    },
+    {
+      "id": "permanent_error_turn_failed",
+      "kind": "supervisor_error",
+      "user": "Explain the swarm engine.",
+      "error": {
+        "message": "invalid request: bad schema",
+        "transient": false
+      },
+      "expect": {
+        "next_node": "respond",
+        "turn_failed": true,
+        "content_contains": "⚠️"
+      }
+    },
+    {
+      "id": "turn_failed_skip_synth",
+      "kind": "respond",
+      "state": {
+        "turn_failed": true,
+        "error_message": "provider down",
+        "iteration": 1,
+        "max_iterations": 15,
+        "messages": [
+          { "role": "user", "content": "Write a long report" },
+          { "role": "assistant", "content": "⚠️ The model request failed." }
+        ]
+      },
+      "expect": {
+        "no_llm_call": true,
+        "content_contains": "⚠️"
+      }
+    },
+    {
+      "id": "systems_at_head",
+      "kind": "supervisor_capture",
+      "user": "Hello",
+      "llm": [{ "content": "Hello — how can I help you today?", "tool_calls": [] }],
+      "expect": {
+        "systems_at_head": true
+      }
+    },
+    {
+      "id": "arabic_language_lock",
+      "kind": "supervisor_capture",
+      "user": "ما هي عاصمة الكويت؟",
+      "llm": [{ "content": "عاصمة الكويت هي الكويت.", "tool_calls": [] }],
+      "expect": {
+        "llm_messages_contain": "LANGUAGE LOCK"
+      }
+    },
+    {
+      "id": "stable_prefix",
+      "kind": "pack",
+      "identity": "You are Kazma, an autonomous multi-platform AI agent.",
+      "histories": [
+        [
+          { "role": "system", "content": "You are Kazma, an autonomous multi-platform AI agent." },
+          { "role": "user", "content": "hi" },
+          { "role": "system", "content": "[KAZMA_WORKING_MEMORY]\ngoal: alpha" }
+        ],
+        [
+          { "role": "system", "content": "You are Kazma, an autonomous multi-platform AI agent." },
+          { "role": "user", "content": "hi" },
+          { "role": "system", "content": "[KAZMA_WORKING_MEMORY]\ngoal: beta" }
+        ]
+      ],
+      "expect": {
+        "prefix_identical": true
+      }
+    },
+    {
+      "id": "danger_hitl_interrupt",
+      "kind": "hitl",
+      "tool": "file_write",
+      "arguments": { "path": "secret.txt", "content": "nope" },
+      "expect": {
+        "interrupt": true,
+        "tool_not_executed": true
+      }
+    },
+    {
+      "id": "orphan_tool_sanitize",
+      "kind": "sanitize",
+      "messages": [
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "orphan_1",
+              "type": "function",
+              "function": { "name": "file_read", "arguments": "{}" }
+            }
+          ]
+        },
+        { "role": "user", "content": "continue" }
+      ],
+      "expect": {
+        "no_tool_calls_left": true
+      }
+    },
+    {
+      "id": "unusable_dsml_leak",
+      "kind": "unusable",
+      "text": "<|DSML|>invoke name=file_read arguments={}",
+      "expect": { "unusable": true }
+    },
+    {
+      "id": "usable_prose",
+      "kind": "unusable",
+      "text": "The swarm engine dispatched three workers and returned a combined report.",
+      "expect": { "unusable": false }
+    },
+    {
+      "id": "friendly_error_warn_prefix",
+      "kind": "friendly_error",
+      "expect": { "content_prefix": "⚠️" }
+    },
+    {
+      "id": "tool_trace_file_read_then_answer",
+      "kind": "tool_trace",
+      "user": "Read README.md and quote the first heading.",
+      "llm": [
+        {
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "c_read",
+              "name": "file_read",
+              "arguments": { "path": "README.md" }
+            }
+          ]
+        },
+        {
+          "content": "The first heading is Kazma.",
+          "tool_calls": []
+        }
+      ],
+      "tool_result": {
+        "name": "file_read",
+        "content": "# Kazma\nAn agent framework."
+      },
+      "expect": {
+        "first_pending": ["file_read"],
+        "second_node": "respond",
+        "second_contains": "Kazma"
+      }
+    },
+    {
+      "id": "tool_trace_computer_use_hitl",
+      "kind": "hitl",
+      "tool": "computer_use",
+      "arguments": { "goal": "open settings" },
+      "expect": {
+        "interrupt": true,
+        "tool_not_executed": true
+      }
+    }
+  ]
+}

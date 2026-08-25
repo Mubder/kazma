@@ -372,6 +372,10 @@
     { cmd: '/unrestricted', desc: 'Mission + YOLO — finish this job, don’t ask' },
     { cmd: '/unrestricted off', desc: 'Restore Settings budget + HITL' },
     { cmd: '/long off', desc: 'Budget only off (HITL unchanged)' },
+    { cmd: '/plan', desc: 'Show plan-mode status (inspect then propose)' },
+    { cmd: '/plan on', desc: 'Plan mode — write/exec tools blocked until /plan go' },
+    { cmd: '/plan go', desc: 'Approve the plan and execute (HITL still on)' },
+    { cmd: '/plan off', desc: 'Leave plan mode' },
     { cmd: '/new', desc: 'Start a new chat session' },
     { cmd: '/reset', desc: 'Clear this conversation history' },
     { cmd: '/steer', insert: '/steer ', desc: 'Queue a note for the running task — edit, then Enter' },
@@ -1443,25 +1447,6 @@
       return;
     }
 
-    // /long /mission /unrestricted — WS intercepts; skip Stop-lock on the live bus.
-    var _capFirst = _cmdLow.split(/\s+/)[0];
-    if (_capFirst === '/long' || _capFirst === '/mission' || _capFirst === '/unrestricted'
-        || _capFirst === '/yolo') {
-      var _capStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
-      if (_capStore && _capStore.connectionStatus === 'connected') {
-        appendMessage('user', text);
-        inputEl.value = '';
-        inputEl.style.height = 'auto';
-        if (!chatSessionId) {
-          chatSessionId = generateSessionId();
-          persistSessionId();
-        }
-        _capStore.sendPrompt(text, selectedModel || '', [], { noTurn: true });
-        return;
-      }
-      // SSE fallback: fall through to the normal send path.
-    }
-
     // During HITL, a normal message is a soft steer — don't start a new turn.
     if (_awaitingApproval && text && text.charAt(0) !== '/') {
       appendMessage('user', '/steer ' + text);
@@ -1583,15 +1568,10 @@
       }
     } catch (e) { /* ignore */ }
 
-    // Route over Central WebSocket Telemetry Bus if connected
-    const agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
-    if (agentStore && agentStore.connectionStatus === 'connected') {
-      agentStore.sendPrompt(content, selectedModel || '', attachmentsPayload);
-      return;
-    }
-
-    // Fallback to HTTP SSE stream if WS is disconnected — with Turn
-    // Delivery V2 cursor resume: a stream lost mid-turn (sleep / proxy
+    // Graph turns always go over HTTP SSE. The WebSocket is telemetry /
+    // cursor resume only (industry stack part 5). Do not re-route send
+    // through agentStore.sendPrompt — that is a second graph client.
+    // Turn Delivery V2 cursor resume: a stream lost mid-turn (sleep / proxy
     // cull / hidden-tab freeze) retries ONCE from its last journaled seq
     // (`last_event_id`); the server replays exactly what was missed. No
     // pollers — one retry, then reconcile from the durable store.
@@ -3119,19 +3099,14 @@
       tokenAccum = '';
       beginTurn();
 
-      // Prefer the live WebSocket bus when connected (same graph + grants path).
-      var agentStore = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
-      if (agentStore && agentStore.connectionStatus === 'connected') {
-        agentStore.submitApproval(action === 'approve', scope, data.thread_id || targetThreadId, data.tool || '');
-        if (scope === 'yolo' && KS.toast) {
-          KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
-        }
-        if (scope === 'tool' && KS.toast) {
-          KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
-        }
-        return;
+      // HITL resume is SSE (`POST /api/approve/{thread_id}`). WS approve_tool
+      // is off unless KAZMA_WS_GRAPH=1; the browser never uses that path.
+      if (scope === 'yolo' && KS.toast) {
+        KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
       }
-
+      if (scope === 'tool' && KS.toast) {
+        KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
+      }
       var payload = {
         action: action,
         scope: scope,
@@ -3885,6 +3860,9 @@
           '<button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="Research budget, HITL stays on">Long</button>' +
           '<button type="button" class="capacity-pill" data-cap="/long mission" aria-pressed="false" title="Run until done (~500 rounds)">Mission</button>' +
         '</div>' +
+        '<div class="capacity-group" role="group" aria-label="Plan">' +
+          '<button type="button" class="capacity-pill" data-cap="/plan on" aria-pressed="false" title="Inspect and propose — write/exec blocked until /plan go">Plan</button>' +
+        '</div>' +
         '<div class="capacity-group" role="group" aria-label="Approvals">' +
           '<button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="Skip danger-tool approvals">YOLO</button>' +
           '<button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>' +
@@ -3904,7 +3882,11 @@
     bar.addEventListener('click', function(e) {
       var btn = e.target.closest('[data-cap]');
       if (!btn || !inputEl) return;
-      inputEl.value = btn.getAttribute('data-cap') || '';
+      var cap = btn.getAttribute('data-cap') || '';
+      if (cap === '/plan on' && btn.classList.contains('is-on')) {
+        cap = '/plan off';
+      }
+      inputEl.value = cap;
       sendMessage();
     });
   }
@@ -3917,10 +3899,13 @@
       if (!snap || !snap.ok) return;
       var status = document.getElementById('capacity-status');
       if (status) {
-        var modeLabel = 'Chat';
+        var bits = [];
+        if (snap.plan_active) bits.push('Plan');
         if (snap.long_active) {
-          modeLabel = snap.mode === 'mission' ? 'Mission' : 'Long';
+          bits.push(snap.mode === 'mission' ? 'Mission' : 'Long');
         }
+        if (!bits.length) bits.push('Chat');
+        var modeLabel = bits.join(' · ');
         var budget = String(snap.max_iterations != null ? snap.max_iterations : '');
         if (snap.iteration != null && budget) {
           status.textContent = modeLabel + ' · ' + snap.iteration + '/' + budget;
@@ -3938,6 +3923,7 @@
         var on = false;
         if (cap === '/long on') on = !!snap.long_active && snap.mode !== 'mission';
         if (cap === '/long mission') on = snap.mode === 'mission' && !!snap.long_active;
+        if (cap === '/plan on') on = !!snap.plan_active;
         if (cap === '/yolo') on = !!snap.yolo_active;
         if (cap === '/unrestricted') on = !!snap.long_active && snap.mode === 'mission' && !!snap.yolo_active;
         btn.classList.toggle('is-on', on);

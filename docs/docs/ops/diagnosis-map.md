@@ -66,6 +66,10 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | **Proceed** redoes same work after budget hit | Continue context not stored/consumed | `long_task.continue.{thread}` + inject on next turn | §11 Long-task |
 | Long audit dies with YOLO on | YOLO only skips HITL; still needs capacity | Enable **both** `/long on` and `/yolo` | §4, §11 |
 | Bot acks **"Saved. Ready…"** instead of executing commands | Stale mission after a **Partial**: continue-context injected ahead of a NEW command + mission left active | Since 2026-08-19: injection gated by `is_continuation_reply`, Partial pauses the long task. Older builds: `/long off` clears it | §11 Long-task |
+| Reminder / HITL card **never delivers** after ~5 min | SessionStore TTL is **300s** — do **not** look up `chat_id` at fire time | Cron uses `delivery_target` captured at schedule. Helper: `kazma_core.sessions.ttl.refuse_session_lookup_for_durable_job` | §2 Sessions, AGENTS.md §16 |
+| Prompt with **"barcode"** routes to the coding model | `ModelRouter.classify` used to substring-match `code` | Word-boundary classify; `models.defaults.<kind>` wins over YAML keywords | §5 Providers |
+| MCP resource text **obeyed as instructions** | Resource body must be fenced | `mcp_read_resource` → `format_untrusted_block(source=mcp_resource:…)` | §12 Injection |
+| MCP server asked Kazma to **sample** (call our LLM) | `sampling/createMessage` must not auto-run | Denied without HITL; `KAZMA_MCP_SAMPLING` default off | §4 HITL |
 
 ---
 
@@ -73,29 +77,31 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 | Matter | Related to |
 |--------|------------|
-| Browser chat | **Both** `sse_chat.py` and `routes/ws_chat.py` + `static/js/chat.js` |
-| Preferred transport | Client prefers **WS** when `connectionStatus === 'connected'` |
+| Browser chat | **SSE graph** (`sse_chat.py` + `static/js/chat.js`) + **WS telemetry** (`routes/ws_chat.py`) |
+| Preferred transport | **SSE** for turns and HITL. WS is cursor resume / live frames. |
+| WS graph escape hatch | `KAZMA_WS_GRAPH=1` restores `send_prompt` / `approve_tool` (debug) |
 | Session store | **One** `SessionManager` / `chat_sessions.db` for both |
 | LangGraph thread | `ChatSession.thread_id` (may **≠** `session_id` for plain web UUIDs) |
 | Platform-linked web sessions | `session_id == thread_id` when `gw-*` |
 
 ### Must stay in sync
 
-| Concern | SSE | WebSocket |
+| Concern | SSE (graph SoT) | WebSocket (telemetry) |
 |---------|-----|-----------|
 | Endpoint | `POST /api/chat/stream` | `/ws/chat/{session_id}` |
-| Graph source | `_graph_holder` (post-recompile) | same |
-| `recursion_limit` | **100** | **100** (`_GRAPH_RECURSION_LIMIT`) |
-| Turn end | SSE `event: done` | `idle` + `stream_end` |
-| HITL emit | SSE `hitl_approval` frame | telemetry `hitl_approval` |
-| HITL resume | `POST /api/approve/{thread_id}` | WS `approve_tool` |
-| YOLO | `/yolo` slash in stream | enable on approve + ContextVar |
-| Env context | per-turn `build_env_context()` | same |
+| Graph source | `_graph_holder` (post-recompile) | same holder; **idle unless** `KAZMA_WS_GRAPH=1` |
+| `recursion_limit` | long-task budgets | same helper when graph is enabled |
+| Turn end | SSE `event: done` | `idle` + `stream_end` (journaled) |
+| HITL emit | SSE `hitl_approval` frame | telemetry `hitl_approval` (scan) |
+| HITL resume | `POST /api/approve/{thread_id}` | WS `approve_tool` **off** unless `KAZMA_WS_GRAPH=1` |
+| YOLO | `/yolo` slash in stream | same, only if WS graph is on |
+| Env context | per-turn `build_env_context()` | same when graph is on |
 | Soul inject | fenced self-improvement block | (see gateway for TG path) |
 
 ### Invariants
 
-- Adding a **new server event** only on SSE or only on WS re-breaks the UI.  
+- Adding a **new telemetry event** only on SSE or only on WS re-breaks the UI.  
+- Graph turns belong on SSE. Do not add a third graph client.  
 - `session_id` is UI/storage; **`thread_id` is LangGraph + YOLO + HITL**.  
 - HITL resume for custom LLMs: use **`ainvoke(Command)`**, not hanging `astream_events`.
 
@@ -220,10 +226,12 @@ Never construct `ConfigStore()` in app code — only `get_config_store()`.
 | IDE mutating ops | `get_tool_registry()` → `LocalToolRegistry` | **no** | B (bus) |
 | Swarm worker helpers | often LocalToolRegistry | depends | B |
 | Native skills | registered onto LocalToolRegistry | n/a | as tools |
+| `python_exec` runtime | E2B (if keyed) → Docker jail → local blocklist | n/a | A or B before run |
+| Codebase search | `code_index` SQLite symbols + live `rg` (Python grep fallback) | n/a | read |
 
 **Invariants**
 
-- IDE **must not** call raw `file_write` / shell functions — always `_call_tool` → registry.  
+- IDE **must not** call raw `file_write` / `file_apply_patch` / shell functions — always `_call_tool` → registry.  
 - Tool “exists in chat but not IDE” is often **MCP-only** on UnifiedToolExecutor.  
 - Swarm package has a separate `tools/registry.py` name — do not confuse with agent `tool_registry.py`.
 
@@ -264,7 +272,7 @@ V2 is the **only** chat memory stack (`recall()` in `memory/recall.py`). The V1
 
 | Layer | Role |
 |-------|------|
-| Recall | FTS5 + sqlite-vec dense + belief/episode PPR + session bias |
+| Recall | FTS5 + dense (sqlite-vec, or **pgvector** when a Postgres DSN is set) + belief/episode PPR + session bias |
 | Write | `mutate_belief` (single INSERT choke) + optional PG mirror + Neo4j dual-write |
 | Per-turn | Supervisor inject when `memory.per_turn_retrieval` (ConfigStore ← yaml) |
 | Post-turn | `schedule_post_turn_memory` → extractor → `mutate_belief` + ego-anchor |

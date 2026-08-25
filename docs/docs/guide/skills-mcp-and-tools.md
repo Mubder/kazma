@@ -244,6 +244,20 @@ The namespace prefix is transparently stripped when routing the tool call back t
 
 The in-process IDE/file MCP server (`mcp.ide_server`) exposes file read/write over the workspace root with a 1 MB per-file cap (`max_file_size`). Per audit reports, it is expected to require `_secret` matching `KAZMA_SECRET` via `hmac.compare_digest`; verify against `mcp_server.py` before relying on it.
 
+### 5.7 Resources, prompts, sampling, roots
+
+Kazma is an MCP **client** (ACP already hosts Kazma in editors). As of 2026-08-25 the initialize handshake advertises more than tools:
+
+| Surface | Behaviour |
+|---------|-----------|
+| **Resources** | `mcp_list_resources` / `mcp_read_resource`. Read body is wrapped in `format_untrusted_block(source="mcp_resource:…")` — data, not instructions. |
+| **Prompts** | `mcp_list_prompts` / `mcp_get_prompt`. Returned as **user-visible** text. Not injected as system. |
+| **Sampling** | `sampling/createMessage` from a server is **denied** unless HITL can approve. Default off (`KAZMA_MCP_SAMPLING` unset). There is no auto-sample path. |
+| **Elicitation** | Same: no auto-fill of server-driven forms. |
+| **Roots** | `roots/list` returns the **active workspace** only (same binding ladder as file tools). |
+
+We do **not** ship an MCP *server* for other IDEs to host our tools (D7).
+
 ---
 
 ## 6. Secret Vault (encrypted credential storage)

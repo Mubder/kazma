@@ -1,6 +1,6 @@
 /* ═══════════════════════════════════════════════════════
    Kazma IDE — Web transport for the transport-agnostic
-   IdeService. File tree, CodeMirror editor (CDN, with a
+   IdeService. File tree, Monaco editor (CDN, with a
    graceful <textarea> fallback), save/run/git/grep/swarm.
    All writes/execs flow through /api/ide/* which reuses the
    shared HITL/safety chain — no parallel un-gated path.
@@ -24,6 +24,7 @@ function ideApp() {
     resultTitle: '',
     cm: null,
     cmReady: false,
+    lspReady: false,
     skills: [],
     selectedSkill: '',
     // ── Multi-tab state ──
@@ -57,9 +58,19 @@ function ideApp() {
     destroy() {
       try { if (this.chatStream && this.chatStream.abort) this.chatStream.abort(); } catch (e) {}
       this.chatStream = null;
+      try { if (this._themeObs) this._themeObs.disconnect(); } catch (e) {}
+      this._themeObs = null;
+      try { if (this._lspDiagTimer) clearTimeout(this._lspDiagTimer); } catch (e) {}
+      this._lspDiagTimer = null;
+      (this._lspDisposables || []).forEach(function (d) {
+        try { if (d && d.dispose) d.dispose(); } catch (e) {}
+      });
+      this._lspDisposables = [];
+      this.lspReady = false;
       try {
         if (this.cm) {
-          if (typeof this.cm.toTextArea === 'function') this.cm.toTextArea();
+          if (typeof this.cm.dispose === 'function') this.cm.dispose();
+          else if (typeof this.cm.toTextArea === 'function') this.cm.toTextArea();
           else if (typeof this.cm.destroy === 'function') this.cm.destroy();
         }
       } catch (e) {}
@@ -117,54 +128,92 @@ function ideApp() {
       }
     },
 
-    // ── Editor (CodeMirror with textarea fallback) ──
+    // ── Editor (Monaco with textarea fallback) ──
+    _monacoTheme() {
+      return document.documentElement.getAttribute('data-theme') === 'light'
+        ? 'vs'
+        : 'vs-dark';
+    },
+
+    _syncMonacoTheme() {
+      if (!this.cmReady || !window.monaco || !monaco.editor) return;
+      try { monaco.editor.setTheme(this._monacoTheme()); } catch (e) { /* ignore */ }
+    },
+
     initEditor() {
       var ta = this.$refs.editor;
-      if (!ta) return;
-      if (typeof window.CodeMirror === 'function') {
+      var host = this.$refs.monacoHost;
+      var self = this;
+      if (ta) {
+        ta.addEventListener('input', function () {
+          if (self.cmReady) return;
+          self.dirty = ta.value !== self.originalContent;
+          var tab = self._activeTab();
+          if (tab) tab.dirty = self.dirty;
+        });
+      }
+      if (!host) return;
+
+      var vsRoot = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs';
+
+      function onReady() {
         try {
-          // Code theme follows the active Kazma theme: dark → material-darker,
-          // light → default (CodeMirror's built-in light theme). The previous
-          // hardcode rendered a dark editor in Kazma Light.
-          var cmTheme = document.documentElement.getAttribute('data-theme') === 'light'
-            ? 'default'
-            : 'material-darker';
-          this.cm = window.CodeMirror.fromTextArea(ta, {
-            lineNumbers: true,
-            theme: cmTheme,
-            mode: 'text/plain',
-            lineWrapping: true,
-            indentUnit: 4,
+          self.cm = monaco.editor.create(host, {
+            value: ta ? (ta.value || '') : '',
+            language: 'plaintext',
+            theme: self._monacoTheme(),
+            automaticLayout: true,
+            minimap: { enabled: false },
+            wordWrap: 'on',
+            fontSize: 13,
+            fontFamily: 'var(--font-mono), Consolas, monospace',
+            scrollBeyondLastLine: false,
+            renderLineHighlight: 'line',
+            tabSize: 4,
           });
-          var self = this;
-          this.cm.on('change', function () {
+          self.cm.onDidChangeModelContent(function () {
             self.dirty = self.cm.getValue() !== self.originalContent;
-            // Keep the active tab's dirty flag in sync so the tab bar
-            // dot indicator updates live as the user types.
             var tab = self._activeTab();
             if (tab) tab.dirty = self.dirty;
+            self._scheduleLspDiagnostics();
           });
-          this.cmReady = true;
-          return;
+          self.cmReady = true;
+          self._bindLsp();
+          self._themeObs = new MutationObserver(function () { self._syncMonacoTheme(); });
+          self._themeObs.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-theme'],
+          });
         } catch (err) {
-          console.warn('[ide] CodeMirror init failed, falling back to textarea', err);
-          this.cm = null;
-          this.cmReady = false;
+          console.warn('[ide] Monaco init failed, falling back to textarea', err);
+          self.cm = null;
+          self.cmReady = false;
         }
       }
-      // Fallback: raw <textarea>
-      var self2 = this;
-      ta.addEventListener('input', function () {
-        self2.dirty = ta.value !== self2.originalContent;
-      });
+
+      if (window.monaco && monaco.editor) {
+        onReady();
+        return;
+      }
+      if (typeof require === 'function' && require.config) {
+        try {
+          require.config({ paths: { vs: vsRoot } });
+          require(['vs/editor/editor.main'], onReady);
+          return;
+        } catch (err) {
+          console.warn('[ide] Monaco loader failed', err);
+        }
+      }
     },
 
     getContent() {
-      return this.cm ? this.cm.getValue() : (this.$refs.editor ? this.$refs.editor.value : '');
+      if (this.cm && typeof this.cm.getValue === 'function') return this.cm.getValue();
+      return this.$refs.editor ? this.$refs.editor.value : '';
     },
 
     setContent(text) {
-      if (this.cm) {
+      text = text || '';
+      if (this.cm && typeof this.cm.setValue === 'function') {
         this.cm.setValue(text);
       } else if (this.$refs.editor) {
         this.$refs.editor.value = text;
@@ -177,14 +226,178 @@ function ideApp() {
       return {
         python: 'python',
         javascript: 'javascript',
-        typescript: 'text/typescript',
-        json: 'application/json',
-        html: 'htmlmixed',
+        typescript: 'typescript',
+        json: 'json',
+        html: 'html',
         css: 'css',
         markdown: 'markdown',
         bash: 'shell',
         yaml: 'yaml',
-      }[lang] || 'text/plain';
+        toml: 'ini',
+        sql: 'sql',
+        rust: 'rust',
+        go: 'go',
+      }[lang] || 'plaintext';
+    },
+
+    // ── LSP (hover / complete / definition / diagnostics) ─────────
+    async _bindLsp() {
+      var self = this;
+      if (this._lspBound || !window.monaco || !monaco.languages) return;
+      try {
+        var st = await this._get('/api/ide/lsp');
+        if (!st || !st.enabled) return;
+      } catch (e) {
+        return;
+      }
+      this._lspBound = true;
+      this.lspReady = true;
+      this._lspDisposables = this._lspDisposables || [];
+      var langs = ['python', 'javascript', 'typescript', 'go', 'rust', 'json'];
+      langs.forEach(function (lang) {
+        self._lspDisposables.push(monaco.languages.registerCompletionItemProvider(lang, {
+          triggerCharacters: ['.', '_'],
+          provideCompletionItems: function (model, position) {
+            var word = model.getWordUntilPosition(position);
+            return self._lsp('complete', {
+              line: position.lineNumber - 1,
+              character: position.column - 1,
+              prefix: word.word || '',
+            }).then(function (data) {
+              var items = (data && data.items) || [];
+              return {
+                suggestions: items.map(function (it) {
+                  return {
+                    label: it.label,
+                    kind: it.kindId != null ? it.kindId : monaco.languages.CompletionItemKind.Text,
+                    insertText: it.insertText || it.label,
+                    detail: it.detail || '',
+                    range: {
+                      startLineNumber: position.lineNumber,
+                      startColumn: word.startColumn,
+                      endLineNumber: position.lineNumber,
+                      endColumn: word.endColumn,
+                    },
+                  };
+                }),
+              };
+            });
+          },
+        }));
+        self._lspDisposables.push(monaco.languages.registerHoverProvider(lang, {
+          provideHover: function (model, position) {
+            return self._lsp('hover', {
+              line: position.lineNumber - 1,
+              character: position.column - 1,
+            }).then(function (data) {
+              if (!data || !data.hover || !data.hover.contents) return null;
+              return { contents: [{ value: data.hover.contents }] };
+            });
+          },
+        }));
+        self._lspDisposables.push(monaco.languages.registerDefinitionProvider(lang, {
+          provideDefinition: function (model, position) {
+            return self._lsp('definition', {
+              line: position.lineNumber - 1,
+              character: position.column - 1,
+            }).then(function (data) {
+              var locs = (data && data.locations) || [];
+              if (!locs.length) return null;
+              var loc = locs[0];
+              if (self._lspSamePath(loc.path)) {
+                return {
+                  uri: model.uri,
+                  range: new monaco.Range(
+                    loc.line || 1, loc.character || 1,
+                    loc.line || 1, (loc.character || 1) + 1
+                  ),
+                };
+              }
+              return self.open(loc.path).then(function () {
+                if (self.cm && loc.line) {
+                  self.cm.revealLineInCenter(loc.line);
+                  self.cm.setPosition({ lineNumber: loc.line, column: loc.character || 1 });
+                }
+                return null;
+              });
+            });
+          },
+        }));
+        self._lspDisposables.push(monaco.languages.registerDocumentSymbolProvider(lang, {
+          provideDocumentSymbols: function (model) {
+            return self._lsp('documentSymbol', {}).then(function (data) {
+              var SK = monaco.languages.SymbolKind;
+              var map = { function: SK.Function, method: SK.Method, class: SK.Class };
+              return ((data && data.symbols) || []).map(function (s) {
+                var line = s.line || 1;
+                return {
+                  name: s.name,
+                  detail: s.signature || '',
+                  kind: map[s.kind] || SK.Variable,
+                  range: new monaco.Range(line, 1, line, 1),
+                  selectionRange: new monaco.Range(line, 1, line, 1),
+                };
+              });
+            });
+          },
+        }));
+      });
+      this._scheduleLspDiagnostics();
+    },
+
+    _lspSamePath(rel) {
+      var a = String(this.currentFile || '').replace(/\\/g, '/');
+      var b = String(rel || '').replace(/\\/g, '/');
+      return !!a && (a === b || a.endsWith('/' + b) || b.endsWith('/' + a));
+    },
+
+    async _lsp(method, extra) {
+      extra = extra || {};
+      try {
+        return await this._post('/api/ide/lsp', {
+          method: method,
+          path: this.currentFile || '',
+          content: this.getContent(),
+          line: extra.line || 0,
+          character: extra.character || 0,
+          prefix: extra.prefix || '',
+        });
+      } catch (e) {
+        return { ok: false };
+      }
+    },
+
+    _scheduleLspDiagnostics() {
+      var self = this;
+      if (!this.lspReady || !this.currentFile) return;
+      if (this._lspDiagTimer) clearTimeout(this._lspDiagTimer);
+      this._lspDiagTimer = setTimeout(function () { self._refreshLspDiagnostics(); }, 400);
+    },
+
+    async _refreshLspDiagnostics() {
+      if (!this.lspReady || !this.cm || !window.monaco) return;
+      var data = await this._lsp('diagnostics', {});
+      this._applyLspDiagnostics((data && data.diagnostics) || []);
+    },
+
+    _applyLspDiagnostics(diags) {
+      if (!this.cm || !window.monaco || !monaco.editor) return;
+      var model = this.cm.getModel && this.cm.getModel();
+      if (!model) return;
+      var markers = (diags || []).map(function (d) {
+        var line = d.line || 1;
+        var col = d.character || 1;
+        return {
+          severity: monaco.MarkerSeverity.Error,
+          message: d.message || 'error',
+          source: d.source || 'kazma',
+          startLineNumber: line,
+          startColumn: col,
+          endLineNumber: line,
+          endColumn: col + 8,
+        };
+      });
+      monaco.editor.setModelMarkers(model, 'kazma-lsp', markers);
     },
 
     // ── HTTP helpers ──
@@ -272,7 +485,7 @@ function ideApp() {
       return this.tabs.find(function (t) { return t.path === self.activeTabPath; }) || null;
     },
 
-    // Save the current CodeMirror content + dirty state back into the tab.
+    // Save the current editor content + dirty state back into the tab.
     _captureToTab() {
       var tab = this._activeTab();
       if (!tab) return;
@@ -280,7 +493,7 @@ function ideApp() {
       tab.dirty = this.dirty;
     },
 
-    // Load a tab's saved state into CodeMirror and update the UI.
+    // Load a tab's saved state into the editor and update the UI.
     _loadFromTab(tab) {
       if (!tab) {
         this.currentFile = '';
@@ -292,12 +505,15 @@ function ideApp() {
       this.activeTabPath = tab.path;
       this.currentFile = tab.path;
       this.currentLang = tab.lang;
-      if (this.cm) {
-        this.cm.setOption('mode', this._cmMode(tab.lang));
+      if (this.cm && window.monaco && monaco.editor && this.cm.getModel) {
+        try {
+          monaco.editor.setModelLanguage(this.cm.getModel(), this._cmMode(tab.lang));
+        } catch (e) { /* unknown language id */ }
       }
       this.setContent(tab.content || '');
       this.originalContent = tab.original || '';
       this.dirty = !!tab.dirty;
+      this._scheduleLspDiagnostics();
     },
 
     switchTab(path) {

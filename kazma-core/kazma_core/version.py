@@ -2,10 +2,10 @@
 
 Policy (see ``docs/VERSIONING.md``)
 ------------------------------------
-* **Public base** is static in root ``pyproject.toml`` (today ``0.9.4``).
+* **Public base** is static in root ``pyproject.toml`` (today ``0.10.0``).
   It changes only by deliberate hand edit / rare milestone — never by CI.
 * **Display version** is always ``{base}+g{shortsha}`` when a commit id is
-  known (PEP 440 local segment). Example: ``0.9.4+g4d37b2c``.
+  known (PEP 440 local segment). Example: ``0.10.0+g4d37b2c``.
 * No GitHub Action bumps digits. The SHA is the accuracy signal.
 
 Resolution order for the short SHA
@@ -37,7 +37,7 @@ __all__ = [
 ]
 
 # Used when pyproject cannot be read (broken checkout, partial install).
-FALLBACK_BASE_VERSION = "0.9.4"
+FALLBACK_BASE_VERSION = "0.10.0"
 
 _VERSION_LINE_RE = re.compile(r'(?m)^version\s*=\s*"([^"]+)"')
 
@@ -156,7 +156,7 @@ def get_git_short_sha(length: int = 7) -> str | None:
 
 @lru_cache(maxsize=1)
 def get_version() -> str:
-    """Full product version for banners/UI: ``0.9.4+g4d37b2c`` when possible."""
+    """Full product version for banners/UI: ``0.10.0+g4d37b2c`` when possible."""
     base = get_base_version()
     sha = get_git_short_sha()
     if sha:

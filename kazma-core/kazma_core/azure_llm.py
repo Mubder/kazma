@@ -85,6 +85,7 @@ class AzureProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float | None = None,
         model: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ):  # type: ignore[override]
         """Chat via Azure — same payload as OpenAI, but deployment-scoped URL."""
         # Azure ignores the `model` field (routing is path-based on the
@@ -94,7 +95,25 @@ class AzureProvider(LLMProvider):
         return await super().chat(
             messages, tools, max_tokens, temperature,
             model=self._deployment,  # keep deployment as the model id
+            response_format=response_format,
         )
+
+    async def chat_stream(
+        self,
+        messages: list,
+        tools: list | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict | None = None,
+    ):
+        """Azure is OpenAI-compatible — stream via the parent SSE path."""
+        async for delta in super().chat_stream(
+            messages, tools, max_tokens, temperature,
+            model=self._deployment,
+            response_format=response_format,
+        ):
+            yield delta
 
     async def close(self) -> None:
         if self._http is not None:

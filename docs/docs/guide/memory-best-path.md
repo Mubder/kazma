@@ -16,17 +16,18 @@ Chat turn
   ├─ Personal memory (V2): beliefs + episodes  → memory_state.db
   ├─ Knowledge Library (optional inject)       → knowledge_* stores
   └─ Optional scale adapters
-       • Qdrant / pgvector  (vectors)
-       • Postgres dual-mirror (state copy)
+       • pgvector (auto when Postgres DSN is set) / Qdrant
+       • Postgres dual-mirror or state.role=primary
        • Neo4j (dual-write; Dashboard still paints SQLite)
 ```
 
 | Store | Role | Default |
 |-------|------|---------|
-| V2 cognitive | “Who I am / what we said” | SQLite primary (SoT) |
+| V2 cognitive | “Who I am / what we said” | SQLite primary on one node |
 | Knowledge Library | “What the docs say” + citations | Separate store |
+| Dense vectors | Episode/belief embeddings | sqlite-vec → **pgvector** when you leave one node |
 | Neo4j | Dual-write of belief triples | **Optional** |
-| Postgres | Multi-process state mirror | **Optional** |
+| Postgres | Multi-process state mirror / primary | **Optional** |
 
 ## Operator checklist
 
@@ -38,7 +39,7 @@ Chat turn
 6. **Memory admin (`/memory`)** — graph + entities/beliefs (below).  
 7. **Smoke** — `pwsh -File scripts/memory_smoke.ps1` · [Smoke matrix](../ops/smoke-matrix) · [Recent features](./recent-features)  
 8. **Optional Neo4j** — only if you want graph dual-write (below).  
-9. **Scale** — multi-replica only: configure backends; do **not** drop SQLite until a real cutover plan ([#76](https://github.com/Mubder/kazma/issues/76)).
+9. **Scale** — set `KAZMA_DATABASE_URL` and `CREATE EXTENSION vector`. pgvector becomes the dense engine automatically (`KAZMA_PGVECTOR=0` keeps sqlite-vec). Do **not** set `KAZMA_MEMORY_STATE_ROLE=primary` until `python scripts/reconcile_memory_mirror.py --dry-run` is clean.
 
 ## Memory admin page (`/memory`)
 

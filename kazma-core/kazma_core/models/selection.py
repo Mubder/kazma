@@ -34,7 +34,12 @@ from kazma_core.vision_capability import is_vision_capable
 if TYPE_CHECKING:
     from kazma_core.model_registry import ModelRegistry
 
-__all__ = ["find_best_model_for_task", "select_provider_for_task"]
+__all__ = [
+    "find_best_model_for_task",
+    "resolve_supervisor_route",
+    "select_provider_for_task",
+    "user_task_default",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +137,91 @@ def _heuristic_best(registry: "ModelRegistry", kind: TaskProfile) -> tuple[str, 
         elif _matches(model_id, patterns):
             return provider_name, model_id
     return None
+
+
+def user_task_default(
+    registry: "ModelRegistry",
+    kind: TaskProfile,
+) -> tuple[str, str] | None:
+    """Return ``(provider, model)`` for ``models.defaults.<kind>`` or env-lock.
+
+    Does **not** apply heuristic id matching. Keyword classification is only
+    a hint; an explicit user default always wins. Env-lock short-circuits
+    to the active profile. Never mutates the active profile.
+    """
+    try:
+        if registry._env_locked():
+            profile = registry.get_active_profile()
+            return (profile.get("provider") or "", profile.get("model") or "")
+    except Exception:  # noqa: BLE001 — best-effort
+        pass
+
+    config_key = _kind_to_config_key(kind)
+    try:
+        default_model = registry._config_store.get(f"models.defaults.{config_key}")
+    except Exception:  # noqa: BLE001 — best-effort
+        default_model = None
+    if isinstance(default_model, str) and default_model.strip():
+        target = default_model.strip()
+        try:
+            provider_name = registry.find_provider_for_model(target)
+            if provider_name:
+                return (provider_name, target)
+        except Exception:  # noqa: BLE001 — best-effort
+            pass
+    return None
+
+
+def resolve_supervisor_route(
+    prompt: str,
+    model_router: Any | None = None,
+    *,
+    registry: "ModelRegistry | None" = None,
+) -> tuple[str | None, Any | None, str]:
+    """Pick a one-off model for this supervisor turn.
+
+    Precedence: env lock / ``models.defaults.<kind>`` → YAML
+    ``ModelRouter.route(classify())`` → ``(None, None, profile)`` so the
+    caller keeps the active client. Keyword lists cannot override an
+    explicit default. Never mutates the active profile.
+
+    Returns ``(model_id, client_or_None, profile_value)``.
+    """
+    from kazma_core.models.router import ModelRouter
+
+    profile = ModelRouter.classify(prompt or "")
+    if registry is None:
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            registry = get_model_registry()
+        except Exception:  # noqa: BLE001 — best-effort
+            registry = None
+
+    if registry is not None:
+        hit = user_task_default(registry, profile)
+        if hit is not None:
+            provider_name, model_id = hit
+            client = None
+            if provider_name and model_id:
+                try:
+                    client = registry.get_client_by_provider(
+                        provider_name, model=model_id
+                    )
+                except Exception:  # noqa: BLE001 — best-effort
+                    client = None
+            logger.info(
+                "[model_selection] supervisor defaults kind=%s → %s (provider=%s)",
+                profile.value,
+                model_id,
+                provider_name,
+            )
+            return model_id or None, client, profile.value
+
+    if model_router is not None:
+        spec = model_router.route(profile)
+        return spec.model, None, profile.value
+    return None, None, profile.value
 
 
 def find_best_model_for_task(

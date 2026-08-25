@@ -19,6 +19,8 @@ import threading
 
 from kazma_core.proxy.anyip import AnyIpProvider
 from kazma_core.proxy.base import NullProvider, ProxyProvider
+from kazma_core.proxy.brightdata import BrightDataProvider
+from kazma_core.proxy.oxylabs import OxylabsProvider
 
 __all__ = ["get_proxy_provider", "list_provider_names"]
 
@@ -28,6 +30,8 @@ logger = logging.getLogger(__name__)
 _PROVIDERS: dict[str, type[ProxyProvider]] = {
     "none": NullProvider,
     "anyip": AnyIpProvider,
+    "brightdata": BrightDataProvider,
+    "oxylabs": OxylabsProvider,
 }
 
 _current_name: str = ""

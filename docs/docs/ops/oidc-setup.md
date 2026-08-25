@@ -9,6 +9,11 @@ description: OIDC IdP Setup — production ops
 
 Kazma uses standard OpenID Connect (authorization code + PKCE).
 
+**Fail-closed:** the callback **verifies** the `id_token` (JWKS for RS/ES/PS,
+client secret for HS*). A JWKS miss, `alg: none`, wrong audience, or bad
+signature is a 400 — Kazma never mints a session from an unverified JWT.
+UserInfo is used only when the IdP omitted `id_token`.
+
 ## Kazma env
 
 ```bash

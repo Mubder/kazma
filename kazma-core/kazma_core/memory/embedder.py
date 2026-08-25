@@ -49,6 +49,8 @@ __all__ = [
     "LocalSentenceTransformerEmbedder",
     "OpenAICompatibleEmbedder",
     "encode_text_to_blob",
+    "HOSTED_PRESETS",
+    "apply_hosted_fleet_defaults",
     "get_embedder",
     "get_embedding_config",
     "get_embedding_dim",
@@ -65,6 +67,93 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "BAAI/bge-m3"
 DEFAULT_DIM = 1024
 DEFAULT_PROVIDER = "local"
+
+# Hosted embed-only fleet presets (MEMORY_REMAINING #78). Opt-in via
+# KAZMA_EMBED_FLEET=1 or provider=openai|voyage — never surprise-switch a
+# laptop's 1024-d sqlite-vec store.
+HOSTED_PRESETS: dict[str, dict[str, Any]] = {
+    "openai": {
+        "provider": "openai-compatible",
+        "model": "text-embedding-3-small",
+        "dim": 1536,
+        "base_url": "https://api.openai.com/v1",
+        "key_envs": ("OPENAI_API_KEY", "KAZMA_EMBED_API_KEY"),
+    },
+    "voyage": {
+        "provider": "openai-compatible",
+        "model": "voyage-3",
+        "dim": 1024,
+        "base_url": "https://api.voyageai.com/v1",
+        "key_envs": ("VOYAGE_API_KEY", "KAZMA_EMBED_API_KEY"),
+    },
+}
+
+
+def apply_hosted_fleet_defaults(
+    cfg: dict[str, Any],
+    *,
+    environ: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Fill hosted embedder fields when the operator opts into a fleet.
+
+    ``KAZMA_EMBED_FLEET=1`` + an API key switches local/auto → OpenAI or
+    Voyage. Named ``provider=openai|voyage`` fills URL/model/dim when empty.
+    """
+    env = environ if environ is not None else os.environ
+    out = dict(cfg)
+    provider = str(out.get("provider") or DEFAULT_PROVIDER).strip().lower()
+
+    if provider in HOSTED_PRESETS:
+        preset = HOSTED_PRESETS[provider]
+        out["provider"] = "openai-compatible"
+        if not str(out.get("base_url") or "").strip():
+            out["base_url"] = str(preset["base_url"])
+        if not str(out.get("model") or "").strip() or out.get("model") == DEFAULT_MODEL:
+            out["model"] = str(preset["model"])
+            out["dim"] = int(preset["dim"])
+        if not str(out.get("api_key") or "").strip():
+            for key_env in preset["key_envs"]:
+                val = str(env.get(key_env, "") or "").strip()
+                if val:
+                    out["api_key"] = val
+                    break
+        return out
+
+    fleet = str(env.get("KAZMA_EMBED_FLEET", "")).strip().lower() in (
+        "1",
+        "true",
+        "on",
+        "yes",
+    )
+    if not fleet or provider not in ("local", "auto", ""):
+        if provider == "auto":
+            out["provider"] = DEFAULT_PROVIDER
+        return out
+
+    for name in ("openai", "voyage"):
+        preset = HOSTED_PRESETS[name]
+        key = ""
+        for key_env in preset["key_envs"]:
+            key = str(env.get(key_env, "") or "").strip()
+            if key:
+                break
+        if not key:
+            continue
+        out["provider"] = "openai-compatible"
+        out["model"] = str(preset["model"])
+        out["dim"] = int(preset["dim"])
+        out["base_url"] = str(preset["base_url"])
+        out["api_key"] = key
+        logger.info(
+            "[Embedder] fleet default → %s (%s dim=%s)",
+            name,
+            preset["model"],
+            preset["dim"],
+        )
+        return out
+    if provider == "auto":
+        out["provider"] = DEFAULT_PROVIDER
+    return out
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -427,14 +516,16 @@ def _read_embedding_config() -> dict[str, Any]:
             if api_key:
                 break
 
-    return {
-        "provider": provider,
-        "model": model,
-        "dim": dim,
-        "base_url": base_url,
-        "api_key": api_key,
-        "api_key_env": api_key_env,
-    }
+    return apply_hosted_fleet_defaults(
+        {
+            "provider": provider,
+            "model": model,
+            "dim": dim,
+            "base_url": base_url,
+            "api_key": api_key,
+            "api_key_env": api_key_env,
+        }
+    )
 
 
 def get_embedding_config() -> dict[str, Any]:
@@ -519,7 +610,7 @@ def get_embedder() -> Embedder | None:
 
     cfg = _read_embedding_config()
     provider = cfg["provider"]
-    remote_providers = ("openai-compatible", "openai", "nim", "remote")
+    remote_providers = ("openai-compatible", "openai", "nim", "remote", "voyage")
     fell_back_from_remote = False
 
     if provider in remote_providers:

@@ -62,8 +62,10 @@ def _sanitize_env_field(value: str, *, max_len: int = 120) -> str:
 _ANNOUNCED_TOOLS = (
     "file_read",
     "file_write",
+    "file_apply_patch",
     "file_list",
     "file_search",
+    "codebase_search",
     "shell_exec",
     "python_exec",
     "git_status",
@@ -368,8 +370,8 @@ def build_env_context(workspace_id: str | None = None) -> str:
         lines.append("Workspace tools are registered for relative paths under the root.")
 
     lines.append(
-        "Danger-tier operations (file_write, shell_exec, git push) require "
-        "HITL approval."
+        "Danger-tier operations (file_apply_patch, file_write, shell_exec, git push) require "
+        "HITL approval. Prefer file_apply_patch for edits to existing files."
     )
 
     return "\n".join(lines)

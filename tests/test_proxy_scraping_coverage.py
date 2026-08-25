@@ -54,6 +54,22 @@ def test_get_scraping_client_injects_proxy():
         asyncio.run(c.aclose())
 
 
+def test_brightdata_oxylabs_unconfigured_are_direct():
+    from kazma_core.proxy.brightdata import BrightDataProvider
+    from kazma_core.proxy.oxylabs import OxylabsProvider
+    from kazma_core.proxy.registry import list_provider_names
+
+    names = list_provider_names()
+    assert "brightdata" in names and "oxylabs" in names
+    with patch(
+        "kazma_core.config_store.get_config_store",
+        side_effect=RuntimeError("no store"),
+    ):
+        assert BrightDataProvider().get_proxy_url() is None
+        assert OxylabsProvider().get_proxy_url() is None
+        assert BrightDataProvider().is_configured() is False
+
+
 def test_get_scraping_client_sync_proxy():
     from kazma_core.proxy import client as pc
 

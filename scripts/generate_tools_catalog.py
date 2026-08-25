@@ -16,31 +16,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "docs" / "reference" / "tools-catalog.md"
 
-# Keep in sync with kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS when possible.
-DANGER = {
-    "file_write",
-    "file_delete",
-    "shell_exec",
-    "code_exec",
-    "python_exec",
-    "schedule_task",
-    "cancel_scheduled",
-    "vault_retrieve",
-    "vault_delete",
-    "config_save",
-    "run_tests",
-    "git_commit",
-    "git_push_pull",
-    "github_create_pr",
-    "install_python_packages",
-    "install_npm_packages",
-    "install_agent_skill",
-    "uninstall_agent_skill",
-    "email_send",
-    "email_delete",
-    "email_categorize",
-    "browser_eval_js",
-}
+def _danger() -> set[str]:
+    """SoT is CANONICAL_DANGER_TOOLS — do not maintain a parallel set."""
+    sys.path.insert(0, str(ROOT / "kazma-core"))
+    from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+    return set(CANONICAL_DANGER_TOOLS)
+
+
+DANGER = _danger()
 
 
 def danger_label(name: str) -> str:
@@ -48,26 +32,37 @@ def danger_label(name: str) -> str:
 
 
 def extract_builtin() -> list[dict]:
-    text = (ROOT / "kazma-core/kazma_core/agent/tool_registry.py").read_text(
-        encoding="utf-8"
+    files = [
+        ROOT / "kazma-core/kazma_core/agent/tool_registry.py",
+        ROOT / "kazma-core/kazma_core/agent/tool_builtins.py",
+    ]
+    patterns = (
+        r"@self\.register\((.*?)\)\s*\n\s*async def ([a-zA-Z0-9_]+)",
+        r"@registry\.register\((.*?)\)\s*\n\s*async def ([a-zA-Z0-9_]+)",
     )
     tools: list[dict] = []
-    for m in re.finditer(
-        r"@self\.register\((.*?)\)\s*\n\s*async def ([a-zA-Z0-9_]+)",
-        text,
-        re.S,
-    ):
-        block, fn = m.group(1), m.group(2)
-        nm = re.search(r"name\s*=\s*['\"]([^'\"]+)['\"]", block)
-        desc = re.search(r"description\s*=\s*['\"]([^'\"]+)['\"]", block)
-        cat = re.search(r"category\s*=\s*['\"]([^'\"]+)['\"]", block)
-        tools.append(
-            {
-                "name": nm.group(1) if nm else fn,
-                "description": (desc.group(1) if desc else "")[:200],
-                "category": cat.group(1) if cat else "",
-            }
-        )
+    seen: set[str] = set()
+    for path in files:
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pat in patterns:
+            for m in re.finditer(pat, text, re.S):
+                block, fn = m.group(1), m.group(2)
+                nm = re.search(r"name\s*=\s*['\"]([^'\"]+)['\"]", block)
+                desc = re.search(r"description\s*=\s*['\"]([^'\"]+)['\"]", block)
+                cat = re.search(r"category\s*=\s*['\"]([^'\"]+)['\"]", block)
+                name = nm.group(1) if nm else fn
+                if name in seen:
+                    continue
+                seen.add(name)
+                tools.append(
+                    {
+                        "name": name,
+                        "description": (desc.group(1) if desc else "")[:200],
+                        "category": cat.group(1) if cat else "",
+                    }
+                )
     return tools
 
 

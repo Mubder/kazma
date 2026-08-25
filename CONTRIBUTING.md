@@ -114,7 +114,7 @@ kazma/
 
 ### Key Design Decisions
 
-- **Storage**: sqlite-vec ONLY — single-file persistence, no ChromaDB or PostgreSQL
+- **Storage**: sqlite-vec on one node; **pgvector** when `KAZMA_DATABASE_URL` is set (`KAZMA_PGVECTOR=0` keeps local). Do not grow Chroma as production memory.
 - **Entry point**: `kazma-core/kazma_core/agent/__init__.py` (exports `KazmaAgent`, `AgentConfig`, `load_config`) plus `kazma-core/kazma_core/agent_runner.py` (`run_agent()`) — ReAct loop via LangGraph state machine
 - **IDE subsystem** (v0.5.0): `kazma-core/kazma_core/ide/` (`env_context.py`, `service.py`, `workspace_scope.py`) is a transport-agnostic coding backend powering the Web IDE page (`/ide`) and the TUI editor, with cross-platform `/ide` commands.
 - **Pluggable embeddings** (v0.5.0): `kazma-core/kazma_core/swarm/memory/embedder.py` lets memory/RAG use local `sentence-transformers` or any OpenAI-compatible `/embeddings` endpoint (NVIDIA NIM/NeMo Retriever, etc.), configured under `memory.embedding` in `kazma.yaml`.

@@ -358,6 +358,7 @@ class DualWriteMirror:
                                     qvec,
                                     tenant_id=tenant_id,
                                     meta={
+                                        "kind": "episode",
                                         "tier": effective_tier,
                                         "session_id": session_id,
                                     },

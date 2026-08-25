@@ -525,6 +525,25 @@ def _insert_belief(
                 "UPDATE beliefs SET embedding=? WHERE id=? AND embedding IS NULL",
                 (emb, bid),
             )
+        try:
+            from kazma_core.memory.backends import get_vector_backend
+            from kazma_core.memory.embedder import get_embedder
+
+            enc = get_embedder()
+            qvec = enc.encode(f"{sub} {pred} {obj}") if enc is not None else None
+            if qvec:
+                get_vector_backend(conn).upsert(
+                    bid,
+                    qvec,
+                    tenant_id=tenant_id,
+                    meta={"kind": "belief", "tier": mem_class or "semantic"},
+                )
+        except Exception:
+            logger.debug(
+                "[belief_mutation] vector backend upsert failed for %s",
+                bid,
+                exc_info=True,
+            )
     except Exception:
         logger.debug("[belief_mutation] belief embedding failed for %s", bid, exc_info=True)
     return {

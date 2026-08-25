@@ -27,6 +27,16 @@ Outbound swarm progress + danger-tool approvals go through `SwarmMessageBus`
 Callback resolution still happens on each platform's own interaction handler
 (`handle_callback`). The bus singleton is process-local (not multi-replica).
 
+### 1.0a Durable execution (Temporal, opt-in)
+
+Swarm **planning** stays in-process. When `KAZMA_TEMPORAL_HOST` is set,
+`SwarmEngine.dispatch` wraps `_dispatch_inner` in a Temporal workflow so a
+crash can resume the step (`kazma_core/swarm/durable.py`). The Temporal
+worker runs **inside the Kazma process** (app lifespan, fail-open). Default
+is still asyncio. Kill-switch `KAZMA_TEMPORAL=0`. Strict:
+`KAZMA_TEMPORAL_REQUIRED=1` (no in-process fallback). Extra:
+`pip install 'kazma[durable]'`.
+
 ### 1.1 Constructor
 
 ```python

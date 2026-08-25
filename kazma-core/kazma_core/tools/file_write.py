@@ -107,4 +107,10 @@ async def file_write(path: str, content: str) -> str:
 
     line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
     byte_count = len(content.encode("utf-8"))
+    try:
+        from kazma_core.code_index.indexer import notify_file_changed
+
+        notify_file_changed(p)
+    except Exception:
+        pass
     return f"Wrote {line_count} lines, {byte_count} bytes to {path}"

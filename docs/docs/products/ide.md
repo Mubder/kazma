@@ -7,7 +7,22 @@ description: Transport-agnostic coding IDE — Web, TUI, and /ide slash commands
 
 # IDE
 
-Kazma’s IDE is a **transport-agnostic coding backend**: one service for Web, TUI, and chat `/ide` commands. Mutations always go through **`LocalToolRegistry`** so HITL cannot be bypassed.
+Kazma’s IDE is a **transport-agnostic coding backend**: one service for Web, TUI, chat `/ide` commands, and the in-process CLI (`kazma ask` / `kazma acp`). Mutations always go through **`LocalToolRegistry`** so HITL cannot be bypassed.
+
+**Web editor (2026-08-25):** Monaco (the VS Code engine) on `/ide`, with a
+plain `<textarea>` if the CDN is offline. Agent edits to existing files
+should use **`file_apply_patch`** (unique `old_string`/`new_string` or a
+unified diff), not a whole-file `file_write`.
+
+**Codebase index:** `codebase_search` (and `GET /api/ide/codebase?q=`) finds
+definitions via a per-workspace SQLite symbol index (tree-sitter if you
+`pip install 'kazma[index]'`, else regex) plus live ripgrep. Install `rg`
+for faster text hits. Kill-switch `KAZMA_CODE_INDEX=0`.
+
+**Language intelligence (2026-08-25):** Monaco registers hover, complete,
+Ctrl+click definition, outline, and syntax markers via `POST /api/ide/lsp`.
+Python/JSON diagnostics are in-process (`ast` / `json`); symbols reuse the
+code index. Not a pylsp daemon. Kill-switch `KAZMA_IDE_LSP=0`.
 
 ## Components
 
@@ -52,7 +67,10 @@ grant, so the loop is smooth rather than a hard failure.
 | Action | HITL | Notes |
 |--------|------|-------|
 | Read / list / search | Usually safe | Workspace-scoped |
+| Codebase search | Safe | `codebase_search` / `GET /api/ide/codebase` — symbols + ripgrep |
+| Language intelligence | Safe | `GET/POST /api/ide/lsp` — hover, complete, definition, diagnostics |
 | Write / delete | Danger tools | Graph or bus approval |
+| Apply patch | Danger (`file_apply_patch`) | Search-replace or unified diff; same HITL as write |
 | Run / run_file / shell | Danger | `shell_exec` / `python_exec` policy |
 | Git commit / push / PR | Danger | Native git skill tools |
 | Send to swarm | — | Attaches env context for workers |

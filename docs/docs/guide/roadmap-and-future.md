@@ -25,10 +25,14 @@ Items are marked:
 | LangGraph supervisor ReAct loop | ✅ | `graph_builder.py`. |
 | Tool calling with OpenAI-compatible providers | ✅ | `httpx`, no SDK. |
 | NVIDIA NIM tool-fallback | ✅ | `llm_provider.py:285-300`. |
-| Streaming (SSE) | ✅ | `streaming.py`. |
+| Strict tool JSON Schema | ✅ | `additionalProperties: false` always; `KAZMA_STRICT_TOOLS=1` for OpenAI `function.strict`. |
+| Structured outputs (`response_format`) | ✅ | Opt-in on `LLMProvider.chat` / `chat_stream`; not forced on supervisor turns. |
+| Pre/Post tool hooks | ✅ | `agent/tool_hooks.py`. Deny/rewrite/observe. Cannot skip HITL. `KAZMA_TOOL_HOOKS=0`. |
+| First-class plan mode | ✅ | `/plan on` · `/plan go`. Structural read-only, then execute. `KAZMA_PLAN_MODE=0`. |
+| Streaming (SSE) | ✅ | `chat_stream()` + `invoke_llm_chat()`; SSE/WS consume synthetic `on_chat_model_stream`. |
 | Context compaction (LLM summarise) | ✅ | `compaction.py`. |
 | Compaction with memory retrieval + checkpoint | 🟡 | Memory adapter wired on main paths; checkpoint_manager still optional. |
-| Rate-limit (429) handling | ✅ | Exponential backoff + Retry-After in `llm_provider.py` (2026-07). |
+| Rate-limit (429) handling | ✅ | Exponential backoff + Retry-After in `llm_provider.py` and native Anthropic `/messages`. Exhausted 429 is `transient=True` + `kind=rate_limit_exhausted` (no same-provider re-retry). |
 | Cost breaker auto-wired | ✅ | `CostCircuitBreaker` instantiated per-agent (`agent_runner.py`) and driven on the live loop — `record_user_interaction()` on each inbound message, `should_halt()` gate, and `record_cost()` after each LLM call (`graph_builder.py`). Exposed on the dashboard via `.status()`. |
 
 ---
@@ -97,7 +101,7 @@ Items are marked:
 | Discord adapter | ✅ | Gateway WebSocket. |
 | Slack adapter | ✅ | Socket Mode / polling. |
 | Web UI (SSE) | ✅ | `/api/chat/stream`. |
-| WebSocket chat | ✅ | Legacy `/ws/chat` removed; SSE `/api/chat/stream` is the sole transport. |
+| WebSocket chat | ✅ | `/ws/chat/{session_id}` is telemetry / cursor resume; SSE `/api/chat/stream` is the graph transport (`KAZMA_WS_GRAPH=1` restores WS graph). |
 | TUI | ✅ | Textual, read-mostly. |
 | EN/AR i18n + RTL | ✅ | Inline dict, Calibri + 16px base. |
 | Majlis protocol | ✅ | `majlis.py` (core), not a UI toggle. |
@@ -116,7 +120,7 @@ Items are marked:
 | Native non-OpenAI providers | ✅ | `AnthropicProvider` (`/messages`), `AzureProvider` (`api-key`+`api-version`), `BedrockProvider` (SigV4 + Converse), `GeminiProvider` (ADC). See [LLM Providers](../reference/llm-providers). |
 | Google Vertex AI (ADC) | ✅ | `google_llm.py`. |
 | Local servers (Ollama/LM Studio) | ✅ | Dummy-key handling. |
-| MCP (stdio + SSE + Streamable HTTP) | ✅ | `mcp/manager.py` — Streamable HTTP (MCP 2025-03-26 spec) with `Mcp-Session-Id` resumption. |
+| MCP (stdio + SSE + Streamable HTTP) | ✅ | `mcp/manager.py` — Streamable HTTP (MCP 2025-03-26 spec) with `Mcp-Session-Id` resumption. Resources/prompts/sampling/roots client surfaces (2026-08-25); sampling is HITL fail-closed. Not an MCP *server*. |
 | Skill Hub (registry, signing, certification) | ✅ | `hub/`. |
 | Langfuse tracing | 🟡 | Dependency present; `logging.langfuse.enabled` flag; integration not active. |
 | OpenTelemetry | 🟡 | `[tracing]` extra has exporters; Kazma's own tracing is in-house spans, not OTel. |
@@ -133,7 +137,7 @@ Items are marked:
 | Swarm metrics (in-memory + SQLite) | ✅ | `MetricsCollector`. |
 | In-house tracing spans | ✅ | `TraceStore` (dashboard) + `TracingEmitter` (swarm). |
 | SSE telemetry events | ✅ | `/api/chat/stream` + telemetry router. |
-| Langfuse tracing | ✅ | Wired via `KazmaTracer`; dormant by default (`logging.langfuse.enabled: false`). |
+| Langfuse tracing | ✅ | Wired via `KazmaTracer`; **auto-on when keys exist** (`logging.langfuse.enabled: auto`). |
 | Prometheus scrape endpoint | ✅ | `/metrics` + `/api/metrics` in `kazma_ui/metrics.py`, mounted in `app.py` (gateway-active block). Emits `text/plain; version=0.0.4` with inbound/outbound/error counters, active threads, adapter, queue-depth, and swarm gauges. |
 | OpenTelemetry export | 🔴 | **Removed** — dead code + 8 packages purged. Langfuse + Console remain as the two backends. Re-add only if OTLP export to Jaeger/Tempo becomes a real requirement. |
 
@@ -146,9 +150,11 @@ Remaining memory polish/scale only in [`MEMORY_REMAINING.md`](https://github.com
 
 Other open items:
 
-1. **Add 429 backoff** to the retry layer (or document the proxy requirement more loudly).
-2. **Resolve the OpenTelemetry question** — dead OTel code + `[tracing]` extra removed; Langfuse + Console remain. Re-add only if OTLP export is required.
-3. **Hosted vector DB** (pgvector/Qdrant/Weaviate) — only when multi-replica shared recall is a product requirement.
+1. **429 backoff** — done 2026-08-25 (generic + Anthropic; see leftover GOAL).
+2. **Resolve the OpenTelemetry question** — dead OTel code + `[tracing]` extra removed; Langfuse + Console remain. Re-add only if OTLP export is required. **Wontfix here** (D5).
+3. **Hosted vector DB** — **pgvector is now the default dense engine when Postgres is on** (industry stack part 6). Pick **Qdrant** in Settings if recall latency becomes the bottleneck. Do not grow Chroma as production memory.
+4. **IDE chrome** — **Monaco + `file_apply_patch`** (industry stack part 7). **Codebase index** (ripgrep + symbols) shipped 2026-08-25. **LSP** (hover/complete/definition/diagnostics) shipped 2026-08-25. **`kazma ask` + ACP stdio** shipped 2026-08-25 (live tokens, TTY HITL, `session/request_permission`).
+5. **E2B + Temporal** — **opt-in adapters** (industry stack part 8). Untrusted `python_exec` via Firecracker; durable swarm steps via Temporal. Planner and HITL stay Kazma.
 
 ---
 

@@ -78,6 +78,9 @@ def main() -> None:
     elif cmd == "migrate":
         _run_migrate(sys.argv[2:])
 
+    elif cmd in ("ask", "acp"):
+        _run_ask(cmd, sys.argv[2:])
+
     elif cmd in ("--help", "-h", "help"):
         from kazma_cli.banner import _get_version
 
@@ -95,9 +98,12 @@ def main() -> None:
         print("  swarm      Swarm orchestration (workers, dispatch, metrics, ...)")
         print("  update     Check for and install Kazma CLI updates")
         print("  migrate    Export/import a Kazma installation (cross-machine migration)")
+        print("  ask        Run the agent on a prompt (no web server)")
+        print("  acp        Agent Client Protocol JSON-RPC on stdio (Zed / JetBrains)")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: 9090)")
+        print("  ask [prompt]  kazma ask \"fix the tests\"  |  kazma ask --plan --json")
 
     else:
         print(f"Unknown command: {cmd}")
@@ -565,6 +571,16 @@ def _run_swarm(args: list[str]) -> None:
     from kazma_cli.swarm import run as swarm_run
 
     swarm_run(args)
+
+
+def _run_ask(cmd: str, args: list[str]) -> None:
+    """Handle ``kazma ask`` / ``kazma acp`` (in-process graph, no uvicorn)."""
+    from kazma_cli.ask import run as ask_run
+
+    argv = list(args)
+    if cmd == "acp" and "--acp" not in argv:
+        argv = ["--acp", *argv]
+    sys.exit(ask_run(argv))
 
 
 def _run_migrate(args: list[str]) -> None:

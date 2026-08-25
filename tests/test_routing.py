@@ -54,6 +54,49 @@ class TestClassify:
         # 3 words, no FAST keyword → DEFAULT fallback.
         assert ModelRouter.classify("hmm interesting indeed") == TaskProfile.DEFAULT
 
+    def test_classify_barcode_is_not_coding(self) -> None:
+        """Word-boundary: 'code' in 'barcode' must not pick the coding model."""
+        assert ModelRouter.classify("what is a barcode used for in retail") != TaskProfile.CODING
+        assert ModelRouter.classify("look") != TaskProfile.FAST
+        assert ModelRouter.classify("this") != TaskProfile.FAST
+
+    def test_defaults_win_over_keyword_route(self) -> None:
+        """models.defaults.code beats YAML first-match for a coding prompt."""
+        from kazma_core.models.selection import resolve_supervisor_route
+
+        models = [
+            ModelSpec(provider="deepseek", model="deepseek-v4-pro", profiles=[TaskProfile.CODING]),
+            ModelSpec(provider="openai", model="pinned-coder", profiles=[TaskProfile.CODING]),
+        ]
+        router = ModelRouter(models=models)
+
+        class _Store:
+            def get(self, key, default=None):
+                if key == "models.defaults.code":
+                    return "pinned-coder"
+                return default
+
+        class _Reg:
+            _config_store = _Store()
+
+            def _env_locked(self):
+                return False
+
+            def find_provider_for_model(self, model):
+                return "openai" if model == "pinned-coder" else None
+
+            def get_client_by_provider(self, name, model=None):
+                return object()
+
+        model_id, client, profile = resolve_supervisor_route(
+            "write a Python function",
+            model_router=router,
+            registry=_Reg(),
+        )
+        assert profile == TaskProfile.CODING.value
+        assert model_id == "pinned-coder"
+        assert client is not None
+
 
 class TestRoute:
     """Test model routing."""

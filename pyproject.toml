@@ -1,6 +1,6 @@
 [project]
 name = "kazma"
-version = "0.9.4"
+version = "0.10.0"
 description = "Kazma — Autonomous AI agent framework with LangGraph, ChromaDB RAG, and Arabic RTL dashboard"
 readme = "README.md"
 license = { text = "MIT" }
@@ -118,6 +118,24 @@ document-platform = [
     # Optional PDFium peer in the multi-engine PDF bake-off (safe if unused).
     "pypdfium2>=4.30.0",
 ]
+# Optional Docling local extract (hard PDFs; salvage after PyMuPDF)
+docling = [
+    "docling>=2.0.0",
+]
+# Codebase index (tree-sitter languages; regex fallback always works)
+index = [
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-javascript>=0.23.0",
+]
+# E2B Firecracker sandboxes (untrusted python_exec)
+sandbox = [
+    "e2b-code-interpreter>=1.2.0",
+]
+# Temporal durable swarm steps (crash-resume long work)
+durable = [
+    "temporalio>=1.8.0",
+]
 # Database drivers beyond SQLite (database_client skill)
 database = [
     "psycopg[binary]>=3.1.0",
@@ -127,7 +145,7 @@ database = [
 # Convenience meta-extra — installs everything at once.
 # Usage: pip install -e ".[all]"  or  uv sync --all-extras
 all = [
-    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert,document-platform]",
+    "kazma[rag,dev,tui,observability,web,postgres,document,database,ocr,convert,document-platform,sandbox,durable,index,docling]",
 ]
 
 [project.scripts]
@@ -164,6 +182,7 @@ markers = [
     "integration: Integration tests",
     "slow: Slow tests",
     "commitment: Commitment Layer tests (gate, resolvers, store, scope, soul)",
+    "eval: Industry eval pack (golden trajectories, no live LLM)",
 ]
 
 [tool.coverage.run]

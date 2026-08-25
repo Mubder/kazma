@@ -56,7 +56,7 @@ class AgentConfig:
     """Configuration loaded from kazma.yaml."""
 
     name: str = "kazma"
-    version: str = "0.9.4"
+    version: str = "0.10.0"
     language: str = "ar"
     rtl: bool = True
     default_model: str = "gpt-4o-mini"
@@ -92,7 +92,7 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
 
         _version = _product_version()
     except Exception:
-        _version = str(agent_cfg.get("version", "0.9.4")).split("+", 1)[0]
+        _version = str(agent_cfg.get("version", "0.10.0")).split("+", 1)[0]
 
     # Settings-UI overrides (ConfigStore) win over YAML for the agent identity
     # fields — the Settings page persists agent.name / agent.language /
@@ -192,16 +192,27 @@ class KazmaAgent:
 
         # Tracer
         tracing_cfg = self.config.raw.get("logging", {})
-        # Create TracingConfig from the raw config
+        if not isinstance(tracing_cfg, dict):
+            tracing_cfg = {}
+        from kazma_core.tracing.langfuse_enable import (
+            langfuse_keys,
+            resolve_langfuse_enabled,
+        )
+
+        _lf = tracing_cfg.get("langfuse", {}) if isinstance(tracing_cfg, dict) else {}
+        if not isinstance(_lf, dict):
+            _lf = {}
+        _lf_on = resolve_langfuse_enabled(tracing_cfg)
+        _pub, _sec, _host = langfuse_keys(_lf)
         tracing_config = TracingConfig(
-            enabled=tracing_cfg.get("langfuse", {}).get("enabled", False),
-            backend="langfuse" if tracing_cfg.get("langfuse", {}).get("enabled") else "console",
+            enabled=_lf_on,
+            backend="langfuse" if _lf_on else "console",
             otlp_endpoint=tracing_cfg.get("otlp_endpoint", "http://localhost:4317"),
             service_name="kazma-agent",
             sample_rate=1.0,
-            langfuse_public_key=tracing_cfg.get("langfuse", {}).get("public_key"),
-            langfuse_secret_key=tracing_cfg.get("langfuse", {}).get("secret_key"),
-            langfuse_host=tracing_cfg.get("langfuse", {}).get("host", "http://localhost:3000"),
+            langfuse_public_key=_pub or None,
+            langfuse_secret_key=_sec or None,
+            langfuse_host=_host,
         )
         self.tracer = KazmaTracer(config=tracing_config)
 

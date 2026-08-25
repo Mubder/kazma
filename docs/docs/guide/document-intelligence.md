@@ -134,6 +134,12 @@ Install: `pip install -e ".[document-platform]"` (includes `pymupdf` +
 `pypdfium2`). Without PyMuPDF, Arabic electronic PDFs may reverse under
 pdfplumber alone.
 
+**Hard-PDF salvage (after the isolated parser returns):** if the native score
+is weak, the parent process may try **Docling** (`pip install 'kazma[docling]'`)
+then **LlamaParse / Reducto** when `LLAMAPARSE_API_KEY` / `REDUCTO_API_KEY` are
+set. API keys never enter the parser sandbox. Kill-switches:
+`KAZMA_DOCLING=0`, `KAZMA_REMOTE_PARSE=0`.
+
 ### Multilingual OCR
 
 - **Per-page quality routing:** Pages with high text density can skip OCR

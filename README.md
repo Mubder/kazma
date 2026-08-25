@@ -73,7 +73,7 @@ Kazma's architecture reflects those foundational principles:
 │  │                SwarmEngine                  │                    │            Pure V2 Cognitive Memory                │  │
 │  │  • 6 Dispatch Patterns (Fan-Out/Pipeline/..)│                    │  • Bi-Temporal Belief Graph (valid_from/until)     │  │
 │  │  • Dynamic Autoscaler (Coder/Researcher/..) │                    │  • Local Ego-Graph Personalized PageRank (PPR)     │  │
-│  │  • ReliabilityRegistry (Breakers & Retries) │                    │  • Sparse (FTS5) + Dense (sqlite-vec) Episodes     │  │
+│  │  • ReliabilityRegistry (Breakers & Retries) │                    │  • Sparse (FTS5) + Dense (sqlite-vec / pgvector)  │  │
 │  │  • Best-Model-Per-Task Prompt Classifier    │                    │  • Parametric Action DAGs + 24h Auto-Consolidation │  │
 │  └─────────────────────────────────────────────┘                    └────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────┘
@@ -92,7 +92,7 @@ Kazma's architecture reflects those foundational principles:
 ### 🧠 Pure V2 Cognitive Memory Engine
 - **Bi-Temporal Beliefs**: Tracks factual assertions with both assertion time and validity time (`valid_from` / `valid_until`) to manage evolving knowledge without hallucination or historical corruption.
 - **Associative PPR Graph**: Multi-hop associative recall via Local Ego-Graph Personalized PageRank over belief entities.
-- **Hybrid Episode Retrieval**: Recalls past dialogues and actions using Reciprocal Rank Fusion (RRF) over SQLite FTS5 (lexical) and `sqlite-vec` (dense embeddings).
+- **Hybrid Episode Retrieval**: Recalls past dialogues and actions using Reciprocal Rank Fusion (RRF) over lexical search (SQLite FTS5, or ILIKE on Postgres-primary) and dense embeddings (`sqlite-vec` on one node, **pgvector** when Postgres is on).
 - **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated 24-hour snapshot backups (`sqlite3.backup` + JSONL/GraphML exports).
 - **Prompt-Fenced Injection**: Injects all retrieved context inside `<kazma:data untrusted>` fences to protect against prompt injection attacks.
 
@@ -211,6 +211,9 @@ OPENAI_API_KEY=sk-...
 # Start the full Web UI & Gateway (http://127.0.0.1:9090)
 kazma serve
 
+# Run the agent without the web server (tokens stream to stdout)
+kazma ask "What files define the supervisor graph?"
+
 # Or launch the Terminal User Interface (TUI)
 kazma-tui
 ```
@@ -265,7 +268,7 @@ remain single-replica — see `docs/docs/guide/document-intelligence.md`.
 | **`kazma-ui`** | [`kazma-ui/`](file:///G:/GitHubRepos/kazma/kazma-ui) | FastAPI web application, SSE streaming chat, Observability Dashboard, Web IDE, and Memory console |
 | **`kazma-tui`** | [`kazma-tui/`](file:///G:/GitHubRepos/kazma/kazma-tui) | Textual-based rich terminal dashboard, interactive IDE, and Documents manager |
 | **`kazma-skills`** | [`kazma-skills/`](file:///G:/GitHubRepos/kazma/kazma-skills) | Native certified skills (Document Platform, Encrypted Vault, Deep Research, Crawler, Database) |
-| **`kazma-cli`** | [`kazma-cli/`](file:///G:/GitHubRepos/kazma/kazma-cli) | Unified command-line interface (`kazma`, `kazma swarm`, `kazma migrate`, `kazma serve`) |
+| **`kazma-cli`** | [`kazma-cli/`](file:///G:/GitHubRepos/kazma/kazma-cli) | Unified command-line interface (`kazma ask`, `kazma acp`, `kazma swarm`, `kazma migrate`, `kazma serve`) |
 
 ---
 

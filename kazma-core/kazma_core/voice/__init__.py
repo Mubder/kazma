@@ -11,8 +11,17 @@ Usage::
 
     from kazma_core.voice.stt import transcribe, list_stt_providers
     from kazma_core.voice.tts import synthesize, list_tts_providers
+    from kazma_core.voice.mode import voice_product_mode, get_vad
+    from kazma_core.voice.livekit import mint_livekit_token, livekit_status
 """
 
 from __future__ import annotations
 
-__all__ = ["list_stt_providers", "list_tts_providers"]
+__all__ = [
+    "list_stt_providers",
+    "list_tts_providers",
+    "voice_product_mode",
+    "get_vad",
+    "mint_livekit_token",
+    "livekit_status",
+]

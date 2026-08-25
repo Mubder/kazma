@@ -22,6 +22,24 @@ description: Kazma Troubleshooting — code-audited reference (unified docs, v0.
 
 **Workaround if it persists:** Disable tools for that provider, or route through an OpenAI-compatible proxy that translates tool definitions. **Do not remove the fallback branch** — it's a documented invariant.
 
+### 1.1b Tool-schema 400 after enabling `KAZMA_STRICT_TOOLS`
+
+**Cause:** OpenAI `function.strict: true` (all properties required, optionals as `T | null`) is rejected by many local servers, Anthropic Messages, and Gemini.
+
+**Fix:** Leave `KAZMA_STRICT_TOOLS` unset. Closed schemas (`additionalProperties: false`) stay on. Invented extra arguments are still dropped at `execute()`. Use `response_format` only on calls that need a JSON **reply**, not on every chat turn.
+
+### 1.1d Agent will not write files / run shell
+
+**Cause:** Plan mode is on (`/plan on` or the Plan pill). Write/exec tools are removed from the schema until you approve.
+
+**Fix:** `/plan go` (or **Proceed**) to execute the plan, or `/plan off` to leave without executing. `KAZMA_PLAN_MODE=0` disables the feature.
+
+### 1.1c Every tool returns `[hook] blocked`
+
+**Cause:** A PreToolUse command or in-process hook is denying calls (`agent.hooks.pre_tool`, or a skill that called `register_pre_tool_hook`).
+
+**Fix:** Set `KAZMA_TOOL_HOOKS=0` and restart to disable all hooks. Then fix or empty `agent.hooks.pre_tool`. Hooks are not HITL — they cannot auto-approve; a deny is an extra restriction.
+
 ### 1.2 Provider/model mismatch (wrong endpoint)
 
 **Symptom:** Requests go to the wrong API endpoint after switching models.
@@ -144,7 +162,7 @@ Verify persistence via `get_config_store().get("registry.active_provider")` / `.
 2. **Compaction injection** — when the conversation hits 80% of the context window, the `CompactionEngine` automatically retrieves the top-5 relevant memories via V2 `recall.search()` and injects them into the fresh system message as `## Relevant Memories`.
 
 **If memories still aren't surfacing:**
-- V2 recall needs the shared embedder (`get_embedder()`). Verify `pip install -e ".[rag]"` (sentence-transformers + sqlite-vec). Without it, recall degrades to FTS5-only keyword match.
+- V2 recall needs the shared embedder (`get_embedder()`). Verify `pip install -e ".[rag]"` (sentence-transformers + sqlite-vec). Without it, recall degrades to FTS5-only keyword match. On Postgres, also `CREATE EXTENSION vector` or dense search stays on sqlite-vec / empty (`KAZMA_PGVECTOR=0` forces local).
 - Check `/api/memory/v2/health` — if `beliefs.active` is 0, no beliefs have been extracted yet (post-turn extraction runs on a background thread + queue; give it a few turns).
 - Check the dashboard V2 board (`/api/memory/v2/graph`) — confirms the belief graph has content.
 - Instruct the model (via `system_prompt`) to proactively call `memory_store` for important facts.
@@ -278,9 +296,9 @@ Three independent version strings:
 
 They are **not** synced. Don't rely on any single one for "the Kazma version."
 
-### 8.2 `models.router: litellm` does not import LiteLLM
+### 8.2 `models.router` does not import LiteLLM
 
-The string `"litellm"` only gates the fallback-model branch (`llm_provider.py:336`). Kazma never `import litellm`. If you point at a LiteLLM proxy, use `http://host:4000/v1` as `base_url`.
+`models.router: kazma` is a **label**. Kazma never `import litellm`. To use a LiteLLM **proxy** for OpenAI-compatible providers, set `KAZMA_LITELLM_URL` (or `llm.gateway.url`). Native Anthropic/Azure/Bedrock/Gemini and local Ollama/LM Studio stay direct. `KAZMA_LITELLM=0` disables it. You can also point one provider's `base_url` at `http://host:4000/v1`.
 
 ### 8.3 `.env.example` lists unused env vars
 

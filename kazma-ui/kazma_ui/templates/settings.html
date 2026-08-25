@@ -1610,6 +1610,8 @@
                 <select class="form-select" x-model="proxy.provider">
                     <option value="none">{{ t('settings.proxy_none') }}</option>
                     <option value="anyip">anyIP.io</option>
+                    <option value="brightdata">Bright Data</option>
+                    <option value="oxylabs">Oxylabs</option>
                 </select>
             </div>
             <div x-show="proxy.provider !== 'none'" class="ic-col" style="gap:12px;" x-cloak>

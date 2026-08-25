@@ -1,7 +1,7 @@
 # Kazma Memory Subsystem — Code Map
 
 > **Purpose**: Single reference for all memory-related code locations, entry points, and data paths.
-> **Updated**: 2026-08-24
+> **Updated**: 2026-08-25
 > **Scope**: The V2 cognitive engine. The V1 4-layer RRF stack was removed in the V1→V2 cutover; V2 is the single stack.
 
 ---
@@ -10,7 +10,7 @@
 
 Kazma memory is the **V2 Cognitive Engine** — the only stack:
 
-- **V2 Cognitive Engine** — bi-temporal belief graph, 4-tier episodes, Local Ego-Graph PPR recall, procedural DAGs, durable consolidation queue. Active read/write path (`memory.v2.use_new_stack: true`).
+- **V2 Cognitive Engine** — bi-temporal belief graph, 4-tier episodes, Local Ego-Graph PPR recall, procedural DAGs, durable consolidation queue. Dense search: sqlite-vec on one node, **pgvector** when a Postgres DSN is set. Active read/write path (`memory.v2.use_new_stack: true`).
 - **V1 (4-layer RRF)** — **removed**. `UnifiedMemoryAdapter` / `VectorMemory` / `get_adapter()` / `get_knowledge_graph()` and the `swarm/memory/{adapter,graph,fts5,sqlite_vec}.py` + `memory/{auto_store,vector_store,chroma_client,async_adapter,schema,backfill,fts5}.py` modules are gone.
 
 See `docs/docs/guide/memory-and-rag.md` for the cutover procedure and architecture.
@@ -233,7 +233,8 @@ memory:
     dim: 1024
 ```
 
-**Env overrides**: `KAZMA_VECTOR_COLLECTION`, `KAZMA_EMBED_*`, `KAZMA_DEMO_MODE`
+**Env overrides**: `KAZMA_VECTOR_COLLECTION`, `KAZMA_EMBED_*`, `KAZMA_DEMO_MODE`,
+`KAZMA_PGVECTOR` (`0` keeps sqlite-vec), `KAZMA_MEMORY_STATE_ROLE`
 (Web UI: Settings → Embedder — ConfigStore `embedding.*` wins over yaml)
 
 ---
@@ -243,6 +244,9 @@ memory:
 ```bash
 # Full vector stack (sqlite-vec + sentence-transformers; chromadb for embedder types / semantic router)
 pip install -e ".[rag]"
+
+# Postgres + pgvector dense (same DSN as KAZMA_DATABASE_URL)
+pip install -e ".[postgres]"   # psycopg; CREATE EXTENSION vector on the DB
 
 # Minimal (FTS5-only episode search, no dense vectors)
 pip install -e .

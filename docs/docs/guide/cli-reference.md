@@ -2,7 +2,7 @@
 id: cli-reference
 title: CLI Reference
 sidebar_label: CLI Reference
-description: Kazma CLI Reference — code-audited reference (unified docs, v0.9+)
+description: Kazma CLI Reference — code-audited reference (unified docs, v0.10+)
 ---
 > The complete `kazma`, `kazma-tui`, and `kazma-web` command surface, every flag, and working examples — all verified against `kazma-cli/` source.
 
@@ -14,7 +14,7 @@ Defined in `pyproject.toml:73-76`:
 
 | Command | Module | What it is |
 |---|---|---|
-| `kazma` | `kazma_cli.main:main` | The primary CLI (hub, gateway, swarm, project, docs, completion, update). |
+| `kazma` | `kazma_cli.main:main` | The primary CLI (ask, acp, hub, gateway, swarm, project, docs, completion, update). |
 | `kazma-tui` | `kazma_tui.app:main` | The Textual TUI dashboard. |
 | `kazma-web` | `kazma_ui.app:main` | The FastAPI Web UI server (alias of `kazma serve`). |
 
@@ -29,6 +29,8 @@ kazma
 ├── (no args)              # banner + status + help hint
 ├── status                 # probe running server, print versions
 ├── serve [port]           # launch Web UI (uvicorn)
+├── ask [options] <prompt> # in-process agent (no uvicorn)
+├── acp                    # ACP JSON-RPC on stdio (Zed / JetBrains)
 ├── wizard                 # interactive skill-install wizard
 ├── hub ...                # skill hub (Click group)
 ├── docs <build|serve>     # build/serve the Docusaurus docs site
@@ -37,6 +39,7 @@ kazma
 ├── gateway ...            # gateway control via REST
 ├── swarm ...              # swarm orchestration via REST
 ├── update                 # check/install CLI updates
+├── migrate ...            # export/verify/import an installation
 └── --help | -h | help     # print command list
 ```
 
@@ -76,6 +79,44 @@ Builds or serves the Docusaurus docs site under `docs/` (`main.py:133-202`).
 kazma docs build        # npm install && npm run build
 kazma docs serve        # npm run start (default port 3000)
 kazma docs serve 4000   # custom port
+```
+
+### 2.6 `kazma ask [options] <prompt>`
+
+Runs the LangGraph supervisor **in-process** (`kazma_core.cli.ask`). Does
+**not** start uvicorn. Tokens stream to stdout; tool lines go to stderr.
+
+| Flag | Meaning |
+|------|---------|
+| `--workspace, -w PATH` | Workspace root (default: cwd) |
+| `--yolo` | Allow danger tools without HITL |
+| `--plan` | Enter plan mode (read-only until the model plans) |
+| `--json` | NDJSON events on stdout (`token` / `tool_*` / `hitl` / `done`) |
+| `--no-stream` | Wait for the full reply (with `--json`, a single object) |
+| `--thread ID` | Reuse a thread id |
+| `--model NAME` | Switch model for this process |
+| `--acp` | Agent Client Protocol stdio server (same as `kazma acp`) |
+
+On a TTY, danger tools prompt `y/N` (or `a` = allow for this session).
+Piped stdin / `kazma ask -` fail closed unless `--yolo`.
+
+```bash
+kazma ask "What files define the supervisor graph?"
+kazma ask --plan "Add a rate limiter to the API"
+kazma ask --json "fix the tests"
+echo "summarize README.md" | kazma ask --json --no-stream -
+```
+
+### 2.7 `kazma acp`
+
+Agent Client Protocol JSON-RPC on stdio (`initialize`, `session/new`,
+`session/prompt`, `session/cancel`). Streams `session/update`
+(`agent_message_chunk`, `tool_call`, `tool_call_update`) and asks the
+editor to approve danger tools via `session/request_permission`.
+
+```bash
+kazma acp
+kazma ask --acp --workspace /path/to/repo
 ```
 
 ---

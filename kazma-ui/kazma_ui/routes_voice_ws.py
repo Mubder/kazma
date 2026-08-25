@@ -75,6 +75,21 @@ async def handle_voice_websocket(
     is_active = True
     processing = False
     session_id = None
+    utterance_task: asyncio.Task[Any] | None = None
+    tts_cancel = asyncio.Event()
+
+    async def _cancel_utterance() -> None:
+        nonlocal processing, utterance_task
+        tts_cancel.set()
+        task = utterance_task
+        utterance_task = None
+        processing = False
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     # Audio format conversion buffer
     audio_buffer = bytearray()
@@ -103,8 +118,9 @@ async def handle_voice_websocket(
                 tts_provider = msg.get("tts_provider", "edgetts")
                 sample_rate = msg.get("sample_rate", 16000)
                 session_id = msg.get("session_id", None)
-                from kazma_core.voice.vad import EnergyVAD
-                vad = EnergyVAD(sample_rate=sample_rate)
+                from kazma_core.voice.mode import get_vad
+
+                vad = get_vad(sample_rate=sample_rate)
                 await websocket.send_text(json.dumps({"type": "listening"}))
 
             elif msg_type == "config":
@@ -128,25 +144,48 @@ async def handle_voice_websocket(
 
                 # Feed to VAD
                 segment = vad.feed(pcm_bytes)
-                if segment is not None and not processing:
-                    # Complete speech segment detected — transcribe + process
+                if segment is not None:
+                    # Barge-in: a new utterance cancels TTS / in-flight turn.
+                    if processing:
+                        await _cancel_utterance()
+                        await websocket.send_text(json.dumps({"type": "interrupted"}))
                     processing = True
+                    tts_cancel.clear()
                     await websocket.send_text(json.dumps({"type": "transcribing"}))
-                    try:
-                        await _process_utterance(
-                            websocket, segment, stt_provider, tts_provider,
-                            session_id=session_id, graph_getter=graph_getter,
-                        )
-                    except Exception as exc:
-                        logger.exception("[ws-voice] Processing failed")
-                        await websocket.send_text(json.dumps({
-                            "type": "error", "content": str(exc)
-                        }))
-                    finally:
-                        processing = False
-                        await websocket.send_text(json.dumps({"type": "listening"}))
+
+                    async def _run(seg: bytes = segment) -> None:
+                        nonlocal processing
+                        try:
+                            await _process_utterance(
+                                websocket, seg, stt_provider, tts_provider,
+                                session_id=session_id, graph_getter=graph_getter,
+                                cancel=tts_cancel,
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            logger.exception("[ws-voice] Processing failed")
+                            await websocket.send_text(json.dumps({
+                                "type": "error", "content": str(exc)
+                            }))
+                        finally:
+                            processing = False
+                            try:
+                                await websocket.send_text(
+                                    json.dumps({"type": "listening"})
+                                )
+                            except Exception:
+                                pass
+
+                    utterance_task = asyncio.create_task(_run())
+
+            elif msg_type == "interrupt":
+                await _cancel_utterance()
+                await websocket.send_text(json.dumps({"type": "interrupted"}))
+                await websocket.send_text(json.dumps({"type": "listening"}))
 
             elif msg_type == "stop":
+                await _cancel_utterance()
                 is_active = False
                 break
 
@@ -166,6 +205,7 @@ async def _process_utterance(
     tts_provider: str,
     session_id: str | None = None,
     graph_getter: Any | None = None,
+    cancel: asyncio.Event | None = None,
 ) -> None:
     """Transcribe audio, get LLM response, stream tokens + TTS back."""
     from kazma_core.voice.stt import transcribe
@@ -195,6 +235,9 @@ async def _process_utterance(
         async for event in _stream_llm_response(
             text, session_id=session_id, graph_getter=graph_getter,
         ):
+            if cancel is not None and cancel.is_set():
+                await websocket.send_text(json.dumps({"type": "interrupted"}))
+                return
             event_type = event.get("type")
             if event_type == "token":
                 content = event.get("content", "")
@@ -230,7 +273,7 @@ async def _process_utterance(
 
     # Step 3: Synthesize TTS and stream chunks back
     try:
-        await _stream_tts(websocket, full_response, tts_provider)
+        await _stream_tts(websocket, full_response, tts_provider, cancel=cancel)
     except Exception as exc:
         logger.warning("[ws-voice] TTS failed: %s", exc)
         # TTS is optional — still send done
@@ -293,7 +336,12 @@ async def _stream_llm_response(
     yield {"type": "done"}
 
 
-async def _stream_tts(websocket: WebSocket, text: str, tts_provider: str) -> None:
+async def _stream_tts(
+    websocket: WebSocket,
+    text: str,
+    tts_provider: str,
+    cancel: asyncio.Event | None = None,
+) -> None:
     """Synthesize TTS audio and stream it to the client in chunks.
 
     For simplicity, we synthesize the full response first, then chunk it.
@@ -322,15 +370,16 @@ async def _stream_tts(websocket: WebSocket, text: str, tts_provider: str) -> Non
     if not audio:
         return
 
-    # Stream in ~16KB chunks
+    # Stream in ~16KB chunks (stop immediately on barge-in).
     chunk_size = 16384
     for i in range(0, len(audio), chunk_size):
+        if cancel is not None and cancel.is_set():
+            return
         chunk = audio[i:i + chunk_size]
         chunk_b64 = base64.b64encode(chunk).decode("ascii")
         await websocket.send_text(json.dumps({
             "type": "tts_chunk", "data": chunk_b64
         }))
-        # Small delay to avoid overwhelming the client
         await asyncio.sleep(0.01)
 
     await websocket.send_text(json.dumps({"type": "tts_done"}))

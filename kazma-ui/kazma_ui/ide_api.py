@@ -9,8 +9,13 @@ agent and swarm.
 Endpoints (all under ``/api/ide``):
   GET  /read?path=...              -> read_file
   POST /write   {path, content}    -> write_file  (HITL-gated)
+  POST /apply_patch {path, old_string, new_string, patch, replace_all}
+                                   -> apply_patch (HITL-gated)
   GET  /list?path=...              -> list_path
   GET  /grep?pattern=&glob=&limit= -> search
+  GET  /codebase?q=&mode=&glob=    -> codebase_search (index + rg)
+  GET  /lsp                        -> LSP status (enabled, languages)
+  POST /lsp     {method, path, ...} -> hover/complete/definition/diagnostics
   POST /run     {command, timeout} -> run         (HITL-gated)
   POST /runfile {path, timeout}    -> run_file     (HITL-gated)
   POST /diff    {path, old, new}   -> diff
@@ -77,6 +82,24 @@ def create_ide_router() -> APIRouter:
             logger.warning("[ide_api] write failed: %s", exc)
             return {"ok": False, "error": str(exc), "path": path}
 
+    # ── POST /api/ide/apply_patch ──────────────────────────────────────
+    @router.post("/apply_patch")
+    async def apply_patch(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        path = str(payload.get("path", "")).strip()
+        if not path:
+            return {"ok": False, "error": "Missing 'path'"}
+        try:
+            return await _service().apply_patch(
+                path,
+                old_string=str(payload.get("old_string") or ""),
+                new_string=str(payload.get("new_string") or ""),
+                patch=str(payload.get("patch") or ""),
+                replace_all=bool(payload.get("replace_all")),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[ide_api] apply_patch failed: %s", exc)
+            return {"ok": False, "error": str(exc), "path": path}
+
     # ── POST /api/ide/delete ───────────────────────────────────────────
     @router.post("/delete")
     async def delete_file(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
@@ -99,6 +122,61 @@ def create_ide_router() -> APIRouter:
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] list failed: %s", exc)
             return {"ok": False, "error": str(exc), "files": []}
+
+    # ── GET /api/ide/codebase ──────────────────────────────────────────
+    @router.get("/codebase")
+    async def codebase(
+        q: str = Query("", description="Symbol or text query"),
+        mode: str = Query("auto"),
+        glob: str = Query(""),
+        limit: int = Query(20),
+    ) -> dict[str, Any]:
+        if not q.strip():
+            return {"ok": False, "error": "Missing 'q'", "output": ""}
+        try:
+            return await _service().codebase_search(
+                q, mode=mode, glob=glob, limit=limit
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[ide_api] codebase search failed: %s", exc)
+            return {"ok": False, "error": str(exc), "output": ""}
+
+    # ── GET /api/ide/lsp ───────────────────────────────────────────────
+    @router.get("/lsp")
+    async def lsp_status() -> dict[str, Any]:
+        from kazma_core.ide.lsp import handle_lsp
+
+        try:
+            return handle_lsp("status")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[ide_api] lsp status failed: %s", exc)
+            return {"ok": False, "enabled": False, "error": str(exc)}
+
+    @router.post("/lsp")
+    async def lsp_request(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        from kazma_core.ide.lsp import handle_lsp
+
+        method = str(payload.get("method") or payload.get("op") or "").strip()
+        try:
+            line = int(payload.get("line") or 0)
+        except (TypeError, ValueError):
+            line = 0
+        try:
+            character = int(payload.get("character") or payload.get("column") or 0)
+        except (TypeError, ValueError):
+            character = 0
+        try:
+            return handle_lsp(
+                method,
+                path=str(payload.get("path") or ""),
+                line=line,
+                character=character,
+                content=payload.get("content"),
+                prefix=str(payload.get("prefix") or ""),
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[ide_api] lsp %s failed: %s", method, exc)
+            return {"ok": False, "error": str(exc)}
 
     # ── GET /api/ide/grep ──────────────────────────────────────────────
     @router.get("/grep")

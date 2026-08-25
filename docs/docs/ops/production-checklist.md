@@ -32,6 +32,8 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] Auth default-deny on `/api/*`
 - [ ] Discovery SSRF protections enabled
 - [ ] `code_exec` Docker force where required (`KAZMA_CODE_EXEC_DOCKER=force`; host-local disabled in prod/multi-user)
+- [ ] Untrusted / multi-user code: E2B Firecracker (`E2B_API_KEY` + `pip install 'kazma[sandbox]'`; `KAZMA_E2B=0` to disable)
+- [ ] Multi-hour swarm: Temporal (`KAZMA_TEMPORAL_HOST` + `pip install 'kazma[durable]'`)
 - [ ] Multi-replica: unique `KAZMA_REPLICA_ID` + LB sticky on `kazma-replica` cookie
 - [ ] Shell allowlist + env scrub active
 - [ ] Workspace root confinement in production

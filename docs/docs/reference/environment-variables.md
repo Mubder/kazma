@@ -7,6 +7,28 @@ description: Master reference for Kazma environment variables (dev, single-opera
 
 > Complete env reference for local, Docker, and production. Prefer strong secrets; never commit `.env` with real keys. Also see [Configuration](../guide/configuration) for `kazma.yaml` and ConfigStore.
 
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KAZMA_COMPUTER_USE` | `1` | `0` disables the `computer_use` tool |
+| `KAZMA_LANGFUSE` | (unset) | `0` forces console tracing even when Langfuse keys exist |
+| `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | | With `logging.langfuse.enabled: auto`, both set → Langfuse backend |
+| `KAZMA_EMBED_FLEET` | (unset) | `1` + OpenAI/Voyage key → hosted embeddings (issue #78) |
+| `KAZMA_DOCLING` | `1` | `0` skips Docling salvage on weak PDF extracts |
+| `KAZMA_REMOTE_PARSE` | `1` | `0` skips LlamaParse/Reducto salvage |
+| `LLAMAPARSE_API_KEY` / `REDUCTO_API_KEY` | | Hard-PDF remote extract (parent process; not the parser sandbox) |
+| `KAZMA_SILERO_VAD` | (unset) | `1` tries Silero VAD (falls back to energy) |
+| `KAZMA_LITELLM_URL` | (unset) | LiteLLM proxy for OpenAI-compatible providers only (e.g. `http://127.0.0.1:4000`) |
+| `KAZMA_LITELLM` | `1` | `0` disables the LiteLLM proxy even if a URL is set |
+| `KAZMA_LITELLM_LOCAL` | (unset) | `1` also routes loopback Ollama/LM Studio through the proxy |
+| `KAZMA_LITELLM_FALLBACK_DIRECT` | (unset) | `1` retries the original provider URL if the proxy is unreachable |
+| `LITELLM_MASTER_KEY` / `LITELLM_API_KEY` / `KAZMA_LITELLM_KEY` | | Bearer key sent to the proxy (else the provider key is reused) |
+| `LIVEKIT_URL` | (unset) | LiveKit WebRTC URL for web duplex voice (e.g. `wss://…livekit.cloud`) |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | | LiveKit API credentials (room tokens). All three required to enable duplex |
+| `KAZMA_VOICE_DUPLEX` | `1` | `0` disables LiveKit duplex even if credentials are set |
+| `KAZMA_CUA_PLANNER` | `1` | `0` keeps `computer_use` on vision-JSON (no Anthropic CUA / Gemini mapping) |
+| `KAZMA_MCP_SAMPLING` | `0` | `1` still requires HITL; servers cannot auto-sample our LLM |
+| `KAZMA_REALTIME_CODEC` | `0` | `1` uses REST STT/TTS as the audio codec. OpenAI Realtime / Gemini Live are skipped |
+
 ## Precedence (reminder)
 
 1. **Specific helpers** may read env first (`KAZMA_SECRET`, vault, disclosure).  
@@ -82,6 +104,27 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 
 ---
 
+## Sandbox (E2B) & durable swarm (Temporal)
+
+Default remains Docker/local `python_exec` and in-process swarm. These are
+opt-in for untrusted code and multi-hour work. See [Architecture](../guide/architecture)
+and extras `kazma[sandbox]` / `kazma[durable]`.
+
+| Variable | Default | Prod required? | Purpose |
+|----------|---------|----------------|---------|
+| `KAZMA_E2B_API_KEY` / `E2B_API_KEY` | unset | Untrusted / multi-user code | E2B Firecracker for HITL-approved `python_exec`. |
+| `KAZMA_E2B` | auto if key set | No | `0` keeps Docker/local even with a key. |
+| `KAZMA_CODE_EXEC_DOCKER` | `auto` | Single-operator jail | `1`/`force` Docker; `0` local (ignored when production forbids local). |
+| `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Wraps swarm `_dispatch_inner`. |
+| `KAZMA_TEMPORAL` | auto if host set | No | `0` keeps in-process swarm. |
+| `KAZMA_TEMPORAL_REQUIRED` | unset | Strict HA | `1` = fail the task if Temporal/SDK is down (no in-process fallback). |
+| `KAZMA_TEMPORAL_NAMESPACE` | `default` | No | Temporal namespace. |
+| `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | Task queue for the in-process Temporal worker. |
+| `KAZMA_CODE_INDEX` | on | No | `0` disables the workspace symbol index + `codebase_search`. |
+| `KAZMA_IDE_LSP` | on | No | `0` disables Monaco hover/complete/definition/diagnostics on `/ide`. |
+
+---
+
 ## LLM / provider
 
 | Variable | Default | Prod required? | Purpose |
@@ -96,6 +139,10 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 | `STABILITY_API_KEY` | unset | Optional | Stability SDXL image-gen backend. |
 | `FAL_KEY` | unset | Optional | Flux image-gen backend (FAL.ai). |
 | `KAZMA_IMAGE_PROVIDER` | unset | Optional | Force an image backend (`pollinations`/`dall-e`/`stability`/`flux`); default `auto`. |
+| `KAZMA_STRICT_TOOLS` | unset (off) | No | `1` stamps OpenAI `function.strict: true` on closed tool schemas (all properties required; optionals are `T \| null`). Default is closed objects with `additionalProperties: false` only — local / Anthropic / Gemini often 400 on `strict`. |
+| `KAZMA_LLM_STREAM` | on | No | `0` falls back to blocking `chat()` (no token SSE). |
+| `KAZMA_TOOL_HOOKS` | on | No | `0` disables PreToolUse / PostToolUse (in-process and command). Empty `agent.hooks.*` lists are a no-op. Hooks cannot skip HITL. |
+| `KAZMA_PLAN_MODE` | on | No | `0` disables `/plan` enter/execute. Plan mode is not a HITL bypass. |
 | `GOOGLE_CALENDAR_TOKEN` / `MS_CALENDAR_TOKEN` | unset | Optional | OAuth token for the calendar skill's Google / Outlook backend. |
 | Provider-specific | — | As used | e.g. DeepSeek, Groq, xAI, OpenRouter, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Google ADC — see Configuration. |
 
@@ -115,7 +162,8 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 | `KAZMA_EMBED_API_KEY` | unset | Remote only | API key for the remote `/embeddings` endpoint. |
 | `KAZMA_DEMO_MODE` | unset | **No** | Demo fixtures — never enable in real prod. |
 | `KAZMA_MEMORY_ENFORCE_TENANT` | unset | Multi-tenant only | When `1`/`true`, the `/memory` operator endpoints scope reads, id-keyed mutations, undo tokens, and graph-clear by the request-scoped tenant (set by the auth middleware from verified JWT/opaque-session claims). Unset = single-tenant `default`. Flip on only when you add a second tenant. |
-| `KAZMA_MEMORY_STATE_ROLE` | unset (`mirror`) | Multi-replica only | `primary` makes the Postgres state backend the recall SoT (fail-closed if down — no silent SQLite). Do **not** enable until `python scripts/reconcile_memory_mirror.py --dry-run` reports no dead-in-mirror / only-in-mirror rows. |
+| `KAZMA_MEMORY_STATE_ROLE` | unset (`mirror`) | Multi-replica only | `primary` makes the Postgres state backend the recall SoT (fail-closed if down — no silent SQLite). Dense search is pgvector fused with ILIKE. Do **not** enable until `python scripts/reconcile_memory_mirror.py --dry-run` reports no dead-in-mirror / only-in-mirror rows. |
+| `KAZMA_PGVECTOR` | auto when a Postgres DSN is set | No | `0` keeps sqlite-vec even if Postgres is on. Unset = pgvector auto-select from `KAZMA_DATABASE_URL` / `memory.backends.state.url`. Explicit Qdrant in Settings still wins. |
 
 ---
 
@@ -151,7 +199,8 @@ Optional package: Playwright via `pip install 'kazma[web]'` then `playwright ins
 |----------|---------|----------------|---------|
 | `KAZMA_OIDC_ISSUER` | unset | If SSO | OIDC issuer URL. |
 | `KAZMA_OIDC_CLIENT_ID` | unset | If SSO | Client id. |
-| `KAZMA_OIDC_CLIENT_SECRET` | unset | If SSO | Client secret. |
+| `KAZMA_OIDC_CLIENT_SECRET` | unset | If SSO | Client secret (required for HS* `id_token`). |
+| `KAZMA_WS_GRAPH` | unset | No | `1` restores WS `send_prompt` / `approve_tool` as a second graph client (debug). Default: SSE only. |
 
 See [OIDC IdP Setup](../ops/oidc-setup) and [Multi-user SaaS](../products/multi-user-saas).
 

@@ -102,6 +102,7 @@ class TestSchemaGeneration:
 
         schema = _generate_schema(fn)
         assert schema["type"] == "object"
+        assert schema["additionalProperties"] is False
         assert schema["properties"]["a"]["type"] == "string"
         assert schema["properties"]["b"]["type"] == "integer"
         assert schema["properties"]["c"]["type"] == "number"
@@ -114,6 +115,7 @@ class TestSchemaGeneration:
 
         schema = _generate_schema(fn)
         assert schema["required"] == ["required"]
+        assert schema["additionalProperties"] is False
         assert schema["properties"]["optional"]["default"] == "default"
 
     def test_skip_self(self):
@@ -243,13 +245,34 @@ class TestLocalToolRegistry:
         assert d["function"]["name"] == "test_tool"
         assert d["function"]["description"] == "Test tool"
         assert d["function"]["parameters"]["type"] == "object"
+        assert d["function"]["parameters"]["additionalProperties"] is False
         assert "query" in d["function"]["parameters"]["properties"]
         assert "limit" in d["function"]["parameters"]["properties"]
         assert d["function"]["parameters"]["required"] == ["query"]
+        assert "strict" not in d["function"]
 
     def test_connected_always_true(self):
         registry = LocalToolRegistry()
         assert registry.connected is True
+
+    @pytest.mark.asyncio
+    async def test_execute_drops_invented_args_and_null_defaults(self):
+        registry = LocalToolRegistry(include_builtins=False)
+        seen: dict[str, object] = {}
+
+        @registry.register(description="Echo")
+        async def echo(text: str, loud: bool = False) -> str:
+            seen["text"] = text
+            seen["loud"] = loud
+            return text.upper() if loud else text
+
+        result = await registry.execute(
+            "echo",
+            {"text": "hi", "loud": None, "invented": 1, "task_id": "keep-me"},
+        )
+        assert result["is_error"] is False
+        assert result["content"] == "hi"
+        assert seen == {"text": "hi", "loud": False}
 
 
 # ═══════════════════════════════════════════════════════════════════

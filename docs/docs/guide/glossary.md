@@ -19,6 +19,9 @@ A separate adapter for swarm HITL approvals (`TelegramBusAdapter`, `DiscordBusAd
 **Agent handler**
 The bridge between platform adapters and the supervisor graph. Now an `agent_handler/` **package** (decomposed from the old `agent_handler.py` file). Owns platform isolation.
 
+**ACP (Agent Client Protocol)**
+Zed's JSON-RPC protocol for editors hosting a coding agent over stdio. Kazma implements a baseline server as `kazma acp` (`initialize`, `session/new`, `session/prompt`, `session/cancel`, `session/update` tool-call chunks, `session/request_permission` for HITL). Same graph as `kazma ask`.
+
 **Aggregation**
 How fan-out results are combined: `collect`, `first_valid`, `merge_all`, `vote`, `synthesize` (`swarm/aggregator.py`).
 
@@ -152,6 +155,13 @@ The worker implementation for both `in_process` and `telegram_bot` worker types 
 
 ---
 
+## L
+
+**LSP (IDE)**
+Workspace-scoped language intelligence on `/ide` (`kazma_core/ide/lsp.py`). Hover, complete, go-to-definition, outline, and Python/JSON syntax diagnostics over `POST /api/ide/lsp`. Uses the code index; not a pylsp daemon. Kill-switch: `KAZMA_IDE_LSP=0`.
+
+---
+
 ## M
 
 **Majlis**
@@ -212,8 +222,20 @@ The platform ID ↔ thread_id mapping (`gateway.py:185`). SQLite or in-memory. N
 **Skill**
 A packaged, optionally-signed Python entry point + manifest registering one or more tools. Loaded from `kazma-skills/manifests/` or the Hub.
 
+**Strict tools**
+OpenAI Structured Outputs for function calling (`function.strict: true`, every property required, optionals as `T | null`). Kazma generates closed schemas (`additionalProperties: false`) always; the `strict` flag is opt-in via `KAZMA_STRICT_TOOLS=1`.
+
+**Structured outputs**
+Provider-enforced JSON for a **non-tool** reply (`response_format` `json_schema` / `json_object` on `LLMProvider.chat`). Callers opt in; the supervisor ReAct loop does not attach it on every turn.
+
+**Plan mode**
+Per-thread inspect-then-propose (`/plan on`). Write/exec tools are stripped via `read_only` hard_constraints. `/plan go` or **Proceed** executes the plan; HITL still applies. Kill-switch: `KAZMA_PLAN_MODE=0`.
+
+**pgvector**
+Postgres extension for vector search. When Kazma already has a Postgres DSN, V2 dense recall auto-selects pgvector (`kazma_memory_vectors`, cosine / HNSW). sqlite-vec remains the one-node default. Kill-switch: `KAZMA_PGVECTOR=0`.
+
 **sqlite-vec**
-A SQLite extension for vector search. In V2 it backs `memory/vector_engine.py` (native sqlite-vec with a guarded NumPy fallback) for episode dense-vector recall. Declared in the `[rag]` optional extra (`sqlite-vec>=0.1.6`).
+A SQLite extension for vector search. In V2 it backs `memory/vector_engine.py` (native sqlite-vec with a guarded NumPy fallback) for episode dense-vector recall on a single node. Declared in the `[rag]` optional extra (`sqlite-vec>=0.1.6`).
 
 **SwarmEngine**
 `swarm/engine.py:103` — the central async orchestrator for swarm workers.
@@ -227,6 +249,9 @@ The enum of swarm patterns: `DISPATCH`, `BROADCAST`, `PIPELINE`, `FAN_OUT`, `CON
 
 **TimeoutGuard**
 `reliability.py:397` — per-task timeout (default 300 s) with `fail`/`retry`/`skip` behavior.
+
+**Tool hooks**
+PreToolUse / PostToolUse callbacks (`agent/tool_hooks.py`). Deny or rewrite before a tool runs, or append a note after. Not a HITL substitute — they cannot auto-approve danger tools. Kill-switch: `KAZMA_TOOL_HOOKS=0`.
 
 **ToolRegistry**
 `agent/tool_registry.py` — the registry the supervisor consults each turn. `execute()` is the single execution path and the swarm bus HITL gate.

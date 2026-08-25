@@ -91,6 +91,8 @@ TOOL_TIERS: dict[str, str] = {
     "file_read": "read",
     "file_search": "read",
     "file_list": "read",
+    "codebase_search": "read",
+    "codebase_status": "read",
     "memory_search": "read",
     "sqlite_query": "read",
     "current_datetime": "read",
@@ -99,6 +101,7 @@ TOOL_TIERS: dict[str, str] = {
     "memory_store": "write",
     # Danger — require HITL approval
     "file_write": "danger",
+    "file_apply_patch": "danger",
     "file_delete": "danger",
     "shell_exec": "danger",
     "code_exec": "danger",
@@ -121,6 +124,7 @@ TOOL_TIERS: dict[str, str] = {
     # they run isolated sub-agent graphs. Remove from danger so they
     # don't time out on HITL approval (60s auto-deny killed research).
     "browser_eval_js": "danger",
+    "computer_use": "danger",
     "request_path_access": "danger",
     "email_list": "safe",
     "email_get": "safe",
@@ -135,6 +139,7 @@ TOOL_TIERS: dict[str, str] = {
 # Keep in sync with kazma.yaml safety.hitl.require_approval_for (parity test).
 CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "file_write",
+    "file_apply_patch",
     "file_delete",
     "shell_exec",
     "code_exec",
@@ -157,6 +162,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "email_delete",
     "email_categorize",
     "browser_eval_js",
+    "computer_use",
     # Path grants expand the FS allowlist — always require human approval.
     "request_path_access",
 )

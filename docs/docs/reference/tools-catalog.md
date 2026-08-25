@@ -12,20 +12,28 @@ description: Complete catalog of built-in agent tools and native skill tools
 | Layer | Module | Notes |
 |-------|--------|-------|
 | Built-in registry | `kazma_core/agent/tool_registry.py` | Supervisor SoT; HITL in `execute()` |
+| Schema | `kazma_core/agent/tool_schema.py` | Closed JSON Schema (`additionalProperties: false`). `KAZMA_STRICT_TOOLS=1` adds OpenAI `function.strict`. |
+| Structured JSON | `LLMProvider.chat(..., response_format=)` | Opt-in per call (`json_schema` / `json_object`). Not on every supervisor turn. |
+| Hooks | `kazma_core/agent/tool_hooks.py` | PreToolUse (deny/rewrite) + PostToolUse (observe). Not HITL. `KAZMA_TOOL_HOOKS=0`. |
 | Unified executor | MCP + local | MCP non-allowlist tools force danger under production |
 | IDE path | `IdeService._call_tool` | Same registry — no bypass |
 | Native skills | `kazma-skills/kazma_skills/native/*` | Loaded via skill manifests |
+| MCP spec (client) | `mcp_list_resources` / `mcp_read_resource` / `mcp_list_prompts` / `mcp_get_prompt` | Resources fenced; prompts user-visible; sampling HITL. Not an MCP server. |
+| Computer use | `computer_use` | Screenshot→action (Playwright). Optional CUA/Gemini planner. HITL **danger**. `KAZMA_COMPUTER_USE=0`. |
 
 ## Built-in tools (LocalToolRegistry)
 
 | Tool | Category | Danger (typical) | Description |
 |------|----------|------------------|-------------|
 | `file_read` | filesystem | safe/read | Read a file from the local filesystem. Returns the file contents as text. |
-| `file_write` | filesystem | **danger** | Write content to a local file. Creates parent directories if needed. Overwrites existing content. |
+| `file_write` | filesystem | **danger** | Write content to a local file (full overwrite). Prefer `file_apply_patch` for edits. |
+| `file_apply_patch` | filesystem | **danger** | Surgical edit: unique `old_string`/`new_string` or a unified diff / Morph Begin Patch. HITL like `file_write`. |
 | `file_append` | filesystem | safe/write | Append content to a local file in chunks. Creates file and parent directories if needed. |
 | `file_delete` | filesystem | **danger** |  |
 | `file_list` | filesystem | safe/read | List files and directories at a path. Returns names sorted alphabetically. |
-| `file_search` | filesystem | safe/read |  |
+| `file_search` | filesystem | safe/read | Regex line search (Python walk). Prefer `codebase_search` for symbols. |
+| `codebase_search` | filesystem | safe/read | Symbol index + live ripgrep. `mode`: auto / symbol / text. |
+| `codebase_status` | filesystem | safe/read | Index file/symbol counts; ripgrep / tree-sitter availability. |
 | `memory_search` | memory | safe/read |  |
 | `memory_store` | memory | safe/read |  |
 | `current_datetime` | utility | safe/read | Get the current date, time, and timezone in ISO-8601 format. |
@@ -36,7 +44,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `spawn_agents` | delegation | safe/read |  |
 | `dispatch_swarm` | swarm | safe/read |  |
 | `check_swarm_task` | swarm | safe/read |  |
-| `python_exec` | code | **danger** |  |
+| `python_exec` | code | **danger** | Sandboxed Python. Order: E2B (if API key) → Docker `--network none` → local import-blocklist. HITL-gated. |
 | `context_info` | diagnostics | safe/read |  |
 
 ### Related tool modules (`kazma_core/tools/`)
@@ -48,6 +56,8 @@ These modules implement or support tools (some registered at startup, some via s
 - `export_session.py`
 - `file_read.py`
 - `file_write.py`
+- `file_apply_patch.py`
+- `code_index/` (symbols + ripgrep; tools `codebase_search` / `codebase_status`)
 - `image_gen.py`
 - `personality_cmd.py`
 - `read_url.py`
@@ -174,6 +184,7 @@ From `kazma_core/safety/hitl.py` → `CANONICAL_DANGER_TOOLS` (also mirrored in 
 - `email_send`
 - `file_delete`
 - `file_write`
+- `file_apply_patch`
 - `git_commit`
 - `git_push`
 - `github_create_pr`

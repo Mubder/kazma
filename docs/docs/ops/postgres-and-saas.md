@@ -19,6 +19,23 @@ description: Postgres & SaaS Cutover — production ops
 
 SQLite remains the default when no database URL is set (tests, local single-node).
 
+### Memory search (pgvector)
+
+Setting `KAZMA_DATABASE_URL` also promotes **V2 dense recall** from sqlite-vec
+to **pgvector** in the same database (table `kazma_memory_vectors`, cosine,
+HNSW when the extension allows it). The cognitive store (`memory_state.db`)
+stays SQLite until you set `KAZMA_MEMORY_STATE_ROLE=primary`.
+
+1. `CREATE EXTENSION IF NOT EXISTS vector;` on the Kazma database (superuser
+   or an allowed extension list on managed Postgres).
+2. Restart Kazma. Kill-switch: `KAZMA_PGVECTOR=0`.
+3. Rebuild embeddings once if you already have history:
+   Settings → Memory → Rebuild embeddings (upserts into pgvector).
+4. Explicit Qdrant in Settings is never overridden.
+
+Postgres-primary recall (`state.role=primary`) is **ILIKE + pgvector RRF**,
+not ILIKE-only.
+
 ## Cutover procedure
 
 1. Install extras: `pip install -e ".[postgres]"`

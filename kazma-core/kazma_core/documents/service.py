@@ -1131,7 +1131,16 @@ class DocumentService:
                     code="parser_output_limit",
                 )
             response = json.loads(result_path.read_text(encoding="utf-8"))
-            return self._validate_response(response, source_sha)
+            document = self._validate_response(response, source_sha)
+            try:
+                from kazma_core.documents.extract_salvage import maybe_salvage_extract
+
+                document = maybe_salvage_extract(source_abs, document)
+            except Exception:
+                logger.debug(
+                    "[documents.service] extract salvage skipped", exc_info=True
+                )
+            return document
         except json.JSONDecodeError as exc:
             raise DocumentSandboxError("Document parser returned invalid JSON") from exc
         finally:

@@ -27,8 +27,12 @@ def mem_db(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_vector_backend_local_search(mem_db):
+def test_vector_backend_local_search(mem_db, monkeypatch):
     from kazma_core.memory.backends import LocalSqliteVectorBackend, get_vector_backend, vector_capability
+
+    monkeypatch.setenv("KAZMA_PGVECTOR", "0")
+    monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     cap = vector_capability()
     assert cap["vector_write_ready"] is True

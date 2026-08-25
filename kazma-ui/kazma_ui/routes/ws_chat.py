@@ -1,7 +1,9 @@
 """FastAPI WebSocket Gateway for Real-Time Chat Telemetry Bus.
 
-Exposes `/ws/chat/{session_id}` to stream standardized JSON event frames from
-LangGraph's `astream_events` directly into client stores (Alpine.js agentStore).
+Exposes `/ws/chat/{session_id}` as the Turn Delivery V2 telemetry / cursor bus
+(ping, resume, live frames). Graph turns (`send_prompt`, `approve_tool`) are
+SSE-only (`POST /api/chat/stream`, `POST /api/approve/{thread_id}`) unless
+``KAZMA_WS_GRAPH=1``.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import time
 import traceback
 import uuid
@@ -57,6 +60,20 @@ def ti_(key: str, fallback: str, **kwargs) -> str:
 
 
 ws_chat_router = APIRouter(tags=["ws-chat"])
+
+def ws_graph_enabled() -> bool:
+    """WS is telemetry/cursor by default. Graph turns stay on SSE.
+
+    Set ``KAZMA_WS_GRAPH=1`` to restore ``send_prompt`` / ``approve_tool`` as a
+    second graph client (debug / emergency only).
+    """
+    return (os.environ.get("KAZMA_WS_GRAPH") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 
 def _ws_recursion_limit(thread_id: str | None = None) -> int:
     """Aligned with gateway / long-task budgets (not a hard-coded 100)."""
@@ -988,6 +1005,29 @@ def create_ws_chat_router(
                     if not text:
                         continue
 
+                    if not ws_graph_enabled():
+                        client_msg_id = str(
+                            payload.get("client_msg_id") or ""
+                        ).strip()
+                        await websocket.send_json(
+                            TelemetryEvent(
+                                type="prompt_ack",
+                                data={
+                                    "client_msg_id": client_msg_id,
+                                    "accepted": False,
+                                    "session_id": session_id,
+                                    "reason": "sse_only",
+                                    "message": (
+                                        "Web chat turns use SSE (/api/chat/stream). "
+                                        "This socket is telemetry only "
+                                        "(set KAZMA_WS_GRAPH=1 to restore WS graph)."
+                                    ),
+                                },
+                                thread_id=thread_id,
+                            ).to_dict()
+                        )
+                        continue
+
                     # Per-turn pin (same as SSE) — do not mutate the process-wide registry.
                     requested_model = str(payload.get("model") or "").strip()
                     ws_workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -1096,6 +1136,33 @@ def create_ws_chat_router(
                         except Exception:
                             logger.debug("[WS-Chat] Failed persisting /long message")
                         continue
+
+                    from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command
+
+                    if is_plan_command(text, require_slash=True):
+                        _pl = apply_plan_command(
+                            thread_id, text, actor=f"ws:{session_id[:12]}",
+                        )
+                        if _pl.rewrite_user_text:
+                            text = _pl.rewrite_user_text
+                        elif _pl.handled:
+                            await _emit_journaled("capacity", {
+                                "plan_active": _pl.plan_active,
+                                "action": _pl.action,
+                                "reply": _pl.reply,
+                            }, thread_id)
+                            await _emit_journaled("stream_end", {"capacity": True}, thread_id)
+                            session.messages.append({"role": "user", "content": text})
+                            session.messages.append({
+                                "role": "assistant",
+                                "content": _pl.reply,
+                                "kind": "capacity",
+                            })
+                            try:
+                                get_session_manager().put(session)
+                            except Exception:
+                                logger.debug("[WS-Chat] Failed persisting /plan message")
+                            continue
 
                     # ── /reset — REAL reset on WS too (parity with the SSE
                     # fast path). Without this intercept the client's local
@@ -1544,8 +1611,13 @@ def create_ws_chat_router(
                             # Bind YOLO/tool-grant ContextVar for the whole turn.
                             # Without this, is_yolo_active/has_tool_grant never
                             # match and every danger tool re-prompts HITL.
-                            stream = graph_inst.astream_events(
-                                input_state, config=config, version="v2"
+                            from kazma_core.llm_stream import bridged_event_stream
+
+                            stream = bridged_event_stream(
+                                thread_id,
+                                graph_inst.astream_events(
+                                    input_state, config=config, version="v2"
+                                ),
                             )
                             tokens_emitted = False
                             turn_started_at = time.monotonic()
@@ -1930,6 +2002,21 @@ def create_ws_chat_router(
 
                 # ── Action 2: approve_tool ───────────────────────────────
                 elif action == "approve_tool":
+                    if not ws_graph_enabled():
+                        from kazma_ui.sse_utils import ApprovalEventBridge
+
+                        await websocket.send_json(
+                            ApprovalEventBridge.create_approval_error_event(
+                                thread_id,
+                                error=(
+                                    "HITL resume uses POST /api/approve/{thread_id}. "
+                                    "WS approve_tool is off unless KAZMA_WS_GRAPH=1."
+                                ),
+                                code="SSE_ONLY",
+                                scope=str(payload.get("scope") or "once"),
+                            )
+                        )
+                        continue
                     approved = bool(payload.get("approved", True))
                     scope = str(payload.get("scope") or "once").strip().lower()
                     if scope in ("session",):

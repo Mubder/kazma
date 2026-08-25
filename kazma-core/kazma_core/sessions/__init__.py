@@ -7,6 +7,11 @@ platform delivery lives in SessionStore (never in graph state).
 
 from __future__ import annotations
 
+from kazma_core.sessions.ttl import (
+    SESSION_TTL_SECONDS,
+    refuse_session_lookup_for_durable_job,
+    session_store_not_for_long_jobs,
+)
 from kazma_core.sessions.directory import (
     SessionEntry,
     bind_sender_to_thread,
@@ -22,6 +27,9 @@ from kazma_core.sessions.directory import (
 )
 
 __all__ = [
+    "SESSION_TTL_SECONDS",
+    "refuse_session_lookup_for_durable_job",
+    "session_store_not_for_long_jobs",
     "SessionEntry",
     "bind_sender_to_thread",
     "canonical_web_session",

@@ -162,23 +162,22 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
             raise RuntimeError(f"OIDC token exchange failed: {resp.status_code} {resp.text[:200]}")
         tokens = resp.json()
 
-    # Prefer id_token claims (JWT) — verify signature when JWKS available
-    claims: dict[str, Any] = {}
+    # id_token MUST verify (JWKS or HS* client secret). Never decode
+    # unverified. Userinfo is only used when the IdP omitted id_token.
+    claims: dict[str, Any]
     id_token = tokens.get("id_token")
     if id_token:
-        claims = _decode_id_token_unverified(id_token)
-        # Optional: verify with JWKS if PyJWT + issuer keys present
-        claims = await _verify_id_token(id_token, disc, cfg) or claims
+        claims = await _verify_id_token(str(id_token), disc, cfg)
+    elif tokens.get("access_token") and disc.get("userinfo_endpoint"):
+        claims = await _userinfo_claims(
+            str(tokens["access_token"]),
+            str(disc["userinfo_endpoint"]),
+        )
+    else:
+        raise PermissionError("OIDC token response had no verifiable identity")
 
-    # userinfo fallback
-    if not claims.get("sub") and tokens.get("access_token") and disc.get("userinfo_endpoint"):
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            ui = await client.get(
-                disc["userinfo_endpoint"],
-                headers={"Authorization": f"Bearer {tokens['access_token']}"},
-            )
-            if ui.status_code == 200:
-                claims = ui.json()
+    if not (claims.get("sub") or claims.get("email")):
+        raise PermissionError("OIDC claims missing subject")
 
     role = oidc_role_from_claims(claims, cfg)
     # Clear one-time state
@@ -221,37 +220,91 @@ def oidc_role_from_claims(claims: dict[str, Any], cfg: OidcConfig | None = None)
     return cfg.default_role if cfg.default_role in ("admin", "operator", "viewer") else "operator"
 
 
-def _decode_id_token_unverified(token: str) -> dict[str, Any]:
-    try:
-        import jwt as _jwt
+_ASYM_ALGS = ("RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "PS256", "PS384", "PS512")
+_HS_ALGS = ("HS256", "HS384", "HS512")
 
-        return dict(_jwt.decode(token, options={"verify_signature": False}))
-    except Exception:
-        return {}
+
+async def _userinfo_claims(access_token: str, endpoint: str) -> dict[str, Any]:
+    """OIDC UserInfo fallback — only when the token response has no id_token."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        ui = await client.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    if ui.status_code != 200:
+        raise PermissionError(f"OIDC userinfo failed: {ui.status_code}")
+    try:
+        data = ui.json()
+    except Exception as exc:
+        raise PermissionError("OIDC userinfo was not JSON") from exc
+    if not isinstance(data, dict):
+        raise PermissionError("OIDC userinfo was not an object")
+    return data
 
 
 async def _verify_id_token(
     token: str, disc: dict[str, Any], cfg: OidcConfig
-) -> dict[str, Any] | None:
-    """Best-effort JWKS verification; returns None if unavailable."""
-    jwks_uri = disc.get("jwks_uri")
-    if not jwks_uri:
-        return None
+) -> dict[str, Any]:
+    """Verify id_token signature + iss/aud/exp. Raises PermissionError on any failure.
+
+    Fail-closed: a JWKS miss, ``alg: none``, algorithm confusion (HS* with a
+    public key), or PyJWT error never returns unverified claims.
+    """
     try:
         import jwt as _jwt
         from jwt import PyJWKClient
+        from jwt.exceptions import PyJWTError
+    except ImportError as exc:
+        raise PermissionError("OIDC verification requires PyJWT") from exc
 
-        jwks_client = PyJWKClient(jwks_uri)
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        return dict(
-            _jwt.decode(
+    try:
+        header = _jwt.get_unverified_header(token)
+    except Exception as exc:
+        raise PermissionError("OIDC id_token is not a JWT") from exc
+
+    alg = str(header.get("alg") or "")
+    if alg.lower() == "none" or alg not in (*_ASYM_ALGS, *_HS_ALGS):
+        raise PermissionError("OIDC id_token algorithm rejected")
+
+    issuer = str(disc.get("issuer") or cfg.issuer)
+    decode_kw: dict[str, Any] = {
+        "audience": cfg.client_id,
+        "issuer": issuer,
+        "leeway": 60,
+        "options": {"require": ["sub", "iss", "aud", "exp"]},
+    }
+
+    try:
+        if alg in _HS_ALGS:
+            if not cfg.client_secret:
+                raise PermissionError("OIDC HS* id_token requires client secret")
+            claims = _jwt.decode(
+                token,
+                cfg.client_secret,
+                algorithms=list(_HS_ALGS),
+                **decode_kw,
+            )
+        else:
+            jwks_uri = disc.get("jwks_uri")
+            if not jwks_uri:
+                raise PermissionError("OIDC discovery missing jwks_uri")
+            jwks_client = PyJWKClient(str(jwks_uri))
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            claims = _jwt.decode(
                 token,
                 signing_key.key,
-                algorithms=["RS256", "ES256", "HS256"],
-                audience=cfg.client_id,
-                issuer=cfg.issuer,
+                algorithms=list(_ASYM_ALGS),
+                **decode_kw,
             )
-        )
+    except PermissionError:
+        raise
+    except PyJWTError as exc:
+        logger.warning("[oidc] id_token verify failed: %s", exc)
+        raise PermissionError("OIDC id_token verification failed") from exc
     except Exception as exc:
-        logger.debug("[oidc] id_token verify failed: %s", exc)
-        return None
+        logger.warning("[oidc] id_token verify failed: %s", exc)
+        raise PermissionError("OIDC id_token verification failed") from exc
+
+    if not isinstance(claims, dict):
+        raise PermissionError("OIDC id_token claims missing")
+    return dict(claims)

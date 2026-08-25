@@ -210,16 +210,25 @@ class TestLLMProvider:
             {"role": "developer", "content": "dev note"},
         ]
         hoisted = hoist_system_messages(msgs)
-        assert [m["role"] for m in hoisted] == ["system", "developer", "user", "assistant", "tool"]
-        # Relative order within each group is preserved.
-        assert hoisted[0]["content"] == "mid-stream note"
-        assert hoisted[1]["content"] == "dev note"
-        # Already-ordered lists are unchanged.
+        # Systems at the head (llama.cpp); assistant/tool adjacency kept.
+        roles = [m["role"] for m in hoisted]
+        first_user = roles.index("user")
+        assert all(r == "system" for r in roles[:first_user])
+        assert "system" not in roles[first_user:]
+        blob = "\n".join(str(m.get("content") or "") for m in hoisted if m["role"] == "system")
+        assert "mid-stream note" in blob
+        assert "dev note" in blob
+        assert any(m.get("role") == "assistant" for m in hoisted)
+        assert any(m.get("role") == "tool" for m in hoisted)
+        # Already-ordered identity prefix is unchanged.
         ordered = [
             {"role": "system", "content": "base"},
             {"role": "user", "content": "hi"},
         ]
-        assert hoist_system_messages(ordered) == ordered
+        packed = hoist_system_messages(ordered)
+        assert packed[0]["role"] == "system"
+        assert packed[0]["content"] == "base"
+        assert packed[1]["role"] == "user"
 
     @pytest.mark.asyncio
     async def test_chat_hoists_mid_stream_system_messages(self) -> None:
@@ -267,3 +276,46 @@ class TestLLMProvider:
         provider._http = mock_client
         await provider.close()
         mock_client.aclose.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_chat_retries_without_unsupported_response_format(self) -> None:
+        import httpx
+
+        provider = LLMProvider(LLMConfig(base_url="http://fake.api/v1", api_key="test"))
+
+        bad = MagicMock()
+        bad.status_code = 400
+        bad.text = 'Unknown parameter: "response_format"'
+        bad.headers = {}
+        err = httpx.HTTPStatusError(
+            "bad",
+            request=httpx.Request("POST", "http://fake.api/v1/chat/completions"),
+            response=bad,
+        )
+        # raise_for_status on the first post: we raise from raise_for_status
+        bad.raise_for_status = MagicMock(side_effect=err)
+
+        ok = MagicMock()
+        ok.status_code = 200
+        ok.json.return_value = {
+            "choices": [{"message": {"content": "plain"}, "finish_reason": "stop"}],
+            "model": "test",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+        ok.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=[bad, ok])
+        mock_client.is_closed = False
+        provider._http = mock_client
+
+        result = await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            response_format={"type": "json_object"},
+        )
+        assert result.content == "plain"
+        assert mock_client.post.await_count == 2
+        # The same payload dict is mutated in place (tools fallback does this
+        # too) — after the retry, response_format is gone.
+        second = mock_client.post.await_args_list[1].kwargs["json"]
+        assert "response_format" not in second

@@ -54,7 +54,7 @@ def _get_version() -> str:
     """Resolve display version: ``{base}+g{shortsha}`` when possible.
 
     SoT is ``kazma_core.version.get_version()`` — public base from root
-    ``pyproject.toml`` (e.g. ``0.9.4``) plus live git short SHA. Never
+    ``pyproject.toml`` (e.g. ``0.10.0``) plus live git short SHA. Never
     hardcode a release number in CLI help.
     """
     try:
@@ -98,7 +98,7 @@ def _get_version() -> str:
     except Exception as exc:
         logger.debug("importlib.metadata version lookup failed: %s", exc)
 
-    return "0.9.4"
+    return "0.10.0"
 
 
 # ---------------------------------------------------------------------------
@@ -224,9 +224,9 @@ def show_status(config: dict[str, Any] | None = None) -> str:
         llm = config.get("llm", {})
         model = llm.get("model", config.get("models", {}).get("default", "unknown"))
         provider = (
-            config.get("models", {}).get("router", "litellm")
+            config.get("models", {}).get("router", "kazma")
             if isinstance(config.get("models"), dict)
-            else "litellm"
+            else "kazma"
         )
     lines.append(f"  Model:     {model}")
     lines.append(f"  Provider:  {provider}")

@@ -5,10 +5,14 @@ stack when ``memory.v2.use_new_stack`` is True.
 
 Pipeline:
   1. **Episode hybrid search** — FTS5 MATCH+bm25 (LIKE fallback) + dense
-     vector over episodic+recall tiers, session-clique PPR, RRF fusion,
-     optional same-session bias.
-  2. **Belief lookup** — FTS5/LIKE + episode-bridge + dense cosine (capped)
-     + belief-graph PPR multi-hop. Only currently-valid beliefs.
+     vector over episodic+recall tiers (sqlite-vec, or **pgvector** when
+     Postgres is on), session-clique PPR, RRF fusion, optional same-session
+     bias.
+  2. **Belief lookup** — FTS5/LIKE + episode-bridge + dense (pgvector when
+     configured, else capped cosine) + belief-graph PPR. Only currently-valid
+     beliefs.
+  Postgres-primary (``state.role=primary``): ILIKE sparse **fused with
+  pgvector dense** — not ILIKE-only.
   3. **Access bump** — on non-empty hits, increment access_count /
      last_accessed (Phase A; toggle ``access_bump_enabled``).
   4. **Format** — beliefs first, then episodes, prompt-fenced.
@@ -198,10 +202,11 @@ def _recall_postgres_primary(
     limit: int,
     explain: bool | None,
 ) -> RecallResult:
-    """Recall exclusively through StateBackend (Postgres).
+    """Recall through Postgres StateBackend + pgvector dense.
 
-    Fail-closed when the primary is down — do not silently read SQLite.
-    Search uses the existing adapter seam (ILIKE), not a second FTS port.
+    Fail-closed when the state primary is down — do not silently read SQLite.
+    Sparse is ILIKE on mirrored rows; dense is VectorBackend (pgvector by
+    default when a DSN is set). The two lists are RRF-fused.
     """
     do_explain = bool(explain)
     if explain is None:
@@ -239,7 +244,7 @@ def _recall_postgres_primary(
         return RecallResult([], [])
 
     try:
-        episodes, beliefs = _merge_remote_state_hits(
+        sparse_ep, sparse_bel = _merge_remote_state_hits(
             query,
             tenant_id=tenant_id,
             limit=limit,
@@ -247,14 +252,29 @@ def _recall_postgres_primary(
             beliefs=[],
             explain=do_explain,
         )
+        dense_ep, dense_bel = _dense_from_vector_backend(
+            query,
+            tenant_id=tenant_id,
+            limit=limit,
+            state_backend=be,
+            explain=do_explain,
+        )
+        episodes = _rrf_fuse(list(sparse_ep), list(dense_ep), {}, limit)
+        beliefs = _rrf_fuse(list(sparse_bel), list(dense_bel), {}, limit)
         for hit in episodes:
-            hit.source = "postgres_primary"
+            hit.source = hit.source or "postgres_primary"
             if do_explain:
-                hit.metadata["sources"] = ["postgres_primary"]
+                srcs = list(hit.metadata.get("sources") or [])
+                if "postgres_primary" not in srcs:
+                    srcs.append("postgres_primary")
+                hit.metadata["sources"] = srcs
         for hit in beliefs:
-            hit.source = "postgres_primary"
+            hit.source = hit.source or "postgres_primary"
             if do_explain:
-                hit.metadata["sources"] = ["postgres_primary"]
+                srcs = list(hit.metadata.get("sources") or [])
+                if "postgres_primary" not in srcs:
+                    srcs.append("postgres_primary")
+                hit.metadata["sources"] = srcs
         return RecallResult(beliefs=beliefs, episodes=episodes)
     except Exception as exc:
         logger.warning("[recall] postgres-primary search failed: %s", exc)
@@ -265,6 +285,134 @@ def _recall_postgres_primary(
         except Exception:
             pass
         return RecallResult([], [])
+
+
+def _dense_from_vector_backend(
+    query: str,
+    *,
+    tenant_id: str,
+    limit: int,
+    state_backend: Any,
+    explain: bool,
+) -> tuple[list[RecallHit], list[RecallHit]]:
+    """pgvector / Qdrant dense hits, hydrated from the Postgres state mirror."""
+    qvec = _encode_query(query)
+    if not qvec:
+        return [], []
+    try:
+        from kazma_core.memory.backends import get_vector_backend
+
+        backend = get_vector_backend()
+    except Exception:
+        return [], []
+    if not getattr(backend, "available", False):
+        return [], []
+
+    ep_hits: list[RecallHit] = []
+    bel_hits: list[RecallHit] = []
+    try:
+        ep_ids = backend.search(
+            qvec,
+            tenant_id=tenant_id,
+            tier=["working", "recall", "episodic"],
+            limit=max(limit * 3, 10),
+            kind="episode",
+        )
+    except TypeError:
+        ep_ids = backend.search(
+            qvec,
+            tenant_id=tenant_id,
+            tier=["working", "recall", "episodic"],
+            limit=max(limit * 3, 10),
+        )
+    except Exception:
+        logger.debug("[recall] pgvector episode search failed", exc_info=True)
+        ep_ids = []
+    try:
+        bel_ids = backend.search(
+            qvec,
+            tenant_id=tenant_id,
+            tier=None,
+            limit=max(limit * 3, 10),
+            kind="belief",
+        )
+    except TypeError:
+        bel_ids = []
+    except Exception:
+        logger.debug("[recall] pgvector belief search failed", exc_info=True)
+        bel_ids = []
+
+    fetch_ep = getattr(state_backend, "fetch_episodes", None)
+    if callable(fetch_ep) and ep_ids:
+        by_id = {
+            str(r.get("id")): r
+            for r in (fetch_ep([eid for eid, _s in ep_ids], tenant_id=tenant_id) or [])
+        }
+        for eid, sim in ep_ids:
+            row = by_id.get(str(eid))
+            text = ""
+            if row:
+                text = (
+                    row.get("summary_text")
+                    or row.get("user_text")
+                    or row.get("assistant_text")
+                    or ""
+                )[:400]
+            meta: dict[str, Any] = {"tier": (row or {}).get("tier"), "dense": True}
+            if explain:
+                meta["sources"] = ["dense", "pgvector"]
+            ep_hits.append(
+                RecallHit(
+                    id=str(eid),
+                    content=text,
+                    score=float(sim),
+                    kind="episode",
+                    source="dense",
+                    metadata=meta,
+                )
+            )
+
+    fetch_bel = getattr(state_backend, "fetch_beliefs", None)
+    if callable(fetch_bel) and bel_ids:
+        by_id = {
+            str(r.get("id")): r
+            for r in (fetch_bel([bid for bid, _s in bel_ids], tenant_id=tenant_id) or [])
+        }
+        for bid, sim in bel_ids:
+            row = by_id.get(str(bid)) or {}
+            sub = row.get("subject") or ""
+            pred = str(row.get("predicate") or "").replace("_", " ")
+            obj = row.get("object") or ""
+            content = f"{sub} {pred} {obj}".strip()
+            meta = {"dense": True}
+            if explain:
+                meta["sources"] = ["dense", "pgvector"]
+            bel_hits.append(
+                RecallHit(
+                    id=str(bid),
+                    content=content,
+                    score=float(sim),
+                    kind="belief",
+                    source="dense",
+                    metadata=meta,
+                )
+            )
+    return ep_hits, bel_hits
+
+
+def _encode_query(query: str) -> list[float] | None:
+    try:
+        from kazma_core.memory.embedder import get_embedder
+
+        embedder = get_embedder()
+        if embedder is None:
+            return None
+        qvec = embedder.encode(query)
+        if not qvec:
+            return None
+        return list(qvec)
+    except Exception:
+        return None
 
 
 def _merge_remote_state_hits(
@@ -974,12 +1122,21 @@ def _episode_dense(
     except Exception:
         return []
     # Search working + episodic + recall so fresh turns and active buffer hit.
-    results = backend.search(
-        qvec,
-        tenant_id=tenant_id,
-        tier=["working", "recall", "episodic"],
-        limit=limit,
-    )
+    try:
+        results = backend.search(
+            qvec,
+            tenant_id=tenant_id,
+            tier=["working", "recall", "episodic"],
+            limit=limit,
+            kind="episode",
+        )
+    except TypeError:
+        results = backend.search(
+            qvec,
+            tenant_id=tenant_id,
+            tier=["working", "recall", "episodic"],
+            limit=limit,
+        )
     return [
         RecallHit(id=eid, content="", score=float(sim), source="dense")
         for eid, sim in results
@@ -993,11 +1150,11 @@ def _belief_dense(
     tenant_id: str,
     limit: int,
 ) -> list[sqlite3.Row]:
-    """Dense (semantic) belief match via cosine over a **capped** candidate set.
+    """Dense (semantic) belief match.
 
-    Phase B: never full-scan every belief embedding. Prefer high-importance
-    rows up to ``memory.v2.dense_belief_candidate_cap`` (default 400).
-    Best-effort: returns [] if no embedder or no belief embeddings exist.
+    When pgvector/Qdrant is the vector backend, search there (no 400-row
+    cap). Otherwise cosine over a **capped** local candidate set
+    (``memory.v2.dense_belief_candidate_cap``, default 400).
     """
     del vector_engine  # reserved for future sqlite-vec belief path
     try:
@@ -1011,6 +1168,9 @@ def _belief_dense(
             return []
     except Exception:
         return []
+    remote_rows = _belief_dense_via_backend(conn, qvec, tenant_id, limit)
+    if remote_rows:
+        return remote_rows
     try:
         import numpy as np
 
@@ -1059,6 +1219,53 @@ def _belief_dense(
         scored.append((sim, r))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [r for _sim, r in scored[:limit]]
+
+
+def _belief_dense_via_backend(
+    conn: sqlite3.Connection,
+    qvec: list[float],
+    tenant_id: str,
+    limit: int,
+) -> list[sqlite3.Row]:
+    """Hydrate pgvector/Qdrant belief ids from the local beliefs table."""
+    try:
+        from kazma_core.memory.backends import get_vector_backend
+
+        backend = get_vector_backend(conn)
+    except Exception:
+        return []
+    name = str(getattr(backend, "name", "") or "")
+    if name not in ("pgvector", "qdrant", "hybrid"):
+        return []
+    if not getattr(backend, "available", False):
+        return []
+    try:
+        hits = backend.search(
+            qvec, tenant_id=tenant_id, tier=None, limit=limit, kind="belief"
+        )
+    except TypeError:
+        return []
+    except Exception:
+        logger.debug("[recall] belief dense backend search failed", exc_info=True)
+        return []
+    ids = [str(eid) for eid, _s in hits if eid]
+    if not ids:
+        return []
+    placeholders = ",".join(["?"] * len(ids))
+    try:
+        rows = conn.execute(
+            f"""SELECT id, subject, predicate, object, predicate_type,
+                      confidence, structural_importance, valid_from,
+                      source_trust_weight, embedding
+               FROM beliefs
+               WHERE valid_until IS NULL AND invalidated_at IS NULL
+                 AND tenant_id = ? AND id IN ({placeholders})""",
+            (tenant_id, *ids),
+        ).fetchall()
+    except Exception:
+        return []
+    order = {eid: i for i, eid in enumerate(ids)}
+    return sorted(rows, key=lambda r: order.get(str(r["id"]), 10_000))
 
 
 def _belief_graph_ppr(

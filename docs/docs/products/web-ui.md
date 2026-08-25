@@ -30,7 +30,7 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
 | Research | `/research` | **Start deep research** (live SSE sessions), results list, archive, compare, export |
 | Documents | `/documents` | Document Intelligence: upload, library, content preview, convert/redact, **ops panel** (capacity, readiness, audit, GC dry-run + confirm) |
-| IDE | `/ide` | Workspace files, run, git, AI-assisted edit |
+| IDE | `/ide` | Monaco editor, workspace files, apply-patch, run, git, AI-assisted edit |
 | Login | `/login` | Secret / local user / OIDC |
 
 ### Documents page (product path)

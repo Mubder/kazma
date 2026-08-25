@@ -49,9 +49,29 @@ from typing import Any
 
 import httpx
 
-__all__ = ["AsyncMCPManager", "MCPBridgeError", "MCPServerHandle", "UnifiedToolExecutor", "classify_mcp_tool"]
+__all__ = [
+    "AsyncMCPManager",
+    "MCPBridgeError",
+    "MCPServerHandle",
+    "UnifiedToolExecutor",
+    "classify_mcp_tool",
+    "get_active_mcp_manager",
+    "set_active_mcp_manager",
+]
 
 logger = logging.getLogger(__name__)
+
+_active_mcp_manager: AsyncMCPManager | None = None
+
+
+def get_active_mcp_manager() -> AsyncMCPManager | None:
+    """Process-wide manager set by :class:`UnifiedToolExecutor`."""
+    return _active_mcp_manager
+
+
+def set_active_mcp_manager(manager: AsyncMCPManager | None) -> None:
+    global _active_mcp_manager
+    _active_mcp_manager = manager
 
 # ══════════════════════════════════════════════════════════════════════════
 # MCP tool classification — danger-tier detection by name pattern
@@ -246,6 +266,8 @@ class MCPServerHandle:
     session_id: str = ""
     # shared
     tools: list[dict[str, Any]] = field(default_factory=list)
+    resources: list[dict[str, Any]] = field(default_factory=list)
+    prompts: list[dict[str, Any]] = field(default_factory=list)
     connected: bool = False
     read_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     timeout: float = 60.0
@@ -583,6 +605,133 @@ class AsyncMCPManager:
             s.pop("_mcp_server", None)
             s.pop("_mcp_raw_name", None)
         return schemas
+
+    # ── Spec surfaces (resources / prompts / sampling / roots) ──────
+
+    async def list_resources(self, server_name: str | None = None) -> list[dict[str, Any]]:
+        """``resources/list`` on one or all connected servers. Best-effort."""
+        out: list[dict[str, Any]] = []
+        names = [server_name] if server_name else list(self._servers)
+        for name in names:
+            if not name:
+                continue
+            handle = self._servers.get(name)
+            if handle is None or not handle.connected:
+                continue
+            try:
+                result = await self._send(handle, "resources/list", {})
+                resources = result.get("resources") if isinstance(result, dict) else []
+                if not isinstance(resources, list):
+                    resources = []
+                handle.resources = resources
+                for item in resources:
+                    if isinstance(item, dict):
+                        row = dict(item)
+                        row["_mcp_server"] = name
+                        out.append(row)
+            except Exception as exc:
+                logger.debug("[MCP] resources/list %s: %s", name, exc)
+        return out
+
+    async def read_resource(self, server_name: str, uri: str) -> dict[str, Any]:
+        """``resources/read`` — body is prompt-fenced untrusted data."""
+        from kazma_core.mcp.spec_client import extract_resource_text, fence_resource
+
+        handle = self._servers.get(server_name)
+        if handle is None or not handle.connected:
+            return {
+                "content": f"MCP server '{server_name}' not connected.",
+                "is_error": True,
+            }
+        target = (uri or "").strip()
+        if not target:
+            return {"content": "uri is required", "is_error": True}
+        try:
+            result = await self._send(handle, "resources/read", {"uri": target})
+        except Exception as exc:
+            return {"content": str(exc), "is_error": True}
+        text = extract_resource_text(result)
+        return {
+            "content": fence_resource(text, server=server_name, uri=target),
+            "is_error": False,
+        }
+
+    async def list_prompts(self, server_name: str | None = None) -> list[dict[str, Any]]:
+        """``prompts/list`` on one or all connected servers. Best-effort."""
+        out: list[dict[str, Any]] = []
+        names = [server_name] if server_name else list(self._servers)
+        for name in names:
+            if not name:
+                continue
+            handle = self._servers.get(name)
+            if handle is None or not handle.connected:
+                continue
+            try:
+                result = await self._send(handle, "prompts/list", {})
+                prompts = result.get("prompts") if isinstance(result, dict) else []
+                if not isinstance(prompts, list):
+                    prompts = []
+                handle.prompts = prompts
+                for item in prompts:
+                    if isinstance(item, dict):
+                        row = dict(item)
+                        row["_mcp_server"] = name
+                        out.append(row)
+            except Exception as exc:
+                logger.debug("[MCP] prompts/list %s: %s", name, exc)
+        return out
+
+    async def get_prompt(
+        self,
+        server_name: str,
+        name: str,
+        arguments: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """``prompts/get`` — returned as user-visible text, not system inject."""
+        handle = self._servers.get(server_name)
+        if handle is None or not handle.connected:
+            return {
+                "content": f"MCP server '{server_name}' not connected.",
+                "is_error": True,
+            }
+        prompt_name = (name or "").strip()
+        if not prompt_name:
+            return {"content": "prompt name is required", "is_error": True}
+        params: dict[str, Any] = {"name": prompt_name}
+        if arguments:
+            params["arguments"] = arguments
+        try:
+            result = await self._send(handle, "prompts/get", params)
+        except Exception as exc:
+            return {"content": str(exc), "is_error": True}
+        messages = result.get("messages") if isinstance(result, dict) else None
+        lines: list[str] = [f"MCP prompt {server_name}/{prompt_name} (user-visible, not instructions):"]
+        if isinstance(messages, list):
+            for msg in messages:
+                if not isinstance(msg, dict):
+                    continue
+                role = msg.get("role") or "user"
+                content = msg.get("content")
+                if isinstance(content, dict):
+                    content = content.get("text") or str(content)
+                lines.append(f"[{role}] {content}")
+        elif isinstance(result, dict) and result.get("description"):
+            lines.append(str(result["description"]))
+        else:
+            lines.append(str(result))
+        return {"content": "\n".join(lines), "is_error": False, "messages": messages}
+
+    async def _reply_server_request(
+        self, handle: MCPServerHandle, data: dict[str, Any]
+    ) -> str:
+        from kazma_core.mcp.spec_client import handle_mcp_server_request, jsonrpc_reply
+
+        method = str(data.get("method") or "")
+        params = data.get("params") if isinstance(data.get("params"), dict) else {}
+        result, error = await handle_mcp_server_request(
+            method, params, server_name=handle.name
+        )
+        return jsonrpc_reply(data.get("id"), result=result, error=error)
 
     # ── Tool execution ──────────────────────────────────────────────
 
@@ -942,14 +1091,12 @@ class AsyncMCPManager:
             # package can take 30-90s on slow networks).  Allow a per-server
             # override via ``cfg["timeout"]`` or the ``KAZMA_MCP_TIMEOUT_MS``
             # env; default 90s for stdio.
+            from kazma_core.mcp.spec_client import client_initialize_params
+
             await self._send(
                 handle,
                 "initialize",
-                {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
-                },
+                client_initialize_params("2024-11-05"),
                 timeout=handle.timeout,
             )
             await self._notify(handle, "notifications/initialized", {})
@@ -1024,14 +1171,12 @@ class AsyncMCPManager:
 
         # MCP handshake
         try:
+            from kazma_core.mcp.spec_client import client_initialize_params
+
             await self._send(
                 handle,
                 "initialize",
-                {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
-                },
+                client_initialize_params("2024-11-05"),
             )
             await self._notify(handle, "notifications/initialized", {})
         except Exception as exc:
@@ -1185,14 +1330,57 @@ class AsyncMCPManager:
         # out of order, while this compact bridge does not keep an ID→future
         # reader.  Keep write+read as one transaction so concurrent tool calls
         # cannot consume one another's responses.
+        read_timeout = timeout or handle.timeout
         async with handle.read_lock:
             try:
                 proc.stdin.write(raw.encode())
                 await proc.stdin.drain()
-                line = await asyncio.wait_for(
-                    proc.stdout.readline(),
-                    timeout=timeout or handle.timeout,
-                )
+                while True:
+                    line = await asyncio.wait_for(
+                        proc.stdout.readline(),
+                        timeout=read_timeout,
+                    )
+                    if not line:
+                        handle.connected = False
+                        retcode = proc.returncode
+                        if retcode is not None:
+                            stderr = ""
+                            if proc.stderr:
+                                try:
+                                    stderr_bytes = await asyncio.wait_for(
+                                        proc.stderr.read(4096), timeout=2.0
+                                    )
+                                    stderr = stderr_bytes.decode(errors="replace")
+                                except TimeoutError:
+                                    pass
+                            raise MCPBridgeError(
+                                f"Server '{handle.name}' exited with code {retcode}. "
+                                f"stderr: {stderr[:500]}"
+                            )
+                        raise MCPBridgeError(
+                            f"Server '{handle.name}' closed stdout (EOF)"
+                        )
+                    text = line.decode().strip()
+                    try:
+                        data = json.loads(text)
+                    except json.JSONDecodeError:
+                        return _jsonrpc_parse(text)
+                    if (
+                        isinstance(data, dict)
+                        and "method" in data
+                        and "result" not in data
+                        and "error" not in data
+                    ):
+                        # Server-initiated request (sampling / roots / ping)
+                        # while we wait for our JSON-RPC result.
+                        if "id" in data:
+                            reply = await self._reply_server_request(handle, data)
+                            proc.stdin.write(reply.encode())
+                            await proc.stdin.drain()
+                        continue
+                    return _jsonrpc_parse(text)
+            except MCPBridgeError:
+                raise
             except Exception as exc:
                 # On read error, attempt to dump stderr and re-raise with diagnostic
                 stderr_snippet = await self._drain_stderr(handle, max_bytes=2048)
@@ -1214,23 +1402,6 @@ class AsyncMCPManager:
                 raise MCPBridgeError(
                     f"stdio read error for '{handle.name}': {exc}\nstderr: {stderr_snippet[:500]}"
                 ) from exc
-
-        if not line:
-            handle.connected = False
-            # Check if process died
-            retcode = proc.returncode
-            if retcode is not None:
-                stderr = ""
-                if proc.stderr:
-                    try:
-                        stderr_bytes = await asyncio.wait_for(proc.stderr.read(4096), timeout=2.0)
-                        stderr = stderr_bytes.decode(errors="replace")
-                    except TimeoutError:
-                        pass
-                raise MCPBridgeError(f"Server '{handle.name}' exited with code {retcode}. stderr: {stderr[:500]}")
-            raise MCPBridgeError(f"Server '{handle.name}' closed stdout (EOF)")
-
-        return _jsonrpc_parse(line.decode().strip())
 
     async def _send_sse(self, handle: MCPServerHandle, raw: str) -> Any:
         """Send a JSON-RPC message over SSE and read the response."""
@@ -1310,14 +1481,12 @@ class AsyncMCPManager:
 
         # MCP handshake — initialize captures the session id from the response.
         try:
+            from kazma_core.mcp.spec_client import client_initialize_params
+
             await self._send(
                 handle,
                 "initialize",
-                {
-                    "protocolVersion": "2025-03-26",
-                    "capabilities": {"tools": {"listChanged": False}},
-                    "clientInfo": {"name": "kazma-mcp-bridge", "version": "0.1.0"},
-                },
+                client_initialize_params("2025-03-26"),
             )
             await self._notify(handle, "notifications/initialized", {})
         except Exception as exc:
@@ -1454,6 +1623,7 @@ class UnifiedToolExecutor:
             mcp = AsyncMCPManager()
         self._local = local
         self._mcp = mcp
+        set_active_mcp_manager(mcp)
         # Original configs (pre-rebind templates) for workspace rebind
         self._server_configs: dict[str, dict[str, Any]] = {}
 
@@ -1594,6 +1764,14 @@ class UnifiedToolExecutor:
                 # We NEVER trust _hitl_approved from LLM args (prompt-injection
                 # risk); only the ContextVar set by graph_builder is honored.
                 arguments.pop("_hitl_approved", None)
+                try:
+                    from kazma_core.agent.tool_hooks import apply_pre_tool_hooks
+
+                    _denied, arguments = await apply_pre_tool_hooks(tool_name, arguments)
+                    if _denied is not None:
+                        return _denied
+                except Exception:
+                    logger.debug("[Unified] pre-tool hook failed", exc_info=True)
                 from kazma_core.agent.tool_registry import _hitl_approved_ctx
 
                 _hitl_already_approved = _hitl_approved_ctx.get()
@@ -1665,7 +1843,14 @@ class UnifiedToolExecutor:
                             }
 
                 logger.debug("[Unified] Routing '%s' → MCP server '%s'", tool_name, server_name)
-                return await self._mcp.execute_mcp_tool(server_name, tool_name, arguments)
+                _mcp_result = await self._mcp.execute_mcp_tool(server_name, tool_name, arguments)
+                try:
+                    from kazma_core.agent.tool_hooks import apply_post_tool_hooks
+
+                    return await apply_post_tool_hooks(tool_name, arguments, _mcp_result)
+                except Exception:
+                    logger.debug("[Unified] post-tool hook failed", exc_info=True)
+                    return _mcp_result
 
         # ── Not found ──────────────────────────────────────────────
         available_local = []

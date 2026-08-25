@@ -4,27 +4,10 @@
 {% block page_title %}{{ t('ide.title') }}{% endblock %}
 
 {% block head %}
-  {# CodeMirror 5 from cdnjs — JS falls back to a <textarea> if these fail to load (offline). #}
+  {# Monaco Editor (VS Code engine) from cdnjs — JS falls back to a <textarea> if these fail (offline). #}
   <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
-  {# Find / replace — CodeMirror search addon (Ctrl+F find, Ctrl+H replace inside the editor). #}
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/jump-to-line.min.js"></script>
+        href="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/editor/editor.main.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
     .ide-container { width: 100%; max-width: 100%; margin: 0; padding: 0 1px; }
@@ -35,8 +18,10 @@
        it shifts the tree/editor on every mouse-enter and feels broken. */
     .ide-tree:hover, .ide-main > .card:hover, .ide-chat:hover { transform: none !important; }
     .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
-    .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); }
-    .ide-editor-wrap .CodeMirror { height: 100%; font-family: var(--font-mono); font-size: 0.85rem; }
+    .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); position: relative; }
+    .ide-monaco { display: none; height: 100%; width: 100%; min-height: 120px; }
+    .ide-editor-wrap.has-monaco .ide-monaco { display: block; }
+    .ide-editor-wrap.has-monaco .ide-fallback { display: none; }
     .ide-fallback { width: 100%; height: 100%; min-height: 120px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.85rem; padding: 10px; box-sizing: border-box; }
     /* ── Toolbar ── */
     .ide-toolbar { margin-bottom: 16px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -55,7 +40,7 @@
     .ide-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 0.9rem; line-height: 1; border-radius: var(--radius-xs); }
     .ide-tab-close:hover { color: var(--danger, #ef4444); background: var(--bg-hover); }
     .ide-tab-dot { color: var(--warning); font-size: 0.6rem; }
-    .CodeMirror-dialog { background: var(--bg-surface); color: var(--text-primary); }
+    .monaco-editor .suggest-widget { z-index: 20; }
     /* ── File tree ── */
     .ide-panel-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 8px 12px; }
     .ide-panel-title { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
@@ -195,7 +180,8 @@
           <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Editor</span>
           <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>(plain textarea)</span>
           <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady && currentFile" x-cloak>
-            Ctrl+F find · Ctrl+H replace
+            <span x-show="lspReady">Ctrl+click definition · hover · complete · </span>
+            Ctrl+F find · Monaco
           </span>
         </div>
         <!-- ── Tab bar ── -->
@@ -209,7 +195,8 @@
             </div>
           </template>
         </div>
-        <div class="ide-editor-wrap">
+        <div class="ide-editor-wrap" :class="{ 'has-monaco': cmReady }">
+          <div x-ref="monacoHost" class="ide-monaco" role="textbox" aria-label="Code editor"></div>
           <textarea x-ref="editor" class="ide-fallback" spellcheck="false"
                     placeholder="Open a file from the tree, or type here…"></textarea>
         </div>

@@ -11,8 +11,8 @@ platform-neutral.
 Safety model
 -----------
 All mutating/executing operations are delegated to the existing
-``LocalToolRegistry`` tools (``file_write``, ``shell_exec``,
-``python_exec``). Those tools already enforce:
+``LocalToolRegistry`` tools (``file_write``, ``file_apply_patch``,
+``shell_exec``, ``python_exec``). Those tools already enforce:
 
   * workspace scoping (fail-closed path-traversal guard in
     ``tool_registry._workspace_scope_error`` and ``tools/file_write``), and
@@ -247,6 +247,37 @@ class IdeService:
         res["path"] = rel_path
         return res
 
+    async def apply_patch(
+        self,
+        rel_path: str,
+        *,
+        old_string: str = "",
+        new_string: str = "",
+        patch: str = "",
+        replace_all: bool = False,
+    ) -> dict[str, Any]:
+        """Surgically edit a workspace file (search-replace or unified diff).
+
+        Delegates to ``file_apply_patch`` so the HITL danger-tool gate applies.
+        Prefer this over :meth:`write_file` for edits to existing files.
+        """
+        try:
+            target = self.resolve(rel_path)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "path": rel_path}
+        res = await self._call_tool(
+            "file_apply_patch",
+            {
+                "path": str(target),
+                "old_string": old_string,
+                "new_string": new_string,
+                "patch": patch,
+                "replace_all": bool(replace_all),
+            },
+        )
+        res["path"] = rel_path
+        return res
+
     async def delete_file(self, rel_path: str) -> dict[str, Any]:
         """Delete a file or directory from the workspace.
 
@@ -313,6 +344,26 @@ class IdeService:
             return {"ok": False, "error": res["error"], "matches": []}
         matches = [line for line in res["output"].splitlines() if line.strip()]
         return {"ok": True, "error": None, "pattern": pattern, "matches": matches}
+
+    async def codebase_search(
+        self,
+        query: str,
+        *,
+        mode: str = "auto",
+        glob: str = "",
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Symbol + text search via the workspace code index (read-only)."""
+        res = await self._call_tool(
+            "codebase_search",
+            {"query": query, "mode": mode, "glob": glob, "limit": limit},
+        )
+        return {
+            "ok": res["ok"],
+            "error": res.get("error"),
+            "output": res.get("output", ""),
+            "query": query,
+        }
 
     async def run(self, command: str, timeout: int = 60) -> dict[str, Any]:
         """Execute a shell command inside the workspace (scoped + HITL gated).

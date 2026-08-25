@@ -31,7 +31,13 @@ presets](../guide/configuration#52-built-in-provider-presets).
 > client-building sites (`get_client`, `get_model`, `get_client_by_provider`),
 > not just a preset entry.
 
----
+### Optional LiteLLM proxy
+
+Set `KAZMA_LITELLM_URL` (or `llm.gateway.url`) to send **OpenAI-compatible**
+calls through a LiteLLM proxy (spend, keys, fallbacks live in the proxy).
+This is not exclusive: Anthropic / Azure / Bedrock / Gemini stay native.
+Loopback Ollama / LM Studio stay direct unless `KAZMA_LITELLM_LOCAL=1`.
+`KAZMA_LITELLM=0` disables the proxy. Kazma does not `import litellm`.
 
 ## OpenAI-compatible providers
 

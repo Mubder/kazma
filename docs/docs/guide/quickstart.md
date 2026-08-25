@@ -152,7 +152,7 @@ agent:
 
 models:
   default: gpt-4o-mini
-  router: litellm     # string only — see Configuration for what this actually does
+  router: kazma       # Kazma's own router — not an import of LiteLLM
   fallback: gpt-4o-mini
 
 llm:
@@ -202,6 +202,28 @@ kazma-tui
 ```
 
 A Textual dashboard with tabs for Dashboard, Chat, Files, Traces, Swarm, Settings. The TUI is primarily a read-only observability view of the core singletons (it initializes `ModelRegistry` and `SwarmEngine` on first launch if they don't exist).
+
+### `kazma ask` (no web server)
+
+The same LangGraph supervisor, without uvicorn. Tokens stream to stdout;
+tool lines go to stderr.
+
+```bash
+kazma ask "What files define the supervisor graph?"
+kazma ask --plan "Add a rate limiter to the API"
+kazma ask --json "fix the tests"          # NDJSON events (token/tool/done)
+echo "summarize README.md" | kazma ask --json --no-stream -
+```
+
+On a **TTY**, danger tools prompt `y/N` (or `a` = allow for this session).
+Piped stdin / `kazma ask -` **fail closed** (no HITL on a consumed stdin).
+`--yolo` is the explicit headless escape hatch. Workspace is cwd
+(`--workspace PATH` to override).
+
+**ACP:** `kazma acp` is Agent Client Protocol JSON-RPC on stdio. Point Zed /
+JetBrains at that command. The agent streams `session/update` chunks and
+tool calls, and asks the editor to approve danger tools via
+`session/request_permission`.
 
 ### Verify with the CLI
 

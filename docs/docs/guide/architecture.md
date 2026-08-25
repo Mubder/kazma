@@ -12,10 +12,12 @@ description: Kazma Architecture — code-audited reference (unified docs, v0.9+)
 
 Kazma is organized around a strict separation between **reasoning** (the LangGraph supervisor graph) and **transport** (the platform adapters). A single graph instance — built once by `build_supervisor_graph()` — serves every channel. The graph never sees platform-specific identifiers; adapters own those and re-attach them only when emitting a reply.
 
+The CLI (`kazma ask`) and ACP stdio (`kazma acp`) are additional mouths: they build the **same** supervisor in-process (no uvicorn). Tokens stream via `register_delta_queue`. HITL uses a MemorySaver checkpointer plus graph `interrupt()` — TTY `y/N`, or ACP `session/request_permission`.
+
 This yields three properties the rest of the system relies on:
 
 1. **Provider freedom** — the brain talks to any OpenAI-compatible endpoint over `httpx`. No vendor SDK is imported.
-2. **Channel parity** — a HITL pause, a tool call, and a streaming token are identical whether they originate from Telegram or the Web UI.
+2. **Channel parity** — a HITL pause, a tool call, and a streaming token are identical whether they originate from Telegram, the Web UI, or `kazma ask`.
 3. **Durable state** — because platform IDs live outside the graph, the graph state is purely conversational and can be checkpointed, replayed, and resumed across restarts.
 
 ---
@@ -207,7 +209,7 @@ if tools and (nim_function_not_found or tool_schema_error):
 
 ### 5.3 Streaming
 
-Streaming is a standalone async generator `stream_chat()` in `streaming.py` (not a method on `LLMProvider`). It POSTs with `stream: True`, parses SSE `data:` lines, handles `[DONE]`, and yields typed `StreamEvent`s (`token`, `tool_call`, `done`, `error`). See [API & Extension Points](api-and-extension-points#sse-event-contract).
+Token streaming is `LLMProvider.chat_stream()` consumed by `invoke_llm_chat()` (`llm_stream.py`), which injects synthetic `on_chat_model_stream` events for SSE/WS. Kill-switch: `KAZMA_LLM_STREAM=0` (blocking `chat()`). See [API & Extension Points](api-and-extension-points#sse-event-contract).
 
 ### 5.4 Cost & retry
 
@@ -219,6 +221,31 @@ Streaming is a standalone async generator `stream_chat()` in `streaming.py` (not
 | Rate-limit (429) handling | **Not implemented** | — |
 
 > The cost breaker is a standalone dataclass; the agent layer must drive it via `record_cost` / `should_halt`. It is not auto-wired into `chat()`.
+
+### 5.5 Strict schemas & structured outputs
+
+Tool parameter objects generated from type hints (`agent/tool_schema.py`) are **closed JSON Schema**: `additionalProperties: false` on the root and nested objects that have `properties`. `required` is parameters without Python defaults (provider-safe). Free-form `dict[K, V]` parameters stay open (`additionalProperties` is the value schema) so `env={...}` still works.
+
+OpenAI Structured Outputs for **tools** is opt-in: `KAZMA_STRICT_TOOLS=1` stamps `function.strict: true` and promotes every property into `required`, wrapping former optionals as `anyOf: [T, {type: null}]`. Tools that cannot satisfy that contract (open dicts) stay unstrict so Anthropic / Gemini / local servers do not 400.
+
+Structured JSON **replies** (not tool calls) use `LLMProvider.chat(..., response_format={"type": "json_schema", ...})` / `json_object`. Helper: `json_schema_response_format()`. The supervisor loop does **not** attach this on every turn. Providers that reject `response_format` are retried once without it. Native Anthropic/Bedrock accept the kwarg for signature parity and ignore it.
+
+### 5.6 Tool hooks (PreToolUse / PostToolUse)
+
+Programmable callbacks around `LocalToolRegistry.execute` and MCP unified execute (`agent/tool_hooks.py`). Claude Code–style:
+
+| Event | Can | Cannot |
+|-------|-----|--------|
+| **PreToolUse** | Deny the call, or rewrite arguments | Skip HITL, skip commitment, auto-approve danger tools |
+| **PostToolUse** | Append a short observation note | Undo a tool that already ran |
+
+In-process: `register_pre_tool_hook` / `register_post_tool_hook` (matcher glob or `a|b`). Operator commands: YAML/ConfigStore `agent.hooks.pre_tool` / `post_tool` — JSON on stdin, JSON on stdout (or exit 2 = deny). Spawned with `asyncio.to_thread(subprocess.run)` (Windows SelectorEventLoop). Empty lists = no-op. Kill-switch: `KAZMA_TOOL_HOOKS=0`. A crashing hook **fail-opens** (the tool still runs); security stays HITL + commitment.
+
+### 5.7 Plan mode
+
+First-class inspect-then-propose (`agent/plan_mode.py`). While `/plan` is on for a thread, the supervisor unions `read_only` + `no_writes` into `hard_constraints`. `filter_tools_for_constraints` removes write/exec tools from the LLM schema; the tool worker allowlist blocks them if the model still names one. YOLO cannot expand that allowlist.
+
+`/plan go` or a short **Proceed** / **approve** reply exits plan mode, drops those tags, and injects an execute system note so the same graph run implements the plan. HITL still gates danger tools. Kill-switch: `KAZMA_PLAN_MODE=0`.
 
 ---
 
@@ -259,7 +286,7 @@ Kazma's chat memory is the **V2 Cognitive Engine** (bi-temporal belief graph, PP
 
 | Subsystem | Backing | Used by | Status |
 |---|---|---|---|
-| **V2 Cognitive Engine** | Bi-temporal belief graph + 4-tier episodes + sqlite-vec (`memory_state.db`) | Chat (per-turn recall, tools, auto-store, compaction) + swarm + self-improvement | ✅ **Chat default** — single read/write path (`recall()` from `memory/recall.py`) |
+| **V2 Cognitive Engine** | Bi-temporal belief graph + 4-tier episodes + sqlite-vec (`memory_state.db`); **pgvector** when Postgres is on | Chat (per-turn recall, tools, auto-store, compaction) + swarm + self-improvement | ✅ **Chat default** — single read/write path (`recall()` from `memory/recall.py`) |
 | **Local Ego-Graph PPR** | Personalized PageRank over the belief/episode graph (2-hop, N≤200) | V2 recall boost | ✅ `memory/ppr.py` |
 | **Consolidator** | LLM/heuristic belief + episode extraction, prompt-fenced | Post-turn write pipeline | ✅ `memory/consolidator.py` |
 | **Durable consolidation queue** | SQLite-backed worker queue (`memory_ops.db`) | Async belief extraction, macro-sleep, backup/export | ✅ `memory/task_queue.py` |
@@ -294,7 +321,7 @@ See [Arabic & Cultural Features](arabic-cultural-features).
 | Tracing spans | In-house `TraceStore` (ring buffer + WebSocket to dashboard) + `TracingEmitter` (swarm, stdlib-only) | ✅ Active |
 | Web research tools | `read_url` / `web_search` / `crawl_site` / research save+digest (`tools/read_url.py`, `web_research.py`) | ✅ Active — [Web research](web-research) |
 | SSE telemetry | `/api/chat/stream` events; telemetry router | ✅ Active |
-| **Langfuse** | `KazmaTracer` with `backend="langfuse"`; enabled via `logging.langfuse.enabled: true` + keys | ✅ **Wired and functional** (dormant by default — activate with keys) |
+| **Langfuse** | `KazmaTracer` with `backend="langfuse"`; `logging.langfuse.enabled: auto` turns on when keys exist | ✅ **Wired** (`KAZMA_LANGFUSE=0` kill-switch) |
 | **OpenTelemetry** | — | 🔴 **Removed** (dead code + dead deps purged; Langfuse + Console remain) |
 | **Prometheus** | — | 🔴 **Not implemented** |
 
@@ -309,7 +336,7 @@ OpenTelemetry was **declared as a dependency with real code, but was never reach
 - Entire `[tracing]` optional extra (6 packages) from `pyproject.toml`
 - `otlp_endpoint` field + `"opentelemetry"` from valid backends in `TracingConfig`
 
-Tracing now has two backends: **Langfuse** (primary, dormant by default) and **Console** (fallback). The in-house `TraceStore` (ring buffer + WebSocket dashboard) and the swarm's stdlib-only `TracingEmitter` (OTel-compatible span format, no OTel package) remain unchanged.
+Tracing now has two backends: **Langfuse** (primary, **auto-on when keys exist**) and **Console** (fallback). The in-house `TraceStore` (ring buffer + WebSocket dashboard) and the swarm's stdlib-only `TracingEmitter` (OTel-compatible span format, no OTel package) remain unchanged.
 
 ---
 

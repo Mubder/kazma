@@ -1,10 +1,13 @@
 """Memory scale backends — ConfigStore-driven vector/embedder profiles.
 
-Default remains local SQLite + local/sqlite-vec. Remote providers are opt-in
-via Settings → Memory backends. Factory re-reads ConfigStore live (mirrors
-``get_proxy_provider`` / HITL) so saves take effect without restart for
-config; embedder singleton still uses :func:`reset_embedder` on save.
+Default on one node remains local SQLite + sqlite-vec. When the process
+already has a Postgres DSN (``KAZMA_DATABASE_URL`` or
+``memory.backends.state.url``), **pgvector is auto-selected** as the dense
+search engine (hybrid dual-write, or remote-first when
+``state.role=primary``). Explicit Qdrant still wins. Kill-switch:
+``KAZMA_PGVECTOR=0``.
 
+Factory re-reads ConfigStore live (mirrors ``get_proxy_provider`` / HITL).
 Never break chat: remote failures fall back per ``failover.on_remote_error``.
 """
 
@@ -95,6 +98,7 @@ class VectorBackend(Protocol):
         tenant_id: str = "default",
         tier: str | list[str] | None = "recall",
         limit: int = 10,
+        kind: str | None = None,
     ) -> list[tuple[str, float]]: ...
 
     def upsert(
@@ -132,7 +136,9 @@ class LocalSqliteVectorBackend:
         tenant_id: str = "default",
         tier: str | list[str] | None = "recall",
         limit: int = 10,
+        kind: str | None = None,
     ) -> list[tuple[str, float]]:
+        del kind  # local engine is the episodes table
         return self._engine.search(
             query_vec, tenant_id=tenant_id, tier=tier, limit=limit
         )
@@ -185,7 +191,7 @@ class _EmptyVectorBackend:
     def available(self) -> bool:
         return False
 
-    def search(self, query_vec, *, tenant_id="default", tier=None, limit=10):
+    def search(self, query_vec, *, tenant_id="default", tier=None, limit=10, kind=None):
         return []
 
     def upsert(self, item_id, vec, *, tenant_id="default", meta=None):
@@ -282,6 +288,7 @@ class QdrantVectorBackend:
         tenant_id: str = "default",
         tier: str | list[str] | None = "recall",
         limit: int = 10,
+        kind: str | None = None,
     ) -> list[tuple[str, float]]:
         if not query_vec or not self._url:
             return []
@@ -302,6 +309,8 @@ class QdrantVectorBackend:
                     must.append({"key": "tier", "match": {"any": list(tier)}})
                 elif tier:
                     must.append({"key": "tier", "match": {"value": str(tier)}})
+                if kind:
+                    must.append({"key": "kind", "match": {"value": str(kind)}})
                 body["filter"] = {"must": must}
                 r = client.post(
                     f"{self._url}/collections/{self._collection}/points/search",
@@ -480,6 +489,16 @@ class PgvectorBackend:
             )
             """
         )
+        try:
+            cur.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS {self._table}_hnsw
+                ON {self._table}
+                USING hnsw (embedding vector_cosine_ops)
+                """
+            )
+        except Exception:
+            logger.debug("[pgvector] HNSW index skipped", exc_info=True)
         conn.commit()
         cur.close()
 
@@ -490,6 +509,7 @@ class PgvectorBackend:
         tenant_id: str = "default",
         tier: str | list[str] | None = "recall",
         limit: int = 10,
+        kind: str | None = None,
     ) -> list[tuple[str, float]]:
         if not query_vec or not self._dsn:
             return []
@@ -499,39 +519,44 @@ class PgvectorBackend:
                 self._ensure_table(conn)
                 cur = conn.cursor()
                 emb = "[" + ",".join(str(float(x)) for x in query_vec) + "]"
+                kind_sql = ""
+                kind_params: list[Any] = []
+                if kind:
+                    kind_sql = " AND COALESCE(meta->>'kind', 'episode') = %s"
+                    kind_params = [str(kind)]
                 if isinstance(tier, (list, tuple)) and tier:
                     placeholders = ",".join(["%s"] * len(tier))
                     cur.execute(
                         f"""
                         SELECT id, 1 - (embedding <=> %s::vector) AS score
                         FROM {self._table}
-                        WHERE tenant_id = %s AND tier IN ({placeholders})
+                        WHERE tenant_id = %s AND tier IN ({placeholders}){kind_sql}
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        [emb, tenant_id, *list(tier), emb, int(limit)],
+                        [emb, tenant_id, *list(tier), *kind_params, emb, int(limit)],
                     )
                 elif tier:
                     cur.execute(
                         f"""
                         SELECT id, 1 - (embedding <=> %s::vector) AS score
                         FROM {self._table}
-                        WHERE tenant_id = %s AND tier = %s
+                        WHERE tenant_id = %s AND tier = %s{kind_sql}
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (emb, tenant_id, str(tier), emb, int(limit)),
+                        (emb, tenant_id, str(tier), *kind_params, emb, int(limit)),
                     )
                 else:
                     cur.execute(
                         f"""
                         SELECT id, 1 - (embedding <=> %s::vector) AS score
                         FROM {self._table}
-                        WHERE tenant_id = %s
+                        WHERE tenant_id = %s{kind_sql}
                         ORDER BY embedding <=> %s::vector
                         LIMIT %s
                         """,
-                        (emb, tenant_id, emb, int(limit)),
+                        (emb, tenant_id, *kind_params, emb, int(limit)),
                     )
                 rows = cur.fetchall()
                 cur.close()
@@ -630,15 +655,19 @@ class HybridVectorBackend:
         tenant_id: str = "default",
         tier: str | list[str] | None = "recall",
         limit: int = 10,
+        kind: str | None = None,
     ) -> list[tuple[str, float]]:
         if getattr(self._remote, "available", False):
             hits = self._remote.search(
-                query_vec, tenant_id=tenant_id, tier=tier, limit=limit
+                query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
             )
             if hits:
                 return hits
+        # Local sqlite-vec is the episodes table — do not mix belief queries.
+        if str(kind or "") == "belief":
+            return []
         return self._local.search(
-            query_vec, tenant_id=tenant_id, tier=tier, limit=limit
+            query_vec, tenant_id=tenant_id, tier=tier, limit=limit, kind=kind
         )
 
     def upsert(
@@ -742,12 +771,13 @@ def vector_capability(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 def get_vector_backend(conn: Any | None = None) -> Any:
     """Return the active VectorBackend (live ConfigStore read).
 
-    - ``local`` → LocalSqliteVectorBackend  
-    - ``hybrid`` → Hybrid(remote + local) when remote URL set, else local  
-    - ``remote`` → remote if available, else failover policy  
+    - sqlite-vec + ``mode=local`` → LocalSqliteVectorBackend
+    - ``hybrid`` → Hybrid(remote + local) when remote URL set
+    - ``remote`` **or** provider ``pgvector``/``qdrant`` → remote if up,
+      else failover policy (default: local sqlite-vec)
     """
     cfg = get_backends_cfg()
-    provider = str((cfg.get("vector") or {}).get("provider") or "sqlite_vec")
+    provider = str((cfg.get("vector") or {}).get("provider") or "sqlite_vec").lower()
     mode = str(cfg.get("mode") or "local").lower()
     failover = str(
         (cfg.get("failover") or {}).get("on_remote_error") or "local"
@@ -777,27 +807,30 @@ def get_vector_backend(conn: Any | None = None) -> Any:
         except Exception:
             return _EmptyVectorBackend()
 
-    if mode == "local" or provider in _LOCAL_VECTOR:
-        try:
-            return _local()
-        except Exception:
-            logger.debug("[vector_backend] local open failed", exc_info=True)
-            return _EmptyVectorBackend()
-
     remote = _build_remote_backend(cfg)
-    if remote is None:
-        return _failover()
 
-    if mode == "hybrid":
+    if mode == "hybrid" and remote is not None:
         try:
             return HybridVectorBackend(remote, _local())
         except Exception:
             return remote if getattr(remote, "available", False) else _failover()
 
-    # remote-first
-    if getattr(remote, "available", False):
-        return remote
-    return _failover()
+    # pgvector / qdrant even if mode was left at the default "local"
+    if provider in _REMOTE_VECTOR:
+        if remote is not None and getattr(remote, "available", False):
+            return remote
+        return _failover()
+
+    if mode == "remote":
+        if remote is not None and getattr(remote, "available", False):
+            return remote
+        return _failover()
+
+    try:
+        return _local()
+    except Exception:
+        logger.debug("[vector_backend] local open failed", exc_info=True)
+        return _EmptyVectorBackend()
 
 _SENSITIVE_SUFFIXES = ("api_key", "password", "token", "secret")
 
@@ -854,9 +887,56 @@ def get_backends_cfg() -> dict[str, Any]:
     if out["mode"] not in ("local", "hybrid", "remote"):
         out["mode"] = "local"
     _apply_state_env_overrides(out)
+    _apply_pgvector_scale_defaults(out)
     # Install / env defaults for Neo4j (fail-open: still sqlite if unset)
     _apply_neo4j_env_defaults(out)
     return out
+
+
+def _postgres_memory_dsn(out: dict[str, Any]) -> str:
+    """DSN for pgvector / state — Settings URL, else process Postgres URL."""
+    import os
+
+    st = out.get("state") if isinstance(out.get("state"), dict) else {}
+    url = str((st or {}).get("url") or "").strip()
+    if url:
+        return url
+    return (
+        os.environ.get("KAZMA_DATABASE_URL")
+        or os.environ.get("DATABASE_URL")
+        or ""
+    ).strip()
+
+
+def _apply_pgvector_scale_defaults(out: dict[str, Any]) -> None:
+    """When Postgres is already on, pgvector is the dense engine.
+
+    Kill-switch ``KAZMA_PGVECTOR=0``. Explicit Qdrant is never overridden.
+    ``state.role=primary`` → remote-first; otherwise hybrid dual-write.
+    """
+    import os
+
+    raw = (os.environ.get("KAZMA_PGVECTOR") or "").strip().lower()
+    if raw in ("0", "false", "no", "off"):
+        return
+    vec = out.get("vector")
+    if not isinstance(vec, dict):
+        return
+    provider = str(vec.get("provider") or "sqlite_vec").strip().lower()
+    if provider == "qdrant":
+        return
+    dsn = str(vec.get("url") or "").strip() or _postgres_memory_dsn(out)
+    if not dsn:
+        return
+    if provider not in _LOCAL_VECTOR and provider not in ("", "pgvector"):
+        return
+    vec["provider"] = "pgvector"
+    if not str(vec.get("url") or "").strip():
+        vec["url"] = dsn
+    mode = str(out.get("mode") or "local").strip().lower()
+    role = str((out.get("state") or {}).get("role") or "mirror").strip().lower()
+    if mode == "local":
+        out["mode"] = "remote" if role == "primary" else "hybrid"
 
 
 def _apply_state_env_overrides(out: dict[str, Any]) -> None:

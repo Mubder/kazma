@@ -266,7 +266,12 @@ class CompactionEngine:
         ]
 
         try:
-            summary = await self.llm_client.chat(prompt)
+            raw = await self.llm_client.chat(prompt)
+            summary = getattr(raw, "content", None)
+            if summary is None:
+                summary = str(raw or "")
+            else:
+                summary = str(summary)
             # Enforce token limit: truncate if LLM ignores constraint
             if len(summary) > 8000:  # ~2000 tokens rough chars estimate
                 summary = summary[:8000]

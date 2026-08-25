@@ -1,11 +1,22 @@
 agent:
   name: kazma
-  version: 0.9.4
+  version: 0.10.0
   language: en
   rtl: false
+  # PreToolUse / PostToolUse — programmable, NOT a permission system.
+  # HITL + commitment still gate danger tools; hooks cannot auto-approve.
+  # matcher: glob or a|b. command: argv list or a shell string (JSON stdin/stdout).
+  # Kill-switch: KAZMA_TOOL_HOOKS=0
+  hooks:
+    enabled: true
+    pre_tool: []
+    post_tool: []
 models:
   default: gpt-4o-mini
-  router: litellm
+  # Native Kazma router (keyword + models.defaults). Not a LiteLLM import.
+  # Optional proxy egress: KAZMA_LITELLM_URL=http://127.0.0.1:4000
+  # Native anthropic/azure/bedrock/google stay on the 4-branch registry.
+  router: kazma
   fallback: gpt-4o-mini
 llm:
   base_url: https://api.openai.com/v1
@@ -16,6 +27,15 @@ llm:
   timeout: 60.0
   input_cost_per_1m: 0.15
   output_cost_per_1m: 0.6
+  # Optional LiteLLM *proxy* for OpenAI-compatible providers only.
+  # Native anthropic/azure/bedrock/google never go through this.
+  # Env KAZMA_LITELLM_URL wins. Kill-switch: KAZMA_LITELLM=0.
+  # Local Ollama/LM Studio stay direct unless include_local: true.
+  gateway:
+    url: ''
+    api_key: ''
+    include_local: false
+    fallback_direct: false
 mcp:
   servers:
   - name: filesystem
@@ -55,7 +75,7 @@ system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كاز�
 
   When you have tools available, use them to accomplish tasks.
 
-  TOOL SELECTION: Prefer native tools over shell_exec. Use file_list/file_read/ file_search/file_write
+  TOOL SELECTION: Prefer native tools over shell_exec. Use codebase_search to find symbols/text, then file_read; file_apply_patch for edits, file_write for new files.
   for files; git tools for git; python_exec for short scripts. shell_exec cwd is already
   the workspace — never use cd (blocked).
 
@@ -132,10 +152,12 @@ safety:
     - browser_eval_js
     - cancel_scheduled
     - code_exec
+    - computer_use
     - config_save
     - email_categorize
     - email_delete
     - email_send
+    - file_apply_patch
     - file_delete
     - file_write
     - git_commit
@@ -174,7 +196,9 @@ logging:
   format: json
   retention_days: 7
   langfuse:
-    enabled: false
+    # auto = on when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY (or yaml keys) exist.
+    # false = off. KAZMA_LANGFUSE=0 kill-switch.
+    enabled: auto
     public_key: ''
     secret_key: ''
 proxy:

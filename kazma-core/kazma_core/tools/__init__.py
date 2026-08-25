@@ -11,6 +11,7 @@ from kazma_core.tools.code_exec import python_exec
 from kazma_core.tools.context_cmd import context_cmd
 from kazma_core.tools.export_session import export_session
 from kazma_core.tools.file_read import file_read
+from kazma_core.tools.file_apply_patch import file_apply_patch
 from kazma_core.tools.file_write import file_write
 from kazma_core.tools.image_gen import generate_image
 from kazma_core.tools.personality_cmd import handle_personality_command, is_personality_command
@@ -23,6 +24,7 @@ from kazma_core.tools.read_url import (
     summarize_research_file,
 )
 from kazma_core.tools.send_message import register_message_backend, send_message
+from kazma_core.tools.computer_use import computer_use
 from kazma_core.tools.vision_analyze import analyze_image
 from kazma_core.tools.web_research import crawl_site
 from kazma_core.tools.web_search import web_search
@@ -41,8 +43,10 @@ __all__ = [
     "export_session",
     "file_read",
     "file_write",
+    "file_apply_patch",
     "generate_image",
     "analyze_image",
+    "computer_use",
     "python_exec",
     "context_cmd",
     "is_personality_command",

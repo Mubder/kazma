@@ -39,6 +39,10 @@ flowchart TB
 | **B** | `/swarm` dispatch | `swarm/safety.py` + `tool_registry.py` | Bus adapter buttons (Telegram/Discord/Slack) |
 | **C** | Swarm PIPELINE tasks | `swarm/checkpoint.py` + `checkpoint_manager.py` | `POST /api/swarm/tasks/\{id\}/approve` |
 
+**Tool hooks are not a fourth HITL gate.** PreToolUse / PostToolUse (`agent/tool_hooks.py`) let an operator script deny or rewrite a call, or append a note after. They run on the same `execute()` path. They **cannot** auto-approve a danger tool, skip commitment, or replace the YAML allowlist. A broken hook fail-opens (the tool still runs). Kill-switch: `KAZMA_TOOL_HOOKS=0`.
+
+**Plan mode is not a HITL bypass.** `/plan on` *removes* write/exec tools. `/plan go` returns them; danger tools still need approval.
+
 ---
 ## Critical: All three build sites now pass `hitl_config`
 
@@ -233,7 +237,7 @@ The three gates use **different** danger-tool lists. This is deliberate (each pa
 
 ### 5.1 Gate A (graph) — `kazma.yaml safety.hitl.require_approval_for`
 
-Default (`kazma.yaml:84-94`): `file_write`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `vault_retrieve`, `vault_delete`.
+Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`. Parity-tested.
 
 Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 

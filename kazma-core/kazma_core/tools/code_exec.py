@@ -2,7 +2,9 @@
 
 Runs user-provided Python snippets with layered isolation:
 
-1. **Docker jail** (preferred when available) — ``--network none``, memory
+0. **E2B Firecracker** (opt-in) — when ``KAZMA_E2B_API_KEY`` / ``E2B_API_KEY``
+   is set. For untrusted / multi-user code. Kill-switch ``KAZMA_E2B=0``.
+1. **Docker jail** (preferred on one trusted box) — ``--network none``, memory
    limit, read-only root, ephemeral tmpfs. Enabled by default when the
    ``docker`` CLI is on PATH, or forced via ``KAZMA_CODE_EXEC_DOCKER=1``.
 2. **Local subprocess** fallback — ``python -I``, import blocklist, scrubbed
@@ -484,8 +486,8 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
 async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     """Execute Python code in a sandboxed environment.
 
-    Prefers Docker (``--network none``) when ``use_docker_jail()`` is true;
-    falls back to a local isolated subprocess with import blocklist.
+    Order: E2B (if keyed) → Docker (``--network none``) → local subprocess
+    with import blocklist. HITL still gates this tool before it runs.
 
     Args:
         code:    Python source code to execute.
@@ -496,6 +498,22 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     """
     if not code or not code.strip():
         return "Error: No code provided."
+
+    try:
+        from kazma_core.sandbox.e2b import e2b_enabled, run_python as _e2b_run
+
+        if e2b_enabled():
+            try:
+                return await _e2b_run(code, timeout)
+            except Exception as exc:
+                if local_exec_forbidden() and not docker_available():
+                    logger.error("[code_exec] E2B required but failed: %s", exc)
+                    return f"[Exit code: 1]\nE2B sandbox failed: {exc}"
+                logger.warning(
+                    "[code_exec] E2B unavailable (%s) — Docker/local fallback", exc
+                )
+    except Exception:
+        logger.debug("[code_exec] E2B probe failed", exc_info=True)
 
     tmp_dir = tempfile.mkdtemp(prefix="kazma_exec_")
     code_file = Path(tmp_dir) / "snippet.py"

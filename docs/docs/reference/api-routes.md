@@ -35,7 +35,7 @@ description: Primary HTTP/SSE/WebSocket routes exposed by kazma-ui and gateway c
 
 | Method | Path | Auth | HITL | Description |
 |--------|------|------|------|-------------|
-| * | `/api/ide/*` | Session | Via tool registry | Files, run, git, swarm send (`ide_api.py`) |
+| * | `/api/ide/*` | Session | Via tool registry | Files, apply_patch, codebase search, LSP (`GET/POST /lsp`), run, git, swarm send (`ide_api.py`) |
 | GET | `/ide` | Session | — | IDE page |
 
 ## Swarm / Command Center

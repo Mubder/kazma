@@ -7,9 +7,9 @@ description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, /memory
 
 > **Live SoT (2026-08).** V2 is the **only** chat memory stack.
 >
-> - **Personal memory** — bi-temporal beliefs, 4-tier episodes, PPR, FTS5 + sqlite-vec, durable queue.
+> - **Personal memory** — bi-temporal beliefs, 4-tier episodes, PPR, FTS5 + dense (sqlite-vec on one node; **pgvector** when Postgres is on), durable queue.
 > - **Knowledge Library** — separate store; **product merge** via labeled inject + federated search (not one table).
-> - **Optional adapters** — Neo4j dual-write, Postgres state mirror, Qdrant/pgvector (fail-open to local).
+> - **Scale adapters** — pgvector auto-selects from the Postgres DSN; Qdrant if you set it; Neo4j dual-write; Postgres state mirror / primary.
 > - **V1 4-layer RRF** (Chroma / L1–L4 concepts) was **removed**. Do not resurrect it in docs or UI copy. Earlier notes referencing `UnifiedMemoryAdapter` / `VectorMemory` are obsolete.
 
 Operator checklist: [Memory best path](./memory-best-path.md).  
@@ -42,10 +42,11 @@ Do **not** merge these — background consolidation must not WAL-contend with ch
 
 | Store | Role | Default |
 |-------|------|---------|
-| V2 cognitive | Who I am / what we said | SQLite SoT |
+| V2 cognitive | Who I am / what we said | SQLite SoT on one node |
 | Knowledge Library | Docs + citations | Separate KB indexes |
 | Neo4j | Optional dual-write of belief triples | Off unless configured |
-| Postgres | Optional dual-mirror of state | Off unless configured |
+| Postgres state | Dual-mirror or `state.role=primary` | Off unless configured |
+| Dense vectors | sqlite-vec (one node) / **pgvector** (Postgres DSN) / Qdrant | Auto pgvector when you leave one node |
 
 **Physical one-table merge of KB + beliefs is wontfix** ([#79](https://github.com/Mubder/kazma/issues/79)). Chat unifies via inject; stores do not.
 
@@ -61,7 +62,7 @@ Do **not** merge these — background consolidation must not WAL-contend with ch
 | Inject Knowledge into chat | `merge_knowledge_into_chat` (default on) |
 | Promote KB hits to episodes | `promote_kb_to_episodes` (tagged soft-copy) |
 | Graph store | `sqlite` (default) or `neo4j` dual-write |
-| Vector / embedder | Local sqlite-vec + local/remote embed models |
+| Vector / embedder | sqlite-vec on one node; **pgvector** when `KAZMA_DATABASE_URL` / state URL is set (`KAZMA_PGVECTOR=0` to keep local) |
 
 Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connectors` → LLM Providers → Platform Connectors.
 
@@ -78,11 +79,19 @@ Legacy deep-links: `?tab=embedder` → Memory (scroll to embedder); `?tab=connec
 
 ### `recall()`
 
-1. Currently-valid beliefs (entity bridge + text match)  
+1. Currently-valid beliefs (entity bridge + text match + dense)  
 2. Episode hybrid search (FTS5 + dense)  
 3. Local Ego-Graph PPR boost  
 4. RRF / budget truncation  
 5. Fence: `format_untrusted_block(..., source="memory_v2_recall")`
+
+**Dense engine:** sqlite-vec while you stay on one SQLite node. When the
+process already has a Postgres DSN, recall uses **pgvector** (hybrid
+dual-write, or remote-first if `KAZMA_MEMORY_STATE_ROLE=primary`).
+Postgres-primary is **ILIKE sparse + pgvector dense, RRF-fused** — not
+ILIKE-only. Explicit Qdrant in Settings is never overridden.
+Kill-switch: `KAZMA_PGVECTOR=0`. Enable `CREATE EXTENSION vector` on the
+database.
 
 ### Post-turn
 
@@ -269,7 +278,7 @@ not a hardcoded “You”.
 | `memory/entity_counts.py` | Single SoT for belief_count / graph_degree SQL |
 | `memory/self_hub.py` | Hub display name + self person-shell collapse |
 | `memory/graph_backend.py` | SQLite default + Neo4j dual-write + tenant edge clear |
-| `memory/backends.py` | Vector / state / graph factory + env Neo4j defaults |
+| `memory/backends.py` | Vector / state / graph factory; pgvector auto-select; env Neo4j defaults |
 | `memory/federated_search.py` | Memory + KB labeled search |
 | `memory/global_reconsolidation.py` | Dedup + re-embed (partitioned) |
 | `memory/worker_bootstrap.py` | Queue handlers + schedulers |

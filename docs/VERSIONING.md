@@ -6,11 +6,11 @@ Kazma uses a **fixed public base** plus a **live git commit id**.
 
 | Piece | Example | Meaning |
 |-------|---------|---------|
-| Public base (files) | `0.9.4` | Root `pyproject.toml` / `kazma.yaml` / package versions |
-| Display version | `0.9.4+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
+| Public base (files) | `0.10.0` | Root `pyproject.toml` / `kazma.yaml` / package versions |
+| Display version | `0.10.0+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
 | `+g……` | PEP 440 **local** segment | Short git SHA (`g` = git) |
 
-Why not bump `0.9.4` → `0.9.5` on every merge? That turned into
+Why not bump `0.10.0` → `0.10.1` on every merge? That turned into
 `0.10 → 0.11 → 0.12` noise in one day. The **SHA** is the accurate
 build identity; the base is a human milestone.
 
@@ -18,16 +18,16 @@ build identity; the base is a human milestone.
 
 | Location | Role |
 |----------|------|
-| Root `pyproject.toml` → `project.version` | **Public base only** (`0.9.4`) |
+| Root `pyproject.toml` → `project.version` | **Public base only** (`0.10.0`) |
 | `kazma.yaml` → `agent.version` | Same public base |
 | `kazma_core.version.get_version()` | **Runtime display**: `base+gSHA` |
-| Git tag `v0.9.4` | Optional milestone marker (no `+`) |
+| Git tag `v0.10.0` | Optional milestone marker (no `+`) |
 
 ```python
 from kazma_core.version import get_version, get_base_version
 
-get_base_version()  # "0.9.4"
-get_version()       # "0.9.4+g4d37b2c"  (when git / CI SHA available)
+get_base_version()  # "0.10.0"
+get_version()       # "0.10.0+g4d37b2c"  (when git / CI SHA available)
 ```
 
 ### SHA resolution order
@@ -45,7 +45,7 @@ get_version()       # "0.9.4+g4d37b2c"  (when git / CI SHA available)
 | `feat:` → minor leap | **Gone** |
 | CI rewrites `pyproject.toml` | **Never** |
 
-## When to change the base (`0.9.4` → `0.9.5` / `0.10.0`)
+## When to change the base (`0.10.0` → `0.10.1` / `0.11.0`)
 
 Only for a deliberate product milestone:
 
@@ -54,8 +54,8 @@ Only for a deliberate product milestone:
    - `kazma.yaml` → `agent.version`
    - `kazma-gateway/pyproject.toml`
    - `kazma-tui` falls through to `kazma_core.version` (no hardcode needed)
-2. Commit: `chore(version): base 0.9.4 → 0.9.5`
-3. Optionally run **Actions → Release** to create tag `v0.9.5` + GitHub Release
+2. Commit: `chore(version): base 0.10.0 → 0.10.1`
+3. Optionally run **Actions → Release** to create tag `v0.10.1` + GitHub Release
 
 Do **not** put `+gSHA` into committed version files. Display code adds it.
 
@@ -72,12 +72,10 @@ Do **not** put `+gSHA` into committed version files. Display code adds it.
 
 ```bash
 python -c "from kazma_core.version import get_version; print(get_version())"
-# → 0.9.4+g4d37b2c
+# → 0.10.0+g4d37b2c
 ```
 
 ## What not to do
 
 - Do **not** re-enable auto bump on push to `main`
-- Do **not** store `0.9.4+g…` in `pyproject.toml` (packaging noise; SHA goes stale)
-- Do **not** map conventional-commit types to SemVer bumps in CI
-- Do **not** set `allow_zero_version = false` (forced a fake 1.0.0 once)
+- Do **not** store `0.10.0+g…` in `pyproject.toml` (packaging noise; SHA goes stale)

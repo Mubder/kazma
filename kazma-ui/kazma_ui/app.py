@@ -1682,6 +1682,16 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Memory] V2 worker start failed: %s", e)
 
+        # ── Temporal durable swarm worker (opt-in) ───────────────────
+        # Same process as SwarmEngine so activities can call _dispatch_inner.
+        # No-ops unless KAZMA_TEMPORAL_HOST is set. Never blocks boot.
+        try:
+            from kazma_core.swarm.durable import start_temporal_worker
+
+            await start_temporal_worker()
+        except Exception as e:
+            logger.warning("[durable] Temporal worker start failed: %s", e)
+
         # ── Time-travel snapshot maintenance loop ────────────────────
         # Daily prune (TTL) + VACUUM of snapshots.db so replay/fork
         # history never grows without bound. Reads auto_maintain /

@@ -26,6 +26,7 @@ import time
 from typing import Any
 
 from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider, LLMResponse, ToolCall
+from kazma_core.llm_stream import StreamDelta
 
 logger = logging.getLogger(__name__)
 
@@ -139,9 +140,11 @@ class BedrockProvider(LLMProvider):
         max_tokens: int | None = None,
         temperature: float | None = None,
         model: str | None = None,
+        response_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         import asyncio
 
+        _ = response_format  # OpenAI-shaped; Bedrock Converse has no equivalent
         model_id = model or self.config.model
         system, convo = self._build_messages(messages)
 
@@ -179,6 +182,7 @@ class BedrockProvider(LLMProvider):
                 # are transient; everything else is permanent — mirrors the
                 # generic LLMProvider classification (AGENTS.md §3).
                 transient = False
+                kind = ""
                 err_resp = getattr(exc, "response", None)
                 if isinstance(err_resp, dict):
                     meta = err_resp.get("ResponseMetadata") or {}
@@ -186,8 +190,12 @@ class BedrockProvider(LLMProvider):
                     code = str((err_resp.get("Error") or {}).get("Code", ""))
                     if status == 429 or (status and status >= 500) or "Throttling" in code:
                         transient = True
+                    if status == 429 or "Throttling" in code:
+                        kind = "rate_limit_exhausted"
                 raise LLMError(
-                    f"Bedrock converse failed: {exc}", transient=transient
+                    f"Bedrock converse failed: {exc}",
+                    transient=transient,
+                    kind=kind,
                 ) from exc
             return self._parse(resp, model_id, start)
 
@@ -235,6 +243,27 @@ class BedrockProvider(LLMProvider):
             cost_usd=cost,
             duration_ms=(time.monotonic() - start) * 1000,
         )
+
+    async def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> Any:
+        """Bedrock ConverseStream is not wired yet — one-chunk fallback.
+
+        Must override the parent OpenAI SSE path: Bedrock is SigV4, not
+        ``/chat/completions``.
+        """
+        resp = await self.chat(
+            messages, tools, max_tokens, temperature, model, response_format
+        )
+        if resp.content:
+            yield StreamDelta(content=resp.content)
+        yield StreamDelta(response=resp)
 
     async def close(self) -> None:
         # boto3 clients hold no asyncio resources.

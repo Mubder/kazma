@@ -505,7 +505,12 @@ async def _stream_langgraph_events(
                 # doesn't cause the SSE connection to time out silently.
                 # Yields a ":keepalive" SSE comment every 10s when no events
                 # arrive, keeping the HTTP connection alive.
-                _event_queue: asyncio.Queue = asyncio.Queue(maxsize=512)
+                _event_queue: asyncio.Queue = asyncio.Queue(maxsize=2048)
+                # Token deltas from invoke_llm_chat land here as synthetic
+                # on_chat_model_stream events (custom LLM is not a BaseChatModel).
+                from kazma_core.llm_stream import register_delta_queue, unregister_delta_queue
+
+                register_delta_queue(thread_id, _event_queue)
                 _stream_done = False
                 # T1 watchdog: last-progress clock written by the pump on every
                 # queue put; read by _pump_watchdog to detect a stalled pump.
@@ -739,6 +744,7 @@ async def _stream_langgraph_events(
                                         )
                                         await asyncio.sleep(0.1)
                 finally:
+                    unregister_delta_queue(thread_id)
                     # DETACHED: do NOT cancel pump_task. The graph keeps running
                     # in the background after the client disconnects. The
                     # done_callback (_on_pump_done) persists the result when
@@ -761,10 +767,13 @@ async def _stream_langgraph_events(
                 yield await emit_j("error", {"content": stream_error})
 
             # ── Post-stream: HITL + backfill assistant text ────────────
-            # Custom LLM path never streams tokens. On HITL interrupt,
-            # astream_events ends WITHOUT terminal on_chain_end — so we
-            # must (1) detect interrupt, (2) pull any assistant prose from
-            # checkpoint state, (3) never leave the UI with only "Thinking…".
+            # Tokens now stream via synthetic on_chat_model_stream (llm_stream).
+            # Backfill still runs when no deltas arrived (HITL resume ainvoke,
+            # kill-switch, or a provider that fell back to blocking chat).
+            # On HITL interrupt, astream_events ends WITHOUT terminal
+            # on_chain_end — so we still (1) detect interrupt, (2) pull any
+            # assistant prose from checkpoint state, (3) never leave the UI
+            # with only "Thinking…".
             thread_id = (config.get("configurable") or {}).get("thread_id", "")
             interrupted = False
             snapshot = None
@@ -1396,6 +1405,43 @@ def create_sse_chat_router(
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
+
+        from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command
+
+        if is_plan_command(raw_msg, require_slash=True):
+            _pl = apply_plan_command(
+                thread_id, raw_msg, actor=f"web:{session_id[:12]}",
+            )
+            if _pl.rewrite_user_text:
+                raw_msg = _pl.rewrite_user_text
+                user_message = _pl.rewrite_user_text
+            elif _pl.handled:
+                session.messages.append({"role": "user", "content": raw_msg})
+                session.messages.append({
+                    "role": "assistant",
+                    "content": _pl.reply,
+                    "kind": "capacity",
+                })
+                try:
+                    _get_store().put(session)
+                except Exception:
+                    logger.exception("[SSE] failed to persist /plan message")
+
+                async def _plan_generator() -> AsyncGenerator[str, None]:
+                    yield await _journal_fast_path(thread_id, "capacity", {
+                        "plan_active": _pl.plan_active,
+                        "action": _pl.action,
+                        "reply": _pl.reply,
+                    })
+                    yield await _journal_fast_path(thread_id, "done", {
+                        "tokens": 1, "cost": 0.0, "duration_ms": 50,
+                    })
+
+                return StreamingResponse(
+                    _plan_generator(),
+                    media_type="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+                )
 
         if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
             from kazma_core.safety.yolo import (

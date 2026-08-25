@@ -171,6 +171,40 @@ def _screenshot_sync(full_page: bool) -> str:
     return str(dest)
 
 
+def _mouse_click_sync(x: int, y: int) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        page.mouse.click(int(x), int(y))
+        text = page.evaluate("() => document.body ? document.body.innerText : ''")
+    return f"clicked ({int(x)},{int(y)})\n{(text or '')[:MAX_TEXT_CHARS]}"
+
+
+def _type_text_sync(text: str) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        page.keyboard.type(str(text or ""), delay=20)
+    return f"typed {len(text or '')} chars"
+
+
+def _key_press_sync(key: str) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        page.keyboard.press(str(key or "Enter"))
+    return f"pressed {key or 'Enter'}"
+
+
+def _scroll_sync(dy: int) -> str:
+    page = _ensure_page_sync()
+    with _state_lock:
+        page.mouse.wheel(0, int(dy))
+    return f"scrolled dy={int(dy)}"
+
+
+def _wait_sync(seconds: float) -> str:
+    time.sleep(max(0.0, min(float(seconds), 5.0)))
+    return f"waited {seconds}s"
+
+
 def _fill_form_sync(fields: dict[str, str], submit_selector: str) -> str:
     page = _ensure_page_sync()
     with _state_lock:

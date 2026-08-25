@@ -1,7 +1,8 @@
 """Chat routes for the Kazma WebUI.
 
-Primary chat transport is SSE at ``/api/chat/stream`` (full graph HITL).
-The legacy WebSocket ``/ws/chat`` endpoint (formerly 410 Gone) was removed.
+Primary (and default) graph transport is SSE at ``/api/chat/stream``.
+``/ws/chat/{session_id}`` remains the Turn Delivery V2 telemetry / cursor
+bus — it does not run the graph unless ``KAZMA_WS_GRAPH=1``.
 """
 
 from __future__ import annotations

@@ -440,6 +440,14 @@ class SwarmEngine:
                 TaskType.CONSULT,
                 TaskType.CONDITIONAL,
             )
+            from kazma_core.swarm.durable import (
+                durable_enabled,
+                in_durable_activity,
+                run_via_durable,
+            )
+
+            if durable_enabled() and not in_durable_activity():
+                return await run_via_durable(self, task, started, task_span)
             if (
                 task.timeout
                 and float(task.timeout) > 0

@@ -16,6 +16,7 @@ from typing import Any
 
 from kazma_core.config_schema import TracingConfig
 from kazma_core.tracing.events import EventBridge, TelemetryEvent
+from kazma_core.tracing.langfuse_enable import langfuse_keys, resolve_langfuse_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,8 @@ __all__ = [
     "get_trace_store",
     "TelemetryEvent",
     "EventBridge",
+    "langfuse_keys",
+    "resolve_langfuse_enabled",
 ]
 
 

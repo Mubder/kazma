@@ -235,11 +235,31 @@ async def health_details():
     active_model = str(checks.get("model_registry", {}).get("active_model") or "")
     active_provider = str(checks.get("model_registry", {}).get("active_provider") or "")
 
+    llm_gateway: dict[str, Any] = {}
+    try:
+        from kazma_core.llm_gateway import gateway_status
+
+        llm_gateway = gateway_status()
+    except Exception as exc:
+        logger.debug("[health] llm_gateway status skipped: %s", exc)
+        llm_gateway = {"enabled": False, "error": type(exc).__name__}
+
+    voice_duplex: dict[str, Any] = {}
+    try:
+        from kazma_core.voice.livekit import livekit_status
+
+        voice_duplex = livekit_status()
+    except Exception as exc:
+        logger.debug("[health] voice duplex status skipped: %s", exc)
+        voice_duplex = {"enabled": False, "mode": "turn_based"}
+
     response = {
         "timestamp": time.time(),
         "checks": checks,
         "active_model": active_model,
         "active_provider": active_provider,
+        "llm_gateway": llm_gateway,
+        "voice_duplex": voice_duplex,
         "system": {
             "python_version": sys.version.split()[0],
             "platform": platform.platform(),

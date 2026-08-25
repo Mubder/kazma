@@ -6,9 +6,11 @@ Default remains local SQLite (``memory_state.db``). When
 a durable copy for APIs / future cutover.
 
 Default recall still prefers SQLite FTS/dense with this module as a
-**mirror + ILIKE assist**. Set ``memory.backends.state.role=primary``
+**mirror + ILIKE assist**, fused with **pgvector** when Postgres is on.
+Set ``memory.backends.state.role=primary``
 (or ``KAZMA_MEMORY_STATE_ROLE=primary``) to make StateBackend the
-recall SoT — fail-closed if Postgres is down (no silent SQLite lie).
+sparse SoT — fail-closed if Postgres is down (no silent SQLite lie).
+Dense search then uses pgvector (not ILIKE-only).
 """
 
 from __future__ import annotations
@@ -110,6 +112,16 @@ class NullStateBackend:
 
     def search_beliefs(
         self, query: str, *, tenant_id: str = "default", limit: int = 10
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def fetch_episodes(
+        self, ids: list[str], *, tenant_id: str = "default"
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def fetch_beliefs(
+        self, ids: list[str], *, tenant_id: str = "default"
     ) -> list[dict[str, Any]]:
         return []
 
@@ -477,6 +489,70 @@ class PostgresStateBackend:
                 conn.close()
         except Exception:
             logger.debug("[state_backend] postgres belief search failed", exc_info=True)
+            return []
+
+    def fetch_episodes(
+        self, ids: list[str], *, tenant_id: str = "default"
+    ) -> list[dict[str, Any]]:
+        wanted = [str(i) for i in ids if i][:50]
+        if not wanted or not self._dsn:
+            return []
+        try:
+            conn = self._connect()
+            try:
+                self._ensure(conn)
+                cur = conn.cursor()
+                placeholders = ",".join(["%s"] * len(wanted))
+                cur.execute(
+                    f"""
+                    SELECT id, session_id, user_text, assistant_text, summary_text,
+                           tier, structural_importance, created_at
+                    FROM kazma_episodes
+                    WHERE tenant_id = %s AND id IN ({placeholders})
+                    """,
+                    [tenant_id, *wanted],
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                cur.close()
+                return rows
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[state_backend] postgres episode fetch failed", exc_info=True)
+            return []
+
+    def fetch_beliefs(
+        self, ids: list[str], *, tenant_id: str = "default"
+    ) -> list[dict[str, Any]]:
+        wanted = [str(i) for i in ids if i][:50]
+        if not wanted or not self._dsn:
+            return []
+        try:
+            conn = self._connect()
+            try:
+                self._ensure(conn)
+                cur = conn.cursor()
+                placeholders = ",".join(["%s"] * len(wanted))
+                cur.execute(
+                    f"""
+                    SELECT id, subject, predicate, object, predicate_type,
+                           confidence, structural_importance, source_trust_weight,
+                           valid_from
+                    FROM kazma_beliefs
+                    WHERE tenant_id = %s AND id IN ({placeholders})
+                      AND valid_until IS NULL AND invalidated_at IS NULL
+                    """,
+                    [tenant_id, *wanted],
+                )
+                cols = [d[0] for d in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                cur.close()
+                return rows
+            finally:
+                conn.close()
+        except Exception:
+            logger.debug("[state_backend] postgres belief fetch failed", exc_info=True)
             return []
 
     def _count(self, table: str, tenant_id: str) -> int:

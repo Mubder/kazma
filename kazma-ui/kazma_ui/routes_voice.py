@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from kazma_ui.rate_limit import rate_limit
 
@@ -250,6 +251,7 @@ async def voice_status() -> dict[str, Any]:
             "available_providers": list_tts_providers(),
         },
         "ready": enabled and _key_present(stt) and _key_present(tts),
+        "duplex": _livekit_public_status(),
     }
 
 
@@ -373,5 +375,67 @@ async def _discover_groq_stt_models() -> list[str]:
     except Exception:
         logger.debug("Groq STT model discovery failed", exc_info=True)
         return []
+
+
+def _livekit_public_status() -> dict[str, Any]:
+    try:
+        from kazma_core.voice.livekit import livekit_status
+
+        return livekit_status()
+    except Exception:
+        return {"enabled": False, "mode": "turn_based", "brain": "langgraph"}
+
+
+@router.get("/livekit/status")
+async def livekit_voice_status() -> dict[str, Any]:
+    """Whether LiveKit duplex is configured (no secrets)."""
+    return _livekit_public_status()
+
+
+class _LiveKitTokenBody(BaseModel):
+    session_id: str = ""
+    identity: str = "web-user"
+
+
+@router.post("/livekit/token", dependencies=[Depends(rate_limit("voice", 30))])
+async def livekit_voice_token(body: _LiveKitTokenBody | None = None) -> dict[str, Any]:
+    """Mint a LiveKit room token for the browser participant.
+
+    The agent brain is still LangGraph (STT → graph → TTS on ``/ws/voice``).
+    LiveKit is WebRTC transport + AEC + barge-in, not a second LLM loop.
+    """
+    from kazma_core.voice.livekit import (
+        get_livekit_config,
+        mint_livekit_token,
+        sanitize_room_name,
+    )
+
+    cfg = get_livekit_config()
+    if not cfg.enabled:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "LiveKit duplex is off. Set LIVEKIT_URL, LIVEKIT_API_KEY, "
+                "and LIVEKIT_API_SECRET (or voice.livekit.*). "
+                "Kill-switch: KAZMA_VOICE_DUPLEX=0."
+            ),
+        )
+    payload = body or _LiveKitTokenBody()
+    session_id = str(payload.session_id or "web").strip()
+    room = f"kazma-{sanitize_room_name(session_id)}"
+    identity = str(payload.identity or "web-user").strip() or "web-user"
+    try:
+        token = mint_livekit_token(
+            identity=identity, room=room, name="Kazma web", config=cfg
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "token": token,
+        "url": cfg.url,
+        "room": room,
+        "identity": sanitize_room_name(identity),
+        "brain": "langgraph",
+    }
 
 

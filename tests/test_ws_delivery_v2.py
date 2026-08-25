@@ -10,6 +10,7 @@ replay over both the ``?last_seq=`` connect form and the mid-connection
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -244,24 +245,19 @@ def test_endpoint_multi_tab_both_receive_live_frames():
             assert got2["type"] == "status_update" and got2["seq"] == 1
 
 
-def test_v2_cursor_connection_survives_send_prompt_ack_path():
-    """REGRESSION (2026-08-24 outage): a function-local
-    `from kazma_ui.active_turns import get_active_turn` inside the legacy
-    catch-up branch shadowed the module-level binding for the whole handler.
-    V2 connections SKIP that branch, so the duplicate-turn guard later read
-    an UNBOUND local -> handler died on every send_prompt -> client burned 5
-    retries -> 'Could not deliver your message after several retries'.
-
-    This test connects WITH a cursor (V2 path) and pushes a send_prompt past
-    the guard (graph mocked): it must reach prompt_ack, not die."""
+def test_v2_cursor_connection_survives_send_prompt_ack_path(monkeypatch):
+    """Default: WS is telemetry. send_prompt is rejected with prompt_ack
+    (accepted=False, reason=sse_only) and the cursor connection stays alive
+    (ping still works). Pre-2026-08-24 a function-local import made this
+    path UnboundLocalError and killed the socket."""
     from unittest.mock import MagicMock
+
+    monkeypatch.delenv("KAZMA_WS_GRAPH", raising=False)
 
     from fastapi import FastAPI as _FastAPI
 
     _seed_session("v2-send-session", "v2-send-thread")
 
-    # A truthy graph lets the send path reach the duplicate-turn guard —
-    # the exact statement that raised UnboundLocalError pre-fix.
     app = _FastAPI()
     app.include_router(create_ws_chat_router(graph=MagicMock()))
     client = TestClient(app)
@@ -269,7 +265,6 @@ def test_v2_cursor_connection_survives_send_prompt_ack_path():
         resumed = ws.receive_json()
         assert resumed["type"] == "resumed"
 
-        # Baseline liveness before the write path.
         ws.send_json({"action": "ping"})
         assert ws.receive_json() == {"type": "pong"}
 
@@ -278,11 +273,69 @@ def test_v2_cursor_connection_survives_send_prompt_ack_path():
             "text": "hello regression",
             "client_msg_id": "regression-ack-1",
         })
-        # Durability ack must arrive — pre-fix this socket died with
-        # UnboundLocalError before any frame.
+        ack = ws.receive_json()
+        assert ack["type"] == "prompt_ack", ack
+        assert ack["data"]["accepted"] is False
+        assert ack["data"]["reason"] == "sse_only"
+
+        ws.send_json({"action": "ping"})
+        assert ws.receive_json() == {"type": "pong"}
+
+
+def test_ws_graph_escape_hatch_accepts_send_prompt(monkeypatch):
+    """KAZMA_WS_GRAPH=1 restores the second graph client (debug only)."""
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI as _FastAPI
+
+    monkeypatch.setenv("KAZMA_WS_GRAPH", "1")
+    _seed_session("v2-graph-session", "v2-graph-thread")
+    app = _FastAPI()
+    app.include_router(create_ws_chat_router(graph=MagicMock()))
+    client = TestClient(app)
+    with client.websocket_connect("/ws/chat/v2-graph-session?last_seq=0") as ws:
+        assert ws.receive_json()["type"] == "resumed"
+        ws.send_json({
+            "action": "send_prompt",
+            "text": "hello graph hatch",
+            "client_msg_id": "graph-ack-1",
+        })
         ack = ws.receive_json()
         assert ack["type"] == "prompt_ack", ack
         assert ack["data"]["accepted"] is True
+
+
+def test_ws_approve_tool_rejected_when_graph_off(monkeypatch):
+    from unittest.mock import MagicMock
+
+    monkeypatch.delenv("KAZMA_WS_GRAPH", raising=False)
+
+    from fastapi import FastAPI as _FastAPI
+
+    _seed_session("v2-hitl-session", "v2-hitl-thread")
+    app = _FastAPI()
+    app.include_router(create_ws_chat_router(graph=MagicMock()))
+    client = TestClient(app)
+    with client.websocket_connect("/ws/chat/v2-hitl-session") as ws:
+        ws.send_json({
+            "action": "approve_tool",
+            "approved": True,
+            "thread_id": "v2-hitl-thread",
+        })
+        err = ws.receive_json()
+        assert err["type"] == "approval_error", err
+        assert err["data"]["code"] == "SSE_ONLY"
+
+
+def test_chat_js_does_not_prefer_ws_graph_client():
+    """Browser chat must not route turns over WS when the telemetry bus is up."""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    assert "agentStore.sendPrompt(" not in src
+    assert "agentStore.submitApproval(" not in src
+    assert "_capStore.sendPrompt(" not in src
 
 
 def test_no_function_local_active_turns_imports():

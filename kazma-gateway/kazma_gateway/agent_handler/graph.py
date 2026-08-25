@@ -346,6 +346,11 @@ def create_graph_handler(
 
     # Session TTL: entries survive agent replies (for crash-recovery routing)
     # and are evicted lazily by this many seconds of inactivity.
+    # FOOTGUN: do NOT look up chat_id / user_id here for jobs older than
+    # this TTL (reminders, HITL cards, cron). Cron captures delivery_target
+    # at schedule time. Helper:
+    # kazma_core.sessions.ttl.refuse_session_lookup_for_durable_job
+    # Keep in lockstep with kazma_core.sessions.ttl.SESSION_TTL_SECONDS.
     _session_ttl_seconds = 300  # 5 minutes
 
     async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
@@ -772,6 +777,30 @@ def create_graph_handler(
                     _cap.action, thread_id, _cap.yolo_active,
                 )
                 return
+
+        if msg.text:
+            from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command
+
+            if is_plan_command(msg.text, require_slash=False):
+                actor = msg.sender_id or "gateway"
+                _pl = apply_plan_command(
+                    thread_id, msg.text, actor=actor, require_slash=False,
+                )
+                if _pl.rewrite_user_text:
+                    msg.text = _pl.rewrite_user_text
+                elif _pl.handled:
+                    ctx = await _store.get(thread_id) or msg.context_metadata
+                    out_text, out_ctx = _prepare_tg_outbound(msg, _pl.reply, ctx)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=out_text,
+                        context_metadata=out_ctx,
+                    ))
+                    logger.info(
+                        "[agent-handler] /plan action=%s thread=%s",
+                        _pl.action, thread_id,
+                    )
+                    return
 
         # ── /undo: Remove last assistant response ──────────────────
         if msg.text and msg.text.strip().lower() == "/undo":

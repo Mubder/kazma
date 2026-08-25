@@ -127,6 +127,20 @@ async def test_write_is_fail_closed_without_approval_bus(ws):
     assert not (ws[0] / "new.py").exists()
 
 
+async def test_apply_patch_is_fail_closed_without_approval_bus(ws):
+    """HITL gate must block file_apply_patch the same way as file_write."""
+    root, svc = ws
+    (root / "hello.py").write_text("print('hi')\n", encoding="utf-8")
+    res = await svc.apply_patch(
+        "hello.py",
+        old_string="print('hi')",
+        new_string="print('hello')",
+    )
+    assert res["ok"] is False
+    assert res["error"] is not None
+    assert (root / "hello.py").read_text(encoding="utf-8") == "print('hi')\n"
+
+
 async def test_run_is_fail_closed_without_approval_bus(ws):
     _, svc = ws
     res = await svc.run("echo hi")
