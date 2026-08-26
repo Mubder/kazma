@@ -394,6 +394,66 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.clear_all_confirm": {"en": "Clear all pending approvals?", "ar": "مسح كل الموافقات المعلقة؟"},
     "dashboard.hitl_once": {"en": "Once", "ar": "مرة واحدة"},
     "dashboard.active_capabilities": {"en": "Active Capabilities", "ar": "القدرات النشطة"},
+    "dashboard.cap.doc": {"en": "Document Intelligence", "ar": "ذكاء المستندات"},
+    "dashboard.cap.doc_desc": {
+        "en": "Intake, OCR, index, redact, generate PDF/DOCX — durable jobs, not a one-shot parser",
+        "ar": "استلام وتعرّف ضوئي وفهرسة وتنقيح وتوليد PDF/DOCX — مهام دائمة وليست محللاً لمرة واحدة",
+    },
+    "dashboard.cap.web": {"en": "Web research", "ar": "بحث الويب"},
+    "dashboard.cap.web_desc": {
+        "en": "web_search, read_url, crawl + Firecrawl/Jina salvage and optional proxy",
+        "ar": "بحث وقراءة وزحف مع Firecrawl/Jina وبروكسي اختياري",
+    },
+    "dashboard.cap.memory": {"en": "Cognitive memory", "ar": "الذاكرة المعرفية"},
+    "dashboard.cap.memory_desc": {
+        "en": "V2 beliefs, episodes, PPR graph, sqlite-vec / pgvector recall",
+        "ar": "معتقدات V2 وحلقات ورسم PPR واسترجاع sqlite-vec / pgvector",
+    },
+    "dashboard.cap.swarm": {"en": "Swarm engine", "ar": "محرك السرب"},
+    "dashboard.cap.swarm_desc": {
+        "en": "Autoscaler, circuit breakers, optional Temporal durable dispatch",
+        "ar": "توسيع تلقائي وقواطع دوائر وإرسال Temporal اختياري",
+    },
+    "dashboard.cap.hitl": {"en": "HITL + commitment", "ar": "HITL والالتزام"},
+    "dashboard.cap.hitl_desc": {
+        "en": "Three approval gates, semantic confirm, MCP sampling HITL",
+        "ar": "ثلاث بوابات موافقة وتأكيد دلالي وHITL لعيّنات MCP",
+    },
+    "dashboard.cap.time": {"en": "Time travel", "ar": "السفر عبر الزمن"},
+    "dashboard.cap.time_desc": {
+        "en": "Snapshot replay and fork of conversation state",
+        "ar": "إعادة تشغيل اللقطات وتفريع حالة المحادثة",
+    },
+    "dashboard.cap.email": {"en": "Email", "ar": "البريد"},
+    "dashboard.cap.email_desc": {
+        "en": "Gmail / Microsoft OAuth + sandbox mailbox",
+        "ar": "مصادقة Gmail وMicrosoft وصندوق حماية",
+    },
+    "dashboard.cap.culture": {"en": "Arabic & RTL", "ar": "العربية وRTL"},
+    "dashboard.cap.culture_desc": {
+        "en": "Khaleeji dialect, RTL UI, Majlis protocol, i18n",
+        "ar": "لهجة خليجية وواجهة RTL وبروتوكول المجلس وترجمة",
+    },
+    "dashboard.cap.cua": {"en": "Computer use", "ar": "استخدام الحاسوب"},
+    "dashboard.cap.cua_desc": {
+        "en": "Screenshot→action loop; Anthropic CUA / Gemini when that model is active",
+        "ar": "حلقة لقطة→إجراء؛ CUA من Anthropic أو Gemini عندما يكون النموذج نشطاً",
+    },
+    "dashboard.cap.voice": {"en": "Voice duplex", "ar": "صوت ثنائي الاتجاه"},
+    "dashboard.cap.voice_desc": {
+        "en": "LiveKit AEC + barge-in on web; STT/TTS still through the graph",
+        "ar": "LiveKit مع إلغاء صدى ومقاطعة على الويب؛ STT/TTS عبر الرسم البياني",
+    },
+    "dashboard.cap.ide": {"en": "IDE + code index", "ar": "IDE وفهرس الشيفرة"},
+    "dashboard.cap.ide_desc": {
+        "en": "Monaco, apply-patch, codebase_search (tree-sitter extra or regex)",
+        "ar": "Monaco وترقيع الملفات وcodebase_search (tree-sitter أو regex)",
+    },
+    "dashboard.cap.mcp": {"en": "MCP + skills", "ar": "MCP والمهارات"},
+    "dashboard.cap.mcp_desc": {
+        "en": "MCP tools/resources/prompts; sampling HITL; agentskills.io install",
+        "ar": "أدوات وموارد MCP؛ عيّنات HITL؛ تثبيت agentskills.io",
+    },
     "dashboard.hitl_allow_tool": {"en": "Allow tool", "ar": "السماح بالأداة"},
     "dashboard.hitl_yolo": {"en": "YOLO", "ar": "YOLO"},
     "dashboard.hitl_deny": {"en": "Deny", "ar": "رفض"},

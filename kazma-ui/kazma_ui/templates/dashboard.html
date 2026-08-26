@@ -292,6 +292,22 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  window.DASH_CAPS = [
+    { id: "doc", name: {{ t('dashboard.cap.doc') | tojson }}, desc: {{ t('dashboard.cap.doc_desc') | tojson }}, color: "#3b82f6" },
+    { id: "web", name: {{ t('dashboard.cap.web') | tojson }}, desc: {{ t('dashboard.cap.web_desc') | tojson }}, color: "#0ea5e9" },
+    { id: "memory", name: {{ t('dashboard.cap.memory') | tojson }}, desc: {{ t('dashboard.cap.memory_desc') | tojson }}, color: "#38bdf8" },
+    { id: "swarm", name: {{ t('dashboard.cap.swarm') | tojson }}, desc: {{ t('dashboard.cap.swarm_desc') | tojson }}, color: "#f59e0b" },
+    { id: "hitl", name: {{ t('dashboard.cap.hitl') | tojson }}, desc: {{ t('dashboard.cap.hitl_desc') | tojson }}, color: "#ef4444" },
+    { id: "time", name: {{ t('dashboard.cap.time') | tojson }}, desc: {{ t('dashboard.cap.time_desc') | tojson }}, color: "#10b981" },
+    { id: "email", name: {{ t('dashboard.cap.email') | tojson }}, desc: {{ t('dashboard.cap.email_desc') | tojson }}, color: "#3b82f6" },
+    { id: "culture", name: {{ t('dashboard.cap.culture') | tojson }}, desc: {{ t('dashboard.cap.culture_desc') | tojson }}, color: "#ec4899" },
+    { id: "cua", name: {{ t('dashboard.cap.cua') | tojson }}, desc: {{ t('dashboard.cap.cua_desc') | tojson }}, color: "#22d3ee" },
+    { id: "voice", name: {{ t('dashboard.cap.voice') | tojson }}, desc: {{ t('dashboard.cap.voice_desc') | tojson }}, color: "#a78bfa" },
+    { id: "ide", name: {{ t('dashboard.cap.ide') | tojson }}, desc: {{ t('dashboard.cap.ide_desc') | tojson }}, color: "#34d399" },
+    { id: "mcp", name: {{ t('dashboard.cap.mcp') | tojson }}, desc: {{ t('dashboard.cap.mcp_desc') | tojson }}, color: "#fb7185" },
+  ];
+</script>
 <script src="/static/js/streaming.js"></script>
 <script src="/static/js/dash_lists.js"></script>
 <script src="/static/js/dashboard.js"></script>

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased — Dashboard Active Capabilities (2026-08-26)
+
+Dashboard cards were a static 8-item 2025 list. They now match 0.10:
+Document Intelligence, computer use, LiveKit voice, IDE + code index,
+MCP + skills, HITL + commitment. Copy is i18n (`window.DASH_CAPS`).
+
 ## Unreleased — Packages tab lists 0.10 extras (2026-08-26)
 
 Settings → Packages now shows (and can install) the extras added in 0.10:
