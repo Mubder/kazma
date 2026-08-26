@@ -492,7 +492,14 @@ def create_graph_handler(
                 msg.text = _rewritten
         except Exception:
             logger.debug("[agent-handler] slash rewrite skipped", exc_info=True)
-        # Cost breaker gate
+        # Cost breaker gate. Order matters: record the interaction FIRST —
+        # record_user_interaction() un-halts a tripped breaker and refreshes
+        # the budget by design. With the gate first, a tripped breaker
+        # short-circuited every message (including /reset and /hitl approve)
+        # before the reset could ever run — a permanent process-lifetime
+        # lockout (audit 2026-08-26).
+        if cost_breaker:
+            cost_breaker.record_user_interaction()
         if cost_breaker and cost_breaker.should_halt():
             # Restore platform context for the reply
             ctx = await _store.get(thread_id)
@@ -509,9 +516,6 @@ def create_graph_handler(
                 )
             )
             return
-
-        if cost_breaker:
-            cost_breaker.record_user_interaction()
 
         # ── Build platform-agnostic state ──────────────────────────
         state = await _build_initial_state(msg, _store)

@@ -1716,15 +1716,19 @@ def create_sse_chat_router(
             )
 
         # ── Cost breaker gate ──────────────────────────────────────
+        # Record the interaction FIRST — record_user_interaction() un-halts
+        # a tripped breaker and refreshes the budget by design. With the gate
+        # first, a tripped breaker rejected every message before the reset
+        # could run — a permanent lockout until process restart (audit
+        # 2026-08-26; same fix as the gateway handler).
+        if cost_breaker:
+            cost_breaker.record_user_interaction()
         if cost_breaker and cost_breaker.should_halt():
             return StreamingResponse(
                 iter([_sse_frame("error", {"content": "Session budget exceeded. Please restart."})]),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
-
-        if cost_breaker:
-            cost_breaker.record_user_interaction()
 
         # ── In-flight turn: a NEW user message supersedes; it does not wait.
         # Cursor attach (`last_event_id`) returned earlier so a refresh can
