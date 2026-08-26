@@ -398,8 +398,10 @@ def mutate_belief(
                 bid = str(result["belief_id"])
                 # Mirror the PERSISTED row (M-04): guarantees the mirror sees
                 # exactly what SQLite committed, death flags included — never
-                # a hand-built "definitely alive" dict.
-                remirror_belief_by_id(conn, bid)
+                # a hand-built "definitely alive" dict. (2026-08-26 audit: was
+                # `conn`, an undefined name — the NameError was swallowed and
+                # the new-belief mirror/graph dual-write never ran.)
+                remirror_belief_by_id(primary_conn, bid)
                 upsert_belief_edge(
                     subject=sub,
                     predicate=pred,

@@ -275,7 +275,10 @@ CREATE TABLE IF NOT EXISTS memory_task_queue (
   max_attempts  INTEGER DEFAULT 3,
   created_at    REAL NOT NULL,
   updated_at    REAL NOT NULL,
-  error_log     TEXT
+  error_log     TEXT,
+  -- Lease heartbeat (durability fix): per-claim token; a reclaim rotates it
+  -- so a stale handler's late ack is rejected. NULL when not processing.
+  lease_token   TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_pending
@@ -551,6 +554,15 @@ def ensure_ops_schema(conn: Any) -> None:
 
     apply_sqlite_pragmas(conn)
     conn.executescript(OPS_DDL)
+    # ── Idempotent column additions ──────────────────────────────────
+    # SQLite lacks ``ADD COLUMN IF NOT EXISTS``; probe ``PRAGMA table_info``
+    # and only ALTER when the column is missing (TaskStore convention).
+    existing_cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(memory_task_queue)")
+    }
+    if "lease_token" not in existing_cols:
+        conn.execute("ALTER TABLE memory_task_queue ADD COLUMN lease_token TEXT")
+        logger.debug("[schema_v2] migrated memory_task_queue.lease_token")
     conn.execute("PRAGMA foreign_keys = ON")
     conn.commit()
     logger.debug("[schema_v2] ops schema ensured")
