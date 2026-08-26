@@ -220,13 +220,12 @@
     } catch (e) { /* ignore malformed URLs */ }
     if (initialSessionId) {
       chatSessionId = initialSessionId;
-      // Use setTimeout to ensure Alpine store is initialized before connecting
-      setTimeout(function() {
-        loadSession(initialSessionId);
-        // Turn Delivery V2: reconcile with server truth (a turn may have
-        // finished or still be running while the page was closed).
-        _resyncDelivery('init');
-      }, 100);
+      // loadSession is in-flight-guarded and loadModels() below triggers
+      // the load for the same saved id — the old +100ms duplicate schedule
+      // caused a double fetch/render flicker on every boot (audit P1-6).
+      // Turn Delivery V2: reconcile with server truth (a turn may have
+      // finished or still be running while the page was closed).
+      _resyncDelivery('init');
     }
 
     // Load available models for the model selector
@@ -341,6 +340,10 @@
   function _resyncDelivery(reason) {
     if (!chatSessionId) return;
     var sid = chatSessionId;
+    // Race guard (audit P1-7): if the user sends a NEW message while this
+    // resync's fetches are in flight, the stale "idle + durable assistant"
+    // branch must not paint the previous reply into the new turn's bubble.
+    var epochAtFetch = _sseEpoch;
     Promise.all([
       fetch('/api/chat/sessions/' + encodeURIComponent(sid) + '/status')
         .then(function(r) { return r.ok ? r.json() : null; })
@@ -350,6 +353,7 @@
         .catch(function() { return []; }),
     ]).then(function(pair) {
       if (chatSessionId !== sid) return;
+      if (_sseEpoch !== epochAtFetch) return; // a new turn started meanwhile
       var status = pair[0] || {};
       var messages = pair[1] || [];
       var generating = !!status.generating;
@@ -4104,8 +4108,13 @@
 
   // Bounded retries for a transient session-messages fetch (restart window).
   var _loadMsgAttempts = 0;
+  // In-flight guard: one loadSession per session at a time (boot used to
+  // double-fetch/render — audit P1-6; retries must also not stack).
+  var _loadInFlightFor = null;
 
   function loadSession(sessionId) {
+    if (_loadInFlightFor === sessionId) return;
+    _loadInFlightFor = sessionId;
     // Loading from server — any previous wait is resolved by what renders.
     _awaitingReply = false;
     // Abort any in-flight turn from the previous session so Stop never sticks.
@@ -4145,8 +4154,9 @@
       })
       .then(function(payload) {
         // Guard against race: user switched sessions while fetch was in flight
-        if (chatSessionId !== sessionId) return;
+        if (chatSessionId !== sessionId) { _loadInFlightFor = null; return; }
         _loadMsgAttempts = 0;
+        _loadInFlightFor = null;
 
         var messages = payload;
         if (payload && !Array.isArray(payload) && Array.isArray(payload.messages)) {
@@ -4221,7 +4231,8 @@
         _restoreUndeliveredOutbox(messages);
       })
       .catch(function(err) {
-        if (chatSessionId !== sessionId) return;
+        if (chatSessionId !== sessionId) { _loadInFlightFor = null; return; }
+        _loadInFlightFor = null;
         diag('load-messages-failed', String((err && err.message) || err));
         // A transient load failure (server restarting / down) must NOT wipe
         // what is already on screen — replacing the transcript with an error
@@ -4528,15 +4539,9 @@
   }
 
   // ── Keyboard shortcuts ────────────────────────────────
+  // Navigation shortcuts (Ctrl+K/N/1-8) live ONLY in modules/nav.js — the
+  // old chat-local Ctrl+K/N here raced the global registry (audit P1-1).
   document.addEventListener('keydown', function(e) {
-    if (e.ctrlKey && e.key === 'k') {
-      e.preventDefault();
-      if (searchInputEl) searchInputEl.focus();
-    }
-    if (e.ctrlKey && e.key === 'n') {
-      e.preventDefault();
-      newSession();
-    }
     if (e.key === 'Escape' && document.activeElement === searchInputEl) {
       searchInputEl.value = '';
       searchQuery = '';

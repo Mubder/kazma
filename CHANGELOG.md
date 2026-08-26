@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Unreleased — UI audit remediation Phase 2: trust & perception (2026-08-26)
+
+- **One keyboard-shortcut registry** (nav.js): the racing Ctrl+1-6
+  hard-load handlers in components.js and chat's local Ctrl+K/N are gone.
+  Ctrl+K opens global search everywhere; Ctrl+N starts a fresh chat
+  session in place on /chat, navigates otherwise.
+- **Cache-bust split-brain closed**: `js_version()` now globs the whole
+  `static/js` tree (no hand-maintained whitelist), and every page-script
+  tag carries `?v=` (13 unversioned tags fixed incl. streaming.js on 7
+  pages and the hardcoded replay.js?v=2).
+- **x-cloak pass**: 173 x-show tags across settings/KB/modal/header/
+  sidebar/documents/workspace/mcp/agents now cloak — no more first-paint
+  flashes (worst: the "Vault Disabled" alert flashing on every Settings
+  load).
+- **Swarm breaker badge**: single class-driven badge per worker
+  (duplicate ids made the green "closed" state unreachable).
+- **Chat boots load once**: in-flight guard on loadSession; the +100ms
+  duplicate schedule removed (was double-fetch + flicker every boot).
+- **Resync race guarded**: a resync that raced a new send can no longer
+  paint the previous reply into the new turn's bubble.
+- **Unhandled fetch failures surface**: a global unhandled-rejection
+  handler toasts failures (deduped) — the ~70 catch-less load calls in
+  settings_hub/mcp/kb/models/providers/skills/ide no longer fail silently
+  into empty-states-as-truth.
+
+Tests: `tests/test_delivery_v2_client.py::TestUIAuditPhase2Fixes`.
+Restart + hard-refresh.
+
 ## Unreleased — UI audit remediation Phase 1: the four P0s (2026-08-26)
 
 From docs/audits/AUDIT_UI_DEEP_2026-08-26.md:

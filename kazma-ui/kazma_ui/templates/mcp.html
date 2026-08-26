@@ -174,8 +174,8 @@
             <div class="modal-actions">
                 <button class="btn btn-secondary" @click="showAddModal = false" :disabled="adding">{{ t('mcp.cancel') }}</button>
                 <button class="btn btn-primary" @click="addServer()" :disabled="adding">
-                    <span x-show="!adding">{{ t('mcp.add_server') }}</span>
-                    <span x-show="adding">Validating…</span>
+                    <span x-show="!adding" x-cloak>{{ t('mcp.add_server') }}</span>
+                    <span x-show="adding" x-cloak>Validating…</span>
                 </button>
             </div>
         </div>

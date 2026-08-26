@@ -209,18 +209,6 @@ export function kazmaApp() {
                 this.toggleSidebar();
             }
 
-            // Ctrl+K — Search
-            if (meta && e.key === 'k') {
-                e.preventDefault();
-                Alpine.store('search').toggle();
-            }
-
-            // Ctrl+N — New chat
-            if (meta && e.key === 'n') {
-                e.preventDefault();
-                window.location.href = '/chat';
-            }
-
             // Escape — Close modals/search
             if (e.key === 'Escape') {
                 if (Alpine.store('search').open) {
@@ -230,19 +218,10 @@ export function kazmaApp() {
                 }
             }
 
-            // Ctrl+1-6 — Navigate sections
-            if (meta && e.key >= '1' && e.key <= '6') {
-                e.preventDefault();
-                const routes = ['/', '/chat', '/dashboard', '/skills', '/mcp', '/swarm'];
-                const idx = parseInt(e.key) - 1;
-                if (routes[idx]) window.location.href = routes[idx];
-            }
-
-            // Ctrl+, — Settings
-            if (meta && e.key === ',') {
-                e.preventDefault();
-                window.location.href = '/settings';
-            }
+            // NOTE: navigation shortcuts (Ctrl+K/N/1-8/,) live ONLY in
+            // modules/nav.js — this used to carry a second (hard-load)
+            // registry, and the two raced: Ctrl+1 landed on the wrong page,
+            // Ctrl+2-6 double-navigated (UI audit P1-1).
         },
     };
 }

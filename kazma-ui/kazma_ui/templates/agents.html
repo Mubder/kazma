@@ -39,8 +39,8 @@
           <span x-html="KazmaIcons.square()"></span> {{ t('agents.stop') }}
         </button>
         <button class="btn btn-secondary" @click="refresh()" :disabled="loadingAction" :title="t('agents.refresh')">
-          <span x-show="!loadingAction">↻</span>
-          <span x-show="loadingAction">…</span>
+          <span x-show="!loadingAction" x-cloak>↻</span>
+          <span x-show="loadingAction" x-cloak>…</span>
         </button>
       </div>
     </div>
@@ -301,6 +301,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/streaming.js"></script>
-<script src="/static/js/agents.js"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
+<script src="/static/js/agents.js?v={{ js_version() }}"></script>
 {% endblock %}

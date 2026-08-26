@@ -132,9 +132,9 @@
             <span x-show="r.private" style="font-size:0.58rem;color:#f59e0b;background:rgba(245,158,11,0.1);padding:1px 6px;border-radius:3px;flex-shrink:0;" x-cloak x-text="t('workspace.private_badge')"></span>
           </div>
         </template>
-        <div x-show="ghRepoFiltered.length === 0" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;">
-          <span x-show="!ghCloning" x-text="t('workspace.no_repos')"></span>
-          <span x-show="ghCloning" x-text="t('workspace.cloning_wait')"></span>
+        <div x-show="ghRepoFiltered.length === 0" style="padding:24px;text-align:center;color:var(--text-muted);font-size:0.8rem;" x-cloak>
+          <span x-show="!ghCloning" x-text="t('workspace.no_repos')" x-cloak></span>
+          <span x-show="ghCloning" x-text="t('workspace.cloning_wait')" x-cloak></span>
         </div>
       </div>
       <div x-show="ghCloning" style="padding:12px 24px;border-top:1px solid var(--border-subtle);text-align:center;font-size:0.8rem;color:var(--accent);" x-cloak>
@@ -249,8 +249,8 @@
         <div style="display:flex;align-items:center;gap:8px;">
           <span :style="{ color: gitDirty ? 'var(--warning)' : 'var(--success)', fontSize:'0.75rem', fontWeight:'500' }"
                 x-text="gitDirty ? ('● ' + t('workspace.dirty')) : ('● ' + t('workspace.clean'))"></span>
-          <span style="color:var(--border-strong);font-size:0.8rem;" x-show="gitIsGit">|</span>
-          <code style="font-family:var(--font-mono);font-size:0.8rem;background:var(--bg-elevated);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-show="gitIsGit" x-text="gitBranch"></code>
+          <span style="color:var(--border-strong);font-size:0.8rem;" x-show="gitIsGit" x-cloak>|</span>
+          <code style="font-family:var(--font-mono);font-size:0.8rem;background:var(--bg-elevated);padding:2px 6px;border-radius:var(--radius-xs);color:var(--accent);" x-show="gitIsGit" x-text="gitBranch" x-cloak></code>
         </div>
       </div>
 
@@ -268,7 +268,7 @@
                 <span x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
-            <div x-show="gitStaged.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
+            <div x-show="gitStaged.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
               {{ t('workspace.no_staged') }}
             </div>
           </div>
@@ -287,7 +287,7 @@
                 <span x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
-            <div x-show="gitModified.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
+            <div x-show="gitModified.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
               {{ t('workspace.no_modified') }}
             </div>
           </div>
@@ -306,14 +306,14 @@
                 <span x-text="line.slice(3)" style="word-break:break-all;"></span>
               </div>
             </template>
-            <div x-show="gitUntracked.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;">
+            <div x-show="gitUntracked.length === 0" style="padding:8px;text-align:center;color:var(--text-muted);font-size:0.7rem;" x-cloak>
               {{ t('workspace.no_untracked') }}
             </div>
           </div>
         </div>
       </div>
 
-      <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);">
+      <div x-show="!gitIsGit && !loading" style="padding:24px 16px;text-align:center;color:var(--text-muted);background:var(--bg-surface);" x-cloak>
         <div style="margin-bottom:8px;color:var(--text-muted);"><span x-html="KazmaIcons.alert({class:'icon-lg'})"></span></div>
         <p style="font-size:0.85rem;margin:0;">{{ t('workspace.not_repo') }}</p>
       </div>
@@ -348,7 +348,7 @@
             </span>
           </template>
           <!-- Connect options when not authenticated -->
-          <div x-show="!ghAuthenticated" class="ic-row">
+          <div x-show="!ghAuthenticated" class="ic-row" x-cloak>
             <button class="btn btn-xs btn-primary" @click="showAppModal = true" style="display:inline-flex;align-items:center;gap:4px;font-size:0.75rem;padding:4px 8px;">
               <span class="ki" data-icon="github" aria-hidden="true"></span> Configure App
             </button>
@@ -359,7 +359,7 @@
               OAuth
             </button>
           </div>
-          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary ic-row-xs" @click="disconnectGitHub()" style="font-size:0.75rem;padding:4px 8px;">
+          <button x-show="ghAuthenticated" class="btn btn-xs btn-secondary ic-row-xs" @click="disconnectGitHub()" style="font-size:0.75rem;padding:4px 8px;" x-cloak>
             {{ t('workspace.gh_disconnect') }}
           </button>
         </div>
@@ -405,7 +405,7 @@
         </div>
 
         <!-- OVERVIEW TAB -->
-        <div x-show="ghActiveTab === 'overview'">
+        <div x-show="ghActiveTab === 'overview'" x-cloak>
         <!-- Repository Info Banner -->
         <div style="display:flex;align-items:start;justify-content:space-between;gap:12px;margin-bottom:10px;">
           <div>
@@ -508,7 +508,7 @@
         </div><!-- /OVERVIEW TAB -->
 
         <!-- PULL REQUESTS TAB -->
-        <div x-show="ghActiveTab === 'pulls'" style="max-height:340px;overflow-y:auto;">
+        <div x-show="ghActiveTab === 'pulls'" style="max-height:340px;overflow-y:auto;" x-cloak>
           <template x-for="pr in ghPrs" :key="pr.number">
             <div @click="ghOpenPr(pr.number)" style="padding:7px 8px;border-bottom:1px solid var(--tint);cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;transition:background 0.15s;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='none'">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
@@ -521,11 +521,11 @@
               </div>
             </div>
           </template>
-          <div x-show="ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_prs')"></div>
+          <div x-show="ghPrs.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_prs')" x-cloak></div>
         </div>
 
         <!-- ISSUES TAB -->
-        <div x-show="ghActiveTab === 'issues'" style="max-height:340px;overflow-y:auto;">
+        <div x-show="ghActiveTab === 'issues'" style="max-height:340px;overflow-y:auto;" x-cloak>
           <template x-for="iss in ghIssues" :key="iss.number">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
@@ -539,11 +539,11 @@
               </div>
             </div>
           </template>
-          <div x-show="ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_issues')"></div>
+          <div x-show="ghIssues.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_open_issues')" x-cloak></div>
         </div>
 
         <!-- COMMITS TAB -->
-        <div x-show="ghActiveTab === 'commits'" style="max-height:340px;overflow-y:auto;">
+        <div x-show="ghActiveTab === 'commits'" style="max-height:340px;overflow-y:auto;" x-cloak>
           <template x-for="c in ghCommits" :key="c.sha">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;gap:8px;">
               <code style="font-family:var(--font-mono);font-size:0.65rem;background:var(--bg-deep);padding:1px 5px;border-radius:var(--radius-xs);color:var(--accent);flex-shrink:0;" x-text="c.sha"></code>
@@ -551,11 +551,11 @@
               <span style="font-size:0.62rem;color:var(--text-muted);flex-shrink:0;margin-left:auto;" x-text="c.author"></span>
             </div>
           </template>
-          <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')"></div>
+          <div x-show="ghCommits.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_recent_commits')" x-cloak></div>
         </div>
 
         <!-- WORKFLOWS TAB -->
-        <div x-show="ghActiveTab === 'workflows'" style="max-height:340px;overflow-y:auto;">
+        <div x-show="ghActiveTab === 'workflows'" style="max-height:340px;overflow-y:auto;" x-cloak>
           <template x-for="wf in ghWorkflows" :key="wf.id">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
@@ -568,11 +568,11 @@
               </div>
             </div>
           </template>
-          <div x-show="ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_workflow_runs')"></div>
+          <div x-show="ghWorkflows.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_workflow_runs')" x-cloak></div>
         </div>
 
         <!-- RELEASES TAB -->
-        <div x-show="ghActiveTab === 'releases'" style="max-height:340px;overflow-y:auto;">
+        <div x-show="ghActiveTab === 'releases'" style="max-height:340px;overflow-y:auto;" x-cloak>
           <template x-for="rel in ghReleases" :key="rel.id">
             <div style="padding:7px 8px;border-bottom:1px solid var(--tint);display:flex;align-items:center;justify-content:space-between;gap:8px;">
               <div style="display:flex;align-items:center;gap:6px;min-width:0;">
@@ -583,7 +583,7 @@
               <a :href="rel.html_url" target="_blank" style="font-size:0.65rem;color:var(--text-muted);text-decoration:none;">view ↗</a>
             </div>
           </template>
-          <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')"></div>
+          <div x-show="ghReleases.length === 0" style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.75rem;" x-text="t('workspace.no_releases')" x-cloak></div>
         </div>
 
       </div><!-- /Main GitHub Card Body -->
@@ -625,7 +625,7 @@
       </div>
       <div class="file-list" style="max-height:180px;overflow-y:auto;">
         <div x-show="currentPath && currentPath !== '/'" @click="goUp()"
-             style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);font-size:0.8rem;">
+             style="display:flex;align-items:center;gap:8px;padding:6px 16px;border-bottom:1px solid var(--border-subtle);cursor:pointer;color:var(--text-secondary);font-size:0.8rem;" x-cloak>
           <span style="width:20px;"><span x-html="KazmaIcons['arrow-up']()"></span></span>
           <span style="flex:1;">..</span>
           <span style="font-size:0.75rem;color:var(--text-muted);">{{ t('workspace.up_one_level') }}</span>
@@ -640,11 +640,11 @@
             <span x-text="item.size || ''" style="font-size:0.75rem;color:var(--text-muted);font-family:var(--font-mono);"></span>
           </div>
         </template>
-        <div x-show="files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);">
+        <div x-show="files.length === 0 && !loading" style="padding:20px;text-align:center;color:var(--text-muted);" x-cloak>
           <div style="font-size:1.5rem;margin-bottom:4px;"><span class="ki" data-icon="inbox" aria-hidden="true"></span></div>
           <p style="margin:0;font-size:0.8rem;">{{ t('workspace.no_files') }}</p>
         </div>
-        <div x-show="loading" style="padding:15px;text-align:center;color:var(--text-muted);">
+        <div x-show="loading" style="padding:15px;text-align:center;color:var(--text-muted);" x-cloak>
           <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
           <div class="skeleton" style="height:28px;margin-bottom:6px;"></div>
           <div class="skeleton" style="height:28px;"></div>
@@ -674,20 +674,20 @@
             <span style="font-size:0.6rem;color:var(--text-tertiary);flex-shrink:0;" x-text="ghRelativeTime(a.timestamp)"></span>
           </div>
         </template>
-        <div x-show="ghActivity.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);">
+        <div x-show="ghActivity.length === 0 && !loading" style="padding:30px 20px;text-align:center;color:var(--text-muted);" x-cloak>
           <p style="margin:0;font-size:0.8rem;" x-text="ghOAuthConnected ? t('workspace.no_activity') : t('workspace.connect_for_activity')"></p>
         </div>
       </div>
     </div>
 
     <!-- Terminal Output -->
-    <div class="card" x-show="showTerminal" style="padding:0;overflow:hidden;grid-column:1/-1;">
+    <div class="card" x-show="showTerminal" style="padding:0;overflow:hidden;grid-column:1/-1;" x-cloak>
       <div class="card-header">
         <h3><span class="ki" data-icon="laptop" aria-hidden="true"></span> <span x-text="t('workspace.terminal_title')"></span></h3>
         <button class="btn-icon" @click="showTerminal = false"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="t('workspace.terminal_close')"></span></button>
       </div>
       <div class="terminal-output" x-ref="terminal" style="background:var(--bg-deep);color:var(--text-primary);font-family:var(--font-mono);font-size:0.8rem;padding:16px;max-height:300px;overflow-y:auto;">
-        <div x-show="termOutput.length === 0" style="color:var(--text-muted);" x-text="t('workspace.terminal_ready')"></div>
+        <div x-show="termOutput.length === 0" style="color:var(--text-muted);" x-text="t('workspace.terminal_ready')" x-cloak></div>
         <template x-for="line in termOutput" :key="line">
           <div x-text="line" style="white-space:pre-wrap;word-break:break-all;"></div>
         </template>
@@ -1514,5 +1514,5 @@ function fallbackFiles() {
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/streaming.js"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
 {% endblock %}

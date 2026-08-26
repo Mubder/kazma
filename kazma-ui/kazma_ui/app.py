@@ -522,37 +522,12 @@ class KazmaAppBuilder:
             _STATIC_DIR / "css" / "kazma.css",
             _STATIC_DIR / "css" / "kazma.v5.css",
         )
-        _js_version_files = (
-            _STATIC_DIR / "js" / "app.js",
-            _STATIC_DIR / "js" / "modules" / "nav.js",
-            _STATIC_DIR / "js" / "modules" / "stores.js",
-            _STATIC_DIR / "js" / "modules" / "components.js",
-            _STATIC_DIR / "js" / "modules" / "util.js",
-            _STATIC_DIR / "js" / "icons.js",
-            # Chat/HITL transport — must bust cache when YOLO/stream fixes land
-            _STATIC_DIR / "js" / "chat.js",
-            _STATIC_DIR / "js" / "streaming.js",
-            _STATIC_DIR / "js" / "stores" / "agentStore.js",
-            _STATIC_DIR / "js" / "hitl_approval.js",
-            # Settings page scripts — must bust cache or the Embedder tab etc.
-            # runs stale JS against fresh HTML (empty status cards symptom).
-            _STATIC_DIR / "js" / "settings.js",
-            _STATIC_DIR / "js" / "settings_core.js",
-            _STATIC_DIR / "js" / "settings_hub.js",
-            _STATIC_DIR / "js" / "settings_agent.js",
-            _STATIC_DIR / "js" / "settings_integrations.js",
-            _STATIC_DIR / "js" / "settings_ops.js",
-            _STATIC_DIR / "js" / "providers.js",
-            _STATIC_DIR / "js" / "models.js",
-            # MCP lifecycle controls run in a standalone page script; include
-            # it so a pulled UI never keeps a stale Start/Test handler cached.
-            _STATIC_DIR / "js" / "mcp.js",
-            # Memory page — graph ops / cut-hub UI lives here; omit = stale canvas JS
-            _STATIC_DIR / "js" / "memory.js",
-            _STATIC_DIR / "js" / "memory_console.js",
-            # Swarm Workflow Editor DAG renderer (vendored, no CDN)
-            _STATIC_DIR / "js" / "mermaid.min.js",
-        )
+        # JS cache-bust version: max mtime over EVERYTHING under static/js
+        # (globbed, re-scanned per request — no stale whitelist). The old
+        # hand-maintained list missed dashboard/ide/swarm/skills/agents/kb/
+        # documents/research/voice + modules/* — pulled UIs kept stale JS
+        # against fresh HTML on exactly those pages (UI audit P1-2).
+        _js_root = _STATIC_DIR / "js"
 
         def _css_version() -> int:
             latest = 1
@@ -565,11 +540,14 @@ class KazmaAppBuilder:
 
         def _js_version() -> int:
             latest = 1
-            for path in _js_version_files:
-                try:
-                    latest = max(latest, int(os.path.getmtime(path)))
-                except Exception:
-                    pass
+            try:
+                for path in _js_root.rglob("*.js"):
+                    try:
+                        latest = max(latest, int(os.path.getmtime(path)))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             return latest
 
         self.templates.env.globals["css_version"] = _css_version

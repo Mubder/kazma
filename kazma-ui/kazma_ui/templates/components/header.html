@@ -74,12 +74,12 @@
         <button class="theme-toggle" @click="toggleTheme()" :title="theme === 'dark' ? 'Switch to light' : 'Switch to dark'">
             {# x-show spans, NOT <template x-if> — Alpine can't clone template
                content inside <button> (cloneNode/_x_dataStack errors). #}
-            <span x-show="theme === 'dark'">
+            <span x-show="theme === 'dark'" x-cloak>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
                 </svg>
             </span>
-            <span x-show="theme === 'light'">
+            <span x-show="theme === 'light'" x-cloak>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
                 </svg>
@@ -99,7 +99,7 @@
                 <span class="sidebar-collapsed-hide" style="font-size:0.75rem;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
                       x-text="me && me.username ? me.username : ''"></span>
                 <span class="badge badge-stdio sidebar-collapsed-hide" style="font-size:0.65rem;margin-left:4px"
-                      x-show="me && me.role" x-text="me && me.role"></span>
+                      x-show="me && me.role" x-text="me && me.role" x-cloak></span>
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
                     <path d="M3 5l3 3 3-3"/>
                 </svg>

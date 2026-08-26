@@ -269,6 +269,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.stopped": {"en": "Stopped", "ar": "توقف"},
     "chat.running": {"en": "Running…", "ar": "جارٍ التنفيذ…"},
     "chat.error": {"en": "Error", "ar": "خطأ"},
+    "load_failed": {"en": "Failed to load", "ar": "فشل التحميل"},
     "chat.waiting_approval": {"en": "Waiting for approval", "ar": "بانتظار الموافقة"},
     "chat.routing": {"en": "Routing: {node}", "ar": "التوجيه: {node}"},
     "chat.routing_arrow": {"en": "Routing → {node}", "ar": "التوجيه ← {node}"},

@@ -180,6 +180,25 @@
             }
             return text;
         };
+        // Uncaught fetch/rejection surface (UI audit P1-8): ~70 load calls
+        // across settings_hub/mcp/kb/models/providers/skills/ide have no
+        // .catch — failures cleared `loading` and rendered empty-states as
+        // truth. This toasts every unhandled rejection (deduped, 5s window)
+        // so a failed load is never silent.
+        (function () {
+            var lastMsg = '', lastAt = 0;
+            window.addEventListener('unhandledrejection', function (ev) {
+                var reason = ev && ev.reason;
+                var msg = (reason && (reason.message || reason.statusText)) || 'request failed';
+                var now = Date.now();
+                if (msg === lastMsg && now - lastAt < 5000) return;
+                lastMsg = msg; lastAt = now;
+                try { console.error('[Kazma] Unhandled rejection:', reason); } catch (e) {}
+                if (window.showToast) {
+                    try { window.showToast('⚠️ ' + window.t('load_failed') + ' — ' + msg, 'error', 4000); } catch (e2) {}
+                }
+            });
+        })();
     </script>
 
     {# Auth guard — global fetch wrapper for session-expired (401) handling.

@@ -643,6 +643,27 @@ export function initSoftNav() {
             window.location.href = '/ide';
             return;
         }
+        // Ctrl+K — global search (the ONE registry; chat's old local
+        // Ctrl+K focused the session search and fought this — audit P1-1).
+        if (e.key === 'k' || e.key === 'K') {
+            e.preventDefault();
+            try {
+                if (window.Alpine && Alpine.store('search')) Alpine.store('search').toggle();
+            } catch (err) { /* search store not ready */ }
+            return;
+        }
+        // Ctrl+N — page-aware new chat: on /chat start a fresh session
+        // in place; anywhere else, navigate to chat (which boots fresh).
+        if (e.key === 'n' || e.key === 'N') {
+            e.preventDefault();
+            if (location.pathname === '/chat'
+                && window.KazmaChat && typeof window.KazmaChat.newSession === 'function') {
+                window.KazmaChat.newSession();
+            } else {
+                window.location.href = '/chat';
+            }
+            return;
+        }
         const target = NAV_SHORTCUTS[e.key];
         if (target) {
             e.preventDefault();

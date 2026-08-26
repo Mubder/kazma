@@ -85,6 +85,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/streaming.js"></script>
-<script src="/static/js/replay.js?v=2"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
+<script src="/static/js/replay.js?v={{ js_version() }}"></script>
 {% endblock %}

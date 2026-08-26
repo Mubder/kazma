@@ -130,7 +130,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/streaming.js"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
 <script>
 // Merge page keys into global i18n — do NOT wipe window.KAZMA_I18N from base.html
 window.KAZMA_I18N = Object.assign({}, window.KAZMA_I18N || {}, {

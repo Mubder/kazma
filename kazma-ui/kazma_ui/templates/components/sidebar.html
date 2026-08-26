@@ -8,7 +8,7 @@
     <div class="sidebar-header">
         <a href="/chat" class="logo" style="text-decoration:none">
             <img src="/static/img/kazma-logo.png" alt="Kazma" class="logo-img">
-            <span class="logo-text" x-show="!sidebarCollapsed">Kazma</span>
+            <span class="logo-text" x-show="!sidebarCollapsed" x-cloak>Kazma</span>
         </a>
         {# On mobile (≤768px) the sidebar is a drawer — this button closes it
            instead of collapsing (DS v5 single-owner mobile nav). #}
@@ -19,11 +19,11 @@
                 {# x-show on real <g> children, NOT <template x-if> — Alpine
                    can't clone template content inside SVG (browser parses it
                    differently) and throws cloneNode/_x_dataStack errors. #}
-                <g x-show="!sidebarCollapsed">
+                <g x-show="!sidebarCollapsed" x-cloak>
                     <rect x="1" y="2" width="14" height="12" rx="2"/>
                     <line x1="6" y1="2" x2="6" y2="14"/>
                 </g>
-                <g x-show="sidebarCollapsed">
+                <g x-show="sidebarCollapsed" x-cloak>
                     <rect x="1" y="2" width="14" height="12" rx="2"/>
                     <line x1="10" y1="2" x2="10" y2="14"/>
                 </g>
@@ -189,7 +189,7 @@
     {# Footer #}
     <div class="sidebar-footer">
         {# Model Selector Dropdown #}
-        <div class="sidebar-model-selector sidebar-collapsed-hide" x-show="!sidebarCollapsed">
+        <div class="sidebar-model-selector sidebar-collapsed-hide" x-show="!sidebarCollapsed" x-cloak>
             <select
                 x-model="activeModel"
                 @change="onModelChange($event)"

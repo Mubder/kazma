@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import re
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -279,6 +280,89 @@ class TestUIAuditP0Fixes:
         assert "bar.innerHTML =" not in js.split("function bindCapacityBar")[1][:2000]
         assert 'data-cap="/plan on"' in html
         assert 'aria-label="Plan"' in html
+
+
+class TestUIAuditPhase2Fixes:
+    """docs/audits/AUDIT_UI_DEEP_2026-08-26.md — Phase 2 contracts."""
+
+    _NAV = _UI / "static" / "js" / "modules" / "nav.js"
+    _COMP = _UI / "static" / "js" / "modules" / "components.js"
+
+    def test_single_shortcut_registry(self):
+        """Navigation shortcuts live ONLY in nav.js — components.js and
+        chat.js must not carry racing Ctrl+N/1-6/K handlers."""
+        comp = self._COMP.read_text(encoding="utf-8")
+        chat = _CHAT_JS.read_text(encoding="utf-8")
+        nav = self._NAV.read_text(encoding="utf-8")
+        assert "Ctrl+1-6" not in comp  # removed block
+        assert "window.location.href = '/chat';" not in comp
+        assert "Alpine.store('search').toggle()" not in comp
+        assert "e.key === 'n'" not in chat
+        assert "e.key === 'k'" not in chat
+        # nav.js owns K (search) + N (page-aware new chat)
+        assert "Alpine.store('search').toggle();" in nav
+        assert "KazmaChat.newSession === 'function'" in nav
+
+    def test_all_page_scripts_versioned(self):
+        """No unversioned page-script tags remain (stale-JS/fresh-HTML
+        split-brain); replay.js no longer hardcodes v=2."""
+        for tpl in (_UI / "templates").glob("*.html"):
+            src = tpl.read_text(encoding="utf-8")
+            for m in re.finditer(r'src="(/static/js/[^"?]+)"', src):
+                rel = m.group(1)
+                assert rel.endswith(".min.js"), (
+                    f"{tpl.name}: unversioned script {rel}"
+                )
+        replay = (_UI / "templates" / "replay.html").read_text(encoding="utf-8")
+        assert "replay.js?v=2" not in replay
+
+    def test_js_version_globs_everything(self):
+        """The cache-bust version covers the whole static/js tree — no
+        hand-maintained whitelist to go stale."""
+        src = (_UI / "app.py").read_text(encoding="utf-8")
+        assert "_js_version_files" not in src
+        assert '_js_root.rglob("*.js")' in src
+
+    def test_loadsession_in_flight_guard(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "_loadInFlightFor" in src
+        assert "if (_loadInFlightFor === sessionId) return;" in src
+        # the +100ms duplicate boot schedule is gone
+        assert "setTimeout(function() {\n        loadSession(initialSessionId);" not in src
+
+    def test_resync_epoch_race_guard(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "var epochAtFetch = _sseEpoch;" in src
+        assert "if (_sseEpoch !== epochAtFetch) return; // a new turn started meanwhile" in src
+
+    def test_unhandled_rejections_surface(self):
+        base = (_UI / "templates" / "base.html").read_text(encoding="utf-8")
+        assert "unhandledrejection" in base
+        assert "showToast" in base
+
+    def test_swarm_breaker_badge_class_driven(self):
+        html = (_UI / "templates" / "swarm.html").read_text(encoding="utf-8")
+        js = (_UI / "static" / "js" / "swarm.js").read_text(encoding="utf-8")
+        assert 'id="cb-badge-{{ w.name }}"' not in html
+        assert 'data-cb-worker="{{ w.name }}"' in html
+        assert '[data-cb-worker="' in js
+
+    def test_x_cloak_pass_applied(self):
+        """The audit's worst flash sites now carry x-cloak (quote-aware tag
+        matching — attributes may contain '>' inside quoted expressions)."""
+        tag_re = re.compile(r"""<[a-zA-Z]+(?:[^>"']|"[^"]*"|'[^']*')*>""")
+        targets = [
+            _UI / "templates" / "settings.html",
+            _UI / "templates" / "knowledge_base.html",
+            _UI / "templates" / "components" / "modal.html",
+            _UI / "templates" / "components" / "header.html",
+        ]
+        for p in targets:
+            src2 = p.read_text(encoding="utf-8")
+            for mm in tag_re.finditer(src2):
+                tag = mm.group(0)
+                if "x-show=" in tag and "<template" not in tag:
+                    assert "x-cloak" in tag, f"{p.name}: {tag[:100]}"
 
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")

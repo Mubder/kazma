@@ -63,7 +63,7 @@
                                         'badge-stdio': p.health === 'healthy',
                                         'badge-standard': p.health === 'degraded',
                                         'badge-premium': p.health === 'down'
-                                    }" x-text="p.health || t('settings.unknown')" x-show="p.health"></span>
+                                    }" x-text="p.health || t('settings.unknown')" x-show="p.health" x-cloak></span>
                                 </div>
                                 <div style="font-size:0.8rem;color:var(--text-muted);word-break:break-all" x-text="p.base_url"></div>
                                 <div style="font-size:0.75rem;color:var(--text-muted)">
@@ -91,7 +91,7 @@
                                           x-text="'Discovered (' + p.discovered_models.length + ')'"></span>
                                     <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
                                           x-show="(p.selected_models || []).length"
-                                          x-text="'(' + (p.selected_models || []).length + ' selected)'"></span>
+                                          x-text="'(' + (p.selected_models || []).length + ' selected)'" x-cloak></span>
                                 </div>
                                 <div style="display:flex;align-items:center;gap:4px">
                                     <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
@@ -123,7 +123,7 @@
                                     </div>
                                 </template>
                                 <div x-show="filteredDiscoveredModels(p).length === 0"
-                                     style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)">
+                                     style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)" x-cloak>
                                     No models match your search
                                 </div>
                             </div>
@@ -134,11 +134,11 @@
                     </div>
                 </template>
 
-                <div x-show="hubProviders.length === 0 && !loading" class="empty-state">
+                <div x-show="hubProviders.length === 0 && !loading" class="empty-state" x-cloak>
                     {{ t('settings.no_providers') }}
                 </div>
 
-                <div x-show="hubTestResult && hubTestResult.type === 'provider'" class="validation-result" style="margin-top:12px">
+                <div x-show="hubTestResult && hubTestResult.type === 'provider'" class="validation-result" style="margin-top:12px" x-cloak>
                     <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
@@ -153,7 +153,7 @@
                     <h3>{{ t('settings.saved_profiles') }}</h3>
                     <button class="btn btn-primary btn-sm" @click="openHubProfileModal()">+ {{ t('settings.save_profile') }}</button>
                 </div>
-                <div x-show="hubProfiles.length === 0" class="empty-state" style="padding:16px">
+                <div x-show="hubProfiles.length === 0" class="empty-state" style="padding:16px" x-cloak>
                     {{ t('settings.no_saved_profiles') }}
                 </div>
                 <template x-for="p in hubProfiles" :key="p.name">
@@ -192,7 +192,7 @@
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
                                 {{ t('settings.token') }}: <span x-text="c.token || '—'" style="font-family:var(--font-mono)"></span>
                             </div>
-                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="Object.keys(c.extras || {}).length">
+                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="Object.keys(c.extras || {}).length" x-cloak>
                                 <template x-for="(val, key) in c.extras" :key="key">
                                     <span x-text="key + ': ' + val" style="margin-right:12px"></span>
                                 </template>
@@ -210,11 +210,11 @@
                     </div>
                 </template>
 
-                <div x-show="hubConnectors.length === 0 && !loading" class="empty-state">
+                <div x-show="hubConnectors.length === 0 && !loading" class="empty-state" x-cloak>
                     {{ t('settings.no_connectors') }}
                 </div>
 
-                <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px">
+                <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px" x-cloak>
                     <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
                     </template>
@@ -241,12 +241,12 @@
         <div x-show="hubProviderModal" x-cloak class="modal-overlay" @click.self="hubProviderModal = false">
             <div class="modal">
                 <h2 x-text="hubEditingProvider._existing ? '{{ t('settings.edit_provider') }}' : '{{ t('settings.add_provider') }}'"></h2>
-                <div class="form-group" x-show="!hubEditingProvider._existing" style="margin-bottom: 16px;">
+                <div class="form-group" x-show="!hubEditingProvider._existing" style="margin-bottom: 16px;" x-cloak>
                     <label>{{ t('settings.choose_preset') }}</label>
                     <select class="form-select" @change="applyHubProviderPreset($event.target.value); $event.target.value = ''">
                         <option value="">{{ t('settings.choose_preset_placeholder') }}</option>
                         <template x-for="preset in providerPresets" :key="preset.key">
-                            <option :value="preset.key" x-text="preset.name" x-show="preset.key !== 'custom'"></option>
+                            <option :value="preset.key" x-text="preset.name" x-show="preset.key !== 'custom'" x-cloak></option>
                         </template>
                     </select>
                 </div>
@@ -272,7 +272,7 @@
                         </div>
 
                         <!-- AI Studio Section -->
-                        <div x-show="hubEditingProvider.google_mode === 'ai_studio'">
+                        <div x-show="hubEditingProvider.google_mode === 'ai_studio'" x-cloak>
                             <div class="form-group" style="margin-bottom: 12px;">
                                 <label>{{ t('settings.api_key') }}</label>
                                 <div class="input-with-toggle">
@@ -287,7 +287,7 @@
                         </div>
 
                         <!-- Vertex AI Section -->
-                        <div x-show="hubEditingProvider.google_mode === 'vertex_ai'">
+                        <div x-show="hubEditingProvider.google_mode === 'vertex_ai'" x-cloak>
                             <div class="form-row" style="gap: 12px;">
                                 <div class="form-group" style="flex: 1;">
                                     <label>GCP Project ID (Optional - falls back to gcloud/ADC)</label>
@@ -340,7 +340,7 @@
                     <button class="btn btn-secondary" @click="testHubProviderFromModal()" :disabled="hubTestingProvider === 'modal'" x-text="hubTestingProvider === 'modal' ? '{{ t('settings.testing') }}' : '{{ t('settings.test_connection') }}'"></button>
                     <button class="btn btn-primary" @click="saveHubProvider()" :disabled="saving || !hubProviderTested" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
                 </div>
-                <div x-show="!hubProviderTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px">
+                <div x-show="!hubProviderTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px" x-cloak>
                     {{ t('settings.test_before_save') }}
                 </div>
             </div>
@@ -369,11 +369,11 @@
                     </div>
                     <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>
                 </div>
-                <div class="form-group" x-show="hubEditingConnector.name === 'telegram'">
+                <div class="form-group" x-show="hubEditingConnector.name === 'telegram'" x-cloak>
                     <label>{{ t('settings.allowed_user_ids') }}</label>
                     <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="1804015016">
                 </div>
-                <div class="form-row" x-show="hubEditingConnector.name === 'slack'">
+                <div class="form-row" x-show="hubEditingConnector.name === 'slack'" x-cloak>
                     <div class="form-group">
                         <label>{{ t('settings.app_token_xapp') }}</label>
                         <input type="text" class="form-input" x-model="hubEditingConnector.extras.app_token" placeholder="xapp-...">
@@ -383,11 +383,11 @@
                         <input type="text" class="form-input" x-model="hubEditingConnector.extras.workspace" placeholder="workspace-name">
                     </div>
                 </div>
-                <div class="form-group" x-show="hubEditingConnector.name === 'discord'">
+                <div class="form-group" x-show="hubEditingConnector.name === 'discord'" x-cloak>
                     <label>{{ t('settings.guild_id') }}</label>
                     <input type="text" class="form-input" x-model="hubEditingConnector.extras.guild_id" placeholder="Guild ID">
                 </div>
-                <div class="form-row" x-show="hubEditingConnector.name === 'email'">
+                <div class="form-row" x-show="hubEditingConnector.name === 'email'" x-cloak>
                     <div class="form-group">
                         <label>{{ t('settings.smtp_host') }}</label>
                         <input type="text" class="form-input" x-model="hubEditingConnector.extras.smtp_host" placeholder="smtp.gmail.com">
@@ -397,7 +397,7 @@
                         <input type="number" class="form-input" x-model="hubEditingConnector.extras.smtp_port" placeholder="587">
                     </div>
                 </div>
-                <div class="form-row" x-show="hubEditingConnector.name === 'email'">
+                <div class="form-row" x-show="hubEditingConnector.name === 'email'" x-cloak>
                     <div class="form-group">
                         <label>{{ t('settings.username') }}</label>
                         <input type="text" class="form-input" x-model="hubEditingConnector.extras.username" placeholder="user@example.com">
@@ -407,19 +407,19 @@
                         <input type="password" class="form-input" x-model="hubEditingConnector.extras.password" placeholder="App password">
                     </div>
                 </div>
-                <div class="form-group" x-show="hubEditingConnector.name === 'email'">
+                <div class="form-group" x-show="hubEditingConnector.name === 'email'" x-cloak>
                     <label>{{ t('settings.imap_host') }}</label>
                     <input type="text" class="form-input" x-model="hubEditingConnector.extras.imap_host" placeholder="imap.gmail.com">
                 </div>
-                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'">
+                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'" x-cloak>
                     <label>{{ t('settings.incoming_webhook_url') }}</label>
                     <input type="text" class="form-input" x-model="hubEditingConnector.extras.incoming_url" placeholder="https://your-domain.com/api/webhooks/incoming">
                 </div>
-                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'">
+                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'" x-cloak>
                     <label>{{ t('settings.outgoing_webhook_url') }}</label>
                     <input type="text" class="form-input" x-model="hubEditingConnector.extras.outgoing_url" placeholder="https://hooks.example.com/...">
                 </div>
-                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'">
+                <div class="form-group" x-show="hubEditingConnector.name === 'webhook'" x-cloak>
                     <label>{{ t('settings.webhook_secret') }}</label>
                     <input type="password" class="form-input" x-model="hubEditingConnector.extras.secret" placeholder="Shared secret">
                 </div>
@@ -437,7 +437,7 @@
                     <button class="btn btn-secondary" @click="testHubConnectorFromModal()" :disabled="hubTestingConnector === 'modal'" x-text="hubTestingConnector === 'modal' ? '{{ t('settings.testing') }}' : '{{ t('settings.test_connection') }}'"></button>
                     <button class="btn btn-primary" @click="saveHubConnector()" :disabled="saving || !hubConnectorTested" x-text="saving ? '{{ t('settings.saving') }}' : '{{ t('settings.save') }}'"></button>
                 </div>
-                <div x-show="!hubConnectorTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px">
+                <div x-show="!hubConnectorTested" style="font-size:0.8rem;color:var(--warning);margin-top:8px" x-cloak>
                     {{ t('settings.test_before_save') }}
                 </div>
             </div>
@@ -530,7 +530,7 @@
                 </p>
                 <p class="form-help" style="margin-top:4px;font-size:0.75rem;color:var(--text-muted);"
                    x-show="agent.recursion_limit"
-                   x-text="'Graph step budget (auto): ~' + (agent.recursion_limit || 100) + ' (aligned with tool rounds)'"></p>
+                   x-text="'Graph step budget (auto): ~' + (agent.recursion_limit || 100) + ' (aligned with tool rounds)'" x-cloak></p>
             </div>
             <div class="form-group" style="margin-top:1rem;">
                 <label>{{ t('settings.long_task_mode') }}</label>
@@ -578,11 +578,11 @@
                     </label>
                 </label>
             </div>
-            <div class="form-group" x-show="safety.hitl_enabled">
+            <div class="form-group" x-show="safety.hitl_enabled" x-cloak>
                 <label>{{ t('settings.tools_requiring_approval') }}</label>
                 <input type="text" class="form-input" :value="(safety.require_approval_for || []).join(', ')" @input="safety.require_approval_for = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)" placeholder="file_write, file_delete, shell_exec">
             </div>
-            <div class="form-row" x-show="safety.hitl_enabled">
+            <div class="form-row" x-show="safety.hitl_enabled" x-cloak>
                 <div class="form-group">
                     <label>{{ t('settings.approval_timeout_seconds') }}</label>
                     <input type="number" class="form-input" x-model.number="safety.approval_timeout" min="10" max="600">
@@ -769,7 +769,7 @@
                  style="margin-bottom:12px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);font-size:0.78rem;"
                  :style="memoryBackendsCapability.vector_write_ready
                    ? 'background:rgba(46,213,115,0.08);border-color:rgba(46,213,115,0.3)'
-                   : 'background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.35)'">
+                   : 'background:rgba(245,158,11,0.08);border-color:rgba(245,158,11,0.35)'" x-cloak>
               <strong x-text="memoryBackendsCapability.vector_status === 'full' ? 'Vector: full (local)' : (memoryBackendsCapability.vector_status === 'remote_ready' ? 'Vector: remote search+write' : 'Vector: needs setup')"></strong>
               <span style="color:var(--text-muted)" x-text="' — ' + (memoryBackendsCapability.vector_status_detail || '')"></span>
             </div>
@@ -792,11 +792,11 @@
                 <label>{{ t('settings.embedder_model') }}</label>
                 <input type="text" class="form-input" x-model="memoryBackends.embedder.model" placeholder="BAAI/bge-m3">
             </div>
-            <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'">
+            <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'" x-cloak>
                 <label>{{ t('settings.embedder_base_url') }}</label>
                 <input type="text" class="form-input" x-model="memoryBackends.embedder.base_url" placeholder="https://…">
             </div>
-            <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'">
+            <div class="form-group" x-show="memoryBackends.embedder.provider !== 'local'" x-cloak>
                 <label>API key</label>
                 <input type="password" class="form-input" x-model="memoryBackends.embedder.api_key" placeholder="leave blank to keep">
             </div>
@@ -808,7 +808,7 @@
                     <option value="qdrant">Qdrant</option>
                 </select>
             </div>
-            <div class="form-group" x-show="memoryBackends.vector.provider !== 'sqlite_vec'">
+            <div class="form-group" x-show="memoryBackends.vector.provider !== 'sqlite_vec'" x-cloak>
                 <label>Vector connection URL / DSN</label>
                 <input type="text" class="form-input" x-model="memoryBackends.vector.url" placeholder="postgresql://… or http://qdrant:6333">
             </div>
@@ -819,11 +819,11 @@
                     <option value="postgres">Postgres dual-mirror</option>
                 </select>
             </div>
-            <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'">
+            <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'" x-cloak>
                 <label>Postgres DSN</label>
                 <input type="text" class="form-input" x-model="memoryBackends.state.url" placeholder="postgresql://user:pass@host:5432/kazma">
             </div>
-            <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'" style="margin-top:4px;">
+            <div class="form-group" x-show="memoryBackends.state && memoryBackends.state.provider === 'postgres'" style="margin-top:4px;" x-cloak>
                 <p style="font-size:0.72rem;color:var(--text-muted);margin:0 0 8px;">
                     The mirror is write-forward only — existing beliefs/episodes aren't copied automatically. Use Sync once after enabling (and to re-sync after bulk edits).
                 </p>
@@ -846,15 +846,15 @@
                         <option value="neo4j">{{ t('settings.memory_graph_neo4j') }}</option>
                     </select>
                 </div>
-                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'">
+                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'" x-cloak>
                     <label>{{ t('settings.memory_neo4j_url') }}</label>
                     <input type="text" class="form-input" x-model="memoryBackends.graph.url" placeholder="bolt://localhost:7687">
                 </div>
-                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'">
+                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'" x-cloak>
                     <label>{{ t('settings.memory_neo4j_user') }}</label>
                     <input type="text" class="form-input" x-model="memoryBackends.graph.user" placeholder="neo4j">
                 </div>
-                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'">
+                <div class="form-group" x-show="(memoryBackends.graph && memoryBackends.graph.provider) === 'neo4j'" x-cloak>
                     <label>{{ t('settings.memory_neo4j_password') }}</label>
                     <input type="password" class="form-input" x-model="memoryBackends.graph.password" placeholder="leave blank to keep">
                 </div>
@@ -955,7 +955,7 @@
                 </select>
                 <div class="form-hint">{{ t('settings.embedder_model_hint') }}</div>
             </div>
-            <div x-show="embedder._preset === '__custom__'">
+            <div x-show="embedder._preset === '__custom__'" x-cloak>
                 <div class="form-group">
                     <label>{{ t('settings.embedder_custom_model') }}</label>
                     <input type="text" class="form-input" x-model="embedder.model" placeholder="BAAI/bge-m3">
@@ -1058,7 +1058,7 @@
                             <td style="padding:6px 8px" x-text="v.beliefs"></td>
                         </tr>
                     </template>
-                    <tr x-show="embedderDbVersions().length === 0">
+                    <tr x-show="embedderDbVersions().length === 0" x-cloak>
                         <td colspan="3" style="padding:10px 8px;color:var(--text-muted)">{{ t('settings.embedder_db_empty') }}</td>
                     </tr>
                 </tbody>
@@ -1071,13 +1071,13 @@
                 <button class="btn btn-danger" @click="rebuildEmbeddings()" :disabled="embedderRebuilding || embedderRebuildStatus.state === 'running'">
                     {# x-show spans, NOT <template x-if> — Alpine can't clone
                        template content inside <button> (cloneNode/_x_dataStack). #}
-                    <span x-show="embedderRebuildStatus.state !== 'running'">{{ t('settings.embedder_rebuild_btn') }}</span>
-                    <span x-show="embedderRebuildStatus.state === 'running'">{{ t('settings.embedder_rebuild_running') }}</span>
+                    <span x-show="embedderRebuildStatus.state !== 'running'" x-cloak>{{ t('settings.embedder_rebuild_btn') }}</span>
+                    <span x-show="embedderRebuildStatus.state === 'running'" x-cloak>{{ t('settings.embedder_rebuild_running') }}</span>
                 </button>
                 <div x-show="embedderRebuildStatus.state !== 'idle'" x-cloak style="margin-top:10px">
                     <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">
                         <span x-text="embedderRebuildStatus.state === 'done' ? t('settings.embedder_rebuild_done') : (embedderRebuildStatus.state === 'error' ? t('settings.embedder_rebuild_error') : (embedderRebuildStatus.done + ' / ' + (embedderRebuildStatus.total || '…')))"></span>
-                        <span x-show="embedderRebuildStatus.model" x-text="embedderRebuildStatus.model"></span>
+                        <span x-show="embedderRebuildStatus.model" x-text="embedderRebuildStatus.model" x-cloak></span>
                     </div>
                     <div style="background:var(--bg-deep);border:1px solid var(--border);border-radius:999px;height:10px;overflow:hidden">
                         <div style="height:100%;background:var(--accent,#22d3ee);transition:width .5s;width:0%" :style="{ width: rebuildPercent() + '%' }"></div>
@@ -1127,7 +1127,7 @@
                         <button class="btn btn-danger btn-sm" @click="deleteMcpServer(s.name)">×</button>
                     </div>
                     <!-- Tool list (expandable) -->
-                    <div x-show="s.tools && s.tools.length > 0" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)">
+                    <div x-show="s.tools && s.tools.length > 0" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-subtle)" x-cloak>
                         <template x-for="tool in (s.tools || [])" :key="tool.name">
                             <div style="display:flex;gap:8px;padding:3px 0;font-size:0.8rem">
                                 <span class="tool-name" x-text="tool.name"></span>
@@ -1138,13 +1138,13 @@
                 </div>
             </template>
 
-            <div x-show="mcpServers.length === 0 && !loading" class="empty-state">
+            <div x-show="mcpServers.length === 0 && !loading" class="empty-state" x-cloak>
                 {{ t('settings.no_mcp_servers') }}
             </div>
         </div>
 
         <!-- Add MCP Server Modal -->
-        <div x-show="showMcpModal" class="modal-overlay" @click.self="showMcpModal = false">
+        <div x-show="showMcpModal" class="modal-overlay" @click.self="showMcpModal = false" x-cloak>
             <div class="modal">
                 <h2>{{ t('settings.add_server') }}</h2>
                 <div class="form-group">
@@ -1158,11 +1158,11 @@
                         <option value="sse">{{ t('settings.sse_http') }}</option>
                     </select>
                 </div>
-                <div class="form-group" x-show="newMcpServer.transport === 'stdio'">
+                <div class="form-group" x-show="newMcpServer.transport === 'stdio'" x-cloak>
                     <label>{{ t('settings.command_space_separated') }}</label>
                     <input type="text" class="form-input" x-model="newMcpServer.command" placeholder="npx -y @modelcontextprotocol/server-filesystem /tmp">
                 </div>
-                <div class="form-group" x-show="newMcpServer.transport === 'sse'">
+                <div class="form-group" x-show="newMcpServer.transport === 'sse'" x-cloak>
                     <label>{{ t('settings.url') }}</label>
                     <input type="text" class="form-input" x-model="newMcpServer.url" placeholder="http://localhost:8080/sse">
                 </div>
@@ -1200,9 +1200,9 @@
                         </div>
                         <div class="skill-desc" x-text="skill.description || '{{ t('settings.no_description') }}'"></div>
                         <div class="skill-meta">
-                            <span x-show="skill.version">v<span x-text="skill.version"></span></span>
-                            <span x-show="skill.category" x-text="skill.category"></span>
-                            <span x-show="skill.author" x-text="'{{ t('settings.by') }} ' + skill.author"></span>
+                            <span x-show="skill.version" x-cloak>v<span x-text="skill.version"></span></span>
+                            <span x-show="skill.category" x-text="skill.category" x-cloak></span>
+                            <span x-show="skill.author" x-text="'{{ t('settings.by') }} ' + skill.author" x-cloak></span>
                         </div>
                         <div class="skill-actions">
                             <button class="btn btn-danger btn-sm" @click="uninstallSkill(skill.name)">{{ t('settings.uninstall') }}</button>
@@ -1211,7 +1211,7 @@
                 </template>
             </div>
 
-            <div x-show="skills.length === 0 && !loading" class="empty-state">
+            <div x-show="skills.length === 0 && !loading" class="empty-state" x-cloak>
                 {{ t('settings.no_skills') }}
             </div>
         </div>
@@ -1286,7 +1286,7 @@
             </div>
 
             <!-- Conflict warnings -->
-            <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px">
+            <div x-show="shortcutConflicts.length > 0" style="padding:12px;background:rgba(210,153,34,0.08);border:1px solid var(--warning);border-radius:var(--radius);margin-bottom:16px" x-cloak>
                 <div style="color:var(--warning);font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.conflicts_detected') }}</div>
                 <template x-for="c in shortcutConflicts" :key="c.action1 + c.action2">
                     <div style="font-size:0.85rem;color:var(--text-secondary)" x-text="`"${c.action1}" ` + t('settings.kb_and') + ` "${c.action2}" ` + t('settings.kb_both_use') + ` ${c.keys}`"></div>
@@ -1354,7 +1354,7 @@
               </div>
             </div>
             <!-- Column-aligned token table (not free-form flex rows) -->
-            <div class="account-list-table account-tokens-table" x-show="apiTokens.length > 0">
+            <div class="account-list-table account-tokens-table" x-show="apiTokens.length > 0" x-cloak>
               <div class="account-list-head">
                 <span>{{ t('settings.token_name') }}</span>
                 <span>Prefix</span>
@@ -1372,13 +1372,13 @@
                 </div>
               </template>
             </div>
-            <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px">{{ t('settings.no_api_tokens') }}</div>
+            <div x-show="apiTokens.length === 0 && !lastCreatedToken" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_api_tokens') }}</div>
         </div>
 
         <!-- Sessions -->
         <div class="settings-group">
             <h3>{{ t('settings.active_sessions') }}</h3>
-            <div class="account-list-table account-sessions-table" x-show="sessions.length > 0">
+            <div class="account-list-table account-sessions-table" x-show="sessions.length > 0" x-cloak>
               <div class="account-list-head account-sessions-head">
                 <span>Platform</span>
                 <span>Last active</span>
@@ -1389,22 +1389,22 @@
                   <span class="account-list-name" x-text="s.platform || t('settings.web')"></span>
                   <span class="account-list-meta" x-text="s.last_active || ''"></span>
                   <span class="account-list-actions">
-                    <span class="badge badge-stdio" x-show="s.current">{{ t('settings.current') }}</span>
+                    <span class="badge badge-stdio" x-show="s.current" x-cloak>{{ t('settings.current') }}</span>
                   </span>
                 </div>
               </template>
             </div>
-            <div x-show="sessions.length === 0" class="empty-state" style="padding:16px">{{ t('settings.no_active_sessions') }}</div>
+            <div x-show="sessions.length === 0" class="empty-state" style="padding:16px" x-cloak>{{ t('settings.no_active_sessions') }}</div>
         </div>
 
         <!-- Platform users (SaaS multi-user) — admin only -->
-        <div class="settings-group" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')">
+        <div class="settings-group" x-show="saasStatus && (saasStatus.principal?.role === 'admin' || saasStatus.principal?.source === 'secret')" x-cloak>
             <h3>{{ t('settings.platform_users') }}</h3>
             <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;line-height:1.45;">
               {{ t('settings.platform_users_help') }} {{ t('settings.backend_label') }}
               <code x-text="saasStatus?.backend || 'sqlite'"></code>
-              <span x-show="saasStatus?.postgres"> · {{ t('settings.postgres_ready') }}</span>
-              <span x-show="saasStatus?.oidc"> · {{ t('settings.oidc_enabled') }}</span>
+              <span x-show="saasStatus?.postgres" x-cloak> · {{ t('settings.postgres_ready') }}</span>
+              <span x-show="saasStatus?.oidc" x-cloak> · {{ t('settings.oidc_enabled') }}</span>
             </p>
             <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">
                 <input type="text" class="form-input" x-model="newUser.username" placeholder="{{ t('settings.username') }}" style="flex:1;min-width:120px">
@@ -1416,7 +1416,7 @@
                 </select>
                 <button class="btn btn-primary" type="button" @click="createPlatformUser()">{{ t('settings.add_user') }}</button>
             </div>
-            <div class="account-list-table" x-show="platformUsers.length > 0">
+            <div class="account-list-table" x-show="platformUsers.length > 0" x-cloak>
               <div class="account-list-head">
                 <span>{{ t('settings.username') }}</span>
                 <span>{{ t('settings.role') }}</span>
@@ -1445,7 +1445,7 @@
                 </div>
               </template>
             </div>
-            <div x-show="platformUsers.length === 0" class="empty-state" style="padding:16px">
+            <div x-show="platformUsers.length === 0" class="empty-state" style="padding:16px" x-cloak>
               {{ t('settings.no_platform_users') }}
             </div>
 
@@ -1487,9 +1487,9 @@
                             <span class="bidi-content" dir="auto" style="font-size:0.8rem;color:var(--text-muted);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" x-text="tool.description || ''"></span>
                         </div>
                         <!-- Expanded tool details -->
-                        <div x-show="selectedTool === tool.name" x-transition style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle)">
+                        <div x-show="selectedTool === tool.name" x-transition style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle)" x-cloak>
                             <div class="bidi-content" dir="auto" style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px" x-text="tool.description || ''"></div>
-                            <div x-show="tool.parameters" style="margin-bottom:8px">
+                            <div x-show="tool.parameters" style="margin-bottom:8px" x-cloak>
                                 <div style="font-size:0.8rem;color:var(--text-muted);margin-bottom:4px">{{ t('settings.parameters') }}</div>
                                 <pre style="font-size:0.75rem;color:var(--text-secondary);background:var(--bg-primary);padding:8px;border-radius:var(--radius);overflow-x:auto" x-text="JSON.stringify(tool.parameters || {}, null, 2)"></pre>
                             </div>
@@ -1500,7 +1500,7 @@
                                 </div>
                                 <button class="btn btn-secondary btn-sm" @click.stop="testTool(tool.name)" style="height:36px">{{ t('settings.test') }}</button>
                             </div>
-                            <div x-show="toolTestResult" style="margin-top:8px;padding:8px;background:var(--bg-primary);border-radius:var(--radius);font-size:0.8rem">
+                            <div x-show="toolTestResult" style="margin-top:8px;padding:8px;background:var(--bg-primary);border-radius:var(--radius);font-size:0.8rem" x-cloak>
                                 <pre x-text="JSON.stringify(toolTestResult, null, 2)" style="white-space:pre-wrap"></pre>
                             </div>
                         </div>
@@ -1508,7 +1508,7 @@
                 </template>
             </div>
 
-            <div x-show="tools.length === 0 && !loading" class="empty-state">
+            <div x-show="tools.length === 0 && !loading" class="empty-state" x-cloak>
                 {{ t('settings.no_tools') }}
             </div>
         </div>
@@ -1552,17 +1552,17 @@
             <div style="padding:12px 16px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
                 <div>
                     <div style="font-weight:600;font-size:0.95rem">
-                        <span x-show="vaultStatus.enabled" class="ic-row-xs" style="color:var(--success);gap:6px"><span class="ki" data-icon="check-circle" aria-hidden="true"></span> Vault Enabled</span>
-                        <span x-show="!vaultStatus.enabled" class="ic-row-xs" style="color:var(--danger);gap:6px"><span class="ki" data-icon="alert-circle" aria-hidden="true"></span> Vault Disabled</span>
+                        <span x-show="vaultStatus.enabled" class="ic-row-xs" style="color:var(--success);gap:6px" x-cloak><span class="ki" data-icon="check-circle" aria-hidden="true"></span> Vault Enabled</span>
+                        <span x-show="!vaultStatus.enabled" class="ic-row-xs" style="color:var(--danger);gap:6px" x-cloak><span class="ki" data-icon="alert-circle" aria-hidden="true"></span> Vault Disabled</span>
                     </div>
                     <div style="font-size:0.8rem;color:var(--text-muted);margin-top:4px">
-                        <span x-show="vaultStatus.enabled" x-text="vaultStatus.secret_count + ' secrets stored'"></span>
-                        <span x-show="!vaultStatus.enabled">Set KAZMA_VAULT_KEY in .env or restart the server to auto-generate one.</span>
+                        <span x-show="vaultStatus.enabled" x-text="vaultStatus.secret_count + ' secrets stored'" x-cloak></span>
+                        <span x-show="!vaultStatus.enabled" x-cloak>Set KAZMA_VAULT_KEY in .env or restart the server to auto-generate one.</span>
                     </div>
                 </div>
                 <button class="btn btn-secondary btn-sm" @click="loadVaultStatus()">Refresh</button>
             </div>
-            <div x-show="vaultStatus.enabled" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted)">
+            <div x-show="vaultStatus.enabled" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted)" x-cloak>
                 The agent can store and retrieve encrypted secrets (API keys, tokens, passwords) using the <code>vault_store</code> and <code>vault_retrieve</code> tools. Retrieval requires HITL approval.
             </div>
         </div>
@@ -1656,7 +1656,7 @@
                     </label>
                 </label>
             </div>
-            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'"><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error || 'Test failed')"></span></span></div>
+            <div x-show="proxyTestResult" style="padding:8px 12px;border-radius:var(--radius);font-size:0.82rem;" :style="proxyTestResult?.success ? 'background:rgba(34,197,94,0.1);color:var(--success)' : 'background:rgba(220,80,80,0.1);color:var(--danger)'" x-cloak><span style="display:inline-flex;align-items:center;gap:6px"><span class="ki" :data-icon="proxyTestResult?.success ? 'check-circle' : 'x'" x-html="KazmaIcons.get(proxyTestResult?.success ? 'check-circle' : 'x')" aria-hidden="true"></span><span x-text="proxyTestResult?.success ? ((window.t('settings.proxy_exit_ip') || 'Exit IP') + ': ' + proxyTestResult.exit_ip) : (proxyTestResult?.error || 'Test failed')"></span></span></div>
             <div style="display:flex;gap:8px;">
                 <button class="btn btn-primary" @click="saveProxy()">{{ t('settings.proxy_save') }}</button>
                 <button class="btn btn-secondary" @click="testProxy()" :disabled="proxyTesting">{{ t('settings.proxy_test') }}</button>
@@ -1681,7 +1681,7 @@
                 <template x-for="(line, i) in logs" :key="i">
                     <div x-text="line" :style="line.includes('ERROR') || line.includes('error') ? 'color:var(--danger)' : line.includes('WARNING') ? 'color:var(--warning)' : 'color:var(--text-secondary)'"></div>
                 </template>
-                <div x-show="logs.length === 0" style="color:var(--text-muted)">{{ t('settings.no_logs_available') }}</div>
+                <div x-show="logs.length === 0" style="color:var(--text-muted)" x-cloak>{{ t('settings.no_logs_available') }}</div>
             </div>
         </div>
 
@@ -1693,7 +1693,7 @@
                 <button class="btn btn-secondary" @click="checkUpdates()"><span class="ki" data-icon="refresh" aria-hidden="true"></span> {{ t('settings.check_updates') }}</button>
                 <button class="btn btn-danger" @click="systemReset()"><span class="ki" data-icon="alert" aria-hidden="true"></span> {{ t('settings.system_reset') }}</button>
             </div>
-            <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)">
+            <div x-show="updateInfo" style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius)" x-cloak>
                 <template x-if="updateInfo?.update_available">
                     <div>
                         <span class="text-warning">{{ t('settings.update_available') }}</span>
@@ -1773,7 +1773,7 @@
                     </div>
                 </template>
             </div>
-            <div x-show="pkgMemory.issues && pkgMemory.issues.length" class="pkg-issues">
+            <div x-show="pkgMemory.issues && pkgMemory.issues.length" class="pkg-issues" x-cloak>
                 <div class="pkg-issues-title">{{ t('packages.memory_issues') }}</div>
                 <ul>
                     <template x-for="(iss, idx) in (pkgMemory.issues || [])" :key="idx">
@@ -1793,7 +1793,7 @@
                 <h4 class="pkg-h4">{{ t('packages.optional_deps') }}</h4>
                 <p class="pkg-muted">{{ t('packages.optional_deps_hint') }}</p>
             </div>
-            <div x-show="pkgLoading" class="pkg-loading">{{ t('common.loading') }}</div>
+            <div x-show="pkgLoading" class="pkg-loading" x-cloak>{{ t('common.loading') }}</div>
             <template x-for="extra in pkgExtras" :key="extra.name">
                 <div class="pkg-extra-row" :class="{ 'pkg-extra-rag': extra.name === 'rag', 'pkg-extra-installed': extra.installed }">
                     <div class="pkg-extra-head">
@@ -1925,7 +1925,7 @@
                     </label>
                 </label>
             </div>
-            <div x-show="importSelective" class="form-group">
+            <div x-show="importSelective" class="form-group" x-cloak>
                 <label>{{ t('settings.select_sections') }}</label>
                 <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
                     <template x-for="section in availableSections" :key="section">
@@ -2059,7 +2059,7 @@
                         <span class="badge" :class="emailStatus.gmail_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
                               x-text="emailStatus.gmail_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     </div>
-                    <div x-show="emailStatus.gmail_configured" style="margin-bottom:12px;font-size:0.85rem;">
+                    <div x-show="emailStatus.gmail_configured" style="margin-bottom:12px;font-size:0.85rem;" x-cloak>
                         <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
                         <code x-text="emailStatus.gmail_address || '—'"></code>
                         <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
@@ -2073,7 +2073,7 @@
                     </div>
 
                     <!-- OAuth -->
-                    <div x-show="emailGmailMode === 'oauth'">
+                    <div x-show="emailGmailMode === 'oauth'" x-cloak>
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_oauth_desc') }}</p>
                         <p style="font-size:0.8rem;margin:0 0 12px 0;">
                             <span style="color:var(--text-tertiary);">{{ t('settings.email_gmail_oauth_client_status') }}:</span>
@@ -2129,7 +2129,7 @@
                                 x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
                     </div>
 
-                    <div style="margin-top:12px;" x-show="emailStatus.gmail_configured">
+                    <div style="margin-top:12px;" x-show="emailStatus.gmail_configured" x-cloak>
                         <button class="btn btn-secondary btn-sm" @click="disconnectGmail()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
                     </div>
                 </div>
@@ -2141,7 +2141,7 @@
                         <span class="badge" :class="emailStatus.microsoft_configured ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
                               x-text="emailStatus.microsoft_configured ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
                     </div>
-                    <div x-show="emailStatus.microsoft_configured" style="margin-bottom:12px;font-size:0.85rem;">
+                    <div x-show="emailStatus.microsoft_configured" style="margin-bottom:12px;font-size:0.85rem;" x-cloak>
                         <span style="color:var(--text-tertiary);">{{ t('settings.email_address') }}:</span>
                         <code x-text="emailStatus.microsoft_address || (emailStatus.microsoft_auth_mode === 'oauth' ? 'OAuth' : '—')"></code>
                         <span class="badge badge-basic" style="font-size:0.65rem;margin-left:6px;"
@@ -2154,7 +2154,7 @@
                     </div>
 
                     <!-- OAuth -->
-                    <div x-show="emailMsMode === 'oauth'">
+                    <div x-show="emailMsMode === 'oauth'" x-cloak>
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_oauth_desc') }}</p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_ms_client_id') }}</label>
@@ -2186,7 +2186,7 @@
                                             <span x-text="emailMsDevice.verification_uri || 'https://microsoft.com/devicelogin'"></span>
                                         </a>
                                     </p>
-                                    <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);">{{ t('settings.email_ms_polling') }}</p>
+                                    <p x-show="emailMsConnecting" style="margin:8px 0 0 0;font-size:0.8rem;color:var(--warning);" x-cloak>{{ t('settings.email_ms_polling') }}</p>
                                 </div>
                             </div>
                         </details>
@@ -2224,14 +2224,14 @@
                                 x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
                     </div>
 
-                    <div style="margin-top:12px;" x-show="emailStatus.microsoft_configured">
+                    <div style="margin-top:12px;" x-show="emailStatus.microsoft_configured" x-cloak>
                         <button class="btn btn-secondary btn-sm" @click="disconnectMicrosoft()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
                     </div>
                 </div>
             </div>
 
             <!-- Multi-account list -->
-            <div style="margin-top:24px;" x-show="emailAccounts.length > 0">
+            <div style="margin-top:24px;" x-show="emailAccounts.length > 0" x-cloak>
                 <h4 style="margin:0 0 8px 0;">{{ t('settings.email_multi_accounts') }}</h4>
                 <p style="font-size:0.8rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_multi_accounts_hint') }}</p>
                 <div class="account-list-table">
@@ -2270,8 +2270,8 @@
                 <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:4px;">{{ t('settings.x_status') }}</div>
                 <div style="font-weight:600;">
                     <span x-text="xStatus.configured ? t('settings.x_configured') : t('settings.x_not_configured')"></span>
-                    <span x-show="xStatus.handle" x-text="' · ' + xStatus.handle"></span>
-                    <span x-show="xStatus.verified_username" x-text="' · @' + xStatus.verified_username"></span>
+                    <span x-show="xStatus.handle" x-text="' · ' + xStatus.handle" x-cloak></span>
+                    <span x-show="xStatus.verified_username" x-text="' · @' + xStatus.verified_username" x-cloak></span>
                 </div>
                 <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.x_hitl_note') }}</p>
                 <p x-show="xStatus.kill_switch" x-cloak style="margin:8px 0 0 0;font-size:0.8rem;color:var(--danger);">{{ t('settings.x_kill_switch') }}</p>
@@ -2400,28 +2400,28 @@
                         </div>
 
                         <div class="form-group">
-                            <label>{{ t('voice.stt_model') }} <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400">{{ t('voice.stt_model_loading') }}</span></label>
+                            <label>{{ t('voice.stt_model') }} <span x-show="sttModelsLoading" style="color:var(--text-muted);font-weight:400" x-cloak>{{ t('voice.stt_model_loading') }}</span></label>
                             <select class="form-select" x-model="sttModelType" @change="onSttModelTypeChange()">
                                 <template x-for="model in sttModelOptions" :key="model.id">
                                     <option :value="model.id" x-text="model.label"></option>
                                 </template>
                                 <option value="custom">{{ t('voice.stt_model_custom') }}</option>
                             </select>
-                            <p class="form-help" style="margin-top:4px" x-show="!sttModelOptions.length">
+                            <p class="form-help" style="margin-top:4px" x-show="!sttModelOptions.length" x-cloak>
                                 {{ t('voice.stt_model_empty') }}
                             </p>
-                            <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'">
+                            <p class="form-help" style="margin-top:4px" x-show="voiceForm.stt_provider === 'nvidia'" x-cloak>
                                 {{ t('voice.stt_nvidia_help') }}
                             </p>
                         </div>
 
-                        <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;">
+                        <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.stt_custom_id') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_custom_help') }}</p>
                         </div>
 
-                        <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;">
+                        <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.stt_base_url') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
                                    placeholder="http://127.0.0.1:9000/v1"
@@ -2464,7 +2464,7 @@
                             </select>
                         </div>
 
-                        <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;">
+                        <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.tts_custom_id') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.tts_voice" placeholder="Enter custom voice ID" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.tts_custom_help') }}</p>
@@ -2499,8 +2499,8 @@
             <div class="form-hint" style="margin:-0.5rem 0 1rem 0">{{ t('settings.backup_retention_hint') }}</div>
             <div style="display:flex;gap:12px;align-items:center;margin-bottom:1.25rem">
                 <button class="btn btn-primary" @click="runBackup()" :disabled="backupRunning">
-                    <span x-show="!backupRunning">{{ t('settings.backup_now') }}</span>
-                    <span x-show="backupRunning">{{ t('settings.backup_running') }}</span>
+                    <span x-show="!backupRunning" x-cloak>{{ t('settings.backup_now') }}</span>
+                    <span x-show="backupRunning" x-cloak>{{ t('settings.backup_running') }}</span>
                 </button>
             </div>
             <!-- Live progress bar -->
@@ -2526,7 +2526,7 @@
         </div>
         <div class="settings-group">
             <h3>{{ t('settings.backup_history') }}</h3>
-            <div x-show="backupList.length === 0 && !backupRunning" class="empty-state">
+            <div x-show="backupList.length === 0 && !backupRunning" class="empty-state" x-cloak>
                 <p>{{ t('settings.backup_none') }}</p>
             </div>
             <template x-for="b in backupList" :key="b.dir">
@@ -2539,10 +2539,10 @@
                         <!-- Cloud sync badge -->
                         <span x-show="b.cloud_synced" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(155,89,182,0.15);color:#9b59b6"
                               :title="'Synced to: ' + (b.cloud_remote || 'cloud')"
-                              x-text="'☁ ' + (b.cloud_remote ? b.cloud_remote.split(':')[0] : 'Cloud')"></span>
+                              x-text="'☁ ' + (b.cloud_remote ? b.cloud_remote.split(':')[0] : 'Cloud')" x-cloak></span>
                         <span x-show="!b.cloud_synced && b.cloud_skipped_reason" class="badge" style="margin-left:4px;font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,193,7,0.12);color:#b8860b"
                               title="Not synced to cloud"
-                              x-text="' locals only'"></span>
+                              x-text="' locals only'" x-cloak></span>
                         <span style="margin-left:12px;font-size:0.8rem;color:var(--text-muted)"
                               x-text="b.databases_ok + ' DBs · ' + b.size_mb + ' MB' + (b.postgres ? ' · PG ✓' : '') + (b.incomplete ? ' · incomplete' : '')"></span>
                     </div>
@@ -2583,11 +2583,11 @@
                         <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="google_drive" @click.stop style="accent-color:#4285f4">
                         <span style="font-size:1.4em">📁</span>
                         <strong>Google Drive</strong>
-                        <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok !== false" class="text-success" style="font-size:0.8rem">✓</span>
+                        <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok !== false" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
                         <span x-show="offsiteProviderStatus('google_drive')?.connected && offsiteProviderStatus('google_drive')?.drive_ok === false"
                               style="font-size:0.8rem;color:#ffa502"
-                              :title="offsiteProviderStatus('google_drive')?.drive_error || 'Drive access blocked'">⚠ Drive</span>
-                        <span x-show="offsiteConfig?.provider === 'google_drive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(66,133,244,0.15);color:#4285f4">active</span>
+                              :title="offsiteProviderStatus('google_drive')?.drive_error || 'Drive access blocked'" x-cloak>⚠ Drive</span>
+                        <span x-show="offsiteConfig?.provider === 'google_drive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(66,133,244,0.15);color:#4285f4" x-cloak>active</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         Uses your Gmail OAuth — click Connect to authorize Drive access.
@@ -2611,8 +2611,8 @@
                         <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="onedrive" @click.stop style="accent-color:#0078d4">
                         <span style="font-size:1.4em">☁️</span>
                         <strong>OneDrive</strong>
-                        <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
-                        <span x-show="offsiteConfig?.provider === 'onedrive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(0,120,212,0.15);color:#0078d4">active</span>
+                        <span x-show="offsiteProviderStatus('onedrive')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
+                        <span x-show="offsiteConfig?.provider === 'onedrive'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(0,120,212,0.15);color:#0078d4" x-cloak>active</span>
                     </div>
                     <p style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
                         Uses your Microsoft account — click Connect to authorize Files access.
@@ -2631,15 +2631,15 @@
                         <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="webdav" @click.stop style="accent-color:#2ed573">
                         <span style="font-size:1.4em">🏠</span>
                         <strong>WD MyCloud / NAS</strong>
-                        <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
-                        <span x-show="offsiteConfig?.provider === 'webdav'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(46,213,115,0.15);color:#2ed573">active</span>
+                        <span x-show="offsiteProviderStatus('webdav')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
+                        <span x-show="offsiteConfig?.provider === 'webdav'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(46,213,115,0.15);color:#2ed573" x-cloak>active</span>
                     </div>
                     <div x-show="offsiteProvider === 'webdav'" x-cloak style="margin-top:6px" @click.stop>
                         <input type="text" class="form-input" x-model="offsiteWebdavUrl" placeholder="https://nas:5005 / DavWWWRoot" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="text" class="form-input" x-model="offsiteWebdavUser" placeholder="Username" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="password" class="form-input" x-model="offsiteWebdavPass" placeholder="Password" style="width:100%;font-size:0.8rem">
                     </div>
-                    <p x-show="offsiteProvider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                    <p x-show="offsiteProvider !== 'webdav'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0" x-cloak>
                         WebDAV — works with WD MyCloud OS5 and any NAS.
                     </p>
                 </div>
@@ -2652,8 +2652,8 @@
                         <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="ftp" @click.stop style="accent-color:#1abc9c">
                         <span style="font-size:1.4em">📡</span>
                         <strong>FTP / NAS</strong>
-                        <span x-show="offsiteProviderStatus('ftp')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
-                        <span x-show="offsiteConfig?.provider === 'ftp'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(26,188,156,0.15);color:#1abc9c">active</span>
+                        <span x-show="offsiteProviderStatus('ftp')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
+                        <span x-show="offsiteConfig?.provider === 'ftp'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(26,188,156,0.15);color:#1abc9c" x-cloak>active</span>
                     </div>
                     <div x-show="offsiteProvider === 'ftp'" x-cloak style="margin-top:6px" @click.stop>
                         <div style="display:flex;gap:6px;margin-bottom:6px">
@@ -2664,7 +2664,7 @@
                         <input type="password" class="form-input" x-model="offsiteFtpPass" placeholder="Password" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="text" class="form-input" x-model="offsiteFtpPath" placeholder="Base path on the server (optional, e.g. Mubder Alfaris)" style="width:100%;font-size:0.8rem">
                     </div>
-                    <p x-show="offsiteProvider !== 'ftp'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                    <p x-show="offsiteProvider !== 'ftp'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0" x-cloak>
                         Plain FTP — works with WD MyCloud OS3 (EX4100) and any FTP server.
                     </p>
                 </div>
@@ -2677,8 +2677,8 @@
                         <input type="radio" name="offsite_provider" x-model="offsiteProvider" value="s3" @click.stop style="accent-color:#ff9900">
                         <span style="font-size:1.4em">🪣</span>
                         <strong>S3 / Backblaze B2</strong>
-                        <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem">✓</span>
-                        <span x-show="offsiteConfig?.provider === 's3'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(255,153,0,0.15);color:#ff9900">active</span>
+                        <span x-show="offsiteProviderStatus('s3')?.connected" class="text-success" style="font-size:0.8rem" x-cloak>✓</span>
+                        <span x-show="offsiteConfig?.provider === 's3'" style="margin-left:auto;font-size:0.68rem;padding:2px 8px;border-radius:10px;background:rgba(255,153,0,0.15);color:#ff9900" x-cloak>active</span>
                     </div>
                     <div x-show="offsiteProvider === 's3'" x-cloak style="margin-top:6px" @click.stop>
                         <input type="text" class="form-input" x-model="offsiteS3Key" placeholder="Access Key ID" style="width:100%;font-size:0.8rem;margin-bottom:6px">
@@ -2686,7 +2686,7 @@
                         <input type="text" class="form-input" x-model="offsiteS3Bucket" placeholder="Bucket name" style="width:100%;font-size:0.8rem;margin-bottom:6px">
                         <input type="text" class="form-input" x-model="offsiteS3Endpoint" placeholder="Endpoint (optional, for B2/MinIO)" style="width:100%;font-size:0.8rem">
                     </div>
-                    <p x-show="offsiteProvider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0">
+                    <p x-show="offsiteProvider !== 's3'" style="font-size:0.78rem;color:var(--text-muted);margin:0 0 10px 0" x-cloak>
                         Amazon S3 or any S3-compatible storage. Cheapest for backups.
                     </p>
                 </div>
@@ -2700,8 +2700,8 @@
                 </label>
                 <span style="flex:1"></span>
                 <button class="btn btn-secondary" @click="testOffsite()" :disabled="offsiteTesting || !offsiteProvider">
-                    <span x-show="!offsiteTesting">{{ t('settings.offsite_test') }}</span>
-                    <span x-show="offsiteTesting">…</span>
+                    <span x-show="!offsiteTesting" x-cloak>{{ t('settings.offsite_test') }}</span>
+                    <span x-show="offsiteTesting" x-cloak>…</span>
                 </button>
                 <button class="btn btn-primary" @click="saveOffsite()" :disabled="!offsiteProvider">
                     {{ t('settings.offsite_save') }}

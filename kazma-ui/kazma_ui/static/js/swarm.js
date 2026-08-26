@@ -375,17 +375,17 @@
 
   function updateBreakerBadge(worker) {
     var cb = worker.circuit_breaker;
-    var badge = $('cb-badge-' + worker.name);
+    // Class-driven single badge per worker (data-cb-worker). The old
+    // duplicate-id + style.display scheme could never show the green
+    // "closed" state (audit P1-4).
+    var badge = document.querySelector('[data-cb-worker="' + (worker.name || '') + '"]');
     if (!badge) return;
-    if (!cb || cb.state === 'closed') {
-      badge.style.display = 'none';
-      return;
-    }
-    badge.style.display = '';
-    badge.className = 'badge ' + (cb.state === 'open' ? 'badge-danger' : 'badge-warning');
-    badge.style.fontSize = '0.65rem';
-    badge.textContent = ' ' + cb.state;
-    badge.title = t('swarm.circuit_failures', {n: (cb.consecutive_failures || 0), threshold: (cb.failure_threshold || 5)});
+    var closed = !cb || cb.state === 'closed';
+    badge.className = 'badge cb-badge ' + (closed
+      ? 'badge-success cb-badge-closed'
+      : (cb.state === 'open' ? 'badge-danger' : 'badge-warning'));
+    badge.textContent = ' ' + (closed ? 'closed' : cb.state);
+    badge.title = t('swarm.circuit_failures', {n: ((cb && cb.consecutive_failures) || 0), threshold: ((cb && cb.failure_threshold) || 5)});
   }
 
   function updateBreakerBadges(workerList) {

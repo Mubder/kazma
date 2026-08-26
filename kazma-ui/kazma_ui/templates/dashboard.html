@@ -309,10 +309,10 @@
     { id: "mcp", name: {{ t('dashboard.cap.mcp') | tojson }}, desc: {{ t('dashboard.cap.mcp_desc') | tojson }}, color: "#fb7185" },
   ];
 </script>
-<script src="/static/js/streaming.js"></script>
-<script src="/static/js/dash_lists.js"></script>
-<script src="/static/js/dashboard.js"></script>
-<script src="/static/js/hitl_approval.js"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
+<script src="/static/js/dash_lists.js?v={{ js_version() }}"></script>
+<script src="/static/js/dashboard.js?v={{ js_version() }}"></script>
+<script src="/static/js/hitl_approval.js?v={{ js_version() }}"></script>
 <script>
 (function() {
   // Session management (preserve existing functionality)

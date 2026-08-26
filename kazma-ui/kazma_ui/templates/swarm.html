@@ -489,11 +489,11 @@
                   <span style="font-weight:600;font-size:0.95rem;">{{ w.name }}</span>
                   {% if w.get('role') %}<span class="badge badge-accent">{{ w.role }}</span>{% endif %}
                   {% set cb = w.get('circuit_breaker') %}
-                  {% if cb and cb.get('state') != 'closed' %}
-                  <span class="badge {% if cb.state == 'open' %}badge-danger{% else %}badge-warning{% endif %}" style="font-size:0.65rem;" id="cb-badge-{{ w.name }}" title="Failures: {{ cb.get('consecutive_failures', 0) }}/{{ cb.get('failure_threshold', 5) }}"><span x-html="KazmaIcons.zap()"></span> {{ cb.state }}</span>
-                  {% else %}
-                  <span class="badge badge-success" style="font-size:0.65rem;display:none;" id="cb-badge-{{ w.name }}"><span x-html="KazmaIcons.zap()"></span> closed</span>
-                  {% endif %}
+                  {# One badge per worker, class-driven (duplicate ids meant
+                     the "closed" green badge was unreachable — audit P1-4). #}
+                  <span class="badge cb-badge {% if cb and cb.state == 'open' %}badge-danger{% elif cb and cb.state != 'closed' %}badge-warning{% else %}badge-success cb-badge-closed{% endif %}"
+                        data-cb-worker="{{ w.name }}" style="font-size:0.65rem;"
+                        title="Failures: {{ (cb.get('consecutive_failures', 0) if cb else 0) }}/{{ (cb.get('failure_threshold', 5) if cb else 5) }}"><span x-html="KazmaIcons.zap()"></span> {{ (cb.state if cb and cb.state != 'closed' else 'closed') }}</span>
                 </div>
                 <div style="display:flex;gap:16px;font-size:0.8rem;color:var(--text-tertiary);">
                   <span data-model="{{ w.get('model', '?') }}">{{ t('swarm.model') }}: <span style="color:var(--text-secondary);font-family:var(--font-mono);">{{ w.get('model', '?') }}</span></span>
@@ -831,6 +831,6 @@
      left window.mermaid undefined whenever the browser couldn't reach
      jsdelivr, breaking the Workflow Editor DAG ("Mermaid library not loaded"). -->
 <script src="/static/js/mermaid.min.js?v={{ js_version() }}"></script>
-<script src="/static/js/streaming.js"></script>
-<script src="/static/js/swarm.js"></script>
+<script src="/static/js/streaming.js?v={{ js_version() }}"></script>
+<script src="/static/js/swarm.js?v={{ js_version() }}"></script>
 {% endblock %}
