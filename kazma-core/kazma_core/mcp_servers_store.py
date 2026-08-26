@@ -129,6 +129,30 @@ def _read_yaml_servers(yaml_path: str | Path | None = None) -> list[dict[str, An
         return []
 
 
+def _splice_yaml_section(text: str, section: str, dumped_block: str) -> str:
+    """Replace one top-level mapping ``section:`` with ``dumped_block``.
+
+    ``yaml.safe_dump`` re-emits the WHOLE document and destroys every
+    comment in it — round-tripping the operator's annotated kazma.yaml
+    through it stripped all documentation comments (2026-08-26 audit
+    follow-through). Splicing replaces only the target section's span and
+    preserves every other byte, comments included.
+    """
+    import re as _re
+
+    start_re = _re.compile(rf"^{_re.escape(section)}:[ \t]*(#.*)?$", _re.M)
+    block = dumped_block.rstrip("\n") + "\n"
+    m = start_re.search(text)
+    if m is None:
+        base = text.rstrip("\n")
+        return (base + "\n\n" if base else "") + block
+    rest = text[m.end():]
+    # The section spans until the next top-level key (column 0).
+    nxt = _re.search(r"^[A-Za-z_][\w.-]*[ \t]*:", rest, _re.M)
+    stop = m.end() + (nxt.start() if nxt else len(rest))
+    return text[: m.start()] + block + text[stop:]
+
+
 def persist_mcp_yaml(
     servers: list[dict[str, Any]],
     *,
@@ -136,6 +160,9 @@ def persist_mcp_yaml(
     mcp_section: dict[str, Any] | None = None,
 ) -> str | None:
     """Write *servers* into ``kazma.yaml`` ``mcp.servers`` atomically.
+
+    Only the ``mcp:`` section is rewritten (comment-preserving splice —
+    see :func:`_splice_yaml_section`); the rest of the file is untouched.
 
     Returns ``None`` on success, or an error message string.
     """
@@ -146,22 +173,23 @@ def persist_mcp_yaml(
         import yaml
 
         with open(path, encoding="utf-8") as f:
-            on_disk = yaml.safe_load(f) or {}
+            on_disk_text = f.read()
+        on_disk = yaml.safe_load(on_disk_text) or {}
         if not isinstance(on_disk, dict):
             on_disk = {}
         mcp = dict(mcp_section) if isinstance(mcp_section, dict) else dict(on_disk.get("mcp") or {})
         mcp["servers"] = servers
-        on_disk["mcp"] = mcp
+        block = yaml.safe_dump(
+            {"mcp": mcp},
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+        new_text = _splice_yaml_section(on_disk_text, "mcp", block)
 
         tmp = path.with_suffix(path.suffix + ".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
-            yaml.safe_dump(
-                on_disk,
-                f,
-                default_flow_style=False,
-                allow_unicode=True,
-                sort_keys=False,
-            )
+            f.write(new_text)
         tmp.replace(path)
         logger.info(
             "[mcp_servers_store] Persisted mcp.servers to %s (%d server(s))",
