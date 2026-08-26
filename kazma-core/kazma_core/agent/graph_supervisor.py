@@ -19,6 +19,7 @@ from kazma_core.agent.graph_helpers import (
 )
 from kazma_core.agent.plan_fence import (
     PLAN_EXECUTE_CONTINUE,
+    PLAN_EXECUTE_FINAL,
     normalize_plan_fence,
     should_execute_plan_only_hop,
 )
@@ -1527,7 +1528,13 @@ async def supervisor_node(
                 iteration,
             )
             assistant_msg = {"role": "assistant", "content": content}
-            continuation_msg = {"role": "user", "content": PLAN_EXECUTE_CONTINUE}
+            # Second nudge is sharper — the model already ignored one
+            # execute instruction (repeat-planner loop, 2026-08-26).
+            _prior = int(state.get("plan_only_continues") or 0)
+            continuation_msg = {
+                "role": "user",
+                "content": PLAN_EXECUTE_FINAL if _prior >= 1 else PLAN_EXECUTE_CONTINUE,
+            }
             return {
                 **breaker_reset,
                 **intent_patch,
@@ -1535,7 +1542,7 @@ async def supervisor_node(
                 "messages": messages + [assistant_msg, continuation_msg],
                 "next_node": NodeName.SUPERVISOR,
                 "iteration": iteration + 1,
-                "plan_only_continues": int(state.get("plan_only_continues") or 0) + 1,
+                "plan_only_continues": _prior + 1,
                 "last_model": response.model,
                 "last_tokens": response.usage.get("total_tokens", 0),
                 "last_cost_usd": response.cost_usd,

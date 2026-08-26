@@ -84,10 +84,20 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         text = candidates[-1] if candidates else ""
         if not text:
             return ""
-        # Tools ran but the last hop is still just a ```plan — not a
-        # user-facing answer. Force synthesis (empty return).
-        if last_tool_idx >= 0 and is_plan_only(text):
-            return ""
+        # A ```plan is never the user-facing answer on its own — the model
+        # planned but never acted (whether or not earlier tools ran).
+        # Forcing synthesis with the honesty note prevents fake "done ✅"
+        # claims over unexecuted plans (2026-08-26 X-post incident).
+        # Plan mode (inspect-only) is the exception: the plan IS the
+        # deliverable the user asked for.
+        if is_plan_only(text):
+            try:
+                from kazma_core.agent.plan_mode import is_plan_mode
+
+                if not is_plan_mode(str(state.get("thread_id") or "")):
+                    return ""
+            except Exception:
+                return ""
         return normalize_plan_fence(text)
 
     _last = messages[-1] if messages else {}
@@ -157,6 +167,9 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
                         "- Do not call any more tools.\n"
                         "- Do not emit tool XML/DSML/markup.\n"
                         "- Do not continue mid-thought ('let me check…', 'next I will…').\n"
+                        "- NEVER claim an action succeeded (posted, sent, saved, "
+                        "deleted) unless its tool RESULT is in the conversation "
+                        "above. A plan or intention is NOT a result.\n"
                         "- Summarize what you DID find/complete from tool results.\n"
                         "- Explicitly list what you did NOT finish and the next step "
                         "the user can ask for.\n"

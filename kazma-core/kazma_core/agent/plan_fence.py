@@ -25,6 +25,7 @@ from typing import Any
 
 __all__ = [
     "PLAN_EXECUTE_CONTINUE",
+    "PLAN_EXECUTE_FINAL",
     "has_plan_fence",
     "is_plan_only",
     "normalize_plan_fence",
@@ -37,13 +38,25 @@ __all__ = [
 ]
 
 # Injected as a synthetic user turn when the model wrote a plan and stopped
-# without tools. One-shot (see ``plan_only_continues`` on SupervisorState).
+# without tools. Two chances (see ``plan_only_continues``): deepseek-v4-flash
+# was observed re-emitting the identical plan after the first nudge and the
+# turn then died with the task silently dropped (2026-08-26 X-post incident).
 PLAN_EXECUTE_CONTINUE = (
     "[KAZMA_PLAN_EXECUTE_CONTINUE] You wrote a ```plan but did not call any "
     "tools. Plan mode is NOT on. Execute that plan NOW: call the tools. "
     "Do not emit another plan fence. After tools finish, write the "
     "user-facing result. Put the closing ``` of any fence on its own line, "
     "then a blank line, then the answer."
+)
+
+# Second and final nudge — the model already ignored one execute instruction.
+PLAN_EXECUTE_FINAL = (
+    "[KAZMA_PLAN_EXECUTE_FINAL] You have now written that plan TWICE without "
+    "calling any tools. Do NOT write another plan fence. Your next message "
+    "MUST either (a) contain the actual tool_calls from the plan, or (b) "
+    "directly answer the user stating exactly what stopped you. NEVER claim "
+    "an action completed unless its tool result is already in this "
+    "conversation."
 )
 
 # Closed fence: ```plan … ```  (closing ticks may be glued to following prose).
@@ -220,7 +233,9 @@ def should_execute_plan_only_hop(
     """True when the model wrote a workbench plan and stopped without tools.
 
     Plan mode (``plan_mode_kind=='plan'``) is inspect-only — do not execute.
-    One auto-continue per turn (``plan_only_continues``).
+    Two auto-continues per turn (``plan_only_continues``): providers that
+    re-emit the identical plan after the first nudge used to end the turn
+    with the task silently dropped.
     """
     if has_tool_calls:
         return False
@@ -228,7 +243,7 @@ def should_execute_plan_only_hop(
         return False
     if (plan_mode_kind or "off") == "plan":
         return False
-    if int(plan_only_continues or 0) >= 1:
+    if int(plan_only_continues or 0) >= 2:
         return False
     if int(iteration) + 1 >= max(1, int(max_iterations or 15)):
         return False

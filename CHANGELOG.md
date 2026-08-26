@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Unreleased — Plan-only turns no longer die silently (2026-08-26)
+
+Live incident (verified against the session transcript): "send them now"
+produced a ```plan, the auto-continue nudged once, deepseek re-emitted the
+IDENTICAL plan, the one-shot guard gave up, and the turn ended with the
+x_post calls never executed — the follow-up reply then claimed "✅ posted"
+with no tool result behind it.
+
+- **Two execute-chances instead of one.** The second nudge
+  (`PLAN_EXECUTE_FINAL`) is sharper: no more plan fences; the next message
+  must contain the tool_calls or an honest blocker — never a success claim
+  without a tool result.
+- **A plan-only final is never the answer** (outside `/plan` mode):
+  respond forces synthesis, with or without prior tool rounds.
+- **Synthesis honesty rule**: "NEVER claim an action succeeded (posted,
+  sent, saved, deleted) unless its tool RESULT is in the conversation."
+- Delivery hardening from the same report: re-attach budget capped at 3
+  per turn (gap-attach loops died out never), a healthy stream is never
+  aborted by a focus-trigger resync, and a journal-gap invalidates the
+  dead cursor instead of re-attaching with it forever.
+- Session rename polish: sidebar titles are bidi-safe (`dir="auto"` —
+  Arabic titles rendered mangled) and the rename prompt input uses the
+  prose font with RTL support.
+
+Tests: `tests/test_plan_fence.py`, `tests/test_delivery_v2_client.py`.
+Restart the server; hard-refresh the chat tab.
+
 ## Unreleased — Turn paint without refresh + WS/SSE dedupe (2026-08-26)
 
 "Shows CoT and a small text; the reply appears eventually, sometimes only

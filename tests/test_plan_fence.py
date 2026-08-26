@@ -14,6 +14,7 @@ import pytest
 
 from kazma_core.agent.plan_fence import (
     PLAN_EXECUTE_CONTINUE,
+    PLAN_EXECUTE_FINAL,
     has_plan_fence,
     is_plan_only,
     normalize_plan_fence,
@@ -136,7 +137,9 @@ def test_should_execute_plan_only_hop_not_in_plan_mode():
     ) is False
 
 
-def test_should_execute_plan_only_hop_once():
+def test_should_execute_plan_only_hop_twice():
+    """Two chances: repeat-planners (deepseek re-emitting the identical
+    plan) used to end the turn with the task silently dropped."""
     plan = "```plan\n- Store the fact\n```"
     assert should_execute_plan_only_hop(
         content=plan,
@@ -145,6 +148,15 @@ def test_should_execute_plan_only_hop_once():
         plan_mode_kind="off",
         plan_only_continues=1,
         iteration=1,
+        max_iterations=15,
+    ) is True
+    assert should_execute_plan_only_hop(
+        content=plan,
+        has_tool_calls=False,
+        tools_available=True,
+        plan_mode_kind="off",
+        plan_only_continues=2,
+        iteration=2,
         max_iterations=15,
     ) is False
 
@@ -355,6 +367,90 @@ async def test_supervisor_plan_only_auto_continues_when_tools_exist():
     assert any(
         m.get("role") == "user" and "KAZMA_PLAN_EXECUTE_CONTINUE" in str(m.get("content") or "")
         for m in out["messages"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_supervisor_second_plan_nudge_is_final_note():
+    """A repeat planner gets the sharper FINAL note on the second chance."""
+    from kazma_core.agent.graph_builder import supervisor_node
+    from kazma_core.agent.state import NodeName
+
+    llm = _ScriptedLLM([
+        _Response(content="```plan\n- Post the approved tweet\n```"),
+    ])
+    tools = [{
+        "type": "function",
+        "function": {"name": "x_post", "parameters": {"type": "object", "properties": {}}},
+    }]
+    out = await supervisor_node(
+        {
+            "messages": [
+                {"role": "system", "content": "You are Kazma."},
+                {"role": "user", "content": "send them now"},
+                # First nudge already happened (plan_only_continues=1) and the
+                # model re-emitted the identical plan.
+                {"role": "assistant", "content": "```plan\n- Post the approved tweet\n```"},
+                {"role": "user", "content": PLAN_EXECUTE_CONTINUE},
+            ],
+            "iteration": 1,
+            "max_iterations": 15,
+            "plan_only_continues": 1,
+        },
+        llm=llm,
+        system_prompt="You are Kazma.",
+        tool_definitions=tools,
+        tool_executor=None,
+        cost_breaker=_FakeCostBreaker(),
+        authority=_FakeAuthority(),
+        tracer=_FakeTracer(),
+    )
+    assert out["next_node"] == NodeName.SUPERVISOR
+    assert out["plan_only_continues"] == 2
+    assert any(
+        m.get("role") == "user" and "KAZMA_PLAN_EXECUTE_FINAL" in str(m.get("content") or "")
+        for m in out["messages"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_respond_synthesizes_over_plan_only_without_tools(monkeypatch):
+    """2026-08-26 X-post incident: the turn ended plan-only with NO tool
+    calls and the synthesis claimed success. A plan-only final (outside
+    plan mode) must force synthesis, and the synthesis prompt must carry
+    the never-claim-success-without-tool-result honesty rule."""
+    from kazma_core.agent.graph_respond import respond_node
+
+    monkeypatch.setattr(
+        "kazma_core.memory.consolidator.schedule_post_turn_memory",
+        lambda *_a, **_k: None,
+    )
+    seen_prompts: list[list[dict]] = []
+
+    class _SynthLLM:
+        async def chat(self, messages=None, tools=None, model=None, **kw):
+            seen_prompts.append(list(messages or []))
+            return _Response(content="⚠️ Not posted — the plan was never executed.")
+
+    state = {
+        "messages": [
+            {"role": "user", "content": "send them now"},
+            {"role": "assistant", "content": "```plan\n- Post the approved EN tweet\n```"},
+            {"role": "user", "content": PLAN_EXECUTE_CONTINUE},
+            {"role": "assistant", "content": "```plan\n- Post the approved EN tweet\n```"},
+        ],
+        "iteration": 3,
+        "max_iterations": 15,
+        "thread_id": "thread-plan-only-test",
+    }
+    out = await respond_node(state, llm=_SynthLLM())
+    last = out["messages"][-1]
+    assert last["role"] == "assistant"
+    assert "Not posted" in last["content"]
+    assert any(
+        "NEVER claim an action succeeded" in str(m.get("content") or "")
+        for p in seen_prompts
+        for m in p
     )
 
 

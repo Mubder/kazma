@@ -41,7 +41,8 @@
                        :placeholder="$store.modal.input"
                        @keydown.enter="$store.modal.actions[$store.modal.actions.length - 1] && $store.modal.actions[$store.modal.actions.length - 1].handler ? ($store.modal.actions[$store.modal.actions.length - 1].handler(), $store.modal.close()) : null"
                        @keydown.escape="$store.modal.close()"
-                       style="width:100%;font-family:var(--font-mono);font-size:0.85rem;">
+                       dir="auto"
+                       style="width:100%;font-size:0.9rem;">
             </div>
 
             {# Footer #}

@@ -267,6 +267,11 @@
   // Set per-send (sendMessage closure owns _dispatchSse); module-level
   // recovery paths (_resyncDelivery) re-attach the live stream through it.
   var _reopenSseRef = null;
+  // Bounded re-attaches per turn — a journal-gap attach closes without a
+  // terminal, and an unbounded resync→reattach cycle with the same invalid
+  // cursor loops forever (the "is it still running?" stuck state).
+  var _reopenCount = 0;
+  var _REOPEN_MAX = 3;
 
   function _resyncDelivery(reason) {
     if (!chatSessionId) return;
@@ -286,10 +291,11 @@
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
       // Still running server-side → keep waiting honestly AND re-attach a
-      // live SSE stream from the journal cursor. Resync used to leave a
-      // generating turn with no transport at all — an undisturbed visible
-      // tab then painted the reply only on manual refresh (2026-08-26).
+      // live SSE stream from the journal cursor — but only when the stream
+      // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
+      // trigger churned connections for no gain.
       if (generating) {
+        var wasLive = !!activeStream;
         if (activeStream) {
           try { activeStream.abort(); } catch (e) { /* already dead */ }
           activeStream = null;
@@ -301,7 +307,7 @@
             KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
           }
         } catch (e2) { /* ignore */ }
-        if (_reopenSseRef) {
+        if (!wasLive && _reopenSseRef) {
           try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
         }
         return;
@@ -1601,6 +1607,8 @@
     // This flag is ONLY cleared in loadSession() (when we re-render from
     // the server). The WS/SSE/endTurn lifecycle CANNOT touch it.
     _awaitingReply = true;
+    // Fresh re-attach budget for this turn (bounded recovery, not a loop).
+    _reopenCount = 0;
 
     // Hidden-tab UX (P4): permission may only be requested from a user
     // gesture — arm it on send.
@@ -1638,7 +1646,8 @@
       if (activeStream) return;               // already live
       if (!_awaitingReply || _awaitingApproval) return;
       if (_lastSeqSeen <= 0) return;          // no cursor → replaying from 0 risks duplication
-      _sseAttempts = 0;                       // fresh retry ladder for this attach
+      if (_reopenCount >= _REOPEN_MAX) return; // bounded: gap-attach loops must die out
+      _reopenCount++;
       console.warn('[KazmaChat] Re-attaching SSE stream (' + reason + ') from seq=' + _lastSeqSeen);
       noteTurnActivity();
       _dispatchSse({ last_event_id: _lastSeqSeen });
@@ -1737,7 +1746,10 @@
         if (status === 'resync') {
           // Journal-gap attach: the server closed the stream and told us to
           // reconcile with durable truth. Silently ignoring it left a dead
-          // stream with no recovery (2026-08-26).
+          // stream with no recovery (2026-08-26). The gap ALSO means our
+          // cursor is invalid — drop it so no recovery path re-attaches
+          // with the same dead cursor (that looped forever).
+          _lastSeqSeen = 0;
           _resyncDelivery('sse-gap');
           return;
         }
@@ -3618,8 +3630,8 @@
     var html = '<div class="session-item' + (isActive ? ' active' : '') + (s.pinned ? ' pinned' : '') + (isMenuOpen ? ' menu-open' : '') + '" data-session-id="' + escapeHtml(s.session_id) + '" data-platform="' + escapeHtml(plat) + '">' +
       '<span class="session-platform-dot dot-' + escapeHtml(plat) + '" title="' + escapeHtml(plat) + '"></span>' +
       '<div class="session-info">' +
-        '<span class="session-title" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
-        '<span class="session-meta">' + escapeHtml(meta) + '</span>' +
+        '<span class="session-title" dir="auto" title="' + escapeHtml(title) + (absTime ? ' \u00B7 ' + absTime : '') + '">' + highlightTitle(title, q) + '</span>' +
+        '<span class="session-meta" dir="auto">' + escapeHtml(meta) + '</span>' +
       '</div>';
     if (showArchived) {
       html += '<div class="session-actions">' +
