@@ -13,8 +13,24 @@ Loaded before any suite conftest (pytest walks from the root down).
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 os.environ.pop("KAZMA_SECRET", None)
+
+# Live-operator-file shield (2026-08-27 incident): test runs boot the real
+# app (create_app), whose logging attaches a daily-rotating handler to the
+# LIVE <repo>/.kazma/kazma.log. The suite rotated it at midnight, and the
+# production server's own first post-midnight rotation then collided on
+# Windows (remove/rename of a file another process still held open) —
+# killing the server's file handler at boot and leaving it console-only.
+# Redirect test logging to a throwaway path BEFORE anything resolves the
+# log file location.
+import tempfile as _tempfile
+
+os.environ.setdefault(
+    "KAZMA_LOG_FILE",
+    str(Path(_tempfile.mkdtemp(prefix="kazma-test-log-")) / "kazma.log"),
+)
 
 # Force the sqlite backend and strip every DSN variant BEFORE any kazma
 # module can read them.
@@ -75,3 +91,24 @@ def _reset_shutdown_event():
     except Exception:
         pass
     yield
+
+
+# ── Live kazma.yaml guard ───────────────────────────────────────────────────
+# persist_mcp_yaml historically re-dumped the WHOLE kazma.yaml (stripping
+# every comment); any test reaching it with the default path round-tripped
+# the operator's live config. The splice fix removes the root cause; this
+# snapshot/restore is the belt-and-braces net for any future writer.
+@_pytest.fixture(scope="session", autouse=True)
+def _restore_live_kazma_yaml():
+    yaml_path = Path(__file__).resolve().parent / "kazma.yaml"
+    try:
+        snapshot = yaml_path.read_bytes()
+    except OSError:
+        yield
+        return
+    yield
+    try:
+        if yaml_path.read_bytes() != snapshot:
+            yaml_path.write_bytes(snapshot)
+    except OSError:
+        pass
