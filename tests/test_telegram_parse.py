@@ -39,6 +39,35 @@ def test_parse_skips_empty():
     assert parse_text_update({"message": {"chat": {"id": 1}, "text": "  "}}) is None
 
 
+def test_parse_skips_edited_message_as_new_turn():
+    """Edits must not start a second graph turn / HITL card."""
+    update = {
+        "update_id": 11,
+        "edited_message": {
+            "message_id": 5,
+            "text": "hello edited",
+            "chat": {"id": 99, "type": "private"},
+            "from": {"id": 7, "username": "alice"},
+        },
+    }
+    assert parse_text_update(update) is None
+
+
+def test_telegram_adapter_dedupes_same_message_id() -> None:
+    from kazma_gateway.adapters.telegram import TelegramAdapter
+    from kazma_gateway.gateway import IncomingMessage
+
+    adapter = TelegramAdapter(token="0:test", allow_all=True)
+    msg = IncomingMessage(
+        platform="telegram",
+        sender_id="telegram:1",
+        text="hi",
+        context_metadata={"chat_id": 9, "message_id": 44},
+    )
+    assert adapter._already_seen_message(msg) is False
+    assert adapter._already_seen_message(msg) is True
+
+
 def test_advance_offset():
     assert advance_offset([], 3) == 3
     assert advance_offset([{"update_id": 1}, {"update_id": 5}], 0) == 6

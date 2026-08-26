@@ -352,6 +352,24 @@ class TestApprovalPrompt:
         if prompt["markup"] is not None:
             assert "inline_keyboard" in prompt["markup"]
 
+    def test_prompt_lists_each_tool_in_a_batch(self):
+        from kazma_gateway.agent_handler import _build_approval_prompt
+
+        payload = {
+            "type": "hitl_approval",
+            "tool": "2 tools",
+            "args": {"tools": ["file_write", "file_write"]},
+            "tools": [
+                {"name": "file_write", "args": {"path": "notes/a.md"}},
+                {"name": "file_write", "args": {"path": "drafts/b.md"}},
+            ],
+        }
+        prompt = _build_approval_prompt(payload, "tid-batch")
+        assert prompt["text"].count("Approval required") == 1
+        assert "notes/a.md" in prompt["text"]
+        assert "drafts/b.md" in prompt["text"]
+        assert "hitl approve tid-batch" in prompt["text"]
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Phase 2: tool_registry HITL flag prevents double-gating

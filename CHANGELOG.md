@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Unreleased — Dual Telegram HITL cards (2026-08-26)
+
+Two `file_write` approval cards on one thread (same `hitl approve <id>`),
+then two "Already handled" replies: Telegram treated an **edit** (or a
+second update with the same `message_id`) as a new agent turn, so the
+graph ran twice and posted two interrupts. Tapping both after the 60s
+HITL timeout (or after the first resume) looked like duplicate cards.
+
+- Ignore `edited_message` as a new turn.
+- Dedupe `(chat_id, message_id)` before enqueue.
+- One batched interrupt lists every tool/path on a **single** card.
+- "Already handled" is sent at most once per thread per 90s.
+
+Restart the gateway/server.
+
 ## Unreleased — Follow-up chat no longer stuck behind Stop (2026-08-26)
 
 After a reply, the next Enter/Send was a no-op until you clicked Stop: the

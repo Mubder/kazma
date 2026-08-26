@@ -55,6 +55,18 @@ async def _stale_approval_message(
             for m in msgs[-6:]
         )
         if not next_nodes and has_assistant and approved:
+            try:
+                from kazma_core.config_store import get_config_store
+                import time as _t
+
+                cs = get_config_store()
+                notice_key = f"hitl.last_stale_notice.{thread_id}"
+                prev = cs.get(notice_key)
+                if isinstance(prev, dict) and (_t.time() - float(prev.get("at") or 0)) < 90:
+                    return None
+                cs.set(notice_key, {"at": _t.time()}, category="safety")
+            except Exception:
+                pass
             return (
                 "✅ Already handled — this approval was applied earlier and the "
                 "turn finished. You can ignore this button (or send a new request)."
@@ -144,6 +156,53 @@ def _build_approval_prompt(
     args_str = str(_redact(args))
     if len(args_str) > 300:
         args_str = args_str[:300] + "…"
+    tools = payload.get("tools") or []
+    if isinstance(tools, list) and len(tools) > 1:
+        lines = [
+            "⚠️ Approval required",
+            f"{len(tools)} actions in this turn:",
+            "",
+        ]
+        for i, item in enumerate(tools, 1):
+            if not isinstance(item, dict):
+                continue
+            tname = str(item.get("name") or item.get("tool") or "tool")
+            targs = _redact(item.get("args") or item.get("arguments") or {})
+            tstr = str(targs)
+            if len(tstr) > 200:
+                tstr = tstr[:200] + "…"
+            lines.append(f"{i}. {tname}: {tstr}")
+        lines.extend(
+            [
+                "",
+                f"Reply: hitl approve {thread_id}",
+                f"   or: hitl deny {thread_id}",
+            ]
+        )
+        text_multi = "\n".join(lines)
+        markup_multi = None
+        plat_multi = (platform or "telegram").lower()
+        try:
+            if plat_multi == "telegram":
+                from kazma_gateway.adapters.telegram import TelegramAdapter
+
+                markup_multi = TelegramAdapter.build_approval_keyboard(thread_id)
+            elif plat_multi == "discord":
+                from kazma_gateway.adapters.discord import DiscordAdapter
+
+                markup_multi = DiscordAdapter.build_approval_keyboard(thread_id)
+            elif plat_multi == "slack":
+                from kazma_gateway.adapters.slack import SlackAdapter
+
+                markup_multi = SlackAdapter.build_approval_keyboard(thread_id)
+        except Exception as exc:
+            logger.debug(
+                "Approval keyboard build failed for platform=%s: %s",
+                plat_multi,
+                exc,
+                exc_info=True,
+            )
+        return {"text": text_multi, "markup": markup_multi, "platform": plat_multi}
     # Phase 3: semantic clarify/confirm → render question + per-option keyboard
     kind = payload.get("kind", "security")
     if kind in ("semantic_clarify", "semantic_confirm"):

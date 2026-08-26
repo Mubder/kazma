@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import time
 from typing import Any
 
 import httpx
@@ -154,6 +155,10 @@ class TelegramAdapter(BaseAdapter):
         # per-thread lock processes turns in enqueue order). Maps chat_id →
         # the chat's tail task; strong refs by construction.
         self._chat_chains: dict[int, asyncio.Task] = {}
+        # (chat_id, message_id) → monotonic. Telegram often delivers the
+        # original message and then an edited_message with the same id —
+        # that used to start a second graph turn and a second HITL card.
+        self._seen_message_ids: dict[tuple[int, int], float] = {}
 
     def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
         """Set the whitelist of allowed Telegram user IDs (public setter).
@@ -466,6 +471,14 @@ class TelegramAdapter(BaseAdapter):
                     )
                     return
 
+            if self._already_seen_message(msg):
+                logger.info(
+                    "[telegram] Skipping duplicate/edit of message_id=%s chat=%s",
+                    msg.context_metadata.get("message_id"),
+                    msg.context_metadata.get("chat_id"),
+                )
+                return
+
             try:
                 queue.put_nowait(msg)
                 logger.info(
@@ -493,6 +506,28 @@ class TelegramAdapter(BaseAdapter):
                 "[telegram] Error processing update %s",
                 update.get("update_id", "?"),
             )
+
+    def _already_seen_message(self, msg: IncomingMessage) -> bool:
+        """True if this (chat_id, message_id) was already enqueued recently."""
+        meta = msg.context_metadata or {}
+        try:
+            chat_id = int(meta.get("chat_id") or 0)
+            message_id = int(meta.get("message_id") or 0)
+        except (TypeError, ValueError):
+            return False
+        if not chat_id or not message_id:
+            return False
+        now = time.monotonic()
+        cutoff = now - 900.0
+        if len(self._seen_message_ids) > 400:
+            self._seen_message_ids = {
+                k: v for k, v in self._seen_message_ids.items() if v > cutoff
+            }
+        key = (chat_id, message_id)
+        if key in self._seen_message_ids:
+            return True
+        self._seen_message_ids[key] = now
+        return False
 
     def _spawn(self, coro: Any) -> asyncio.Task:
         """Fire-and-forget with a strong reference.

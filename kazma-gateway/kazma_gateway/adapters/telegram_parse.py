@@ -26,7 +26,12 @@ def parse_text_update(update: dict[str, Any]) -> IncomingMessage | None:
     """Parse a Telegram Update into an IncomingMessage for text/caption.
 
     Returns None if not a usable text message (voice handled elsewhere).
+    ``edited_message`` is ignored as a new agent turn — Telegram fires a
+    second update when the user edits, which used to start a second graph
+    invoke and a duplicate HITL card on the same thread.
     """
+    if "edited_message" in update and "message" not in update and "channel_post" not in update:
+        return None
     message = extract_message(update)
     if not message:
         return None

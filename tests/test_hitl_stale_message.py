@@ -54,3 +54,25 @@ async def test_stale_debounce_silences_second_tap(tmp_path, monkeypatch) -> None
         approved=True,
     )
     assert text is None  # silenced
+
+
+@pytest.mark.asyncio
+async def test_stale_already_handled_is_sent_once() -> None:
+    from kazma_gateway.agent_handler.hitl import _stale_approval_message
+
+    msgs = [
+        {"role": "user", "content": "do thing"},
+        {"role": "assistant", "content": "Done."},
+    ]
+    snap = SimpleNamespace(next=(), values={"messages": msgs})
+    graph = MagicMock()
+    graph.aget_state = AsyncMock(return_value=snap)
+    cfg = {"configurable": {"thread_id": "dual-card-thread"}}
+    first = await _stale_approval_message(
+        graph, cfg, "dual-card-thread", action="approve", approved=True
+    )
+    second = await _stale_approval_message(
+        graph, cfg, "dual-card-thread", action="approve", approved=True
+    )
+    assert first is not None and "Already handled" in first
+    assert second is None
