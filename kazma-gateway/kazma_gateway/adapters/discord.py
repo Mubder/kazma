@@ -142,6 +142,22 @@ class DiscordAdapter(BaseAdapter):
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
+                    # Fatal gateway close codes: 4013 invalid intents / 4014
+                    # disallowed intents. 4014 means MESSAGE_CONTENT (or
+                    # another privileged intent we request) is NOT enabled in
+                    # the Discord Developer Portal — reconnecting can never
+                    # succeed, so stop with an actionable message instead of
+                    # looping forever.
+                    _close_code = getattr(getattr(exc, "rcvd", None), "code", None)
+                    if _close_code in (4013, 4014):
+                        logger.critical(
+                            "[discord] Gateway rejected our intents (close code "
+                            "%s). Enable 'MESSAGE CONTENT INTENT' under Discord "
+                            "Developer Portal → Application → Bot → Privileged "
+                            "Gateway Intents, then restart Kazma.",
+                            _close_code,
+                        )
+                        break
                     err_msg = str(exc) or exc.__class__.__name__
                     logger.warning("[discord] Gateway connection dropped (%s) — reconnecting...", err_msg)
                     if await self.jitter_sleep(shutdown_event):
@@ -190,7 +206,14 @@ class DiscordAdapter(BaseAdapter):
                             "op": 2,
                             "d": {
                                 "token": self._token,
-                                "intents": (1 << 0) | (1 << 9),  # GUILDS + MESSAGE_CONTENT
+                                # GUILDS + GUILD_MESSAGES + MESSAGE_CONTENT
+                                # (privileged — must ALSO be enabled in the
+                                # Discord Developer Portal, or the gateway
+                                # closes with 4014) + DIRECT_MESSAGES.
+                                # Without MESSAGE_CONTENT, guild messages
+                                # arrive with empty content (2023 enforcement)
+                                # and DMs require DIRECT_MESSAGES.
+                                "intents": (1 << 0) | (1 << 9) | (1 << 15) | (1 << 12),
                                 "properties": {"os": "linux", "browser": "kazma", "device": "kazma"},
                             },
                         }
