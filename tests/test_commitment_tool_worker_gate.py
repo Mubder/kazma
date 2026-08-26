@@ -9,8 +9,14 @@ remind is blocked (held for clarification) instead of firing wrong.
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
+
+
+def _future(days: int) -> str:
+    """A belief date `days` out — dynamic so the fixtures never rot."""
+    return (datetime.now(timezone.utc) + timedelta(days=days)).date().isoformat()
 
 
 @pytest.fixture
@@ -28,7 +34,7 @@ def isolated_dbs(tmp_path, monkeypatch):
     o = sqlite3.connect(ops_db)
     ensure_primary_schema(p)
     ensure_ops_schema(o)
-    mutate_belief(p, "user", "copilot_next_reset", "2026-09-01",
+    mutate_belief(p, "user", "copilot_next_reset", _future(6),
                   ops_conn=o, importance=5, extraction_method="user_explicit")
     p.commit()
     yield {"copilot": True}
@@ -63,23 +69,29 @@ def _state(text, tool_name, args):
 @pytest.mark.anyio
 async def test_gate_rewrites_wrong_date_to_memory_anchored_date(isolated_dbs):
     """CAPSTONE: tool_worker receives schedule_task with the model's invented
-    Aug 13; the gate anchors to copilot_next_reset=Sep 1 and rewrites the args
-    to fire_at = Sep 1 − 2d = Aug 30 BEFORE execution."""
+    date; the gate anchors to copilot_next_reset (6 days out) and rewrites the
+    args to fire_at = reset − 2d BEFORE execution."""
     from kazma_core.agent.graph_builder import tool_worker_node
+
+    _reset = datetime.now(timezone.utc) + timedelta(days=6)   # the true belief date
+    _invented = _reset - timedelta(days=19)                   # the model's wrong date
+    _expected = _reset - timedelta(days=2)                    # "2 days before the reset"
 
     exe = _RecExecutor()
     state = _state(
         "remind me before the copilot monthly reset in 2 days",
         "schedule_task",
-        {"timing": "2026-08-13T10:00:00+00:00", "prompt": "reset soon"},
+        {"timing": _invented.replace(hour=10, minute=0, second=0,
+                                     microsecond=0).isoformat(),
+         "prompt": "reset soon"},
     )
     await tool_worker_node(state, tool_executor=exe, tracer=_NoopTracer(), hitl_config=None)
 
     assert exe.calls, "schedule_task should have executed (allow+rewrite)"
     name, args = exe.calls[0]
     assert name == "schedule_task"
-    assert args["timing"].startswith("2026-08-30"), (
-        f"gate must rewrite to Sep 1 − 2d = Aug 30, got {args['timing']}")
+    assert args["timing"].startswith(_expected.date().isoformat()), (
+        f"gate must rewrite to reset − 2d = {_expected.date()}, got {args['timing']}")
     assert args["prompt"] == "reset soon"  # non-timing args preserved
 
 
@@ -100,8 +112,10 @@ async def test_gate_blocks_ambiguous_remind(tmp_path, monkeypatch):
     p = sqlite3.connect(state_db); p.row_factory = sqlite3.Row
     o = sqlite3.connect(ops_db)
     ensure_primary_schema(p); ensure_ops_schema(o)
-    mutate_belief(p, "user", "grok_next_reset", "2026-08-15", ops_conn=o,
-                  importance=5, extraction_method="user_explicit")
+    # 4 days out: inside the 7-day relevance window of the from-now fire
+    # candidate (now+2d) → ambiguous → clarify (the CoPilot guard).
+    mutate_belief(p, "user", "grok_next_reset", _future(4),
+                  ops_conn=o, importance=5, extraction_method="user_explicit")
     p.commit()
 
     exe = _RecExecutor()

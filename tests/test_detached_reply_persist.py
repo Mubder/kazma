@@ -81,10 +81,12 @@ async def test_detached_persists_appends_after_trailing_user(monkeypatch):
         graph, {"configurable": {"thread_id": "t1"}}, "s1", "t1"
     )
 
-    assert session.messages[-1] == {
-        "role": "assistant",
-        "content": "Yes — your XHypert name was exactly that.",
-    }
+    last = session.messages[-1]
+    assert last["role"] == "assistant"
+    assert last["content"] == "Yes — your XHypert name was exactly that."
+    # Every writer stamps `ts` on appended assistant rows (2026-08-26
+    # shape-consistency fix) — presence, not the exact value, is the contract.
+    assert "ts" in last
     # The previous turn's answer is intact — the old code overwrote it.
     assert session.messages[1]["content"] == "PREVIOUS ANSWER — must survive"
     assert len(session.messages) == 4

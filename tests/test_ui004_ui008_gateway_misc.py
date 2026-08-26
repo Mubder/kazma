@@ -181,10 +181,15 @@ class TestKeyboardShortcuts:
         )
 
     def test_app_js_ctrl_k_search(self) -> None:
-        """Ctrl+K must toggle/focus search (global shortcut)."""
-        js = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
-        assert "ctrlKey" in js or "metaKey" in js
-        assert "'k'" in js, "components.js must bind Ctrl+K"
+        """Ctrl+K must toggle/focus search via the ONE registry (nav.js)."""
+        nav = (_JS_DIR / "modules" / "nav.js").read_text(encoding="utf-8")
+        assert "ctrlKey" in nav or "metaKey" in nav
+        assert "'k'" in nav, "nav.js must bind Ctrl+K (the one shortcut registry)"
+        # The old racing handler in components.js was removed (UI audit P2).
+        components = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
+        assert "'k'" not in components, (
+            "components.js must not bind Ctrl+K — nav.js owns the registry"
+        )
 
     def test_chat_js_ctrl_k_focuses_search(self) -> None:
         """In chat context, Ctrl+K focuses the session search input."""

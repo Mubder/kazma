@@ -116,7 +116,11 @@ def test_soft_nav_pauses_alpine_mutations_across_swap() -> None:
     assert "Alpine.stopObservingMutations" in nav
     assert "Alpine.startObservingMutations" in nav
     assert "function rebindAlpineRoot(" in nav
-    assert "function isEmptyAlpineBind(" in nav
+    # P0-4: bare `x-data` roots are legitimately bound — the old
+    # isEmptyAlpineBind gate treated them as unbound and re-introduced the
+    # reload loop. isAlpineBound is the current bound-state check.
+    assert "function isAlpineBound(" in nav
+    assert "function isEmptyAlpineBind(" not in nav
     # Call sites (trailing ;) — not the function declarations.
     pause_at = nav.index("pauseAlpineMutations();")
     swap_at = nav.index("oldBody.innerHTML = newBody.innerHTML")

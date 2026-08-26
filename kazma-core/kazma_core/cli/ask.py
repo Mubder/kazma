@@ -491,8 +491,6 @@ async def _invoke_supervisor(
     payload: Any = state
     last_text = ""
     try:
-        from langgraph.types import Command
-
         hitl_rounds = 0
         while True:
             try:
@@ -547,10 +545,16 @@ async def _invoke_supervisor(
                     enable_yolo(thread_id, actor="cli-allow-always")
                 except Exception:
                     pass
-            payload = Command(resume={
-                "approved": bool(decision.get("approved")),
-                "reason": "cli" if decision.get("approved") else "denied",
-            })
+            from kazma_core.safety.commitment.resume import build_resume_command
+
+            payload = build_resume_command(
+                hitl_payload,
+                approved=bool(decision.get("approved")),
+                reason="cli" if decision.get("approved") else "denied",
+            )
+            if payload is None:
+                # Stale HITL card — nothing pending to resume.
+                break
     finally:
         reset_current_thread_id(token)
         if drain_task is not None:
