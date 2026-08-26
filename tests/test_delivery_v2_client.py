@@ -339,6 +339,9 @@ class TestUIAuditPhase2Fixes:
         base = (_UI / "templates" / "base.html").read_text(encoding="utf-8")
         assert "unhandledrejection" in base
         assert "showToast" in base
+        # The toast must carry the throwing file:line so a stale-cache vs
+        # real-bug question is answered without a console round-trip.
+        assert "@ ' + m[1] + ':' + m[2]" in base
 
     def test_swarm_breaker_badge_class_driven(self):
         html = (_UI / "templates" / "swarm.html").read_text(encoding="utf-8")

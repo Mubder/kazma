@@ -195,7 +195,21 @@
                 lastMsg = msg; lastAt = now;
                 try { console.error('[Kazma] Unhandled rejection:', reason); } catch (e) {}
                 if (window.showToast) {
-                    try { window.showToast('⚠️ ' + window.t('load_failed') + ' — ' + msg, 'error', 4000); } catch (e2) {}
+                    try {
+                        // Locate the throwing frame so a stale-cache vs
+                        // real-bug question is answered on the toast itself
+                        // ("lastEventId is not defined" recurred with no
+                        // matching reference in the shipped source).
+                        var where = '';
+                        try {
+                            var st = reason && reason.stack;
+                            if (st) {
+                                var m = st.match(/\/([A-Za-z0-9_./-]+\.js):(\d+):(\d+)/);
+                                if (m) where = ' @ ' + m[1] + ':' + m[2];
+                            }
+                        } catch (e0) { /* ignore */ }
+                        window.showToast('⚠️ ' + window.t('load_failed') + ' — ' + msg + where, 'error', 5000);
+                    } catch (e2) {}
                 }
             });
         })();
