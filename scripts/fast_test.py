@@ -54,8 +54,12 @@ TEST_DIRS = _test_dirs_from_pyproject()
 
 _FAILED_RE = re.compile(r"^(FAILED|ERROR)\s+(\S+::\S+)", re.M)
 
-# Windows segfault exit code (0xC0000005) and POSIX SIGSEGV.
-_CRASH_CODES = {139, -1073741819}
+# Windows segfault exit code (0xC0000005) and POSIX SIGSEGV. The NTSTATUS
+# arrives signed (-1073741819) via some capture paths and unsigned
+# (3221225477 = 0xC0000005) via others — BOTH must classify as a crash, or a
+# natively-crashed chunk is treated as finished and its files are never
+# rerun (observed 2026-08-26: chunk 01 lost 114 files silently).
+_CRASH_CODES = {139, -1073741819, 3221225477}
 
 
 def discover_test_files() -> list[Path]:
