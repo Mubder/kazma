@@ -60,6 +60,10 @@ See [Email integration](email-integration). Sandbox works with no setup.
 
 Mutating tools (`email_send`, `email_delete`, `email_categorize`) need HITL approval. If Gmail returns **403 insufficient scopes**, add Gmail scopes on the OAuth consent screen, Disconnect, and Connect again.
 
+### How does Kazma tweet on X?
+
+Official X API only — [X publisher](x-publisher). Create a Read + Write app at developer.x.com, put the **four OAuth 1.0a keys** in **Settings → X** (not chat). Each tweet still needs your HITL approval (YOLO cannot skip). Kill-switch: `KAZMA_X_POST=0`.
+
 ### How do I make the agent research the web?
 
 There is **no** `/research` slash command. Ask in **chat** (e.g. “Research X and cite sources”) or use **`/swarm research …`** for multi-worker dispatch. The agent uses `web_search`, `read_url` / `read_url_to_file`, optional `crawl_site`, and `digest_research_file`. See [Web research](web-research).

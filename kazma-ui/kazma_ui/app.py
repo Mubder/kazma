@@ -1315,6 +1315,17 @@ class KazmaAppBuilder:
             logger.warning("Email API router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "email_api", "error": str(e)})
 
+        try:
+            from kazma_ui.x_api import protected_router as x_protected
+            from kazma_ui.x_api import router as x_router
+
+            self.app.include_router(x_router)
+            self.app.include_router(x_protected)
+            logger.info("X API router mounted at /api/x/*")
+        except Exception as e:
+            logger.warning("X API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "x_api", "error": str(e)})
+
         # ── Documents API (shared DocumentIngestionService) ──
         # The router delegates to app.state.documents (wired in _on_startup).
         # Mounted unconditionally so the /documents page always has an API;

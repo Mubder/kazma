@@ -97,6 +97,8 @@ class SafetyConfig(BaseModel):
             "email_delete",
             "email_categorize",
             "browser_eval_js",
+            "x_post",
+            "x_delete_post",
         ],
         "timeout_seconds": 300,
     })

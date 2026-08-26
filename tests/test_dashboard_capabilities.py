@@ -15,7 +15,7 @@ def test_dash_caps_includes_new_surfaces() -> None:
     js = _JS.read_text(encoding="utf-8")
     i18n = _I18N.read_text(encoding="utf-8")
     assert "window.DASH_CAPS" in html
-    for cap_id in ("cua", "voice", "ide", "mcp", "hitl", "doc"):
+    for cap_id in ("cua", "voice", "ide", "mcp", "hitl", "doc", "x"):
         assert f'id: "{cap_id}"' in html or f"id: '{cap_id}'" in html
         assert f"dashboard.cap.{cap_id}" in i18n
     assert "svgIcons[f.id]" in js

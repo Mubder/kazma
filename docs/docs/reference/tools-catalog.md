@@ -189,7 +189,10 @@ These modules implement or support tools (some registered at startup, some via s
  |
 | `email_categorize` | email-manager | email | **danger** | Mark read/unread, star/flag, add/remove labels, move folder. HITL required. Args: message_id, mark_read, star, add_labels, remove_labels, move_to_folder, provider.
  |
-| `email_analyze` | email-manager | email | safe/read | Summarize email, extract action items/deadlines, sentiment, phishing risk. Args: message_id or raw_text, focus (full\|security\|actions), provider.
+| `email_analyze` | email-manager | email | safe/read | Summarize email, extract action items/deadlines, sentiment, phishing risk. Args: message_id or raw_text, focus (full\|security\|actions), provider. |
+| `x_status` | x-publisher | social | safe/read | Read-only X connector status. Never returns secrets. Direct the operator to Settings → X for keys. |
+| `x_post` | x-publisher | social | **danger (always HITL)** | Official POST /2/tweets (OAuth 1.0a). YOLO cannot skip. Args: text, reply_to_id. |
+| `x_delete_post` | x-publisher | social | **danger (always HITL)** | Official DELETE /2/tweets/:id. Args: tweet_id. |
  |
 | `install_python_packages` | environment-bootstrapper | system | **danger** | Install Python packages safely inside the runtime virtual environment using uv or pip. |
 | `install_npm_packages` | environment-bootstrapper | system | **danger** | Install Node/npm packages inside the active workspace. |
@@ -263,4 +266,6 @@ From `kazma_core/safety/hitl.py` → `CANONICAL_DANGER_TOOLS` (also mirrored in 
 - `uninstall_agent_skill`
 - `vault_delete`
 - `vault_retrieve`
+- `x_delete_post`
+- `x_post`
 

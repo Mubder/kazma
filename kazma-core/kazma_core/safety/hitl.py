@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 __all__ = [
+    "ALWAYS_HITL_TOOLS",
     "CANONICAL_DANGER_TOOLS",
     "DEFAULT_DANGER_TOOLS",
     "TOOL_TIERS",
@@ -132,6 +133,9 @@ TOOL_TIERS: dict[str, str] = {
     "email_send": "danger",
     "email_delete": "danger",
     "email_categorize": "danger",
+    "x_post": "danger",
+    "x_delete_post": "danger",
+    "x_status": "read",
     # Unsafe — always blocked (reserved)
 }
 
@@ -165,7 +169,14 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "computer_use",
     # Path grants expand the FS allowlist — always require human approval.
     "request_path_access",
+    # Official X API writes — also in ALWAYS_HITL_TOOLS (YOLO cannot skip).
+    "x_post",
+    "x_delete_post",
 )
+
+# Public posts cannot be YOLO-skipped, granted, or run with HITL disabled.
+# X ToU / automation rules require a human to approve each outbound tweet.
+ALWAYS_HITL_TOOLS: frozenset[str] = frozenset({"x_post", "x_delete_post"})
 
 # Backward-compatible alias used throughout the codebase / tests.
 DEFAULT_DANGER_TOOLS: list[str] = list(CANONICAL_DANGER_TOOLS)
@@ -307,6 +318,9 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
     Returns:
         True if the tool requires approval.
     """
+    if tool_name in ALWAYS_HITL_TOOLS:
+        return True
+
     tid = get_current_thread_id()
     if tid:
         try:

@@ -23,6 +23,7 @@
         <button class="settings-tab" :class="{ active: tab === 'import' }" @click="onTabChange('import')">{{ t('settings.tab_import') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'voice' }" @click="onTabChange('voice')">{{ t('settings.tab_voice') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'email' }" @click="onTabChange('email')">{{ t('settings.tab_email') }}</button>
+        <button class="settings-tab" :class="{ active: tab === 'x' }" @click="onTabChange('x')">{{ t('settings.tab_x') }}</button>
         <button class="settings-tab" :class="{ active: tab === 'documents' }" @click="onTabChange('documents')">{{ t('settings.tab_documents') }}</button>
     </nav>
 
@@ -2248,6 +2249,94 @@
             <p style="margin-top:20px;font-size:0.8rem;color:var(--text-tertiary);">
                 {{ t('settings.email_docs_hint') }}
                 <a href="/docs/guide/email-integration" style="color:var(--accent);">{{ t('settings.email_docs_link') }}</a>
+            </p>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         TAB: X (official API)
+         ═══════════════════════════════════════════════════════════════ -->
+    <div x-show="tab === 'x'" x-transition x-cloak>
+        <div class="settings-group">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:16px;flex-wrap:wrap;">
+                <div>
+                    <h3 style="margin:0;">{{ t('settings.x_title') }}</h3>
+                    <p style="font-size:0.85rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.x_subtitle') }}</p>
+                </div>
+                <button class="btn btn-sm btn-secondary" @click="loadXStatus()" :disabled="xLoading" x-text="xLoading ? '…' : t('settings.x_refresh')"></button>
+            </div>
+
+            <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--border-subtle);background:var(--bg-elevated);margin-bottom:16px;">
+                <div style="font-size:0.75rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);margin-bottom:4px;">{{ t('settings.x_status') }}</div>
+                <div style="font-weight:600;">
+                    <span x-text="xStatus.configured ? t('settings.x_configured') : t('settings.x_not_configured')"></span>
+                    <span x-show="xStatus.handle" x-text="' · ' + xStatus.handle"></span>
+                    <span x-show="xStatus.verified_username" x-text="' · @' + xStatus.verified_username"></span>
+                </div>
+                <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.x_hitl_note') }}</p>
+                <p x-show="xStatus.kill_switch" x-cloak style="margin:8px 0 0 0;font-size:0.8rem;color:var(--danger);">{{ t('settings.x_kill_switch') }}</p>
+                <p style="margin:8px 0 0 0;font-size:0.8rem;color:var(--text-muted);">
+                    {{ t('settings.x_quota') }}:
+                    <span x-text="(xStatus.caps && xStatus.caps.posts_today) || 0"></span>
+                    /
+                    <span x-text="(xStatus.caps && xStatus.caps.max_posts_per_day) || 8"></span>
+                    {{ t('settings.x_per_day') }}
+                </p>
+            </div>
+
+            <div class="form-group">
+                <label>{{ t('settings.x_handle') }}</label>
+                <input type="text" class="form-input" x-model="xForm.handle" placeholder="@yourhandle" autocomplete="off">
+            </div>
+            <div class="form-row two-col-grid">
+                <div class="form-group">
+                    <label>{{ t('settings.x_api_key') }}</label>
+                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.api_key" :placeholder="xStatus.keys_set && xStatus.keys_set.api_key ? '********' : ''" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.x_api_key_secret') }}</label>
+                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.api_key_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.api_key_secret ? '********' : ''" autocomplete="off">
+                </div>
+            </div>
+            <div class="form-row two-col-grid">
+                <div class="form-group">
+                    <label>{{ t('settings.x_access_token') }}</label>
+                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token ? '********' : ''" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.x_access_token_secret') }}</label>
+                    <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token_secret ? '********' : ''" autocomplete="off">
+                </div>
+            </div>
+            <label class="toggle" style="margin-bottom:12px;">
+                <input type="checkbox" x-model="xShowKeys">
+                <span class="toggle-slider"></span>
+                <span style="margin-inline-start:8px;font-size:0.85rem;">{{ t('settings.x_show_keys') }}</span>
+            </label>
+            <label class="toggle" style="margin-bottom:12px;">
+                <input type="checkbox" x-model="xForm.enabled">
+                <span class="toggle-slider"></span>
+                <span style="margin-inline-start:8px;font-size:0.85rem;">{{ t('settings.x_enabled') }}</span>
+            </label>
+            <div class="form-row two-col-grid">
+                <div class="form-group">
+                    <label>{{ t('settings.x_max_day') }}</label>
+                    <input type="number" class="form-input" x-model.number="xForm.max_posts_per_day" min="1" max="50">
+                </div>
+                <div class="form-group">
+                    <label>{{ t('settings.x_max_month') }}</label>
+                    <input type="number" class="form-input" x-model.number="xForm.max_posts_per_month" min="1" max="500">
+                </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+                <button class="btn btn-primary" @click="saveXCredentials()" :disabled="xSaving" x-text="xSaving ? '…' : t('settings.x_save')"></button>
+                <button class="btn btn-secondary" @click="testXConnection()" :disabled="xSaving || !xStatus.configured">{{ t('settings.x_test') }}</button>
+                <button class="btn btn-danger" @click="disconnectX()" :disabled="xSaving || !xStatus.configured">{{ t('settings.x_disconnect') }}</button>
+            </div>
+            <p style="margin-top:16px;font-size:0.8rem;color:var(--text-tertiary);">{{ t('settings.x_howto') }}</p>
+            <p style="margin-top:8px;font-size:0.8rem;color:var(--text-tertiary);">
+                {{ t('settings.x_docs_hint') }}
+                <a href="/docs/guide/x-publisher" style="color:var(--accent);">{{ t('settings.x_docs_link') }}</a>
             </p>
         </div>
     </div>

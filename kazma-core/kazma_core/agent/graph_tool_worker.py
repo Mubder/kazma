@@ -480,7 +480,13 @@ async def tool_worker_node(
                 else:
                     safe_tools.append(tc)
         else:
-            safe_tools = list(pending)
+            from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+            for tc in pending:
+                if tc["name"] in ALWAYS_HITL_TOOLS:
+                    danger_tools.append(tc)
+                else:
+                    safe_tools.append(tc)
 
         async def _exec_one(tc: PendingToolCall) -> ToolResult:
             start = time.monotonic()
@@ -726,7 +732,9 @@ async def tool_worker_node(
                 primary_args = {"tools": [t["name"] for t in tools_payload]}
 
             from kazma_core.safety.yolo import yolo_allowed as _yolo_allowed
+            from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS as _ALWAYS_HITL
 
+            _batch_always = any(tc["name"] in _ALWAYS_HITL for tc in danger_tools)
             approval_input = {
                 "type": "hitl_approval",
                 "kind": "security",  # self-describing (§4.3): every payload carries kind
@@ -734,7 +742,7 @@ async def tool_worker_node(
                 "args": primary_args,
                 "tools": tools_payload,
                 "message": message,
-                "yolo_allowed": _yolo_allowed(),
+                "yolo_allowed": _yolo_allowed() and not _batch_always,
             }
 
             # Defense-in-depth: requires_approval() already filtered YOLO/grants
@@ -743,7 +751,10 @@ async def tool_worker_node(
             from kazma_core.safety.yolo import is_yolo_active
 
             current_thread = get_current_thread_id() or state.get("thread_id") or ""
-            if current_thread and is_yolo_active(str(current_thread)):
+            from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
+
+            _always = [tc for tc in danger_tools if tc["name"] in ALWAYS_HITL_TOOLS]
+            if current_thread and is_yolo_active(str(current_thread)) and not _always:
                 logger.warning(
                     "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",
                     current_thread,

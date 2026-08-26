@@ -21,6 +21,7 @@ const sidebars = {
         'guide/knowledge-library',
         'guide/recent-features',
         'guide/email-integration',
+        'guide/x-publisher',
         'guide/document-intelligence',
         'guide/document-phases',
         'guide/document-rendering',

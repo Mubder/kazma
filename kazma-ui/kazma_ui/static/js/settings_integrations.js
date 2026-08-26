@@ -636,6 +636,114 @@
                 this.emailSaving = false;
             }
         },
+
+        async loadXStatus() {
+            this.xLoading = true;
+            try {
+                const data = await this._fetch('/api/x/status');
+                if (data && !data.error) {
+                    Object.assign(this.xStatus, data);
+                    if (data.handle) this.xForm.handle = data.handle;
+                    if (data.caps) {
+                        if (data.caps.max_posts_per_day) this.xForm.max_posts_per_day = data.caps.max_posts_per_day;
+                        if (data.caps.max_posts_per_month) this.xForm.max_posts_per_month = data.caps.max_posts_per_month;
+                    }
+                    this.xForm.enabled = !!data.enabled;
+                }
+            } catch (e) {
+                showToast('Failed to load X status: ' + e.message, 'error');
+            } finally {
+                this.xLoading = false;
+            }
+        },
+
+        async saveXCredentials() {
+            this.xSaving = true;
+            try {
+                const resp = await fetch('/api/x/credentials', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        api_key: this.xForm.api_key,
+                        api_key_secret: this.xForm.api_key_secret,
+                        access_token: this.xForm.access_token,
+                        access_token_secret: this.xForm.access_token_secret,
+                        handle: this.xForm.handle,
+                        enabled: this.xForm.enabled,
+                        max_posts_per_day: Number(this.xForm.max_posts_per_day) || 8,
+                        max_posts_per_month: Number(this.xForm.max_posts_per_month) || 80,
+                    }),
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || data.ok === false) {
+                    showToast(data.detail || data.error || 'Save failed', 'error');
+                    return;
+                }
+                this.xForm.api_key = '';
+                this.xForm.api_key_secret = '';
+                this.xForm.access_token = '';
+                this.xForm.access_token_secret = '';
+                Object.assign(this.xStatus, data);
+                showToast('X credentials saved (vaulted). Test the connection next.', 'success');
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            } finally {
+                this.xSaving = false;
+            }
+        },
+
+        async testXConnection() {
+            this.xSaving = true;
+            try {
+                const resp = await fetch('/api/x/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || data.ok === false) {
+                    showToast(data.detail || data.error || 'X test failed', 'error');
+                    return;
+                }
+                Object.assign(this.xStatus, data);
+                var who = data.verified_username ? (' @' + data.verified_username) : '';
+                showToast('X API ok' + who + '. Read + Write user tokens work.', 'success');
+            } catch (e) {
+                showToast('X test failed: ' + e.message, 'error');
+            } finally {
+                this.xSaving = false;
+            }
+        },
+
+        async disconnectX() {
+            if (!(await window.kazmaConfirm({
+                title: 'Disconnect X',
+                message: 'Remove the four OAuth keys from the vault and disable posting?',
+                confirmText: 'Disconnect',
+                danger: true,
+            }))) return;
+            this.xSaving = true;
+            try {
+                const resp = await fetch('/api/x/disconnect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || data.ok === false) {
+                    showToast(data.detail || data.error || 'Disconnect failed', 'error');
+                    return;
+                }
+                Object.assign(this.xStatus, data);
+                this.xForm.enabled = false;
+                showToast('X connector disconnected.', 'success');
+            } catch (e) {
+                showToast('Disconnect failed: ' + e.message, 'error');
+            } finally {
+                this.xSaving = false;
+            }
+        },
         };
     };
 })(typeof window !== "undefined" ? window : globalThis);

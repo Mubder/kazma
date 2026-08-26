@@ -173,6 +173,7 @@ keywords blocked).
 | `advanced_web_crawler` | web_search_duckduckgo, crawl_page, parse_document | CSV/JSON/XLS/PDF parsing |
 | `system_health_monitor` | get_system_stats, list_active_processes, read_system_logs | |
 | `task_scheduler_cron` | schedule_task, list_scheduled, cancel_scheduled | HITL-gated |
+| `x_publisher` | x_status, x_post, x_delete_post | Official X API v2; `x_post` / `x_delete_post` **always HITL** |
 | `environment_bootstrapper` | install_python_packages, install_npm_packages, check_environment | HITL-gated |
 | `visual_interpreter_generator` | analyze_local_image, generate_ui_mockup | |
 | `arabic_bilingual_nlp` | arabic_translate, hijri_convert, insert_diacritics | |

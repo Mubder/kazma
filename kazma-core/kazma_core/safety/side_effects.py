@@ -148,6 +148,11 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "email_list": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "email_get": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "email_analyze": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    "x_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
+               ("text",)),
+    "x_delete_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
+                      ("tweet_id",)),
+    "x_status": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # git / github
     "git_commit": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     "git_push_pull": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),

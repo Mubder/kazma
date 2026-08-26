@@ -237,7 +237,9 @@ The three gates use **different** danger-tool lists. This is deliberate (each pa
 
 ### 5.1 Gate A (graph) — `kazma.yaml safety.hitl.require_approval_for`
 
-Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`. Parity-tested.
+Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`, `x_post`, `x_delete_post`. Parity-tested.
+
+**Always-HITL (X ToU):** `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`) require approval even when YOLO, standing grants, or HITL-disabled would skip other danger tools. Official API only — see [X publisher](x-publisher).
 
 Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 

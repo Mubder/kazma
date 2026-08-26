@@ -180,6 +180,17 @@ HTML page: `GET /documents` (session). TUI Documents tab uses the same coordinat
 
 Agent mail ops use tools (`email_list`, …), not these HTTP routes. Guide: [Email integration](../guide/email-integration).
 
+## X publisher
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/x/status` | Session | Configured?, handle, caps. Never returns secrets. |
+| POST | `/api/x/credentials` | Session + CSRF | Save four OAuth 1.0a keys (vaulted) + handle + caps. |
+| POST | `/api/x/test` | Session + CSRF | `GET /2/users/me` with stored keys. |
+| POST | `/api/x/disconnect` | Session + CSRF | Delete keys, disable posting. |
+
+Tweets themselves go through `x_post` (always HITL). Guide: [X publisher](../guide/x-publisher).
+
 ## Gateways & platforms
 
 | Method | Path | Auth | Description |

@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Unreleased — Official X publisher (2026-08-26)
+
+Tweet through **X API v2** only (OAuth 1.0a user context — Bearer cannot post).
+
+- Settings → **X**: four keys vaulted as `connectors.x.*`. Never paste in chat.
+- Tools: `x_status`, `x_post`, `x_delete_post`. `ALWAYS_HITL_TOOLS` — YOLO / grants cannot skip.
+- ToU fail-safes: length, mention/cashtag/hashtag caps, 30d duplicate hash, 8/day 80/30d ledger, no write retry, `User-Agent`, `KAZMA_X_POST=0`.
+- No like/follow/DM/scrape/CUA posting. Guide: `docs/docs/guide/x-publisher.md`.
+
+Restart the server, then Settings → X.
+
 ## Unreleased — Dashboard Active Capabilities (2026-08-26)
 
 Dashboard cards were a static 8-item 2025 list. They now match 0.10:

@@ -318,6 +318,22 @@
         emailLoading: false,
         emailSaving: false,
 
+        // ── X (Twitter) official API ──
+        xStatus: {
+            configured: false,
+            enabled: false,
+            kill_switch: false,
+            handle: '',
+            can_post: false,
+            verified_username: '',
+            caps: { max_posts_per_day: 8, posts_today: 0, max_posts_per_month: 80, posts_30d: 0 },
+            keys_set: { api_key: false, api_key_secret: false, access_token: false, access_token_secret: false },
+        },
+        xForm: { api_key: '', api_key_secret: '', access_token: '', access_token_secret: '', handle: '', enabled: true, max_posts_per_day: 8, max_posts_per_month: 80 },
+        xLoading: false,
+        xSaving: false,
+        xShowKeys: false,
+
         async init() {
             const self = this;
             self.loading = true;
@@ -619,6 +635,9 @@
                     break;
                 case 'email':
                     await this.loadEmailStatus();
+                    break;
+                case 'x':
+                    await this.loadXStatus();
                     break;
             }
         },

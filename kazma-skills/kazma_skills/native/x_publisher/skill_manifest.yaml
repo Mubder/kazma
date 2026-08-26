@@ -1,0 +1,42 @@
+name: x-publisher
+version: 0.1.0
+description: >
+  Post and delete tweets through the official X API v2 using OAuth 1.0a user
+  context (the four keys from developer.x.com). Never paste keys in chat —
+  store them in Settings → X. HITL is mandatory even in YOLO. No scrape,
+  like, follow, or DM. Bearer tokens cannot post.
+author: Kazma Team
+license: MIT
+
+tools:
+  x_status:
+    arabic_name: "حالة إكس"
+    description: >
+      Read-only X connector status: configured?, handle, remaining Kazma
+      caps, last posts. Never returns secrets. If unconfigured, tell the
+      operator to open Settings → X (not chat) and paste the four OAuth 1.0a
+      keys with Read + Write app permissions.
+    category: social
+    prompt_chain:
+      - "ما حالة نشر إكس؟"
+  x_post:
+    arabic_name: "تغريدة"
+    description: >
+      Post one tweet via official POST /2/tweets (OAuth 1.0a). HITL is
+      ALWAYS required — YOLO and standing grants cannot skip it. Policy
+      denies empty text, over-length, duplicate 30d, too many @mentions /
+      $cashtags / hashtags, and over Kazma daily/monthly caps. Args: text
+      (required), reply_to_id (optional, for a thread reply). Never ask the
+      operator to paste API secrets in chat. Do not use browser/computer_use
+      to tweet — that violates X ToU.
+    category: social
+    prompt_chain:
+      - "انشر تغريدة بعد موافقتي"
+  x_delete_post:
+    arabic_name: "حذف تغريدة"
+    description: >
+      Delete a tweet the connector posted (DELETE /2/tweets/:id). HITL
+      always required. Args: tweet_id.
+    category: social
+    prompt_chain:
+      - "احذف التغريدة (يتطلب موافقة)"

@@ -245,6 +245,22 @@ HITL: `email_send`, `email_delete`, `email_categorize`. Guide: [Email integratio
 
 ---
 
+## X publisher (official API)
+
+Native skill `x-publisher`. Credentials live in Settings → X (vaulted ConfigStore keys) or env. Guide: [X publisher](../guide/x-publisher).
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KAZMA_X_POST` | unset (on if Settings enabled) | `0` hard-disables posting. |
+| `X_API_KEY` | unset | OAuth 1.0a consumer key (else `connectors.x.api_key`). |
+| `X_API_KEY_SECRET` | unset | Consumer secret. |
+| `X_ACCESS_TOKEN` | unset | User access token. |
+| `X_ACCESS_TOKEN_SECRET` | unset | User access token secret. |
+
+Do not use the app-only Bearer token. User authentication must be **Read and write**.
+
+---
+
 ## Safety guards & embedder downloads (2026-08-19)
 
 Opt-in hardening from the deep-structure audit
