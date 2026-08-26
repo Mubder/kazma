@@ -272,6 +272,12 @@
   // cursor loops forever (the "is it still running?" stuck state).
   var _reopenCount = 0;
   var _REOPEN_MAX = 3;
+  // Monotonic per-dispatch epoch: stale SSE dispatches (superseded by an
+  // approval resume, cursor re-attach, or abort) must not paint or finalize.
+  var _sseEpoch = 0;
+  // True once THIS turn painted a real assistant reply — the "No response
+  // received." fallback must never fire after a successful paint.
+  var _turnPainted = false;
 
   function _resyncDelivery(reason) {
     if (!chatSessionId) return;
@@ -1550,6 +1556,7 @@
       resetSessionStats();
       currentMsgEl = null;
       tokenAccum = '';
+      _turnPainted = false;
       if (activeStream) { activeStream.abort(); activeStream = null; }
       renderSessionList();
     }
@@ -1579,6 +1586,7 @@
     // so progress attaches to a new bubble, not the previous reply).
     currentMsgEl = null;
     tokenAccum = '';
+    _turnPainted = false;
     disableInput(); // → beginTurn → progress panel on new assistant bubble
 
     // Reset attachment state (chips above the box, not placeholder text)
@@ -1670,12 +1678,19 @@
           if (Object.prototype.hasOwnProperty.call(extraBody, k)) body[k] = extraBody[k];
         }
       }
-      activeStream = KS.sse('/api/chat/stream', body, buildSseCallbacks());
+      activeStream = KS.sse('/api/chat/stream', body, buildSseCallbacks(++_sseEpoch));
     }
 
-    function buildSseCallbacks() {
+    function buildSseCallbacks(epoch) {
+      // Stale-stream guard: only the CURRENT dispatch may paint tokens,
+      // log activity, or run terminal side effects. A superseded stream's
+      // late frames (post-approval resume, cursor re-attach, aborted fetch)
+      // used to create empty bubbles and a trailing "_No response received."
+      // AFTER a successful reply (2026-08-26).
+      function _mine() { return epoch === _sseEpoch; }
       return {
       onToken: function(data) {
+        if (!_mine()) return;
         noteTurnActivity();
         _noteSeq();
         KS.hideTyping(typingEl);
@@ -1698,6 +1713,7 @@
       },
 
       onToolCall: function(data) {
+        if (!_mine()) return;
         noteTurnActivity();
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();
         var inputs = data.inputs;
@@ -1713,6 +1729,7 @@
       },
 
       onToolResult: function(data) {
+        if (!_mine()) return;
         noteTurnActivity();
         if (!currentMsgEl) return;
         var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
@@ -1733,12 +1750,14 @@
       },
 
       onMemoryExplain: function(data) {
+        if (!_mine()) return;
         noteTurnActivity();
         try { applyMemoryExplain(data || {}); } catch (e) { /* ignore */ }
       },
 
       // SSE CoT parity with WS agentStore — routing / synthesizing / heartbeats
       onStatus: function(data) {
+        if (!_mine()) return;
         noteTurnActivity();
         _noteSeq();
         var status = (data && (data.status || data.message)) || '';
@@ -1780,6 +1799,7 @@
       },
 
       onDone: function(data) {
+        if (!_mine()) return;
         activeStream = null;
         KS.hideTyping(typingEl);
         activeTypingEl = null;
@@ -1797,7 +1817,11 @@
           window.KazmaChat.applyFinalAssistantText(data.content, data.model || '', { source: 'done' });
         }
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
-        if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval) {
+        // _turnPainted: a late stale terminal must NEVER print this after a
+        // successful reply already painted (the trailing "_No response
+        // received." under the posted-tweets answer, 2026-08-26).
+        if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval
+            && !_turnPainted) {
           currentMsgEl = createAssistantMessage();
           var emptyEl = currentMsgEl.querySelector('.message-text');
           if (emptyEl) {
@@ -1862,6 +1886,7 @@
       },
 
       onApprovalRequired: function(data) {
+        if (!_mine()) return;
         // HITL: graph paused — render scope-aware approval card and lock input.
         KS.hideTyping(typingEl);
         activeTypingEl = null;
@@ -1877,6 +1902,7 @@
       },
 
       onError: function(msg) {
+        if (!_mine()) return;
         _sseAttempts++;
         _noteSeq();
         var lastId = (activeStream && typeof activeStream.lastEventId === 'function')
@@ -4199,6 +4225,7 @@
     tokenAccum = '';
     lastSentUserText = '';
     _awaitingReply = false;
+    _turnPainted = false;
 
     // Bind WS bus to the NEW session (disconnect old so late frames can't
     // re-arm beginTurn on the fresh chat).
@@ -4504,6 +4531,7 @@
       // idempotent, and a skipped paint was the "no response until refresh"
       // root cause.
       tokenAccum = incoming;
+      _turnPainted = true;
       tryIngestPlanFromText(tokenAccum);
       var display = stripPlanFenceForDisplay(tokenAccum);
       if (textEl) {

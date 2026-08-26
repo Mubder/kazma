@@ -120,6 +120,24 @@ class TestV2ArchitecturePresent:
         assert "'/api/pending-approvals'" in src
         assert "setTimeout(recoverMissedApproval, 1200)" in src
 
+    def test_stale_stream_epoch_guard(self):
+        """Superseded SSE dispatches (approval resume, re-attach, abort)
+        must not paint or run terminal side effects — stale frames created
+        empty bubbles and a trailing '_No response received.' AFTER a
+        successful reply (2026-08-26)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "var _sseEpoch = 0;" in src
+        assert "buildSseCallbacks(++_sseEpoch)" in src
+        assert "function _mine() { return epoch === _sseEpoch; }" in src
+        # painting + terminal + activity handlers are epoch-gated
+        assert src.count("if (!_mine()) return;") >= 7
+
+    def test_empty_notice_never_after_painted_reply(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "var _turnPainted = false;" in src
+        assert "_turnPainted = true;" in src
+        assert "!_turnPainted)" in src  # empty-bubble fallback guard
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

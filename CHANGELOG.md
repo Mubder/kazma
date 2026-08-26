@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Unreleased — Stale streams can no longer pollute a finished turn (2026-08-26)
+
+The approval flow worked end-to-end (card surfaced, both tweets posted)
+but the turn left two empty bubbles and a trailing "_No response
+received." UNDER the successful reply — superseded SSE dispatches (the
+pre-approval stream, cursor re-attaches) were still running painting and
+terminal handlers after the turn moved on.
+
+- **SSE epoch guard**: every dispatch gets a monotonic epoch; only the
+  current dispatch's callbacks may paint tokens, log activity, render
+  cards, or finalize the turn. Stale frames are dropped client-side.
+- **The empty-turn fallback can never fire after a painted reply**
+  (`_turnPainted`), only on genuinely empty turns.
+
+Tests: `tests/test_delivery_v2_client.py`. Restart + hard-refresh.
+
 ## Unreleased — Interrupted turns are never silent (2026-08-26)
 
 "Shows the plan and then complete silence — no card, no error, no sign
