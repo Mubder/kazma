@@ -408,6 +408,14 @@ class TestUIAuditPhase3Fixes:
         comp = (_UI / "static" / "js" / "modules" / "components.js").read_text(encoding="utf-8")
         assert "querySelector('[x-data*=\"kazmaApp\"]')" not in comp
 
+    def test_prompt_always_renders_input(self):
+        """Browser-reproduced 2026-08-26: the Rename dialog opened with NO
+        textbox — promptAsync gated the input row on `opts.placeholder`, and
+        session rename passes {title, label, defaultValue} only. A prompt
+        must always show its input (placeholder falls back to label/message)."""
+        stores = (_UI / "static" / "js" / "modules" / "stores.js").read_text(encoding="utf-8")
+        assert "input: opts.placeholder || opts.label || opts.message || ' '," in stores
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

@@ -162,7 +162,9 @@ export function registerStores() {
              * Promise-based prompt dialog — replaces native window.prompt.
              * Resolves the entered string on confirm, null on Cancel /
              * overlay / Escape (matching native semantics).
-             * @param {Object} opts - { title, message, placeholder, defaultValue, confirmText, cancelText }
+             * @param {Object} opts - { title, message, label, placeholder, defaultValue, confirmText, cancelText }
+             *   The input ALWAYS renders; placeholder falls back to label,
+             *   then message.
              * @returns {Promise<string|null>}
              */
             promptAsync(opts = {}) {
@@ -184,7 +186,12 @@ export function registerStores() {
                         title: title,
                         body: escapedMsg ? `<p class="confirm-message">${escapedMsg}</p>` : '',
                         size: 'sm',
-                        input: opts.placeholder || '',          // truthy → render input
+                        // A PROMPT always renders its input. The old
+                        // `opts.placeholder || ''` left `input` falsy for
+                        // callers that pass label/message/defaultValue only
+                        // (session Rename) — the dialog opened with NO
+                        // textbox at all (reproduced 2026-08-26).
+                        input: opts.placeholder || opts.label || opts.message || ' ',
                         inputValue: opts.defaultValue || '',
                         onClose: function () { settle(null); },
                         actions: [
