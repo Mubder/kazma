@@ -4076,6 +4076,9 @@
       .catch(function() { KS.toast('Rename failed', 'error', 3000); });
   }
 
+  // Bounded retries for a transient session-messages fetch (restart window).
+  var _loadMsgAttempts = 0;
+
   function loadSession(sessionId) {
     // Loading from server — any previous wait is resolved by what renders.
     _awaitingReply = false;
@@ -4117,6 +4120,7 @@
       .then(function(payload) {
         // Guard against race: user switched sessions while fetch was in flight
         if (chatSessionId !== sessionId) return;
+        _loadMsgAttempts = 0;
 
         var messages = payload;
         if (payload && !Array.isArray(payload) && Array.isArray(payload.messages)) {
@@ -4192,13 +4196,32 @@
       })
       .catch(function(err) {
         if (chatSessionId !== sessionId) return;
-        messagesEl.innerHTML =
-          '<div class="chat-welcome">' +
-            '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
-            '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
-            '<p>Failed to load messages: ' + escapeHtml(err.message) + '</p>' +
-          '</div>';
-        KS.toast('Failed to load session messages', 'error', 3000);
+        diag('load-messages-failed', String((err && err.message) || err));
+        // A transient load failure (server restarting / down) must NOT wipe
+        // what is already on screen — replacing the transcript with an error
+        // card destroyed the latest reply ("refresh loses the output",
+        // 2026-08-26). Keep painted content; toast + bounded retry instead.
+        var hadContent = !!(messagesEl && messagesEl.querySelector('.message'));
+        if (!hadContent) {
+          messagesEl.innerHTML =
+            '<div class="chat-welcome">' +
+              '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
+              '<h2>Session ' + escapeHtml(sessionId.slice(0, 8)) + '</h2>' +
+              '<p>Failed to load messages: ' + escapeHtml((err && err.message) || String(err)) + '</p>' +
+            '</div>';
+        }
+        KS.toast(
+          'Failed to load session messages' + (err && err.message ? ' (' + err.message + ')' : '') + ' — retrying…',
+          'error', 4000
+        );
+        if (_loadMsgAttempts < 2) {
+          _loadMsgAttempts++;
+          setTimeout(function() {
+            if (chatSessionId === sessionId) loadSession(sessionId);
+          }, 1500);
+        } else {
+          _loadMsgAttempts = 0;
+        }
       });
   }
 

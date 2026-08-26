@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased — Refresh never destroys the transcript (2026-08-26)
+
+"Failed to load session messages" on refresh AND the latest output
+disappearing: a transient messages-fetch failure (server restarting /
+down — the endpoint itself verified healthy for every session) replaced
+the ENTIRE on-screen transcript with an error card, destroying the
+still-painted latest reply.
+
+- The load failure now keeps whatever is on screen, shows a toast with
+  the underlying error, and retries twice (1.5s apart) before giving up.
+- Assistant-row persistence shape is consistent across writers: the
+  incremental temp message and the detached-reply append both stamp
+  ``ts`` (mixed shapes produced ts-less duplicate rows after restarts).
+- Load failures land in the diagnostics ring buffer.
+
+Tests: `tests/test_delivery_v2_client.py`. Restart + hard-refresh.
+
 ## Unreleased — Empty terminals are honest + turn-lifecycle trace (2026-08-26)
 
 "CoT claimed done in 1s without a response" — and the message never

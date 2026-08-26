@@ -197,6 +197,24 @@ class TestV2ArchitecturePresent:
         assert "diag('done'," in src
         assert "diag('empty-terminal');" in src
 
+    def test_transient_load_failure_never_wipes_transcript(self):
+        """A failed session-messages fetch (restart window / server down)
+        must keep what's on screen and retry — replacing the transcript
+        with an error card destroyed the latest reply (2026-08-26)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "_loadMsgAttempts" in src
+        assert "var hadContent = !!(messagesEl && messagesEl.querySelector('.message'));" in src
+        assert "if (!hadContent) {" in src
+        assert "diag('load-messages-failed'" in src
+
+    def test_persist_writers_stamp_ts(self):
+        """Both assistant-row append paths (incremental temp message and
+        detached reply) stamp ts — mixed shapes produced ts-less duplicate
+        rows after restarts."""
+        src = (_ROOT / "kazma-ui" / "kazma_ui" / "sse_chat.py").read_text(encoding="utf-8")
+        assert '"ts": _dtc.now(_UTCc).isoformat(),' in src
+        assert '"ts": _dtmod.now(_UTC).isoformat(),' in src
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

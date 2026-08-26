@@ -261,8 +261,18 @@ async def _persist_detached_reply(
                 )
                 if trailing is not None and trailing.get("role") == "user":
                     # Normal detached completion: the user bubble is the last
-                    # entry — append the reply after it.
-                    sess.messages.append({"role": "assistant", "content": asst})
+                    # entry — append the reply after it. Stamp ``ts`` like the
+                    # inline persist — mixed shapes (ts-less rows from one
+                    # writer, ts from the other) showed up as duplicate
+                    # consecutive replies after restarts (2026-08-26).
+                    from datetime import UTC as _UTC
+                    from datetime import datetime as _dtmod
+
+                    sess.messages.append({
+                        "role": "assistant",
+                        "content": asst,
+                        "ts": _dtmod.now(_UTC).isoformat(),
+                    })
                 else:
                     # No trailing user turn (e.g. a pending bubble from an
                     # incremental persist) — replace the last assistant /
@@ -1985,8 +1995,18 @@ def create_sse_chat_router(
                     )
                 except Exception:
                     _turn_model = ""
-            # Temporary message dict for incremental persistence
-            temp_assistant_msg: dict[str, Any] = {"role": "assistant", "content": ""}
+            # Temporary message dict for incremental persistence. Carries
+            # ``ts`` from creation so every append path (incremental, final,
+            # detached) produces the same row shape — mixed shapes surfaced
+            # as ts-less duplicate rows after restarts (2026-08-26).
+            from datetime import UTC as _UTCc
+            from datetime import datetime as _dtc
+
+            temp_assistant_msg: dict[str, Any] = {
+                "role": "assistant",
+                "content": "",
+                "ts": _dtc.now(_UTCc).isoformat(),
+            }
             if _turn_model:
                 temp_assistant_msg["model"] = _turn_model
             # CoT / activity log for this turn (tools + status), persisted with
