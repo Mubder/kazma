@@ -9,6 +9,7 @@ from kazma_core.product_knowledge import (
     ARABIC_NAME_VARIANT,
     LATIN_NAME,
     build_product_knowledge,
+    enforce_arabic_brand,
     identity_line,
     knowledge_already_present,
 )
@@ -38,6 +39,43 @@ class TestArabicBrand:
         assert LATIN_NAME in line
         assert ARABIC_NAME_PRIMARY in line
         assert ARABIC_NAME_FORBIDDEN in line
+
+
+class TestEnforceArabicBrand:
+    """The deterministic reply-boundary sanitizer (prompt rules can slip)."""
+
+    def test_rewrites_forbidden_spelling(self) -> None:
+        assert enforce_arabic_brand("أنا كازما") == f"أنا {ARABIC_NAME_PRIMARY}"
+        # Multiple occurrences + correct ones untouched
+        out = enforce_arabic_brand("كازما وكاظمه وكاظمة وكازما")
+        assert ARABIC_NAME_FORBIDDEN not in out
+        assert ARABIC_NAME_VARIANT in out
+        assert out.count(ARABIC_NAME_PRIMARY) == 3
+
+    def test_diacritic_variants_rewritten(self) -> None:
+        out = enforce_arabic_brand("كَازما تساعدك")
+        assert ARABIC_NAME_FORBIDDEN not in out
+        assert ARABIC_NAME_PRIMARY in out
+
+    def test_code_fences_untouched(self) -> None:
+        s = f"قلت كازما في النص\n\n```python\nname = 'كازما'\n```\n\nخلاص"
+        out = enforce_arabic_brand(s)
+        assert ARABIC_NAME_PRIMARY in out
+        assert "name = 'كازما'" in out  # fenced content is data
+
+    def test_no_arabic_is_noop(self) -> None:
+        assert enforce_arabic_brand("Kazma helps you code.") == "Kazma helps you code."
+        assert enforce_arabic_brand("") == ""
+        assert enforce_arabic_brand(None) == ""
+
+    def test_reply_boundaries_apply_it(self) -> None:
+        """normalize_plan_fence / user_reply_text are the shared finalizers."""
+        from kazma_core.agent.plan_fence import normalize_plan_fence, user_reply_text
+
+        text = f"```plan\n- step\n```\n\nتم بواسطة كازما"
+        assert ARABIC_NAME_FORBIDDEN not in normalize_plan_fence(text)
+        assert ARABIC_NAME_FORBIDDEN not in user_reply_text(text)
+        assert ARABIC_NAME_PRIMARY in user_reply_text(text)
 
     def test_knowledge_already_present(self) -> None:
         empty = "You are a helpful bot."

@@ -148,11 +148,12 @@ def user_reply_text(text: str | None) -> str:
     Strips the ```plan workbench fence — platform chats cannot render it
     (Telegram showed a raw code block glued to every tool-turn reply).
     A plan-only payload (no prose) is returned as-is so the caller's
-    fallback text logic still sees content.
+    fallback text logic still sees content. The Arabic brand spelling
+    (كاظمه, never كازما) is enforced on the prose.
     """
     prose = prose_for_user(text)
     if prose.strip():
-        return prose
+        return _brand(prose)
     return str(text or "").strip()
 
 
@@ -160,17 +161,29 @@ def normalize_plan_fence(text: str | None) -> str:
     """Canonical form: fence (if any) on its own lines, blank line, then prose.
 
     Closing ````` is always alone on a line. Never glue prose onto the fence.
-    No-op (stripped original) when there is no plan.
+    No-op (stripped original) when there is no plan. Also enforces the Arabic
+    brand spelling (كاظمه, never كازما) — every reply boundary (respond
+    persist, SSE/WS done.content, gateway) flows through here.
     """
     raw = str(text or "")
     plan, prose = split_plan_and_prose(raw)
     if not plan:
-        return (prose or raw).strip()
+        return _brand((prose or raw).strip())
     body = plan.strip("\n")
     fence = f"```plan\n{body}\n```"
     if prose:
-        return f"{fence}\n\n{prose.strip()}"
+        return f"{fence}\n\n{_brand(prose.strip())}"
     return fence
+
+
+def _brand(text: str) -> str:
+    """Apply the Arabic brand-spelling guarantee (fail-open)."""
+    try:
+        from kazma_core.product_knowledge import enforce_arabic_brand
+
+        return enforce_arabic_brand(text)
+    except Exception:  # never break a reply over branding
+        return text
 
 
 def pick_user_facing_text(*candidates: str | None) -> str:

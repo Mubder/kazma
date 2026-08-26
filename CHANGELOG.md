@@ -1,5 +1,55 @@
 # CHANGELOG
 
+## Unreleased — Turn paint without refresh + WS/SSE dedupe (2026-08-26)
+
+"Shows CoT and a small text; the reply appears eventually, sometimes only
+after a refresh" — plus every reply visibly painted twice. Delivery audit
+found the live-paint recovery paths were one-way:
+
+- **Resync while generating now re-attaches the SSE stream** from the
+  journal cursor (`_reopenSse`). Resync used to leave a generating turn
+  with no live transport — an undisturbed visible tab then painted only
+  on manual refresh.
+- **Journal-gap attaches are honored**: the server's `status=resync`
+  signal was silently ignored by the SSE client → dead stream.
+- **Truncated streams reconcile**: a stream that ended without a
+  terminal frame kept partial text and never resynced →
+  `_resyncDelivery('sse-truncated')` paints the durable reply or
+  re-attaches.
+- **WS/SSE double delivery deduped**: every journaled frame fans out to
+  the telemetry WS too; while the SSE stream owns the live turn
+  (`KazmaChat.hasLiveSSE()`) the store no longer re-paints tokens, the
+  final reply, or the HITL card — that was the duplicated bubbles.
+- **`error` frames are no longer journal-replayed** — replaying them
+  re-triggered onError → attach → replayed-error retry storms; the
+  following `done` carries the durable outcome.
+
+Tests: `tests/test_delivery.py`, `tests/test_delivery_v2_client.py`,
+`tests/test_sse_delivery_v2.py`, `tests/test_ws_delivery_v2.py`.
+Restart the server; hard-refresh the chat tab.
+
+## Unreleased — Arabic brand guarantee + recall referent anti-hijack (2026-08-26)
+
+- **كاظمه, never كازما — deterministically.** Prompt rules (product
+  knowledge + language lock) already steer the model, but transliteration
+  slipped through in replies. New `product_knowledge.enforce_arabic_brand`
+  rewrites any ك-ا-ز-م-ا sequence (diacritics tolerated) to كاظمه outside
+  code fences, applied at every reply boundary via
+  `plan_fence.normalize_plan_fence` / `user_reply_text` (respond persist,
+  SSE/WS done.content, gateway). Three wrong spellings in Web i18n fixed
+  (`backup_desc`, `x_quota`, snapshots hint).
+- **"send it now" hijacked by a stale memory note.** A recalled
+  already-completed Telegram-test note got injected (fenced) and the model
+  bound "send it" to it instead of the Arabic tweet approved in the live
+  conversation — a wrong duplicate ping was dispatched. The recall block now
+  carries RECALL RULES *outside* the untrusted fence: recalled notes are
+  PAST observations, never actionable; short commands resolve against the
+  CURRENT conversation; a recall-only "pending" task must be verified with
+  live tools or confirmed with the user.
+
+Tests: `tests/test_product_knowledge.py`, `tests/test_industry_smoke_matrix.py`,
+`tests/test_plan_fence.py`. Restart the server.
+
 ## Unreleased — YOLO card honesty on always-HITL tools (2026-08-26)
 
 "Is YOLO session really YOLO?" — yes for every danger tool (verified:

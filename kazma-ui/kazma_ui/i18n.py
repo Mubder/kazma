@@ -655,7 +655,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.tab_system": {"en": "System", "ar": "النظام"},
     "settings.tab_backup": {"en": "Backup", "ar": "النسخ الاحتياطي"},
     "settings.backup_heading": {"en": "Universal Backup", "ar": "النسخ الاحتياطي الشامل"},
-    "settings.backup_desc": {"en": "Backs up ALL Kazma data: every database, chat history, beliefs, vectors, settings, documents, workspace, and Postgres. Runs automatically every 24h. Use this button to run it now.", "ar": "ينسخ احتياطياً كل بيانات كازما: كل قواعد البيانات، سجل المحادثات، المعتقدات، المتجهات، الإعدادات، المستندات، مساحة العمل، و Postgres."},
+    "settings.backup_desc": {"en": "Backs up ALL Kazma data: every database, chat history, beliefs, vectors, settings, documents, workspace, and Postgres. Runs automatically every 24h. Use this button to run it now.", "ar": "ينسخ احتياطياً كل بيانات كاظمه: كل قواعد البيانات، سجل المحادثات، المعتقدات، المتجهات، الإعدادات، المستندات، مساحة العمل، و Postgres."},
     "settings.backup_now": {"en": "Back Up Now", "ar": "نسخ احتياطي الآن"},
     "settings.backup_running": {"en": "Backing up…", "ar": "جاري النسخ…"},
     "settings.backup_done": {"en": "Done:", "ar": "اكتمل:"},
@@ -696,7 +696,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "KAZMA_X_POST=0 is set — posting is hard-disabled.",
         "ar": "KAZMA_X_POST=0 مفعّل — النشر معطّل تماماً.",
     },
-    "settings.x_quota": {"en": "Kazma cap", "ar": "حد كازما"},
+    "settings.x_quota": {"en": "Kazma cap", "ar": "حد كاظمه"},
     "settings.x_per_day": {"en": "today", "ar": "اليوم"},
     "settings.x_handle": {"en": "Handle (for display + mention skip)", "ar": "المعرف (للعرض وتجاهل الإشارة الذاتية)"},
     "settings.x_api_key": {"en": "API Key (consumer key)", "ar": "مفتاح API"},
@@ -787,7 +787,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.time_travel_title": {"en": "Time travel (replay / fork)", "ar": "السفر عبر الزمن (إعادة / تفريع)"},
     "settings.time_travel_hint": {
         "en": "Kazma snapshots each conversation turn so /replay N and /fork N can rewind it. This cap controls how many snapshots are kept per thread — higher values allow deeper rewinds but grow snapshots.db (it accumulates per thread).",
-        "ar": "تلتقط كازما لقطات من كل محادثة لتتيح أمرَي /replay N و /fork N. هذا الحد يتحكم بعدد اللقطات المحفوظة لكل محادثة — القيم الأعلى تسمح بتراجع أعمق لكنها تزيد حجم snapshots.db (ينمو لكل محادثة).",
+        "ar": "تلتقط كاظمه لقطات من كل محادثة لتتيح أمرَي /replay N و /fork N. هذا الحد يتحكم بعدد اللقطات المحفوظة لكل محادثة — القيم الأعلى تسمح بتراجع أعمق لكنها تزيد حجم snapshots.db (ينمو لكل محادثة).",
     },
     "settings.time_travel_max_snapshots": {"en": "Snapshots per thread", "ar": "عدد اللقطات لكل محادثة"},
     "settings.time_travel_max_snapshots_hint": {

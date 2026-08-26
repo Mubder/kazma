@@ -14,12 +14,15 @@ naming.
 
 from __future__ import annotations
 
+import re
+
 __all__ = [
     "ARABIC_NAME_PRIMARY",
     "ARABIC_NAME_VARIANT",
     "ARABIC_NAME_FORBIDDEN",
     "LATIN_NAME",
     "build_product_knowledge",
+    "enforce_arabic_brand",
     "identity_line",
 ]
 
@@ -30,7 +33,31 @@ ARABIC_NAME_PRIMARY = "كاظمه"  # primary brand spelling (ظ, not ز)
 ARABIC_NAME_VARIANT = "كاظمة"  # acceptable feminine form with tāʾ marbūṭa
 ARABIC_NAME_FORBIDDEN = "كازما"  # wrong phonetic (ز) — never use
 
+# Any ك-ا-ز-م-ا sequence, tolerating Arabic diacritics between letters
+# (كَازما, كازَما, …) — the ز is what makes it wrong.
+_FORBIDDEN_NAME_RE = re.compile(
+    r"ك[\u064B-\u0652]*ا[\u064B-\u0652]*ز[\u064B-\u0652]*م[\u064B-\u0652]*ا"
+)
+
 _KNOWLEDGE_MARKER = "## KAZMA PRODUCT KNOWLEDGE"
+
+
+def enforce_arabic_brand(text: str | None) -> str:
+    """Deterministically rewrite the forbidden كازما (ز) to كاظمه (ظ).
+
+    Prompt rules (product knowledge + language lock) steer the model, but
+    transliteration slips through occasionally — this is the hard guarantee
+    applied at the user-facing reply boundaries. Text inside ``` code
+    fences is left untouched (quoted code/file content is data, not prose).
+    """
+    s = str(text or "")
+    if "ز" not in s or not _FORBIDDEN_NAME_RE.search(s):
+        return s
+    parts = s.split("```")
+    # Even indices are outside fences (a leading ``` makes index 0 empty).
+    for i in range(0, len(parts), 2):
+        parts[i] = _FORBIDDEN_NAME_RE.sub(ARABIC_NAME_PRIMARY, parts[i])
+    return "".join(parts)
 
 
 def identity_line() -> str:
