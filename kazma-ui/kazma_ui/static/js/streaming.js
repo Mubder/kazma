@@ -9,6 +9,14 @@ var KazmaStream = (function() {
   // ── SSE (Server-Sent Events) ──────────────────────────
   function ssePost(url, body, callbacks) {
     var controller = new AbortController();
+    // Turn Delivery V2: journaled SSE frames carry an ``id: <seq>`` line.
+    // Track the last seen id so a resume retry can present it as
+    // last_event_id and the server replays exactly what was missed. MUST
+    // live at ssePost's own scope — the returned ``lastEventId`` getter
+    // closes over this, not over the fetch .then callback below (which is
+    // a different scope; a var declared there made the getter throw
+    // "lastEventId is not defined" on any stream error).
+    var lastEventId = null;
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
@@ -22,10 +30,6 @@ var KazmaStream = (function() {
       var reader = response.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';
-      // Turn Delivery V2: journaled SSE frames carry an ``id: <seq>`` line.
-      // Track the last seen id so a resume retry can present it as
-      // last_event_id and the server replays exactly what was missed.
-      var lastEventId = null;
 
       // Guard: the SSE ``event: done`` frame already completes the turn.
       // When the HTTP body closes, the reader also ends — without this flag
