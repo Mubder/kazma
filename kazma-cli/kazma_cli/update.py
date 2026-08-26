@@ -75,9 +75,22 @@ _EXTRA_MARKERS: dict[str, tuple[str, ...]] = {
     "web": ("playwright",),
     "dev": ("pytest", "ruff", "mypy"),
     "test": ("fakeredis",),
+    "push": ("pywebpush",),
+    "postgres": ("psycopg",),
+    "document": ("reportlab",),
+    "ocr": ("pytesseract",),
+    "convert": ("weasyprint",),
+    "document-platform": ("fitz",),
+    "docling": ("docling",),
+    "index": ("tree_sitter",),
+    "sandbox": ("e2b_code_interpreter",),
+    "durable": ("temporalio",),
+    "database": ("pymysql", "pymongo"),
 }
 _KNOWN_EXTRAS: tuple[str, ...] = (
-    "rag", "tui", "observability", "web", "dev", "test",
+    "rag", "postgres", "index", "sandbox", "durable", "docling",
+    "document", "ocr", "convert", "document-platform", "database",
+    "tui", "observability", "web", "push", "dev", "test",
 )
 
 # Flags that are boolean toggles (no value follows them).

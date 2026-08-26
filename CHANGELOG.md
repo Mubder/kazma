@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased — Packages tab lists 0.10 extras (2026-08-26)
+
+Settings → Packages now shows (and can install) the extras added in 0.10:
+`[index]` `[sandbox]` `[durable]` `[docling]` `[ocr]` `[convert]`
+`[document-platform]` `[push]`. Installer allowlist + `kazma update`
+markers stay in lockstep with `pyproject.toml`.
+
 ## Unreleased — Chat as the product (Web UI overhaul, 2026-08-26)
 
 Chat is the product; dashboard is an inspector. Templates + `kazma.v5.css`.

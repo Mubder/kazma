@@ -2376,7 +2376,10 @@ def register_direct_routes(self: Any) -> None:
                     "packages.extra.document.desc",
                     "PDF/DOCX/XLSX generation for document_generator skill.",
                 ),
-                "packages": ["reportlab", "python-docx", "openpyxl", "arabic-reshaper", "python-bidi"],
+                "packages": [
+                    "reportlab", "python-docx", "openpyxl", "arabic-reshaper",
+                    "python-bidi", "pypdf", "pdfplumber", "python-pptx",
+                ],
                 "install_cmd": 'uv pip install -e ".[document]"',
             },
             "database": {
@@ -2437,7 +2440,87 @@ def register_direct_routes(self: Any) -> None:
                     "Browser automation via Playwright for JS-heavy pages.",
                 ),
                 "packages": ["playwright"],
-                "install_cmd": 'uv pip install -e ".[web]"   # additive — won\'t remove other extras',
+                "install_cmd": 'uv pip install -e ".[web]"   # then: python -m playwright install chromium',
+            },
+            "index": {
+                "title": _i18n("packages.extra.index.title", "Codebase index"),
+                "priority": 2,
+                "description": _i18n(
+                    "packages.extra.index.desc",
+                    "tree-sitter grammars for codebase_search. Regex fallback works without this extra.",
+                ),
+                "packages": ["tree-sitter", "tree-sitter-python", "tree-sitter-javascript"],
+                "install_cmd": 'uv pip install -e ".[index]"',
+            },
+            "sandbox": {
+                "title": _i18n("packages.extra.sandbox.title", "E2B sandbox"),
+                "priority": 3,
+                "description": _i18n(
+                    "packages.extra.sandbox.desc",
+                    "Firecracker python_exec via E2B. Needs E2B_API_KEY. Default remains local exec.",
+                ),
+                "packages": ["e2b-code-interpreter"],
+                "install_cmd": 'uv pip install -e ".[sandbox]"   # then set E2B_API_KEY',
+            },
+            "durable": {
+                "title": _i18n("packages.extra.durable.title", "Temporal durable swarm"),
+                "priority": 3,
+                "description": _i18n(
+                    "packages.extra.durable.desc",
+                    "Temporal-wrapped swarm dispatch (crash-resume). Needs KAZMA_TEMPORAL_HOST. Default is in-process.",
+                ),
+                "packages": ["temporalio"],
+                "install_cmd": 'uv pip install -e ".[durable]"   # then set KAZMA_TEMPORAL_HOST',
+            },
+            "docling": {
+                "title": _i18n("packages.extra.docling.title", "Docling PDF salvage"),
+                "priority": 4,
+                "description": _i18n(
+                    "packages.extra.docling.desc",
+                    "Local Docling extract for hard PDFs after PyMuPDF. Optional; skip if unused.",
+                ),
+                "packages": ["docling"],
+                "install_cmd": 'uv pip install -e ".[docling]"',
+            },
+            "ocr": {
+                "title": _i18n("packages.extra.ocr.title", "OCR"),
+                "priority": 5,
+                "description": _i18n(
+                    "packages.extra.ocr.desc",
+                    "Tesseract OCR for scanned documents. Also install system tesseract-ocr.",
+                ),
+                "packages": ["pytesseract", "pdf2image", "pillow"],
+                "install_cmd": 'uv pip install -e ".[ocr]"   # plus OS Tesseract',
+            },
+            "convert": {
+                "title": _i18n("packages.extra.convert.title", "HTML/Markdown → PDF"),
+                "priority": 6,
+                "description": _i18n(
+                    "packages.extra.convert.desc",
+                    "WeasyPrint conversion. Needs OS fonts.",
+                ),
+                "packages": ["weasyprint"],
+                "install_cmd": 'uv pip install -e ".[convert]"',
+            },
+            "document-platform": {
+                "title": _i18n("packages.extra.document_platform.title", "Document Intelligence engines"),
+                "priority": 4,
+                "description": _i18n(
+                    "packages.extra.document_platform.desc",
+                    "Parse/redact/render (PyMuPDF + PDFium) plus document/ocr/convert extras.",
+                ),
+                "packages": ["pymupdf", "pypdfium2"],
+                "install_cmd": 'uv pip install -e ".[document-platform]"',
+            },
+            "push": {
+                "title": _i18n("packages.extra.push.title", "Web Push"),
+                "priority": 9,
+                "description": _i18n(
+                    "packages.extra.push.desc",
+                    "pywebpush for turn-complete notifications. Feature self-disables if missing.",
+                ),
+                "packages": ["pywebpush"],
+                "install_cmd": 'uv pip install -e ".[push]"',
             },
         }
 
@@ -2460,6 +2543,22 @@ def register_direct_routes(self: Any) -> None:
             "pymongo": "MongoDB driver for database_client skill",
             "fakeredis": "In-memory Redis stub for tests",
             "httpx": "HTTP client (also listed in test extra for completeness)",
+            "tree-sitter": "Parser runtime for the codebase index",
+            "tree-sitter-python": "Python grammar for codebase_search",
+            "tree-sitter-javascript": "JavaScript grammar for codebase_search",
+            "e2b-code-interpreter": "E2B Firecracker sandboxes for python_exec",
+            "temporalio": "Temporal SDK for durable swarm steps",
+            "docling": "Local hard-PDF salvage after PyMuPDF",
+            "pywebpush": "Web Push (VAPID) for turn-complete",
+            "pytesseract": "Tesseract Python bindings",
+            "pdf2image": "PDF page rasterizer for OCR",
+            "pillow": "Image I/O for OCR / documents",
+            "weasyprint": "HTML/Markdown to PDF",
+            "pymupdf": "MuPDF parser (import fitz)",
+            "pypdfium2": "PDFium parser peer",
+            "pypdf": "PDF read/write",
+            "pdfplumber": "PDF table/text extract",
+            "python-pptx": "PowerPoint generation",
         }
 
         # ── Core dependencies (always installed via monorepo packages) ──

@@ -2030,6 +2030,46 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Browser automation via Playwright for JS-heavy pages.",
         "ar": "أتمتة المتصفح عبر Playwright لصفحات JavaScript.",
     },
+    "packages.extra.index.title": {"en": "Codebase index", "ar": "فهرس الشيفرة"},
+    "packages.extra.index.desc": {
+        "en": "tree-sitter grammars for codebase_search. Regex fallback works without this extra.",
+        "ar": "قواعد tree-sitter لـ codebase_search. البحث بالتعبير النمطي يعمل بدون هذه الإضافة.",
+    },
+    "packages.extra.sandbox.title": {"en": "E2B sandbox", "ar": "عزل E2B"},
+    "packages.extra.sandbox.desc": {
+        "en": "Firecracker python_exec via E2B. Needs E2B_API_KEY. Default remains local exec.",
+        "ar": "تنفيذ بايثون في Firecracker عبر E2B. يحتاج E2B_API_KEY. الافتراضي يبقى التنفيذ المحلي.",
+    },
+    "packages.extra.durable.title": {"en": "Temporal durable swarm", "ar": "سرب Temporal الدائم"},
+    "packages.extra.durable.desc": {
+        "en": "Temporal-wrapped swarm dispatch (crash-resume). Needs KAZMA_TEMPORAL_HOST. Default is in-process.",
+        "ar": "إرسال السرب عبر Temporal (استئناف بعد الانهيار). يحتاج KAZMA_TEMPORAL_HOST. الافتراضي داخل العملية.",
+    },
+    "packages.extra.docling.title": {"en": "Docling PDF salvage", "ar": "إنقاذ PDF عبر Docling"},
+    "packages.extra.docling.desc": {
+        "en": "Local Docling extract for hard PDFs after PyMuPDF. Optional; skip if unused.",
+        "ar": "استخراج Docling المحلي لملفات PDF الصعبة بعد PyMuPDF. اختياري.",
+    },
+    "packages.extra.ocr.title": {"en": "OCR", "ar": "التعرّف الضوئي"},
+    "packages.extra.ocr.desc": {
+        "en": "Tesseract OCR for scanned documents. Also install system tesseract-ocr.",
+        "ar": "Tesseract للمستندات الممسوحة. ثبّت tesseract-ocr على النظام أيضاً.",
+    },
+    "packages.extra.convert.title": {"en": "HTML/Markdown → PDF", "ar": "HTML/Markdown ← PDF"},
+    "packages.extra.convert.desc": {
+        "en": "WeasyPrint conversion. Needs OS fonts.",
+        "ar": "تحويل WeasyPrint. يحتاج خطوط النظام.",
+    },
+    "packages.extra.document_platform.title": {"en": "Document Intelligence engines", "ar": "محركات ذكاء المستندات"},
+    "packages.extra.document_platform.desc": {
+        "en": "Parse/redact/render (PyMuPDF + PDFium) plus document/ocr/convert extras.",
+        "ar": "تحليل وتنقيح وعرض (PyMuPDF + PDFium) مع إضافات المستند/OCR/التحويل.",
+    },
+    "packages.extra.push.title": {"en": "Web Push", "ar": "إشعارات الويب"},
+    "packages.extra.push.desc": {
+        "en": "pywebpush for turn-complete notifications. Feature self-disables if missing.",
+        "ar": "pywebpush لإشعارات اكتمال الدورة. تتعطل الميزة تلقائياً إن غابت الحزمة.",
+    },
     "packages.layer.embedder": {"en": "Embedder", "ar": "المضمّن"},
     "packages.layer.vector_memory": {"en": "VectorMemory", "ar": "VectorMemory"},
     "packages.layer.layer_l1": {"en": "L1 Chroma", "ar": "L1 كروما"},

@@ -17,20 +17,32 @@ logger = logging.getLogger(__name__)
 # Track active installer tasks to prevent concurrent duplicate installations
 _active_installations: set[str] = set()
 
-# pyproject optional-dependencies extras (must stay allowlisted in the API)
+# pyproject optional-dependencies extras (must stay allowlisted in the API).
+# Keep in lockstep with [project.optional-dependencies] in pyproject.toml.
 ALLOWED_EXTRAS: frozenset[str] = frozenset({
-    "rag", "dev", "test", "tui", "observability", "web", "all",
+    "rag", "dev", "test", "tui", "observability", "web", "push", "postgres",
+    "document", "ocr", "convert", "document-platform", "docling",
+    "index", "sandbox", "durable", "database", "all",
 })
 
 # Individual packages that may be installed without an extra name
 ALLOWED_PACKAGES: frozenset[str] = frozenset({
     "sentence-transformers",
     "chromadb",
+    "sqlite-vec",
     "prometheus-client",
     "playwright",
     "textual",
     "python-bidi",
     "fakeredis",
+    "tree-sitter",
+    "e2b-code-interpreter",
+    "temporalio",
+    "docling",
+    "pywebpush",
+    "pytesseract",
+    "weasyprint",
+    "pymupdf",
 })
 
 
