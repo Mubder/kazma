@@ -58,13 +58,16 @@ from __future__ import annotations
 import json
 import logging
 import logging.config
+import logging.handlers
 import os
 import sys
+import time as _time
 from datetime import datetime, time, UTC
 from typing import Any
 
 __all__ = [
     "StructuredJSONFormatter",
+    "SafeTimedRotatingFileHandler",
     "setup_logging",
     "is_debug",
     "LOG_LEVELS",
@@ -93,6 +96,41 @@ NOISY_LIBS = (
     # uvicorn.access stays at INFO (useful for tracing request flow).
     "uvicorn.error",
 )
+
+
+class SafeTimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
+    """TimedRotatingFileHandler that cannot die on a Windows rotation race.
+
+    The stock handler's ``doRollover`` does ``os.remove(dest)`` then
+    ``os.rename(src, dest)`` — on Windows BOTH fail with ``PermissionError``
+    when another process still holds either file open (observed 2026-08-27:
+    a test run had rotated the live ``kazma.log`` at midnight while a second
+    process held it; the production server's first post-midnight emit then
+    raised inside ``emit`` → ``Handler.handleError`` dumped a traceback to
+    the console and the file handler stopped writing for the process's
+    lifetime — console-only logging).
+
+    On rollover failure we SKIP this rotation (keep appending to the live
+    file; the next boundary retries) and advance ``rolloverAt`` so the
+    failure is not retried on every emit.
+    """
+
+    def doRollover(self) -> None:  # noqa: D102 — see class docstring
+        try:
+            super().doRollover()
+        except OSError as exc:
+            try:
+                sys.stderr.write(
+                    f"[logging] daily rotation skipped ({exc.__class__.__name__}: {exc}) — "
+                    f"continuing to append to {self.baseFilename}\n"
+                )
+            except Exception:  # noqa: BLE001 — never raise from error handling
+                pass
+            # stream may have been closed before the failure — force reopen.
+            self.stream = None
+            # Advance the schedule past the colliding boundary, else emit()
+            # would retry (and warn) on every record.
+            self.rolloverAt = self.computeRollover(int(_time.time()))
 
 
 class StructuredJSONFormatter(logging.Formatter):
@@ -301,7 +339,9 @@ def setup_logging(level: str | None = None) -> str:
                 # … backupCount auto-deletes the oldest daily file on each rotation,
                 # so the log always holds the last `retention_days` days with no
                 # line lost within the window. Self-cleaning by age.
-                "()": "logging.handlers.TimedRotatingFileHandler",
+                # Safe… variant: a Windows multi-process rotation collision
+                # must skip, not kill, the handler (see class docstring).
+                "()": "kazma_core.logging_config.SafeTimedRotatingFileHandler",
                 "filename": str(log_path),
                 "when": "midnight",
                 "interval": 1,
