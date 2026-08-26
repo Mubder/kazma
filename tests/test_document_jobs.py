@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from kazma_core.documents.config import DocumentConfig
+from kazma_core.documents.ingestion import DocumentIngestionService
 from kazma_core.documents.jobs import (
     DocumentJobRepository,
     InvalidJobTransitionError,
@@ -358,3 +361,124 @@ def test_terminal_job_row_is_database_immutable(tmp_path) -> None:
             )
     finally:
         metadata.close()
+
+
+def test_validating_to_ocr_required_transition_and_claim(tmp_path) -> None:
+    metadata, jobs = _repository(tmp_path / "documents.db")
+    try:
+        job = _enqueue(metadata, jobs)
+        job = jobs.transition(
+            tenant_id=job.tenant_id,
+            job_id=job.id,
+            expected_state=job.state,
+            expected_version=job.version,
+            new_state=DocumentJobState.QUARANTINED,
+        )
+        job = jobs.transition(
+            tenant_id=job.tenant_id,
+            job_id=job.id,
+            expected_state=job.state,
+            expected_version=job.version,
+            new_state=DocumentJobState.VALIDATING,
+        )
+        forced = jobs.transition(
+            tenant_id=job.tenant_id,
+            job_id=job.id,
+            expected_state=job.state,
+            expected_version=job.version,
+            new_state=DocumentJobState.OCR_REQUIRED,
+            event_type="validated",
+        )
+        assert forced.state is DocumentJobState.OCR_REQUIRED
+        # The OCR leg of the claim path must be able to pick the row up.
+        claimed = jobs.claim_next(owner="ocr-worker", lease_seconds=30)
+        assert claimed is not None and claimed.id == forced.id
+        assert claimed.state is DocumentJobState.OCR_RUNNING
+    finally:
+        metadata.close()
+
+
+def test_claim_next_dead_letters_exhausted_rows_and_claims_healthy_work(
+    tmp_path,
+) -> None:
+    clock = MutableClock()
+    metadata, jobs = _repository(tmp_path / "documents.db", clock=clock)
+    try:
+        # Exhausted ocr_required row via the realistic path: claim the only
+        # attempt, then the parser escalates PARSING -> OCR_REQUIRED.
+        escalated = _ready(
+            jobs, _enqueue(metadata, jobs, key="escalated", max_attempts=1)
+        )
+        claimed = jobs.claim_next(owner="worker", lease_seconds=30)
+        assert claimed is not None and claimed.id == escalated.id
+        escalated = jobs.transition(
+            tenant_id=claimed.tenant_id,
+            job_id=claimed.id,
+            expected_state=claimed.state,
+            expected_version=claimed.version,
+            new_state=DocumentJobState.OCR_REQUIRED,
+            lease_owner="worker",
+        )
+        # Exhausted ready_to_parse row (defense in depth for any producer).
+        stalled = _ready(jobs, _enqueue(metadata, jobs, key="stalled", max_attempts=1))
+        metadata._conn.execute(
+            "UPDATE document_jobs SET attempt = max_attempts WHERE id = ?",
+            (str(stalled.id),),
+        )
+        metadata._conn.commit()
+        clock.advance(1)
+        healthy = _ready(jobs, _enqueue(metadata, jobs, key="healthy"))
+        # A single exhausted claimable row used to raise
+        # InvalidJobTransitionError here, rolling back the whole claim
+        # transaction and wedging the queue forever.
+        survivor = jobs.claim_next(owner="worker", lease_seconds=30)
+        assert survivor is not None and survivor.id == healthy.id
+        for poisoned in (escalated, stalled):
+            dead = jobs.get(tenant_id=poisoned.tenant_id, job_id=poisoned.id)
+            assert dead is not None
+            assert dead.state is DocumentJobState.DEAD_LETTER
+            assert dead.error_code == "max_attempts"
+    finally:
+        metadata.close()
+
+
+def test_transient_intake_failure_lands_in_claimable_retry_wait(
+    tmp_path, monkeypatch
+) -> None:
+    clock = MutableClock()
+    config = DocumentConfig(storage_root=tmp_path / "store")
+    metadata = DocumentRepository(
+        config.storage_root / "documents.db", tenant_quota_bytes=100_000
+    )
+    jobs = DocumentJobRepository(
+        metadata, clock=clock, jitter=lambda _base: 0, retry_base_seconds=5
+    )
+    service = DocumentIngestionService(
+        config=config, repository=metadata, jobs=jobs
+    )
+
+    def _transient_fault(**_kwargs) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(service, "_validate_and_promote", _transient_fault)
+    try:
+        result = service.ingest_stream(
+            io.BytesIO(b"Kazma transient intake retry probe.\n"),
+            filename="note.txt",
+            tenant_id="tenant-a",
+            workspace_id="ws-1",
+            actor_id="alice",
+        )
+        assert result.state is DocumentJobState.RETRY_WAIT
+        job = jobs.get(tenant_id="tenant-a", job_id=result.job_id)
+        assert job is not None
+        assert job.stage == "validating"  # ACTIVE stage preserved -> claimable
+        assert job.retry_at is not None  # reclaim gate stamped with backoff
+        assert job.error_code == "validation_transient"
+        assert jobs.claim_next(owner="worker", lease_seconds=30) is None
+        clock.advance(5)  # retry_base_seconds with zero jitter
+        claimed = jobs.claim_next(owner="worker", lease_seconds=30)
+        assert claimed is not None and claimed.id == job.id
+        assert claimed.state is DocumentJobState.VALIDATING
+    finally:
+        service.close()

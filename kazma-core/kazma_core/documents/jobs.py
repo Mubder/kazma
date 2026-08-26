@@ -95,6 +95,7 @@ ALLOWED_TRANSITIONS = MappingProxyType(
         DocumentJobState.VALIDATING: frozenset(
             {
                 DocumentJobState.READY_TO_PARSE,
+                DocumentJobState.OCR_REQUIRED,
                 DocumentJobState.RETRY_WAIT,
                 DocumentJobState.REJECTED,
                 DocumentJobState.CANCELLED,
@@ -102,7 +103,11 @@ ALLOWED_TRANSITIONS = MappingProxyType(
             }
         ),
         DocumentJobState.READY_TO_PARSE: frozenset(
-            {DocumentJobState.PARSING, DocumentJobState.CANCELLED}
+            {
+                DocumentJobState.PARSING,
+                DocumentJobState.CANCELLED,
+                DocumentJobState.DEAD_LETTER,
+            }
         ),
         DocumentJobState.PARSING: frozenset(
             {
@@ -115,7 +120,11 @@ ALLOWED_TRANSITIONS = MappingProxyType(
             }
         ),
         DocumentJobState.OCR_REQUIRED: frozenset(
-            {DocumentJobState.OCR_RUNNING, DocumentJobState.CANCELLED}
+            {
+                DocumentJobState.OCR_RUNNING,
+                DocumentJobState.CANCELLED,
+                DocumentJobState.DEAD_LETTER,
+            }
         ),
         DocumentJobState.OCR_RUNNING: frozenset(
             {

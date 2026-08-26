@@ -543,12 +543,22 @@ class DocumentIngestionService:
                 "[documents.ingestion] transient validation failure job=%s type=%s",
                 job.id, type(exc).__name__,
             )
-            return self._transition(
-                job,
-                DocumentJobState.RETRY_WAIT,
+            # Route through record_failure (the exact worker-tier path) so the
+            # row keeps its ACTIVE stage ("validating") and gets retry_at
+            # stamped with the shared backoff helper — a bare transition to
+            # RETRY_WAIT leaves stage="retry_wait" with retry_at NULL, which
+            # claim_next/_claim_target can never reclaim (orphan).
+            return self.jobs.record_failure(
+                tenant_id=job.tenant_id,
+                job_id=job.id,
+                expected_state=job.state,
+                expected_version=job.version,
+                owner="intake",
                 error_code="validation_transient",
-                error_message=f"Document validation hit a transient error ({type(exc).__name__})",
-                event_type="transient_failure",
+                error_message=(
+                    f"Document validation hit a transient error ({type(exc).__name__})"
+                ),
+                transient=True,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
