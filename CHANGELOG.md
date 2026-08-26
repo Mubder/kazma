@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Unreleased — Follow-up chat no longer stuck behind Stop (2026-08-26)
+
+After a reply, the next Enter/Send was a no-op until you clicked Stop: the
+composer stayed in generating mode, and the server rejected a new prompt
+with "still being processed" while the previous pump was registered.
+
+- **Composer:** a typed follow-up stop-and-sends. Empty Send is still Stop.
+  `/steer` / `/abort` still hit the live turn.
+- **SSE:** a new user message **supersedes** the in-flight pump (cancel +
+  await) instead of returning the wait token. Cursor resume (`last_event_id`)
+  still attaches.
+- **onDone / healer:** release Stop unless a live HITL card is on screen.
+
+Restart the server. Hard-refresh the chat tab.
+
 ## Unreleased — Official X publisher (2026-08-26)
 
 Tweet through **X API v2** only (OAuth 1.0a user context — Bearer cannot post).

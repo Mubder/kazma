@@ -116,7 +116,11 @@
         sendMessage();
         return;
       }
-      if (_isGenerating) { abortGeneration(); } else { sendMessage(); }
+      // Empty composer + generating → Stop. Typed follow-up → stop-and-send
+      // (do not swallow the draft behind the Stop button).
+      if (_isGenerating && !draft) { abortGeneration(); return; }
+      if (_isGenerating && draft) { abortThenSend(); return; }
+      sendMessage();
     });
 
     // Make the entire input box focus the text field (no dead zones).
@@ -533,14 +537,20 @@
       hideSlashMenu();
       return;
     }
-    // While generating, Enter submits a steer/abort draft; otherwise it
-    // does not send a new turn (Stop / Escape still abort).
+    // While generating: /steer|/abort go to the live turn; any other draft
+    // stop-and-sends (Enter used to no-op, forcing a Stop click first).
     if (_isGenerating && e.key === 'Enter') {
       var draft = (inputEl && inputEl.value || '').trim();
       if (!e.shiftKey && isSteerOrAbortCommand(draft)) {
         e.preventDefault();
         hideSlashMenu();
         sendMessage();
+        return;
+      }
+      if (!e.shiftKey && draft) {
+        e.preventDefault();
+        hideSlashMenu();
+        abortThenSend();
         return;
       }
       if (!e.shiftKey) e.preventDefault();
@@ -842,26 +852,40 @@
     endTurn();
   }
 
-  function abortGeneration() {
+  function abortGeneration(opts) {
+    opts = opts || {};
     if (activeStream) {
       activeStream.abort();
       activeStream = null;
-      KS.toast('Generation stopped', 'info', 2000);
+      if (!opts.silent && KS.toast) KS.toast('Generation stopped', 'info', 2000);
     }
     // The SSE turn runs detached server-side (refresh-safe) — aborting the
     // fetch alone would NOT stop the generation. Tell the server to cancel
     // the pump task so billing stops and the transcript persists as-is.
+    var stopP = Promise.resolve();
     try {
       if (chatSessionId) {
-        fetch('/api/chat/stop', {
+        stopP = fetch('/api/chat/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ session_id: chatSessionId }),
           credentials: 'same-origin',
-        }).catch(function() { /* best-effort */ });
+        }).then(function() {}).catch(function() { /* best-effort */ });
       }
     } catch (e) { /* best-effort */ }
     forceEndTurn();
+    return stopP;
+  }
+
+  /** Stop the in-flight turn, then send whatever is in the composer. */
+  function abortThenSend() {
+    var p = abortGeneration({ silent: true });
+    function go() { sendMessage(); }
+    var raced = Promise.race([
+      p && typeof p.then === 'function' ? p : Promise.resolve(),
+      new Promise(function(resolve) { setTimeout(resolve, 1500); }),
+    ]);
+    raced.then(go, go);
   }
 
   // Heal desync: WS sets isThinking=false but missed chat.endTurn (or vice versa).
@@ -875,9 +899,19 @@
       // paint a false "Done · 1s" heading while the turn is still running.
       if (!_serverActivitySeen) return;
       try {
+        if (hasInlineApprovalCard()) return;
         if (!window.Alpine || !Alpine.store || !Alpine.store('agent')) return;
         var store = Alpine.store('agent');
         if (store.pendingApproval) return;
+        // Reply already painted and the SSE fetch is gone — Stop was stuck
+        // because WS still had isThinking from a leftover status frame.
+        var sseDead = !activeStream;
+        var replyPainted = !!(tokenAccum && String(tokenAccum).trim());
+        if (sseDead && replyPainted) {
+          console.warn('[KazmaChat] Desync recovery: SSE ended with a painted reply — releasing Stop');
+          endTurn();
+          return;
+        }
         if (store._turnActive || store.isThinking) return;
         // Bus is idle; chat still thinks a turn is running → release.
         console.warn('[KazmaChat] Desync recovery: releasing stuck generation lock');
@@ -1695,6 +1729,7 @@
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         var interrupted = !!(data && data.interrupted);
+        try {
         // Terminal frame is SoT — ALWAYS replace-paint, even when plan
         // tokens already arrived (glued ```plan + answer used to be skipped
         // because tokenAccum was nonempty).
@@ -1742,15 +1777,16 @@
         if (tokenAccum && window.KazmaVoice && !interrupted) {
           window.KazmaVoice.playTTS(tokenAccum);
         }
-        // If HITL paused this turn, onApprovalRequired already called
-        // pauseForApproval — do NOT endTurn (would re-enable input under the card).
-        if (interrupted || _awaitingApproval) {
-          activeStream = null;
+        } finally {
+        // Live HITL card: keep the approval lock. Otherwise ALWAYS release
+        // Stop / Enter — a painted reply with a stuck generating flag was
+        // why the next message needed a Stop click first.
+        if (hasInlineApprovalCard() || _awaitingApproval) {
           if (!_awaitingApproval) pauseForApproval(null);
-          // Still refresh list so a new season appears mid-HITL
           if (showArchived) loadArchivedSessions(); else refreshSessionsSoon();
         } else {
-          endTurn(); // also refreshSessionsSoon
+          endTurn();
+        }
         }
       },
 

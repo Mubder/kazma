@@ -34,11 +34,30 @@ def test_enter_and_send_submit_steer_during_generation() -> None:
     assert "isSteerOrAbortCommand(draft)" in js
     # Generating + Enter used to swallow every keystroke. Steer must send.
     assert "_isGenerating && e.key === 'Enter'" in js
-    assert "sendMessage();" in js.split("_isGenerating && e.key === 'Enter'")[1][:400]
-    # Send button: steer/abort draft wins over Stop.
-    click = js.split("sendBtn.addEventListener('click'")[1][:500]
+    enter = js.split("_isGenerating && e.key === 'Enter'")[1][:900]
+    assert "sendMessage();" in enter
+    assert "abortThenSend()" in enter
+    # Send button: steer/abort draft wins over Stop; a typed follow-up
+    # stop-and-sends instead of discarding the draft.
+    click = js.split("sendBtn.addEventListener('click'")[1][:800]
     assert "isSteerOrAbortCommand(draft)" in click
     assert "sendMessage()" in click
+    assert "abortThenSend()" in click
+
+
+def test_followup_supersedes_instead_of_wait() -> None:
+    """A new message must not be blocked behind Stop / 'still processing'."""
+    js = _js()
+    assert "function abortThenSend()" in js
+    sse = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "sse_chat.py"
+    ).read_text(encoding="utf-8")
+    assert "Superseding in-flight turn" in sse
+    assert "It will appear here shortly" not in sse
+    assert "cancel_turn(thread_id)" in sse
 
 
 def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> None:
@@ -73,7 +92,7 @@ def test_supervisor_steer_tid_falls_back_to_context() -> None:
         / "kazma-core"
         / "kazma_core"
         / "agent"
-        / "graph_builder.py"
+        / "graph_supervisor.py"
     ).read_text(encoding="utf-8")
     assert "_steer_tid = str(state.get(\"thread_id\") or \"\")" in gb
     assert "get_current_thread_id" in gb

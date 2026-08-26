@@ -1713,13 +1713,12 @@ def create_sse_chat_router(
         if cost_breaker:
             cost_breaker.record_user_interaction()
 
-        # ── Duplicate-turn guard: reject if a background turn is still running
-        # for this thread (e.g. user refreshed mid-turn and immediately resent).
-        # Shared with the WebSocket transport so WS turns are also covered.
-        # A turn whose client has been gone past DETACHED_TTL_S is REAPED
-        # (cancelled + awaited) instead of rejected — the WS transport does
-        # the same; without it a hung detached pump would block the thread
-        # forever (T2).
+        # ── In-flight turn: a NEW user message supersedes; it does not wait.
+        # Cursor attach (`last_event_id`) returned earlier so a refresh can
+        # rejoin the running pump. A follow-up prompt is the user moving on —
+        # the old "still being processed" reject locked the composer until
+        # they pressed Stop. Cancel + await the old pump so two graphs never
+        # interleave on the same checkpointer (same sequential rule as T2 reap).
         _detached_turn = get_active_turn(thread_id)
         if _detached_turn is not None and not _detached_turn.done():
             _stale = reap_stale_turn(thread_id)
@@ -1732,18 +1731,16 @@ def create_sse_chat_router(
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await _stale
         if is_turn_running(thread_id):
-            logger.info("[SSE] Rejecting duplicate turn for thread=%s (still running)", thread_id[:12])
-            async def _dup_gen() -> AsyncGenerator[str, None]:
-                yield _sse_frame("token", {
-                    "content": "⏳ Your previous message is still being processed. "
-                               "It will appear here shortly — no need to resend."
-                })
-                yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
-            return StreamingResponse(
-                _dup_gen(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            logger.info(
+                "[SSE] Superseding in-flight turn for thread=%s (new user message)",
+                thread_id[:12],
             )
+            _old = cancel_turn(thread_id)
+            if _old is not None:
+                with contextlib.suppress(
+                    asyncio.CancelledError, asyncio.TimeoutError, Exception
+                ):
+                    await asyncio.wait_for(_old, timeout=15.0)
 
         # ── Persist UI projection (display only) ───────────────────
         from datetime import UTC, datetime as _dt
