@@ -6,6 +6,7 @@ path previously inlined as ``SwarmEngine._dispatch_worker``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
@@ -97,6 +98,24 @@ async def dispatch_worker(
     occurs the list contains the source worker's result followed by
     every result from the target chain.
     """
+    # Normalize "no deadline" inputs BEFORE they reach TimeoutGuard
+    # (same semantics as dispatch_helpers.wait_timeout): the guard's
+    # execute() raises ValueError for timeout <= 0 and treats None as
+    # its own 300s default, so the raw value cannot be forwarded — a
+    # single {"timeout": 0} dispatch used to convert the ValueError into
+    # an error result AND a breaker failure for every worker, tripping
+    # every breaker OPEN. Clamp non-positive timeouts to the large
+    # sentinel; unparseable values fall back to the guard's default.
+    from kazma_core.swarm.dispatch_helpers import NO_DEADLINE_SENTINEL
+
+    try:
+        _t = float(timeout)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        timeout = None
+    else:
+        if _t <= 0:
+            timeout = NO_DEADLINE_SENTINEL
+
     breaker = engine.get_circuit_breaker(worker.name)
     retry_policy = engine.get_retry_policy(worker.name)
     timeout_guard = engine.get_timeout_guard(worker.name)
@@ -148,6 +167,14 @@ async def dispatch_worker(
     # Mutable container for handoff state captured inside _attempt.
     captured_handoff: dict[str, Any] = {}
 
+    # Whether _attempt ran worker.mark_dispatched (which sets busy=True).
+    # busy is ONLY reset by mark_completed(); on the normal result path
+    # that happens below, and the BaseException handler below releases it
+    # for cancellation (cancel_task / pattern-level wait_for timeouts) —
+    # without that, a cancelled dispatch left the worker object busy for
+    # the process lifetime.
+    dispatched = False
+
     # Phase 3: extract per-task workspace_id so we can scope the dispatch.
     # Phase 5: also extract the commitment scope-token (§3.11 swarm privilege cap).
     _ws_id = None
@@ -169,7 +196,9 @@ async def dispatch_worker(
 
     try:
         async def _attempt() -> dict[str, Any]:
+            nonlocal dispatched
             worker.mark_dispatched(prompt)
+            dispatched = True
             # Record activity for auto-scaler reaping
             if engine._autoscaler is not None:
                 engine._autoscaler.record_activity(worker.name)
@@ -283,6 +312,7 @@ async def dispatch_worker(
             pass
 
         worker.mark_completed(worker_result.status)
+        dispatched = False  # busy released on the normal result path
 
         # Index successful worker output as a V2 swarm_result episode under
         # this worker's name so swarm memory is not only "default".
@@ -327,13 +357,33 @@ async def dispatch_worker(
             },
         )
         return [worker_result]
-    except BaseException:
+    except BaseException as exc:
         if not recorded:
             try:
                 breaker.record_failure()
                 recorded = True
             except Exception:
                 pass
+        # Cancellation (cancel_task / a pattern-level wait_for timeout)
+        # unwinds before the normal path's mark_completed() — release the
+        # busy flag here or the worker object stays busy for the process
+        # lifetime. The breaker failure above is kept (current policy:
+        # a cancelled dispatch still counts); only the busy flag is
+        # released. mark_completed is idempotent w.r.t. busy (False→False)
+        # so a late cancel after the normal path completed is harmless.
+        if dispatched:
+            try:
+                worker.mark_completed(
+                    "cancelled"
+                    if isinstance(exc, asyncio.CancelledError)
+                    else "error"
+                )
+            except Exception:
+                logger.debug(
+                    "[SwarmEngine] mark_completed on abort failed for worker '%s'",
+                    worker.name,
+                    exc_info=True,
+                )
         raise
     finally:
         # Audit H8: never leave half-open stuck if cancel/timeout skipped record_*.

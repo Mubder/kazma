@@ -7,7 +7,7 @@ from typing import Any
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
-__all__ = ["WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "resolve_max_concurrent", "wait_timeout"]
+__all__ = ["NO_DEADLINE_SENTINEL", "WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "resolve_max_concurrent", "wait_timeout"]
 
 # Map free-form worker type aliases to canonical WorkerConfig.type values
 WORKER_TYPE_ALIASES: dict[str, str] = {
@@ -35,6 +35,15 @@ def wait_timeout(timeout: float | None) -> float | None:
     except (TypeError, ValueError):
         return None
     return t if t > 0 else None
+
+
+# Sentinel expressing "no deadline" to :class:`TimeoutGuard`, whose
+# ``execute()`` raises ``ValueError`` for ``timeout <= 0`` and treats
+# ``None`` as its own default (300s) — so neither can carry the documented
+# "timeout <= 0 means no timeout" semantics through the guard. One year:
+# effectively unbounded, still finite for ``asyncio.wait_for`` scheduling
+# and log formatting.
+NO_DEADLINE_SENTINEL: float = 86_400.0 * 365.0
 
 
 def aggregate_outputs(worker_results: list[WorkerResult]) -> str | None:

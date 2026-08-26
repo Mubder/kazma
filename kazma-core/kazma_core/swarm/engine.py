@@ -102,6 +102,19 @@ def _utc_now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+# Pattern task types whose ``task.timeout`` is applied PER STEP by the
+# pattern executors (patterns.py ``wait_timeout`` wraps each individual
+# dispatch), NOT as a whole-task deadline. dispatch() exempts these from
+# the whole-task ``wait_for`` and reap_stale_tasks() must scale its
+# watchdog deadline by the pattern's step count accordingly.
+_PER_STEP_PATTERN_TYPES = (
+    TaskType.PIPELINE,
+    TaskType.FAN_OUT,
+    TaskType.CONSULT,
+    TaskType.CONDITIONAL,
+)
+
+
 class SwarmEngine:
     """Central async orchestrator for swarm workers."""
 
@@ -434,12 +447,7 @@ class SwarmEngine:
             # step's budget — e.g. a 3-step pipeline with timeout=0.01 was killed
             # before step 1 finished (2026-08-15 audit). Only single-worker
             # DISPATCH keeps the whole-task deadline as its safety net.
-            _per_step_patterns = (
-                TaskType.PIPELINE,
-                TaskType.FAN_OUT,
-                TaskType.CONSULT,
-                TaskType.CONDITIONAL,
-            )
+            # (The set lives at module level: _PER_STEP_PATTERN_TYPES.)
             from kazma_core.swarm.durable import (
                 durable_enabled,
                 in_durable_activity,
@@ -451,7 +459,7 @@ class SwarmEngine:
             if (
                 task.timeout
                 and float(task.timeout) > 0
-                and task.type not in _per_step_patterns
+                and task.type not in _PER_STEP_PATTERN_TYPES
             ):
                 return await asyncio.wait_for(
                     self._dispatch_inner(task, started, task_span),
@@ -512,7 +520,25 @@ class SwarmEngine:
                 and (t.metadata or {}).get("checkpoint_timeout")
             ):
                 continue
-            timeout = getattr(t, "timeout", None) or 300.0
+            timeout = float(getattr(t, "timeout", None) or 300.0)
+            # Pattern tasks (PIPELINE/FAN_OUT/CONSULT/CONDITIONAL) get
+            # ``task.timeout`` PER STEP, not as a whole-task deadline —
+            # dispatch() exempts them from the whole-task wait_for and
+            # patterns.py applies wait_timeout(task.timeout) around EACH
+            # step. Reaping at ``timeout + 30s`` (whole-task semantics)
+            # finalized legitimately-running multi-step patterns
+            # mid-flight (a 3-step pipeline with timeout=300 may run
+            # ~900s but was reaped at 330s), and _finalize_task's
+            # idempotency guard then discarded the eventual real result.
+            # Scale the deadline by the step count: pipeline steps run
+            # sequentially (len(workers)); fan-out/consult waves are
+            # bounded above by sequential steps; conditional is router +
+            # one branch (at least 2).
+            step_budget = 1
+            if getattr(t, "type", None) in _PER_STEP_PATTERN_TYPES:
+                step_budget = max(len(getattr(t, "workers", None) or []), 1)
+                if t.type == TaskType.CONDITIONAL:
+                    step_budget = max(step_budget, 2)
             started_iso = getattr(t, "started_at", None)
             if not started_iso:
                 continue
@@ -520,18 +546,23 @@ class SwarmEngine:
                 from datetime import datetime, timezone
                 dt = datetime.fromisoformat(started_iso.replace("Z", "+00:00"))
                 elapsed = (datetime.now(timezone.utc) - dt).total_seconds()
-                if elapsed > float(timeout) + 30.0:
+                if elapsed > timeout * step_budget + 30.0:
                     logger.warning(
-                        "[SwarmEngine] Reaping stale task %s (elapsed: %.1fs, timeout: %.1fs)",
+                        "[SwarmEngine] Reaping stale task %s (elapsed: %.1fs, "
+                        "timeout: %.1fs x %d steps)",
                         tid,
                         elapsed,
-                        float(timeout),
+                        timeout,
+                        step_budget,
                     )
                     self._finalize_task(
                         t,
                         worker_results=[],
                         status="timeout",
-                        error=f"Task timed out after {float(timeout):.1f}s (reaped by watchdog).",
+                        error=(
+                            f"Task timed out after {timeout * step_budget:.1f}s "
+                            "(reaped by watchdog)."
+                        ),
                         duration_seconds=elapsed,
                     )
                     reaped += 1

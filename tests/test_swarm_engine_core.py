@@ -460,3 +460,150 @@ def test_config_store_pragma_helper():
             assert mode in ("WAL", "MEMORY")  # WAL preferred
         finally:
             conn.close()
+
+
+# ── Watchdog / timeout semantics (2026-08-26 swarm audit) ────────────────
+
+
+def _running_task(
+    task_type: TaskType, workers: list[str], timeout: float, started_iso: str
+) -> SwarmTask:
+    """Build a RUNNING SwarmTask injected straight into _active_tasks."""
+    from kazma_core.swarm.task import TaskStatus
+
+    task = SwarmTask(prompt="audit", type=task_type, workers=workers, timeout=timeout)
+    task.status = TaskStatus.RUNNING
+    task.started_at = started_iso
+    return task
+
+
+def test_reap_scales_pattern_deadline_by_step_count(empty_config):
+    """Pattern tasks get ``task.timeout`` PER STEP (dispatch() exempts them
+    from the whole-task deadline; patterns.py wait_for's each step), so the
+    watchdog must scale by the step count — a legit 3-step pipeline with
+    timeout=100 runs ~300s but was reaped at 130s (timeout+30), and the
+    finalize idempotency guard then discarded its eventual result."""
+    from datetime import UTC, datetime, timedelta
+
+    from kazma_core.swarm.engine import SwarmEngine
+    from kazma_core.swarm.task import TaskStatus
+
+    engine = SwarmEngine(empty_config)
+    within_budget = (datetime.now(UTC) - timedelta(seconds=200)).isoformat()
+    past_budget = (datetime.now(UTC) - timedelta(seconds=400)).isoformat()
+
+    # 3-step pipeline, timeout=100 per step → total budget 300s (+30 margin).
+    # elapsed=200s > 100+30 (old whole-task deadline) but < 100*3+30 → kept.
+    pipeline = _running_task(
+        TaskType.PIPELINE, ["a", "b", "c"], 100.0, within_budget
+    )
+    engine._active_tasks[pipeline.id] = pipeline
+
+    # Conditional with only the router listed: budget is at least
+    # router + one branch = 2 steps → 200s < 100*2+30 → kept.
+    conditional = _running_task(
+        TaskType.CONDITIONAL, ["router"], 100.0, within_budget
+    )
+    engine._active_tasks[conditional.id] = conditional
+
+    # Same elapsed for a plain DISPATCH → whole-task deadline → reaped.
+    single = _running_task(TaskType.DISPATCH, ["a"], 100.0, within_budget)
+    engine._active_tasks[single.id] = single
+
+    assert engine.reap_stale_tasks() == 1
+    assert single.id not in engine._active_tasks
+    assert pipeline.id in engine._active_tasks
+    assert conditional.id in engine._active_tasks
+    assert pipeline.status == TaskStatus.RUNNING
+
+    # Past the SCALED deadline (100*3+30=330s) the pattern IS reaped —
+    # the watchdog stays a safety net for genuinely hung patterns.
+    stale_pipeline = _running_task(
+        TaskType.PIPELINE, ["a", "b", "c"], 100.0, past_budget
+    )
+    engine._active_tasks[stale_pipeline.id] = stale_pipeline
+
+    assert engine.reap_stale_tasks() == 1
+    assert stale_pipeline.id not in engine._active_tasks
+    assert pipeline.id in engine._active_tasks
+
+
+@pytest.mark.asyncio
+async def test_dispatch_timeout_zero_means_no_deadline_not_error(empty_config):
+    """``timeout <= 0`` documents "no timeout": dispatch must complete
+    normally and record NO breaker failures. TimeoutGuard.execute used to
+    raise ValueError("timeout must be > 0"), which the generic except
+    converted into an error result + breaker.record_failure() — one
+    {"timeout": 0} API call failed every worker and tripped every breaker."""
+    from kazma_core.swarm.engine import SwarmEngine
+
+    engine = SwarmEngine(empty_config)
+    engine.add_worker(WorkerConfig(name="alpha", type="in_process"))
+    worker = engine.get_worker("alpha")
+    worker.dispatch = AsyncMock(return_value={
+        "worker": "alpha",
+        "task_id": "task-zero",
+        "status": "success",
+        "output": "done",
+        "error": None,
+    })
+
+    # Single-dispatch path.
+    result = await engine.dispatch(
+        SwarmTask(prompt="zero timeout", workers=["alpha"], timeout=0)
+    )
+    assert result.status == "success"
+    assert result.worker_results[0].status == "success"
+    worker.dispatch.assert_awaited()
+
+    # Broadcast path honors the same semantics.
+    broadcast = await engine.dispatch(
+        SwarmTask(
+            prompt="zero timeout broadcast",
+            type=TaskType.BROADCAST,
+            workers=["alpha"],
+            timeout=0,
+        )
+    )
+    assert broadcast.status == "success"
+
+    breaker = engine.get_circuit_breaker("alpha")
+    assert breaker.consecutive_failures == 0
+    assert breaker.state.value == "closed"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_dispatch_releases_worker_busy(empty_config):
+    """A cancelled dispatch (cancel_task / pattern-level wait_for timeout)
+    used to leave worker.busy=True forever — busy is only reset by
+    mark_completed(), which the BaseException handler never called."""
+    from kazma_core.swarm.engine import SwarmEngine
+
+    engine = SwarmEngine(empty_config)
+    engine.add_worker(WorkerConfig(name="alpha", type="in_process"))
+    worker = engine.get_worker("alpha")
+
+    release = asyncio.Event()
+
+    async def slow_dispatch(task: str, context: str = "") -> dict[str, str | None]:
+        await release.wait()
+        return {"worker": "alpha", "status": "success", "output": "late", "error": None}
+
+    worker.dispatch = slow_dispatch  # type: ignore[assignment,union-attr]
+
+    outer = asyncio.create_task(
+        engine.dispatch(SwarmTask(prompt="cancel me", workers=["alpha"], timeout=0))
+    )
+    await asyncio.sleep(0.05)  # let the dispatch reach the worker await
+    assert worker.busy is True
+
+    outer.cancel()
+    release.set()
+    result = await outer  # engine.dispatch finalizes cancellation, no raise
+
+    assert result.status == "cancelled"
+    # Busy flag is released on the cancellation path...
+    assert worker.busy is False
+    # ...while the current policy (a cancelled dispatch still counts as a
+    # breaker failure) is preserved.
+    assert engine.get_circuit_breaker("alpha").consecutive_failures == 1
