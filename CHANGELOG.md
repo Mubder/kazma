@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Unreleased — Build identity + send durability (2026-08-26)
+
+Root-caused a "same behavior again" report to a restart-mid-turn: the
+server process restarted one minute INTO the turn (fixes were on disk,
+the running process predating them), the in-flight turn died with no
+terminal, and a follow-up message sent during the restart window never
+reached the server — silently lost.
+
+- **Build identity is now visible**: `/health/live` returns
+  `build: {commit, started_at}` and the chat sidebar shows a
+  `build <commit> · up since <time>` badge — verifying a restart picked
+  up the pull is a glance, not a guess.
+- **Undelivered sends are never lost**: outgoing text is parked in a
+  localStorage outbox before dispatch, cleared on the first streamed
+  token (server received it), and restored after reload with a
+  ↻ Retry button when the server never got it.
+
+Tests: `tests/test_delivery_v2_client.py`. Restart + hard-refresh to see
+the badge.
+
 ## Unreleased — Approve-resume streams obey the same turn rules (2026-08-26)
 
 The six-tweet turn painted the correct answer but still left a trailing

@@ -102,6 +102,8 @@
 
     if (!messagesEl) return; // not on chat page
 
+    _paintBuildBadge();
+
     // Input handlers
     if (inputEl) {
       inputEl.addEventListener('keydown', onInputKeydown);
@@ -278,6 +280,63 @@
   // True once THIS turn painted a real assistant reply — the "No response
   // received." fallback must never fire after a successful paint.
   var _turnPainted = false;
+
+  // ── Send durability (outbox) ─────────────────────────────────────
+  // A message whose POST never reached the server (restart / down) must
+  // not vanish: it is parked in localStorage before dispatch, cleared on
+  // the first streamed token (server got it), and restored with a Retry
+  // affordance on the next load (2026-08-26 restart-mid-turn incident).
+  function _outboxKey() { return 'kazma_outbox_' + (chatSessionId || ''); }
+  function _outboxWrite(text) {
+    try { localStorage.setItem(_outboxKey(), JSON.stringify({ text: text, ts: Date.now() })); } catch (e) { /* private mode */ }
+  }
+  function _outboxClear() {
+    try { localStorage.removeItem(_outboxKey()); } catch (e) { /* ignore */ }
+  }
+  function _restoreUndeliveredOutbox(serverMessages) {
+    try {
+      var raw = localStorage.getItem(_outboxKey());
+      if (!raw) return;
+      var entry;
+      try { entry = JSON.parse(raw); } catch (e) { _outboxClear(); return; }
+      var text = String((entry && entry.text) || '').trim();
+      if (!text) { _outboxClear(); return; }
+      var msgs = serverMessages || [];
+      for (var i = 0; i < msgs.length; i++) {
+        if (msgs[i] && msgs[i].role === 'user'
+            && String(msgs[i].content || '').trim() === text) {
+          _outboxClear();  // the server did receive it after all
+          return;
+        }
+      }
+      lastSentUserText = text;  // Retry resends exactly this
+      appendMessage('user', text);
+      appendMessage(
+        'assistant',
+        '⚠️ _This message was **not delivered** — the server was down or restarting when you sent it. ' +
+        'Tap retry to send it now._\n\n' +
+        '<button class="btn btn-sm btn-primary" onclick="window.KazmaChat && window.KazmaChat.retry()">↻ Retry</button>'
+      );
+      scrollToBottom();
+    } catch (e) { /* corrupt outbox — drop silently */ _outboxClear(); }
+  }
+
+  /** Running build identity in the sidebar footer (see /health/live build). */
+  function _paintBuildBadge() {
+    try {
+      fetch('/health/live')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .then(function(d) {
+          var b = d && d.build;
+          var el = document.getElementById('build-badge');
+          if (!b || !el) return;
+          var started = b.started_at
+            ? new Date(b.started_at * 1000).toLocaleTimeString() : '';
+          el.textContent = 'build ' + (b.commit || '?') + (started ? ' · up since ' + started : '');
+        })
+        .catch(function() { /* badge is best-effort */ });
+    } catch (e) { /* ignore */ }
+  }
 
   function _resyncDelivery(reason) {
     if (!chatSessionId) return;
@@ -1693,6 +1752,7 @@
         if (!_mine()) return;
         noteTurnActivity();
         _noteSeq();
+        _outboxClear();  // first streamed token = the server received the send
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         if (!currentMsgEl) {
@@ -1937,6 +1997,12 @@
       };
     }
 
+    // Park the outgoing text BEFORE dispatch: if the POST never reaches the
+    // server (restart/down), the next load restores it with a Retry button
+    // instead of silently losing the user's message.
+    if (typeof content === 'string' && content.trim()) {
+      _outboxWrite(content);
+    }
     _dispatchSse(null);
   }
 
@@ -4080,6 +4146,7 @@
         checkPendingApprovals();
         updateContextBadge();
         refreshCapacity();
+        _restoreUndeliveredOutbox((data && data.messages) || data || []);
       })
       .catch(function(err) {
         if (chatSessionId !== sessionId) return;

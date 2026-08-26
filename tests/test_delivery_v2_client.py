@@ -156,6 +156,34 @@ class TestV2ArchitecturePresent:
         at2 = src.index("// Another danger tool after grant")
         assert "createAssistantMessage()" not in src[at2:at2 + 500]
 
+    def test_build_identity_is_visible(self):
+        """The running git commit + start time must be checkable at a glance
+        (sidebar badge + /health/live) — the 2026-08-26 incident had fixes
+        on disk while the process predating them served the turn."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        html = (_UI / "templates" / "chat.html").read_text(encoding="utf-8")
+        assert "function _paintBuildBadge()" in src
+        assert "fetch('/health/live')" in src
+        assert 'id="build-badge"' in html
+        from kazma_ui.health import get_build_info
+
+        info = get_build_info()
+        assert set(info) == {"commit", "started_at"}
+        assert info["commit"]  # resolves or 'unknown' — never empty
+
+    def test_undelivered_send_is_restored(self):
+        """A send that never reached the server (restart/down) is parked in
+        a localStorage outbox before dispatch, cleared on the first streamed
+        token, and restored with a Retry button on the next load."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function _outboxWrite(" in src
+        assert "_outboxWrite(content);" in src
+        assert "_outboxClear();  # first streamed token".replace(" # ", "  // ") in src \
+            or "_outboxClear();  // first streamed token" in src
+        assert "function _restoreUndeliveredOutbox(" in src
+        assert "_restoreUndeliveredOutbox((data && data.messages)" in src
+        assert "window.KazmaChat.retry()" in src
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

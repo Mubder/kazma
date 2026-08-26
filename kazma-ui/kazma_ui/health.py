@@ -1,12 +1,13 @@
 """Health check endpoints for Kazma.
 
 Provides /health/live and /health/ready endpoints for Kubernetes
-liveness and readiness probes.
+liveness/readiness probes.
 """
 
 from __future__ import annotations
 
 import logging
+import subprocess
 import time
 from typing import Any
 
@@ -20,11 +21,38 @@ __all__ = [
     "check_config_store",
     "check_model_registry",
     "check_swarm_engine",
+    "get_build_info",
     "get_health_dependencies",
     "router",
 ]
 
 router = APIRouter(tags=["health"])
+
+# Resolved once at import (process start): which git commit + when. This is
+# what ends the "did the restart actually pick the fix up?" loop — the UI
+# footer and /health/live both surface it (2026-08-26 restart-mid-turn
+# incident: fixes were on disk but the process predating them ran the turn).
+_BUILD_INFO: dict[str, Any] = {"commit": "unknown", "started_at": time.time()}
+try:
+    from pathlib import Path as _Path
+
+    _repo_root = _Path(__file__).resolve().parents[2]
+    _git_out = subprocess.run(
+        ["git", "-C", str(_repo_root), "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    _commit = (_git_out.stdout or "").strip()
+    if _commit:
+        _BUILD_INFO["commit"] = _commit
+except Exception:
+    logger.debug("[Health] build commit probe failed", exc_info=True)
+
+
+def get_build_info() -> dict[str, Any]:
+    """Running build identity: git commit (short) + process start time."""
+    return dict(_BUILD_INFO)
 
 
 def get_health_dependencies():
@@ -161,7 +189,7 @@ async def liveness():
     Python process is running and can respond to HTTP requests.
     Used by multi-replica load balancers / Kubernetes.
     """
-    return {"status": "alive", "timestamp": time.time()}
+    return {"status": "alive", "timestamp": time.time(), "build": get_build_info()}
 
 
 @router.get("/health/ready")
