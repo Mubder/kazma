@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Unreleased — Approve-resume streams obey the same turn rules (2026-08-26)
+
+The six-tweet turn painted the correct answer but still left a trailing
+"_No response received." and blank containers: the HITL approve-resume
+stream (`submitApproval`) had its OWN empty-notice branch without the
+`_turnPainted` guard, eagerly created blank bubbles when a second
+approval card followed, and never invalidated the original main stream.
+
+- Approve-resume bumps the SSE epoch — the pre-approval main stream's
+  terminal can no longer fire over the resumed turn.
+- Its token paint sets `_turnPainted`; its empty-notice respects it.
+- The next-approval handler no longer eagerly creates a blank assistant
+  bubble (tokens create one lazily).
+
+Tests: `tests/test_delivery_v2_client.py`. Restart + hard-refresh.
+
 ## Unreleased — Stale streams can no longer pollute a finished turn (2026-08-26)
 
 The approval flow worked end-to-end (card surfaced, both tweets posted)

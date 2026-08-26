@@ -138,6 +138,24 @@ class TestV2ArchitecturePresent:
         assert "_turnPainted = true;" in src
         assert "!_turnPainted)" in src  # empty-bubble fallback guard
 
+    def test_approve_resume_stream_guards(self):
+        """The HITL approve-resume stream owns the turn: it invalidates the
+        main stream's epoch, marks the turn painted on token paint, its own
+        empty-notice respects _turnPainted, and the next-approval handler
+        no longer eagerly creates a blank bubble (2026-08-26 six-tweet turn:
+        trailing '_No response received.' + empty containers)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        # epoch bump before the approve-resume dispatch
+        assert "_sseEpoch++;" in src
+        # token paint marks the turn painted
+        at = src.index("tokenAccum += tokenData.content;")
+        assert "_turnPainted = true;" in src[at:at + 200]
+        # both empty-notice branches are guarded
+        assert src.count("!_turnPainted)") >= 2
+        # no eager blank bubble on the next-approval timeout
+        at2 = src.index("// Another danger tool after grant")
+        assert "createAssistantMessage()" not in src[at2:at2 + 500]
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

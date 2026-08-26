@@ -3368,6 +3368,10 @@
         try { activeStream.abort(); } catch (e) {}
         activeStream = null;
       }
+      // The approve-resume stream now owns the turn: invalidate the original
+      // main-stream callbacks (epoch) so its lingering terminal can never
+      // paint the empty-notice or finalize over the resumed turn.
+      _sseEpoch++;
 
       activeStream = sseFn(approvalUrl, payload, {
         onEvent: function() {},
@@ -3376,6 +3380,7 @@
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
           if (!currentMsgEl) currentMsgEl = createAssistantMessage();
           tokenAccum += tokenData.content;
+          _turnPainted = true;
           tryIngestPlanFromText(tokenAccum);
           var textEl = currentMsgEl.querySelector('.message-text');
           if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
@@ -3423,8 +3428,10 @@
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
           setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
           // Another danger tool after grant — should be rare for YOLO; surface card.
+          // Do NOT eagerly create an assistant bubble here — tokens create it
+          // lazily; an eager empty one stayed blank when the turn ended
+          // (the stray "Thinking…"/empty containers, 2026-08-26).
           setTimeout(function() {
-            currentMsgEl = createAssistantMessage();
             tokenAccum = '';
             renderHitlCard(nextApproval);
           }, 40);
@@ -3445,7 +3452,12 @@
           }
 
           var interrupted = !!(doneData && doneData.interrupted);
-          if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval) {
+          // Same rule as the main onDone: never after a painted reply
+          // (sequential approvals clear tokenAccum/currentMsgEl — a later
+          // resume terminal with cleared state used to print this UNDER
+          // the successful answer).
+          if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval
+              && !_turnPainted) {
             appendAssistantText('_No response received._');
           }
 
