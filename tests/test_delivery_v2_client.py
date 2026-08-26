@@ -98,13 +98,27 @@ class TestV2ArchitecturePresent:
 
     def test_ws_sse_dedupe_guard(self):
         """Every journaled frame fans out to WS too — the store must not
-        double-paint while the SSE stream owns the live turn (the
-        duplicated-bubble incident class)."""
+        double-paint tokens/final reply while the SSE stream owns the live
+        turn (the duplicated-bubble incident class). The approval card is
+        NOT suppressed in the store anymore: dedupe moved to renderHitlCard
+        (idempotent on a live card) because suppressing the WS render while
+        betting on a late SSE frame left interrupted turns silently paused
+        with no card at all (2026-08-26)."""
         chat_src = _CHAT_JS.read_text(encoding="utf-8")
         store_src = _STORE_JS.read_text(encoding="utf-8")
         assert "hasLiveSSE: function()" in chat_src
-        # token/done painting + approval card all gated on the live SSE
-        assert store_src.count("hasLiveSSE()") >= 3
+        # token/done painting still gated on the live SSE
+        assert store_src.count("hasLiveSSE()") >= 2
+        # card dedupe is at the render site, not the transport
+        assert "if (hasInlineApprovalCard()) return;" in chat_src
+
+    def test_missed_approval_card_recovery(self):
+        """An interrupted turn whose card never rendered must recover it
+        from /api/pending-approvals (server truth), one best-effort shot."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function recoverMissedApproval(" in src
+        assert "'/api/pending-approvals'" in src
+        assert "setTimeout(recoverMissedApproval, 1200)" in src
 
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")

@@ -186,13 +186,11 @@ document.addEventListener('alpine:init', () => {
       // Inline card is the only HITL UI. Never set pendingApproval when we
       // can render inline — that was the duplicated YOLO card (bottom Alpine
       // + message stream). Keep pendingApproval as fallback only.
+      // Dedupe lives in chat.js renderHitlCard (idempotent on a live card):
+      // suppressing here because SSE "will render it later" left the turn
+      // silently paused when that frame never arrived.
       if (chat && typeof chat._hitlApproval === 'function') {
         this.pendingApproval = null;
-        // WS/SSE dedupe: while the SSE stream owns the live turn it renders
-        // its own approval card — a second one here doubled every card.
-        if (typeof chat.hasLiveSSE === 'function' && chat.hasLiveSSE()) {
-          return;
-        }
         chat._hitlApproval(approval);
         return;
       }

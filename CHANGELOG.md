@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — Interrupted turns are never silent (2026-08-26)
+
+"Shows the plan and then complete silence — no card, no error, no sign
+anything is ongoing." The graph HAD paused for HITL (activity showed
+"Waiting for approval · 2 tools") but the approval card never rendered:
+the WS-side card render was suppressed by the dedupe guard (betting the
+SSE frame would render it later), and when that frame was late or lost
+the paused turn had no UI at all.
+
+- **Card dedupe moved to the render site**: `renderHitlCard` is now
+  idempotent (first live card wins) and the WS path always renders —
+  no transport bets.
+- **Lost-card recovery**: an interrupted turn that ends with no rendered
+  card triggers a one-shot `/api/pending-approvals` fetch (~1.2s) that
+  rebuilds the card from server truth.
+
+Tests: `tests/test_delivery_v2_client.py`. Restart + hard-refresh.
+
 ## Unreleased — Plan-only turns no longer die silently (2026-08-26)
 
 Live incident (verified against the session transcript): "send them now"

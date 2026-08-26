@@ -1853,6 +1853,11 @@
         if (truncated && !_awaitingApproval) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
+        // Interrupted (HITL) turn with no rendered card anywhere = silently
+        // paused. Recover the card from server truth, best-effort one shot.
+        if (interrupted && !hasInlineApprovalCard() && !_awaitingApproval) {
+          setTimeout(recoverMissedApproval, 1200);
+        }
         }
       },
 
@@ -3107,8 +3112,51 @@
     } catch (e) { /* ignore */ }
   }
 
+  /** Server-truth recovery: an interrupted turn whose approval card never
+   *  rendered is a SILENTLY PAUSED turn — no card, no error, no progress
+   *  (the 2026-08-26 "complete silence" X-post incident). One best-effort
+   *  fetch of the pending list; render this session's card if present. */
+  function recoverMissedApproval() {
+    if (hasInlineApprovalCard() || _awaitingApproval) return;
+    fetch('/api/pending-approvals', { credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(payload) {
+        if (hasInlineApprovalCard() || _awaitingApproval) return;
+        var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
+        if (!pending.length) return;
+        var tid = chatSessionId || '';
+        var hit = null;
+        for (var i = 0; i < pending.length; i++) {
+          var p = pending[i] || {};
+          if (String(p.thread_id || '') === tid) { hit = p; break; }
+        }
+        // Single-operator common case: one pending approval, no id match
+        // (session id ≠ graph thread id) — take it. The approve endpoint's
+        // ownership check still guards cross-tenant abuse.
+        if (!hit && pending.length === 1) hit = pending[0];
+        if (!hit) return;
+        console.warn('[KazmaChat] Recovering missed approval card for thread=' + hit.thread_id);
+        renderHitlCard({
+          thread_id: hit.thread_id,
+          kind: hit.kind || 'security',
+          tool: hit.tool_name || hit.tool || 'unknown',
+          args: hit.arguments || hit.args || {},
+          message: hit.message || '',
+          yolo_allowed: hit.yolo_allowed !== false,
+        });
+      })
+      .catch(function() { /* best-effort */ });
+  }
+
   function renderHitlCard(data) {
     if (!data) return;
+    // Idempotent: WS and SSE both deliver the approval (journal fan-out +
+    // SSE frame). The FIRST render wins; a second live card for the same
+    // interrupt duplicates buttons and double-fires resumes. Suppression
+    // used to live in the WS store (skip when SSE is live) — but when the
+    // SSE frame was late/lost NO card appeared at all and the paused turn
+    // went completely silent (2026-08-26 X-post incident).
+    if (hasInlineApprovalCard()) return;
     pauseForApproval(data);
     // The inline card is the primary approval UI. Hide the bottom Alpine card
     // (driven by $store.agent.pendingApproval) so the same approval is never
