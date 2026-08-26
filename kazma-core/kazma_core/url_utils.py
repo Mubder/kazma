@@ -77,8 +77,13 @@ def normalize_provider_url(
         # or LiteLLM proxy (it handles routing itself)
         is_ollama = port in _OLLAMA_PORTS or "ollama" in hostname.lower()
         is_litellm = port in _LITELLM_PORTS or "litellm" in hostname.lower()
+        # Google's OpenAI-compat endpoints version their own paths
+        # (generativelanguage.googleapis.com/v1beta/openai and
+        # {region}-aiplatform.googleapis.com/endpoints/openapi) — appending
+        # /v1 produced .../openai/v1/chat/completions, a 404 on every call.
+        is_google = hostname.lower().endswith("googleapis.com")
 
-        if not is_ollama and not is_litellm:
+        if not is_ollama and not is_litellm and not is_google:
             path = f"{path}/v1"
 
     # Step 5: Reconstruct

@@ -650,8 +650,21 @@ class LLMProvider:
                     data = resp.json()
                 except Exception as fallback_error:
                     logger.error("Fallback model also failed: %s", fallback_error)
+                    # Classify like the primary path: a transient outage on
+                    # either side (network / 5xx / 429) must stay retryable —
+                    # defaulting to permanent froze failover chains (audit).
+                    _fb_resp = getattr(fallback_error, "response", None)
+                    _fb_code = getattr(_fb_resp, "status_code", None)
+                    _combo_transient = (
+                        status_code >= 500
+                        or status_code == 429
+                        or _fb_code is None      # network-level failure (no response)
+                        or _fb_code >= 500
+                        or _fb_code == 429
+                    )
                     raise LLMError(
-                        f"Primary and fallback models failed: {e} / {fallback_error}"
+                        f"Primary and fallback models failed: {e} / {fallback_error}",
+                        transient=_combo_transient,
                     ) from e
             else:
                 raise LLMError(

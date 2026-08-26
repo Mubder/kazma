@@ -103,10 +103,65 @@ class AnthropicProvider(LLMProvider):
         return "\n\n".join(system_parts), convo
 
     @staticmethod
+    def _tool_use_blocks(m: dict[str, Any]) -> list[dict[str, Any]]:
+        """OpenAI assistant ``tool_calls`` → Anthropic ``tool_use`` blocks."""
+        blocks: list[dict[str, Any]] = []
+        for tc in m.get("tool_calls") or []:
+            if not isinstance(tc, dict):
+                continue
+            fn = tc.get("function") or {}
+            raw_args = fn.get("arguments")
+            if raw_args in (None, ""):
+                parsed: Any = {}
+            elif isinstance(raw_args, str):
+                try:
+                    parsed = json.loads(raw_args)
+                except json.JSONDecodeError:
+                    parsed = {"_raw": raw_args}
+            else:
+                parsed = raw_args
+            blocks.append({
+                "type": "tool_use",
+                "id": str(tc.get("id") or ""),
+                "name": str(fn.get("name") or ""),
+                "input": parsed if isinstance(parsed, dict) else {"_raw": str(raw_args)},
+            })
+        return blocks
+
+    @staticmethod
     def _convert_message(m: dict[str, Any]) -> dict[str, Any]:
-        """Convert one OpenAI-format message to Anthropic content-block form."""
+        """Convert one OpenAI-format message to Anthropic content-block form.
+
+        The Kazma agent loop emits standard OpenAI tool traffic — one
+        ``role:"tool"`` dict per tool result plus assistant messages carrying
+        ``tool_calls``. Anthropic requires tool results as ``tool_result``
+        blocks inside a USER message and prior assistant ``tool_use`` blocks;
+        passing the OpenAI shapes through verbatim 400s the first tool turn.
+        """
         role = m.get("role", "user")
         content = m.get("content")
+
+        # OpenAI tool result → tool_result block(s) inside a USER turn.
+        if role == "tool":
+            if isinstance(content, list):
+                result_content: Any = content
+            elif isinstance(content, str):
+                result_content = content
+            elif content is None:
+                result_content = ""
+            else:
+                result_content = json.dumps(content)
+            return {
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": str(m.get("tool_call_id") or ""),
+                    "content": result_content,
+                }],
+            }
+
+        tool_use = AnthropicProvider._tool_use_blocks(m)
+
         # Already a list of blocks (multimodal) — coerce block types.
         if isinstance(content, list):
             blocks: list[dict[str, Any]] = []
@@ -130,11 +185,46 @@ class AnthropicProvider(LLMProvider):
                     blocks.append(b)
                 elif btype == "tool_use":
                     blocks.append(b)
+            blocks.extend(tool_use)
             return {"role": role, "content": blocks or [{"type": "text", "text": ""}]}
 
-        # Plain string content.
+        # Plain string content (± tool_calls on the assistant turn).
         text = content if isinstance(content, str) else json.dumps(content)
+        if tool_use:
+            blocks = ([{"type": "text", "text": text}] if text else []) + tool_use
+            return {"role": role, "content": blocks}
         return {"role": role, "content": text}
+
+    @staticmethod
+    def _merge_consecutive(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Coalesce adjacent same-role messages (Anthropic requires alternation).
+
+        One ``role:"tool"`` message per tool result converts to N consecutive
+        user turns (often right after a real user message); every parallel
+        ``tool_use``'s result must also sit in a single user turn.
+        """
+
+        def _as_blocks(c: Any) -> list[dict[str, Any]]:
+            if isinstance(c, list):
+                return [b for b in c if isinstance(b, dict)]
+            if isinstance(c, str) and c:
+                return [{"type": "text", "text": c}]
+            if c is None or c == "":
+                return []
+            return [{"type": "text", "text": json.dumps(c)}]
+
+        merged: list[dict[str, Any]] = []
+        for msg in messages:
+            if merged and merged[-1].get("role") == msg.get("role"):
+                prev = merged[-1]
+                pc, cc = prev.get("content"), msg.get("content")
+                if isinstance(pc, str) and isinstance(cc, str):
+                    prev["content"] = (pc + "\n\n" + cc) if (pc and cc) else (pc or cc)
+                else:
+                    prev["content"] = _as_blocks(pc) + _as_blocks(cc)
+                continue
+            merged.append(dict(msg))
+        return merged
 
     @staticmethod
     def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -182,7 +272,9 @@ class AnthropicProvider(LLMProvider):
             "model": model or self.config.model,
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,
-            "messages": [self._convert_message(m) for m in convo],
+            "messages": self._merge_consecutive(
+                [self._convert_message(m) for m in convo]
+            ),
         }
         if system:
             payload["system"] = system
@@ -245,6 +337,31 @@ class AnthropicProvider(LLMProvider):
                     kind="rate_limit_exhausted",
                 ) from exc
             transient = status_code >= 500
+            # Context overflow must carry kind="context_overflow" so the
+            # watchdog routes to compaction instead of failing the turn
+            # (mirrors the generic provider's marker list).
+            if status_code in (400, 413, 422) and any(
+                marker in body.lower()
+                for marker in (
+                    "context_length_exceeded",
+                    "maximum context length",
+                    "context window",
+                    "prompt is too long",
+                    "too many tokens",
+                    "input is too long",
+                    "exceeds the context",
+                    "context length",
+                )
+            ):
+                logger.warning(
+                    "[Anthropic] context overflow (HTTP %s): %s", status_code, body[:200]
+                )
+                raise LLMError(
+                    f"Anthropic prompt exceeds context window (HTTP {status_code}): "
+                    f"{body[:300]}",
+                    transient=False,
+                    kind="context_overflow",
+                ) from exc
             logger.error("[Anthropic] HTTP %d: %s", status_code, body)
             raise LLMError(
                 f"Anthropic API error (HTTP {status_code}): {body}",
@@ -302,7 +419,9 @@ class AnthropicProvider(LLMProvider):
             "model": model or self.config.model,
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,
-            "messages": [self._convert_message(m) for m in convo],
+            "messages": self._merge_consecutive(
+                [self._convert_message(m) for m in convo]
+            ),
             "stream": True,
         }
         if system:

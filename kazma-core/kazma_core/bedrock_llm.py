@@ -88,7 +88,7 @@ class BedrockProvider(LLMProvider):
             role = m.get("role", "user")
             content = m.get("content")
             text = content if isinstance(content, str) else json.dumps(content)
-            if role == "system":
+            if role in ("system", "developer"):
                 system.append({"text": text})
             elif role == "tool":
                 # OpenAI tool result → Bedrock toolResult on the next user turn.
@@ -114,7 +114,19 @@ class BedrockProvider(LLMProvider):
                 convo.append({"role": "assistant", "content": blocks})
             else:
                 convo.append({"role": role, "content": [{"text": text}]})
-        return system, convo
+        # Converse requires strict role alternation and ALL toolResults for a
+        # turn's toolUses in ONE user message. The OpenAI loop emits one
+        # role:"tool" dict per result (→ N consecutive user turns, often right
+        # after a real user message) — coalesce the runs before sending.
+        merged: list[dict[str, Any]] = []
+        for msg in convo:
+            if merged and merged[-1].get("role") == msg.get("role"):
+                merged[-1]["content"] = list(merged[-1].get("content", [])) + list(
+                    msg.get("content", [])
+                )
+                continue
+            merged.append(msg)
+        return system, merged
 
     @staticmethod
     def _convert_tools(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -188,10 +200,28 @@ class BedrockProvider(LLMProvider):
                     meta = err_resp.get("ResponseMetadata") or {}
                     status = meta.get("HTTPStatusCode")
                     code = str((err_resp.get("Error") or {}).get("Code", ""))
+                    err_msg = str((err_resp.get("Error") or {}).get("Message", ""))
                     if status == 429 or (status and status >= 500) or "Throttling" in code:
                         transient = True
                     if status == 429 or "Throttling" in code:
                         kind = "rate_limit_exhausted"
+                    # Context overflow must carry kind="context_overflow" so
+                    # the watchdog routes to compaction instead of failing the
+                    # turn (mirrors the generic provider).
+                    _err_l = (code + " " + err_msg).lower()
+                    if any(
+                        marker in _err_l
+                        for marker in (
+                            "context_length_exceeded",
+                            "input is too long",
+                            "prompt is too long",
+                            "exceeds the context",
+                            "context window",
+                            "too many tokens",
+                            "context length",
+                        )
+                    ):
+                        kind = "context_overflow"
                 raise LLMError(
                     f"Bedrock converse failed: {exc}",
                     transient=transient,
