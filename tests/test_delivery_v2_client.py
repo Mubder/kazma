@@ -220,6 +220,23 @@ class TestV2ArchitecturePresent:
         assert '"ts": _dtc.now(_UTCc).isoformat(),' in src
         assert '"ts": _dtmod.now(_UTC).isoformat(),' in src
 
+    def test_status_strip_single_owner(self):
+        """The top status strip (#thinking-indicator) is Alpine-store-owned:
+        beginTurn arms it for EVERY turn start (SSE, WS, approve-resume —
+        submitApproval calls beginTurn), terminals clear it. The imperative
+        KS.showTyping/hideTyping inline styles on typingEl fought Alpine's
+        x-show — the intermittent missing status bar (2026-08-26)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function _setStatusStrip(" in src
+        assert "function _clearStatusStrip(" in src
+        # beginTurn arms the strip before anything else can
+        at = src.index("function beginTurn(")
+        seg = src[at:at + 700]
+        assert "_setStatusStrip(" in seg
+        # no imperative display writes on the Alpine-owned element remain
+        assert "showTyping(typingEl" not in src
+        assert "hideTyping(typingEl" not in src
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Unreleased — Top status strip is single-owner (2026-08-26)
+
+"Sometimes the status bar shows, sometimes not." Three interacting
+causes from the recent UI work:
+
+- The immersive shell made `#thinking-indicator` Alpine-owned
+  (`x-show` on `$store.agent.isThinking`), but chat.js kept writing
+  inline `display` via `KS.showTyping/hideTyping` on the SAME element —
+  two owners fighting; last writer won.
+- `beginTurn()` never set the store flag (only `endTurn` cleared it),
+  so visibility depended entirely on WS frames arriving — WS health
+  decided "sometimes".
+- Approve-resume turns (epoch-guarded) stopped feeding the strip
+  entirely — post-approval continuations ran with no status at all.
+
+Now `beginTurn` arms the strip for EVERY turn start (fresh send, WS,
+approve-resume) via `_setStatusStrip`/`_clearStatusStrip` on the store;
+all imperative display writes on the Alpine-owned element are gone.
+Note: `composer-ws-status` (WS dot) keeps its `x-cloak` — it appears
+once Alpine boots, by design.
+
+Tests: `tests/test_delivery_v2_client.py`. Hard-refresh (no restart
+needed — static JS only).
+
 ## Unreleased — Refresh never destroys the transcript (2026-08-26)
 
 "Failed to load session messages" on refresh AND the latest output

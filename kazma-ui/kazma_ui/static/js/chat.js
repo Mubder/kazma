@@ -368,9 +368,7 @@
         _awaitingReply = true;
         noteTurnActivity();
         try {
-          if (typingEl && KS.showTyping) {
-            KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
-          }
+          _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
         } catch (e2) { /* ignore */ }
         if (!wasLive && _reopenSseRef) {
           try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
@@ -393,7 +391,7 @@
         _awaitingReply = false;
         if (_isGenerating) endTurn();
         else {
-          try { if (typingEl && KS.hideTyping) KS.hideTyping(typingEl); } catch (e3) {}
+          _clearStatusStrip();
         }
       }
     }).catch(function() { /* transient network — the next trigger retries */ });
@@ -792,11 +790,40 @@
     }, TURN_IDLE_WATCHDOG_MS);
   }
 
+  /**
+   * Single owner of the top status strip (#thinking-indicator): the Alpine
+   * store (isThinking + statusMessage). The old imperative
+   * KS.showTyping/hideTyping inline styles fought Alpine's x-show over the
+   * same element — combined with beginTurn never setting the store flag,
+   * the strip appeared only when WS frames happened to arrive and vanished
+   * mid-turn on idle/approval frames (the intermittent "no status bar",
+   * 2026-08-26).
+   */
+  function _setStatusStrip(msg) {
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        var st = Alpine.store('agent');
+        st.isThinking = true;
+        if (msg) st.statusMessage = msg;
+      }
+    } catch (e) { /* store not ready */ }
+  }
+  function _clearStatusStrip() {
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        Alpine.store('agent').isThinking = false;
+      }
+    } catch (e) { /* store not ready */ }
+  }
+
   function beginTurn() {
     _isGenerating = true;
     _awaitingApproval = false;
     _lastTurnActivityTs = Date.now();
     _serverActivitySeen = false;
+    // Status strip shows the instant ANY turn starts (SSE, WS, or
+    // approve-resume) — no longer dependent on WS frames arriving.
+    _setStatusStrip(ti('thinking', 'Kazma is thinking\u2026'));
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     _armTurnWatchdog();
@@ -863,7 +890,7 @@
       KS.hideTyping(activeTypingEl);
     }
     activeTypingEl = null;
-    if (typingEl && KS.hideTyping) KS.hideTyping(typingEl);
+    _clearStatusStrip();
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Type a message or /yolo \u2026 (Enter to send)';
@@ -924,7 +951,7 @@
     _awaitingApproval = true;
     if (activeTypingEl && KS.hideTyping) KS.hideTyping(activeTypingEl);
     activeTypingEl = null;
-    if (typingEl && KS.hideTyping) KS.hideTyping(typingEl);
+    _clearStatusStrip();
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
@@ -1680,9 +1707,8 @@
     syncInputBidi();
     updateComposerCharCount();
 
-    // Show typing indicator (tracked so abortGeneration can clear it)
+    // Status strip is store-owned now; beginTurn arms it below.
     activeTypingEl = typingEl;
-    KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
 
     // Ensure we have a stable session id
     if (!chatSessionId) {
@@ -1778,7 +1804,7 @@
         noteTurnActivity();
         _noteSeq();
         _outboxClear();  // first streamed token = the server received the send
-        KS.hideTyping(typingEl);
+        _clearStatusStrip();
         activeTypingEl = null;
         if (!currentMsgEl) {
           currentMsgEl = createAssistantMessage();
@@ -1870,7 +1896,7 @@
             state: 'running',
           });
           if (typingEl && KS.showTyping) {
-            try { KS.showTyping(typingEl, title); } catch (e) { /* ignore */ }
+            try { _setStatusStrip(title); } catch (e) { /* ignore */ }
           }
         } else if (status === 'paused_for_approval' || status === 'idle') {
           // HITL / idle handled by other callbacks
@@ -1886,7 +1912,7 @@
       onDone: function(data) {
         if (!_mine()) return;
         activeStream = null;
-        KS.hideTyping(typingEl);
+        _clearStatusStrip();
         activeTypingEl = null;
         diag('done', {
           interrupted: !!(data && data.interrupted),
@@ -1981,7 +2007,7 @@
       onApprovalRequired: function(data) {
         if (!_mine()) return;
         // HITL: graph paused — render scope-aware approval card and lock input.
-        KS.hideTyping(typingEl);
+        _clearStatusStrip();
         activeTypingEl = null;
         logProgress({
           kind: 'status',
@@ -2010,14 +2036,14 @@
           console.warn('[KazmaChat] SSE stream lost at seq=' + lastId + ' — resuming');
           noteTurnActivity();
           try {
-            if (typingEl && KS.showTyping) KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
+            _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
           } catch (_t) {}
           _dispatchSse({ last_event_id: Number(lastId) });
           return;
         }
         // Final failure: surface it, then reconcile with server truth (the
         // turn may have completed server-side and be durable already).
-        KS.hideTyping(typingEl);
+        _clearStatusStrip();
         activeTypingEl = null;
         if (!currentMsgEl) currentMsgEl = createAssistantMessage();
         var textEl = currentMsgEl.querySelector('.message-text');
@@ -4654,7 +4680,7 @@
       // Keep currentMsgEl so applyFinal paints into the same turn bubble.
     },
     applyFinalAssistantText: function(content, model, opts) {
-      KS.hideTyping(typingEl);
+      _clearStatusStrip();
       activeTypingEl = null;
       if (!content) return;
       var incoming = String(content).trim();
@@ -4707,7 +4733,7 @@
     },
     appendLiveToken: function(content, opts) {
       noteTurnActivity();
-      KS.hideTyping(typingEl);
+      _clearStatusStrip();
       activeTypingEl = null;
       if (!content) return;
       // Full-message backfill: replace, never append (post-HITL duplicate fix).
@@ -4736,7 +4762,7 @@
     },
     setPlan: setPlan,
     appendErrorMessage: function(errMsg) {
-      KS.hideTyping(typingEl);
+      _clearStatusStrip();
       activeTypingEl = null;
       logProgress({ kind: 'error', title: ti('error', 'Error'), detail: String(errMsg || ''), state: 'failed' });
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
@@ -4754,10 +4780,9 @@
       appendMessage('user', text);
       scrollToBottom();
       beginTurn();
-      KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
     },
     onStreamToken: function(content) {
-      KS.hideTyping(typingEl);
+      _clearStatusStrip();
       if (!currentMsgEl) currentMsgEl = createAssistantMessage();
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
