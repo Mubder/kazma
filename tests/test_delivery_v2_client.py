@@ -74,6 +74,38 @@ class TestV2ArchitecturePresent:
         for trigger in ("'visibility'", "'focus'", "'pageshow'", "'init'", "'load'", "'idle-watchdog'"):
             assert trigger in src, f"missing resync trigger {trigger}"
 
+    def test_resync_reattaches_live_stream_when_generating(self):
+        """2026-08-26: resync-while-generating used to leave NO live transport —
+        an undisturbed visible tab painted the reply only on manual refresh."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function _reopenSse(" in src
+        assert "_reopenSseRef('resync-' + (reason || '?'))" in src
+        assert "last_event_id: _lastSeqSeen" in src
+
+    def test_sse_gap_status_routes_to_resync(self):
+        """Journal-gap attach signals status=resync; the SSE client must
+        reconcile instead of silently closing (dead-stream class)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "status === 'resync'" in src
+        assert "_resyncDelivery('sse-gap')" in src
+
+    def test_truncated_stream_reconciles(self):
+        """Stream ended without a terminal frame → reconcile with server
+        truth instead of sitting on partial text until a manual refresh."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "var truncated = !data;" in src
+        assert "_resyncDelivery('sse-truncated')" in src
+
+    def test_ws_sse_dedupe_guard(self):
+        """Every journaled frame fans out to WS too — the store must not
+        double-paint while the SSE stream owns the live turn (the
+        duplicated-bubble incident class)."""
+        chat_src = _CHAT_JS.read_text(encoding="utf-8")
+        store_src = _STORE_JS.read_text(encoding="utf-8")
+        assert "hasLiveSSE: function()" in chat_src
+        # token/done painting + approval card all gated on the live SSE
+        assert store_src.count("hasLiveSSE()") >= 3
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

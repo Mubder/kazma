@@ -76,7 +76,11 @@ SUBSCRIBER_QUEUE_MAX = 1000
 #: into a reconnecting client's open turn was the 2026-08-16 duplicated-
 #: MISSION-ON incident class. LIVE fan-out is unaffected — journaling them
 #: is exactly what gives second tabs real-time parity.
-REPLAY_SKIP_TYPES = frozenset({"capacity", "steer"})
+#: ``error`` frames are transient turn-local diagnostics: replaying them
+#: re-triggered the client's onError → attach → replayed-error loop (the
+#: 2026-08-26 retry storm). The ``done`` that follows an error carries the
+#: durable outcome a reconnecting client needs.
+REPLAY_SKIP_TYPES = frozenset({"capacity", "steer", "error"})
 
 
 def is_replayable(frame: dict[str, Any]) -> bool:

@@ -264,6 +264,10 @@
    * No debounce windows, no expectReply gating, no rendered-text matching:
    * idempotent by construction, so it never needs guarding (plan KD-5).
    */
+  // Set per-send (sendMessage closure owns _dispatchSse); module-level
+  // recovery paths (_resyncDelivery) re-attach the live stream through it.
+  var _reopenSseRef = null;
+
   function _resyncDelivery(reason) {
     if (!chatSessionId) return;
     var sid = chatSessionId;
@@ -281,9 +285,10 @@
       var generating = !!status.generating;
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
-      // Still running server-side → keep waiting honestly. Result delivery
-      // is owned by the resumed WS stream (cursor replay) or the SSE resume
-      // retry — never by client-side timers.
+      // Still running server-side → keep waiting honestly AND re-attach a
+      // live SSE stream from the journal cursor. Resync used to leave a
+      // generating turn with no transport at all — an undisturbed visible
+      // tab then painted the reply only on manual refresh (2026-08-26).
       if (generating) {
         if (activeStream) {
           try { activeStream.abort(); } catch (e) { /* already dead */ }
@@ -296,6 +301,9 @@
             KS.showTyping(typingEl, ti('thinking', 'Kazma is thinking\u2026'));
           }
         } catch (e2) { /* ignore */ }
+        if (_reopenSseRef) {
+          try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
+        }
         return;
       }
 
@@ -1610,6 +1618,32 @@
     // (`last_event_id`); the server replays exactly what was missed. No
     // pollers — one retry, then reconcile from the durable store.
     var _sseAttempts = 0;
+    // Last journaled seq seen this session (survives stream-object death so
+    // a resync-triggered re-attach can resume from the right cursor).
+    var _lastSeqSeen = 0;
+    function _noteSeq() {
+      if (activeStream && typeof activeStream.lastEventId === 'function') {
+        var sid = Number(activeStream.lastEventId());
+        if (sid > 0) _lastSeqSeen = sid;
+      }
+    }
+    /**
+     * Re-attach the SSE stream from the journal cursor WITHOUT sending a new
+     * prompt (the server treats last_event_id as attach-only). Delivery rule
+     * (2026-08-26): resync used to leave a generating turn with NO live
+     * transport — an undisturbed visible tab then painted the reply only on
+     * manual refresh.
+     */
+    function _reopenSse(reason) {
+      if (activeStream) return;               // already live
+      if (!_awaitingReply || _awaitingApproval) return;
+      if (_lastSeqSeen <= 0) return;          // no cursor → replaying from 0 risks duplication
+      _sseAttempts = 0;                       // fresh retry ladder for this attach
+      console.warn('[KazmaChat] Re-attaching SSE stream (' + reason + ') from seq=' + _lastSeqSeen);
+      noteTurnActivity();
+      _dispatchSse({ last_event_id: _lastSeqSeen });
+    }
+    _reopenSseRef = _reopenSse;
 
     function _dispatchSse(extraBody) {
       if (activeStream) {
@@ -1634,6 +1668,7 @@
       return {
       onToken: function(data) {
         noteTurnActivity();
+        _noteSeq();
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         if (!currentMsgEl) {
@@ -1696,8 +1731,16 @@
       // SSE CoT parity with WS agentStore — routing / synthesizing / heartbeats
       onStatus: function(data) {
         noteTurnActivity();
+        _noteSeq();
         var status = (data && (data.status || data.message)) || '';
         if (!status) return;
+        if (status === 'resync') {
+          // Journal-gap attach: the server closed the stream and told us to
+          // reconcile with durable truth. Silently ignoring it left a dead
+          // stream with no recovery (2026-08-26).
+          _resyncDelivery('sse-gap');
+          return;
+        }
         if (status === 'thinking' || status === 'synthesizing' || status === 'routing_node') {
           var title = status === 'synthesizing'
             ? ti('synthesizing', 'Composing response\u2026')
@@ -1729,6 +1772,11 @@
         KS.hideTyping(typingEl);
         activeTypingEl = null;
         var interrupted = !!(data && data.interrupted);
+        // No terminal frame (HTTP body closed / attach ended early): the
+        // turn may still be running server-side or already durable. Keep
+        // the partial paint for now and reconcile with server truth —
+        // this used to sit on "CoT + small text" until a manual refresh.
+        var truncated = !data;
         try {
         // Terminal frame is SoT — ALWAYS replace-paint, even when plan
         // tokens already arrived (glued ```plan + answer used to be skipped
@@ -1787,6 +1835,12 @@
         } else {
           endTurn();
         }
+        // Truncated stream (no terminal frame): reconcile with durable
+        // truth after the lock settles — paints the persisted reply when
+        // the turn already finished, re-attaches when still generating.
+        if (truncated && !_awaitingApproval) {
+          setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
+        }
         }
       },
 
@@ -1807,6 +1861,7 @@
 
       onError: function(msg) {
         _sseAttempts++;
+        _noteSeq();
         var lastId = (activeStream && typeof activeStream.lastEventId === 'function')
           ? activeStream.lastEventId() : null;
         activeStream = null;
@@ -4309,6 +4364,12 @@
       updateContextBadgeSoon();
     },
     isGenerating: function() { return _isGenerating; },
+    /**
+     * True while an SSE stream owns the live turn. The telemetry WS checks
+     * this to avoid double-painting the same reply over both transports
+     * (the duplicated-bubble incident class, 2026-08-26).
+     */
+    hasLiveSSE: function() { return !!activeStream; },
     refreshSessions: loadSessions,
     refreshSessionsSoon: refreshSessionsSoon,
     getOrCreateSessionId: function() {

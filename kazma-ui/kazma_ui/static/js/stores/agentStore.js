@@ -188,6 +188,11 @@ document.addEventListener('alpine:init', () => {
       // + message stream). Keep pendingApproval as fallback only.
       if (chat && typeof chat._hitlApproval === 'function') {
         this.pendingApproval = null;
+        // WS/SSE dedupe: while the SSE stream owns the live turn it renders
+        // its own approval card — a second one here doubled every card.
+        if (typeof chat.hasLiveSSE === 'function' && chat.hasLiveSSE()) {
+          return;
+        }
         chat._hitlApproval(approval);
         return;
       }
@@ -1071,7 +1076,13 @@ document.addEventListener('alpine:init', () => {
           // reconnect catch-up sets replay:true — chat.js must not open a
           // second bubble when loadSession already painted the same answer.
           const isReplay = !!(data && data.replay) || !!(frame && frame.replay);
-          if (finalText && window.KazmaChat) {
+          // WS/SSE dedupe: while the SSE stream owns the live turn, IT paints
+          // the final reply — the WS painting on top duplicated bubbles
+          // (every journaled frame fans out to both transports).
+          const sseOwnsTurn = !!(window.KazmaChat &&
+            typeof window.KazmaChat.hasLiveSSE === 'function' &&
+            window.KazmaChat.hasLiveSSE());
+          if (finalText && window.KazmaChat && !sseOwnsTurn) {
             if (typeof window.KazmaChat.applyFinalAssistantText === 'function') {
               window.KazmaChat.applyFinalAssistantText(finalText, data.model || '', {
                 replay: isReplay,
@@ -1110,6 +1121,11 @@ document.addEventListener('alpine:init', () => {
           this._turnActive = true;
           const text = frame.content || data.content;
           if (!text || !window.KazmaChat) break;
+          // WS/SSE dedupe: the live SSE stream paints streamed tokens; the
+          // WS painting the same frames duplicated text into tokenAccum.
+          if (typeof window.KazmaChat.hasLiveSSE === 'function' && window.KazmaChat.hasLiveSSE()) {
+            break;
+          }
           // full=true backfill / recovery: replace, don't concatenate
           const isFull = !!(data && data.full) || !!(frame && frame.full);
           if (isFull && typeof window.KazmaChat.applyFinalAssistantText === 'function') {

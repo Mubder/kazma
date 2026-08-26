@@ -355,6 +355,12 @@ class TestReplayFilter:
         # capacity flag in data (fast-path stream_end) also excluded.
         assert not is_replayable({"type": "stream_end", "data": {"capacity": True}})
 
+    def test_error_frames_never_replayable(self):
+        """2026-08-26: replaying a journaled error re-triggered the client's
+        onError → attach → replayed-error retry storm. The done frame that
+        follows an error carries the durable outcome."""
+        assert not is_replayable({"type": "error", "data": {"message": "boom"}})
+
     def test_turn_content_always_replayable(self):
         assert is_replayable({"type": "llm_delta", "data": {"content": "hi"}})
         assert is_replayable({"type": "turn_complete", "data": {"content": "done"}})
