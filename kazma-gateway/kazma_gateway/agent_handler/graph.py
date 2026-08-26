@@ -1453,6 +1453,18 @@ def create_graph_handler(
                     else:
                         assistant_text = "(No response generated)"
 
+                # ── Plan fence: platform chats have no workbench — strip
+                # the ```plan checklist from the outbound reply (Telegram
+                # rendered it as a raw code block glued to every tool turn).
+                try:
+                    from kazma_core.agent.plan_fence import user_reply_text
+
+                    assistant_text = user_reply_text(assistant_text)
+                except Exception:
+                    logger.debug(
+                        "[agent-handler] plan-fence strip skipped", exc_info=True
+                    )
+
                 # ── Majlis tone adaptation ──────────────────────────
                 # Wrap the LLM's response with cultural tone based on
                 # current cultural context (Ramadan warm, Eid celebratory,

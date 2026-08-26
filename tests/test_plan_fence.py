@@ -22,6 +22,7 @@ from kazma_core.agent.plan_fence import (
     rewrite_terminal_assistant_message,
     should_execute_plan_only_hop,
     split_plan_and_prose,
+    user_reply_text,
 )
 from kazma_core.agent.state import SupervisorState, initial_supervisor_state
 
@@ -194,6 +195,14 @@ _CHAT_JS = (
     / "chat.js"
 )
 
+_GATEWAY_GRAPH = (
+    Path(__file__).resolve().parent.parent
+    / "kazma-gateway"
+    / "kazma_gateway"
+    / "agent_handler"
+    / "graph.py"
+)
+
 
 def test_chat_js_always_applies_done_content():
     src = _CHAT_JS.read_text(encoding="utf-8")
@@ -206,8 +215,59 @@ def test_chat_js_always_applies_done_content():
 
 def test_chat_js_handles_glued_closer():
     src = _CHAT_JS.read_text(encoding="utf-8")
-    # Client split must not require a newline before the closing ticks.
-    assert r"/```plan[^\n]*\n?([\s\S]*?)```/i" in src
+    # Client split must not require a newline before the closing ticks,
+    # and must not swallow ```plantuml-style fences (\b guard).
+    assert r"/```plan\b[^\n]*\n?([\s\S]*?)```/i" in src
+
+
+# ── Plan-vs-content discrimination (2026-08-26 regressions) ────────────
+
+
+def test_plantuml_fence_is_not_a_plan():
+    text = (
+        "Here is the diagram:\n\n"
+        "```plantuml\n@startuml\nAlice -> Bob: hi\n@enduml\n```\n\n"
+        "Diagram above."
+    )
+    plan, prose = split_plan_and_prose(text)
+    assert plan == ""
+    assert "plantuml" in prose
+    assert "@startuml" in prose
+
+
+def test_deep_plan_heading_is_content_not_workbench():
+    text = (
+        "Here is the rewritten document.\n\n"
+        "## Plan\n- Phase one\n- Phase two\n\n"
+        "## Risks\nNothing major."
+    )
+    plan, prose = split_plan_and_prose(text)
+    assert plan == ""
+    assert "## Plan" in prose
+    assert "Phase one" in prose
+
+
+def test_head_plan_heading_is_still_a_plan():
+    text = "## Plan\n- Inspect\n- Write\n\nDone."
+    plan, prose = split_plan_and_prose(text)
+    assert "Inspect" in plan
+    assert prose == "Done."
+
+
+def test_user_reply_text_strips_fence_for_platforms():
+    fenced = "```plan\n- Check memory\n```\n\nSaved. Updated the note."
+    assert user_reply_text(fenced) == "Saved. Updated the note."
+    # Plan-only payload must NOT come back empty (caller fallback logic).
+    plan_only = "```plan\n- Check memory\n```"
+    assert user_reply_text(plan_only) == plan_only.strip()
+    assert user_reply_text("Plain reply.") == "Plain reply."
+
+
+def test_gateway_strips_plan_fence_from_platform_reply():
+    """Source contract: the gateway reply path routes through user_reply_text."""
+    src = _GATEWAY_GRAPH.read_text(encoding="utf-8")
+    assert "from kazma_core.agent.plan_fence import user_reply_text" in src
+    assert "user_reply_text(assistant_text)" in src
 
 
 # ── Supervisor: plan-only hop auto-continues when tools exist ──────────

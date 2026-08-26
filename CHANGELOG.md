@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Unreleased — Plan-fence reply polish + rewrite-not-store intent (2026-08-26)
+
+Two live regressions after the plan-fence delivery change:
+
+- **Platform replies showed raw ```plan fences.** The supervisor now nudges
+  every tool turn open with a ```plan workbench fence, and the normalized
+  fence stayed in the outbound text — Telegram/Discord/Slack rendered a
+  code block glued to the answer. The gateway reply path now strips the
+  fence (`plan_fence.user_reply_text`, fail-open). The Web bubble already
+  stripped client-side.
+- **"Rewrite the text and mention the memory" hijacked into MEMORY STORE
+  TASK.** A long paste whose head merely *mentioned* "memory" classified
+  as a store intent; the supervisor then instructed the model to save
+  beliefs — and it went and changed stored memory instead of rewriting
+  the text. The bulk-paste fallback now requires a store verb near the
+  memory target (or a `Memory:` paste header). `memory_store` /
+  `memory_admin` tool descriptions gained the same explicit guard.
+- **Plan-vs-content discrimination:** a `## Plan` heading deep inside a
+  rewritten document is content, not a workbench checklist — the heading
+  heuristic is now anchored to the first line (Python + chat.js parity),
+  and ```` ```plantuml ```` style fences no longer match as plans
+  (`\b` on the info string). The chat.js `## Plan` branch also stopped
+  dropping text that preceded the heading.
+
+Tests: `tests/test_plan_fence.py`, `tests/test_turn_input_continuity.py`.
+Restart the server; hard-refresh the chat tab.
+
 ## Unreleased — Dual Telegram HITL cards (2026-08-26)
 
 Two `file_write` approval cards on one thread (same `hitl approve <id>`),

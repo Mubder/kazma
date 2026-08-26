@@ -122,6 +122,18 @@ _NAMED_PROJECT_RE = re.compile(
     r"|\b([A-Za-z][\w]{1,32})\s+is\s+an?\s+"
 )
 
+# Bulk-paste head: memory must appear as the *target* of a store verb (or a
+# "Memory:" paste header). A bare "memory" mention — "rewrite the text and
+# mention the memory" + a long paste — used to hijack the whole turn into
+# MEMORY STORE TASK and the model mutated stored beliefs instead of
+# rewriting the text.
+_BULK_STORE_HEAD_RE = re.compile(
+    r"(?is)"
+    r"\b(?:add|save|store|put|write|ingest|persist)\b.{0,60}\b(?:memor(?:y|ies)|ذاكر|جراف|graph)\b"
+    r"|"
+    r"\bmemor(?:y|ies)\s*[:\-–—]\s*\S"
+)
+
 
 def is_short_continuation(text: str) -> bool:
     """True for short same-session continuations like 'Proceed' / 'try now'."""
@@ -460,11 +472,11 @@ def is_memory_store_intent(text: str) -> bool:
         t,
     ):
         return True
-    # Long document with an explicit project memory target in the first lines
+    # Long paste whose FIRST lines name memory as the storage target (store
+    # verb nearby, or a "Memory:" header). A mere mention ("rewrite the
+    # text and mention the memory" + paste) is NOT a store task.
     head = t[:400]
-    if is_bulk_document_message(t) and re.search(
-        r"(?i)\b(?:memory|remember|save|store)\b", head
-    ):
+    if is_bulk_document_message(t) and _BULK_STORE_HEAD_RE.search(head):
         return True
     return False
 

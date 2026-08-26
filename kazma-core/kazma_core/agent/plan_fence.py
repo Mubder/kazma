@@ -33,6 +33,7 @@ __all__ = [
     "rewrite_terminal_assistant_message",
     "should_execute_plan_only_hop",
     "split_plan_and_prose",
+    "user_reply_text",
 ]
 
 # Injected as a synthetic user turn when the model wrote a plan and stopped
@@ -46,17 +47,22 @@ PLAN_EXECUTE_CONTINUE = (
 )
 
 # Closed fence: ```plan … ```  (closing ticks may be glued to following prose).
+# ``\b`` keeps ```plantuml / ```planning blocks out of the plan split.
 _CLOSED_FENCE_RE = re.compile(
-    r"```plan[^\n]*\n?(.*?)```",
+    r"```plan\b[^\n]*\n?(.*?)```",
     re.IGNORECASE | re.DOTALL,
 )
 # Unclosed fence: ```plan … (EOF, no closing ticks).
 _OPEN_FENCE_RE = re.compile(
-    r"```plan[^\n]*\n?(.*)$",
+    r"```plan\b[^\n]*\n?(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
+# Markdown plan heading — ONLY valid as the first line of the message (the
+# supervisor nudge asks for the plan "before or alongside tool_calls", i.e.
+# at the top). A "## Plan" section deep inside a rewritten document is
+# content, not a workbench checklist.
 _MD_PLAN_RE = re.compile(
-    r"(?:^|\n)(?:#{1,3}\s*plan\b|\*\*plan\*\*)[^\n]*\n(.*)$",
+    r"^(?:#{1,3}\s*plan\b|\*\*plan\*\*)[^\n]*\n(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
@@ -93,12 +99,10 @@ def split_plan_and_prose(text: str | None) -> tuple[str, str]:
         prose_parts = [p for p in (before, rest) if p]
         return plan, "\n\n".join(prose_parts).strip()
 
-    md = _MD_PLAN_RE.search(s)
+    md = _MD_PLAN_RE.match(s.lstrip())
     if md:
-        before = s[: md.start()].strip()
         plan, rest = _split_list_then_prose(md.group(1) or "")
-        prose_parts = [p for p in (before, rest) if p]
-        return plan, "\n\n".join(prose_parts).strip()
+        return plan, rest.strip()
 
     return "", s.strip()
 
@@ -136,6 +140,20 @@ def prose_for_user(text: str | None) -> str:
     """User-facing answer with the plan fence stripped. Empty if plan-only."""
     _plan, prose = split_plan_and_prose(text)
     return prose
+
+
+def user_reply_text(text: str | None) -> str:
+    """Outbound reply payload for chat platforms (Telegram/Discord/Slack).
+
+    Strips the ```plan workbench fence — platform chats cannot render it
+    (Telegram showed a raw code block glued to every tool-turn reply).
+    A plan-only payload (no prose) is returned as-is so the caller's
+    fallback text logic still sees content.
+    """
+    prose = prose_for_user(text)
+    if prose.strip():
+        return prose
+    return str(text or "").strip()
 
 
 def normalize_plan_fence(text: str | None) -> str:

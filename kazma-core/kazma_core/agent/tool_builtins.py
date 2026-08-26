@@ -947,7 +947,9 @@ def register_builtin_tools(registry: LocalToolRegistry) -> None:
             "link subject=kazma predicate=has_part object=kazma_framework. "
             "Merge duplicate shells into one: merge id=mubder_kazma target=kazma. "
             "Delete junk entity true/false: delete_entity id=true. "
-            "DO NOT use memory_store to restructure the graph — store only adds notes."
+            "DO NOT use memory_store to restructure the graph — store only adds notes. "
+            "Only for explicit user requests to maintain/clean memory — never "
+            "because a text you are rewriting or composing should mention memory."
         ),
         category="memory",
     )
@@ -1124,7 +1126,10 @@ def register_builtin_tools(registry: LocalToolRegistry) -> None:
             '{"service":"grok","next_reset":"<when>"} so the new value SUPERSEDES '
             "the previous one instead of stacking duplicates. Free text that mentions "
             "a product next/weekly reset is auto-classified the same way. "
-            "To remove stale beliefs use memory_invalidate — never raw SQL."
+            "To remove stale beliefs use memory_invalidate — never raw SQL. "
+            "Only use this tool when the user EXPLICITLY asks to save/remember "
+            "something — never because a reply you are writing should mention "
+            "or reference memory."
         ),
         category="memory",
     )

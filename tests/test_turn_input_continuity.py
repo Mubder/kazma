@@ -46,6 +46,27 @@ def test_is_memory_store_intent_shipx_paste():
     assert is_memory_store_intent(cleanup) is False
 
 
+def test_rewrite_mention_memory_is_not_store_intent():
+    """Regression (2026-08-26): 'rewrite the text and mention the memory' +
+    a long paste used to classify as MEMORY STORE TASK — the supervisor then
+    told the model to mutate stored beliefs instead of rewriting the text.
+    A bare 'memory' mention in a paste head is NOT a storage target.
+    """
+    rewrite = (
+        "Please rewrite the text below and mention the memory system in "
+        "the conclusion:\n\n" + ("y" * 700)
+    )
+    assert is_memory_store_intent(rewrite) is False
+    # Short form too
+    assert is_memory_store_intent("rewrite the text and mention the memory") is False
+    # Explicit store phrasing still classifies (verb → memory target)
+    keep = "Here is the doc, save it into memory:\n\n" + ("z" * 700)
+    assert is_memory_store_intent(keep) is True
+    # "Memory:" paste header still classifies
+    header = "Memory:\nKazma is a multi-platform agent framework...\n" + ("w" * 700)
+    assert is_memory_store_intent(header) is True
+
+
 def test_multi_part_pat_github_not_exclusive_graph_cleanup():
     """Regression: PAT + read repos + store under Mubder→kazma + compare.
 

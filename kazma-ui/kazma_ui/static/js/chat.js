@@ -2300,7 +2300,8 @@
   function splitPlanAndProse(text) {
     var s = String(text || '');
     if (!s.trim()) return { plan: '', prose: '' };
-    var m = s.match(/```plan[^\n]*\n?([\s\S]*?)```/i);
+    // \b keeps ```plantuml / ```planning blocks out of the plan split.
+    var m = s.match(/```plan\b[^\n]*\n?([\s\S]*?)```/i);
     if (m) {
       var after = s.slice(m.index + m[0].length).replace(/^[ \t]+/, '').replace(/^\n+/, '').trim();
       var before = s.slice(0, m.index).trim();
@@ -2309,14 +2310,17 @@
       if (after) proseParts.push(after);
       return { plan: String(m[1] || '').trim(), prose: proseParts.join('\n\n').trim() };
     }
-    var open = s.match(/```plan[^\n]*\n?([\s\S]*)$/i);
+    var open = s.match(/```plan\b[^\n]*\n?([\s\S]*)$/i);
     if (open) {
       var split = _splitListThenProse(open[1] || '');
       var beforeOpen = s.slice(0, open.index).trim();
       var proseOpen = [beforeOpen, split.prose].filter(Boolean).join('\n\n').trim();
       return { plan: split.plan, prose: proseOpen };
     }
-    var md = s.match(/(?:^|\n)(?:#{1,3}\s*plan\b|\*\*plan\*\*)[^\n]*\n([\s\S]*)/i);
+    // Markdown Plan heading — only valid as the FIRST line (mirrors the
+    // Python _MD_PLAN_RE anchor): a "## Plan" section deep inside a
+    // rewritten document is content, not a workbench checklist.
+    var md = s.replace(/^\s+/, '').match(/^(?:#{1,3}\s*plan\b|\*\*plan\*\*)[^\n]*\n([\s\S]*)/i);
     if (md) {
       var mdSplit = _splitListThenProse(md[1] || '');
       return { plan: mdSplit.plan, prose: mdSplit.prose };
