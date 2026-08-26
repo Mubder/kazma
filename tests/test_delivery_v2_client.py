@@ -471,6 +471,31 @@ class TestHiddenTabUX:
         assert "endTurn(" in src
 
 
+class TestResyncFragmentationFixes:
+    """2026-08-27 post-restart incident: one reply painted as 3 bubbles.
+
+    A focus/visibility resync during a live turn ABORTED the healthy SSE
+    stream and forced a journal-cursor reopen; the replay's terminal paints
+    closed the bubble mid-stream, so every later token opened a NEW bubble
+    with its own "Writing reply…" row.
+    """
+
+    def test_resync_never_aborts_a_live_stream(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        generating = src.split("if (generating) {", 1)[1].split("return;\n      }", 1)[0]
+        # The generating branch must early-return while a stream is live…
+        assert "if (activeStream) {" in generating
+        assert "NEVER abort it here" in generating
+        # …and must NOT contain the old abort-then-skip-reopen pattern.
+        assert "activeStream.abort(); } catch (e)" not in generating
+        assert "wasLive" not in generating
+
+    def test_resync_paint_not_terminal_while_stream_live(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        final_fn = src.split("applyFinalAssistantText: function", 1)[1]
+        assert "(opts.replay || opts.source === 'resync') && !activeStream" in final_fn
+
+
 class TestServerSidePingPin:
     """Plan KD-7: server-side WS protocol pings are the death certificate for
     black-holed sockets. Without them the WS handler never unwinds on a dead

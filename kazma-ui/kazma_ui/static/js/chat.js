@@ -379,17 +379,24 @@
       // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
       // trigger churned connections for no gain.
       if (generating) {
-        var wasLive = !!activeStream;
         if (activeStream) {
-          try { activeStream.abort(); } catch (e) { /* already dead */ }
-          activeStream = null;
+          // A live stream owns this turn — NEVER abort it here. Aborting a
+          // healthy stream forced a journal-cursor reopen whose replay
+          // painted terminal segments, fragmenting one reply into multiple
+          // bubbles each with its own "Writing reply…" row (2026-08-27
+          // post-restart). The live stream IS the delivery path; a genuinely
+          // dead stream is handled below (no activeStream → reopen).
+          try {
+            _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
+          } catch (e2) { /* ignore */ }
+          return;
         }
         _awaitingReply = true;
         noteTurnActivity();
         try {
           _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
         } catch (e2) { /* ignore */ }
-        if (!wasLive && _reopenSseRef) {
+        if (_reopenSseRef) {
           try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
         }
         return;
@@ -4731,9 +4738,12 @@
       }
       // Release wait only after paint — server content is on screen (or tried).
       _awaitingReply = false;
-      if (opts.replay || opts.source === 'resync') {
+      if ((opts.replay || opts.source === 'resync') && !activeStream) {
         // Replay/resync paints are terminal for this turn — close the bubble
-        // so the next message opens a fresh one.
+        // so the next message opens a fresh one. But NOT while a live stream
+        // owns the turn: closing mid-stream makes the next token open a NEW
+        // bubble + its own "Writing reply…" row, fragmenting one reply into
+        // pieces (2026-08-27 post-restart).
         currentMsgEl = null;
         tokenAccum = '';
       }
