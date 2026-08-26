@@ -4192,7 +4192,7 @@
         checkPendingApprovals();
         updateContextBadge();
         refreshCapacity();
-        _restoreUndeliveredOutbox((data && data.messages) || data || []);
+        _restoreUndeliveredOutbox(messages);
       })
       .catch(function(err) {
         if (chatSessionId !== sessionId) return;

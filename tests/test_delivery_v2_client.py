@@ -180,7 +180,12 @@ class TestV2ArchitecturePresent:
         assert "_outboxWrite(content);" in src
         assert "_outboxClear();  // first streamed token" in src
         assert "function _restoreUndeliveredOutbox(" in src
-        assert "_restoreUndeliveredOutbox((data && data.messages)" in src
+        # MUST reference the in-scope `messages` variable — an earlier
+        # version referenced a nonexistent `data` and ReferenceError'd
+        # EVERY loadSession (the "Failed to load session messages
+        # (data is not defined)" spam, 2026-08-26).
+        assert "_restoreUndeliveredOutbox(messages);" in src
+        assert "data && data.messages) || data" not in src
         assert "window.KazmaChat.retry()" in src
 
     def test_empty_terminal_is_honest_and_traced(self):
