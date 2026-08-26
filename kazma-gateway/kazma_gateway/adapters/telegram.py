@@ -159,6 +159,19 @@ class TelegramAdapter(BaseAdapter):
         # original message and then an edited_message with the same id —
         # that used to start a second graph turn and a second HITL card.
         self._seen_message_ids: dict[tuple[int, int], float] = {}
+        # Offset-commit tracking (at-least-once delivery): ``self._offset``
+        # is the COMMITTED mark — it only advances past an update once that
+        # update's chain task finishes, so a crash between dispatch and
+        # completion makes Telegram redeliver (it never redelivers past a
+        # confirmed offset). Same-process redelivery while the offset lags
+        # behind an in-flight chain is deduped twice: by
+        # ``_unacked_updates`` at dispatch and by ``_seen_message_ids`` at
+        # enqueue. Cross-restart redelivery is the accepted at-least-once
+        # duplicate (the dedup sets are memory-only); Telegram's 24h
+        # server-side update retention bounds the window.
+        self._pending_updates: set[int] = set()   # dispatched, chain not finished
+        self._unacked_updates: set[int] = set()   # dispatched, not yet committed
+        self._max_seen_update_id: int = 0
 
     def set_allowed_users(self, user_ids: list[int] | set[int]) -> None:
         """Set the whitelist of allowed Telegram user IDs (public setter).
@@ -326,13 +339,25 @@ class TelegramAdapter(BaseAdapter):
                         break
 
                     try:
+                        try:
+                            update_id = int(update.get("update_id", 0) or 0)
+                        except (TypeError, ValueError):
+                            update_id = 0
+                        # While the committed offset lags behind an
+                        # in-flight chain, Telegram redelivers every
+                        # unconfirmed update on each poll — skip ids we
+                        # already dispatched but have not committed yet.
+                        if update_id and update_id in self._unacked_updates:
+                            continue
+
                         # Handle inline keyboard callbacks
                         if "callback_query" in update:
-                            self._spawn(
+                            cb_task = self._spawn(
                                 self._handle_callback_query(
                                     update["callback_query"],
                                 )
                             )
+                            self._track_update(update_id, cb_task)
                             continue
 
                         # Offload per-update processing off the poll loop
@@ -376,10 +401,21 @@ class TelegramAdapter(BaseAdapter):
                 chat_id = int(message.get("chat", {}).get("id", 0) or 0)
         except Exception:
             chat_id = 0
+        try:
+            update_id = int(update.get("update_id", 0) or 0)
+        except (TypeError, ValueError):
+            update_id = 0
+        if update_id and update_id in self._unacked_updates:
+            # Redelivery of an uncommitted update (Telegram resends
+            # everything ≥ committed+1 while an earlier chain is still
+            # running) — already dispatched, skip.
+            return
         if not chat_id:
             # No chat identity (rare/unknown update shapes) — process
             # unchained but still off the poll loop.
-            self._spawn(self._process_update(update, queue))
+            self._track_update(
+                update_id, self._spawn(self._process_update(update, queue))
+            )
             return
         prev = self._chat_chains.get(chat_id)
         task = asyncio.create_task(
@@ -387,6 +423,52 @@ class TelegramAdapter(BaseAdapter):
             name=f"tg-update:{chat_id}:{update.get('update_id', '?')}",
         )
         self._chat_chains[chat_id] = task
+        self._track_update(update_id, task)
+
+    def _track_update(self, update_id: int, task: asyncio.Task) -> None:
+        """Register a dispatched update so its offset commits on completion.
+
+        Both chained and unchained dispatch paths funnel through here —
+        the committed offset never passes an update whose task has not
+        finished.
+        """
+        if not update_id:
+            return
+        self._unacked_updates.add(update_id)
+        self._pending_updates.add(update_id)
+        task.add_done_callback(
+            lambda t, uid=update_id: self._on_update_done(uid, t)
+        )
+
+    def _on_update_done(self, update_id: int, task: asyncio.Task) -> None:
+        """Commit the getUpdates offset past finished update tasks.
+
+        Advances ``self._offset`` to the highest update_id with no
+        unfinished predecessor (contiguous completed prefix). A task that
+        RAISED still commits — redelivering an already-failing handler
+        would poison-loop — but is logged at warning. A still-running
+        earlier update holds the mark so a crash redelivers everything
+        uncommitted (at-least-once).
+        """
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.warning(
+                    "[telegram] Update %d processing failed (%s: %s) — "
+                    "committing offset to avoid redelivery loop",
+                    update_id,
+                    type(exc).__name__,
+                    str(exc)[:200],
+                )
+        self._pending_updates.discard(update_id)
+        nxt = self._offset + 1
+        while (
+            self._offset < self._max_seen_update_id
+            and nxt not in self._pending_updates
+        ):
+            self._offset = nxt
+            self._unacked_updates.discard(nxt)
+            nxt += 1
 
     async def _process_update_chained(
         self,
@@ -497,10 +579,31 @@ class TelegramAdapter(BaseAdapter):
                         )
                     )
             except asyncio.QueueFull:
+                chat_id = int(msg.context_metadata.get("chat_id", 0) or 0)
                 logger.warning(
                     "[telegram] Queue full — dropping message from chat=%d",
-                    msg.context_metadata.get("chat_id", 0),
+                    chat_id,
                 )
+                # The user saw their message "delivered" — tell them it was
+                # dropped instead of leaving them staring at silence. Direct
+                # send (deliberately bypasses the full queue); failure to
+                # notify escalates to ERROR so the drop is never silent.
+                if chat_id:
+                    try:
+                        http = self._ensure_http()
+                        await http.post(
+                            "/sendMessage",
+                            json={
+                                "chat_id": chat_id,
+                                "text": "⚠️ Busy — message dropped, please resend.",
+                            },
+                        )
+                    except Exception:
+                        logger.error(
+                            "[telegram] Queue full — dropped message from "
+                            "chat=%d and busy notice failed to send",
+                            chat_id,
+                        )
         except Exception:
             logger.exception(
                 "[telegram] Error processing update %s",
@@ -568,7 +671,11 @@ class TelegramAdapter(BaseAdapter):
         """Execute a single getUpdates call with long-poll.
 
         Uses Telegram's built-in long-polling (timeout parameter)
-        to reduce idle requests. Advances the offset after each batch.
+        to reduce idle requests. The offset CONFIRMS only the committed
+        prefix (committed + 1): updates whose chain tasks have not
+        finished are redelivered by Telegram on later polls — deduped at
+        dispatch via ``_unacked_updates`` — so a crash between dispatch
+        and chain completion redelivers them instead of losing them.
 
         Returns:
             List of Telegram Update objects.
@@ -578,7 +685,7 @@ class TelegramAdapter(BaseAdapter):
 
         params: dict[str, Any] = {"timeout": self._poll_timeout}
         if self._offset:
-            params["offset"] = self._offset
+            params["offset"] = self._offset + 1
 
         resp = await self._http.get(
             "/getUpdates",
@@ -592,10 +699,13 @@ class TelegramAdapter(BaseAdapter):
             return []
 
         updates = data.get("result", [])
-
-        from kazma_gateway.adapters.telegram_parse import advance_offset
-
-        self._offset = advance_offset(updates, self._offset)
+        for update in updates:
+            try:
+                uid = int(update.get("update_id", 0) or 0)
+            except (TypeError, ValueError):
+                uid = 0
+            if uid > self._max_seen_update_id:
+                self._max_seen_update_id = uid
         return updates
 
     def _parse_update(self, update: dict[str, Any]) -> IncomingMessage | None:
