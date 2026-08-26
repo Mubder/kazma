@@ -256,10 +256,17 @@ class SubAgentManager:
                 "auto_deny": True,
             }
 
-        # "inherit" — use process-wide HITL config
+        # "inherit" — use process-wide HITL config, but force auto_deny:
+        # child graphs are built checkpointer-less (build_child_graph /
+        # get_streaming_graph), so an interrupt() pause can never be
+        # resumed — inherit must degrade to auto-deny rather than mint
+        # unresumable interrupts that silently kill the child turn
+        # (audit H2, mirrors the auto_deny branch above).
         try:
             from kazma_core.safety.hitl import get_hitl_config
 
-            return get_hitl_config()
+            hitl = dict(get_hitl_config())
+            hitl["auto_deny"] = True
+            return hitl
         except Exception:
             return None

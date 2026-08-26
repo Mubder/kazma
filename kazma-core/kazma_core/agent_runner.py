@@ -802,7 +802,9 @@ class KazmaAgent:
 
         This builds (and caches) a graph from the agent's own components
         without a checkpointer, so the SSE path can use ``astream_events``
-        without reaching into private graph-builder internals.
+        without reaching into private graph-builder internals. Because the
+        graph is checkpointer-less, its HITL config carries ``auto_deny`` —
+        an interrupt() pause here could never be resumed (audit F2/H1).
 
         The graph supports ``ainvoke()`` and ``astream_events()``.
         """
@@ -817,6 +819,17 @@ class KazmaAgent:
         streaming_hitl = get_hitl_config(self.config.raw)
         if not streaming_hitl.get("enabled", True):
             streaming_hitl = None
+        else:
+            # The streaming graph is cached WITHOUT a checkpointer: this
+            # method is sync (called from sync app-builder closures), so it
+            # cannot await the AsyncSqliteSaver construction that
+            # _ensure_graph performs. Its live consumers — the voice WS
+            # getter and the boot-window _graph_holder (replaced post-startup
+            # by app.py's checkpointed recompile) — therefore can never
+            # resume an interrupt() pause via /api/approve. Force auto_deny
+            # (audit F2/H1): danger tools deny with a clear message instead
+            # of minting an unresumable interrupt that kills the turn.
+            streaming_hitl = {**streaming_hitl, "auto_deny": True}
 
         # Ensure the snapshot recorder exists BEFORE building/caching the
         # streaming graph. app.py calls get_streaming_graph() at startup
@@ -850,10 +863,23 @@ class KazmaAgent:
         *,
         tools: list[str] | None = None,
         hitl_config: dict[str, Any] | None = None,
+        checkpointer: Any | None = None,
     ) -> Any:
         """Build a one-shot supervisor graph for sub-agents (audit M19).
 
         Not cached — each spawn can carry auto-deny HITL and tool filters.
+
+        Args:
+            tools: Optional tool-name allowlist filter.
+            hitl_config: Optional HITL config; defaults to the live
+                ``get_hitl_config()``.
+            checkpointer: Optional checkpointer. Child graphs default to
+                ``checkpointer=None`` (one-shot), which means LangGraph
+                ``interrupt()`` can never persist a pause — so a
+                checkpointer-less build forces ``auto_deny`` into the HITL
+                config (audit H1): danger tools deny with a clear message
+                instead of minting an unresumable interrupt that silently
+                kills the turn.
         """
         from kazma_core.agent.graph_builder import build_supervisor_graph
         from kazma_core.safety.hitl import get_hitl_config
@@ -872,6 +898,13 @@ class KazmaAgent:
         if isinstance(hitl, dict) and not hitl.get("enabled", True):
             hitl = None
 
+        # Checkpointer-less children can never resume an interrupt() pause
+        # (audit H1 — cron/sub-agent child graphs died silently on danger
+        # tools). Force auto_deny so tool_worker_node denies directly.
+        # Callers that pass a checkpointer keep the resumable gate.
+        if checkpointer is None and isinstance(hitl, dict):
+            hitl = {**hitl, "auto_deny": True}
+
         return build_supervisor_graph(
             llm=self.llm,
             system_prompt=self.system_prompt,
@@ -881,7 +914,7 @@ class KazmaAgent:
             authority=self.authority,
             tracer=self.tracer,
             hitl_config=hitl,
-            checkpointer=None,
+            checkpointer=checkpointer,
             snapshot_recorder=self._snapshot_recorder,
         )
 

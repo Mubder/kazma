@@ -470,7 +470,15 @@ async def tool_worker_node(
         # interrupt() is the sole gate for single-agent chat. Restored in
         # the finally below.
         _graph_gate_token = None
-        if hitl_config:
+        # Truthiness fix (audit F9): ``{"enabled": False}`` is a truthy dict
+        # but a DISABLED gate. Treating it as active (a) set the gate
+        # ContextVar, suppressing the registry-level SwarmMessageBus gate
+        # with no graph gate actually backing the turn, and (b) still routed
+        # ALWAYS_HITL_TOOLS into interrupt() — which kills checkpointer-less
+        # child graphs. A disabled config must behave exactly like None:
+        # no ContextVar, ALWAYS_HITL_TOOLS-only danger split.
+        _hitl_active = bool(hitl_config) and bool(hitl_config.get("enabled", True))
+        if _hitl_active:
             from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
 
             _graph_gate_token = _graph_hitl_gate_ctx.set(True)
@@ -692,7 +700,8 @@ async def tool_worker_node(
                     name=tc["name"],
                     content=(
                         f"Tool '{tc['name']}' is a danger tool and was auto-denied "
-                        "(sub-agent safety mode is 'auto_deny')."
+                        "(this graph runs with auto_deny HITL — it cannot pause "
+                        "for human approval)."
                     ),
                     is_error=True,
                     duration_ms=0.0,
@@ -707,6 +716,30 @@ async def tool_worker_node(
                     record_commitment_terminal("auto_denied")
                 except Exception:
                     pass
+            danger_tools = []
+
+        # ALWAYS_HITL_TOOLS fail-closed (audit F9): with no ACTIVE gate
+        # (hitl_config None or {"enabled": False}) the danger batch above can
+        # only contain ALWAYS_HITL_TOOLS. interrupt() is not an option here —
+        # the checkpointer is not determinable at this point, and graphs
+        # without one (checkpointer-less children, streaming/voice) can
+        # never resume the pause. Deny with a clear actionable error
+        # instead of minting an unresumable interrupt.
+        if danger_tools and not _hitl_active:
+            for tc in danger_tools:
+                results.append(ToolResult(
+                    tool_call_id=str(tc.get("id") or ""),
+                    name=tc["name"],
+                    content=(
+                        f"Tool '{tc['name']}' always requires explicit human "
+                        "approval, but the HITL approval gate is disabled on "
+                        "this graph — the call was DENIED, not executed. "
+                        "Re-enable safety.hitl.enabled to use this tool."
+                    ),
+                    is_error=True,
+                    duration_ms=0.0,
+                    outcome="hard",
+                ))
             danger_tools = []
 
         if danger_tools:

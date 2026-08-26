@@ -545,3 +545,357 @@ class TestSseApprovalFrame:
 
         assert any("approval_required" in f for f in frames)
         assert any("shell_exec" in f for f in frames)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Unresumable-interrupt elimination (audit H1/H2/F2/F9): checkpointer-less
+# graphs must auto-deny instead of minting interrupt() pauses that can
+# never be resumed by /api/approve.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _mock_agent():
+    """MagicMock KazmaAgent for bound-method graph-build tests.
+
+    Mirrors the pattern in test_s4_coverage_gaps.py — the REAL method runs
+    against the mock so build kwargs can be inspected.
+    """
+    from unittest.mock import MagicMock
+
+    from kazma_core.agent_runner import AgentConfig, KazmaAgent
+
+    agent = MagicMock(spec=KazmaAgent)
+    agent._streaming_graph = None
+    agent.config = AgentConfig(
+        raw={"safety": {"hitl": {"enabled": True, "require_approval_for": ["shell_exec"]}}}
+    )
+    agent.llm = MagicMock()
+    agent.system_prompt = "sys"
+    agent.tools = MagicMock()
+    agent.tools.get_tool_definitions.return_value = []
+    agent.cost_breaker = MagicMock()
+    agent.authority = MagicMock()
+    agent.tracer = MagicMock()
+    agent._snapshot_recorder = None
+    return agent
+
+
+class TestChildGraphAutoDeny:
+    """build_child_graph (Fix 1): checkpointer-less children force auto_deny."""
+
+    def test_no_checkpointer_injects_auto_deny(self):
+        """Default (checkpointer-less) child graphs must carry auto_deny."""
+        from unittest.mock import patch
+
+        from kazma_core.agent_runner import KazmaAgent
+
+        agent = _mock_agent()
+        fake_graph = object()
+        with (
+            patch(
+                "kazma_core.agent.graph_builder.build_supervisor_graph",
+                return_value=fake_graph,
+            ) as build,
+            patch(
+                "kazma_core.safety.hitl.get_hitl_config",
+                return_value={"enabled": True, "require_approval_for": {"shell_exec"}},
+            ),
+        ):
+            result = KazmaAgent.build_child_graph(agent)
+        assert result is fake_graph
+        kwargs = build.call_args.kwargs
+        assert kwargs["checkpointer"] is None
+        assert kwargs["hitl_config"]["auto_deny"] is True
+
+    def test_checkpointer_backed_child_keeps_resumable_gate(self):
+        """A caller passing a checkpointer keeps interrupt()-capable HITL."""
+        from unittest.mock import patch
+
+        from kazma_core.agent_runner import KazmaAgent
+
+        agent = _mock_agent()
+        cp = object()
+        with (
+            patch(
+                "kazma_core.agent.graph_builder.build_supervisor_graph",
+                return_value=object(),
+            ) as build,
+            patch(
+                "kazma_core.safety.hitl.get_hitl_config",
+                return_value={"enabled": True, "require_approval_for": {"shell_exec"}},
+            ),
+        ):
+            KazmaAgent.build_child_graph(agent, checkpointer=cp)
+        kwargs = build.call_args.kwargs
+        assert kwargs["checkpointer"] is cp
+        assert not kwargs["hitl_config"].get("auto_deny")
+
+    def test_explicit_config_not_mutated_and_disabled_stays_none(self):
+        """Caller-supplied config is copied (never mutated); disabled → None."""
+        from unittest.mock import patch
+
+        from kazma_core.agent_runner import KazmaAgent
+
+        agent = _mock_agent()
+        caller_cfg = {"enabled": True, "require_approval_for": {"shell_exec"}}
+        with (
+            patch(
+                "kazma_core.agent.graph_builder.build_supervisor_graph",
+                return_value=object(),
+            ) as build,
+        ):
+            KazmaAgent.build_child_graph(agent, hitl_config=caller_cfg)
+        assert caller_cfg.get("auto_deny") is None, "caller dict must not be mutated"
+        assert build.call_args.kwargs["hitl_config"]["auto_deny"] is True
+
+        with patch(
+            "kazma_core.agent.graph_builder.build_supervisor_graph",
+            return_value=object(),
+        ) as build2:
+            KazmaAgent.build_child_graph(agent, hitl_config={"enabled": False})
+        assert build2.call_args.kwargs["hitl_config"] is None
+
+
+class TestStreamingGraphAutoDeny:
+    """get_streaming_graph (Fix 4, audit F2): the cached checkpointer-less
+    streaming graph (voice WS + boot-window holder) must auto-deny."""
+
+    def test_streaming_hitl_carries_auto_deny(self):
+        from unittest.mock import patch
+
+        from kazma_core.agent_runner import KazmaAgent
+
+        agent = _mock_agent()
+        fake_graph = object()
+        with (
+            patch(
+                "kazma_core.agent.graph_builder.build_supervisor_graph",
+                return_value=fake_graph,
+            ) as build,
+            patch(
+                "kazma_core.safety.hitl.get_hitl_config",
+                return_value={"enabled": True, "require_approval_for": {"shell_exec"}},
+            ),
+        ):
+            result = KazmaAgent.get_streaming_graph(agent)
+        assert result is fake_graph
+        kwargs = build.call_args.kwargs
+        assert kwargs.get("checkpointer") is None
+        assert kwargs["hitl_config"]["enabled"] is True
+        assert kwargs["hitl_config"]["auto_deny"] is True
+
+    def test_streaming_hitl_disabled_stays_none(self):
+        from unittest.mock import patch
+
+        from kazma_core.agent_runner import KazmaAgent
+
+        agent = _mock_agent()
+        with (
+            patch(
+                "kazma_core.agent.graph_builder.build_supervisor_graph",
+                return_value=object(),
+            ) as build,
+            patch(
+                "kazma_core.safety.hitl.get_hitl_config",
+                return_value={"enabled": False, "require_approval_for": set()},
+            ),
+        ):
+            KazmaAgent.get_streaming_graph(agent)
+        assert build.call_args.kwargs["hitl_config"] is None
+
+
+class _InvokeMockGraph:
+    """Mock child graph for SubAgentManager.spawn tests."""
+
+    async def ainvoke(self, state, config=None):
+        return {
+            "messages": [
+                *state.get("messages", []),
+                {"role": "assistant", "content": "done"},
+            ],
+        }
+
+
+class TestSubAgentInheritAutoDeny:
+    """Fix 2 (audit H2): safety_mode="inherit" forces auto_deny — child
+    graphs are checkpointer-less, so an inherited interrupt() pause could
+    never be resumed."""
+
+    @pytest.mark.asyncio
+    async def test_inherit_mode_forces_auto_deny(self):
+        from unittest.mock import patch
+
+        from kazma_core.agent.sub_agent import SubAgentManager
+
+        received = []
+
+        def capture_builder(tools=None, hitl_config=None):
+            received.append(hitl_config)
+            return _InvokeMockGraph()
+
+        manager = SubAgentManager(graph_builder=capture_builder, max_concurrent=3)
+        with patch(
+            "kazma_core.safety.hitl.get_hitl_config",
+            return_value={"enabled": True, "require_approval_for": {"shell_exec"}},
+        ):
+            result = await manager.spawn(goal="g", safety_mode="inherit")
+
+        assert result.status == "success"
+        cfg = received[0]
+        assert cfg is not None
+        assert cfg["enabled"] is True
+        assert cfg["auto_deny"] is True
+
+    def test_build_hitl_config_inherit_static(self):
+        from unittest.mock import patch
+
+        from kazma_core.agent.sub_agent import SubAgentManager
+
+        with patch(
+            "kazma_core.safety.hitl.get_hitl_config",
+            return_value={"enabled": True, "require_approval_for": {"file_write"}},
+        ):
+            cfg = SubAgentManager._build_hitl_config("inherit")
+        assert cfg["auto_deny"] is True
+
+
+class _GateRecordingExecutor:
+    """Records tool calls + the graph-gate ContextVar value at execute time."""
+
+    def __init__(self):
+        self.calls = []
+        self.gate_ctx_values = []
+
+    async def execute(self, name, args):
+        from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+
+        self.calls.append((name, dict(args)))
+        self.gate_ctx_values.append(bool(_graph_hitl_gate_ctx.get()))
+        return {"content": f"executed {name}", "is_error": False}
+
+
+class _NoopTracer2:
+    def trace_tool_execution(self, **kw):
+        pass
+
+
+def _tw_state(tool_name, args):
+    from kazma_core.agent.state import initial_supervisor_state
+
+    s = initial_supervisor_state(thread_id="t-hitl")
+    s["messages"] = [{"role": "user", "content": f"run {tool_name}"}]
+    s["tool_calls_pending"] = [{"id": "c1", "name": tool_name, "arguments": args}]
+    return s
+
+
+def _done_results(out):
+    return list(out.get("tool_calls_done", []))
+
+
+class TestToolWorkerUnbackedGate:
+    """Fix 3 (audit F9): disabled/None hitl_config must not set the graph
+    gate ContextVar, and ALWAYS_HITL_TOOLS must fail closed (deny) rather
+    than mint an unresumable interrupt."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_config_does_not_set_gate_ctx(self):
+        """A safe tool under {"enabled": False} executes with the registry
+        gate NOT suppressed (previously the truthy dict set it)."""
+        from kazma_core.agent.graph_builder import tool_worker_node
+
+        exe = _GateRecordingExecutor()
+        state = _tw_state("file_read", {"path": "a.txt"})
+        out = await tool_worker_node(
+            state,
+            tool_executor=exe,
+            tracer=_NoopTracer2(),
+            hitl_config={"enabled": False, "require_approval_for": {"shell_exec"}},
+        )
+        assert [c[0] for c in exe.calls] == ["file_read"]
+        assert exe.gate_ctx_values == [False], "disabled config must not set the gate ContextVar"
+        assert out["next_node"] in ("supervisor", "respond")
+
+    @pytest.mark.asyncio
+    async def test_always_hitl_tool_denied_on_disabled_config(self):
+        """x_post with a DISABLED config is denied with a clear error —
+        not executed, not interrupted."""
+        from kazma_core.agent.graph_builder import tool_worker_node
+
+        exe = _GateRecordingExecutor()
+        state = _tw_state("x_post", {"content": "hello"})
+        out = await tool_worker_node(
+            state,
+            tool_executor=exe,
+            tracer=_NoopTracer2(),
+            hitl_config={"enabled": False, "require_approval_for": set()},
+        )
+        assert exe.calls == [], "x_post must not execute"
+        dones = _done_results(out)
+        assert len(dones) == 1
+        assert dones[0]["is_error"] is True
+        assert "DENIED" in dones[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_always_hitl_tool_denied_on_none_config(self):
+        """x_post with hitl_config=None is denied — previously this raised
+        an unresumable GraphInterrupt on checkpointer-less graphs."""
+        from kazma_core.agent.graph_builder import tool_worker_node
+
+        exe = _GateRecordingExecutor()
+        state = _tw_state("x_delete_post", {"post_id": "1"})
+        out = await tool_worker_node(
+            state, tool_executor=exe, tracer=_NoopTracer2(), hitl_config=None
+        )
+        assert exe.calls == []
+        dones = _done_results(out)
+        assert dones[0]["is_error"] is True
+        assert "DENIED" in dones[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_auto_deny_config_denies_danger_tool(self):
+        """enabled + auto_deny (child graphs, streaming graph) denies danger
+        tools directly — the tool_worker half of Fixes 1/2/4."""
+        from kazma_core.agent.graph_builder import tool_worker_node
+
+        exe = _GateRecordingExecutor()
+        state = _tw_state("shell_exec", {"command": "echo hi"})
+        out = await tool_worker_node(
+            state,
+            tool_executor=exe,
+            tracer=_NoopTracer2(),
+            hitl_config={
+                "enabled": True,
+                "require_approval_for": {"shell_exec"},
+                "auto_deny": True,
+            },
+        )
+        assert exe.calls == []
+        dones = _done_results(out)
+        assert dones[0]["is_error"] is True
+        assert "auto-denied" in dones[0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_enabled_backed_config_still_interrupts(self):
+        """Guard: an enabled config WITHOUT auto_deny keeps the resumable
+        interrupt() gate (the checkpointed main/SSE graph path). Outside a
+        graph runner the interrupt call surfaces as RuntimeError (bare
+        call) / GraphInterrupt (inside a graph) — either way the tool must
+        NOT have executed."""
+        import pytest as _pytest
+        from langgraph.errors import GraphInterrupt
+
+        from kazma_core.agent.graph_builder import tool_worker_node
+
+        exe = _GateRecordingExecutor()
+        state = _tw_state("shell_exec", {"command": "echo hi"})
+        with _pytest.raises((GraphInterrupt, RuntimeError)):
+            await tool_worker_node(
+                state,
+                tool_executor=exe,
+                tracer=_NoopTracer2(),
+                hitl_config={
+                    "enabled": True,
+                    "require_approval_for": {"shell_exec"},
+                },
+            )
+        assert exe.calls == []

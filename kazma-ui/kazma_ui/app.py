@@ -1200,6 +1200,11 @@ class KazmaAppBuilder:
                     return
 
                 def _voice_graph_getter() -> Any:
+                    # The streaming graph is checkpointer-less, so its HITL
+                    # config carries auto_deny (see get_streaming_graph):
+                    # a voice danger-tool pause could never be resumed via
+                    # /api/approve (audit F2) — it denies with a clear
+                    # message instead of interrupting.
                     agent = self.agent
                     if agent is not None:
                         return agent.get_streaming_graph()
