@@ -8,6 +8,7 @@ Covers:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -131,6 +132,27 @@ class TestExtractInterruptInfo:
             MockInterrupt({"type": "some_other_type", "data": 123})
         ])
         assert _extract_interrupt_info(task) is None
+
+    def test_extracts_yolo_allowed_flag(self) -> None:
+        """Always-HITL batches carry yolo_allowed=False; default is True."""
+        blocked = MockTask(interrupts=[
+            MockInterrupt({
+                "type": "hitl_approval",
+                "tool": "x_post",
+                "args": {},
+                "yolo_allowed": False,
+            })
+        ])
+        result = _extract_interrupt_info(blocked)
+        assert result is not None
+        assert result["yolo_allowed"] is False
+
+        untagged = MockTask(interrupts=[
+            MockInterrupt({"type": "hitl_approval", "tool": "file_write", "args": {}})
+        ])
+        result2 = _extract_interrupt_info(untagged)
+        assert result2 is not None
+        assert result2["yolo_allowed"] is True
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -319,3 +341,44 @@ class TestPendingApprovalsEndpoint:
             assert data["pending"][0]["thread_id"] == "t-1"
             assert data["pending"][0]["tool_name"] == "file_write"
             assert data["pending"][0]["arguments"]["path"] == "/x"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# 4. yolo_allowed plumbing — cards must not offer YOLO when the server
+#    marks the batch always-HITL (X ToU fail-safes). A YOLO button that
+#    re-prompts reads as "YOLO session = approve once".
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestYoloAllowedPlumbing:
+    """Source contracts: the flag travels from interrupt payload to every card."""
+
+    _ROOT = Path(__file__).resolve().parent.parent
+
+    def _src(self, rel: str) -> str:
+        return (self._ROOT / rel).read_text(encoding="utf-8")
+
+    def test_sse_frame_forwards_yolo_allowed(self) -> None:
+        src = self._src("kazma-ui/kazma_ui/sse_chat.py")
+        assert '"yolo_allowed": payload.get(' in src
+
+    def test_extractor_forwards_yolo_allowed(self) -> None:
+        src = self._src("kazma-ui/kazma_ui/hitl_approval.py")
+        assert '"yolo_allowed": bool(value.get("yolo_allowed", True))' in src
+        assert '"yolo_allowed": info.get("yolo_allowed", True)' in src
+
+    def test_inline_chat_card_hides_yolo_button(self) -> None:
+        src = self._src("kazma-ui/kazma_ui/static/js/chat.js")
+        assert "data.yolo_allowed !== false" in src
+
+    def test_pending_panel_hides_yolo_button(self) -> None:
+        src = self._src("kazma-ui/kazma_ui/static/js/hitl_approval.js")
+        assert "item.yolo_allowed !== false" in src
+
+    def test_alpine_fallback_card_hides_yolo_button(self) -> None:
+        src = self._src("kazma-ui/kazma_ui/templates/chat.html")
+        assert "pendingApproval?.yolo_allowed !== false" in src
+
+    def test_agent_store_forwards_yolo_allowed(self) -> None:
+        src = self._src("kazma-ui/kazma_ui/static/js/stores/agentStore.js")
+        assert "yolo_allowed: frame.yolo_allowed !== undefined" in src

@@ -125,6 +125,9 @@
         );
       }
 
+      // Always-HITL tools (X ToU fail-safes) re-prompt even under YOLO —
+      // hide the button so YOLO never reads as "approve once".
+      var yoloOk = item.yolo_allowed !== false;
       return (
         '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
         '  <div class="hitl-approval-header">' +
@@ -136,6 +139,10 @@
         '  </div>' +
         (message ? '<div class="hitl-approval-message" dir="auto">' + message + '</div>' : '') +
         '  <div class="hitl-approval-args"><pre>' + argsStr + '</pre></div>' +
+        (yoloOk ? '' :
+        '  <div class="hitl-approval-message" dir="auto" style="font-size:0.75rem;">' +
+        escapeHtml(t('dashboard.hitl_always_note', 'This tool always requires approval — YOLO cannot skip it.')) +
+        '</div>') +
         '  <div class="hitl-approval-actions">' +
         '    <button class="btn btn-sm btn-success hitl-approve-btn" data-thread-id="' + threadId + '" data-scope="once">' +
         '      ' + safeIcon('check') + ' ' + t('dashboard.hitl_once', 'Once') +
@@ -143,9 +150,11 @@
         '    <button class="btn btn-sm btn-primary hitl-approve-tool-btn" data-thread-id="' + threadId + '" data-scope="tool" data-tool="' + toolName + '">' +
         '      ' + t('dashboard.hitl_allow_tool', 'Allow tool') +
         '    </button>' +
-        '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
-        '      ' + t('dashboard.hitl_yolo', 'YOLO') +
-        '    </button>' +
+        (yoloOk
+          ? '    <button class="btn btn-sm btn-warning hitl-approve-yolo-btn" data-thread-id="' + threadId + '" data-scope="yolo">' +
+            '      ' + t('dashboard.hitl_yolo', 'YOLO') +
+            '    </button>'
+          : '') +
         '    <button class="btn btn-sm btn-danger hitl-deny-btn" data-thread-id="' + threadId + '">' +
         '      ' + safeIcon('x') + ' ' + t('dashboard.hitl_deny', 'Deny') +
         '    </button>' +

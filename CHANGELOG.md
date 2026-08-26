@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Unreleased — YOLO card honesty on always-HITL tools (2026-08-26)
+
+"Is YOLO session really YOLO?" — yes for every danger tool (verified:
+card click → per-thread grant, 4h TTL, `/yolo off`; graph, MCP executor,
+and `get_hitl_config` all skip approval under it). Two classes are
+exempt **by design**: `x_post`/`x_delete_post` (X API ToU fail-safes,
+always-HITL) and semantic clarify/confirm cards. But every approval card
+still offered a **YOLO session** button even when the server payload said
+`yolo_allowed: false` — clicking it on an x_post card approved that one
+call and the next x_post prompted again, reading exactly like "YOLO is
+only approve-once".
+
+- `yolo_allowed` now travels the whole payload path: SSE
+  `approval_required` frame, pending-approvals extractor/API, and the WS
+  store bridge.
+- Inline chat card, Pending Approvals panel, and the Alpine fallback
+  card hide the YOLO button when the flag is false and say why ("this
+  tool always requires approval").
+- Fixed stale `tests/test_hitl.py::test_empty_danger_list` (pre-existing
+  failure from the X publisher commit: ALWAYS_HITL tools stay gated even
+  with an empty configured danger list).
+
+Tests: `tests/test_hitl_approval_ui.py` (+plumbing contracts),
+`tests/test_hitl.py`. Restart the server; hard-refresh the chat tab.
+
 ## Unreleased — Plan-fence reply polish + rewrite-not-store intent (2026-08-26)
 
 Two live regressions after the plan-fence delivery change:

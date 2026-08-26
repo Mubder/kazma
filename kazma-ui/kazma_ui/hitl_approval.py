@@ -53,6 +53,7 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "message": "" if msg is None else str(msg),
                 "kind": value.get("kind", "security"),
                 "items": value.get("items") or [],
+                "yolo_allowed": bool(value.get("yolo_allowed", True)),
             }
         # Fallback: some interrupt payloads may not carry the type tag but
         # still have tool/args keys
@@ -67,6 +68,7 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "message": "" if msg is None else str(msg),
                 "kind": value.get("kind", "security"),
                 "items": value.get("items") or [],
+                "yolo_allowed": bool(value.get("yolo_allowed", True)),
             }
     return None
 
@@ -206,6 +208,7 @@ async def _get_pending_approvals(
                         "tool_name": info["tool_name"],
                         "arguments": info["arguments"],
                         "message": info["message"],
+                        "yolo_allowed": info.get("yolo_allowed", True),
                     }
                 )
                 # Only need one interrupt per thread

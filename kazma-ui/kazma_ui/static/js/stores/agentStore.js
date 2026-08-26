@@ -910,6 +910,9 @@ document.addEventListener('alpine:init', () => {
               // generic Approve/Deny (SSE passed them through correctly).
               kind: frame.kind || data.kind || '',
               items: frame.items || data.items || null,
+              yolo_allowed: frame.yolo_allowed !== undefined
+                ? frame.yolo_allowed
+                : (data.yolo_allowed !== undefined ? data.yolo_allowed : undefined),
             });
           } else if (statusVal === 'idle') {
             // End of turn — MUST release chat.js Stop / Enter lock.
@@ -1004,6 +1007,9 @@ document.addEventListener('alpine:init', () => {
             // (see the paused_for_approval case above).
             kind: frame.kind || data.kind || '',
             items: frame.items || data.items || null,
+            yolo_allowed: frame.yolo_allowed !== undefined
+              ? frame.yolo_allowed
+              : (data.yolo_allowed !== undefined ? data.yolo_allowed : undefined),
           });
           break;
 

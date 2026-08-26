@@ -3126,6 +3126,9 @@
 
     var card = document.createElement('div');
     card.className = 'hitl-approval-card';
+    // Server marks always-HITL batches (X ToU fail-safes) yolo_allowed=false —
+    // offering a YOLO button there reads as "approve once" when it re-prompts.
+    var yoloOk = data.yolo_allowed !== false;
     card.innerHTML =
       '<div class="hitl-approval-header">\u26A0 Approval Required</div>' +
       '<div class="hitl-approval-body">' +
@@ -3135,14 +3138,18 @@
           : toolsHtml) +
         '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
-          'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
-          '<strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.' +
+          (yoloOk
+            ? 'Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. ' +
+              '<strong>YOLO session</strong> skips every danger tool (native + MCP) until you <code>/yolo off</code> or TTL.'
+            : 'This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO and session grants cannot skip it.') +
         '</p>' +
       '</div>' +
       '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
         '<button class="btn btn-sm btn-success hitl-approve" data-scope="once" title="This call only">Approve once</button>' +
         '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="Allow this tool for ~30m in this session">Allow tool (session)</button>' +
-        '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="Skip all danger tools for this session">YOLO session</button>' +
+        (yoloOk
+          ? '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="Skip all danger tools for this session">YOLO session</button>'
+          : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
     content.appendChild(card);

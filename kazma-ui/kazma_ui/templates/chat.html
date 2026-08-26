@@ -64,14 +64,17 @@
       <div class="hitl-approval-body">
         <p><strong>Tool:</strong> <code x-text="$store.agent?.pendingApproval?.tool"></code></p>
         <p x-show="$store.agent?.pendingApproval?.message" class="hitl-message" x-text="$store.agent?.pendingApproval?.message"></p>
-        <p class="hitl-scope-hint">
+        <p class="hitl-scope-hint" x-show="$store.agent?.pendingApproval?.yolo_allowed !== false">
           Tip: <strong>Allow tool</strong> stops repeat prompts for this tool only. <strong>YOLO</strong> skips all danger tools for this session.
+        </p>
+        <p class="hitl-scope-hint" x-cloak x-show="$store.agent?.pendingApproval?.yolo_allowed === false">
+          This tool <strong>always requires approval</strong> (safety fail-safe) — YOLO cannot skip it.
         </p>
       </div>
       <div class="hitl-approval-actions">
         <button class="btn btn-sm btn-success" @click="$store.agent.submitApproval(true, 'once')">Approve once</button>
         <button class="btn btn-sm btn-primary" @click="$store.agent.submitApproval(true, 'tool')">Allow tool (session)</button>
-        <button class="btn btn-sm btn-warning" @click="$store.agent.submitApproval(true, 'yolo')">YOLO session</button>
+        <button class="btn btn-sm btn-warning" x-cloak x-show="$store.agent?.pendingApproval?.yolo_allowed !== false" @click="$store.agent.submitApproval(true, 'yolo')">YOLO session</button>
         <button class="btn btn-sm btn-danger" @click="$store.agent.submitApproval(false, 'once')">Deny</button>
       </div>
     </div>

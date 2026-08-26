@@ -839,6 +839,9 @@ async def _stream_langgraph_events(
                                         "tools": payload.get("tools") or [],
                                         "items": payload.get("items") or [],
                                         "message": payload.get("message", ""),
+                                        "yolo_allowed": payload.get(
+                                            "yolo_allowed", True
+                                        ),
                                     },
                                 )
                                 logger.info(
