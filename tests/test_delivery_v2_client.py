@@ -178,11 +178,24 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _outboxWrite(" in src
         assert "_outboxWrite(content);" in src
-        assert "_outboxClear();  # first streamed token".replace(" # ", "  // ") in src \
-            or "_outboxClear();  // first streamed token" in src
+        assert "_outboxClear();  // first streamed token" in src
         assert "function _restoreUndeliveredOutbox(" in src
         assert "_restoreUndeliveredOutbox((data && data.messages)" in src
         assert "window.KazmaChat.retry()" in src
+
+    def test_empty_terminal_is_honest_and_traced(self):
+        """A turn that terminal'd without any reply must not claim 'Done'
+        in the progress panel, and the lifecycle trace must be dumpable
+        (the 'done in 1s, no response, message never persisted' incident
+        left no evidence anywhere)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "finalizeProgress(_turnPainted ? true : 'empty');" in src
+        assert "'No response'" in src
+        assert "function diag(" in src
+        assert "diagnostics: dumpDiagnostics," in src
+        assert "diag('dispatch'," in src
+        assert "diag('done'," in src
+        assert "diag('empty-terminal');" in src
 
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")

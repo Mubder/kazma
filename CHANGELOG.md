@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Unreleased — Empty terminals are honest + turn-lifecycle trace (2026-08-26)
+
+"CoT claimed done in 1s without a response" — and the message never
+persisted server-side, so the send was fast-terminated before the turn
+started. The UI lied ("Done · 1s") and nothing recorded why.
+
+- A turn that terminal'd without painting any reply now shows
+  **"No response"** in the progress panel — never "Done".
+- Turn-lifecycle diagnostics: every dispatch / terminal / error /
+  recovery event lands in a ring buffer; `window.KazmaChat.diagnostics()`
+  (or the console table auto-dumped on stream errors and empty terminals)
+  shows exactly what happened — the next fast-dead turn identifies
+  itself instead of leaving no evidence.
+
+Tests: `tests/test_delivery_v2_client.py`. Restart + hard-refresh.
+
 ## Unreleased — Build identity + send durability (2026-08-26)
 
 Root-caused a "same behavior again" report to a restart-mid-turn: the

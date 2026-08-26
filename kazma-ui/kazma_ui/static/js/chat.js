@@ -826,6 +826,25 @@
     syncSendButtonForDraft();
   }
 
+  // ── Turn lifecycle diagnostics ───────────────────────────────────
+  // Ring buffer of the last turn-lifecycle events. The 2026-08-26 "done in
+  // 1s, no response, message never persisted" incident left no trace
+  // anywhere — this makes the next one self-identifying:
+  // window.KazmaChat.diagnostics() (or the console table dumped on error)
+  // shows the exact dispatch/terminal sequence.
+  var _diag = [];
+  function diag(ev, detail) {
+    try {
+      _diag.push({ t: new Date().toISOString().slice(11, 23), e: ev, d: detail });
+      if (_diag.length > 200) _diag.shift();
+    } catch (e) { /* ignore */ }
+  }
+  function dumpDiagnostics() {
+    var copy = _diag.slice();
+    try { if (console.table) console.table(copy); else console.log(copy); } catch (e) { console.log(copy); }
+    return copy;
+  }
+
   function endTurn() {
     _clearTurnTimers();
     _isGenerating = false;
@@ -838,7 +857,8 @@
       var _store = (window.Alpine && Alpine.store) ? Alpine.store('agent') : null;
       if (_store) { _store._turnActive = false; _store.isThinking = false; }
     } catch (e) { /* store not ready */ }
-    finalizeProgress(true);
+    // Honest summary: a turn that delivered no reply must not claim "Done".
+    finalizeProgress(_turnPainted ? true : 'empty');
     if (activeTypingEl && KS.hideTyping) {
       KS.hideTyping(activeTypingEl);
     }
@@ -958,6 +978,7 @@
 
   /** Stop the in-flight turn, then send whatever is in the composer. */
   function abortThenSend() {
+    diag('abort-then-send');
     var p = abortGeneration({ silent: true });
     function go() { sendMessage(); }
     var raced = Promise.race([
@@ -1435,7 +1456,10 @@
       KS.toast(ti('uploading', 'Uploading\u2026'), 'info', 2000);
       return;
     }
-    if (!text && !hasTextAtt && !hasUploads) return;
+    if (!text && !hasTextAtt && !hasUploads) {
+      diag('send-skipped-empty');
+      return;
+    }
 
     // Track for the empty-turn Retry button (agent-stopped-talking layer 4).
     // Only set when there's real text — uploads-only turns can't be retried
@@ -1737,6 +1761,7 @@
           if (Object.prototype.hasOwnProperty.call(extraBody, k)) body[k] = extraBody[k];
         }
       }
+      diag('dispatch', { attach: !!(extraBody && extraBody.last_event_id), msgLen: (content || '').length });
       activeStream = KS.sse('/api/chat/stream', body, buildSseCallbacks(++_sseEpoch));
     }
 
@@ -1863,6 +1888,12 @@
         activeStream = null;
         KS.hideTyping(typingEl);
         activeTypingEl = null;
+        diag('done', {
+          interrupted: !!(data && data.interrupted),
+          truncated: !data,
+          contentLen: (data && data.content || '').length,
+          painted: _turnPainted,
+        });
         var interrupted = !!(data && data.interrupted);
         // No terminal frame (HTTP body closed / attach ended early): the
         // turn may still be running server-side or already durable. Keep
@@ -1882,6 +1913,8 @@
         // received." under the posted-tweets answer, 2026-08-26).
         if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval
             && !_turnPainted) {
+          diag('empty-terminal');
+          dumpDiagnostics();
           currentMsgEl = createAssistantMessage();
           var emptyEl = currentMsgEl.querySelector('.message-text');
           if (emptyEl) {
@@ -1963,6 +1996,8 @@
 
       onError: function(msg) {
         if (!_mine()) return;
+        diag('sse-error', String(msg || ''));
+        dumpDiagnostics();
         _sseAttempts++;
         _noteSeq();
         var lastId = (activeStream && typeof activeStream.lastEventId === 'function')
@@ -2892,6 +2927,10 @@
     if (titleEl) {
       if (ok === false) {
         titleEl.textContent = ti('stopped', 'Stopped');
+      } else if (ok === 'empty') {
+        // The turn terminal'd without painting any reply — never claim Done.
+        titleEl.textContent = ti('no_response', 'No response');
+        titleEl.title = 'Turn ended without a reply — see the message area or window.KazmaChat.diagnostics()';
       } else {
         // Turn summary bar: "Done · N tools · M steps · Xs · $cost · tokens"
         // One line that stays readable when the panel is collapsed.
@@ -3071,6 +3110,9 @@
   function appendMessage(role, content, attachmentName, ts, opts) {
     var wrapper = document.createElement('div');
     wrapper.className = 'message message-' + role;
+    if (role === 'assistant' && content && String(content).trim()) {
+      _turnPainted = true;  // any painted assistant text counts as a reply
+    }
 
     var when = formatMsgTime(ts);
     var iso = '';
@@ -4530,6 +4572,9 @@
       updateContextBadgeSoon();
     },
     isGenerating: function() { return _isGenerating; },
+    /** Dump the turn-lifecycle trace (dispatch/terminal sequence) — the
+     *  "what actually happened" for fast-dead turns. */
+    diagnostics: dumpDiagnostics,
     /**
      * True while an SSE stream owns the live turn. The telemetry WS checks
      * this to avoid double-painting the same reply over both transports
