@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## Unreleased — Phase 1 audit remediation: functional Blockers + CI truth (2026-08-27)
+
+From the 2026-08-26 deep functional audit (5 Blockers, ~30 High). Suite
+went 4586p/12f/114-files-silently-lost → **6113 passed / 1 pre-existing
+order-flake / 10 skipped / 9 xfailed**.
+
+- **fast_test crash classifier** recognizes the UNSIGNED Windows access
+  violation (3221225477) — a natively-crashed chunk was treated as
+  finished and its ~115 files never retried. Proven live: the validation
+  run recovered two crashed chunks (230 files re-run per-file).
+- **12 red tests root-caused**: commitment fixtures had date-rot (now
+  dynamic); `cli/ask` built `Command(resume=…)` outside the chokepoint
+  (now routes through `build_resume_command`); 4 UI tests asserted
+  superseded implementation details; session_directory ×6 is a
+  pre-existing order-dependent isolation flake (passes standalone).
+- **Anthropic-native tool flow fixed** — `role:"tool"` → `tool_result`
+  blocks in a user turn, assistant `tool_calls` → `tool_use` blocks,
+  consecutive same-role runs merged (first tool-using turn previously
+  400'd); context-overflow 400s tagged `kind=context_overflow`.
+- **Gemini un-broken** — `normalize_provider_url` no longer appends `/v1`
+  to googleapis.com endpoints (every call was a 404 in both AI-Studio and
+  Vertex modes). Bedrock: grouped toolResults, `developer`→system,
+  overflow tagging. Fallback double-failure classifies transient.
+- **Cost-breaker lockout fixed** — `record_user_interaction()` (which
+  un-halts by design) sat AFTER the `should_halt()` early-return; once
+  tripped, /reset /abort and /hitl approve were dead until process
+  restart. Ordering fixed on gateway + SSE paths.
+- **Documents state machine**: claim-time dead-lettering no longer raises
+  and wedges the whole queue; `force_ocr` intake is a legal
+  VALIDATING→OCR_REQUIRED transition; intake retries carry `retry_at` and
+  are reclaimable.
+- **No more unresumable HITL interrupts**: checkpointer-less child graphs
+  (cron) and the streaming/voice graph get `auto_deny`; sub-agent
+  `inherit` too; `{"enabled": False}` no longer suppresses the registry
+  bus gate; ALWAYS-HITL tools on an inactive gate hard-deny with an
+  actionable message.
+- **Swarm**: watchdog scales pattern deadlines by step count (legit
+  pipelines were reaped and their results discarded); `timeout<=0` means
+  no-deadline instead of tripping every breaker; cancelled dispatches
+  release `worker.busy`.
+- **Durability**: memory task queue got lease tokens + 60s heartbeat
+  (no more >300s double-execution / infinite reclaim); Telegram moved to
+  contiguous-prefix offset commit (at-least-once; a crash no longer loses
+  acknowledged updates) and queue-full drops now notify the user.
+- **Memory mirror**: one-token NameError fix (`conn`→`primary_conn`) —
+  the new-belief mirror/graph dual-write had been dead on 100% of
+  mutations.
+- **Discord un-deafened**: MESSAGE_CONTENT (1<<15) + DIRECT_MESSAGES
+  (1<<12) intents; 4013/4014 close codes stop with an actionable
+  Developer-Portal message. **Operator action: enable "MESSAGE CONTENT
+  INTENT" in the Discord Developer Portal before restart.**
+
+39 new tests (provider conversions, HITL child graphs, swarm trio, queue
+lease, Telegram offsets, documents transitions). Restart required.
+Known follow-ups: worker lacks a VALIDATING stage handler; some test
+round-trips the live `kazma.yaml` (strips comments); TUI/session-directory
+order flakes share a singleton-bleed root cause.
+
 ## Unreleased — UI audit remediation Phase 3: polish & hardening (2026-08-26)
 
 - **Voice buttons restored** (operator decision): hold-to-record mic and
