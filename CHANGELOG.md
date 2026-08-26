@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Unreleased — post-restart incident: reply fragmentation, log loss, test pollution (2026-08-27)
+
+Three fixes from the live 00:48 incident (one reply rendered as 3
+mid-sentence bubbles after a server restart; server logging silently dead):
+
+- **Resync no longer aborts a live SSE stream** (chat.js): a focus/
+  visibility resync during a generating turn aborted the healthy stream and
+  forced a journal-cursor reopen; the replay's terminal paints closed the
+  bubble mid-stream, so every later token opened a NEW bubble with its own
+  "Writing reply…" row. A live stream is now left alone (dead streams still
+  reopen from the cursor), and replay/resync paints are no longer terminal
+  while a stream owns the turn.
+- **Daily log rotation cannot kill the file handler anymore**
+  (`SafeTimedRotatingFileHandler`): on Windows, a rotation collision
+  (another process holding the rotated target open) raised inside emit() —
+  a traceback at boot and console-only logging for the process lifetime.
+  A failed rotation now skips gracefully (keeps appending, advances the
+  schedule) with a one-line stderr notice.
+- **Test runs no longer touch live operator files**: the root conftest
+  redirects `KAZMA_LOG_FILE` to a throwaway path (test-booted apps were
+  rotating the LIVE kazma.log at midnight — the direct cause of the
+  collision above) and snapshots/restores `kazma.yaml` at session bounds.
+  Root cause fixed too: `persist_mcp_yaml` now SPLICES the `mcp:` section
+  instead of re-dumping the whole file through safe_dump, which had been
+  stripping every documentation comment from the operator's config on every
+  MCP-server save.
+
+Tests: `TestResyncFragmentationFixes` (delivery client), new
+`test_mcp_yaml_persist.py` (7) and `test_logging_rotation.py` (3).
+Restart + hard-refresh to pick up chat.js; restart restores file logging.
+
 ## Unreleased — Phase 1 audit remediation: functional Blockers + CI truth (2026-08-27)
 
 From the 2026-08-26 deep functional audit (5 Blockers, ~30 High). Suite
