@@ -116,6 +116,17 @@ export function initSoftNav() {
         if (newCrumbs && oldCrumbs) {
             oldCrumbs.innerHTML = newCrumbs.innerHTML;
         }
+
+        // Sync the shell class (e.g. `is-chat`): it is stamped server-side
+        // per route (base.html) and drives header visibility + immersive
+        // body CSS. Without this, soft-navigating away from /chat left
+        // `is-chat` stuck on `.app-layout` — header hidden on EVERY page
+        // and chat's padding/overflow rules leaking (audit P0-3).
+        const newLayout = doc.querySelector('.app-layout');
+        const oldLayout = document.querySelector('.app-layout');
+        if (newLayout && oldLayout && newLayout.className !== oldLayout.className) {
+            oldLayout.className = newLayout.className;
+        }
     }
 
     function extractFactoryNames(root) {
@@ -141,21 +152,15 @@ export function initSoftNav() {
         return false;
     }
 
-    function isEmptyAlpineBind(el) {
-        const stack = el && el._x_dataStack;
-        if (!stack || !stack[0]) return true;
-        try {
-            return Object.keys(stack[0]).length === 0;
-        } catch (e) {
-            return true;
-        }
-    }
-
     function isAlpineBound(el) {
         if (!el || !(el._x_dataStack || el.__x)) return false;
-        // Alpine treats a missing factory as x-data="{}" and still marks the
-        // node initialized. That empty stack is not a real page bind.
-        return !isEmptyAlpineBind(el);
+        // The PRESENCE of _x_dataStack proves Alpine initialized the node.
+        // Bare `x-data` (no expression) is a legitimate pattern — Alpine
+        // gives it a zero-key data object — and treating those as "unbound"
+        // made every soft-nav into /chat throw and fall back to a full
+        // reload (audit P0-4). Real failures have NO stack at all. (The old
+        // zero-key "empty bind" heuristic is deliberately gone.)
+        return true;
     }
 
     function pageLevelXDataRoots(root) {
@@ -291,7 +296,9 @@ export function initSoftNav() {
 
             let allReady = true;
             for (const el of roots) {
-                if (!isAlpineBound(el) || isEmptyAlpineBind(el)) {
+                // Bare `x-data` roots ARE bound (zero-key stack) — gating on
+                // isEmptyAlpineBind here re-introduced the P0-4 reload loop.
+                if (!isAlpineBound(el)) {
                     allReady = false;
                     break;
                 }

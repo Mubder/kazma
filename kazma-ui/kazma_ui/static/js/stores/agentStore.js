@@ -12,7 +12,7 @@
  * Enter blocked) because SSE callbacks never fire when the WS bus is preferred.
  */
 
-document.addEventListener('alpine:init', () => {
+function registerAgentStore() {
   function _ti(key, fallback) {
     const m = window.CHAT_I18N || {};
     const v = m[key];
@@ -1187,4 +1187,14 @@ document.addEventListener('alpine:init', () => {
       }
     },
   });
-});
+}
+
+// Registration must survive soft-nav: nav.js re-runs this script AFTER
+// Alpine already booted (alpine:init has fired and will never fire again),
+// leaving $store.agent dead for the whole session — status strip, WS bus,
+// and the HITL bottom card all silently no-oped (audit P0-1).
+if (window.Alpine) {
+  registerAgentStore();
+} else {
+  document.addEventListener('alpine:init', registerAgentStore);
+}

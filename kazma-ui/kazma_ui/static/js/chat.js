@@ -4252,38 +4252,12 @@
   }
 
   function bindCapacityBar() {
-    var area = document.getElementById('chat-input-area');
-    var footer = area ? area.querySelector('.input-footer') : null;
+    // The template (chat.html ⋯ popover) is the SINGLE owner of the bar's
+    // markup. This used to physically relocate #capacity-bar out of the
+    // popover on every load — detaching it from the v5 popover CSS (empty ⋯
+    // menu) — and kept a divergent JS-built fallback bar (audit P0-2).
+    // Here we only BIND the click behavior.
     var bar = document.getElementById('capacity-bar');
-    if (!bar && area) {
-      bar = document.createElement('div');
-      bar.id = 'capacity-bar';
-      bar.className = 'capacity-bar';
-      bar.setAttribute('role', 'toolbar');
-      bar.setAttribute('aria-label', 'Turn budget and HITL');
-      bar.innerHTML =
-        '<span id="capacity-status" class="capacity-status">Chat · 100</span>' +
-        '<div class="capacity-group" role="group" aria-label="Budget">' +
-          '<button type="button" class="capacity-pill" data-cap="/long on" aria-pressed="false" title="Research budget, HITL stays on">Long</button>' +
-          '<button type="button" class="capacity-pill" data-cap="/long mission" aria-pressed="false" title="Run until done (~500 rounds)">Mission</button>' +
-        '</div>' +
-        '<div class="capacity-group" role="group" aria-label="Plan">' +
-          '<button type="button" class="capacity-pill" data-cap="/plan on" aria-pressed="false" title="Inspect and propose — write/exec blocked until /plan go">Plan</button>' +
-        '</div>' +
-        '<div class="capacity-group" role="group" aria-label="Approvals">' +
-          '<button type="button" class="capacity-pill" data-cap="/yolo" aria-pressed="false" title="Skip danger-tool approvals">YOLO</button>' +
-          '<button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>' +
-        '</div>' +
-        '<button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>' +
-        '<div class="capacity-group session-metrics" aria-label="Session usage">' +
-          '<span id="session-cost" class="capacity-stat cost-badge">$0.0000</span>' +
-          '<span id="session-tokens" class="capacity-stat token-badge">0 tok</span>' +
-          '<span id="context-size" class="capacity-stat context-badge">—</span>' +
-        '</div>';
-    }
-    if (bar && footer && bar.nextElementSibling !== footer) {
-      footer.parentNode.insertBefore(bar, footer);
-    }
     if (!bar || bar.getAttribute('data-bound')) return;
     bar.setAttribute('data-bound', '1');
     bar.addEventListener('click', function(e) {

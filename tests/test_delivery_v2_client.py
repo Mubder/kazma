@@ -237,6 +237,49 @@ class TestV2ArchitecturePresent:
         assert "showTyping(typingEl" not in src
         assert "hideTyping(typingEl" not in src
 
+
+class TestUIAuditP0Fixes:
+    """docs/audits/AUDIT_UI_DEEP_2026-08-26.md — Phase 1 contracts."""
+
+    _NAV = _UI / "static" / "js" / "modules" / "nav.js"
+    _STORE = _UI / "static" / "js" / "stores" / "agentStore.js"
+    _CHAT_HTML = _UI / "templates" / "chat.html"
+
+    def test_p0_3_soft_nav_syncs_layout_class(self):
+        """`is-chat` is stamped server-side per route; soft-nav must sync it
+        or the header stays hidden on every page after visiting chat."""
+        src = self._NAV.read_text(encoding="utf-8")
+        assert "oldLayout.className = newLayout.className;" in src
+
+    def test_p0_4_bare_x_data_is_bound(self):
+        """Bare `x-data` (zero-key Alpine stack) is a LEGITIMATE bind — the
+        old 'empty bind' heuristic made every soft-nav into /chat throw and
+        fall back to a full reload (the 2-3 reloads symptom)."""
+        src = self._NAV.read_text(encoding="utf-8")
+        assert "function isEmptyAlpineBind" not in src
+        at = src.index("function isAlpineBound(")
+        seg = src[at:src.index("}", src.index("return true;", at))]
+        assert "PRESENCE of _x_dataStack" in seg
+
+    def test_p0_1_agent_store_registers_after_boot(self):
+        """Soft-nav re-runs agentStore.js after Alpine booted (alpine:init
+        never fires again) — registration must be synchronous in that case
+        or $store.agent (status strip, WS bus, HITL card) stays dead."""
+        src = self._STORE.read_text(encoding="utf-8")
+        assert "function registerAgentStore() {" in src
+        assert "if (window.Alpine) {" in src
+        assert "registerAgentStore();" in src
+
+    def test_p0_2_capacity_bar_template_is_single_owner(self):
+        """No DOM relocation, no JS-built fallback bar; the template ⋯
+        popover owns the markup — and carries the Plan pill for parity."""
+        js = _CHAT_JS.read_text(encoding="utf-8")
+        html = self._CHAT_HTML.read_text(encoding="utf-8")
+        assert "insertBefore(bar, footer)" not in js
+        assert "bar.innerHTML =" not in js.split("function bindCapacityBar")[1][:2000]
+        assert 'data-cap="/plan on"' in html
+        assert 'aria-label="Plan"' in html
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

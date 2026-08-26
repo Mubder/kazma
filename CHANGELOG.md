@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased — UI audit remediation Phase 1: the four P0s (2026-08-26)
+
+From docs/audits/AUDIT_UI_DEEP_2026-08-26.md:
+
+- **P0-3 sticky `is-chat`**: soft-nav now syncs `.app-layout`'s class —
+  the header reappears on every non-chat page after visiting chat (it
+  was hidden everywhere), and chat goes immersive when soft-navigated
+  into.
+- **P0-4 reload storm**: bare `x-data` elements are recognized as
+  legitimately bound — soft-nav into chat no longer throws and falls
+  back to a full reload. Page switches drop from 2-3 loads to 1.
+- **P0-1 dead `$store.agent`**: the store registers synchronously when
+  Alpine already booted (soft-nav arrival) — status strip, WS telemetry,
+  and the HITL bottom card live on every navigation path.
+- **P0-2 capacity bar**: the ⋯ popover template is the single owner (the
+  JS relocation that detached it is gone); Plan pill added to the
+  template for parity with the removed JS fallback.
+
+Tests: `tests/test_delivery_v2_client.py::TestUIAuditP0Fixes`. Restart +
+hard-refresh.
+
 ## Unreleased — Top status strip is single-owner (2026-08-26)
 
 "Sometimes the status bar shows, sometimes not." Three interacting
