@@ -2308,24 +2308,28 @@
                     <input :type="xShowKeys ? 'text' : 'password'" class="form-input" x-model="xForm.access_token_secret" :placeholder="xStatus.keys_set && xStatus.keys_set.access_token_secret ? '********' : ''" autocomplete="off">
                 </div>
             </div>
-            <label class="toggle" style="margin-bottom:12px;">
-                <input type="checkbox" x-model="xShowKeys">
-                <span class="toggle-slider"></span>
-                <span style="margin-inline-start:8px;font-size:0.85rem;">{{ t('settings.x_show_keys') }}</span>
+            <label class="toggle-row">
+                <span class="toggle">
+                    <input type="checkbox" x-model="xShowKeys">
+                    <span class="toggle-slider"></span>
+                </span>
+                <span>{{ t('settings.x_show_keys') }}</span>
             </label>
-            <label class="toggle" style="margin-bottom:12px;">
-                <input type="checkbox" x-model="xForm.enabled">
-                <span class="toggle-slider"></span>
-                <span style="margin-inline-start:8px;font-size:0.85rem;">{{ t('settings.x_enabled') }}</span>
+            <label class="toggle-row">
+                <span class="toggle">
+                    <input type="checkbox" x-model="xForm.enabled">
+                    <span class="toggle-slider"></span>
+                </span>
+                <span>{{ t('settings.x_enabled') }}</span>
             </label>
-            <div class="form-row two-col-grid">
+            <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <div class="form-group">
-                    <label>{{ t('settings.x_max_day') }}</label>
-                    <input type="number" class="form-input" x-model.number="xForm.max_posts_per_day" min="1" max="50">
+                    <label for="x-max-day">{{ t('settings.x_max_day') }}</label>
+                    <input id="x-max-day" type="number" class="form-input" x-model.number="xForm.max_posts_per_day" min="1" max="50">
                 </div>
                 <div class="form-group">
-                    <label>{{ t('settings.x_max_month') }}</label>
-                    <input type="number" class="form-input" x-model.number="xForm.max_posts_per_month" min="1" max="500">
+                    <label for="x-max-month">{{ t('settings.x_max_month') }}</label>
+                    <input id="x-max-month" type="number" class="form-input" x-model.number="xForm.max_posts_per_month" min="1" max="500">
                 </div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">

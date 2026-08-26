@@ -2837,6 +2837,22 @@ tbody tr:last-child td {
   transform: translateX(16px);
   background: #fff;
 }
+/* Caption sits NEXT to the 36px switch — never inside it (overflow clip). */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  min-height: 20px;
+  cursor: pointer;
+}
+.toggle-row .toggle { flex-shrink: 0; }
+.toggle-row > span {
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
 
 /* ── 17. Status Indicators ──────────────────────────────────────── */
 .text-success { color: var(--success); }

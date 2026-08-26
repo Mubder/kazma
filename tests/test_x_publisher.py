@@ -188,3 +188,7 @@ def test_settings_tab_and_api_wired() -> None:
     assert 'tab === \'x\'' in html or 'tab === "x"' in html
     assert "/api/x/credentials" in js
     assert "X API router mounted" in app
+    # Captions must sit beside the 36px switch, not inside it (overflow clip).
+    assert 'class="toggle-row"' in html
+    assert "settings.x_show_keys" in html
+    assert "settings.x_enabled" in html
