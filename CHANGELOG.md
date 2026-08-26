@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Unreleased — fix `lastEventId is not defined` (2026-08-27)
+
+- The SSE cursor's `lastEventId` getter threw `ReferenceError:
+  lastEventId is not defined` on every stream error path. Root cause:
+  `var lastEventId` was declared INSIDE the `fetch().then(...)` callback
+  while the returned `lastEventId` getter lives at `ssePost`'s own scope —
+  a different function scope, so the getter had no binding. The
+  declaration now sits at `ssePost` top level (streaming.js). Regression
+  test evaluates the real file under Node and asserts the getter returns
+  null instead of throwing.
+- The unhandled-rejection toast now appends the throwing `file.js:line`
+  so a stale-cache-vs-real-bug question is answerable without a console
+  round-trip.
+
+Hard-refresh to pick up streaming.js/base.html.
+
 ## Unreleased — post-restart incident: reply fragmentation, log loss, test pollution (2026-08-27)
 
 Three fixes from the live 00:48 incident (one reply rendered as 3
