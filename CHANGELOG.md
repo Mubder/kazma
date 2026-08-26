@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Unreleased — UI audit remediation Phase 3: polish & hardening (2026-08-26)
+
+- **Voice buttons restored** (operator decision): hold-to-record mic and
+  live duplex voice are visible in the composer again.
+- **Dead top-bar CSS pruned** from kazma.css (the block v5 fully
+  overrode); agentStore dead code removed (no-op grace timer,
+  double-query banner sync).
+- **Outbox Retry button** is a real injected DOM element (was markdown
+  raw-HTML riding the renderer's escape path).
+- **`recoverMissedApproval`** prefers the thread this tab actually saw
+  interrupt before falling back to session-id / single-pending matching.
+- **Robust app-root lookup** (was a substring `[x-data*=kazmaApp]`
+  selector); **importmap covers all 8 modules** (stale-module trap);
+  **header titles read `page_title` from route context** (the old Jinja
+  block never crossed the include boundary); **`hasLiveSSE` contract
+  documented** (only the two turn-owning dispatches may set
+  `activeStream`).
+
+Tests: `tests/test_delivery_v2_client.py::TestUIAuditPhase3Fixes`.
+Restart + hard-refresh.
+
 ## Unreleased — UI audit remediation Phase 2: trust & perception (2026-08-26)
 
 - **One keyboard-shortcut registry** (nav.js): the racing Ctrl+1-6

@@ -16,7 +16,10 @@
                 <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
         </button>
-        <h1 class="header-title">{% block page_title %}{{ active_page|default('Kazma')|title }}{% endblock %}</h1>
+        {# Titles come from the route context (`page_title`) — the old
+   {% block page_title %} was inert: Jinja blocks do not cross
+   {% include %} boundaries (UI audit P2). #}
+        <h1 class="header-title">{{ page_title|default(active_page|default('Kazma')|title) }}</h1>
         {% block breadcrumbs %}
         <nav class="breadcrumbs" aria-label="Breadcrumb">
             <a href="/" class="breadcrumb-link">{{ t('header.home') }}</a>

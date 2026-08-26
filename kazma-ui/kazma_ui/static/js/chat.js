@@ -310,12 +310,27 @@
       }
       lastSentUserText = text;  // Retry resends exactly this
       appendMessage('user', text);
-      appendMessage(
+      var notice = appendMessage(
         'assistant',
         '⚠️ _This message was **not delivered** — the server was down or restarting when you sent it. ' +
-        'Tap retry to send it now._\n\n' +
-        '<button class="btn btn-sm btn-primary" onclick="window.KazmaChat && window.KazmaChat.retry()">↻ Retry</button>'
+        'Tap retry to send it now._'
       );
+      // Retry button injected as a real DOM element (post-render), not
+      // markdown raw-HTML — the renderer only guarantees code-block
+      // escaping (audit P2).
+      try {
+        var btn = document.createElement('button');
+        btn.className = 'btn btn-sm btn-primary';
+        btn.textContent = '↻ Retry';
+        btn.addEventListener('click', function() {
+          if (window.KazmaChat && typeof window.KazmaChat.retry === 'function') {
+            window.KazmaChat.retry();
+          }
+        });
+        (notice && notice.querySelector('.message-text')
+          ? notice.querySelector('.message-text')
+          : messagesEl).appendChild(btn);
+      } catch (e) { /* ignore */ }
       scrollToBottom();
     } catch (e) { /* corrupt outbox — drop silently */ _outboxClear(); }
   }
@@ -2011,6 +2026,7 @@
       onApprovalRequired: function(data) {
         if (!_mine()) return;
         // HITL: graph paused — render scope-aware approval card and lock input.
+        if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
         activeTypingEl = null;
         logProgress({
@@ -3280,6 +3296,11 @@
    *  rendered is a SILENTLY PAUSED turn — no card, no error, no progress
    *  (the 2026-08-26 "complete silence" X-post incident). One best-effort
    *  fetch of the pending list; render this session's card if present. */
+  // Thread of the most recent interrupt seen by this tab (from approval
+  // payloads / interrupted dones) — lets recoverMissedApproval match the
+  // RIGHT pending approval instead of guessing (audit P2).
+  var _lastInterruptedThreadId = '';
+
   function recoverMissedApproval() {
     if (hasInlineApprovalCard() || _awaitingApproval) return;
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
@@ -3288,15 +3309,17 @@
         if (hasInlineApprovalCard() || _awaitingApproval) return;
         var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
         if (!pending.length) return;
-        var tid = chatSessionId || '';
         var hit = null;
-        for (var i = 0; i < pending.length; i++) {
-          var p = pending[i] || {};
-          if (String(p.thread_id || '') === tid) { hit = p; break; }
+        // Preference order: the thread we saw interrupt → the session id →
+        // (single-operator fallback) the only pending entry. The approve
+        // endpoint's ownership check still guards cross-tenant abuse.
+        var candidates = [_lastInterruptedThreadId, chatSessionId || ''];
+        for (var c = 0; c < candidates.length && !hit; c++) {
+          for (var i = 0; i < pending.length; i++) {
+            var p = pending[i] || {};
+            if (candidates[c] && String(p.thread_id || '') === candidates[c]) { hit = p; break; }
+          }
         }
-        // Single-operator common case: one pending approval, no id match
-        // (session id ≠ graph thread id) — take it. The approve endpoint's
-        // ownership check still guards cross-tenant abuse.
         if (!hit && pending.length === 1) hit = pending[0];
         if (!hit) return;
         console.warn('[KazmaChat] Recovering missed approval card for thread=' + hit.thread_id);
@@ -4607,6 +4630,12 @@
      * True while an SSE stream owns the live turn. The telemetry WS checks
      * this to avoid double-painting the same reply over both transports
      * (the duplicated-bubble incident class, 2026-08-26).
+     *
+     * CONTRACT: `activeStream` is assigned ONLY by the two turn-owning
+     * dispatches — the /api/chat/stream send/attach (_dispatchSse) and the
+     * /api/approve resume (submitApproval). Never point it at any other
+     * fetch/stream, or the WS dedupe would suppress painting for unrelated
+     * traffic (audit P2).
      */
     hasLiveSSE: function() { return !!activeStream; },
     refreshSessions: loadSessions,

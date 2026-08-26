@@ -474,7 +474,9 @@ html[data-theme="light"] { color-scheme: only light; }
 .composer-more:not([open]) .capacity-bar { display: none; }
 .composer-icon-btn { padding: 4px; }
 .composer-file-input { display: none; }
-.composer-voice-btn { display: none; }
+/* Voice buttons RESTORED (UI audit P2, operator decision 2026-08-26):
+   hold-to-record mic + live duplex voice are visible and wired. */
+.composer-voice-btn { display: inline-flex; }
 .composer-mic-recording { display: none; }
 .composer-chrome { margin-top: 0; }
 

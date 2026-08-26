@@ -1823,21 +1823,9 @@ tbody tr:last-child td {
 .hitl-status.hitl-denied { color: var(--danger); }
 .hitl-status.hitl-error { color: var(--danger); }
 
-.chat-model-bar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-4);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
-}
-
-.chat-input-area {
-  position: relative;
-  padding: var(--sp-4) var(--sp-6);
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-panel);
-}
+/* Old opaque top-bar .chat-model-bar / .chat-input-area rules removed —
+   v5 owns both (composer dock + glassy bar); the old block was dead for
+   its only consumer (UI audit P2). */
 .composer-chrome {
   display: flex;
   flex-direction: column;

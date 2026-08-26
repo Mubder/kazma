@@ -364,6 +364,50 @@ class TestUIAuditPhase2Fixes:
                 if "x-show=" in tag and "<template" not in tag:
                     assert "x-cloak" in tag, f"{p.name}: {tag[:100]}"
 
+
+class TestUIAuditPhase3Fixes:
+    """docs/audits/AUDIT_UI_DEEP_2026-08-26.md — Phase 3 (P2) contracts."""
+
+    def test_voice_buttons_restored(self):
+        v5 = (_UI / "static" / "css" / "kazma.v5.css").read_text(encoding="utf-8")
+        assert ".composer-voice-btn { display: inline-flex; }" in v5
+        assert ".composer-voice-btn { display: none; }" not in v5
+
+    def test_dead_topbar_css_pruned(self):
+        css = (_UI / "static" / "css" / "kazma.css").read_text(encoding="utf-8")
+        assert "border-bottom: 1px solid var(--border-subtle);\n  background: var(--bg-panel);\n}" not in css.split(".hitl-status")[1][:600]
+
+    def test_outbox_retry_button_is_dom_injected(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "btn.addEventListener('click', function() {" in src
+        assert "<button class=\"btn btn-sm btn-primary\" onclick=" not in src
+
+    def test_remembered_thread_preferred_in_recovery(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "var _lastInterruptedThreadId = '';" in src
+        assert "var candidates = [_lastInterruptedThreadId, chatSessionId || ''];" in src
+        assert "_lastInterruptedThreadId = String(data.thread_id);" in src
+
+    def test_importmap_covers_all_modules(self):
+        base = (_UI / "templates" / "base.html").read_text(encoding="utf-8")
+        for mod in (Path(_UI / "static" / "js" / "modules")).glob("*.js"):
+            assert f'"/static/js/modules/{mod.name}"' in base, f"importmap missing {mod.name}"
+
+    def test_header_title_from_context(self):
+        header = (_UI / "templates" / "components" / "header.html").read_text(encoding="utf-8")
+        assert "page_title|default(active_page" in header
+        # the inert block is gone from the rendered title element
+        title_line = [ln for ln in header.split("\n") if "header-title" in ln]
+        assert title_line and "{% block" not in title_line[0]
+
+    def test_has_live_sse_contract_documented(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "CONTRACT: `activeStream` is assigned ONLY by the two turn-owning" in src
+
+    def test_fragile_root_selector_gone(self):
+        comp = (_UI / "static" / "js" / "modules" / "components.js").read_text(encoding="utf-8")
+        assert "querySelector('[x-data*=\"kazmaApp\"]')" not in comp
+
     def test_ws_connect_sends_resume_cursor(self):
         src = _STORE_JS.read_text(encoding="utf-8")
         assert "?last_seq=" in src

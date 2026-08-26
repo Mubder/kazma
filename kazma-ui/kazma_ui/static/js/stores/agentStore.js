@@ -213,13 +213,8 @@ function registerAgentStore() {
       try {
         const el = document.getElementById('thinking-indicator');
         if (!el) return;
-        let text = el.querySelector('.thinking-text');
-        if (!text) {
-          // Vanilla path may have replaced children via showTyping
-          const spans = el.querySelectorAll('span');
-          // last text node area
-        }
-        text = el.querySelector('.thinking-text');
+        // Note: the strip's visibility is x-show-owned; this only syncs text.
+        const text = el.querySelector('.thinking-text');
         if (text && this.statusMessage) {
           text.textContent = this.statusMessage;
         }
@@ -718,16 +713,8 @@ function registerAgentStore() {
           ? 'Previous message is still processing.'
           : 'Message was not accepted. Please try again.');
       // turn_busy already gets a graph_error from the server; only paint if needed.
-      if (d.reason === 'persist_failed' || d.reason === 'turn_busy') {
-        // graph_error handler also ends the turn; keep thinking until that arrives,
-        // but if no graph_error follows, unlock after a short grace.
-        const self = this;
-        setTimeout(function () {
-          if (self._turnActive && !self.pendingApproval) {
-            // leave unlock to graph_error/idle; no-op if already idle
-          }
-        }, 50);
-      }
+      // (A former 50ms no-op grace timer lived here — dead code, removed in
+      // the 2026-08-26 UI audit remediation.)
       if (d.reason === 'persist_failed') {
         try {
           const chat = this._chat();

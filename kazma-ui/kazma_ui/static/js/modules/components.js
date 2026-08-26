@@ -332,7 +332,12 @@ export function sidebarComponent() {
         },
 
         toggleSidebar() {
-            const appEl = document.querySelector('[x-data*="kazmaApp"]');
+            // Robust root lookup: the old `[x-data*="kazmaApp"]` substring
+            // selector broke if any template mentioned the name elsewhere
+            // (UI audit P2). The app root is the <html> element itself.
+            const appEl = document.documentElement.hasAttribute('x-data')
+                ? document.documentElement
+                : document.querySelector('html[x-data], body [x-data]');
             if (appEl && window.Alpine) {
                 const data = Alpine.$data(appEl);
                 if (data) {
