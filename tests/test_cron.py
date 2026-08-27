@@ -9,13 +9,38 @@
     6. CronScheduler cancel
     7. schedule_task tool registered
     8. list_scheduled + cancel_scheduled tools registered
+
+Plus operator-timezone support (audit M14): clock-time anchors and naive ISO
+strings resolve via ConfigStore ``cron.timezone`` → env ``KAZMA_TZ`` → UTC.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-
 import pytest
+from datetime import UTC, datetime, timedelta, timezone
+
+
+def _zone_available(name: str) -> bool:
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(name)
+        return True
+    except Exception:
+        return False
+
+
+requires_tzdb = pytest.mark.skipif(
+    not _zone_available("Asia/Kuwait"),
+    reason="IANA tz database unavailable (install 'tzdata' on Windows)",
+)
+
+
+@pytest.fixture()
+def _no_tz_env(monkeypatch):
+    """Ensure no operator timezone leaks in from the developer machine."""
+    monkeypatch.delenv("KAZMA_TZ", raising=False)
+    yield
 from kazma_core.cron.scheduler import (
     CronScheduler,
     JobStatus,
@@ -75,6 +100,61 @@ class TestParseTiming:
         """Invalid timing raises ValueError."""
         with pytest.raises(ValueError, match="Unparseable"):
             parse_timing("next tuesday")
+
+
+class TestOperatorTimezone:
+    """Audit M14: clock-time anchors + naive ISO honor the operator zone."""
+
+    @requires_tzdb
+    def test_daily_uses_operator_timezone(self, monkeypatch) -> None:
+        """'daily at 9am' in Asia/Kuwait (UTC+3, no DST) → 06:00Z occurrence."""
+        monkeypatch.setenv("KAZMA_TZ", "Asia/Kuwait")
+        now = datetime(2026, 12, 1, 10, 0, tzinfo=UTC)  # 13:00 Kuwait
+        result = parse_timing("daily at 9am", from_time=now)
+        assert result == datetime(2026, 12, 2, 6, 0, tzinfo=UTC)
+
+    @requires_tzdb
+    def test_naive_iso_uses_operator_timezone(self, monkeypatch) -> None:
+        """Naive ISO attaches the operator zone instead of UTC."""
+        monkeypatch.setenv("KAZMA_TZ", "Asia/Kuwait")
+        result = parse_timing("2026-12-01T09:00:00")
+        assert result == datetime(2026, 12, 1, 6, 0, tzinfo=UTC)
+
+    def test_explicit_offset_iso_honored_as_is(self, _no_tz_env, monkeypatch) -> None:
+        """Aware ISO strings win over any configured operator zone."""
+        monkeypatch.setenv("KAZMA_TZ", "Asia/Kuwait")
+        result = parse_timing("2026-12-01T09:00:00+03:00")
+        assert result == datetime(2026, 12, 1, 9, 0, tzinfo=timezone(timedelta(hours=3)))
+
+    def test_default_utc_when_unset(self, _no_tz_env) -> None:
+        """No config key and no env → UTC behavior unchanged (back-compat)."""
+        now = datetime(2026, 12, 1, 10, 0, tzinfo=UTC)
+        assert parse_timing("daily at 9am", from_time=now) == datetime(
+            2026, 12, 2, 9, 0, tzinfo=UTC
+        )
+        assert parse_timing("2026-12-01T09:00:00") == datetime(
+            2026, 12, 1, 9, 0, tzinfo=UTC
+        )
+
+    @requires_tzdb
+    def test_configstore_key_wins_over_env(self, _no_tz_env, monkeypatch) -> None:
+        """Read order: ConfigStore cron.timezone beats KAZMA_TZ."""
+        from kazma_core.config_store import get_config_store
+
+        monkeypatch.setenv("KAZMA_TZ", "Asia/Kuwait")
+        get_config_store().set("cron.timezone", "UTC")
+        now = datetime(2026, 12, 1, 10, 0, tzinfo=UTC)
+        assert parse_timing("daily at 9am", from_time=now) == datetime(
+            2026, 12, 2, 9, 0, tzinfo=UTC
+        )
+
+    def test_invalid_zone_falls_back_to_utc(self, _no_tz_env, monkeypatch) -> None:
+        """Unresolvable name never raises — falls back to UTC."""
+        monkeypatch.setenv("KAZMA_TZ", "Mars/Olympus_Mons")
+        now = datetime(2026, 12, 1, 10, 0, tzinfo=UTC)
+        assert parse_timing("daily at 9am", from_time=now) == datetime(
+            2026, 12, 2, 9, 0, tzinfo=UTC
+        )
 
 
 class TestSQLiteCronStore:

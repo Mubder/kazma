@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from enum import StrEnum
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiosqlite
 
@@ -88,14 +90,60 @@ class ScheduledJob:
 # Timing parser
 # ══════════════════════════════════════════════════════════════════════════
 
+# Warn once per process about an unresolvable timezone name.
+_tz_warned = False
+
+
+def get_cron_timezone() -> tzinfo:
+    """Resolve the operator-configured timezone for clock-time anchors.
+
+    Read order (audit M14): ConfigStore ``cron.timezone`` → env ``KAZMA_TZ``
+    → UTC. Clock-time anchors ("daily at 9am") and NAIVE ISO timestamps are
+    interpreted in this zone instead of assuming UTC — the previous UTC-only
+    behavior made "9am" fire at noon for a UTC+3 operator. Explicit-offset
+    ISO strings ("2026-12-01T09:00:00+03:00") are honored as-is.
+
+    Live-resolved on every call (mirrors ``get_hitl_config``) so a Settings
+    change takes effect on the next schedule/reschedule without a restart.
+    An unresolvable name falls back to UTC with a warn-once log (never
+    raises). Requires the stdlib ``zoneinfo`` database (the ``tzdata`` pip
+    package on Windows).
+    """
+    global _tz_warned
+
+    name = ""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        name = str(get_config_store().get("cron.timezone") or "").strip()
+    except Exception:
+        pass
+    if not name:
+        name = os.environ.get("KAZMA_TZ", "").strip()
+    if not name:
+        return UTC
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        if not _tz_warned:
+            logger.warning(
+                "[CronScheduler] invalid cron.timezone %r — falling back to UTC "
+                "(IANA name required, e.g. 'Asia/Kuwait'; install 'tzdata' on Windows)",
+                name,
+            )
+            _tz_warned = True
+        return UTC
+
 
 def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
     """Parse human-readable timing into next run time.
 
     Supported formats:
         - "5m", "30m", "1h", "2h" (relative)
-        - "daily at 9am", "daily at 3pm" (recurring)
-        - ISO timestamp: "2026-06-25T09:00:00"
+        - "daily at 9am", "daily at 3pm" (recurring — anchored in the
+          operator timezone, see :func:`get_cron_timezone`)
+        - ISO timestamp: "2026-06-25T09:00:00" (naive → operator timezone;
+          explicit-offset strings honored as-is)
 
     Args:
         timing:     Timing string.
@@ -109,6 +157,7 @@ def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
     """
     now = from_time or datetime.now(UTC)
     timing = timing.strip().lower()
+    tz = get_cron_timezone()
 
     # Relative: "5m", "30m", "1h", "2h"
     match = re.match(r"^(\d+)(m|h)$", timing)
@@ -130,7 +179,7 @@ def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
             hour += 12
         if match.group(2) == "am" and hour == 12:
             hour = 0
-        next_run = now.replace(hour=hour, minute=0, second=0, microsecond=0, tzinfo=UTC)
+        next_run = now.replace(hour=hour, minute=0, second=0, microsecond=0, tzinfo=tz)
         if next_run <= now:
             next_run += timedelta(days=1)
         return next_run
@@ -139,7 +188,7 @@ def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
     try:
         dt = datetime.fromisoformat(timing)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
+            dt = dt.replace(tzinfo=tz)
         return dt
     except ValueError:
         pass
