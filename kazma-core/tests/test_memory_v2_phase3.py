@@ -290,6 +290,56 @@ def test_macro_sleep_demotes_old_episodic(dbs):
     assert stats["demoted_episodic"] >= 1
 
 
+def test_macro_sleep_recall_ttl_survives_active_memory(dbs):
+    """Audit H18: a recall row past recall_ttl_days by CREATION but important
+    and recently touched must SURVIVE archival (text intact)."""
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    p, o = dbs
+    now = time.time()
+    # Created > recall_ttl_days (90) ago, but accessed an hour ago + important.
+    p.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
+        "tier, structural_importance, access_count, last_accessed, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("r_hot", "default", "s1", 1, "vital fact", "recall", 4, 5,
+         now - 3600, now - 86400 * 120),
+    )
+    p.commit()
+    run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    row = p.execute(
+        "SELECT tier, user_text FROM episodes WHERE id='r_hot'"
+    ).fetchone()
+    assert row["tier"] == "recall"
+    assert row["user_text"] == "vital fact"
+
+
+def test_macro_sleep_recall_ttl_archives_stale_low_importance(dbs):
+    """Audit H18: recall rows stale on BOTH clocks (created AND untouched past
+    ttl) with importance below the promote floor are still archived."""
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    p, o = dbs
+    now = time.time()
+    p.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
+        "tier, structural_importance, access_count, last_accessed, created_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        ("r_stale", "default", "s1", 1, "stale note", "recall", 1, 0,
+         now - 86400 * 120, now - 86400 * 120),
+    )
+    p.commit()
+    stats = run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    row = p.execute(
+        "SELECT tier, user_text FROM episodes WHERE id='r_stale'"
+    ).fetchone()
+    assert row["tier"] == "archived"
+    assert row["user_text"] is None
+    assert stats["demoted_recall"] >= 1
+
+
 def test_macro_sleep_promotes_important_episodic(dbs):
     from kazma_core.memory.config import DEFAULT_MEMORY_CFG
     from kazma_core.memory.macro_sleep import run_macro_sleep

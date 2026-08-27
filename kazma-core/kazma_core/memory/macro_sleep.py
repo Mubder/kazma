@@ -142,8 +142,20 @@ def run_macro_sleep(
                 stats["promoted_to_recall"] += 1
             # Demote recall→archived by pure age (recall_ttl_days) — bounds
             # long-term recall growth even for frequently-idle items that
-            # never trip the idle demotion.
-            elif tier == "recall" and recall_ttl > 0 and created_age > recall_ttl:
+            # never trip the idle demotion. Audit H18: this previously keyed
+            # on created_at alone, nulling the text of high-importance,
+            # recently-accessed memories mid-life. Archive only rows stale
+            # on BOTH clocks — created past ttl AND untouched past ttl
+            # (age = now − last_touch) — AND below the promote floor (same
+            # floor as the episodic branch below): actively-used or
+            # important memories survive.
+            elif (
+                tier == "recall"
+                and recall_ttl > 0
+                and created_age > recall_ttl
+                and age > recall_ttl
+                and importance < promote_min_importance
+            ):
                 primary_conn.execute(
                     "UPDATE episodes SET tier='archived', "
                     "summary_text=COALESCE(summary_text, SUBSTR(user_text, 1, 200)), "
