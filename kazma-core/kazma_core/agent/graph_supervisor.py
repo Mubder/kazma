@@ -551,6 +551,9 @@ async def supervisor_node(
                         last_user_content, _ledger, is_continuation=_is_continue,
                     )
                     if _led_res["mode"] == "bound":
+                        if _ledger is not None and _ledger.clarify_pending:
+                            _ledger.clarify_pending = False
+                            _led_store.save(_ledger)
                         logger.info(
                             "[Supervisor] ledger binding: %r -> %r",
                             (last_user_content or "")[:40],
@@ -559,8 +562,26 @@ async def supervisor_node(
                         _led_block = _format_ledger_block(
                             _ledger, binding=str(_led_res["binding"])
                         )
+                    elif _led_res["mode"] == "post_clarify":
+                        # User answered the previous clarify — unlock and
+                        # direct the model to proceed with its recommended
+                        # option (never ask twice in a row).
+                        if _ledger is not None:
+                            _ledger.clarify_pending = False
+                            _led_store.save(_ledger)
+                        logger.info(
+                            "[Supervisor] ledger post-clarify unlock: proceeding with recommended option"
+                        )
+                        _led_block = (
+                            "KAZMA TASK CONTINUATION: "
+                            + str(_led_res["directive"])
+                            + ("\n" + _format_ledger_block(_ledger) if _ledger else "")
+                        )
                     elif _led_res["mode"] == "clarify":
                         _ledger_clarify = True
+                        if _ledger is not None and not _ledger.clarify_pending:
+                            _ledger.clarify_pending = True
+                            _led_store.save(_ledger)
                         _led_block = "KAZMA CLARIFY-ONLY TURN: " + str(
                             _led_res["question"]
                         )

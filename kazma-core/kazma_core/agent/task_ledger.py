@@ -74,10 +74,15 @@ CREATE TABLE IF NOT EXISTS task_ledgers (
     findings TEXT NOT NULL DEFAULT '[]',
     open_questions TEXT NOT NULL DEFAULT '[]',
     updated_at REAL NOT NULL,
-    superseded_by TEXT
+    superseded_by TEXT,
+    clarify_pending INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_task_ledgers_tenant ON task_ledgers(tenant_id, status);
 """
+
+# Migration for pre-clarify_pending databases (CREATE IF NOT EXISTS will
+# not add a column to an existing table).
+_ALTER_CLARIFY = "ALTER TABLE task_ledgers ADD COLUMN clarify_pending INTEGER NOT NULL DEFAULT 0"
 
 
 # ── Model ─────────────────────────────────────────────────────────────
@@ -102,6 +107,7 @@ class TaskLedger:
     findings: list[str] = field(default_factory=list)
     open_questions: list[str] = field(default_factory=list)
     status: str = _ACTIVE
+    clarify_pending: bool = False
     tenant_id: str = "default"
     updated_at: float = field(default_factory=time.time)
     superseded_by: str | None = None
@@ -166,6 +172,7 @@ class TaskLedger:
             "open_questions": json.dumps(self.open_questions, ensure_ascii=False),
             "updated_at": self.updated_at,
             "superseded_by": self.superseded_by,
+            "clarify_pending": 1 if self.clarify_pending else 0,
         }
 
     @classmethod
@@ -197,6 +204,7 @@ class TaskLedger:
             open_questions=[str(x) for x in _loads(row.get("open_questions", "[]"))],
             updated_at=float(row.get("updated_at", 0) or 0),
             superseded_by=row.get("superseded_by"),
+            clarify_pending=bool(row.get("clarify_pending", 0)),
         )
 
 
@@ -228,6 +236,10 @@ class TaskLedgerStore:
             conn = self._connect()
             try:
                 conn.executescript(_CREATE)
+                try:
+                    conn.execute(_ALTER_CLARIFY)
+                except sqlite3.OperationalError:
+                    pass  # column already exists
                 conn.commit()
             finally:
                 conn.close()
@@ -240,9 +252,11 @@ class TaskLedgerStore:
                 conn.execute(
                     "INSERT OR REPLACE INTO task_ledgers "
                     "(thread_id, tenant_id, status, goal, next_action, steps, "
-                    " findings, open_questions, updated_at, superseded_by) "
+                    " findings, open_questions, updated_at, superseded_by, "
+                    " clarify_pending) "
                     "VALUES (:thread_id, :tenant_id, :status, :goal, :next_action, "
-                    ":steps, :findings, :open_questions, :updated_at, :superseded_by)",
+                    ":steps, :findings, :open_questions, :updated_at, "
+                    ":superseded_by, :clarify_pending)",
                     row,
                 )
                 conn.commit()
@@ -403,6 +417,20 @@ def resolve_continuation(
         return {"mode": "pass"}
     if ledger is None or ledger.status != _ACTIVE:
         return {"mode": "pass"}
+    if ledger.clarify_pending:
+        # The previous turn ASKED a clarifying question and the user just
+        # answered with a short continuation — proceeding to ask again would
+        # loop forever (2026-08-27 live report). Unlock: the model proceeds
+        # with its recommended option, tools available.
+        return {
+            "mode": "post_clarify",
+            "directive": (
+                "The user answered your clarifying question with a short "
+                "'go ahead'. Proceed NOW with your recommended/most-likely "
+                "option from the options you presented — do not ask again. "
+                "Tools are available; execute the next pipeline steps."
+            ),
+        }
     if ledger.next_action:
         return {
             "mode": "bound",
@@ -415,6 +443,7 @@ def resolve_continuation(
     goal = ledger.goal or "the current task"
     return {
         "mode": "clarify",
+        "mark_pending": True,
         "question": (
             f'You asked to continue, but the last turn did not record a next '
             f'step. Ask the user ONE short clarifying question about what to '

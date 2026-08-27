@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Unreleased — clarify-loop fix + DSML leak scrub (2026-08-27, live report)
+
+The first live run of the Task Ledger exposed two follow-on bugs, both fixed:
+
+- **Clarify-loop**: a clarify turn ("which direction?") followed by
+  "proceed" hit the clarify-lock AGAIN (still no declared next action) —
+  the model had zero tools, narrated tool calls it could not run, and asked
+  a third time. The ledger now carries a durable ``clarify_pending`` flag
+  (SQLite column + migration): a short continuation while a clarify is
+  pending **unlocks** the turn with a directive to proceed with the
+  recommended option and never ask twice. A later declared next action
+  clears the flag.
+- **DSML leak scrub**: DeepSeek models occasionally emit their NATIVE
+  tool-call markup (``<｜｜DSML｜｜invoke …>``) as plain text — raw protocol
+  garbage rendered into the reply (it appeared when the model tried to call
+  tools that weren't there). ``chat.js`` now scrubs DSML blocks/tags at all
+  four paint paths (live, terminal, applyFinal, appendMessage); verified
+  against the exact leaked payload.
+
+Tests: 4 new (post-clarify resolution, pending roundtrip incl. the
+INSERT-column fix, supervisor wiring, client scrub pins) — 16 ledger tests
+green, 41 chat/plan suites green.
+
 ## Unreleased — Task Ledger: durable intent resolution, no shortcuts (2026-08-27)
 
 The definitive answer to the "proceed with next → git commit" incident class.

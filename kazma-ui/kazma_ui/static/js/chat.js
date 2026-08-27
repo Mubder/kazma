@@ -3349,7 +3349,7 @@
       avatarHtml +
       '<div class="message-content">' +
         '<div class="message-text" dir="auto">' +
-          (role === 'user' ? renderUserContentHtml(content) : KS.markdown(stripPlanFenceForDisplay(content))) +
+          (role === 'user' ? renderUserContentHtml(content) : KS.markdown(_scrubDsml(stripPlanFenceForDisplay(content)))) +
         '</div>' +
         '<div class="message-meta" data-ts="' + escapeHtml(iso) + '">' +
           (attachmentName ? '\uD83D\uDCCE ' + escapeHtml(attachmentName) + ' \u00B7 ' : '') +
@@ -3456,7 +3456,7 @@
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
     if (final) {
-      textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
+      textEl.innerHTML = transformRenderedForPlan(KS.markdown(_scrubDsml(stripPlanFenceForDisplay(tokenAccum))));
       // Re-apply dir="auto" after innerHTML (the attribute survives but the
       // bidi direction may need recalculating for the new content).
       textEl.setAttribute('dir', 'auto');
@@ -3471,6 +3471,7 @@
     // the layout around it. Plan fences stay stripped live; the plan-only
     // phase holds the bubble open with a blank line.
     var liveParts = splitPlanAndProse(tokenAccum);
+    liveParts.prose = _scrubDsml(liveParts.prose);
     if (liveParts.prose) {
       textEl.innerHTML = transformRenderedForPlan(KS.markdown(liveParts.prose));
       if (window.KazmaBidi) KazmaBidi.apply(textEl, liveParts.prose);
@@ -3511,6 +3512,21 @@
       _liveRenderDirty = false;
       _paintLiveTextNow(_liveRenderEl, true);
     }
+  }
+
+  // ── DSML leak scrub ────────────────────────────────────────────────
+  // DeepSeek models sometimes emit their NATIVE tool-call markup
+  // (<｜｜DSML｜｜invoke ...>) as plain text instead of
+  // structured tool calls — raw protocol garbage in the reply (2026-08-27
+  // live report). Scrub it from every paint path; the markup carries no
+  // human value.
+  var _DSML_BLOCK = /<｜｜DSML｜｜tool_calls>[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g;
+  var _DSML_TAG = /<\/?｜｜[^>]*>/g;
+  function _scrubDsml(text) {
+    var t = String(text || '');
+    if (t.indexOf('DSML') < 0 && t.indexOf('｜') < 0) return t;
+    return t.replace(_DSML_BLOCK, '').replace(_DSML_TAG, '')
+            .replace(/\n{3,}/g, '\n\n').trim();
   }
 
   function hasInlineApprovalCard() {
@@ -4996,7 +5012,7 @@
       tokenAccum = incoming;
       _turnPainted = true;
       tryIngestPlanFromText(tokenAccum);
-      var display = stripPlanFenceForDisplay(tokenAccum);
+      var display = _scrubDsml(stripPlanFenceForDisplay(tokenAccum));
       if (textEl) {
         try {
           textEl.innerHTML = transformRenderedForPlan(KS.markdown(display));

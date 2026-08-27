@@ -168,3 +168,46 @@ def test_task_ledger_tool_registered() -> None:
     ).read_text(encoding="utf-8")
     assert src.count('"task_ledger_update"') >= 1
     assert "DURABLE TASK LEDGER" in src
+
+
+# ── Post-clarify unlock (2026-08-27 live report: clarify → "proceed" →
+#    clarify-lock AGAIN → model narrated tool calls it couldn't run) ────
+
+
+def test_continuation_after_clarify_unlocks_instead_of_looping() -> None:
+    led = TaskLedger(thread_id="t", goal="naming sweep", next_action="",
+                     clarify_pending=True)
+    res = resolve_continuation("proceed", led, is_continuation=True)
+    assert res["mode"] == "post_clarify"
+    assert "recommended" in res["directive"] and "do not ask again" in res["directive"]
+
+
+def test_clarify_marks_pending_and_store_roundtrip(store: TaskLedgerStore) -> None:
+    led = TaskLedger(thread_id="th-c", goal="g", next_action="")
+    res = resolve_continuation("go", led, is_continuation=True)
+    assert res["mode"] == "clarify" and res.get("mark_pending") is True
+    led.clarify_pending = True
+    store.save(led)
+    back = store.active_for("th-c")
+    assert back is not None and back.clarify_pending is True
+
+
+def test_supervisor_handles_post_clarify() -> None:
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "kazma-core" / "kazma_core" / "agent" / "graph_supervisor.py"
+    ).read_text(encoding="utf-8")
+    assert '"post_clarify"' in src
+    assert "post-clarify unlock" in src
+    assert "_ledger.clarify_pending = True" in src
+
+
+def test_dsml_scrub_wired_in_client() -> None:
+    js = (
+        Path(__file__).resolve().parents[1]
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    assert "function _scrubDsml(text)" in js
+    assert "_scrubDsml(stripPlanFenceForDisplay(tokenAccum))" in js
+    assert "_scrubDsml(stripPlanFenceForDisplay(content))" in js
+    assert "liveParts.prose = _scrubDsml(liveParts.prose);" in js
