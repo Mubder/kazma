@@ -602,6 +602,56 @@ async def test_json_success_short_circuits_extraction(monkeypatch):
     assert recover.await_count == 0
 
 
+def test_structured_suffix_content_types_are_textual():
+    """RFC 6839 suffixes (+json/+xml) are textual API payloads — the gate
+    rejected application/rdap+json (2026-08-27 availability-check incident)."""
+    from kazma_core.tools.read_url import _is_textual_content_type
+
+    assert _is_textual_content_type("application/rdap+json") is True
+    assert _is_textual_content_type("application/rdap+json; charset=utf-8") is True
+    assert _is_textual_content_type("application/ld+json") is True
+    assert _is_textual_content_type("application/atom+xml") is True
+    # Binary payloads must still be rejected.
+    assert _is_textual_content_type("application/pdf") is False
+    assert _is_textual_content_type("image/png") is False
+
+
+@pytest.mark.asyncio
+async def test_rdap_200_rdapjson_passes_content_gate(monkeypatch):
+    """A TAKEN domain = RDAP 200 + application/rdap+json. The content-type
+    gate ran BEFORE the JSON short-circuit and rejected the +json suffix
+    (no plain "application/json" substring) — every taken-domain check died
+    with "non-text content" (the 2026-08-27 availability-check incident;
+    only the 404/free branch was covered by tests)."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    ru = __import__("importlib").import_module("kazma_core.tools.read_url")
+
+    for ct in (
+        "application/rdap+json",
+        "application/rdap+json; charset=utf-8",
+        "application/ld+json",
+    ):
+        resp = MagicMock()
+        resp.text = '{"eventName": "registration", "handle": "DOM-123"}'
+        resp.status_code = 200
+        resp.headers = {"content-type": ct}
+
+        extract = MagicMock(return_value="SHOULD NOT BE CALLED")
+        recover = AsyncMock(return_value=None)
+        monkeypatch.setattr(ru, "_fetch_via_optional_backends", AsyncMock(return_value=None))
+        monkeypatch.setattr(ru, "_get_capped", AsyncMock(return_value=(resp, resp.text, False)))
+        monkeypatch.setattr(ru, "_extract_text", extract)
+        monkeypatch.setattr(ru, "_should_try_playwright", MagicMock(return_value=False))
+        monkeypatch.setattr(ru, "_recover_hard_page", recover)
+        monkeypatch.setattr(ru, "_cache_get", lambda *a, **k: None)
+
+        out = await ru._fetch_full_text("https://rdap.verisign.com/com/v1/domain/taken.com")
+        assert out == '{"eventName": "registration", "handle": "DOM-123"}', ct
+        assert extract.call_count == 0
+        assert recover.await_count == 0
+
+
 @pytest.mark.asyncio
 async def test_html_404_no_recovery(monkeypatch):
     """A plain HTML 404 must not launch the recovery cascade either —

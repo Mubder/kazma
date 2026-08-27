@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Unreleased — RDAP taken-domain checks unblocked (2026-08-27)
+
+The agent couldn't check name availability in one turn — every fast path
+failed and only sequential browser navigation worked. Root cause in our
+code: `read_url`'s content-type gate ran BEFORE the JSON short-circuit and
+rejected `application/rdap+json` (no plain `application/json` substring), so
+every RDAP **200** reply (domain TAKEN) died with "non-text content". The
+2026-08-21 domain-sweep fix and its tests only covered the **404** (free)
+branch — taken domains were exactly the broken half.
+
+- `_is_textual_content_type` now accepts RFC 6839 structured-syntax suffixes
+  (`+json` / `+xml`, charset-aware): `application/rdap+json`,
+  `application/ld+json`, `application/atom+xml`, … Binary types
+  (PDF/images) are still rejected.
+- Tests: 200-branch coverage for rdap+json (plain + charset) and ld+json —
+  the taken-domain shape — plus the suffix unit matrix; existing 404/free
+  and plain-JSON tests unchanged and green.
+- Context (not bugs, by design): `python_exec`'s import blocklist and
+  `shell_exec`'s no-network allowlist are deliberate egress controls —
+  `read_url` is the sanctioned HTTP door, which is why this gate bug was so
+  punishing. Parallel browser navigation hitting a greenlet error is the
+  known §23 single-Playwright-loop constraint; sequential navigation remains
+  the fallback.
+
 ## Unreleased — always-formatted streaming + rich user bubbles (2026-08-27)
 
 Operator decision: the agent's reply must ALWAYS be fully formatted rich

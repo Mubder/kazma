@@ -129,7 +129,18 @@ def _is_textual_content_type(content_type: str) -> bool:
     ct = (content_type or "").lower()
     if not ct:
         return True  # missing header — try anyway
-    return any(tok in ct for tok in _TEXTUAL_CONTENT_TYPES)
+    if any(tok in ct for tok in _TEXTUAL_CONTENT_TYPES):
+        return True
+    # RFC 6839 structured-syntax suffixes: application/rdap+json,
+    # application/hal+json, application/ld+json, application/atom+xml … are
+    # all textual API payloads. The gate REJECTED rdap+json (no plain
+    # "application/json" substring) and ran BEFORE the JSON short-circuit,
+    # so every 200 RDAP reply (domain TAKEN) died here — the 2026-08-27
+    # availability-check incident (only the 404/free branch was tested).
+    base = ct.split(";", 1)[0].strip()
+    if base.endswith("+json") or base.endswith("+xml"):
+        return True
+    return False
 
 
 def _is_json_payload(content_type: str, body: str) -> bool:
