@@ -592,31 +592,117 @@ import re as _re  # noqa: E402
 # /etc` all reached the HITL card. Broadened below. System-dir targets use a
 # trailing `(?!\S)` so `rm -rf /home` is denied but `rm -rf /home/user/proj`
 # (a legitimate scoped delete) is not.
+#
+# Second hardening round (this change): the `(?!\S)` boundary family was
+# evadable — `rm -rf /etc/`, `rm -rf //`, `rm -rf ./`, `rm -rf ./*`,
+# `rm -rf ..` all slipped through, and pipe-indirection trusted the
+# interpreter appearing IMMEDIATELY after the pipe (`curl x | sudo bash`,
+# `curl x | tee f && sh f` both evaded). Targets are now anchored:
+# trailing separator/dot runs after a rooted target are absorbed into the
+# match, while RELATIVE project paths (`build/`, `logs/*.log`, `../sibling`)
+# still pass through to the normal HITL card. Windows destruction forms
+# (drive-root deletes, `format C:`, `Stop-Computer`, `rd /s /q C:\`,
+# PowerShell download-cradles) added to the same destruction class.
+# Token-start barrier: catastrophic targets are recognized only at the START
+# of a shell word — mid-token separators must never anchor a rooted branch
+# (e.g. the "/" inside the relative glob `dist/*` must not read as "/*").
+_TOKSTART = r"(?:^|(?<=[\s(\"';|&,]))"
+
 _EXEC_DENYLIST = [
-    # rm with a recursive flag targeting a catastrophic location.
+    # rm with a recursive flag targeting a catastrophic location. A target is
+    # catastrophic when it is ROOTED (/ or a run of /. or //), a bare system
+    # dir (optionally followed ONLY by separators/dots/globs), a drive root,
+    # home/PWD, the cwd itself (./ or . or * globs), or a >=2-level parent
+    # climb. Deeper scoped paths (`/home/user/proj`, `./build`, `../pkgs`,
+    # `dist/*`) intentionally fall through to the HITL card instead of denying.
     _re.compile(
-        r"\brm\s+[^;|&\n]*?-[a-zA-Z]*r[a-zA-Z]*\s+"
+        r"\brm\s+[^;|&\n]*?-[a-zA-Z]*r[a-zA-Z]*\s+" + _TOKSTART +
         r"(?:"
-        r"/(?![\w/])"                                                       # /           (root)
-        r"|/\*"                                                              # /*          (root glob)
-        r"|/(?:home|etc|root|var|usr|boot|bin|sbin|lib|opt|proc|sys)(?!\S)"  # /<sysdir> bare
-        r"|[\"']?(?:~|\$HOME|\$PWD)[\"']?(?!\S)"                            # home dir (quoted-tolerant)
-        r"|[\"']?\.[\"']?(?!\S)"                                            # .           (cwd wipe)
-        r"|[\"']?\*[\"']?(?!\S)"                                            # *           (cwd glob)
+        r"[\"']?/[/.]*(?![\w.-])"                                             # / // /. /.. (rooted dot/sep runs)
+        r"|/\*"                                                               # /*          (root glob)
+        r"|/(?:home|etc|root|var|usr|boot|bin|sbin|lib|opt|proc|sys)"         # /<sysdir>, incl /etc/ /etc// /etc/./
+        r"[/\\.]*?(?![\w.\-/])"
+        r"|[\"']?[A-Za-z]:[/\\]+[*]?[\"']?(?![\w-])"                          # C:\ C:/ C:\* (drive roots)
+        r"|[\"']?(?:~|\$HOME|\$PWD)[/\\]*(?:\*)?[\"']?(?![\w-])"              # ~ ~/ ~/* $HOME/ $PWD/
+        r"|[\"']?\.{1,2}[/\\]+\*{0,2}[\"']?(?![\w-])"                         # ./ ../ ./* ../* (cwd/parent wipes)
+        r"|[\"']?\.{1,2}[\"']?(?![\w./\\-])"                                  # . .. bare (cwd / parent dir)
+        r"|[\"']?\*+[\"']?(?![\w.*?/\\-])"                                    # * ** bare (cwd glob)
+        r"|\.\.(?:[/\\]+\.\.)+"                                               # ../../ + climbs (escapes any root)
         r")",
         _re.IGNORECASE,
     ),
     _re.compile(r":\s*\(\)\s*\{.*:.*\|.*&.*\}", _re.IGNORECASE),  # fork bomb
-    # Remote content piped to ANY interpreter (sh/bash/zsh/python/perl/ruby/node).
-    _re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sh|bash|zsh|python\d?|perl|ruby|node)\b", _re.IGNORECASE),
+    # Remote content piped toward an interpreter. Hardened (audit finding):
+    # the interpreter used to have to sit IMMEDIATELY after the pipe, so
+    # `curl x | sudo bash` and `curl x | tee f && sh f` evaded. Now anything
+    # up to ~120 post-pipe chars may precede the interpreter.
+    _re.compile(
+        r"\b(?:curl|wget)\b[^\n]*\|[^\n]{0,120}?\b(?:sudo\s+)?(?:ba|z|da|k)?sh\b",
+        _re.IGNORECASE,
+    ),
+    _re.compile(
+        r"\b(?:curl|wget)\b[^\n]*\|\s*(?:python\d?|perl|ruby|node)\b",
+        _re.IGNORECASE,
+    ),
+    # Download-to-file then execute THE SAME fetched script (curl -o x.sh;
+    # sh x.sh). Back-reference ties executor and artifact together so
+    # pre-existing project scripts (`curl cfg.json && bash setup.sh`) are
+    # unaffected. |, -, --output, >> redirections all count as fetch-to-file.
+    _re.compile(
+        r"\b(?:curl|wget)\b[^;\n|]*?"
+        r"(?:-o|--output(?:-document)?=?|>>)[ \"']?"
+        r"([\w./\\$%{}~-]+\.(?:sh|py|pl|rb|ps1|js))[ \"']?"
+        r"[^;\n]{0,200}?(?:&&|;)\s*(?:sudo\s+)?"
+        r"(?:(?:[\w.\\/-]+[/\\])?(?:ba|z|da)?sh|python\d?|perl|ruby|node)\s+"
+        r"(?:-[^\s]+\s+)*[\"']?\1\b",
+        _re.IGNORECASE,
+    ),
+    # PowerShell / Windows cradle downloads: iex/irm + WebClient.DownloadString
+    # feeding Invoke-Expression (either order).
+    _re.compile(
+        r"\b(?:iex|irm)\b[^\n]{0,200}?\bdownloadstring\b",
+        _re.IGNORECASE,
+    ),
+    _re.compile(
+        r"downloadstring[^\n]{0,100}?\b(?:iex|invoke-expression)\b",
+        _re.IGNORECASE,
+    ),
+    _re.compile(
+        r"\bnew-object\s+-com(?:object)?\s+shell\.application[^\n]{0,120}?"
+        r"\b(?:shellexecute|runcmd)\b",
+        _re.IGNORECASE,
+    ),
     _re.compile(r"\bdd\b\s+.*of\s*=\s*/dev/", _re.IGNORECASE),  # dd to device
     _re.compile(r"\bmkfs\b", _re.IGNORECASE),  # format filesystem
     _re.compile(r">\s*/dev/(sd|nvme|hd|disk)", _re.IGNORECASE),  # redirect to raw disk
-    _re.compile(r"\b(?:shutdown|reboot|halt|poweroff|init\s+0)\b", _re.IGNORECASE),
-    # chmod world-writable/recursive on system locations.
     _re.compile(
-        r"\bchmod\s+(?:-R\s+)?[0-7]{3,4}\s+"
-        r"(?:/(?![\w/])|/\*|/(?:home|etc|root|var|usr|boot|bin|sbin|lib|opt)(?!\S)|~)",
+        r"\b(?:shutdown|reboot|halt|poweroff|init\s+0|stop-computer|restart-computer)\b",
+        _re.IGNORECASE,
+    ),
+    # Windows mass-destructive helpers beyond rm equivalents.
+    _re.compile(r"\bformat(?:\.com)?\s+[\"']?[A-Za-z]:[/\\]?", _re.IGNORECASE),
+    _re.compile(r"\b(?:rd|rmdir)\b(?:(?:\s+/|/\s*)[sq][a-z]*)+\s+[\"']?[A-Za-z]:[/\\]", _re.IGNORECASE),
+    # Remove-Item -Recurse (-Force) on a drive root (flag either side of path,
+    # quotes optional). Deeper targets keep reaching the HITL card.
+    _re.compile(
+        r"\bremove-item\b"
+        r"(?:"
+        r"[^\n]{0,80}?[-/]rec[a-z]*[^\n]{0,80}?[\"']?[A-Za-z]:[/\\]+[*]?[\"']?(?![\w-])"
+        r"|[^\n]{0,80}?[\"']?[A-Za-z]:[/\\]+[*]?[\"']?[^\n]{0,80}?[-/]rec[a-z]*"
+        r")",
+        _re.IGNORECASE,
+    ),
+    # chmod world-writable/recursive on system locations (same anchored
+    # boundaries as the rm entry above).
+    _re.compile(
+        r"\bchmod\s+(?:-[Rr]\s+)?[0-7Xx]{3,4}\s+" + _TOKSTART +
+        r"(?:"
+        r"[\"']?/[/.]*(?![\w.-])"
+        r"|/\*"
+        r"|/(?:home|etc|root|var|usr|boot|bin|sbin|lib|opt)[/\\.]*?(?![\w.\-/])"
+        r"|[\"']?[A-Za-z]:[/\\]+[*]?[\"']?(?![\w-])"
+        r"|~[/\\]*[*]?"
+        r")",
         _re.IGNORECASE,
     ),
 ]

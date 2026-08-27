@@ -37,6 +37,10 @@ _SENSITIVE_READS = [
 # Maximum time to wait for approval before auto-rejecting.
 _DEFAULT_APPROVAL_TIMEOUT = 60.0  # seconds
 
+# Defensive fallback when safety.hitl cannot be imported (mirrors the ALWAYS
+# set — YOLO must never widen beyond this on an import failure).
+_ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({"x_post", "x_delete_post"})
+
 
 class SafetyViolationError(Exception):
     """Raised when a tool call is blocked by the safety middleware."""
@@ -143,7 +147,30 @@ class SafetyMiddleware:
 
         from kazma_core.safety.hitl import get_current_thread_id
         tid = get_current_thread_id()
-        if tid:
+
+        # Classification BEFORE the YOLO shortcut (audit fix — HIGH): YOLO used
+        # to short-circuit ahead of danger/ALWAYS evaluation, so
+        # ALWAYS_HITL_TOOLS (x_post / x_delete_post) auto-ran through
+        # LocalToolRegistry. Mirrors hitl.requires_approval(), which resolves
+        # ALWAYS first: YOLO may bypass CANONICAL-danger tools only.
+        try:
+            from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS as _always_set
+        except Exception:  # pragma: no cover - degraded import
+            _always_set = _ALWAYS_HITL_FALLBACK
+
+        if tool_name in _always_set:
+            # Belt-and-braces: ALWAYS_HITL tools gate even if a narrowed
+            # require_approval_for list omits them.
+            force_danger = True
+
+        if not force_danger and self.is_sensitive_read(tool_name):
+            logger.info("[Safety] Sensitive read allowed: %s (task=%s)", tool_name, task_id)
+            return True
+
+        if not force_danger and not self.is_danger_tool(tool_name):
+            return True  # safe tool
+
+        if tid and tool_name not in _always_set:
             try:
                 from kazma_core.safety.yolo import is_yolo_active
                 if is_yolo_active(tid):
@@ -156,12 +183,13 @@ class SafetyMiddleware:
             except Exception:
                 pass
 
-        if not force_danger and self.is_sensitive_read(tool_name):
-            logger.info("[Safety] Sensitive read allowed: %s (task=%s)", tool_name, task_id)
-            return True
-
-        if not force_danger and not self.is_danger_tool(tool_name):
-            return True  # safe tool
+        if tool_name in _always_set:
+            logger.warning(
+                "[Safety] %s is an ALWAYS_HITL tool — YOLO cannot bypass the "
+                "approval gate (task=%s)",
+                tool_name,
+                task_id,
+            )
 
         # ── Danger tool — request approval ─────────────────
         logger.warning("[Safety] Danger tool blocked pending approval: %s", tool_name)

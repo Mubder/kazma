@@ -65,9 +65,37 @@ def _commitment_resolve_gate(
         _cmt_on = None  # type: ignore[assignment]
         _authz = None; _load_beliefs = None; _needs_sem = None  # type: ignore[assignment]
         record_commitment_terminal = None  # type: ignore[assignment]
+
+    def _is_semantic(tool_name: str) -> bool:
+        """Fail-closed semantic probe (deep-audit 2026-08-19, finding #9).
+
+        A classifier/profile explosion must classify the tool as SEMANTIC
+        (gated), never let it slip past the gate as if it were a read.
+        """
+        try:
+            return bool(_needs_sem(tool_name))
+        except Exception:
+            return True
+
+    def _block_unhealthy(tool_name: str, tool_id: Any) -> None:
+        """Fail-closed deny card for a per-tool commitment-gate failure."""
+        semantic_blocked.append(ToolResult(
+            tool_call_id=str(tool_id or ""),
+            name=tool_name,
+            content=(
+                f"Commitment gate unavailable for {tool_name} — "
+                "blocked while the policy engine is unhealthy. "
+                "Do not retry; tell the user what failed."
+            ),
+            is_error=True, duration_ms=0, outcome="terminal",
+        ))
+
     if _cmt_on and _cmt_on() and _needs_sem and _authz:
         try:
-            _sem = [_tc for _tc in pending if _needs_sem(_tc["name"])]
+            _sem: list[PendingToolCall] = []
+            for _probe in pending:
+                if _is_semantic(str(_probe.get("name") or "")):
+                    _sem.append(_probe)
             if _sem:
                 _tenant = state.get("tenant_id") or "default"
                 _req_at = _dt.now(_tz.utc)
@@ -85,7 +113,10 @@ def _commitment_resolve_gate(
                     )
                     _beliefs = []
                 _user_text = _last_user_text(state)
-                _kept: list[PendingToolCall] = [_tc for _tc in pending if not _needs_sem(_tc["name"])]
+                _kept: list[PendingToolCall] = [
+                    _tc for _tc in pending
+                    if not _is_semantic(str(_tc.get("name") or ""))
+                ]
                 for _tc in _sem:
                     try:
                         _dec = _authz(
@@ -105,42 +136,60 @@ def _commitment_resolve_gate(
                             _tc["name"],
                             exc_info=True,
                         )
-                        semantic_blocked.append(ToolResult(
-                            tool_call_id=str(_tc.get("id") or ""),
-                            name=_tc["name"],
-                            content=(
-                                f"Commitment gate unavailable for {_tc['name']} — "
-                                "blocked while the policy engine is unhealthy. "
-                                "Do not retry; tell the user what failed."
-                            ),
+                        _block_unhealthy(_tc["name"], _tc.get("id"))
+                        continue
+                    try:
+                        if _dec.decision == "allow":
+                            if _dec.rewritten_args:
+                                _tc["arguments"] = _dec.rewritten_args
+                            _kept.append(_tc)
+                        elif _dec.decision in ("clarify", "confirm"):
+                            semantic_hold.append((_tc, _dec))
+                        else:
+                            _q = _dec.reason or "denied by commitment gate"
+                            semantic_blocked.append(ToolResult(
+                                tool_call_id=str(_tc.get("id") or ""),
+                                name=_tc["name"],
+                            content=(f"Commitment gate denied {_tc['name']}: {_q}. "
+                                     "Do not retry; tell the user why and what they can do."),
                             is_error=True, duration_ms=0, outcome="terminal",
                         ))
-                        continue
-                    if _dec.decision == "allow":
-                        if _dec.rewritten_args:
-                            _tc["arguments"] = _dec.rewritten_args
-                        _kept.append(_tc)
-                    elif _dec.decision in ("clarify", "confirm"):
-                        semantic_hold.append((_tc, _dec))
-                    else:
-                        _q = _dec.reason or "denied by commitment gate"
-                        semantic_blocked.append(ToolResult(
-                            tool_call_id=str(_tc.get("id") or ""),
-                            name=_tc["name"],
-                        content=(f"Commitment gate denied {_tc['name']}: {_q}. "
-                                 "Do not retry; tell the user why and what they can do."),
-                        is_error=True, duration_ms=0, outcome="terminal",
-                    ))
-                    if record_commitment_terminal:
-                        try: record_commitment_terminal("denied")
-                        except Exception: pass
+                        if record_commitment_terminal:
+                            try: record_commitment_terminal("denied")
+                            except Exception: pass
+                    except Exception:
+                        # Any exception while processing THIS tool's decision
+                        # denies only THAT tool fail-closed — it must never
+                        # un-gate the rest of the batch (finding #9).
+                        logger.warning(
+                            "[ToolWorker] commitment gate errored processing "
+                            "%s decision — denying that tool (fail-closed)",
+                            _tc.get("name"),
+                            exc_info=True,
+                        )
+                        _block_unhealthy(str(_tc.get("name") or ""), _tc.get("id"))
                 pending = _kept
         except Exception:
-            # Structural breakage inside the gate (not per-tool). Treated
-            # like the layer being disabled — the kill-switch posture is
-            # fail-open — but logged loudly so it is investigated
-            # (deep-audit 2026-08-19, finding #9).
-            logger.warning("[ToolWorker] commitment gate skipped (structural failure)", exc_info=True)
+            # Structural failure in the SHARED gate setup above (tenant
+            # stamp, clock, constraint-belief shim) — NOT a per-tool error.
+            # Per-tool resolve exceptions are guarded inside the loop below,
+            # so one broken tool no longer un-gates the rest of the batch
+            # (deep-audit 2026-08-19, finding #9). Anything still unresolved
+            # here is DENIED fail-closed (AGENTS.md §20: authorization-engine
+            # exceptions on semantic acts fail closed); non-semantic tools
+            # continue untouched so reads never stall on this path.
+            logger.warning(
+                "[ToolWorker] commitment gate structural failure — blocking "
+                "remaining semantic tools (fail-closed)",
+                exc_info=True,
+            )
+            _still_open: list[PendingToolCall] = []
+            for _tc in pending:
+                if _is_semantic(str(_tc.get("name") or "")):
+                    _block_unhealthy(_tc["name"], _tc.get("id"))
+                else:
+                    _still_open.append(_tc)
+            pending = _still_open
 
     if semantic_hold:
         _items = [{

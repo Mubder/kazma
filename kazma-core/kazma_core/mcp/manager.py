@@ -105,6 +105,29 @@ _SENSITIVE_READ_KEYWORDS = (
     "api_key", "private", "vault", "auth", "cookie", "session_key",
 )
 
+# Canonical mutator vocabulary (audit fix — MED-HIGH): mirrored from
+# ``kazma_core.safety.side_effects._MUTATOR_TOKENS`` so MCP classification and
+# the commitment side-effect registry agree on what a mutator looks like.
+# Missing verbs here let safe-token blends like ``mcp__kv__query_set``
+# classify SAFE despite being mutators. Live-imported when available; this
+# mirror is the import-degradation fallback.
+_MUTATOR_TOKENS_FALLBACK = frozenset({
+    "write", "save", "delete", "remove", "drop", "exec", "run", "spawn",
+    "send", "schedule", "cancel", "config", "install", "deploy", "update",
+    "create", "merge", "push", "pull", "commit", "set", "put", "post",
+    "apply", "grant", "revoke", "reset", "clear", "wipe", "override",
+})
+
+
+def _mutator_tokens() -> frozenset[str]:
+    """Return the canonical mutator vocabulary (lazy import — no cycle)."""
+    try:
+        from kazma_core.safety.side_effects import _MUTATOR_TOKENS
+
+        return _MUTATOR_TOKENS
+    except Exception:
+        return _MUTATOR_TOKENS_FALLBACK
+
 
 def _mcp_raw_tool_name(tool_name: str) -> str:
     """Strip ``mcp__{server}__`` namespace so classification ignores server slugs.
@@ -200,14 +223,21 @@ def classify_mcp_tool(tool_name: str) -> str:
     ``mcp__server__`` prefix) so server slugs cannot bleach unknown tools.
     """
     name_lower = _mcp_raw_tool_name(tool_name).lower()
-    has_danger = any(kw in name_lower for kw in _DANGER_KEYWORDS)
-    has_sensitive_read = any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
-    if has_danger or has_sensitive_read:
+    tokens = set(re.split(r"[^a-z0-9]+", name_lower))
+    # Danger wins on ANY danger keyword, sensitive-read token, or canonical
+    # mutator token (audit fix): a mutator verb blended with a safe noun
+    # (``query_set``, ``kv_save``) must not bleach to safe. Mutators match
+    # whole tokens; keyword scans stay substring-based as before.
+    has_danger = (
+        any(kw in name_lower for kw in _DANGER_KEYWORDS)
+        or any(kw in name_lower for kw in _SENSITIVE_READ_KEYWORDS)
+        or bool(tokens & set(_mutator_tokens()))
+    )
+    if has_danger:
         return "danger"
     # Safe verbs need whole token matches.  A substring match would classify
     # arbitrary names such as ``frobnicate`` (contains ``cat``) as safe and
     # bypass the default-unknown HITL gate.
-    tokens = set(re.split(r"[^a-z0-9]+", name_lower))
     has_safe = any(kw in tokens for kw in _SAFE_KEYWORDS)
     if has_safe:
         return "safe"
