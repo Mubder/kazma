@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Unreleased — X audit log viewer in Settings (2026-08-27)
+
+The X connector's audit trail was DB-only; now it is visible in the UI.
+
+- **GET /api/x/audit** — newest-first entries (limit 1–500, optional action
+  filter) from the append-only `x_audit.db`.
+- **Settings → X connector → Audit log**: compact table (local timestamp,
+  action, status, HTTP code, tweet id, duration) with a Refresh button;
+  hover any row for the full request/response content. Fully localized
+  (EN/AR).
+- Tests: endpoint serving + limit bounding (test_x_audit.py — 8 green);
+  template-compile + settings suites green (118).
+
 ## Unreleased — generate_pdf post-render verification (2026-08-27 incident)
 
 The model passed a SUMMARY as section bodies ("26 names, all confirmed

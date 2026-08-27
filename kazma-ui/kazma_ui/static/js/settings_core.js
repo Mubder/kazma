@@ -341,6 +341,8 @@
         xForm: { api_key: '', api_key_secret: '', access_token: '', access_token_secret: '', handle: '', enabled: true, max_posts_per_day: 8, max_posts_per_month: 80 },
         xLoading: false,
         xSaving: false,
+        // X audit log (append-only x_audit.db; loaded on demand)
+        xAudit: { entries: [], loading: false },
         xShowKeys: false,
 
         async init() {

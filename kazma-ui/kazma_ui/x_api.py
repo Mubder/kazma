@@ -115,6 +115,24 @@ async def x_status() -> JSONResponse:
         return _safe_error(exc)
 
 
+@router.get("/audit")
+async def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
+    """Recent X-integration audit entries (append-only x_audit.db).
+
+    Every API call — post/reply/delete/verify, success, HTTP error, and
+    network failure alike — with its full request/response content and a
+    local timestamp. Newest first.
+    """
+    try:
+        from kazma_core.x_api.audit import query_x_audit
+
+        bounded = max(1, min(int(limit or 50), 500))
+        entries = query_x_audit(limit=bounded, action=(action or None))
+        return JSONResponse({"ok": True, "count": len(entries), "entries": entries})
+    except Exception as exc:
+        return _safe_error(exc)
+
+
 @protected_router.post("/credentials", dependencies=[Depends(_verify_same_origin)])
 async def x_save_credentials(body: XCredentialsBody) -> JSONResponse:
     try:

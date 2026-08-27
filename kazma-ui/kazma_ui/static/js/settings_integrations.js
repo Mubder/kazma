@@ -657,6 +657,18 @@
             }
         },
 
+        async loadXAudit() {
+            this.xAudit.loading = true;
+            try {
+                const data = await this._fetch('/api/x/audit?limit=50');
+                if (data && data.ok) this.xAudit.entries = data.entries || [];
+            } catch (e) {
+                showToast('Failed to load X audit log: ' + e.message, 'error');
+            } finally {
+                this.xAudit.loading = false;
+            }
+        },
+
         async saveXCredentials() {
             this.xSaving = true;
             try {

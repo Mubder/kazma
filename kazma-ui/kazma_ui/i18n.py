@@ -717,6 +717,19 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.x_docs_hint": {"en": "Guide:", "ar": "الدليل:"},
     "settings.x_docs_link": {"en": "X publisher", "ar": "ناشر إكس"},
+    "settings.x_audit_title": {"en": "Audit log", "ar": "سجل التدقيق"},
+    "settings.x_audit_refresh": {"en": "Refresh", "ar": "تحديث"},
+    "settings.x_audit_hint": {
+        "en": "Every X API call — posts, replies, deletes, errors — with full content and timestamp (hover a row for the response).",
+        "ar": "كل عملية من واجهة إكس — نشر، ردود، حذف، أخطاء — بالمحتوى الكامل والوقت (مرّر المؤشر على الصف لعرض الاستجابة).",
+    },
+    "settings.x_audit_when": {"en": "When", "ar": "الوقت"},
+    "settings.x_audit_action": {"en": "Action", "ar": "العملية"},
+    "settings.x_audit_status": {"en": "Status", "ar": "الحالة"},
+    "settings.x_audit_empty": {
+        "en": "No X activity recorded yet — entries appear here after the first API call.",
+        "ar": "لا يوجد نشاط مسجّل بعد — ستظهر العمليات هنا بعد أول استدعاء للواجهة.",
+    },
     "settings.tab_documents": {"en": "Documents", "ar": "المستندات"},
     "settings.documents_title": {"en": "Document Intelligence", "ar": "ذكاء المستندات"},
     "settings.documents_hint": {

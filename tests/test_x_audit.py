@@ -170,3 +170,43 @@ async def test_network_error_audited(audit_db: Path, fake_http) -> None:
     rows = query_x_audit(status="network_error")
     assert rows and rows[0]["action"] == "post"
     assert rows[0]["http_status"] is None
+
+
+# ── Settings viewer endpoint ──────────────────────────────────────────
+
+
+async def test_audit_endpoint_serves_entries(monkeypatch):
+    """GET /api/x/audit backs the Settings → X connector audit table."""
+    import kazma_core.x_api.audit as audit_mod
+    from kazma_ui.x_api import x_audit
+
+    rows = [
+        {"ts": "2026-08-27T20:01:02+03:00", "action": "post", "status": "success",
+         "http_status": 201, "tweet_id": "1770", "duration_ms": 900,
+         "request_body": None, "response_body": None},
+        {"ts": "2026-08-27T20:05:00+03:00", "action": "delete", "status": "error",
+         "http_status": 429, "tweet_id": None, "duration_ms": 300,
+         "request_body": None, "response_body": None},
+    ]
+    monkeypatch.setattr(audit_mod, "query_x_audit", lambda **k: rows)
+    out = await x_audit(limit=10)
+    import json as _json
+    payload = _json.loads(out.body)
+    assert payload["ok"] is True and payload["count"] == 2
+    assert payload["entries"][0]["action"] == "post"
+
+
+async def test_audit_endpoint_bounds_limit(monkeypatch):
+    import kazma_core.x_api.audit as audit_mod
+    from kazma_ui.x_api import x_audit
+
+    seen = {}
+
+    def fake(**k):
+        seen["limit"] = k.get("limit")
+        return []
+
+    monkeypatch.setattr(audit_mod, "query_x_audit", fake)
+    import json as _json
+    payload = _json.loads((await x_audit(limit=9999)).body)
+    assert payload["ok"] is True and seen["limit"] == 500
