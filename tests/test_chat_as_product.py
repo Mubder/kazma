@@ -193,3 +193,14 @@ def test_scroll_is_pin_to_bottom_not_forced() -> None:
     assert "if (!_userPinnedToBottom) return; // reader scrolled up — don't fight them" in js
     assert "function scrollToBottomForce()" in js
     assert js.count("scrollToBottomForce();") >= 2  # send + session load
+
+
+def test_status_strip_never_toggles_per_token() -> None:
+    """#thinking-indicator sits IN-FLOW between transcript and composer: every
+    hide/show shifts the composer ~33px and makes the streaming text bounce.
+    onToken used to clear it on every token batch while heartbeats/plan
+    events re-set it — constant flapping, perceived as the flicker. The strip
+    must stay steady for the whole stream; only terminal paths may hide it."""
+    js = _CHAT_JS.read_text(encoding="utf-8")
+    on_token_body = js.split("onToken: function(data) {", 1)[1].split("onToolCall:", 1)[0]
+    assert "_clearStatusStrip" not in on_token_body

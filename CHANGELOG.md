@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Unreleased — status strip no longer flaps mid-stream (the flicker, root-caused) (2026-08-27)
+
+Operator lead: "it's the MD markers — started after the plan-fence work."
+Analysis of `8816ebe3` (plan fences) + instrumentation found the real loop:
+`#thinking-indicator` renders **in-flow between the transcript and the
+composer** — every hide/show shifts the composer ~33px, resizes the
+transcript viewport, and makes the streaming text jump. `onToken` was
+calling `_clearStatusStrip()` on **every token batch** while heartbeats,
+"Writing reply…", and the plan-fence commit's new "Plan locked" status
+re-set it — so the strip flapped constantly during every reply, bouncing
+the layout (corroborated by the earlier scroll telemetry: 13 direction
+reversals / 18 >30px jumps per stream).
+
+- `onToken` no longer clears the strip — it stays steady ("Writing reply…")
+  for the whole stream; only terminal paths (done / error / endTurn /
+  approval park) hide it.
+- Composes with the two earlier angles: plain-text live streaming (no
+  per-token rebuild) and pin-to-bottom scrolling.
+
 ## Unreleased — pin-to-bottom scrolling (streaming view stops bouncing) (2026-08-27)
 
 Third angle on the flicker report, measured this time: `scrollToBottom` ran

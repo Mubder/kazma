@@ -1832,7 +1832,12 @@
         noteTurnActivity();
         _noteSeq();
         _outboxClear();  // first streamed token = the server received the send
-        _clearStatusStrip();
+        // NOTE: do NOT clear the status strip per token. The strip sits
+        // IN-FLOW between transcript and composer — every hide/show shifts
+        // the composer ~33px, resizes the transcript viewport and makes the
+        // streaming text bounce (the flicker). While tokens flow the strip
+        // stays steady ("Writing reply…"); terminal paths (done/error/
+        // endTurn) are the only ones allowed to hide it.
         activeTypingEl = null;
         if (!currentMsgEl) {
           currentMsgEl = createAssistantMessage();
