@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## Unreleased — X integration audit log (2026-08-27)
+
+Operator decision: every X (Twitter) API call now leaves an append-only audit
+trail — full request payload + full response body, HTTP status, duration, and
+a human-readable local date-and-time — in `kazma-data/x_audit.db` (SQLite WAL).
+
+- **`kazma_core/x_api/audit.py`** — `XAuditLog` store + `log_x_event`
+  (best-effort, never raises — an audit failure can never break the X call it
+  records) + `query_x_audit()` / `purge_x_audit()` helpers. Separate from the
+  post ledger (`x_posts.db`, quota/dedup control flow) on purpose: the audit
+  log is append-only truth, never consulted to gate a request.
+- **Hooked at the single choke point** — `XClient._request` — so posts,
+  replies, deletes, credential checks, HTTP errors (429/401/…), and network
+  failures are ALL recorded, regardless of caller (native `x_publisher`
+  skill, `/api/x/*` web router, or scheduled tweets). Actions are labeled
+  `post` / `reply` / `delete` / `verify_credentials`; `tweet_id` captured on
+  success and on delete.
+- No automatic pruning — an audit log is kept whole; `purge_x_audit()` is
+  there if an operator ever wants retention.
+- Tests: `tests/test_x_audit.py` (store roundtrip incl. Arabic content,
+  choke-point coverage for success/reply/delete/error/network, never-raises).
+
 ## Unreleased — fix streaming "double vision" flicker (2026-08-27)
 
 Measured root cause: `chat.js onToken` re-parsed the FULL accumulated

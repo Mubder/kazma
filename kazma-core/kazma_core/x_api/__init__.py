@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from kazma_core.x_api.audit import log_x_event, query_x_audit, reset_x_audit
 from kazma_core.x_api.client import XApiError, XClient
 from kazma_core.x_api.config import XConfig, XCredentials, get_x_config
 from kazma_core.x_api.policy import PolicyDecision, evaluate_post
@@ -14,4 +15,7 @@ __all__ = [
     "PolicyDecision",
     "evaluate_post",
     "get_x_config",
+    "log_x_event",
+    "query_x_audit",
+    "reset_x_audit",
 ]
