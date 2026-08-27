@@ -22,8 +22,15 @@ from kazma_core.agent.plan_fence import (
     PLAN_EXECUTE_FINAL,
     normalize_plan_fence,
     should_execute_plan_only_hop,
+    split_plan_and_prose as _split_plan_fence,
 )
 from kazma_core.agent.state import NodeName, PendingToolCall, SupervisorState
+from kazma_core.agent.task_ledger import (
+    extract_next_action as _extract_next_action,
+    format_ledger_block as _format_ledger_block,
+    get_ledger_store as _get_ledger_store,
+    resolve_continuation as _resolve_ledger_continuation,
+)
 from kazma_core.llm_provider import LLMProvider
 from kazma_core.llm_stream import invoke_llm_chat
 from kazma_core.summarizer import _normalize_msg
@@ -513,6 +520,68 @@ async def supervisor_node(
                 bool(_recall_session_id),
             )
 
+        # ── Task Ledger: durable task state + continuation binding ──────
+        # The ledger is the resolution surface for short continuations
+        # ("proceed"/"next") — never the corruptible transcript. A topic
+        # shift supersedes the active ledger; a normal ≥40-char message
+        # seeds a fresh one; a DECLARED next action binds continuations,
+        # and a continuation with no declared target locks the turn to a
+        # clarifying question (tools are filtered out below) so a misread
+        # costs a question, never an action (2026-08-27 git-commit incident).
+        _ledger_clarify = False
+        if iteration == 0:
+            try:
+                _thread_id = str(state.get("thread_id", "") or "")
+                if _thread_id:
+                    _led_store = _get_ledger_store()
+                    _ledger = _led_store.active_for(_thread_id)
+                    if _is_shift and _ledger is not None:
+                        _ledger.supersede(by=(last_user_content or "")[:120])
+                        _led_store.save(_ledger)
+                        _ledger = None
+                    if (
+                        _ledger is None
+                        and (last_user_content or "").strip()
+                        and len(last_user_content.strip()) >= 40
+                    ):
+                        _ledger = _led_store.get_or_create(_thread_id)
+                        _ledger.goal = last_user_content.strip()[:240]
+                        _led_store.save(_ledger)
+                    _led_res = _resolve_ledger_continuation(
+                        last_user_content, _ledger, is_continuation=_is_continue,
+                    )
+                    if _led_res["mode"] == "bound":
+                        logger.info(
+                            "[Supervisor] ledger binding: %r -> %r",
+                            (last_user_content or "")[:40],
+                            str(_led_res.get("next_action", ""))[:80],
+                        )
+                        _led_block = _format_ledger_block(
+                            _ledger, binding=str(_led_res["binding"])
+                        )
+                    elif _led_res["mode"] == "clarify":
+                        _ledger_clarify = True
+                        _led_block = "KAZMA CLARIFY-ONLY TURN: " + str(
+                            _led_res["question"]
+                        )
+                        logger.info(
+                            "[Supervisor] ledger clarify-lock "
+                            "(continuation with no declared next step)"
+                        )
+                    else:
+                        _led_block = (
+                            _format_ledger_block(_ledger) if _ledger else ""
+                        )
+                    if _led_block:
+                        _ins2 = (
+                            1 if messages and messages[0].get("role") == "system" else 0
+                        )
+                        messages.insert(
+                            _ins2, {"role": "system", "content": _led_block}
+                        )
+            except Exception:
+                logger.debug("[Supervisor] task-ledger wiring failed", exc_info=True)
+
         # Priority pin: every non-continuation turn (drop the old len>=80 gate).
         # Continuations get CONTINUITY above instead of fighting priority text.
         # Only on iteration 0 so ReAct tool rounds do not re-stack system notes.
@@ -704,6 +773,11 @@ async def supervisor_node(
         tool_definitions,
         list(intent_patch.get("hard_constraints") or []),
     )
+    # Ledger clarify-lock: an unresolved continuation must cost a QUESTION,
+    # not an action — with zero tools available the only sensible reply is
+    # the clarifying question the ledger block demands.
+    if _ledger_clarify:
+        effective_tool_definitions = []
 
     # Classify as a hint; models.defaults.<kind> wins over keywords / YAML.
     routed_model = None
@@ -1476,6 +1550,34 @@ async def supervisor_node(
         duration_ms,
         len(response.tool_calls),
     )
+
+    # ── Task Ledger persistence: plan steps + declared next action ────
+    # Deterministic extraction — no extra LLM call. The reply's plan fence
+    # becomes the ledger's steps; its closing "Now I'll …" line becomes the
+    # next_action that BINDS the next short continuation.
+    try:
+        _led_content = (response.content or "").strip()
+        if _led_content:
+            _thread_id = str(state.get("thread_id", "") or "")
+            if _thread_id:
+                _led_store = _get_ledger_store()
+                _ledger = _led_store.active_for(_thread_id)
+                if _ledger is not None:
+                    _plan_txt, _ = _split_plan_fence(_led_content)
+                    if _plan_txt.strip():
+                        _items = [
+                            ln.strip().lstrip("-*0123456789.) ").strip()
+                            for ln in _plan_txt.splitlines()
+                        ]
+                        _items = [i for i in _items if len(i) >= 3][:12]
+                        if _items:
+                            _ledger.set_plan(_items)
+                    _nxt = _extract_next_action(_led_content)
+                    if _nxt:
+                        _ledger.declare_next(_nxt)
+                    _led_store.save(_ledger)
+    except Exception:
+        logger.debug("[Supervisor] task-ledger persist failed", exc_info=True)
 
     # ── Route decision ─────────────────────────────────────────────
     if not response.tool_calls:

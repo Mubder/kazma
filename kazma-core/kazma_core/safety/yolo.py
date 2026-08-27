@@ -25,7 +25,9 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_TTL_SECONDS = 4 * 3600  # 4 hours
+_DEFAULT_TTL_SECONDS = 3600  # 1 hour — was 4h; a stale YOLO window let a
+# misread intent run an unprompted git commit (2026-08-27). Raise via
+# KAZMA_YOLO_TTL_SECONDS (0/off = no expiry) if you truly need longer.
 
 
 class YoloDisabledError(PermissionError):

@@ -163,6 +163,20 @@ class SafetyMiddleware:
             # require_approval_for list omits them.
             force_danger = True
 
+        # Blast radius (2026-08-27 incident): git WRITE commands (commit/
+        # push/reset/…) always gate — YOLO must never auto-approve a repo
+        # mutation born from a misread intent. Read-only git is exempt.
+        _git_write = False
+        try:
+            if tool_name in ("exec", "shell_exec", "run_command") and tool_args:
+                from kazma_core.agent.task_ledger import is_git_write_command
+
+                _git_write = is_git_write_command(str(tool_args))
+        except Exception:
+            _git_write = False
+        if _git_write:
+            force_danger = True
+
         if not force_danger and self.is_sensitive_read(tool_name):
             logger.info("[Safety] Sensitive read allowed: %s (task=%s)", tool_name, task_id)
             return True
@@ -170,7 +184,7 @@ class SafetyMiddleware:
         if not force_danger and not self.is_danger_tool(tool_name):
             return True  # safe tool
 
-        if tid and tool_name not in _always_set:
+        if tid and tool_name not in _always_set and not _git_write:
             try:
                 from kazma_core.safety.yolo import is_yolo_active
                 if is_yolo_active(tid):

@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## Unreleased — Task Ledger: durable intent resolution, no shortcuts (2026-08-27)
+
+The definitive answer to the "proceed with next → git commit" incident class.
+Short continuations used to resolve against the CONVERSATION TRANSCRIPT — a
+corruptible narrative (that day: truncated to 158 chars by a mid-stream
+Stop). The Ledger replaces that with a durable, structured, owned object.
+
+**`kazma_core/agent/task_ledger.py`** — one ACTIVE ledger per thread in
+`kazma-data/task_ledgers.db` (SQLite WAL): `goal`, plan `steps` (status +
+result per step), **`next_action`** (THE binding target), `findings`,
+`open_questions`. Survives restarts, refreshes, truncated replies, and new
+sessions — the resolution surface is never the transcript.
+
+- **Deterministic maintenance**: each reply's ```plan fence becomes the
+  ledger's steps; its closing "Now … / Next: … / التالي:" line becomes
+  `next_action` (EN+AR patterns, last declaration wins). No extra LLM call.
+- **`task_ledger_update` native tool** — the model maintains goal / next
+  step / findings / step-status deliberately (registered read-safe).
+- **Binding**: a short continuation ("proceed", "next", كمّل) + active
+  ledger with a declared next action → the turn context states exactly
+  which step "next" means, with an escape clause for genuinely-new tasks.
+- **Structural clarify**: a continuation with NO declared target locks the
+  turn to a single clarifying question — tools are filtered OUT, so the
+  model physically cannot act on a guess. A misread costs a question.
+- **Topic shift supersedes** the ledger (kept for history); ≥40-char
+  messages seed a fresh one.
+
+**Blast radius (both execution paths)**
+
+- Git WRITE commands (`commit/push/merge/rebase/reset/checkout --
+  /restore/clean/rm/…`) now ALWAYS require an approval card — YOLO cannot
+  auto-approve them — on the graph tool-worker path AND the swarm/IDE
+  registry path. Read-only git (status/log/diff) is exempt.
+- YOLO TTL default 4h → **1h** (`KAZMA_YOLO_TTL_SECONDS` still overrides).
+
+Tests: `tests/test_task_ledger.py` (12) — store durability across reopen,
+supersede/history, EN+AR extraction, bind/clarify/pass resolution, git-write
+classification matrix, TTL pin, supervisor wiring pins, tool registration.
+
 ## Unreleased — un-glue streamed narration segments (2026-08-27)
 
 Report: during multi-iteration turns (batch domain checks) the live bubble

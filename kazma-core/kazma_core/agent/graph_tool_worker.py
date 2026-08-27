@@ -274,6 +274,27 @@ def _commitment_resolve_gate(
     return pending, semantic_blocked
 
 
+def _tc_is_git_write(tc: "PendingToolCall") -> bool:
+    """A git WRITE (commit/push/reset/checkout --/…) must always require an
+    approval card — even under YOLO. Blast-radius rule from the 2026-08-27
+    incident: a misread intent ("proceed with next") must cost a
+    confirmation dialog, never a repo mutation. Read-only git (status/log/
+    diff) is exempt. Also honored by the swarm/IDE registry path via the
+    same kazma_core.agent.task_ledger.is_git_write_command predicate."""
+    try:
+        if str(tc.get("name", "")) not in ("exec", "shell_exec", "run_command"):
+            return False
+        args = tc.get("arguments") or {}
+        cmd = str(args.get("command") or args.get("cmd") or "")
+        if not cmd:
+            return False
+        from kazma_core.agent.task_ledger import is_git_write_command
+
+        return is_git_write_command(cmd)
+    except Exception:
+        return False
+
+
 async def tool_worker_node(
     state: SupervisorState,
     *,
@@ -532,7 +553,7 @@ async def tool_worker_node(
 
             _graph_gate_token = _graph_hitl_gate_ctx.set(True)
             for tc in pending:
-                if requires_approval(tc["name"], hitl_config):
+                if requires_approval(tc["name"], hitl_config) or _tc_is_git_write(tc):
                     danger_tools.append(tc)
                 else:
                     safe_tools.append(tc)
@@ -540,7 +561,7 @@ async def tool_worker_node(
             from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
 
             for tc in pending:
-                if tc["name"] in ALWAYS_HITL_TOOLS:
+                if tc["name"] in ALWAYS_HITL_TOOLS or _tc_is_git_write(tc):
                     danger_tools.append(tc)
                 else:
                     safe_tools.append(tc)
@@ -835,7 +856,11 @@ async def tool_worker_node(
             current_thread = get_current_thread_id() or state.get("thread_id") or ""
             from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS
 
-            _always = [tc for tc in danger_tools if tc["name"] in ALWAYS_HITL_TOOLS]
+            _always = [
+                tc
+                for tc in danger_tools
+                if tc["name"] in ALWAYS_HITL_TOOLS or _tc_is_git_write(tc)
+            ]
             if current_thread and is_yolo_active(str(current_thread)) and not _always:
                 logger.warning(
                     "[ToolWorker] YOLO active for thread=%s — auto-approving %d danger tool(s)",

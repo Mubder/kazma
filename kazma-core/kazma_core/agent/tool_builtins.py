@@ -2605,6 +2605,93 @@ def register_builtin_tools(registry: LocalToolRegistry) -> None:
     except Exception as e:
         logger.error("Failed to register update_scratchpad: %s", e, exc_info=True)
 
+    # Task Ledger — the durable task-state object the user's short
+    # continuations ("proceed"/"next") resolve against. The deterministic
+    # extractor maintains plan/next_action automatically; THIS tool lets the
+    # model maintain goal/findings/steps deliberately (2026-08-27 design).
+    try:
+        from kazma_core.agent.task_ledger import get_ledger_store
+
+        async def task_ledger_update(
+            goal: str = "",
+            next_action: str = "",
+            add_finding: str = "",
+            add_open_question: str = "",
+            mark_step_done: int = -1,
+            complete: bool = False,
+        ) -> str:
+            """Update the durable task ledger (goal / next step / findings).
+
+            Maintains the structured task state that binds the user's short
+            continuation replies ("proceed", "next") to the RIGHT step and
+            survives refreshes and restarts. Set ``goal`` when the mission
+            is (re)defined, ``next_action`` to declare what comes next,
+            ``add_finding`` to record a durable result, ``mark_step_done``
+            (0-based plan index) as steps complete, ``complete`` when the
+            task is finished.
+            """
+            from kazma_core.shutdown import is_shutting_down
+
+            if is_shutting_down():
+                return "Error: shutting down"
+            tid = ""
+            try:
+                from kazma_core.safety.hitl import get_current_thread_id
+
+                tid = get_current_thread_id() or ""
+            except Exception:
+                tid = ""
+            if not tid:
+                return "Error: no active thread for the task ledger"
+            store = get_ledger_store()
+            led = store.get_or_create(tid)
+            changed: list[str] = []
+            if goal.strip():
+                led.goal = goal.strip()[:240]
+                changed.append("goal")
+            if next_action.strip():
+                led.declare_next(next_action)
+                changed.append("next_action")
+            if add_finding.strip():
+                led.add_finding(add_finding)
+                changed.append("finding")
+            if add_open_question.strip():
+                led.add_open_question(add_open_question)
+                changed.append("open_question")
+            if mark_step_done >= 0:
+                led.mark_step(mark_step_done, "done")
+                changed.append(f"step[{mark_step_done}]=done")
+            if complete:
+                led.complete()
+                changed.append("complete")
+            if not changed:
+                return "No changes requested — ledger unchanged."
+            store.save(led)
+            return (
+                "Task ledger updated: "
+                + ", ".join(changed)
+                + f". Current: goal={led.goal[:120]!r} next={led.next_action[:120]!r} "
+                f"steps={sum(1 for s in led.steps if s.status == 'done')}/{len(led.steps)} done."
+            )
+
+        registry.register_function(
+            "task_ledger_update",
+            task_ledger_update,
+            description=(
+                "Update the DURABLE TASK LEDGER — the structured task state "
+                "(goal, plan steps, declared next action, findings) that the "
+                "user's short continuation replies ('proceed', 'next', "
+                "'continue') resolve against. Maintaining it is how you make "
+                "'next' unambiguous. Set goal when the mission is defined, "
+                "next_action whenever you announce the next step, add_finding "
+                "for durable results, mark_step_done (0-based) as steps "
+                "complete, complete=True when finished. Args are all optional."
+            ),
+            category="memory",
+        )
+    except Exception as e:
+        logger.error("Failed to register task_ledger_update: %s", e, exc_info=True)
+
     @registry.register(
         description=(
             "Use the computer (screenshot → click/type/key loop) to accomplish a "
