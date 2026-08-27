@@ -231,8 +231,11 @@ def test_chat_js_handles_glued_closer():
     # and must not swallow ```plantuml-style fences (\b guard). The
     # 2026-08-27 plan-render rework also tolerates space variants
     # ("``` plan") — CommonMark opens those fences too, and refusing them
-    # glued plan text into prose.
-    assert r"/```[ \t]*plan\b[^\n]*\n?([\s\S]*?)```/i" in src
+    # glued plan text into prose. The multi-fence rework (same day) made the
+    # CLOSED-fence matcher GLOBAL (`gi` + while-loop) so replies carrying
+    # several plan fences strip ALL of them — later fence wins.
+    assert r"/```[ \t]*plan\b[^\n]*\n?([\s\S]*?)```/gi" in src
+    assert "re.exec(s)) !== null" in src
 
 
 # ── Plan-vs-content discrimination (2026-08-26 regressions) ────────────

@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Unreleased — transcript recall fallback (2026-08-27)
+
+Born from the "green names" incident: facts that live only in past chat
+transcripts are invisible to V2 recall, so a "list my green names" task
+burned 21 iterations hand-writing SQL against `chat_sessions.db` (plus a
+YOLO gate) before answering.
+
+- **`kazma_core/memory/transcript_recall.py`** — `search_transcripts()`:
+  read-only, term-based search over past web chat sessions (title + message
+  text; longest/most-specific terms win, title matches rank highest, Arabic
+  terms supported). Opens `kazma-data/chat_sessions.db` by path (no
+  kazma-ui import), never raises, quiet no-op when the store is missing.
+- **Supervisor wiring** (`graph_supervisor.py`): when V2 recall returns
+  NOTHING for the query, the top past-session hits are injected as a
+  prompt-fenced untrusted block (`chat_history` source) next to where the
+  memory block would sit — zero extra iterations, no danger tools, no
+  permissions. Suppressed-recall turns skip it too.
+- Kill-switch: `KAZMA_TRANSCRIPT_RECALL=0` env or ConfigStore
+  `memory.transcript_fallback=false` (live-read, default ON).
+- Tests: `tests/test_transcript_recall.py` (7) — ranking incl. the exact
+  green-names shape, Arabic terms, current-session exclusion, tenant
+  isolation, missing-store no-op, kill-switch, fence format, wiring pin.
+- Note: v1 reads the SQLite sessions store (present even under the PG
+  backend for web sessions); a Postgres-primary variant can follow if
+  session storage ever moves fully to PG.
+
 ## Unreleased — multiple ```plan fences render correctly again (2026-08-27)
 
 Operator report: a task reply carrying **five** ```plan fences (the model

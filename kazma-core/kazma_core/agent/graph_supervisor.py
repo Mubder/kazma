@@ -824,6 +824,41 @@ async def supervisor_node(
                             "[Supervisor] V2 recall: %d beliefs, %d episodes for turn",
                             len(result.beliefs), len(result.episodes),
                         )
+                elif not _suppress_recall:
+                    # Transcript fallback (2026-08-27 "green names" incident):
+                    # V2 memory had NOTHING for the query, yet the answer often
+                    # lives in a past chat transcript. Search past web sessions
+                    # (title + message text) and inject a fenced excerpt block —
+                    # instead of the supervisor hand-writing SQL against
+                    # chat_sessions.db for 21 iterations (plus a YOLO gate).
+                    try:
+                        from kazma_core.memory.transcript_recall import (
+                            format_transcript_block,
+                            search_transcripts,
+                            transcript_fallback_enabled,
+                        )
+
+                        if transcript_fallback_enabled():
+                            _tx_hits = await asyncio.to_thread(
+                                search_transcripts,
+                                _recall_query or last_user_content,
+                                exclude_session_id=_recall_session_id,
+                                tenant_id=str(state.get("tenant_id", "default")),
+                            )
+                            if _tx_hits:
+                                _tx_block = format_transcript_block(_tx_hits)
+                                if _tx_block:
+                                    messages.insert(
+                                        1, {"role": "system", "content": _tx_block}
+                                    )
+                                    logger.info(
+                                        "[Supervisor] transcript fallback: %d past-session hit(s) for turn",
+                                        len(_tx_hits),
+                                    )
+                    except Exception:
+                        logger.debug(
+                            "[Supervisor] transcript fallback failed", exc_info=True
+                        )
                 # Merge Knowledge Library into chat path (labeled, fenced).
                 # Product merge: inject KB next to memory; optional promote to episodes.
                 _kb_hits_for_explain: list[dict[str, Any]] = []
