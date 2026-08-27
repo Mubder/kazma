@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Unreleased — memory q-filter underscore-insensitive (2026-08-27)
+
+`memory_list_beliefs(q=…)` and `memory_list_entities(q=…)` used a literal
+LIKE — "memory system" returned 0 while FTS `memory_search` matched
+`user_memory_system` fine. Both filters now normalize underscores/hyphens
+to spaces on BOTH sides (SQL `REPLACE` + a `_qnorm` needle normalizer), so
+word-style queries match snake/kebab-case ids. Verified: "memory system"
+finds `user_memory_system`; "prefers dark" finds `prefers-dark-mode`.
+
 ## Unreleased — cron approval-delivery pipeline fixed, 4 layers (2026-08-27)
 
 The incident class: agent-rescheduled X-tweet cron jobs ("Rescheduled batch

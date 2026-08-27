@@ -9,6 +9,8 @@ denial notifications, and the scheduling context plumbing.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 import importlib
@@ -177,3 +179,20 @@ async def test_denial_notification_silent_outside_cron(monkeypatch):
 
     await _notify_cron_denial("x_post", "denied")
     assert not called  # normal gateway turns: no extra message
+
+
+# ── memory q-filter normalization (2026-08-27 quirk) ──────────────────
+
+
+def test_memory_q_filter_underscore_insensitive():
+    """memory_list_beliefs(q=…) used a literal LIKE — 'memory system'
+    returned 0 while FTS memory_search matched user_memory_system. The
+    filter now normalizes _/- to spaces on both sides."""
+    from kazma_core.agent.tool_builtins import _qnorm
+
+    assert _qnorm("memory system") == "memory system"
+    assert _qnorm("Memory_System") == "memory system"
+    assert _qnorm("  prefers--dark__mode ") == "prefers dark mode"
+    src = Path(__import__("kazma_core.agent.tool_builtins", fromlist=["x"]).__file__).read_text(encoding="utf-8")
+    assert "REPLACE(REPLACE(subject,'_',' '),'-',' ')" in src
+    assert "REPLACE(REPLACE(e.name,'_',' '),'-',' ')" in src

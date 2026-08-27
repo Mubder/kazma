@@ -20,6 +20,16 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from kazma_core.agent.tool_registry import LocalToolRegistry
 
+def _qnorm(q: str) -> str:
+    """Normalize a memory q-filter: underscores/hyphens -> single spaces,
+    lowercased. Paired with REPLACE(...) in SQL so 'memory system' matches
+    user_memory_system (2026-08-27 report — the literal LIKE filter missed
+    it while FTS memory_search matched fine)."""
+    import re as _re
+
+    return _re.sub(r"[_\-\s]+", " ", str(q or "").strip().lower()).strip()
+
+
 def register_builtin_tools(registry: LocalToolRegistry) -> None:
     """Register the core built-in tools onto *registry*."""
     from kazma_core.agent.tool_registry import _pending_dispatch_tasks
@@ -514,10 +524,13 @@ def register_builtin_tools(registry: LocalToolRegistry) -> None:
             )
             params: list[Any] = [tenant]
             if (q or "").strip():
-                ql = f"%{q.strip().lower()}%"
+                # Word-boundary friendly: normalize _/- to spaces on BOTH
+                # sides so 'memory system' matches user_memory_system.
+                ql = f"%{_qnorm(q)}%"
                 sql += (
-                    " AND (LOWER(subject) LIKE ? OR LOWER(predicate) LIKE ? "
-                    "OR LOWER(object) LIKE ?)"
+                    " AND (LOWER(REPLACE(REPLACE(subject,'_',' '),'-',' ')) LIKE ? "
+                    "OR LOWER(REPLACE(REPLACE(predicate,'_',' '),'-',' ')) LIKE ? "
+                    "OR LOWER(REPLACE(REPLACE(object,'_',' '),'-',' ')) LIKE ?)"
                 )
                 params.extend([ql, ql, ql])
             sql += (
@@ -564,10 +577,11 @@ def register_builtin_tools(registry: LocalToolRegistry) -> None:
             """
             params: list[Any] = [tenant]
             if (q or "").strip():
-                ql = f"%{q.strip().lower()}%"
+                ql = f"%{_qnorm(q)}%"
                 sql += (
-                    " AND (LOWER(e.id) LIKE ? OR LOWER(e.name) LIKE ? "
-                    "OR LOWER(e.type) LIKE ?)"
+                    " AND (LOWER(REPLACE(REPLACE(e.id,'_',' '),'-',' ')) LIKE ? "
+                    "OR LOWER(REPLACE(REPLACE(e.name,'_',' '),'-',' ')) LIKE ? "
+                    "OR LOWER(REPLACE(REPLACE(e.type,'_',' '),'-',' ')) LIKE ?)"
                 )
                 params.extend([ql, ql, ql])
             sql += " ORDER BY belief_count DESC, e.name ASC LIMIT ?"
