@@ -44,13 +44,17 @@ def test_load_bearing_ids_unique() -> None:
     assert 'class="capacity-group session-metrics"' in html
 
 
-def test_composer_more_hides_capacity_not_deletes() -> None:
+def test_capacity_row_visible_not_hidden_behind_popover() -> None:
+    """Operator decision 2026-08-27: the FULL capacity row (budget status +
+    mode pills + Reset + session usage) is a visible toolbar under the text
+    field — the ⋯ composer-more popover that hid it is removed."""
     html = _CHAT.read_text(encoding="utf-8")
-    assert 'class="composer-more"' in html
-    more_at = html.find('class="composer-more"')
+    assert 'class="composer-more"' not in html
+    assert "composer-more-toggle" not in html
+    assert 'id="capacity-bar"' in html
+    chrome_at = html.find('class="composer-chrome"')
     cap_at = html.find('id="capacity-bar"')
-    assert 0 <= more_at < cap_at
-    assert "composer-more-toggle" in html
+    assert 0 <= chrome_at < cap_at, "capacity-bar must live inside .composer-chrome"
 
 
 def test_immersive_chat_class_on_layout() -> None:
@@ -124,8 +128,8 @@ def test_sidebar_is_grouped_not_more_disclosure() -> None:
 def test_reduced_motion_and_tap_target() -> None:
     v5 = _V5.read_text(encoding="utf-8")
     assert "prefers-reduced-motion" in v5
-    assert "composer-more-toggle" in v5
-    assert "min-width: var(--tap)" in v5 or "min-width:var(--tap)" in v5.replace(" ", "")
+    assert "var(--tap)" in v5
+    assert "min-height: var(--tap)" in v5 or "min-height:var(--tap)" in v5.replace(" ", "")
 
 
 def test_chat_js_untouched_by_overhaul_contract() -> None:

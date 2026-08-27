@@ -272,8 +272,10 @@ class TestUIAuditP0Fixes:
         assert "registerAgentStore();" in src
 
     def test_p0_2_capacity_bar_template_is_single_owner(self):
-        """No DOM relocation, no JS-built fallback bar; the template ⋯
-        popover owns the markup — and carries the Plan pill for parity."""
+        """No DOM relocation, no JS-built fallback bar; the chat.html template
+        (composer-chrome) owns the markup — and carries the Plan pill for
+        parity. The row is a visible toolbar (the ⋯ popover was removed
+        2026-08-27 at operator request)."""
         js = _CHAT_JS.read_text(encoding="utf-8")
         html = self._CHAT_HTML.read_text(encoding="utf-8")
         assert "insertBefore(bar, footer)" not in js

@@ -45,7 +45,7 @@ def test_metrics_share_button_row_and_shape() -> None:
     assert ".session-metrics" in css
     assert "margin-inline-start: auto" in css.split(".session-metrics")[1][:80]
     assert "flex-wrap: wrap" in css.split(".capacity-bar {")[1][:160]
-    assert ".input-footer .session-metrics" in css
+    assert ".capacity-bar .session-metrics" in css
     assert "flex: 1 0 100%" in css
     assert ".char-badge.is-empty { display: none; }" in css.replace("\n", " ")
     assert "formatCompactCount" in js
@@ -54,13 +54,12 @@ def test_metrics_share_button_row_and_shape() -> None:
     assert "YOLO' : 'HITL'" not in js
 
 
-def test_session_metrics_always_visible_under_composer() -> None:
-    """Operator decision 2026-08-27: usage counters render under the text
-    field, NOT behind the ⋯ details popover — they vanished from the
-    composer chrome when the popover became the bar's only home."""
+def test_session_metrics_live_in_visible_capacity_row() -> None:
+    """Operator decision 2026-08-27: the usage counters (cost/tokens/context)
+    sit in the always-visible capacity row under the composer — not tucked
+    behind a ⋯ details popover (which previously hid them)."""
     html = _CHAT_HTML.read_text(encoding="utf-8")
     metrics_at = html.find('class="capacity-group session-metrics"')
-    details_close = html.find("</details>")
-    footer_at = html.find('class="input-footer"')
-    assert 0 <= details_close < metrics_at, "metrics must live outside the ⋯ popover"
-    assert 0 <= footer_at < metrics_at, "metrics must live inside .input-footer"
+    bar_at = html.find('id="capacity-bar"')
+    assert 0 <= bar_at < metrics_at, "metrics must live inside the visible capacity-bar"
+    assert "<details" not in html, "no details popover may wrap the composer metrics"

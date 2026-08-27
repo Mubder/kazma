@@ -4035,15 +4035,15 @@ tbody tr:last-child td {
   .chat-input-area { padding: var(--sp-3); }
   .chat-welcome { padding: var(--sp-6) var(--sp-4); }
   .chat-input-footer-hint { display: none; }   /* hide "Enter / Ctrl+Enter" hint */
-  /* Metrics live in .input-footer now (2026-08-27) — drop them to a full
-     row under the draft counter instead of scrolling off-screen. */
-  .input-footer .session-metrics {
+  /* Session usage drops to a full row under the mode pills instead of
+     scrolling off-screen (metrics restored to .capacity-bar 2026-08-27). */
+  .capacity-bar .session-metrics {
     flex: 1 0 100%;
     width: 100%;
     margin-inline-start: 0;
     display: flex;
   }
-  .input-footer .session-metrics .capacity-stat {
+  .capacity-bar .session-metrics .capacity-stat {
     flex: 1;
     text-align: center;
   }

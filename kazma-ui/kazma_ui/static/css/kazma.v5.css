@@ -443,40 +443,9 @@ html[data-theme="light"] { color-scheme: only light; }
   background: var(--bg-elevated);
   color: var(--accent);
 }
-.composer-more {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  margin: 0;
-}
-.composer-more-toggle {
-  list-style: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: var(--tap);
-  min-height: var(--tap);
-  padding: 0;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md, 10px);
-  background: var(--bg-surface);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 1.1rem;
-  line-height: 1;
-  user-select: none;
-}
-.composer-more-toggle::-webkit-details-marker { display: none; }
-.composer-more-toggle:hover { color: var(--text-primary); background: var(--bg-hover); }
-.composer-more[open] .composer-more-toggle {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
-  color: var(--accent);
-}
-.composer-more .capacity-bar {
-  flex: 1 0 100%;
-  margin-top: 6px;
-}
-.composer-more:not([open]) .capacity-bar { display: none; }
+/* A2/A3 retired 2026-08-27: the ⋯ details popover (composer-more) that hid
+   the capacity bar behind a toggle is removed — the full capacity row is a
+   visible toolbar in .composer-chrome again (operator decision). */
 .composer-icon-btn { padding: 4px; }
 .composer-file-input { display: none; }
 /* Voice buttons RESTORED (UI audit P2, operator decision 2026-08-26):
@@ -484,6 +453,10 @@ html[data-theme="light"] { color-scheme: only light; }
 .composer-voice-btn { display: inline-flex; }
 .composer-mic-recording { display: none; }
 .composer-chrome { margin-top: 0; }
+/* Touch tap targets for the always-visible capacity controls (a11y). */
+@media (pointer: coarse) {
+  .capacity-pill, .capacity-reset { min-height: var(--tap); }
+}
 
 /* A4 — message craft: document measure; quieter user bubble.
    Operator decision 2026-08-27: measure widened to 96ch to match the

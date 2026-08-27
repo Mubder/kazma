@@ -1,14 +1,17 @@
 # CHANGELOG
 
-## Unreleased — composer metrics restored + wider chat column (2026-08-27)
+## Unreleased — full composer capacity row restored + wider chat column (2026-08-27)
 
-- **Session usage counters are back under the text field.** The
-  `cost / tokens / context` metrics had been nested inside the `⋯` details
-  popover (`#capacity-bar`), where `.composer-more:not([open]) .capacity-bar
-  { display: none; }` hid them — so they disappeared from the composer
-  chrome. They now live in `.input-footer` (always visible under the input,
-  next to the char counter and Enter hint); the popover keeps only the mode
-  pills + Reset. Mobile rule retargeted `.input-footer .session-metrics`.
+- **The whole capacity row is a visible toolbar under the text field**
+  (operator decision). The `bdda10a4` "make chat the product" overhaul had
+  moved the entire `#capacity-bar` (budget status `Chat · 100`, the
+  Long/Mission/Plan/YOLO/Unrestricted mode pills, Reset, and the
+  `cost / tokens / context` session metrics) behind a `⋯` `<details>`
+  popover, so the metrics and mode indicators vanished from the composer
+  chrome. The popover is removed and the full row renders in
+  `.composer-chrome` again — exactly the pre-overhaul layout. The char
+  counter + Enter hint stay in `.input-footer` beneath it. Touch devices get
+  a 44px tap target on the pills; mobile keeps metrics on a full row.
 - **Wider chat column with small side margins** (operator decision): the
   transcript's `clamp(64px, 12vw, 180px)` side slab read too slim, so it is
   now `clamp(16px, 3vw, 40px)` and the message measure widened to
