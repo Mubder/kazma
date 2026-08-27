@@ -1841,7 +1841,7 @@
         tokenAccum += data.content;
         tryIngestPlanFromText(tokenAccum);
         var textEl = currentMsgEl.querySelector('.message-text');
-        textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
+        textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
         // Re-apply dir="auto" after innerHTML (the attribute survives but
         // the bidi direction may need recalculating for the new content).
         textEl.setAttribute('dir', 'auto');
@@ -2553,7 +2553,10 @@
     var s = String(text || '');
     if (!s.trim()) return { plan: '', prose: '' };
     // \b keeps ```plantuml / ```planning blocks out of the plan split.
-    var m = s.match(/```plan\b[^\n]*\n?([\s\S]*?)```/i);
+    // Optional [ \t]* between the fence and "plan" — some models emit
+    // "``` plan"; CommonMark still opens a fence there, and refusing to
+    // recognize it left plan text glued into prose/code (2026-08-27).
+    var m = s.match(/```[ \t]*plan\b[^\n]*\n?([\s\S]*?)```/i);
     if (m) {
       var after = s.slice(m.index + m[0].length).replace(/^[ \t]+/, '').replace(/^\n+/, '').trim();
       var before = s.slice(0, m.index).trim();
@@ -2562,7 +2565,7 @@
       if (after) proseParts.push(after);
       return { plan: String(m[1] || '').trim(), prose: proseParts.join('\n\n').trim() };
     }
-    var open = s.match(/```plan\b[^\n]*\n?([\s\S]*)$/i);
+    var open = s.match(/```[ \t]*plan\b[^\n]*\n?([\s\S]*)$/i);
     if (open) {
       var split = _splitListThenProse(open[1] || '');
       var beforeOpen = s.slice(0, open.index).trim();
@@ -2597,6 +2600,128 @@
     var parts = splitPlanAndProse(text);
     if (parts.prose) return parts.prose;
     return String(text || '');
+  }
+
+  /**
+   * Post-process RENDERED plan-fence HTML (pure: html -> html).
+   *
+   * Why: stripPlanFenceForDisplay works at the TEXT level and drops the
+   * ```plan fence whenever prose exists — but two shapes still reach the
+   * paint as a raw code blob glued to surrounding prose (the 2026-08-27
+   * transcript artifact: plan text + "Let me…" preamble + ":Core stats"
+   * fused mid-line):
+   *   1. plan-ONLY turns (no prose means the stripper returns the raw
+   *      fenced text) render as a full-height <pre><code> wall;
+   *   2. transient/streamed unclosed fences render as ONE <pre> holding
+   *      the plan AND the trailing prose, which CommonMark never splits.
+   * This transforms every rendered plan-ish code block into a COLLAPSED
+   * <details class="kazma-plan"><summary>Plan</summary>...</details>,
+   * drops DUPLICATED plan blocks so only one details remains, and forces
+   * a block-level <p> boundary between </details> and bare trailing
+   * prose.
+   *
+   * Contract:
+   * - Pure and IDEMPOTENT under repeated innerHTML swaps driven by
+   *   streaming: every paint derives the final html from scratch via
+   *   transformRenderedForPlan(markdown(...)), and running the transform
+   *   on already-transformed html is a no-op (regions inside an existing
+   *   kazma-plan details are never touched again).
+   * - Content-preserving: the original <pre>/<code> markup moves inside
+   *   the details verbatim — no text node is rewritten or lost.
+   * - Heuristic fallback only fires on UNSPECIFIED code fences whose body
+   *   is majority checklist lines (>=2 list-marker lines and list lines
+   *   form at least half of the non-empty lines). Explicitly-typed blocks
+   *   (language-js, language-python, plantuml...) are never touched.
+   */
+  function transformRenderedForPlan(html) {
+    var s = String(html || '');
+    if (!s) return s;
+    // Full <pre> element INCLUDING the mdRender copy-button tail — a
+    // partial match would strand '<button…></pre>' outside the wrapper.
+    var PLAN_OPEN = /<pre\b[^>]*>(\s*(?:<span class="code-lang">[^<]*<\/span>)?\s*<code([^>]*)>((?:(?!<\/code>)[\s\S])*)<\/code>\s*(?:<button[^>]*>[\s\S]*?<\/button>)?\s*)<\/pre>/g;
+
+    // ── Pass 0: isolate existing kazma-plan regions (idempotency guard).
+    // Everything between <details class="kazma-plan">...</details> is left
+    // byte-identical; only the surrounding segments are transformed.
+    var segs = [];
+    var rest = s;
+    var m;
+    while ((m = rest.match(/<details class="kazma-plan"[^>]*>[\s\S]*?<\/details>/)) !== null) {
+      if (m.index > 0) segs.push({ html: rest.slice(0, m.index), prot: false });
+      segs.push({ html: m[0], prot: true });
+      rest = rest.slice(m.index + m[0].length);
+    }
+    if (rest) segs.push({ html: rest, prot: false });
+    if (!segs.some(function(seg) { return !seg.prot; })) return s;
+
+    var primaryPlanText = null;
+
+    function decodeEntities(txt) {
+      return txt
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&');
+    }
+    function planish(attrs, body) {
+      if (/\blanguage-plan\b/.test(attrs)) return true;
+      if (/class="[^"]*language-/.test(attrs)) return false; // explicitly typed
+      var lines = decodeEntities(body).split('\n');
+      var nonEmpty = 0, listy = 0;
+      lines.forEach(function(ln) {
+        if (!ln.trim()) return;
+        nonEmpty++;
+        if (/^\s*(?:[-*+]|\d+[.)])\s+\S/.test(ln)) listy++;
+      });
+      return nonEmpty >= 2 && listy >= 2 && listy * 2 >= nonEmpty;
+    }
+    function normKey(body) {
+      return decodeEntities(body).replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+    function buildDetails(inner) {
+      // Content-preserving: the original <pre> inner markup (lang label,
+      // escaped code, copy button) moves inside the details verbatim.
+      return '<details class="kazma-plan"><summary>Plan</summary>'
+        + '<div class="kazma-plan-body"><pre>' + inner + '</pre></div></details>';
+    }
+
+    var parts_ = [];
+    segs.forEach(function(seg) {
+      if (seg.prot) { parts_.push(seg.html); return; }
+      var local = '';
+      var cursor = 0;
+      var pm;
+      PLAN_OPEN.lastIndex = 0;
+      while ((pm = PLAN_OPEN.exec(seg.html)) !== null) {
+        if (!planish(pm[2], pm[3])) continue;
+        local += seg.html.slice(cursor, pm.index);
+        if (primaryPlanText === null) {
+          primaryPlanText = normKey(pm[3]);
+          local += buildDetails(pm[1]);
+        } else if (normKey(pm[3]) !== primaryPlanText) {
+          local += buildDetails(pm[1]);
+        }
+        // else: duplicated plan block — drop silently (collapse to ONE
+        // details; the twin already renders above).
+        cursor = pm.index + pm[0].length;
+      }
+      local += seg.html.slice(cursor);
+      parts_.push(local);
+    });
+
+    var out = parts_.join('');
+
+    // </details> directly followed by BARE TEXT (e.g. the fused
+    // ":Core stats" run) needs a block boundary or the browser glues it
+    // onto one line with whatever precedes it.
+    out = out.replace(/(<\/details>)([^\s<])/g, '$1\n<p>$2');
+    // Collapse ANY plurality of plan details (twins arriving via repeated
+    // paints or duplicated server content) down to the first one.
+    var seen = 0;
+    out = out.replace(/<details class="kazma-plan"[^>]*>[\s\S]*?<\/details>/g, function(d) {
+      seen++;
+      return seen === 1 ? d : '';
+    });
+    return out;
   }
 
   /**
@@ -3551,7 +3676,7 @@
           _turnPainted = true;
           tryIngestPlanFromText(tokenAccum);
           var textEl = currentMsgEl.querySelector('.message-text');
-          if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
+          if (textEl) textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
           scrollToBottom();
         },
         onToolCall: function(toolData) {
@@ -4724,7 +4849,7 @@
       var display = stripPlanFenceForDisplay(tokenAccum);
       if (textEl) {
         try {
-          textEl.innerHTML = KS.markdown(display);
+          textEl.innerHTML = transformRenderedForPlan(KS.markdown(display));
         } catch (mdErr) {
           textEl.textContent = display;
         }
@@ -4775,7 +4900,7 @@
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
+      if (textEl) textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
       scrollToBottom();
     },
     setPlan: setPlan,
@@ -4805,7 +4930,7 @@
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = KS.markdown(stripPlanFenceForDisplay(tokenAccum));
+      if (textEl) textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
       scrollToBottom();
     },
     onStreamDone: function() {

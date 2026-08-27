@@ -639,3 +639,69 @@ class TestCursorTrackerNode:
             assert out == ["init", "ok", "dupe", "gap", 6, 10, "dupe", "ok", 0, 42]
         finally:
             harness_path.unlink(missing_ok=True)
+
+
+class TestPlanFencePresentation:
+    """2026-08-27 transcript artifact (the requested PlanFencePresentation
+    suite): persisted replies showed ```plan block text + 'Let me…'
+    preamble + ':Core stats' glued mid-line.
+
+    Fix shape: the client now post-processes RENDERED html through the
+    pure ``transformRenderedForPlan`` (chat.js, near
+    stripPlanFenceForDisplay): plan-ish code blocks become a COLLAPSED
+    <details class="kazma-plan"> widget, duplicates collapse to ONE
+    details, and bare trailing text after </details> gets an explicit <p>
+    block boundary. Applied at every paint site; idempotent under the
+    repeated innerHTML swaps streaming drives. Behavioral assertions live
+    in tests/js/test_plan_render.js (run under Node below).
+    """
+
+    _PLAN_JS = _ROOT / "tests" / "js" / "test_plan_render.js"
+
+    def test_transform_exists_near_stripper(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function transformRenderedForPlan(" in src
+        assert "function stripPlanFenceForDisplay(" in src
+        # The transform must sit with the other paint helpers (same region)
+        at_strip = src.index("function stripPlanFenceForDisplay(")
+        at_tf = src.index("function transformRenderedForPlan(")
+        assert abs(at_tf - at_strip) < 8000
+
+    def test_every_paint_site_applies_the_transform(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        # SSE onToken + WS approve-resume token + appendLiveToken +
+        # voice onStreamToken all share this exact expression…
+        assert src.count(
+            "transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)))"
+        ) >= 4
+        # …and applyFinalAssistantText wraps its rendered display too.
+        final_fn = src.split("applyFinalAssistantText: function", 1)[1]
+        assert "transformRenderedForPlan(KS.markdown(display))" in final_fn
+        # textContent fallback still uses the raw stripped text.
+        assert "textEl.textContent = display;" in final_fn
+
+    def test_fence_splitter_tolerates_space_variant(self):
+        """'``` plan' (space between fence and tag) defeated BOTH the text
+        stripper and tryIngestPlanFromText — plan text then glued into
+        prose/code in the persisted transcript."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        # both fence branches (closed + open) must accept the space variant
+        assert src.count("```[ \\t]*plan\\b") >= 2
+
+    def test_details_widget_markers(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert '<details class="kazma-plan"><summary>Plan</summary>' in src
+        assert '<div class="kazma-plan-body"><pre>' in src
+
+    def test_behavior_harness_under_node(self):
+        if shutil.which("node") is None:
+            import pytest
+
+            pytest.skip("node not available")
+        proc = subprocess.run(
+            ["node", str(self._PLAN_JS)],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(_ROOT),
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "FAIL" not in proc.stdout
