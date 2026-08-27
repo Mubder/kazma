@@ -2024,7 +2024,11 @@
         }
         // Interrupted (HITL) turn with no rendered card anywhere = silently
         // paused. Recover the card from server truth, best-effort one shot.
-        if (interrupted && !hasInlineApprovalCard() && !_awaitingApproval) {
+        // `truncated` (stream died with no terminal frame — client refresh /
+        // tab switch) is included: the interrupt event may have fired AFTER
+        // this tab's stream dropped, so `interrupted` stays false and the
+        // pending approval would otherwise be invisible until auto-deny.
+        if ((interrupted || truncated) && !hasInlineApprovalCard() && !_awaitingApproval) {
           setTimeout(recoverMissedApproval, 1200);
         }
         }
@@ -2078,6 +2082,10 @@
           '<br><button class="btn btn-sm btn-danger" onclick="window.KazmaChat.retry()">Retry</button></div>';
         endTurn();
         _resyncDelivery('sse-fail');
+        // A dead stream can also mean the turn parked on a HITL interrupt
+        // server-side that this tab never rendered — surface the approval
+        // card from server truth so the user can act before auto-deny.
+        setTimeout(recoverMissedApproval, 800);
         if (msg && window.showToast) {
           try { window.showToast(String(msg), 'error', 4000); } catch (_t) {}
         }

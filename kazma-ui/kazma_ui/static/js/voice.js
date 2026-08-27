@@ -167,7 +167,12 @@
 
   // ── TTS Playback ──────────────────────────────────────
 
+  // Latch survives a page reload (the mid-turn "flicker" refresh resets a
+  // plain in-memory flag, which made the yellow "TTS unavailable" toast fire
+  // on EVERY response for servers without edge-tts). sessionStorage lasts the
+  // tab session; `/voice on` clears it for an explicit retry.
   var _ttsUnavailable = false;
+  try { _ttsUnavailable = sessionStorage.getItem('kazma_tts_unavailable') === '1'; } catch (e) {}
 
   async function playTTS(text, provider) {
     if (!isTtsEnabled() || _ttsUnavailable) return;
@@ -187,6 +192,7 @@
         // reply; `/voice on` clears the latch for an explicit retry.
         if (resp.status === 503) {
           _ttsUnavailable = true;
+          try { sessionStorage.setItem('kazma_tts_unavailable', '1'); } catch (e1) {}
           try {
             showToast('Voice output unavailable (TTS not configured) — silenced until /voice on.', 'info', 4500);
           } catch (e0) { /* toast system absent */ }
@@ -209,9 +215,10 @@
   function handleVoiceCommand(text) {
     var lower = text.trim().toLowerCase();
     if (lower === '/voice on' || lower === '/voice enable') {
-      localStorage.setItem(TTS_ENABLED_KEY, 'true');
-      _ttsUnavailable = false;  // explicit opt-in — re-probe the server
-      showToast('Voice replies enabled', 'success');
+        localStorage.setItem(TTS_ENABLED_KEY, 'true');
+        _ttsUnavailable = false;  // explicit opt-in — re-probe the server
+        try { sessionStorage.removeItem('kazma_tts_unavailable'); } catch (e1) {}
+        showToast('Voice replies enabled', 'success');
       return true;
     }
     if (lower === '/voice off' || lower === '/voice disable') {

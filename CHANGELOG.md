@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Unreleased — recover lost HITL approval card + silence TTS toast spam (2026-08-27)
+
+Root-caused from the live log (`C:\Users\balfa\kazma\.kazma\kazma.log`): the
+"no response on schedule/permission tasks" symptom is a HITL approval that is
+auto-denied because the approval card never reaches the browser — a client
+refresh/tab switch drops the SSE stream a moment *before* the interrupt fires,
+so `interrupted` stays false and the pending approval is invisible until the
+60s watchdog denies it. Schedule/permission tasks are exactly the ones that
+call danger-tier tools, hence the correlation.
+
+- **Recover the missed approval card on any stream death.** `chat.js` now runs
+  `recoverMissedApproval` (server-truth fetch of `/api/pending-approvals`) on a
+  *truncated* stream and on SSE final failure, not only on a clean
+  `interrupted` terminal frame — so after a flicker/refresh the card re-renders
+  and the user can Approve inside the window instead of silently timing out.
+- **Voice toast spam fixed.** The mid-turn flicker is a page refresh, which
+  reset the in-memory TTS-unavailable latch and re-fired the yellow "TTS not
+  configured" toast on every response for servers without `edge-tts`. The latch
+  now persists via `sessionStorage` (cleared by `/voice on`), so the toast fires
+  once per tab session.
+- Operator action still required for full voice: install `edge-tts` in the
+  running install (see release notes) — the code now degrades quietly without it.
+
 ## Unreleased — full composer capacity row restored + wider chat column (2026-08-27)
 
 - **The whole capacity row is a visible toolbar under the text field**

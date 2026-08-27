@@ -138,3 +138,27 @@ def test_chat_js_untouched_by_overhaul_contract() -> None:
     assert "model-selector" in js
     assert "capacity-bar" in js
     assert "data-cap" in js
+
+
+def test_approval_card_recovered_when_stream_dies() -> None:
+    """Incident 2026-08-27 ("no response on schedule/permission tasks"): a
+    client refresh/tab switch drops the SSE stream BEFORE the HITL interrupt
+    arrives, so `interrupted` stays false and the pending approval is never
+    rendered — it then silently hits the 60s auto-deny. Recovery of the missed
+    approval card must therefore fire on a truncated stream AND on SSE final
+    failure, not only on a clean `interrupted` terminal frame."""
+    js = _CHAT_JS.read_text(encoding="utf-8")
+    assert "(interrupted || truncated) && !hasInlineApprovalCard()" in js
+    assert "setTimeout(recoverMissedApproval, 800)" in js
+    assert "setTimeout(recoverMissedApproval, 1200)" in js
+
+
+def test_voice_tts_latch_survives_reload() -> None:
+    """The mid-turn flicker is a page refresh, which reset the in-memory TTS
+    latch and re-fired the yellow 'TTS unavailable' toast on every response.
+    The latch must persist across reloads via sessionStorage."""
+    voice = _CHAT_JS.parent / "voice.js"
+    src = voice.read_text(encoding="utf-8")
+    assert "sessionStorage.getItem('kazma_tts_unavailable')" in src
+    assert "sessionStorage.setItem('kazma_tts_unavailable', '1')" in src
+    assert "sessionStorage.removeItem('kazma_tts_unavailable')" in src
