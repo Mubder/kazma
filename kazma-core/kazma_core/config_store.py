@@ -49,6 +49,7 @@ _SENSITIVE_LAST_SEGMENTS = frozenset({
     "password",
     "passwd",
     "private_key",
+    "private_key_path",  # key FILE pointers point at secret material too
     "access_token",
     "refresh_token",
     "bot_token",
@@ -56,6 +57,9 @@ _SENSITIVE_LAST_SEGMENTS = frozenset({
     "auth_token",
     "client_secret",
     "webhook_secret",
+    # Webhook URLs carry embedded credentials/bearer paths (e.g. Slack, n8n).
+    "webhook",
+    "webhook_url",
     # Audit S1: GitHub App credentials stored under connectors.github.app_*
     # have last-segment names that the classifier above did not match, so they
     # sat plaintext in settings.db/Postgres even with KAZMA_VAULT_KEY set.
@@ -63,16 +67,42 @@ _SENSITIVE_LAST_SEGMENTS = frozenset({
     "app_private_key_path",
 })
 
+# Audit M3: locator-shaped values (user:password@host live in the URL) whose
+# NAME mentions a database-ish subsystem. Requires BOTH a name word AND a
+# locator last segment so benign counters (metrics.database_query_count) or
+# UI settings stay plaintext — a false positive costs an encrypted + masked
+# Setting the operator can no longer read at a glance.
+_URL_BEARING_NAME_WORDS = frozenset({
+    "database",
+    "dsn",
+    "redis",
+    "postgres",
+    "postgresql",
+})
+_LOCATOR_LAST_SEGMENTS = frozenset({
+    "url",
+    "uri",
+    "dsn",
+    "connection_string",
+    "conn_string",
+    "endpoint",
+})
+
 
 def is_sensitive_config_key(key: str) -> bool:
     """True when *key* should never sit in plaintext settings.db if vault is on.
 
-    Detection is two-layer (audit C1):
+    Detection is layered (audit C1 + M3):
     1. Last-segment match against known sensitive names / suffixes.
     2. Any-segment match on secret-kind words — so ``connectors.github.app_private_key``
        or ``email.smtp.password``-style nesting can never slip through when a new
        integration adds a differently-shaped key. Segment matching (split on dots
        and underscores) avoids false positives like ``tokenizer`` / ``monkey``.
+    3. Locator-shaped keys (url/uri/dsn/connection_string/endpoint last segment)
+       whose name mentions a database-ish subsystem (database/dsn/redis/postgres)
+       — the value embeds ``user:password@host``, so treat it as a credential.
+    4. Key-material endings: ``*_encryption_key`` / ``*_signing_key`` /
+       ``*_webhook`` variants.
     """
     if not key:
         return False
@@ -85,6 +115,12 @@ def is_sensitive_config_key(key: str) -> bool:
         or last.endswith("_secret")
         or last.endswith("_password")
         or last.endswith("_api_key")
+        # audit M3: key-material variants — exact (llm.encryption_key) and
+        # prefixed compounds (sso.jwt_signing_key).
+        or last in ("encryption_key", "signing_key")
+        or last.endswith("_encryption_key")
+        or last.endswith("_signing_key")
+        or last.endswith("_webhook")  # webhook URLs carry bearer paths
     ):
         return True
     # Layer 2: any segment that IS a secret-kind word (anywhere in the key).
@@ -98,6 +134,13 @@ def is_sensitive_config_key(key: str) -> bool:
         for seg in ("privatekey", "clientsecret", "accesstoken", "refreshtoken", "bottoken")
     ):
         return True
+    # Layer 3: database/dsn locator URLs embed credentials (audit M3).
+    # Candidate tails = dotted last segment (covers ``x.connection_string``)
+    # + final atomic segment (covers flat keys like ``kazma_database_url``).
+    tails = {last, segments[-1]} if segments else {last}
+    if tails & _LOCATOR_LAST_SEGMENTS:
+        if any(seg in _URL_BEARING_NAME_WORDS for seg in segments):
+            return True
     return False
 
 
@@ -1281,12 +1324,35 @@ def set_config_store(store: ConfigStore) -> None:
     _config_store = store
 
 
-def reset_config_store() -> None:
-    """Drop the singleton reference (used by test teardown)."""
+def peek_config_store() -> "ConfigStore | None":
+    """Return the live singleton WITHOUT creating one (None if not yet made).
+
+    Test harnesses capture-and-restore via this + :func:`set_config_store`;
+    never calls ``get_config_store()``'s lazy constructor.
+    """
+    return _config_store
+
+
+def reset_config_store(*, close: bool = True) -> None:
+    """Drop the singleton reference (used by test teardown).
+
+    ``close=False`` drops the reference WITHOUT closing the underlying DB —
+    the instance is left to the GC, which cannot finalize it while any
+    thread (e.g. a leftover daemon reader like the procedural-outcome
+    recorder) still holds a reference into it. An explicit eager
+    ``close()``, by contrast, frees the native sqlite handle underneath
+    such a reader and hard-crashes the interpreter (Windows access
+    violation observed in ``tests/test_mcp_server.py`` via the root-conftest
+    isolation fixture's teardown). Test harnesses should pass
+    ``close=False``; production callers never race this way.
+    """
     global _config_store
     if _config_store is not None:
-        _config_store.close()
-    _config_store = None
+        if close:
+            _config_store.close()
+        # Reference dropped either way; GC cannot collect while a live
+        # thread holds its own reference, so deferral is race-free.
+        _config_store = None
 
 
 def get_validated_config() -> KazmaConfig:

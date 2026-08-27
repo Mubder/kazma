@@ -27,6 +27,7 @@ __all__ = [
     "bind_live_socket",
     "cancel_turn",
     "clear_orphan_stamp",
+    "reset_active_turns",
     "get_active_turn",
     "get_live_socket",
     "get_orphan_stamp",
@@ -217,6 +218,20 @@ def cancel_turn(thread_id: str) -> Any | None:
             logger.debug("[active-turns] task.cancel() failed for thread=%s", thread_id[:12], exc_info=True)
         logger.info("[active-turns] cancelled turn for thread=%s", thread_id[:12])
     return task
+
+
+def reset_active_turns() -> None:
+    """Drop every registry entry (tests only).
+
+    The registry dicts are process-wide; a test that registers a turn (or
+    binds a live socket) without unwinding leaves stale entries that trip
+    later duplicate-turn guards and orphan-TTL reaps. Mirrors the
+    ``reset_config_store`` / ``reset_turn_broker`` test-reset pattern.
+    """
+    with _lock:
+        _turns.clear()
+        _orphaned_at.clear()
+        _live_sockets.clear()
 
 
 def get_active_turn(thread_id: str) -> Any | None:

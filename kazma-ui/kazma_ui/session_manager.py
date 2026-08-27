@@ -37,7 +37,9 @@ __all__ = [
     "MAX_MESSAGES_PER_SESSION",
     "SessionManager",
     "get_session_manager",
+    "peek_session_manager",
     "reset_session_manager",
+    "set_session_manager",
 ]
 
 # Maximum number of sessions retained in memory.  When exceeded the
@@ -1079,3 +1081,25 @@ def reset_session_manager() -> SessionManager:
         except Exception as exc:
             logging.getLogger(__name__).debug("test session clear: %s", exc)
     return _session_manager
+
+
+def peek_session_manager() -> "SessionManager | None":
+    """Return the live singleton WITHOUT creating one (None if not yet made).
+
+    Test harnesses capture-and-restore via this + :func:`set_session_manager`.
+    """
+    return _session_manager
+
+
+def set_session_manager(manager: SessionManager | None) -> None:
+    """Install (or drop, with ``None``) the process-wide singleton.
+
+    Mirrors ``config_store.set_config_store``: lets the root test conftest
+    point every suite at a per-test isolated DB instead of the SHARED
+    ``chat_sessions_test.db`` under the repo cwd — concurrent pytest chunk
+    processes each deleting/recreating that one file mid-statement is the
+    Windows "disk I/O error" flake family. The previous instance is NOT
+    closed here; callers own its lifecycle.
+    """
+    global _session_manager
+    _session_manager = manager

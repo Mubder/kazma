@@ -112,3 +112,178 @@ def _restore_live_kazma_yaml():
             yaml_path.write_bytes(snapshot)
     except OSError:
         pass
+
+
+# ── Process-global singleton isolation (order-dependence cure) ──────────────
+# Symptom (2026-08-27): suites pass standalone but fail/hang inside big
+# fast_test chunks. Diagnosis (tests/order_flake_bisect.py + manual):
+#
+# 1. IN-PROCESS bleed — package suites (kazma_*_tests) have NO isolation
+#    fixtures of their own, so singletons they create lazily survive into
+#    later tests in the same chunk process:
+#      - kazma_ui.session_manager.get_session_manager() binds the SHARED
+#        real file ``kazma-data/chat_sessions_test.db``; in pytest mode
+#        reset_session_manager() DELETES that file per call — while another
+#        concurrently-running chunk process holds it open this is the
+#        Windows "disk I/O error" family (the historical session_directory
+#        ERROR flake).
+#      - TurnBroker._emit_locks holds asyncio.Lock instances bound to the
+#        test's event loop; reusing the broker across tests on new loops
+#        raises "bound to a different loop" or deadlocks (the approval-hang
+#        class).
+#      - AlertDispatcher._last_dispatch is class-level with a 300s dedup
+#        window: one alert fired by an early test silently suppresses every
+#        same-subsystem alert for minutes of process lifetime.
+#      - active_turns registries keep "running" turns / live sockets after
+#        their owner test finished.
+# 2. CROSS-PROCESS contention on shared real data-dir files (above).
+#
+# This fixture gives EVERY testpath what tests/conftest.py gives only
+# ``tests/``: capture-and-restore/reset of the known global singletons,
+# using PUBLIC reset/set helpers only (reset_config_store,
+# reset_model_registry, set_safety(get_safety()), reset_turn_broker,
+# reset_active_turns(), AlertDispatcher.reset_state(), SessionManager via
+# set_session_manager(reset_session_manager())). No private attribute is
+# touched from here. Kill-switch for debugging: KAZMA_TEST_ISOLATION=0.
+# Parked singleton instances swapped out by the isolation fixture below.
+# They are deliberately NEVER closed or dropped mid-process: an explicit
+# close() frees sqlite's native handle under a leftover daemon reader, and
+# letting them be GC'd finalizes a connection on whichever thread happens
+# to run collection — both hard-crash pytest (access violation). Holding a
+# reference pins them until interpreter exit, which is single-threaded.
+_PARKED: list = []
+
+
+def _park(obj) -> None:
+    if obj is not None:
+        _PARKED.append(obj)
+
+
+@_pytest.fixture(autouse=True)
+def _isolate_process_singletons(tmp_path):
+    import os as _os
+
+    if _os.environ.get("KAZMA_TEST_ISOLATION") == "0":
+        yield
+        return
+
+    # ---- setup: make each test START from pristine singletons -------------
+    # Swap-and-park semantics (NEVER close/GC here — see _PARKED above):
+    # capture whatever singleton is live, install a per-test tmp-dir-backed
+    # instance via the public setter; teardown restores the captured one and
+    # parks our creation.
+    _prev_sm = None
+    _created_sm = None
+    try:
+        from kazma_ui.session_manager import (
+            SessionManager as _SM,
+            peek_session_manager as _peek_sm,
+            set_session_manager as _set_sm,
+        )
+
+        _prev_sm = _peek_sm()
+        _created_sm = _SM(db_path=str(tmp_path / "chat_sessions.db"))
+        _set_sm(_created_sm)
+    except Exception:
+        _prev_sm = None
+        _created_sm = None
+
+    _prev_cm = None
+    _created_cm = None
+    try:
+        from kazma_core.config_store import (
+            ConfigStore as _CS,
+            peek_config_store as _peek_cm,
+            set_config_store as _set_cm,
+        )
+
+        _prev_cm = _peek_cm()
+        _created_cm = _CS(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(tmp_path / "kazma.yaml"),
+        )
+        _set_cm(_created_cm)
+    except Exception:
+        _prev_cm = None
+        _created_cm = None
+
+    # SafetyMiddleware: capture whatever was active BEFORE the test so the
+    # teardown can restore it even if the test swapped it via set_safety().
+    try:
+        from kazma_core.swarm.safety import get_safety
+
+        _prev_safety = get_safety()
+    except Exception:
+        _prev_safety = None
+
+    try:
+        from kazma_core.model_registry import reset_model_registry
+
+        reset_model_registry()
+    except Exception:
+        pass
+
+    try:
+        from kazma_ui.delivery import reset_turn_broker
+
+        reset_turn_broker()
+    except Exception:
+        pass
+
+    # ---- teardown: restore + park (never close/GC — see _PARKED) ---------
+    yield
+
+    try:
+        from kazma_ui.session_manager import set_session_manager
+
+        set_session_manager(_prev_sm)
+        _park(_created_sm)
+        _created_sm = None
+    except Exception:
+        pass
+
+    try:
+        from kazma_core.config_store import set_config_store
+
+        set_config_store(_prev_cm)
+        _park(_created_cm)
+        _created_cm = None
+    except Exception:
+        pass
+
+    try:
+        from kazma_core.model_registry import reset_model_registry
+
+        reset_model_registry()
+    except Exception:
+        pass
+
+    try:
+        from kazma_ui.delivery import reset_turn_broker
+
+        reset_turn_broker()
+    except Exception:
+        pass
+
+    try:
+        from kazma_ui.active_turns import reset_active_turns
+
+        reset_active_turns()
+    except Exception:
+        pass
+
+    try:
+        from kazma_core.observability.alerts import AlertDispatcher
+
+        AlertDispatcher.reset_state()
+    except Exception:
+        pass
+
+    # SafetyMiddleware: restore whatever was active BEFORE the test — tests
+    # may have swapped it via set_safety(); don't let that swap leak.
+    try:
+        from kazma_core.swarm.safety import set_safety
+
+        set_safety(_prev_safety)
+    except Exception:
+        pass

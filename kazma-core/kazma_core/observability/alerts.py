@@ -181,6 +181,19 @@ class AlertDispatcher:
         cls._recent_alerts.clear()
 
     @classmethod
+    def reset_state(cls) -> None:
+        """Clear buffers AND the 300s dedup window (tests only).
+
+        ``_last_dispatch`` is a CLASS-level map with a monotonic clock: a
+        test that fires one alert leaves dedup entries that silently
+        suppress every same-subsystem broadcast for the next 5 minutes of
+        process lifetime (order-dependent flake channel). Mirrors
+        ``reset_config_store`` / ``reset_turn_broker`` test-reset pattern.
+        """
+        cls._recent_alerts.clear()
+        cls._last_dispatch.clear()
+
+    @classmethod
     def resolve_alerts_for_subsystem(cls, subsystem: str) -> None:
         """Clear alerts for a specific subsystem once it is resolved."""
         cls._init_default_channels()
