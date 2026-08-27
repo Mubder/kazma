@@ -1,5 +1,90 @@
 # CHANGELOG
 
+## Unreleased — Phase 2 remediation streams: security, performance, functional mediums, test infra (2026-08-27)
+
+Five parallel streams closing the remaining audit findings. ~200 new tests.
+
+**Security**
+- YOLO no longer bypasses ALWAYS_HITL_TOOLS (`x_post`/`x_delete_post`) on
+  the swarm/IDE registry path — classification now runs BEFORE the YOLO
+  shortcut (swarm/safety.py).
+- MCP tool classifier unified with the canonical mutator vocabulary:
+  any mutator token forces danger even when safe tokens are present
+  (`mcp__kv__query_set` was classifying safe).
+- Commitment outer gate fails CLOSED per-tool on structural errors —
+  previously one raising lookup skipped the gate for the entire batch.
+- Exec denylist rebuilt: trailing-slash/`//`/`.`-run evasions, pipe
+  indirection within 120 chars, download-then-execute back-reference,
+  and the PowerShell destruction class (`Remove-Item -Recurse -Force C:\`,
+  `format C:`, `Stop-Computer`, `rd /s /q`). Relative project paths stay
+  allowed.
+- Loopback WebSocket requires an Origin check (CSWSH closed): same-host,
+  absent Origin (non-browser), or `KAZMA_WS_EXTRA_ORIGINS`; kill-switch
+  `KAZMA_WS_ORIGIN_CHECK=0`. Valid credentials still fall through fine.
+- GitHub clone hardened: token moved out of argv/URL into GIT_CONFIG env
+  (with stderr redaction before returning), clone target slug validated
+  against traversal, host allowlist (`KAZMA_CLONE_HOSTS` extends), and
+  blocking subprocesses moved off the event loop.
+- Vault coverage: `webhook_url`, credential-bearing URL/DSN locator keys,
+  `_encryption_key`/`_signing_key` endings now auto-vault.
+- Rate buckets added to paid endpoints: documents (10/min), IDE exec
+  (15/min), backup (3/min), admin ops incl. embedder rebuild (10/min).
+
+**Performance / event loop**
+- Per-turn env_context git subprocesses now run in a worker thread (up to
+  ~8 s/turn of frozen loop on slow disks, gone).
+- `/health/deep` checks all run concurrently off-loop.
+- Time-travel snapshot capture threaded off the supervisor iteration;
+  snapshot store got cross-thread safety; `snapshots.db` resolves via
+  data-dir instead of CWD-relative literal (relocated installs and
+  out-of-root starts were reading/writing the wrong file).
+- `file_read` streams newline-bounded windows with a 32 MiB budget
+  (2 GB file OOM-killing the server: fixed); access grants are checked
+  BEFORE the dedup cache and swarm workers clear it per dispatch.
+
+**Functional mediums**
+- Migration bundle verification rejects archive entries absent from the
+  manifest (tamper signal) before anything swaps onto live DBs.
+- Recall-TTL archival now requires staleness on BOTH clocks AND low
+  importance — daily-used memories stop evaporating at day 91.
+- Cron timezone support: `cron.timezone` setting or `KAZMA_TZ` env
+  (live-read, UTC fallback) anchors clock-time schedules and naive ISO;
+  "daily 9am" fires at local 9am again. **Recommended:** set
+  `cron.timezone: Asia/Kuwait`, and add `tzdata` to kazma-core deps for
+  bare-Windows installs.
+- SessionStore `/reset` deletes NULL-tenant rows it can read (stale
+  routing resurrection closed); foreign-tenant rows still protected.
+
+**Supervisor**
+- Budget-exhausted iterations answer pending tool calls with an explicit
+  "budget exhausted, not executed" synthetic result and route to respond —
+  the final tool round is no longer silently stripped without the model
+  knowing.
+
+**Chat rendering**
+- ```plan fences render as their own collapsed "Plan" disclosure at every
+  paint site — no more plan text glued mid-sentence into prose, duplicate
+  plans from resume repaints collapse, ```` ``` plan ```` space variant
+  tolerated.
+- The unhandled-rejection toast reports the throwing `file.js:line`.
+- Voice TTS latches off after the first 503 (provider unconfigured)
+  instead of retrying every reply; `/voice on` re-probes. Dead CDN
+  stylesheet removed (Edge Tracking Prevention noise).
+
+**Test infrastructure**
+- Root-conftest autouse isolation fixture for ALL testpaths
+  (`KAZMA_TEST_ISOLATION=0` disables): per-test SessionManager +
+  ConfigStore/ModelRegistry/TurnBroker/AlertDispatcher/Safety resets via
+  public APIs; three tiny idempotent reset helpers added to prod modules.
+  Disposal uses capture→swap→restore→PARK: discarded singletons are pinned
+  until interpreter exit — eager `close()` segfaulted under leftover daemon
+  readers and deferred-GC finalized connections cross-thread (both native
+  access violations; `test_mcp_server.py` repro'd 3/3, now clean).
+- Empirical flake root causes documented: shared-file chat DB races across
+  chunk processes + stale in-process singletons; reproduction harness
+  included (`tests/test_singleton_isolation.py`,
+  `tests/order_flake_bisect.py`).
+
 ## Unreleased — fix `lastEventId is not defined` (2026-08-27)
 
 - The SSE cursor's `lastEventId` getter threw `ReferenceError:
