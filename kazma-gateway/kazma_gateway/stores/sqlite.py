@@ -124,7 +124,15 @@ class SQLiteSessionStore(SessionStore):
         db = await self._ensure_db()
         resolved_tenant = tenant_id if tenant_id is not None else get_current_tenant_id()
         if resolved_tenant is not None:
-            await db.execute("DELETE FROM sessions WHERE thread_id = ? AND tenant_id = ?", (thread_id, resolved_tenant))
+            # Mirror get()'s exact predicate (audit H26): NULL-tenant rows are
+            # globally visible on read ((tenant_id=? OR tenant_id IS NULL)),
+            # but the old exact-match DELETE skipped them — /reset deleted
+            # nothing and the stale row resurrected routing. Rows tagged to a
+            # DIFFERENT tenant are still left alone (multi-tenant isolation).
+            await db.execute(
+                "DELETE FROM sessions WHERE thread_id = ? AND (tenant_id = ? OR tenant_id IS NULL)",
+                (thread_id, resolved_tenant),
+            )
         else:
             await db.execute(_DELETE, (thread_id,))
         await db.commit()

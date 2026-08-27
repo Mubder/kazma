@@ -159,3 +159,61 @@ class TestInMemoryStore:
         assert await store.get("t1") == {"chat_id": 1}
         await store.delete("t1")
         assert await store.get("t1") == {}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Tenant delete/read symmetry (audit H26)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestTenantDeleteSymmetry:
+    """delete() must mirror get()'s (tenant_id=? OR tenant_id IS NULL) predicate.
+
+    Previously delete() used an exact tenant match, so NULL-tenant rows
+    (written before tenant context existed) survived /reset while get()
+    kept serving them — stale routing resurrected after a reset.
+    """
+
+    @pytest.mark.asyncio
+    async def test_delete_removes_null_tenant_row_under_resolved_tenant(
+        self, store: SQLiteSessionStore
+    ) -> None:
+        # No tenant context on put → stored with NULL tenant_id.
+        await store.put("legacy-thread", {"chat_id": 1})
+
+        # get() serves it to any resolved tenant…
+        assert await store.get("legacy-thread", tenant_id="tenant_a") == {"chat_id": 1}
+
+        # …so /reset's delete under a resolved tenant must remove it.
+        await store.delete("legacy-thread", tenant_id="tenant_a")
+        assert await store.get("legacy-thread", tenant_id="tenant_a") == {}
+        assert await store.get("legacy-thread") == {}
+
+        # Gone from the table entirely, not just invisible to the reader.
+        db = await store._ensure_db()
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM sessions WHERE thread_id = 'legacy-thread'"
+        )
+        assert (await cursor.fetchone())[0] == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_still_respects_other_tenant_rows(
+        self, store: SQLiteSessionStore
+    ) -> None:
+        """Cross-tenant isolation is preserved (mirrors get())."""
+        await store.put("tenant-thread", {"platform": "telegram"}, tenant_id="tenant_b")
+
+        await store.delete("tenant-thread", tenant_id="tenant_a")
+        assert await store.get("tenant-thread", tenant_id="tenant_b") != {}
+
+        await store.delete("tenant-thread", tenant_id="tenant_b")
+        assert await store.get("tenant-thread", tenant_id="tenant_b") == {}
+
+    @pytest.mark.asyncio
+    async def test_delete_without_tenant_removes_null_row(
+        self, store: SQLiteSessionStore
+    ) -> None:
+        """No resolved tenant → plain thread-scoped delete (unchanged path)."""
+        await store.put("plain-thread", {"chat_id": 2})  # NULL tenant row
+        await store.delete("plain-thread")
+        assert await store.get("plain-thread") == {}
