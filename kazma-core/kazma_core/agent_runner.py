@@ -265,9 +265,11 @@ class KazmaAgent:
         # per turn in build_env_context() via the streaming path; this base
         # injection covers the initial system prompt. See env_context.py.
         try:
-            from kazma_core.ide.env_context import build_env_context
+            # Sync constructor context (__init__ cannot await): call the
+            # blocking builder directly (git probes bounded at 2 × 4s).
+            from kazma_core.ide.env_context import _build_env_context_sync
 
-            env_block = build_env_context()
+            env_block = _build_env_context_sync()
             if env_block and env_block not in self.system_prompt:
                 self.system_prompt = self.system_prompt.rstrip() + "\n\n" + env_block
         except Exception:

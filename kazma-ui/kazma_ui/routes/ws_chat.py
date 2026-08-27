@@ -1501,7 +1501,8 @@ def create_ws_chat_router(
                     # haunt this thread with max_iterations=100 forever.
                     consume_long_task_turn(thread_id)
 
-                    env_block = build_env_context()
+                    # Async facade — offloads blocking git probes off the event loop.
+                    env_block = await build_env_context()
                     sys_msgs = [{"role": "system", "content": env_block}] if env_block else None
                     full_messages = await build_turn_messages(
                         graph_inst,

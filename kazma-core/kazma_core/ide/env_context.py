@@ -24,6 +24,7 @@ block rather than raising. The brain always gets *something* useful.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import subprocess
@@ -200,8 +201,13 @@ def _list_available_tools() -> list[str]:
         return list(_ANNOUNCED_TOOLS)
 
 
-def build_env_context(workspace_id: str | None = None) -> str:
-    """Build the environment-awareness markdown block.
+def _build_env_context_sync(workspace_id: str | None = None) -> str:
+    """Build the environment-awareness markdown block (blocking variant).
+
+    Runs up to two ``git`` subprocess probes (4s timeout each) plus SQLite
+    store lookups — up to ~8s worst case. Async callers MUST go through
+    :func:`build_env_context` (which offloads this to a worker thread);
+    only sync contexts (e.g. ``KazmaAgent.__init__``) call this directly.
 
     Args:
         workspace_id: Optional WorkspaceStore row id (Phase 3 targeting).
@@ -379,14 +385,33 @@ def build_env_context(workspace_id: str | None = None) -> str:
     return "\n".join(lines)
 
 
+async def build_env_context(workspace_id: str | None = None) -> str:
+    """Async facade over :func:`_build_env_context_sync`.
+
+    The builder probes ``git`` via sync ``subprocess.run`` (up to 2 × 4s
+    timeout) and consults SQLite-backed stores — all blocking. It is
+    invoked on EVERY chat turn from multiple async sites (SSE/WS chat,
+    swarm worker dispatch, IDE send-to-swarm), so it MUST run off the
+    event loop: this wrapper offloads to a worker thread
+    (AGENTS.md §23 pattern) and returns a string identical to the sync
+    variant's output. Re-read per turn on purpose — the active workspace
+    can switch between turns. Memoization opportunity (not taken): cache
+    keyed by ``(resolved_root)`` with a ~1 turn TTL would collapse repeat
+    git probes within one dispatch fan-out.
+    """
+    return await asyncio.to_thread(_build_env_context_sync, workspace_id=workspace_id)
+
+
 def env_context_for_dispatch(task: Any) -> str:
     """Build env context for a dispatched swarm task, honoring task.workspace_id.
 
-    Convenience wrapper used by the worker prompt-assembly path.
+    Convenience wrapper used by the worker prompt-assembly path. Sync by
+    design (historical API); delegates to the blocking builder directly.
+    Prefer ``await build_env_context(workspace_id=...)`` in async code.
     """
     wid = None
     try:
         wid = getattr(task, "workspace_id", None)
     except Exception:  # pragma: no cover - defensive
         pass
-    return build_env_context(workspace_id=wid)
+    return _build_env_context_sync(workspace_id=wid)

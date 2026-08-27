@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 
-def test_set_active_workspace_repins_file_write(tmp_path, monkeypatch):
+async def test_set_active_workspace_repins_file_write(tmp_path, monkeypatch):
+    # async (pytest asyncio AUTO): build_env_context became a to_thread
+    # coroutine in the 2026-08-27 event-loop sweep and this file's tail
+    # awaits it.
     import importlib
 
     from kazma_core.stores import reset_workspace_store
@@ -49,7 +52,7 @@ def test_set_active_workspace_repins_file_write(tmp_path, monkeypatch):
     # env_context must advertise ShipX, not kazma
     from kazma_core.ide.env_context import build_env_context
 
-    block = build_env_context()
+    block = await build_env_context()
     assert str(shipx) in block
     assert "ShipX" in block
     assert "BINDING" in block or "Hard rules" in block

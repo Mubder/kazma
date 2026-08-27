@@ -38,6 +38,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
@@ -53,6 +54,33 @@ logger = logging.getLogger(__name__)
 # Default paths / limits
 DEFAULT_DB_PATH = "kazma-data/snapshots.db"
 DEFAULT_MAX_SNAPSHOTS = 50
+
+
+def _resolve_db_path(db_path: str | Path | None) -> str:
+    """Resolve a snapshots DB location to an absolute, cwd-independent path (H19).
+
+    The legacy ``DEFAULT_DB_PATH`` literal (``kazma-data/snapshots.db``) is
+    CWD-relative: two processes started from different working directories
+    silently wrote DIFFERENT snapshot files. Resolution now goes through
+    ``kazma_core.paths`` (which honors ``KAZMA_DATA_DIR``):
+
+    - None/empty → ``paths.snapshots_db()`` (the data-dir default).
+    - Absolute path → unchanged.
+    - Relative path (e.g. the shipped ``kazma.yaml`` ``db_path:``
+      ``kazma-data/snapshots.db`` literal) → anchored into the data dir by
+      filename, so every process in one installation shares ONE database.
+    """
+    p = Path(db_path) if db_path else None
+    if p is not None and p.is_absolute():
+        return str(p)
+    try:
+        from kazma_core.paths import data_dir
+
+        base = Path(data_dir())
+        return str(base / p.name) if p is not None else str(base / "snapshots.db")
+    except Exception:  # noqa: BLE001 - never break startup over path resolution
+        logger.debug("[TimeTravel] data-dir resolution failed; using legacy default", exc_info=True)
+        return str(p) if p is not None else DEFAULT_DB_PATH
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -143,34 +171,51 @@ ON snapshots (thread_id, iteration)
 class SnapshotStore:
     """Persistent SQLite-backed snapshot store.
 
-    Thread-safe for sequential use (SQLite single-writer model).
+    Safe for use from multiple threads: the connection is created with
+    ``check_same_thread=False`` (capture now runs inside
+    ``asyncio.to_thread`` — M35) and mutating operations are serialized
+    by an in-process lock.
     """
 
-    def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
-        self._db_path = db_path
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path)
-        apply_sqlite_pragmas(self._conn)
-        self._conn.execute(_CREATE_TABLE_SQL)
-        self._conn.execute(_CREATE_INDEX_SQL)
-        self._conn.commit()
+    def __init__(self, db_path: str | Path | None = DEFAULT_DB_PATH) -> None:
+        # H19: resolve through the data dir so the path is cwd-independent.
+        self._db_path = _resolve_db_path(db_path)
+        # Serializes ALL connection use: capture runs inside asyncio.to_thread
+        # (M35), while replay/fork handlers may touch the same connection from
+        # the event-loop thread. Unsynchronized cross-thread sqlite use can
+        # corrupt the C-level handle (native access violations downstream).
+        self._conn_lock = threading.RLock()
+        Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
+        with self._conn_lock:
+            apply_sqlite_pragmas(self._conn)
+            self._conn.execute(_CREATE_TABLE_SQL)
+            self._conn.execute(_CREATE_INDEX_SQL)
+            self._conn.commit()
+
+    @property
+    def db_path(self) -> str:
+        """The resolved (absolute) database file path."""
+        return self._db_path
 
     def save(self, record: SnapshotRecord) -> None:
         """Insert or replace a snapshot record."""
-        self._conn.execute(
-            "INSERT OR REPLACE INTO snapshots (id, thread_id, iteration, state_json, timestamp, model_used) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (record.id, record.thread_id, record.iteration, record.state_json, record.timestamp, record.model_used),
-        )
-        self._conn.commit()
+        with self._conn_lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO snapshots (id, thread_id, iteration, state_json, timestamp, model_used) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (record.id, record.thread_id, record.iteration, record.state_json, record.timestamp, record.model_used),
+            )
+            self._conn.commit()
 
     def get(self, thread_id: str, iteration: int) -> SnapshotRecord | None:
         """Retrieve a single snapshot by thread + iteration."""
-        row = self._conn.execute(
-            "SELECT id, thread_id, iteration, state_json, timestamp, model_used "
-            "FROM snapshots WHERE thread_id = ? AND iteration = ?",
-            (thread_id, iteration),
-        ).fetchone()
+        with self._conn_lock:
+            row = self._conn.execute(
+                "SELECT id, thread_id, iteration, state_json, timestamp, model_used "
+                "FROM snapshots WHERE thread_id = ? AND iteration = ?",
+                (thread_id, iteration),
+            ).fetchone()
         if row is None:
             return None
         return SnapshotRecord(
@@ -180,11 +225,12 @@ class SnapshotStore:
 
     def list_for_thread(self, thread_id: str) -> list[SnapshotRecord]:
         """List all snapshots for a thread, ordered by iteration."""
-        rows = self._conn.execute(
-            "SELECT id, thread_id, iteration, state_json, timestamp, model_used "
-            "FROM snapshots WHERE thread_id = ? ORDER BY iteration",
-            (thread_id,),
-        ).fetchall()
+        with self._conn_lock:
+            rows = self._conn.execute(
+                "SELECT id, thread_id, iteration, state_json, timestamp, model_used "
+                "FROM snapshots WHERE thread_id = ? ORDER BY iteration",
+                (thread_id,),
+            ).fetchall()
         return [
             SnapshotRecord(
                 id=r[0], thread_id=r[1], iteration=r[2],
@@ -195,18 +241,20 @@ class SnapshotStore:
 
     def clear_thread(self, thread_id: str) -> int:
         """Delete all snapshots for a thread.  Returns count deleted."""
-        cursor = self._conn.execute(
-            "DELETE FROM snapshots WHERE thread_id = ?",
-            (thread_id,),
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        with self._conn_lock:
+            cursor = self._conn.execute(
+                "DELETE FROM snapshots WHERE thread_id = ?",
+                (thread_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount
 
     def list_distinct_threads(self) -> list[str]:
         """Return all distinct thread_ids that have at least one snapshot."""
-        rows = self._conn.execute(
-            "SELECT DISTINCT thread_id FROM snapshots ORDER BY thread_id"
-        ).fetchall()
+        with self._conn_lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT thread_id FROM snapshots ORDER BY thread_id"
+            ).fetchall()
         return [r[0] for r in rows]
 
     def evict_beyond(self, thread_id: str, max_count: int) -> int:
@@ -215,24 +263,26 @@ class SnapshotStore:
         Deletes the oldest iterations that exceed the cap.
         Returns the number of records deleted.
         """
-        rows = self._conn.execute(
-            "SELECT id FROM snapshots WHERE thread_id = ? ORDER BY iteration DESC",
-            (thread_id,),
-        ).fetchall()
-        if len(rows) <= max_count:
-            return 0
-        ids_to_delete = [r[0] for r in rows[max_count:]]
-        placeholders = ",".join("?" * len(ids_to_delete))
-        cursor = self._conn.execute(
-            f"DELETE FROM snapshots WHERE id IN ({placeholders})",
-            ids_to_delete,
-        )
-        self._conn.commit()
-        return cursor.rowcount
+        with self._conn_lock:
+            rows = self._conn.execute(
+                "SELECT id FROM snapshots WHERE thread_id = ? ORDER BY iteration DESC",
+                (thread_id,),
+            ).fetchall()
+            if len(rows) <= max_count:
+                return 0
+            ids_to_delete = [r[0] for r in rows[max_count:]]
+            placeholders = ",".join("?" * len(ids_to_delete))
+            cursor = self._conn.execute(
+                f"DELETE FROM snapshots WHERE id IN ({placeholders})",
+                ids_to_delete,
+            )
+            self._conn.commit()
+            return cursor.rowcount
 
     def close(self) -> None:
         """Close the underlying connection."""
-        self._conn.close()
+        with self._conn_lock:
+            self._conn.close()
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -258,15 +308,20 @@ class SnapshotRecorder:
         *,
         enabled: bool = True,
         max_snapshots: int = DEFAULT_MAX_SNAPSHOTS,
-        db_path: str = DEFAULT_DB_PATH,
+        db_path: str | Path | None = DEFAULT_DB_PATH,
         store: SnapshotStore | None = None,
     ) -> None:
         self._enabled = enabled
         self._max_snapshots = max_snapshots
+        # H19: resolve once (data-dir anchored, cwd-independent). Relative
+        # literals from legacy kazma.yaml configs normalize to the data dir.
+        self._db_path = _resolve_db_path(db_path)
         # In-memory LRU: key=(thread_id, iteration) → SnapshotRecord
         self._memory: OrderedDict[tuple[str, int], SnapshotRecord] = OrderedDict()
-        # SQLite store (lazily created or injected)
-        self._store = store
+        # SQLite store (lazily created or injected); guarded so two
+        # concurrent to_thread captures cannot double-create it.
+        self._store: SnapshotStore | None = store
+        self._store_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -276,23 +331,31 @@ class SnapshotRecorder:
     def enabled(self, value: bool) -> None:
         self._enabled = value
 
-    def _get_store(self, db_path: str = DEFAULT_DB_PATH) -> SnapshotStore:
+    @property
+    def db_path(self) -> str:
+        """The resolved (absolute) default snapshots DB path for this recorder."""
+        return self._db_path
+
+    def _get_store(self, db_path: str | Path | None = None) -> SnapshotStore:
         """Lazy-init the SQLite store."""
         if self._store is None:
-            self._store = SnapshotStore(db_path)
+            with self._store_lock:
+                if self._store is None:
+                    self._store = SnapshotStore(db_path if db_path else self._db_path)
         return self._store
 
     def capture(
         self,
         state: dict[str, Any],
         *,
-        db_path: str = DEFAULT_DB_PATH,
+        db_path: str | Path | None = None,
     ) -> SnapshotRecord | None:
         """Capture a snapshot of the current SupervisorState.
 
         Args:
             state: The SupervisorState dict (or any dict with the expected keys).
-            db_path: Path to the SQLite snapshots database.
+            db_path: Optional SQLite DB override; defaults to this
+                recorder's resolved path (data-dir anchored).
 
         Returns:
             The captured SnapshotRecord, or None if time travel is disabled.
@@ -341,7 +404,7 @@ class SnapshotRecorder:
         thread_id: str,
         iteration: int,
         *,
-        db_path: str = DEFAULT_DB_PATH,
+        db_path: str | Path | None = None,
     ) -> SnapshotRecord | None:
         """Retrieve a snapshot, preferring in-memory over SQLite."""
         key = (thread_id, iteration)
@@ -359,7 +422,7 @@ class SnapshotRecorder:
         self,
         thread_id: str,
         *,
-        db_path: str = DEFAULT_DB_PATH,
+        db_path: str | Path | None = None,
     ) -> list[SnapshotRecord]:
         """List all available snapshots for a thread."""
         # Merge in-memory and SQLite, dedup by (thread_id, iteration)
@@ -386,7 +449,7 @@ class SnapshotRecorder:
         self,
         thread_id: str,
         *,
-        db_path: str = DEFAULT_DB_PATH,
+        db_path: str | Path | None = None,
     ) -> int:
         """Clear all snapshots for a thread from both stores.
 
@@ -406,7 +469,7 @@ class SnapshotRecorder:
 
         return mem_count + db_count
 
-    def list_distinct_threads(self, *, db_path: str = DEFAULT_DB_PATH) -> list[str]:
+    def list_distinct_threads(self, *, db_path: str | Path | None = None) -> list[str]:
         """Return all distinct thread_ids that have at least one snapshot.
 
         Merges in-memory and SQLite thread sets.
@@ -448,7 +511,7 @@ class ReplayEngine:
         thread_id: str,
         iteration: int,
         *,
-        db_path: str = DEFAULT_DB_PATH,
+        db_path: str | Path | None = None,
     ) -> dict[str, Any] | None:
         """Load the state snapshot for a specific thread + iteration.
 
@@ -593,12 +656,13 @@ def maintain_snapshots(
     SQLite never shrinks a file on DELETE; the freed pages are reclaimed
     here so ``snapshots.db`` stops growing without bound across threads.
     Safe to run while the server is live (WAL mode, short write lock).
+    ``db_path=None`` resolves to the data-dir-anchored default (H19).
 
     Returns:
         Stats dict: ``deleted``, ``size_before``, ``size_after``,
         ``reclaimed`` (bytes), ``retention_days``, and per-step status.
     """
-    db = Path(db_path) if db_path is not None else Path(DEFAULT_DB_PATH)
+    db = Path(_resolve_db_path(db_path))
     size_before = db.stat().st_size if db.exists() else 0
     deleted = 0
     cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(retention_days)))).isoformat()
@@ -684,12 +748,14 @@ def start_snapshot_maintenance_loop(
     *,
     interval_hours: int = _MAINTENANCE_INTERVAL_HOURS,
     first_delay_seconds: int = _MAINTENANCE_FIRST_DELAY_SECONDS,
+    db_path: str | Path | None = None,
 ) -> asyncio.Task:
     """Start the daily snapshot prune + VACUUM loop (fire-and-forget).
 
     Reads ``time_travel.auto_maintain`` / ``time_travel.retention_days`` live
     from the ConfigStore on every run, so Settings-UI changes apply without
     a restart.  Never raises — failures are logged and the loop continues.
+    ``db_path=None`` resolves to the data-dir-anchored snapshots DB.
     """
     async def _loop() -> None:
         await asyncio.sleep(max(0, first_delay_seconds))
@@ -704,7 +770,7 @@ def start_snapshot_maintenance_loop(
                 if not cfg["auto_maintain"]:
                     logger.debug("[TimeTravel] auto-maintain disabled; skipping")
                 else:
-                    await asyncio.to_thread(maintain_snapshots, None, cfg["retention_days"])
+                    await asyncio.to_thread(maintain_snapshots, db_path, cfg["retention_days"])
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - loop must survive any failure

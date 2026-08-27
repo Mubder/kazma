@@ -528,9 +528,14 @@ class IdeService:
         # content from the Web IDE) is appended after the env block.
         full_context = ""
         try:
-            from kazma_core.ide.env_context import build_env_context
+            from kazma_core.ide.env_context import _build_env_context_sync
 
-            full_context = build_env_context(workspace_id=workspace_id)
+            # Sync (blocking) builder ON PURPOSE: send_to_swarm is a rare
+            # user-initiated dispatch, not a per-turn hot path, and running
+            # the sqlite-heavy builder on a worker thread inside this swarm-
+            # dispatch window destabilizes concurrent store access under
+            # test. Revisit alongside IdeService per-task scope threading.
+            full_context = _build_env_context_sync(workspace_id=workspace_id)
         except Exception:
             logger.warning("[IdeService] env_context build failed — dispatched worker may lack workspace awareness", exc_info=True)
         if context:

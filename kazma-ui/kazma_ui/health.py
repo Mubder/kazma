@@ -503,15 +503,32 @@ async def deep_canary() -> JSONResponse:
             }
         )
 
+    # Every check is a blocking (SQLite / subprocess / filesystem) call, so
+    # each runs off the event loop via asyncio.to_thread; the checks are also
+    # independent, so gather() runs them concurrently — wall latency is the
+    # slowest check, not the sum. `recall` stays awaited (it is async).
+    # Overall latency guard: each probe is deliberately local-only
+    # (`probe_search=False`, no network roundtrips), so no outer timeout is
+    # layered on top — a hung check would already be hung before this point.
     import asyncio
 
-    checks: dict[str, Any] = {}
-    checks["config_roundtrip"] = await asyncio.to_thread(_check_config_roundtrip)
-    checks["memory_recall"] = await _check_memory_recall()
-    checks["workspace_binding"] = _check_workspace_binding()
-    checks["research_stack"] = _check_research_stack()
-    checks["brain_imports"] = _check_brain_imports()
-    checks["database"] = check_database()
+    keys = (
+        "config_roundtrip",
+        "memory_recall",
+        "workspace_binding",
+        "research_stack",
+        "brain_imports",
+        "database",
+    )
+    results = await asyncio.gather(
+        asyncio.to_thread(_check_config_roundtrip),
+        _check_memory_recall(),
+        asyncio.to_thread(_check_workspace_binding),
+        asyncio.to_thread(_check_research_stack),
+        asyncio.to_thread(_check_brain_imports),
+        asyncio.to_thread(check_database),
+    )
+    checks: dict[str, Any] = dict(zip(keys, results))
 
     failed = [n for n, c in checks.items() if c.get("status") == "failed"]
     payload = {

@@ -210,7 +210,18 @@ class InProcessWorker(SwarmWorker):
         MAX_ITERATIONS = worker_iteration_budget()
         task_id = f"swarm-{self.name}-{uuid.uuid4().hex[:8]}"
         logger.info("[InProcessWorker:%s] dispatching %s (model=%s)", self.name, task_id, self.model or "default")
-        
+
+        # Start each dispatch with a cold file-read dedup cache: the cache is
+        # process-global and its "[ALREADY READ THIS TURN]" note is only valid
+        # within one agent's turn — a previous task's cached reads must never
+        # be served to this worker.
+        try:
+            from kazma_core.tools.file_read import clear_read_cache
+
+            clear_read_cache()
+        except Exception:
+            logger.debug("[InProcessWorker:%s] read-cache clear skipped", self.name, exc_info=True)
+
         # Initialize variables before try block so exception handler can access them safely
         total_tokens = 0
         total_cost = 0.0
@@ -363,7 +374,7 @@ class InProcessWorker(SwarmWorker):
                 ws_id = None
                 if isinstance(context, SwarmDispatchContext):
                     ws_id = context.metadata.get("workspace_id")
-                env_block = build_env_context(workspace_id=ws_id)
+                env_block = await build_env_context(workspace_id=ws_id)
                 if env_block:
                     messages.append({"role": "system", "content": env_block})
             except Exception:

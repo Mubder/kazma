@@ -54,16 +54,16 @@ def tmp_ws(tmp_path, monkeypatch):
     configure_workspace(workspace=None)
 
 
-def test_env_context_always_names_workspace_root(tmp_ws):
+async def test_env_context_always_names_workspace_root(tmp_ws):
     """Even with no git repo, the block must name the workspace root."""
-    block = build_env_context()
+    block = await build_env_context()
     assert "Active Workspace" in block or "Workspace root" in block
     assert str(tmp_ws) in block
     # No repo in a bare dir — must NOT claim a real remote.
     assert "Repository: `" not in block or "not a git" in block.lower() or "unknown" in block.lower()
 
 
-def test_env_context_detects_git_repo(tmp_ws):
+async def test_env_context_detects_git_repo(tmp_ws):
     """In a git repo the slug + branch are detected."""
     subprocess.run(["git", "init", "-q"], cwd=str(tmp_ws), check=True)
     subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=str(tmp_ws), check=True)
@@ -72,14 +72,14 @@ def test_env_context_detects_git_repo(tmp_ws):
         ["git", "remote", "add", "origin", "https://github.com/owner/myrepo.git"],
         cwd=str(tmp_ws), check=True,
     )
-    block = build_env_context()
+    block = await build_env_context()
     assert "owner/myrepo" in block
     assert "Hard rules" in block or "BINDING" in block
 
 
-def test_env_context_lists_tools(tmp_ws):
+async def test_env_context_lists_tools(tmp_ws):
     """The block announces the available tools so the brain is aware."""
-    block = build_env_context()
+    block = await build_env_context()
     # At least file_read/file_write/shell_exec should be named.
     assert "file_read" in block or "Available tools" in block
 

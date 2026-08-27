@@ -1837,7 +1837,8 @@ def create_sse_chat_router(
         try:
             from kazma_core.ide.env_context import build_env_context
 
-            env_block = build_env_context()
+            # Async facade — offloads blocking git probes off the event loop.
+            env_block = await build_env_context()
             if env_block:
                 system_msgs.append({"role": "system", "content": env_block})
         except Exception:

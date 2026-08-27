@@ -21,6 +21,7 @@ This module keeps the public import path and compiles the graph.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -164,7 +165,9 @@ def build_supervisor_graph(
         if snapshot_recorder is not None and snapshot_recorder.enabled:
             # Merge current state with result to get the full picture
             merged = {**state, **result}
-            record = snapshot_recorder.capture(merged)
+            # Capture does json.dumps(O(state)) + sync SQLite write on EVERY
+            # supervisor iteration — run it off the event loop (M35).
+            record = await asyncio.to_thread(snapshot_recorder.capture, merged)
             if record is not None:
                 result["snapshot_id"] = record.id
                 result["snapshot_iteration"] = merged.get("iteration", 0)
