@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Unreleased — fix streaming "double vision" flicker (2026-08-27)
+
+Measured root cause: `chat.js onToken` re-parsed the FULL accumulated
+markdown and replaced the message's entire `innerHTML` on **every token
+event** — one 150-word reply produced **5,311 DOM mutations** (2,643 add /
+2,624 del on `.message-text`), tearing down and rebuilding every paragraph
+per token. The eye reads that full-rebuild churn as flicker / double vision.
+
+- **Live-token paint throttle**: streaming paints now go through
+  `_scheduleLiveTextPaint` — at most one markdown re-render per 150 ms window
+  (first token paints immediately). Both token paths (main stream +
+  approve-resume) are rewired. Verified live on the running install: the same
+  150-word story prompt now causes **24 mutation events** (~175× less churn)
+  with the final text flushed intact by the terminal `_flushLiveTextPaint()`.
+- Not Qwen's doing: the only working-tree changes Qwen left were two tool
+  registrations in `side_effects.py` and one MCP server entry in
+  `kazma.yaml` — no UI files. The flicker was the pre-existing per-token
+  repaint, now fixed.
+
 ## Unreleased — recover lost HITL approval card + silence TTS toast spam (2026-08-27)
 
 Root-caused from the live log (`C:\Users\balfa\kazma\.kazma\kazma.log`): the

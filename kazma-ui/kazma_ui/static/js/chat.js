@@ -1841,11 +1841,7 @@
         tokenAccum += data.content;
         tryIngestPlanFromText(tokenAccum);
         var textEl = currentMsgEl.querySelector('.message-text');
-        textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
-        // Re-apply dir="auto" after innerHTML (the attribute survives but
-        // the bidi direction may need recalculating for the new content).
-        textEl.setAttribute('dir', 'auto');
-        if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
+        _scheduleLiveTextPaint(textEl);
         scrollToBottom();
       },
 
@@ -2007,6 +2003,9 @@
           window.KazmaVoice.playTTS(tokenAccum);
         }
         } finally {
+        // Flush any throttled live paint so the final frame shows the FULL
+        // accumulated text (the last token batch may still be coalesced).
+        _flushLiveTextPaint();
         // Live HITL card: keep the approval lock. Otherwise ALWAYS release
         // Stop / Enter — a painted reply with a stuck generating flag was
         // why the next message needed a Stop click first.
@@ -3411,6 +3410,59 @@
   /** True when an ACTIVE inline approval card (enabled buttons) is rendered.
       Resolved cards keep the class but their buttons are disabled/removed, so
       a stale card from an earlier approval doesn't suppress a new one. */
+  // ── Live-token paint throttle ─────────────────────────────────────
+  // Re-parsing the FULL accumulated markdown and replacing innerHTML on
+  // every token event tore the message down and rebuilt it ~2,600 times per
+  // reply (measured 2026-08-27: 5,311 DOM mutations on a 150-word story) —
+  // the visible "double vision" flicker while streaming. Coalesce to one
+  // render per window; the terminal frame flushes whatever is pending.
+  var _LIVE_RENDER_MIN_MS = 150;
+  var _liveRenderTimer = null;
+  var _liveRenderLastAt = 0;
+  var _liveRenderDirty = false;
+  var _liveRenderEl = null;
+
+  function _paintLiveTextNow(textEl) {
+    if (!textEl) return;
+    textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
+    // Re-apply dir="auto" after innerHTML (the attribute survives but the
+    // bidi direction may need recalculating for the new content).
+    textEl.setAttribute('dir', 'auto');
+    if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
+  }
+
+  function _scheduleLiveTextPaint(textEl) {
+    if (!textEl) return;
+    _liveRenderEl = textEl;
+    var since = Date.now() - _liveRenderLastAt;
+    if (since >= _LIVE_RENDER_MIN_MS) {
+      if (_liveRenderTimer) { clearTimeout(_liveRenderTimer); _liveRenderTimer = null; }
+      _liveRenderLastAt = Date.now();
+      _liveRenderDirty = false;
+      _paintLiveTextNow(textEl);
+      return;
+    }
+    _liveRenderDirty = true;
+    if (_liveRenderTimer) return;
+    _liveRenderTimer = setTimeout(function() {
+      _liveRenderTimer = null;
+      _liveRenderLastAt = Date.now();
+      _liveRenderDirty = false;
+      if (_liveRenderEl) _paintLiveTextNow(_liveRenderEl);
+    }, _LIVE_RENDER_MIN_MS - since);
+  }
+
+  /** Terminal flush: cancel any pending throttled paint and render the final
+   *  accumulated text immediately (called from the done/finally paths). */
+  function _flushLiveTextPaint() {
+    if (_liveRenderTimer) { clearTimeout(_liveRenderTimer); _liveRenderTimer = null; }
+    if (_liveRenderDirty && _liveRenderEl) {
+      _liveRenderLastAt = Date.now();
+      _liveRenderDirty = false;
+      _paintLiveTextNow(_liveRenderEl);
+    }
+  }
+
   function hasInlineApprovalCard() {
     if (!messagesEl) return false;
     var cards = messagesEl.querySelectorAll('.hitl-approval-card');
@@ -3684,7 +3736,7 @@
           _turnPainted = true;
           tryIngestPlanFromText(tokenAccum);
           var textEl = currentMsgEl.querySelector('.message-text');
-          if (textEl) textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
+          _scheduleLiveTextPaint(textEl);
           scrollToBottom();
         },
         onToolCall: function(toolData) {

@@ -162,3 +162,17 @@ def test_voice_tts_latch_survives_reload() -> None:
     assert "sessionStorage.getItem('kazma_tts_unavailable')" in src
     assert "sessionStorage.setItem('kazma_tts_unavailable', '1')" in src
     assert "sessionStorage.removeItem('kazma_tts_unavailable')" in src
+
+
+def test_streaming_paint_throttled_not_per_token() -> None:
+    """The 'double vision' flicker (2026-08-27): onToken replaced the FULL
+    accumulated markdown innerHTML on EVERY token event — measured 5,311 DOM
+    mutations (2,643 add / 2,624 del on .message-text) for one 150-word
+    reply. Live paints must go through the coalescing scheduler and the
+    terminal frame must flush the final text."""
+    js = _CHAT_JS.read_text(encoding="utf-8")
+    assert "_LIVE_RENDER_MIN_MS = 150" in js
+    assert "function _scheduleLiveTextPaint(textEl)" in js
+    assert js.count("_scheduleLiveTextPaint(textEl);") >= 2  # main + approve-resume
+    assert "function _flushLiveTextPaint()" in js
+    assert "_flushLiveTextPaint();" in js
