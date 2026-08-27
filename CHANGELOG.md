@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Unreleased — task_ledger_update registered (2026-08-27, live fix)
+
+First live end-to-end run of the approval pipeline worked (tweet posted,
+HTTP 201, audit row captured) — but the model's `task_ledger_update`
+add_finding was DENIED by the commitment layer as an "unregistered
+mutator (fail-closed)": the tool was never added to the side-effects
+registry. Registered as `NONE/NONE` (mutates only the internal ledger DB,
+never the world — same tier as update_scratchpad). 26 side-effect /
+commitment tests green.
+
 ## Unreleased — memory q-filter underscore-insensitive (2026-08-27)
 
 `memory_list_beliefs(q=…)` and `memory_list_entities(q=…)` used a literal
