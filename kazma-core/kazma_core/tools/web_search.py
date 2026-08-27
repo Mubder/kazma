@@ -113,6 +113,23 @@ def _is_loopback_base(base: str) -> bool:
     )
 
 
+def _note_rank(note: str) -> int:
+    """Lower = more informative. Keeps a REACHABLE-instance note from being
+    overwritten by a later dead candidate's connection error — the loop tries
+    5 bases and the last one (127.0.0.1:8080, refused) used to hide the real
+    story (empty@8088, engines suspended) with a bogus 'unavailable'
+    (2026-08-27 'why is Kazma not using my SearXNG' report)."""
+    if note.startswith("searxng:empty@"):
+        return 0
+    if note.startswith("searxng:http_"):
+        return 1
+    return 2
+
+
+def _better_note(current: str, new: str) -> str:
+    return new if _note_rank(new) <= _note_rank(current) else current
+
+
 def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] | None, str]:
     """Try SearXNG across candidate bases. Returns (results|None, status_note)."""
     import time as _time
@@ -130,6 +147,7 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
         candidates = [good] + [c for c in candidates if c != good]
 
     last_note = "searxng:unavailable"
+    reached_any = False  # any instance ANSWERED (even 0 results / non-200)
     for base in candidates:
         try:
             search_url = f"{base}/search"
@@ -154,12 +172,31 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
                 ) as client:
                     r = client.get(search_url, params=params)
             if r.status_code != 200:
-                last_note = f"searxng:http_{r.status_code}@{base}"
+                reached_any = True
+                last_note = _better_note(
+                    last_note, f"searxng:http_{r.status_code}@{base}"
+                )
                 continue
             data = r.json()
+            reached_any = True
             raw_results = data.get("results", [])
             if not raw_results:
-                last_note = f"searxng:empty@{base}"
+                # Surface WHY the instance answered with nothing — SearXNG
+                # reports its suspended/CAPTCHA'd engines, which is the
+                # actual story behind "all backends empty" (2026-08-27:
+                # brave suspended + ddg CAPTCHA made obscure queries return
+                # 0 while common ones still worked).
+                extra = ""
+                try:
+                    unresp = data.get("unresponsive_engines") or []
+                    names = [str(u[0]) for u in unresp if isinstance(u, (list, tuple)) and u][:4]
+                    if names:
+                        extra = f" (engines suspended: {', '.join(names)})"
+                except Exception:
+                    pass
+                last_note = _better_note(
+                    last_note, f"searxng:empty@{base}{extra}"
+                )
                 # empty is still a live instance — keep base cached
                 _searxng_cache["base"] = base
                 _searxng_cache["dead_until"] = 0.0
@@ -182,13 +219,19 @@ def _searxng_search(query: str, max_results: int) -> tuple[list[dict[str, str]] 
             )
             return normalized, f"searxng:ok@{base}"
         except Exception as exc:
-            last_note = f"searxng:unavailable@{base} ({type(exc).__name__})"
+            last_note = _better_note(
+                last_note, f"searxng:unavailable@{base} ({type(exc).__name__})"
+            )
             logger.debug("[web_search] SearXNG %s: %s", base, exc)
             continue
 
-    # All candidates failed — cool down 60s
-    _searxng_cache["base"] = None
-    _searxng_cache["dead_until"] = now + 60.0
+    # Cool down 60s ONLY when no instance ever answered — a reachable
+    # instance returning 0 results (engines suspended) must not poison the
+    # cache and get skipped for a minute; that made a working SearXNG look
+    # dead on the very next query (2026-08-27).
+    if not reached_any:
+        _searxng_cache["base"] = None
+        _searxng_cache["dead_until"] = now + 60.0
     _searxng_cache["note"] = last_note
     return None, last_note
 

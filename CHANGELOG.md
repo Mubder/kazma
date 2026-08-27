@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Unreleased — Kazma WAS using your SearXNG; the note lied (2026-08-27)
+
+Diagnosis of "why is Kazma not using my SearXNG": it was — reachable at
+`127.0.0.1:8088`, HTTP 200, results parsing. Three stacked issues made it
+look dead:
+
+1. **Misleading status note (bug, fixed):** the candidate loop tried 5 bases
+   and the LAST one (`127.0.0.1:8080` — nothing listens there) overwrote the
+   truthful `searxng:empty@8088` note with `unavailable@8080 (ConnectError)`.
+   Notes are now ranked — a reachable-instance note (empty/http) always wins
+   over a later dead candidate's connection error.
+2. **Empty-result cooldown poisoning (bug, fixed):** a reachable instance
+   returning 0 results (upstream engines suspended) triggered the 60s
+   dead-cooldown and cleared the cached good base — so one obscure query
+   made the NEXT query skip SearXNG entirely. Cooldown now applies only when
+   NO instance answered.
+3. **Suspended engines surfaced (diagnostics):** empty results now carry
+   SearXNG's own `unresponsive_engines` list (e.g. `brave: suspended`,
+   `duckduckgo: CAPTCHA`) straight into the log note — the real story behind
+   "all backends empty" for obscure queries.
+
+Verified live against the user's instance: the previously failing query now
+returns 5 results (`searxng:ok@8088`). Tests: regression pin in
+`test_searxng_discovery.py` (reachable note survives dead candidates, no
+cooldown on reachable-empty); 9 green.
+
 ## Unreleased — RDAP taken-domain checks unblocked (2026-08-27)
 
 The agent couldn't check name availability in one turn — every fast path

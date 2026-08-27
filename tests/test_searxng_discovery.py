@@ -86,3 +86,46 @@ def test_searxng_all_fail_sets_cooldown(monkeypatch):
     assert ws._searxng_cache["base"] is None
     assert ws._searxng_cache["dead_until"] > time.time()
     assert "dead:1" in note or "unavailable" in note
+
+
+def test_searxng_empty_note_not_overwritten_by_dead_candidates(monkeypatch):
+    """2026-08-27 report: the loop's LAST candidate (127.0.0.1:8080 —
+    refused) overwrote the truthful 'empty@8088 (engines suspended)' note
+    with 'unavailable', making a WORKING SearXNG look dead. The reachable
+    note must win, the suspended engines must be surfaced, and a reachable
+    instance must NOT trigger the 60s dead-cooldown."""
+    import httpx
+
+    class _Resp:
+        status_code = 200
+
+        def json(self):
+            return {
+                "results": [],
+                "unresponsive_engines": [
+                    ["brave", "Suspended: too many requests"],
+                    ["duckduckgo", "CAPTCHA"],
+                ],
+            }
+
+    def fake_get(url, **k):
+        if "8088" in url:
+            return _Resp()
+        raise httpx.ConnectError("refused")
+
+    ws._searxng_cache.clear()
+    ws._searxng_cache.update({"base": None, "dead_until": 0.0, "note": ""})
+    monkeypatch.setattr(
+        ws, "_searxng_candidate_bases",
+        lambda: ["http://127.0.0.1:8088", "http://127.0.0.1:8080"],
+    )
+    monkeypatch.setattr(httpx, "get", fake_get)
+
+    results, note = ws._searxng_search("obscure brand", 3)
+    assert results is None
+    assert note.startswith("searxng:empty@http://127.0.0.1:8088")
+    assert "engines suspended" in note and "brave" in note
+    assert "unavailable@http://127.0.0.1:8080" not in note
+    # Reachable instance: no dead-cooldown, good base stays cached.
+    assert ws._searxng_cache["base"] == "http://127.0.0.1:8088"
+    assert ws._searxng_cache["dead_until"] == 0.0
