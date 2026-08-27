@@ -228,8 +228,11 @@ def test_chat_js_always_applies_done_content():
 def test_chat_js_handles_glued_closer():
     src = _CHAT_JS.read_text(encoding="utf-8")
     # Client split must not require a newline before the closing ticks,
-    # and must not swallow ```plantuml-style fences (\b guard).
-    assert r"/```plan\b[^\n]*\n?([\s\S]*?)```/i" in src
+    # and must not swallow ```plantuml-style fences (\b guard). The
+    # 2026-08-27 plan-render rework also tolerates space variants
+    # ("``` plan") — CommonMark opens those fences too, and refusing them
+    # glued plan text into prose.
+    assert r"/```[ \t]*plan\b[^\n]*\n?([\s\S]*?)```/i" in src
 
 
 # ── Plan-vs-content discrimination (2026-08-26 regressions) ────────────

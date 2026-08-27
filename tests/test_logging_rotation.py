@@ -62,10 +62,18 @@ class TestSafeRotation:
     def test_setup_logging_wires_safe_handler(self, monkeypatch, tmp_path):
         monkeypatch.setenv("KAZMA_LOG_FILE", str(tmp_path / "t.log"))
         monkeypatch.setenv("KAZMA_LOG_LEVEL", "INFO")
+        import kazma_core.logging_config as _lc
         from kazma_core.logging_config import setup_logging
 
-        setup_logging(level="INFO")
+        # setup_logging is idempotent by design (_logging_configured guard) —
+        # an earlier test in the same chunk process already configured it,
+        # so force this test's own pass with ITS tmp target.
+        monkeypatch.setattr(_lc, "_logging_configured", False)
+
         root = logging.getLogger()
+        pre_handlers = list(root.handlers)
+        setup_logging(level="INFO")
+        added = [h for h in root.handlers if h not in pre_handlers]
         file_handlers = [
             h for h in root.handlers if isinstance(h, SafeTimedRotatingFileHandler)
         ]
@@ -77,3 +85,8 @@ class TestSafeRotation:
         for h in file_handlers:
             h.close()
             root.removeHandler(h)
+        # Drop any console handlers this call added too, so a later test's
+        # guard-reset doesn't accumulate duplicates on root.
+        for h in added:
+            if h not in pre_handlers and h in root.handlers:
+                root.removeHandler(h)
