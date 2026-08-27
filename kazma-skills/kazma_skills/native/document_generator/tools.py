@@ -68,6 +68,85 @@ def _output(result: Any, label: str) -> str:
     )
 
 
+# Words too generic to prove a section body reached the PDF.
+_VERIFY_STOP = {
+    "the", "and", "with", "that", "this", "from", "for", "are", "was",
+    "were", "have", "has", "will", "your", "you", "all", "not", "but",
+    "into", "than", "then", "them", "they", "their", "there", "these",
+    "those", "been", "being", "when", "what", "which", "while", "about",
+}
+
+
+def _verify_pdf_content(
+    path: Any, sections: list[dict[str, str]] | None, tables: list[dict[str, Any]] | None,
+) -> str | None:
+    """Post-render verification: the PDF must actually CONTAIN the content
+    the caller asked for (2026-08-27 incident: the model passed a SUMMARY as
+    section bodies — "26 names, all confirmed available…" — and reported
+    success for a PDF holding only headings; 30 names never made it in).
+
+    Extracts the rendered text and requires ≥70% of each section body's
+    distinctive LATIN tokens (≥4 chars, stopwords dropped) plus every table
+    header and first-row cell to appear. Latin-only matching deliberately
+    sidesteps RTL/Arabic extraction presentation-forms. Returns an error
+    string for the model to self-correct with, or None when verified
+    (or when verification cannot run — never blocks generation).
+    """
+    try:
+        import re as _re
+
+        pdf_path = str(path)
+        if not pdf_path.lower().endswith(".pdf") or not Path(pdf_path).is_file():
+            return None
+        import fitz  # pymupdf — same parser stack the document platform uses
+
+        doc = fitz.open(pdf_path)
+        try:
+            rendered = " ".join(page.get_text() for page in doc)
+        finally:
+            doc.close()
+        norm = _re.sub(r"[^a-z0-9]+", " ", rendered.lower())
+
+        def _tokens(text: str) -> list[str]:
+            words = _re.sub(r"[^a-zA-Z0-9]+", " ", str(text or "").lower()).split()
+            return [w for w in words if len(w) >= 4 and w not in _VERIFY_STOP]
+
+        for i, sec in enumerate(sections or []):
+            toks = _tokens(sec.get("body", ""))
+            if not toks:
+                continue  # nothing Latin/provable to check (e.g. Arabic body)
+            found = sum(1 for t in toks if t in norm)
+            if found / len(toks) < 0.7:
+                missing = [t for t in toks if t not in norm]
+                return (
+                    f"Error: PDF VERIFICATION FAILED — section "
+                    f"{i + 1} ('{str(sec.get('heading', ''))[:60]}') body did "
+                    f"not reach the PDF ({found}/{len(toks)} distinctive terms "
+                    f"found; first missing: {', '.join(missing[:6])}). "
+                    f"The file was created but is INCOMPLETE — do NOT report "
+                    f"success. Re-call with the COMPLETE body text (or write "
+                    f"a markdown file and use markdown_path)."
+                )
+        for t_i, table in enumerate(tables or []):
+            cells = [str(c) for c in (table.get("headers") or [])]
+            rows = table.get("rows") or []
+            if rows:
+                cells.extend(str(c) for c in (rows[0] or []))
+            missing = [c for c in cells if c.strip() and str(c).lower() not in norm]
+            if missing:
+                return (
+                    f"Error: PDF VERIFICATION FAILED — table {t_i + 1} is "
+                    f"missing content in the rendered PDF (missing: "
+                    f"{', '.join(missing)[:120]}). The file was created but "
+                    f"is INCOMPLETE — do NOT report success. Re-call with the "
+                    f"full table rows (or use markdown_path)."
+                )
+        return None
+    except Exception:
+        # Verification is a guardrail, never a blocker.
+        return None
+
+
 async def generate_pdf(
     title: str,
     sections: list[dict[str, str]] | None = None,
@@ -85,7 +164,12 @@ async def generate_pdf(
         sections automatically. Keeps the tool call tiny regardless of
         document size — inline sections that exceed the model's output
         token limit get truncated into unparseable JSON.
-      - ``sections``: inline [{"heading": …, "body": …}] (small docs only)
+      - ``sections``: inline [{"heading": …, "body": …}] (small docs only).
+        The body MUST be the COMPLETE verbatim final text — every list
+        item, every table row. NEVER a summary of it ("26 names, all
+        confirmed available…" is a WRONG body; the actual names are the
+        body). The rendered PDF is verified against the bodies and an
+        incomplete document returns an error, not a success.
 
     Section bodies support lightweight markdown for real formatting:
       - ``#`` / ``##`` / ``###`` headings
@@ -143,6 +227,15 @@ async def generate_pdf(
         export_dir=DOC_DIR,
         **_scope(),
     )
+    if result.ok:
+        # Guardrail (2026-08-27 incident): verify the rendered PDF actually
+        # CONTAINS the requested bodies/tables before reporting success —
+        # a lazily-summarized call (or a renderer truncation) must surface
+        # as an error the model can self-correct from, never a false ✅.
+        _path = getattr(result.data, "export_path", None) if result.data else None
+        _err = _verify_pdf_content(_path, _sections(sections), tables)
+        if _err:
+            return _err
     return _output(result, "PDF")
 
 

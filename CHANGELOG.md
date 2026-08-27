@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## Unreleased — generate_pdf post-render verification (2026-08-27 incident)
+
+The model passed a SUMMARY as section bodies ("26 names, all confirmed
+available…"), the renderer faithfully produced a headings-only PDF, and the
+agent reported ✅ success — the 30 names never made it into the document.
+
+- **`_verify_pdf_content`** (generate_pdf guardrail): after rendering, the
+  PDF text is extracted and each section body's distinctive Latin tokens
+  (≥4 chars, stopwords dropped) must appear at ≥70% coverage; every table
+  header + first-row cell must appear. A miss returns an explicit error the
+  model can self-correct from ("do NOT report success") — never a false ✅.
+  Verified against BOTH real PDFs from the incident: the intended bodies
+  against the broken file are caught; the good file passes; Arabic bodies
+  skip safely (Latin-only matching sidesteps RTL extraction forms).
+  Verification is a guardrail, never a blocker (missing file/exception →
+  pass silently).
+- Tool docstring now forbids summary bodies explicitly: the body MUST be
+  the complete verbatim text.
+- Tests: `tests/test_pdf_verification.py` (5).
+
 ## Unreleased — pseudo-tool-call block scrub + clean clarify directives (2026-08-27)
 
 Live follow-up: a locked (clarify) turn rendered the model's narrated
