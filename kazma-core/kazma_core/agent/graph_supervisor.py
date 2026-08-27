@@ -1648,6 +1648,63 @@ async def supervisor_node(
 
     pending = [PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments) for tc in response.tool_calls]
 
+    # Budget-exhausted divert (audit H5): iteration was already advanced for
+    # this hop, so when THIS increment reaches the cap the router force-
+    # diverts to RESPOND and the sanitizer silently strips the dangling
+    # tool_calls — the model lost its final tool round with no explanation.
+    # Instead, answer every pending call here with an explicit synthetic
+    # tool result and route to RESPOND ourselves, so the chain stays valid
+    # AND the model is told its calls were discarded by budget, not lost.
+    # Mission-mode extension mirrors the router's own hard-wall predicate so
+    # legit mission hops past a soft cap are untouched.
+    _next_iter = int(iteration or 0) + 1
+    _soft_max = int(state.get("max_iterations") or 15)
+    _budget_divert = _next_iter >= _soft_max
+    if _budget_divert:
+        try:
+            from kazma_core.agent.long_task import is_mission_mode, mission_hard_rounds
+
+            _tid = str(state.get("thread_id") or "") or None
+            if _tid and is_mission_mode(_tid):
+                _used = int(state.get("mission_rounds_used") or 0) + int(iteration or 0)
+                _hard = int(state.get("mission_hard_rounds") or mission_hard_rounds())
+                if _used < _hard:
+                    _budget_divert = False
+        except Exception:
+            logger.debug("[Supervisor] mission check failed", exc_info=True)
+
+    if _budget_divert:
+        logger.warning(
+            "[Supervisor] Iteration %d == max_iterations — answering %d tool "
+            "call(s) with budget-exhausted notices and routing to respond",
+            _next_iter, len(pending),
+        )
+        _synth = [
+            {
+                "role": "tool",
+                "tool_call_id": p.id,
+                "content": (
+                    f"Iteration budget exhausted ({_next_iter}/{_soft_max}) — "
+                    f"'{p.name}' was NOT executed. Work with what you have."
+                ),
+            }
+            for p in pending
+        ]
+        return {
+            **breaker_reset,
+            **_tool_patch,
+            **_mission_carry,
+            "messages": messages + [assistant_msg] + _synth,
+            "tool_calls_pending": [],
+            "tool_calls_done": [],
+            "next_node": NodeName.RESPOND,
+            "iteration": _next_iter,
+            "last_model": response.model,
+            "last_tokens": response.usage.get("total_tokens", 0),
+            "last_cost_usd": response.cost_usd,
+            "_last_finish_reason": _finish_reason,
+        }
+
     # Truncation detection: finish_reason="length" means the provider cut the
     # response at max_tokens — tool-call JSON is likely severed mid-string.
     # The tool worker reads this to give a truncation-specific corrective
