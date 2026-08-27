@@ -226,7 +226,8 @@ def _module_graph() -> Any:
 
 
 async def _persist_detached_reply(
-    graph: Any, config: dict, session_id: str, thread_id: str
+    graph: Any, config: dict, session_id: str, thread_id: str,
+    streamed_text: str = "",
 ) -> None:
     """Persist a detached turn's final reply into the session store.
 
@@ -240,6 +241,12 @@ async def _persist_detached_reply(
     * Failures log at WARNING (they were debug-swallowed, leaving the user
       waiting hours for a reply that existed in the checkpoint while the
       log showed nothing).
+    * A CANCELLED/stop mid-turn leaves the checkpoint holding only the LAST
+      interim segment — the streamed accumulation (all narration + final)
+      is the richer truth and wins when longer (2026-08-27 incident: a
+      96-second 40-lookup sweep persisted as a 158-char fragment after the
+      user stopped the turn mid-stream; the 2,272 streamed chars were
+      discarded).
     """
     try:
         snap = await graph.aget_state(config)
@@ -247,6 +254,9 @@ async def _persist_detached_reply(
         if snap and snap.values:
             msgs = snap.values.get("messages") or []
             asst = _user_facing_reply(_last_assistant_text(msgs))
+        streamed = str(streamed_text or "").strip()
+        if streamed and len(streamed) > len((asst or "").strip()):
+            asst = streamed
         with _module_store().transact(session_id) as sess:
             if asst:
                 trailing = next(
@@ -615,7 +625,10 @@ async def _stream_langgraph_events(
                     # RuntimeError off-loop and drop the persist silently).
                     _turn_loop.call_soon_threadsafe(
                         lambda: _turn_loop.create_task(
-                            _persist_detached_reply(graph, config, session_id, thread_id)
+                            _persist_detached_reply(
+                                graph, config, session_id, thread_id,
+                                streamed_text=content_acc,
+                            )
                         )
                     )
 

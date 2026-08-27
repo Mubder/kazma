@@ -198,3 +198,49 @@ async def test_backfill_noop_when_checkpoint_does_not_end_with_assistant(monkeyp
     out = await sse_chat._checkpoint_backfill_unanswered(session)
     assert len(out) == 1
     assert store.puts == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_turn_persists_full_streamed_narration():
+    """2026-08-27 incident: a 96-second sweep was stopped mid-stream; the
+    checkpoint held only the last 158-char interim segment, and the detached
+    persist wrote THAT — discarding the 2,272 streamed chars. The streamed
+    accumulation must win when it is the richer text."""
+    import kazma_ui.sse_chat as sc
+
+    class _Snap:
+        values = {"messages": [
+            {"role": "user", "content": "go"},
+            {"role": "assistant", "content": "All 40 lookups done. Next: social sweep"},
+        ]}
+
+    class _Graph:
+        async def aget_state(self, config):
+            return _Snap()
+
+    class _Sess:
+        messages = [{"role": "user", "content": "go", "ts": "t"}]
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    class _Store:
+        def transact(self, sid):
+            return _Sess()
+
+    sc._module_store = lambda: _Store()
+    streamed = "Narration batch 1 …\n\nbatch 2 …\n\nfinal table with all greens"
+    assert len(streamed) > len("All 40 lookups done. Next: social sweep")
+    await sc._persist_detached_reply(_Graph(), {}, "s1", "th1", streamed_text=streamed)
+    assert _Sess.messages[-1]["content"] == streamed
+
+    # And the checkpoint text still wins when it is the richer one.
+    _Sess.messages = [{"role": "user", "content": "go", "ts": "t"}]
+    long_final = "Full final reply that is longer than the short streamed bit"
+    _Snap.values = {"messages": [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": long_final},
+    ]}
+    await sc._persist_detached_reply(_Graph(), {}, "s1", "th1", streamed_text="short")
+    assert _Sess.messages[-1]["content"] == long_final
