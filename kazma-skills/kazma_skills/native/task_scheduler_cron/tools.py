@@ -29,9 +29,22 @@ async def schedule_task(timing: str, prompt: str) -> str:
     # Capture the chat this reminder was booked from so the result routes back
     # to the right conversation at fire time. The delivery_target is a
     # platform-prefixed id like "telegram:<chat_id>"; infer the platform from
-    # its prefix so _deliver uses the matching backend. Empty when invoked
-    # headlessly (no active conversation) — _deliver then falls back gracefully.
+    # its prefix so _deliver uses the matching backend.
     delivery_target = get_current_delivery_target() or ""
+    # Cron-fired turns (agent RESCHEDULING from inside a scheduled job) have
+    # no gateway context — inherit the FIRING job's delivery identity so the
+    # rescheduled job is never born targetless (2026-08-27 incident: the
+    # "Rescheduled batch job N/8" rows carried "" and every result message
+    # died with 'target_id must be platform:id format').
+    if not delivery_target:
+        try:
+            from kazma_core.cron.scheduler import get_cron_parent
+
+            parent = get_cron_parent()
+            if parent and str(parent.get("delivery_target") or "").strip():
+                delivery_target = str(parent["delivery_target"]).strip()
+        except Exception:
+            pass
     platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
     # Capture the booking thread too (bound in tool_worker_node). The
     # commitment cancel_job resolver verifies against pending jobs; jobs

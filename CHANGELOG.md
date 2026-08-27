@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Unreleased — cron approval-delivery pipeline fixed, 4 layers (2026-08-27)
+
+The incident class: agent-rescheduled X-tweet cron jobs ("Rescheduled batch
+job N/8") were born with an empty delivery_target — the gateway ContextVar
+is empty inside cron-fired turns — so every result message died with
+`target_id must be platform:id format`, and the original batch's approval
+denials (0/8) were silent.
+
+1. **Capture at creation (root fix)**: the scheduler binds a cron-parent
+   context around each job execution; `schedule_task` inherits the FIRING
+   job's delivery_target/platform when the gateway context is empty —
+   rescheduled jobs can never be born targetless.
+2. **`_deliver` repair chain**: malformed/empty target → adopt a sibling
+   job's valid target on the same thread AND persist it back (the broken
+   row self-heals) → best-effort session-store lookup → if still nothing,
+   one CRITICAL log naming the job (never a silent warning, never a
+   bare-UUID send). Every delivery logs the target actually used.
+3. **Denial notifications**: when a danger tool (x_post) is denied or times
+   out inside a cron turn, the scheduling conversation now gets
+   "⚠️ job X: 'x_post' was denied — NOT executed" via the cron-parent
+   target. The 0/8 silent-failure class is closed.
+4. **Tests**: `tests/test_cron_approval_pipeline.py` (8) — context
+   roundtrip, schedule_task inheritance, sibling adoption + persist, valid
+   rows untouched, undeliverable = CRITICAL not crash, denial notify
+   (fires in cron context, silent otherwise). Cron + swarm-safety suites
+   green (35).
+
 ## Unreleased — X audit log viewer in Settings (2026-08-27)
 
 The X connector's audit trail was DB-only; now it is visible in the UI.

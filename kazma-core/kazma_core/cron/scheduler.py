@@ -30,6 +30,29 @@ __all__ = ["CronScheduler", "JobStatus", "SQLiteCronStore", "ScheduledJob", "get
 
 logger = logging.getLogger(__name__)
 
+# ── Cron-parent context (2026-08-27 approval-delivery incident) ────────
+# Bound around each job execution so tools running INSIDE a cron-fired
+# turn can inherit the firing job's delivery identity. The gateway's
+# delivery-target ContextVar is empty on this path (no inbound user
+# message), which is how agent-rescheduled jobs were born targetless.
+from contextvars import ContextVar as _ContextVar
+
+_cron_parent_ctx: _ContextVar[dict[str, str] | None] = _ContextVar(
+    "kazma_cron_parent", default=None
+)
+
+
+def get_cron_parent() -> dict[str, str] | None:
+    """The firing cron job's identity, when the current turn is cron-fired.
+
+    Keys: job_id, delivery_target, platform, thread_id. None outside a
+    cron execution (normal gateway turns).
+    """
+    val = _cron_parent_ctx.get()
+    if isinstance(val, dict) and any(str(val.get(k) or "").strip() for k in val):
+        return val
+    return None
+
 # Module-level singleton
 _cron_scheduler: CronScheduler | None = None
 
@@ -390,6 +413,40 @@ class SQLiteCronStore:
         )
         await self._db.commit()
 
+    async def update_delivery_target(self, job_id: str, delivery_target: str) -> None:
+        """Repair a job's delivery_target (self-heal from a sibling job)."""
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
+        await self._db.execute(
+            "UPDATE cron_jobs SET delivery_target = ? WHERE job_id = ?",
+            (str(delivery_target or "").strip(), job_id),
+        )
+        await self._db.commit()
+
+    async def sibling_delivery_target(self, thread_id: str) -> str:
+        """A VALID delivery_target from any other job on the same thread.
+
+        Used by _deliver's repair chain: rescheduled/legacy rows born with
+        an empty or malformed target adopt a sibling's routing — the whole
+        batch shares one conversation (2026-08-27 incident).
+        """
+        if self._db is None or not str(thread_id or "").strip():
+            return ""
+        try:
+            rows = await self._db.execute_fetchall(
+                "SELECT delivery_target FROM cron_jobs "
+                "WHERE thread_id = ? AND delivery_target LIKE '%:%' "
+                "ORDER BY created_at DESC LIMIT 1",
+                (str(thread_id),),
+            )
+            for row in rows or []:
+                cand = str(row[0] or "").strip()
+                if ":" in cand:
+                    return cand
+        except Exception:
+            pass
+        return ""
+
     async def cancel(self, job_id: str) -> bool:
         """Cancel a pending job. Returns True if found."""
         if self._db is None:
@@ -659,6 +716,20 @@ class CronScheduler:
         await self._store.update_status(job.job_id, JobStatus.RUNNING)
         logger.info("[CronScheduler] Executing %s: %.80s", job.job_id, job.prompt)
 
+        # Bind the cron-parent context for the whole execution: jobs the
+        # agent RESCHEDULES from inside this turn inherit this job's
+        # delivery_target/platform instead of being born targetless (the
+        # 2026-08-27 incident — "Rescheduled batch job N/8" rows carried an
+        # empty delivery_target, so _deliver fell back to the bare thread
+        # UUID and the gateway rejected every result message).
+        parent_token = _cron_parent_ctx.set(
+            {
+                "job_id": job.job_id,
+                "delivery_target": job.delivery_target or "",
+                "platform": job.platform or "",
+                "thread_id": job.thread_id or "",
+            }
+        )
         try:
             if self._graph_builder is None:
                 raise RuntimeError("No graph builder configured")
@@ -714,25 +785,79 @@ class CronScheduler:
             await self._store.update_status(job.job_id, JobStatus.FAILED)
             await self._store.update_result(job.job_id, f"Error: {str(exc)[:500]}")
         finally:
+            _cron_parent_ctx.reset(parent_token)
             self._in_flight.discard(job.job_id)
 
     async def _deliver(self, job: ScheduledJob, text: str) -> None:
-        """Send result to the user via the original platform.
+        """Send result to the user via the original platform — with repair.
 
-        Preference order for the delivery target:
-            1. ``job.delivery_target`` — the platform-prefixed chat id captured
-               at schedule time (robust against SessionStore TTL eviction).
-            2. ``job.thread_id`` — legacy fallback for rows scheduled before
-               the ``delivery_target`` column existed.
-            3. ``"{platform}:unknown"`` — last resort.
+        Target resolution chain (2026-08-27 'target_id must be platform:id
+        format' incident — agent-rescheduled jobs were born with an empty
+        delivery_target and every result message died):
+
+            1. ``job.delivery_target`` when well-formed (``platform:id``).
+            2. A sibling job's valid delivery_target on the same thread —
+               adopted AND persisted back so the broken row self-heals.
+            3. The session store lookup for the thread (best-effort; the
+               5-minute TTL makes this a bonus, not a strategy).
+            4. Nothing works → one CRITICAL log naming the job — never a
+               silent warning, never a bare-UUID send that the gateway
+               rejects.
         """
+        target_id = str(job.delivery_target or "").strip()
+
+        def _valid(t: str) -> bool:
+            return bool(t) and ":" in t and not t.endswith(":")
+
+        if not _valid(target_id):
+            healed = ""
+            try:
+                healed = await self._store.sibling_delivery_target(job.thread_id)
+            except Exception:
+                healed = ""
+            if _valid(healed):
+                logger.warning(
+                    "[CronScheduler] %s had malformed/empty delivery_target %r — "
+                    "adopted sibling target %r (persisted)",
+                    job.job_id, target_id or job.thread_id, healed,
+                )
+                target_id = healed
+                try:
+                    await self._store.update_delivery_target(job.job_id, healed)
+                except Exception:
+                    logger.debug("[CronScheduler] target repair persist failed", exc_info=True)
+            else:
+                # Session-store fallback (best effort — TTL is 5 min; the
+                # web SessionManager knows platform/chat_id per thread).
+                try:
+                    from kazma_ui.session_manager import get_session_manager
+
+                    mgr = get_session_manager()
+                    sess = mgr.get_by_thread_id(job.thread_id) if mgr else None
+                    if sess is not None:
+                        plat = str(getattr(sess, "platform", "") or job.platform or "")
+                        chat = str(getattr(sess, "chat_id", "") or "")
+                        if plat and chat and _valid(f"{plat}:{chat}"):
+                            target_id = f"{plat}:{chat}"
+                except Exception:
+                    pass
+        if not _valid(target_id):
+            logger.critical(
+                "[CronScheduler] UNDELIVERABLE job %s ('%.60s'): no valid "
+                "delivery_target (stored=%r thread=%r platform=%r). Result "
+                "NOT sent — fix the job's delivery target or re-create it "
+                "from a live conversation.",
+                job.job_id, job.prompt, job.delivery_target, job.thread_id, job.platform,
+            )
+            return
         try:
             from kazma_core.tools.send_message import send_message
 
-            # Never consult SessionStore here — TTL is 5 minutes
-            # (kazma_core.sessions.ttl.SESSION_TTL_SECONDS). delivery_target
-            # was captured at schedule time.
-            target_id = job.delivery_target or job.thread_id or f"{job.platform}:unknown"
-            await send_message(target_id, text, backend=job.platform)
+            platform = target_id.split(":", 1)[0]
+            logger.info("[CronScheduler] delivering %s -> %s", job.job_id, target_id)
+            await send_message(target_id, text, backend=platform)
         except Exception as exc:
-            logger.warning("[CronScheduler] Failed to deliver result for %s: %s", job.job_id, exc)
+            logger.critical(
+                "[CronScheduler] delivery FAILED for %s -> %s: %s",
+                job.job_id, target_id, exc,
+            )

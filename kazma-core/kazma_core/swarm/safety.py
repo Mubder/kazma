@@ -24,6 +24,36 @@ __all__ = ["SafetyMiddleware", "SafetyViolationError", "get_safety", "set_safety
 
 logger = logging.getLogger(__name__)
 
+
+async def _notify_cron_denial(tool_name: str, reason: str) -> None:
+    """Tell the scheduling conversation when a danger tool is denied inside
+    a cron-fired turn (2026-08-27 fix, the 0/8 silent-failure class).
+
+    Normal gateway turns see the denial in the live chat; cron turns have
+    no conversation, so the user would never learn the action didn't run.
+    Uses the cron-parent context's delivery target; fire-and-forget and
+    never raises — a notification failure must not mask the denial itself.
+    """
+    try:
+        from kazma_core.cron.scheduler import get_cron_parent
+
+        parent = get_cron_parent()
+        if not parent:
+            return
+        target = str(parent.get("delivery_target") or "").strip()
+        if not target or ":" not in target:
+            return
+        from kazma_core.tools.send_message import send_message
+
+        await send_message(
+            target,
+            f"⚠️ Scheduled job {parent.get('job_id', '')}: '{tool_name}' was "
+            f"{reason} — the action was NOT executed.",
+            backend=target.split(":", 1)[0],
+        )
+    except Exception:
+        logger.debug("[Safety] cron denial notification failed", exc_info=True)
+
 # Single source of truth — see kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS.
 # Alias kept so existing imports of _EXTENDED_DANGER keep working.
 _EXTENDED_DANGER: list[str] = list(CANONICAL_DANGER_TOOLS)
@@ -230,6 +260,7 @@ class SafetyMiddleware:
                 "[Safety] Danger tool '%s' BLOCKED (no approval bus; "
                 "allow_headless_danger=False) (task=%s)", tool_name, task_id,
             )
+            await _notify_cron_denial(tool_name, "blocked (no approval bus)")
             return False
 
         approved = await bus.request_approval(
@@ -246,6 +277,10 @@ class SafetyMiddleware:
         else:
             self._rejected_count += 1
             logger.warning("[Safety] Danger tool REJECTED: %s (task=%s)", tool_name, task_id)
+            # Cron turns have no live conversation — the user would never
+            # hear about the denial (the 0/8 silent-failure class). Tell the
+            # scheduling conversation directly (2026-08-27 fix).
+            await _notify_cron_denial(tool_name, "denied or timed out")
 
         return approved
 
