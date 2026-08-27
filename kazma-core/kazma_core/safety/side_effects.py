@@ -170,6 +170,8 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "sqlite_query": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "current_datetime": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "send_message": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    "send_approval_request": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
+    "dispatch_notification": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
     "context_info": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "update_scratchpad": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     "mcp_test_server": (EffectKind.READ, SemanticTier.NONE, None, ()),

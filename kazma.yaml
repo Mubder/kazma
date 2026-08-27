@@ -47,6 +47,11 @@ mcp:
     - '@modelcontextprotocol/server-filesystem'
     - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
+  - name: sequential-thinking
+    transport: stdio
+    command:
+    - C:\Users\balfa\kazma\AppData\Roaming\uv\tools\mcp-sequential-thinking\Scripts\mcp-sequential-thinking.exe
+    enabled: true
   - name: test-mcp
     transport: stdio
     command:
