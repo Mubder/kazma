@@ -172,6 +172,11 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "send_message": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     "context_info": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "update_scratchpad": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    # Internal task-state bookkeeping (mutates only the ledger DB, never the
+    # world) — unregistered, the commitment layer denied it as a fail-closed
+    # unregistered mutator (2026-08-27 live: the model's add_finding was
+    # rejected mid-turn).
+    "task_ledger_update": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     "mcp_test_server": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # knowledge library
     "knowledge_list_libraries": (EffectKind.READ, SemanticTier.NONE, None, ()),
