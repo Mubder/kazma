@@ -14,6 +14,7 @@ import secrets
 import subprocess
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -48,6 +49,59 @@ def parse_github_slug(url: str) -> tuple[str, str] | None:
         owner, repo = match.groups()
         return owner, repo
     return None
+
+
+def _parse_git_remote(url: str) -> tuple[str, str]:
+    """Return ``(scheme, host)`` for common git remote forms.
+
+    Handles ``https://host/path``, ``ssh://git@host/path`` and the scp-like
+    ``git@host:owner/repo.git`` syntax. Unknown forms return ``("", "")``.
+    """
+    u = (url or "").strip()
+    if not u:
+        return ("", "")
+    if "://" in u:
+        parts = urlsplit(u)
+        try:
+            host = parts.hostname or ""
+        except ValueError:
+            host = ""
+        return (parts.scheme.lower(), host.lower())
+    scp_like = re.match(r"^(?:[^@/]+@)?([A-Za-z0-9._-]+):(.+)$", u)
+    if scp_like:
+        return ("ssh", scp_like.group(1).lower())
+    return ("", "")
+
+
+def _clone_host_allowed(url: str) -> bool:
+    """L1 gate: only github.com remotes may be cloned.
+
+    Accepts ``https://github.com/*``, ``https://*.github.com/*`` and SSH
+    forms aimed at the same hosts. ``KAZMA_CLONE_HOSTS`` (comma-separated
+    hostnames) extends the allowlist for GitHub Enterprise-style servers.
+    Everything else — ``http://``, ``file://``, arbitrary internal git
+    servers — is refused before any subprocess runs.
+    """
+    scheme, host = _parse_git_remote(url)
+    if not host:
+        return False
+    extra = {
+        h.strip().lower()
+        for h in os.environ.get("KAZMA_CLONE_HOSTS", "").split(",")
+        if h.strip()
+    }
+    if host in extra:
+        return True
+    github_family = host == "github.com" or host.endswith(".github.com")
+    return github_family and scheme in ("https", "ssh")
+
+
+def _redact_token(text: str | None, secret: str | None) -> str:
+    """Remove *secret* from stderr / user-visible output (audit H15)."""
+    body = text or ""
+    if secret and secret in body:
+        body = body.replace(secret, "[redacted]")
+    return body
 
 
 def save_github_token_to_env(token: str) -> None:
@@ -989,12 +1043,21 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     remote), just activates that workspace. Otherwise clones into
     ``$KAZMA_CLONE_DIR`` (default ``~/kazma-repos``) and registers it.
     """
+    import asyncio
+    import base64
     import subprocess
+    from kazma_gateway.agent_handler.commands import safe_repo_dir_name
     from kazma_gateway.routers.github_client import GitHubClient
 
     full_name = body.full_name.strip()
     if not full_name or "/" not in full_name:
         return JSONResponse({"error": "Invalid full_name (expected 'owner/repo')."}, status_code=422)
+
+    # Traversal guard: the slug's last segment becomes a directory under the
+    # clone dir — validate it before anything touches the filesystem (H14).
+    repo_name = safe_repo_dir_name(full_name)
+    if not repo_name:
+        return JSONResponse({"error": "Invalid full_name (unsafe repository name)."}, status_code=422)
 
     # Resolve the clone URL.
     if body.clone_url and not body.use_ssh:
@@ -1011,6 +1074,13 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
             return JSONResponse({"error": f"Could not resolve clone URL: {exc}"}, status_code=502)
     if not url:
         return JSONResponse({"error": "Could not determine clone URL."}, status_code=422)
+    # Scheme/host allowlist — no http/file/arbitrary-host remotes (L1).
+    if not _clone_host_allowed(url):
+        return JSONResponse(
+            {"error": "Clone refused: only github.com https/ssh URLs are allowed "
+                      "(set KAZMA_CLONE_HOSTS to extend)."},
+            status_code=422,
+        )
 
     # Check if already open locally — match by remote.origin.url.
     from kazma_core.stores import get_workspace_store
@@ -1021,7 +1091,8 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
             root = str(ws.get("root_path", ""))
             if not Path(root).joinpath(".git").exists():
                 continue
-            res = subprocess.run(
+            res = await asyncio.to_thread(
+                subprocess.run,
                 ["git", "config", "--get", "remote.origin.url"],
                 cwd=root, capture_output=True, text=True, timeout=5,
             )
@@ -1034,7 +1105,7 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
     # Clone into the base dir.
     base_dir = os.environ.get("KAZMA_CLONE_DIR", "").strip() or str(Path.home() / "kazma-repos")
     Path(base_dir).mkdir(parents=True, exist_ok=True)
-    repo_dir = Path(base_dir) / full_name.split("/")[-1]
+    repo_dir = Path(base_dir) / repo_name
     if repo_dir.exists():
         # Append a counter to avoid clobbering an existing dir.
         i = 1
@@ -1042,35 +1113,52 @@ async def clone_repo(body: CloneRepoRequest) -> JSONResponse:
             i += 1
         repo_dir = Path(f"{repo_dir}-{i}")
 
+    gh_token: str | None = None
     try:
-        # Inject the GitHub token into the HTTPS clone URL so private repos
-        # authenticate without prompting. Uses x-access-token:<token> scheme
-        # (works for PAT, OAuth, and GitHub App installation tokens). Harmless
-        # for public repos. SSH URLs are left untouched (SSH key handles auth).
-        clone_url = url
-        if not body.use_ssh and clone_url.startswith("https://github.com/"):
+        # Authenticate private clones via git config env vars — the token
+        # never enters argv (clone URL or -c flag), so it cannot leak through
+        # process listings or a failed clone's echoed stderr (H14/H15).
+        clone_env = {**os.environ}
+        if not body.use_ssh:
             try:
                 from kazma_gateway.routers.github_client import get_github_token
 
-                token = get_github_token()
-                if token:
-                    clone_url = f"https://x-access-token:{token}@github.com/" + clone_url[len("https://github.com/"):]
+                gh_token = get_github_token()
+                if gh_token:
+                    basic = base64.b64encode(f"x-access-token:{gh_token}".encode()).decode()
+                    clone_env.update({
+                        "GIT_CONFIG_COUNT": "1",
+                        "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
+                        "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: Basic {basic}",
+                    })
             except Exception:
-                logger.debug("[github/repos/clone] token injection failed, using raw URL", exc_info=True)
+                logger.debug("[github/repos/clone] token injection failed, cloning anonymously", exc_info=True)
 
-        subprocess.run(["git", "clone", "--depth", "1", clone_url, str(repo_dir)], check=True, capture_output=True, text=True, timeout=120)
+        # to_thread: a sync clone would freeze the shared event loop for up
+        # to the 120s timeout (mirrors agent_handler/commands.py).
+        await asyncio.to_thread(
+            subprocess.run,
+            ["git", "clone", "--depth", "1", url, str(repo_dir)],
+            check=True, capture_output=True, text=True, timeout=120,
+            env=clone_env,
+        )
     except subprocess.CalledProcessError as exc:
-        return JSONResponse({"error": f"git clone failed: {(exc.stderr or '')[:300]}"}, status_code=502)
+        return JSONResponse(
+            {"error": f"git clone failed: {_redact_token(exc.stderr, gh_token)[:300]}"},
+            status_code=502,
+        )
     except subprocess.TimeoutExpired:
         return JSONResponse({"error": "git clone timed out."}, status_code=504)
     except Exception as exc:
-        return JSONResponse({"error": f"git clone failed: {exc}"}, status_code=502)
+        return JSONResponse(
+            {"error": f"git clone failed: {_redact_token(str(exc), gh_token)}"},
+            status_code=502,
+        )
 
     # Register + activate the cloned repo as a workspace.
     from kazma_core.config_store import get_config_store
 
-    name = full_name.split("/")[-1]
-    record = store.create_workspace(name, str(repo_dir))
+    record = store.create_workspace(repo_name, str(repo_dir))
     store.set_active_workspace(record["id"])
     cs = get_config_store()
     cs.set("workspace.selected_path", str(repo_dir), category="workspace")

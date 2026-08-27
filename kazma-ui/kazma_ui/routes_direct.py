@@ -983,7 +983,7 @@ def register_direct_routes(self: Any) -> None:
         except Exception as exc:
             return {"ok": False, "episodes": [], "error": str(exc)[:300]}
 
-    @self.app.post("/api/memory/v2/reconsolidate")
+    @self.app.post("/api/memory/v2/reconsolidate", dependencies=[Depends(rate_limit("admin_ops", 10))])
     async def _memory_v2_reconsolidate():
         """Enqueue a global_reconsolidation task (Dashboard / Settings trigger)."""
         try:
@@ -1382,14 +1382,14 @@ def register_direct_routes(self: Any) -> None:
             cfg = {**cfg, "graph": g}
         return test_neo4j_connection(cfg)
 
-    @self.app.post("/api/settings/memory/backends/sync-neo4j")
+    @self.app.post("/api/settings/memory/backends/sync-neo4j", dependencies=[Depends(rate_limit("admin_ops", 10))])
     async def _settings_memory_sync_neo4j():
         """Backfill active SQLite beliefs into Neo4j (needed once after enabling)."""
         from kazma_core.memory.graph_backend import sync_beliefs_to_neo4j
 
         return sync_beliefs_to_neo4j(tenant_id="default", limit=1000)
 
-    @self.app.post("/api/settings/memory/backends/sync-postgres")
+    @self.app.post("/api/settings/memory/backends/sync-postgres", dependencies=[Depends(rate_limit("admin_ops", 10))])
     async def _settings_memory_sync_postgres():
         """Backfill existing SQLite beliefs + episodes into the Postgres state mirror.
 
@@ -1406,7 +1406,7 @@ def register_direct_routes(self: Any) -> None:
 
         return {"ok": True, "backends": reset_backends_to_local()}
 
-    @self.app.post("/api/settings/memory/backends/rebuild")
+    @self.app.post("/api/settings/memory/backends/rebuild", dependencies=[Depends(rate_limit("admin_ops", 10))])
     async def _settings_memory_rebuild():
         """Kick off embedding rebuild (reuses reembed module)."""
         try:
@@ -3533,7 +3533,7 @@ def register_direct_routes(self: Any) -> None:
         }
 
     # ── Universal Backup ────────────────────────────────────────────────
-    @self.app.post("/api/backup/now")
+    @self.app.post("/api/backup/now", dependencies=[Depends(rate_limit("backup", 3))])
     async def _backup_now() -> Any:
         """Trigger a universal backup in the background. Returns immediately."""
         import asyncio
@@ -3584,7 +3584,7 @@ def register_direct_routes(self: Any) -> None:
 
         return delete_universal_backup(dir_name)
 
-    @self.app.post("/api/backup/{dir_name}/archive")
+    @self.app.post("/api/backup/{dir_name}/archive", dependencies=[Depends(rate_limit("backup", 3))])
     async def _backup_archive(dir_name: str) -> Any:
         """Archive a universal backup into a downloadable .zip."""
         from kazma_core.backup.universal import archive_universal_backup

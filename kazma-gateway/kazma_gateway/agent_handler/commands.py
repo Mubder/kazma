@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,30 @@ from .swarm_dispatch import (
 
 logger = logging.getLogger(__name__)
 
-__all__: list[str] = []
+__all__: list[str] = ["safe_repo_dir_name"]
+
+# The last path segment of a repo slug becomes a directory name under
+# $KAZMA_CLONE_DIR; validate it centrally (traversal guard, audit H14/H15).
+_SAFE_REPO_DIR_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def safe_repo_dir_name(owner_repo: str) -> str | None:
+    """Return the last ``/`` segment of *owner_repo* when safe as a directory
+    name, else ``None``.
+
+    Rejects empty segments, traversal ('..'), and any character outside
+    ``[A-Za-z0-9._-]`` so a crafted slug can never escape
+    ``$KAZMA_CLONE_DIR``. Shared by the ``/ide repo clone`` command and the
+    Web ``POST /api/github/repos/clone`` router.
+    """
+    if not owner_repo:
+        return None
+    segment = owner_repo.rsplit("/", 1)[-1]
+    if segment in ("", ".", ".."):
+        return None
+    if not _SAFE_REPO_DIR_SEGMENT_RE.match(segment):
+        return None
+    return segment
 
 
 async def _try_swarm_command(
@@ -677,11 +701,18 @@ async def _try_ide_command(
                 )
                 return True
 
+            dir_name = safe_repo_dir_name(slug)
+            if not dir_name:
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⚠️ Invalid repo slug — cannot derive a safe directory name.",
+                )
+                return True
             base_dir = os.environ.get("KAZMA_CLONE_DIR", "").strip() or str(
                 Path.home() / "kazma-repos"
             )
             Path(base_dir).mkdir(parents=True, exist_ok=True)
-            repo_dir = Path(base_dir) / slug.split("/")[-1]
+            repo_dir = Path(base_dir) / dir_name
             if repo_dir.exists():
                 i = 1
                 while Path(f"{repo_dir}-{i}").exists():
@@ -727,7 +758,7 @@ async def _try_ide_command(
             except subprocess.TimeoutExpired:
                 await _send_model_reply(msg, store, manager, thread_id, "⚠️ Clone timed out.")
                 return True
-            record = store_ws.create_workspace(slug.split("/")[-1], str(repo_dir))
+            record = store_ws.create_workspace(dir_name, str(repo_dir))
             store_ws.set_active_workspace(record["id"])
             try:
                 _o, _r = slug.split("/", 1)

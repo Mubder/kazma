@@ -81,6 +81,10 @@ def _principal(request: Request) -> str:
 
 
 def _allow(key: tuple[str, str], limit: int) -> tuple[bool, float]:
+    # Defensive: a limit <= 0 would IndexError on win[0] below (latent, found
+    # while hardening tests — _per_minute rejects <1 so prod can't reach it).
+    if limit <= 0:
+        return True, 0.0
     now = time.monotonic()
     with _lock:
         if len(_windows) > _MAX_TRACKED_KEYS:

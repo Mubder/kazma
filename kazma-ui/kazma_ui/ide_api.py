@@ -35,7 +35,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Depends, Query
+
+from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +196,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": str(exc), "matches": []}
 
     # ── POST /api/ide/run ──────────────────────────────────────────────
-    @router.post("/run")
+    @router.post("/run", dependencies=[Depends(rate_limit("ide_exec", 15))])
     async def run(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         command = str(payload.get("command", "")).strip()
         timeout = _coerce_timeout(payload.get("timeout"))
@@ -207,7 +209,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": str(exc), "output": ""}
 
     # ── POST /api/ide/runfile ──────────────────────────────────────────
-    @router.post("/runfile")
+    @router.post("/runfile", dependencies=[Depends(rate_limit("ide_exec", 15))])
     async def run_file(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         path = str(payload.get("path", "")).strip()
         timeout = _coerce_timeout(payload.get("timeout"))
@@ -234,7 +236,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": str(exc), "diff": "", "changed": False}
 
     # ── POST /api/ide/git ──────────────────────────────────────────────
-    @router.post("/git")
+    @router.post("/git", dependencies=[Depends(rate_limit("ide_exec", 15))])
     async def git(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         subcommand = str(payload.get("subcommand", "")).strip()
         timeout = _coerce_timeout(payload.get("timeout"))
@@ -247,7 +249,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": str(exc), "output": ""}
 
     # ── POST /api/ide/swarm ────────────────────────────────────────────
-    @router.post("/swarm")
+    @router.post("/swarm", dependencies=[Depends(rate_limit("ide_exec", 15))])
     async def swarm(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         instruction = str(payload.get("instruction", "")).strip()
         if not instruction:
@@ -280,7 +282,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": False, "error": str(exc), "skills": []}
 
     # ── POST /api/ide/skill ────────────────────────────────────────────
-    @router.post("/skill")
+    @router.post("/skill", dependencies=[Depends(rate_limit("ide_exec", 15))])
     async def run_skill(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         """Render a coding skill instruction for a path and dispatch to swarm."""
         skill_name = str(payload.get("skill", "")).strip()

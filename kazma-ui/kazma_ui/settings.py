@@ -11,8 +11,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, Response
+
+from kazma_ui.rate_limit import rate_limit
 from fastapi.templating import Jinja2Templates
 
 from kazma_ui.models import (
@@ -621,7 +623,10 @@ class SettingsRouterBuilder:
                 return {"status": "error", "error": str(exc)}
             return {"status": "ok"}
 
-        @router.post("/api/settings/embedder/rebuild")
+        @router.post(
+            "/api/settings/embedder/rebuild",
+            dependencies=[Depends(rate_limit("admin_ops", 10))],
+        )
         async def api_start_embedder_rebuild() -> dict[str, Any]:
             """Start a background embedding rebuild (incremental: only rows
             whose model version differs from the configured model)."""

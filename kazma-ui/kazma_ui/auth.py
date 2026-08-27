@@ -113,6 +113,97 @@ def _trust_lan_enabled() -> bool:
     return raw in ("1", "true", "on", "yes")
 
 
+#: Extra allowed WebSocket origins (comma-separated, exact ``scheme://host[:port]``
+#: strings, e.g. ``https://tunnel.example.com``). Used by the CSWSH guard below
+#: when the operator intentionally serves the app under a different origin.
+WS_EXTRA_ORIGINS_ENV_VAR = "KAZMA_WS_EXTRA_ORIGINS"
+
+
+def _ws_origin_check_enabled() -> bool:
+    """Kill-switch for the WebSocket cross-origin guard.
+
+    Set ``KAZMA_WS_ORIGIN_CHECK=0`` to restore pre-guard behaviour (loopback /
+    trusted-LAN peers authenticated with no Origin validation). Default ON.
+    """
+    return os.environ.get("KAZMA_WS_ORIGIN_CHECK", "").strip().lower() not in (
+        "0", "false", "no",
+    )
+
+
+def _extract_ws_header(websocket: Any, name: str) -> str:
+    """Case-insensitive header lookup on a WebSocket, tolerating raw scopes."""
+    headers = getattr(websocket, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        value = headers.get(name)  # Starlette Headers — case-insensitive
+        if value:
+            return str(value).strip()
+    except Exception:
+        pass
+    # Raw ASGI scope headers: sequence of (name, value) byte pairs.
+    try:
+        target = name.lower().encode("latin-1")
+        for key, val in headers:
+            if str(key).lower().encode("latin-1") != target:
+                continue
+            if isinstance(val, bytes):
+                return val.decode("latin-1", "ignore").strip()
+            return str(val).strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _ws_origin_allowed(websocket: Any) -> bool:
+    """Cross-Site WebSocket Hijacking guard for credential-less trust paths.
+
+    Any public page can open ``ws://127.0.0.1:<port>/ws/...`` from a visitor's
+    browser; the TCP peer is then loopback and used to be trusted with NO
+    credential — letting an attacker consume HITL state or drive turns.
+    Browsers always attach an ``Origin`` header to WS handshakes, so allow
+    only when:
+
+      1. The header is absent (curl / TUI / non-browser client), OR
+      2. It matches the request ``Host`` exactly (same-origin page), OR
+      3. It appears in ``KAZMA_WS_EXTRA_ORIGINS`` (comma-separated
+         ``scheme://host[:port]`` entries).
+
+    Kill-switch: ``KAZMA_WS_ORIGIN_CHECK=0`` disables the guard entirely.
+    """
+    if not _ws_origin_check_enabled():
+        return True
+    origin = _extract_ws_header(websocket, "origin")
+    if not origin:
+        return True  # non-browser client
+    lowered = origin.strip().lower()
+    host = _extract_ws_header(websocket, "host")
+    # Browsers serialise Origin as scheme://host[:port]; compare its
+    # authority (host[:port]) against the request Host header.
+    try:
+        from urllib.parse import urlsplit
+
+        origin_authority = (urlsplit(origin).netloc or "").strip().lower()
+    except Exception:
+        origin_authority = ""
+    if host and origin_authority and origin_authority == host.strip().lower():
+        return True
+    extra = {
+        o.strip().lower()
+        for o in os.environ.get(WS_EXTRA_ORIGINS_ENV_VAR, "").split(",")
+        if o.strip()
+    }
+    if lowered in extra:
+        return True
+    logger.warning(
+        "[SECURITY] WebSocket handshake rejected by Origin check "
+        "(origin=%s, host=%s) — add it to KAZMA_WS_EXTRA_ORIGINS to allow",
+        origin,
+        host or "<none>",
+    )
+    return False
+
+
 def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     """Whether to Set-Cookie the secret without an explicit login.
 
@@ -492,6 +583,11 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
       4. ``kazma-session`` opaque cookie (preferred, mint by /login or TRUST_LAN)
       5. ``kazma-secret`` legacy cookie — only when opaque sessions are off
       6. Loopback or private LAN peers (WSL bridge 172.28.x.x, Docker 172.17.x.x, 192.168.x.x)
+         — with a cross-origin check (``_ws_origin_allowed``): a public page can
+         open ``ws://127.0.0.1`` from any browser (CSWSH), so the handshake
+         ``Origin`` must be absent / same-host / allow-listed
+         (``KAZMA_WS_EXTRA_ORIGINS``). Kill-switch ``KAZMA_WS_ORIGIN_CHECK=0``.
+         If the Origin check fails, credential paths below are still tried.
       7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only — blocked in production)
     """
     expected = expected_secret or get_kazma_secret()
@@ -513,14 +609,16 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     # The browser authenticates via the same-origin kazma-session cookie; the
     # old <meta> token path was removed (leaked the bearer into page source /
     # logs). Loopback trust keeps local single-operator use working without
-    # any credential. The practical risk is low: malware on the same machine
-    # already has full access to the filesystem and vault. The session-cookie
-    # requirement applies to REMOTE connections.
-    if _is_loopback_client(websocket):
+    # any credential — but a public page can open ws://127.0.0.1 from any
+    # visitor's browser (CSWSH), so require the handshake Origin to be
+    # absent / same-host / explicitly allow-listed first. Callers reject
+    # with websocket.close(code=1008, ...) on this policy-violation path;
+    # credentialed clients still authenticate via the checks below.
+    if _is_loopback_client(websocket) and _ws_origin_allowed(websocket):
         return True
 
     # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
-    if _is_private_lan_client(websocket) and _trust_lan_enabled():
+    if _is_private_lan_client(websocket) and _trust_lan_enabled() and _ws_origin_allowed(websocket):
         return True
 
     # Query parameter: per-session WS token only — never the raw KAZMA_SECRET

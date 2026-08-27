@@ -55,8 +55,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
+
+from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +166,7 @@ def create_documents_router() -> APIRouter:
 
     # ── Upload intake (streamed, bounded) ───────────────────────────────
 
-    @router.post("")
+    @router.post("", dependencies=[Depends(rate_limit("documents", 10))])
     async def upload(request: Request) -> Any:
         import asyncio
 
@@ -268,7 +270,7 @@ def create_documents_router() -> APIRouter:
 
     # ── Workspace-safe local import ─────────────────────────────────────
 
-    @router.post("/import")
+    @router.post("/import", dependencies=[Depends(rate_limit("documents", 10))])
     async def import_local(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
         import asyncio
 
@@ -319,7 +321,7 @@ def create_documents_router() -> APIRouter:
 
     # ── Document actions (convert / pdf / redact / generate / merge) ─────
 
-    @router.post("/generate")
+    @router.post("/generate", dependencies=[Depends(rate_limit("documents", 10))])
     async def generate(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
@@ -352,7 +354,7 @@ def create_documents_router() -> APIRouter:
         except Exception as exc:  # noqa: BLE001
             return _action_error(exc, "generate")
 
-    @router.post("/merge")
+    @router.post("/merge", dependencies=[Depends(rate_limit("documents", 10))])
     async def merge(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
@@ -405,7 +407,7 @@ def create_documents_router() -> APIRouter:
             filename=info["filename"],
         )
 
-    @router.post("/{document_id}/convert")
+    @router.post("/{document_id}/convert", dependencies=[Depends(rate_limit("documents", 10))])
     async def convert(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
@@ -497,7 +499,7 @@ def create_documents_router() -> APIRouter:
         except Exception as exc:  # noqa: BLE001
             return _action_error(exc, "fill_form")
 
-    @router.post("/{document_id}/redact")
+    @router.post("/{document_id}/redact", dependencies=[Depends(rate_limit("documents", 10))])
     async def redact(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
