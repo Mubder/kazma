@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — always-formatted streaming + rich user bubbles (2026-08-27)
+
+Operator decision: the agent's reply must ALWAYS be fully formatted rich
+text (never a raw text block while streaming), and pasted formatted text in
+the USER bubble must render with the same pipeline and spacing as assistant
+output.
+
+- **Formatted live streaming**: live paints render full markdown
+  (`KS.markdown` + plan transform) at the throttled cadence (≤ ~7 renders/s).
+  Safe now that the real flicker causes are fixed — the status strip no
+  longer flaps mid-stream and scrolling is pin-to-bottom, so nothing shifts
+  the layout around the throttled repaints. Plan fences stay stripped live.
+- **User bubbles**: `renderUserContentHtml` now uses the same `KS.markdown`
+  renderer as assistant replies — bold, inline code, fenced code blocks,
+  tables, links, and identical paragraph/line spacing. `mdRender` escapes
+  ALL HTML internally, so pasted markup can never inject. The legacy
+  hand-rolled list renderer remains only as a fallback.
+
 ## Unreleased — transcript recall fallback (2026-08-27)
 
 Born from the "green names" incident: facts that live only in past chat

@@ -3284,6 +3284,14 @@
    */
   function renderUserContentHtml(text) {
     var s = String(text || '');
+    // Same rich renderer as assistant replies (mdRender escapes ALL HTML
+    // internally — pasted markup can never inject), so a pasted formatted
+    // text keeps bold/code/tables/links and the exact paragraph spacing the
+    // assistant output uses. Legacy hand-rolled fallback below only if the
+    // streaming module is absent.
+    if (KS && KS.markdown) {
+      try { return KS.markdown(s); } catch (e) { /* fall through */ }
+    }
     if (s.indexOf('\n') < 0 && !/^\s*(?:#{1,4}\s|[-*\u2022]\s|\d+[.)]\s)/.test(s)) {
       return escapeHtml(s);
     }
@@ -3455,13 +3463,20 @@
       if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
       return;
     }
-    // Live streaming paints as PLAIN TEXT on a single text node: the text
-    // just grows (no element teardown/rebuild at all — flicker-free by
-    // construction). Markdown renders exactly once, at the terminal frame.
-    // Plan fences are stripped LIVE too — raw ```plan walls never show
-    // mid-turn; the plan surfaces via the plan widget / status strip.
+    // Live paints render FULL markdown at the throttled cadence (≤ ~7
+    // renders/sec via _scheduleLiveTextPaint) — the reply is ALWAYS
+    // formatted, never a raw text block. This is safe now that the real
+    // flicker causes are fixed (steady status strip + pin-to-bottom
+    // scrolling): the throttle bounds the rebuild churn, and nothing shifts
+    // the layout around it. Plan fences stay stripped live; the plan-only
+    // phase holds the bubble open with a blank line.
     var liveParts = splitPlanAndProse(tokenAccum);
-    textEl.textContent = liveParts.prose || '\u00a0';
+    if (liveParts.prose) {
+      textEl.innerHTML = transformRenderedForPlan(KS.markdown(liveParts.prose));
+      if (window.KazmaBidi) KazmaBidi.apply(textEl, liveParts.prose);
+    } else {
+      textEl.textContent = '\u00a0';
+    }
     textEl.setAttribute('dir', 'auto');
   }
 
