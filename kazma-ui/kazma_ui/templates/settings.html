@@ -1038,7 +1038,12 @@
                         <option :value="z" x-text="z"></option>
                     </template>
                 </datalist>
-                <div class="form-hint">{{ t('settings.cron_tz_source_' + (cronTz.source || 'default')) }}</div>
+                <!-- Alpine-side binding: cronTz.source is a client model, and
+                     the fallback must use JS `||` semantics — Jinja only knows
+                     `or` and cannot see Alpine state, so a server-side t()
+                     concatenation here was a template compile error that 500'd
+                     the whole page (2026-08-27). -->
+                <div class="form-hint" x-text="t('settings.cron_tz_source_' + (cronTz.source || 'default'))"></div>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
                 <button class="btn btn-primary" @click="saveCronTimezone()" :disabled="cronTzSaving"
