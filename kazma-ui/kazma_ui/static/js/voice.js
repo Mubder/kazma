@@ -167,8 +167,10 @@
 
   // ── TTS Playback ──────────────────────────────────────
 
+  var _ttsUnavailable = false;
+
   async function playTTS(text, provider) {
-    if (!isTtsEnabled()) return;
+    if (!isTtsEnabled() || _ttsUnavailable) return;
     provider = provider || getTtsProvider();
 
     try {
@@ -180,6 +182,15 @@
 
       var resp = await fetch('/api/voice/tts', { method: 'POST', body: formData });
       if (!resp.ok) {
+        // 503 = TTS not configured/usable on the server (misconfig hint).
+        // Latch it off for the session instead of re-probing on every
+        // reply; `/voice on` clears the latch for an explicit retry.
+        if (resp.status === 503) {
+          _ttsUnavailable = true;
+          try {
+            showToast('Voice output unavailable (TTS not configured) — silenced until /voice on.', 'info', 4500);
+          } catch (e0) { /* toast system absent */ }
+        }
         console.warn('[Voice] TTS failed:', resp.status);
         return;
       }
@@ -199,6 +210,7 @@
     var lower = text.trim().toLowerCase();
     if (lower === '/voice on' || lower === '/voice enable') {
       localStorage.setItem(TTS_ENABLED_KEY, 'true');
+      _ttsUnavailable = false;  // explicit opt-in — re-probe the server
       showToast('Voice replies enabled', 'success');
       return true;
     }

@@ -2009,11 +2009,23 @@ def register_direct_routes(self: Any) -> None:
 
     @self.app.get("/api/alerts/recent")
     async def _get_recent_alerts():
+        from fastapi.encoders import jsonable_encoder
+
         from kazma_core.observability.alerts import AlertDispatcher
-        return [
-            a.to_dict() if hasattr(a, "to_dict") else a
-            for a in AlertDispatcher.get_recent_alerts()
-        ]
+
+        # Serialize defensively: one non-JSON-safe alert field (NaN from a
+        # metric, an exotic object) can kill the response mid-flight — the
+        # browser sees the truncated keep-alive reply as HTTP 502 and the
+        # alerts panel goes blank. A bad row must degrade to a placeholder,
+        # not take down the endpoint.
+        out: list[Any] = []
+        for a in AlertDispatcher.get_recent_alerts():
+            item = a.to_dict() if hasattr(a, "to_dict") else a
+            try:
+                out.append(jsonable_encoder(item))
+            except Exception:
+                out.append({"repr": repr(item), "error": "unserializable alert omitted"})
+        return out
 
     @self.app.get("/api/system/memory/backups")
     async def _list_memory_backups():

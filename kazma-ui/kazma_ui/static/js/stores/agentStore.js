@@ -1169,6 +1169,18 @@ function registerAgentStore() {
           break;
         }
 
+        case 'snapshot': {
+          // Time Travel: live snapshot captured — same contract as the SSE
+          // dispatch in streaming.js. Previously fell into the unhandled
+          // default, spamming the console on every supervisor iteration.
+          try {
+            if (window.KazmaReplay && typeof window.KazmaReplay.onLiveSnapshot === 'function') {
+              window.KazmaReplay.onLiveSnapshot(data || frame);
+            }
+          } catch (e) { /* replay panel not open */ }
+          break;
+        }
+
         default:
           console.debug('[AgentStore] Unhandled telemetry event type:', type, frame);
       }

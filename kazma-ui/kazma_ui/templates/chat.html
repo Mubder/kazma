@@ -4,11 +4,11 @@
 {% block page_title %}{{ t('chat.title') }}{% endblock %}
 
 {% block head_extra %}
-{# Code-highlight theme follows the active Kazma theme (SSR via theme()).
-   Previously github-dark was hardcoded, so code blocks rendered dark in
-   Kazma Light. default.min.css is highlight.js's light theme. #}
-{% set _hljs_theme = 'default' if theme() == 'light' else 'github-dark' %}
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/{{ _hljs_theme }}.min.css">
+{# Code-highlight theme: Kazma renders code blocks with its own
+   .code-block / .inline-code styling and NEVER emits highlight.js classes,
+   so the remote CDN theme stylesheet here was pure dead weight whose fetch
+   also tripped Edge Tracking Prevention on every chat load (2026-08-27).
+   Removed — add a vendored local stylesheet if real hljs support lands. #}
 {% endblock %}
 
 {% block content %}
