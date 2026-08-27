@@ -3522,10 +3522,20 @@
   // human value.
   var _DSML_BLOCK = /<｜｜DSML｜｜tool_calls>[\s\S]*?<\/｜｜DSML｜｜tool_calls>/g;
   var _DSML_TAG = /<\/?｜｜[^>]*>/g;
+  // A fenced block holding a single JSON object shaped like a TOOL CALL
+  // (top-level "tool"/"name" key) — the model narrating an invocation it
+  // could not execute (2026-08-27: '{"tool": "file_list", "path": "."}'
+  // rendered as an ugly code block inside the chat).
+  var _TOOLCALL_BLOCK = /```[a-zA-Z]*[ \t]*\n[ \t]*\{[\s\S]*?"(?:tool|name)"[ \t]*:[\s\S]*?\}[ \t]*\n?```/g;
   function _scrubDsml(text) {
     var t = String(text || '');
-    if (t.indexOf('DSML') < 0 && t.indexOf('｜') < 0) return t;
-    return t.replace(_DSML_BLOCK, '').replace(_DSML_TAG, '')
+    _TOOLCALL_BLOCK.lastIndex = 0;
+    var hasToolBlock = _TOOLCALL_BLOCK.test(t);
+    _TOOLCALL_BLOCK.lastIndex = 0;
+    if (t.indexOf('DSML') < 0 && t.indexOf('｜') < 0 && !hasToolBlock) return t;
+    return t.replace(_DSML_BLOCK, '')
+            .replace(_TOOLCALL_BLOCK, '')
+            .replace(_DSML_TAG, '')
             .replace(/\n{3,}/g, '\n\n').trim();
   }
 

@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — pseudo-tool-call block scrub + clean clarify directives (2026-08-27)
+
+Live follow-up: a locked (clarify) turn rendered the model's narrated
+invocation as an ugly fenced JSON block (`{"tool": "file_list", …}`) in the
+chat.
+
+- `chat.js` scrub now also removes fenced blocks shaped like a tool call
+  (JSON object with a top-level `tool`/`name` key) — verified: the exact
+  leaked payload disappears while legitimate `json` config blocks survive.
+- The clarify directive demands PLAIN PROSE ONLY (no code blocks / JSON /
+  tool markup); the post-clarify unlock directive demands REAL tool calls,
+  never narrated ones.
+- 2 new tests (18 ledger + 15 chat suites green).
+
 ## Unreleased — clarify-loop fix + DSML leak scrub (2026-08-27, live report)
 
 The first live run of the Task Ledger exposed two follow-on bugs, both fixed:

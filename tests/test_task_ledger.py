@@ -211,3 +211,26 @@ def test_dsml_scrub_wired_in_client() -> None:
     assert "_scrubDsml(stripPlanFenceForDisplay(tokenAccum))" in js
     assert "_scrubDsml(stripPlanFenceForDisplay(content))" in js
     assert "liveParts.prose = _scrubDsml(liveParts.prose);" in js
+
+
+def test_scrub_removes_pseudo_toolcall_json_blocks() -> None:
+    """2026-08-27 follow-up: the model narrated a locked-out tool call as a
+    fenced JSON block ('{"tool": "file_list", ...}') — ugly protocol garbage
+    in the chat. The client scrub removes tool-call-shaped fenced blocks
+    while keeping legitimate JSON config blocks."""
+    js = (
+        Path(__file__).resolve().parents[1]
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    assert "_TOOLCALL_BLOCK" in js
+    # tool-call shape keys, not generic JSON
+    assert '"(?:tool|name)"' in js
+
+
+def test_clarify_directive_demands_clean_prose() -> None:
+    led = TaskLedger(thread_id="t", goal="g", next_action="")
+    res = resolve_continuation("go", led, is_continuation=True)
+    assert "PLAIN PROSE ONLY" in res["question"]
+    led2 = TaskLedger(thread_id="t", goal="g", next_action="", clarify_pending=True)
+    res2 = resolve_continuation("go", led2, is_continuation=True)
+    assert "never" in res2["directive"] and "JSON" in res2["directive"]

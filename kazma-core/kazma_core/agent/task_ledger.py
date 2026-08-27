@@ -428,7 +428,9 @@ def resolve_continuation(
                 "The user answered your clarifying question with a short "
                 "'go ahead'. Proceed NOW with your recommended/most-likely "
                 "option from the options you presented — do not ask again. "
-                "Tools are available; execute the next pipeline steps."
+                "Tools are available; CALL them as real tool calls (never "
+                "narrate invocations as JSON or code blocks) and execute "
+                "the next pipeline steps."
             ),
         }
     if ledger.next_action:
@@ -447,7 +449,9 @@ def resolve_continuation(
         "question": (
             f'You asked to continue, but the last turn did not record a next '
             f'step. Ask the user ONE short clarifying question about what to '
-            f'do next for: {goal}. Do not run any tools this turn.'
+            f'do next for: {goal}. Do not run any tools this turn, and reply '
+            f'with PLAIN PROSE ONLY — no code blocks, no JSON, no tool-call '
+            f'markup of any kind.'
         ),
     }
 
