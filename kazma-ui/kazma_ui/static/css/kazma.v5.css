@@ -376,8 +376,10 @@ html[data-theme="light"] { color-scheme: only light; }
    still work unstyled (G8).
    ═══════════════════════════════════════════════════════════════════ */
 
-/* A1 — hide page header on chat; transcript fills the column */
-.app-layout.is-chat .page-header { display: none; }
+/* A1 — chat keeps the page header (operator decision 2026-08-27: the header
+   carries the language toggle and unifies Kazma's look across pages; the
+   transcript still fills the column below it). Only the body layout is
+   chat-specific now. */
 .app-layout.is-chat .page-body {
   padding: 0;
   overflow: hidden;
@@ -393,8 +395,11 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 @media (max-width: 768px) {
   .app-layout.is-chat .chat-container {
-    height: calc(var(--app-ivh, 100dvh) - var(--bottom-nav-height)) !important;
-    max-height: calc(var(--app-ivh, 100dvh) - var(--bottom-nav-height)) !important;
+    /* Header is back on chat (2026-08-27) — subtract its height like the
+    base mobile rule does, or the transcript over-fills and the composer
+    clips under .page-body's overflow:hidden. */
+    height: calc(var(--app-ivh, 100dvh) - var(--header-height) - var(--bottom-nav-height)) !important;
+    max-height: calc(var(--app-ivh, 100dvh) - var(--header-height) - var(--bottom-nav-height)) !important;
   }
 }
 
@@ -538,6 +543,12 @@ html[data-theme="light"] { color-scheme: only light; }
 .session-search-input {
   font-size: 0.8rem;
   padding: 6px 10px;
+  /* Containment (2026-08-27 RTL bug): .form-input sets no width, so the
+     input fell back to the browser's intrinsic size — direction/font
+     dependent, and in Arabic it overflowed the 240px sessions sidebar. */
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 .sessions-archive-btn {
   width: 100%;

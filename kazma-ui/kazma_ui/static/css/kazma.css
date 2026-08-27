@@ -4237,6 +4237,9 @@ canvas { display: block; border-radius: 4px; }
 }
 .session-search-wrapper {
   margin-bottom: 8px;
+  /* Flex child of .chat-sidebar — without this an intrinsic-width input
+     can stretch the column (the RTL overflow seen 2026-08-27). */
+  min-width: 0;
 }
 .session-item {
   position: relative;

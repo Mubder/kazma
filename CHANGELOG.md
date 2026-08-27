@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — chat header restored + RTL session-search containment (2026-08-27)
+
+- **Chat keeps the page header** (operator decision): the immersive hide
+  rule (`.app-layout.is-chat .page-header { display: none; }`) is gone —
+  chat now shows the standard top bar like every other page, which restores
+  the language toggle (EN/ع) on chat and unifies the look. The transcript
+  still fills the column below the header; the mobile height calc
+  re-subtracts `--header-height` so the composer doesn't clip.
+- **Arabic session-search containment**: `.form-input` sets no width, so
+  the sessions search fell back to the browser's intrinsic input size —
+  direction/font dependent and overflowing the 240px sidebar in RTL. It is
+  now width:100%/border-box inside a min-width:0 wrapper — identical LTR
+  and RTL.
+
 ## Unreleased — Phase 2 remediation streams: security, performance, functional mediums, test infra (2026-08-27)
 
 Five parallel streams closing the remaining audit findings. ~200 new tests.

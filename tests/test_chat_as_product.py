@@ -57,8 +57,25 @@ def test_immersive_chat_class_on_layout() -> None:
     base = _BASE.read_text(encoding="utf-8")
     v5 = _V5.read_text(encoding="utf-8")
     assert "is-chat" in base
-    assert ".app-layout.is-chat .page-header" in v5
     assert ".app-layout.is-chat .chat-container" in v5
+
+
+def test_chat_keeps_page_header() -> None:
+    """Operator decision 2026-08-27: chat shows the page header — it carries
+    the language toggle and unifies the look across pages. The immersive
+    hide rule must NOT come back."""
+    v5 = _V5.read_text(encoding="utf-8")
+    assert ".app-layout.is-chat .page-header { display: none; }" not in v5
+
+
+def test_session_search_input_contained() -> None:
+    """RTL regression (2026-08-27): the sessions search input must be
+    width-constrained to its wrapper — the intrinsic browser default
+    overflowed the sidebar in Arabic."""
+    v5 = _V5.read_text(encoding="utf-8")
+    css = _V5.parent.joinpath("kazma.css").read_text(encoding="utf-8")
+    assert "width: 100%;" in v5.split(".session-search-input {")[1].split("}")[0]
+    assert "min-width: 0;" in css.split(".session-search-wrapper {")[1].split("}")[0]
 
 
 def test_sidebar_is_grouped_not_more_disclosure() -> None:
