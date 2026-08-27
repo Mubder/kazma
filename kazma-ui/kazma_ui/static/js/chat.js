@@ -2566,25 +2566,41 @@
   function splitPlanAndProse(text) {
     var s = String(text || '');
     if (!s.trim()) return { plan: '', prose: '' };
-    // \b keeps ```plantuml / ```planning blocks out of the plan split.
-    // Optional [ \t]* between the fence and "plan" — some models emit
-    // "``` plan"; CommonMark still opens a fence there, and refusing to
-    // recognize it left plan text glued into prose/code (2026-08-27).
-    var m = s.match(/```[ \t]*plan\b[^\n]*\n?([\s\S]*?)```/i);
-    if (m) {
-      var after = s.slice(m.index + m[0].length).replace(/^[ \t]+/, '').replace(/^\n+/, '').trim();
-      var before = s.slice(0, m.index).trim();
-      var proseParts = [];
-      if (before) proseParts.push(before);
-      if (after) proseParts.push(after);
-      return { plan: String(m[1] || '').trim(), prose: proseParts.join('\n\n').trim() };
+    // ALL ```plan fences are workbench scaffolding, never content. Later
+    // fences WIN — the model re-plans mid-turn, and a reply carrying five
+    // fences (2026-08-27 report) previously leaked fences #2..#5 into the
+    // prose, rendering as raw ``` code walls. \b keeps ```plantuml /
+    // ```planning out; optional [ \t]* accepts "``` plan".
+    var plan = '';
+    var pieces = [];
+    var last = 0;
+    var found = false;
+    var re = /```[ \t]*plan\b[^\n]*\n?([\s\S]*?)```/gi;
+    var m;
+    while ((m = re.exec(s)) !== null) {
+      found = true;
+      pieces.push(s.slice(last, m.index));
+      var body = String(m[1] || '').trim();
+      if (body) plan = body; // later fence replaces the earlier plan
+      last = re.lastIndex;
     }
-    var open = s.match(/```[ \t]*plan\b[^\n]*\n?([\s\S]*)$/i);
+    var residual = s.slice(last);
+    // Trailing OPEN fence (closer not yet arrived — mid-stream shape).
+    // Handles the glued closer (```Saved.) that CommonMark never closes.
+    var open = residual.match(/```[ \t]*plan\b[^\n]*\n?([\s\S]*)$/i);
     if (open) {
+      found = true;
+      pieces.push(residual.slice(0, open.index));
       var split = _splitListThenProse(open[1] || '');
-      var beforeOpen = s.slice(0, open.index).trim();
-      var proseOpen = [beforeOpen, split.prose].filter(Boolean).join('\n\n').trim();
-      return { plan: split.plan, prose: proseOpen };
+      if (split.plan) plan = split.plan;
+      if (split.prose) pieces.push(split.prose);
+    } else if (residual) {
+      pieces.push(residual);
+    }
+    if (found) {
+      var prose = pieces.map(function(p) { return String(p || '').trim(); })
+        .filter(Boolean).join('\n\n').trim();
+      return { plan: plan, prose: prose };
     }
     // Markdown Plan heading — only valid as the FIRST line (mirrors the
     // Python _MD_PLAN_RE anchor): a "## Plan" section deep inside a
@@ -3442,7 +3458,10 @@
     // Live streaming paints as PLAIN TEXT on a single text node: the text
     // just grows (no element teardown/rebuild at all — flicker-free by
     // construction). Markdown renders exactly once, at the terminal frame.
-    textEl.textContent = stripPlanFenceForDisplay(tokenAccum) || tokenAccum;
+    // Plan fences are stripped LIVE too — raw ```plan walls never show
+    // mid-turn; the plan surfaces via the plan widget / status strip.
+    var liveParts = splitPlanAndProse(tokenAccum);
+    textEl.textContent = liveParts.prose || '\u00a0';
     textEl.setAttribute('dir', 'auto');
   }
 

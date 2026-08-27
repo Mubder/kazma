@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Unreleased — multiple ```plan fences render correctly again (2026-08-27)
+
+Operator report: a task reply carrying **five** ```plan fences (the model
+re-plans per iteration) rendered fences #2–#5 as raw ` ``` ` code walls —
+`splitPlanAndProse` only recognized the FIRST fence, so the rest leaked into
+the prose.
+
+- `splitPlanAndProse` now strips **all** ```plan fences; the **later** fence
+  wins (it is the current plan after re-planning) and every non-plan segment
+  is preserved in order as prose. The streaming open-fence shape and the
+  `## Plan`-heading fallback behave as before.
+- The live plain-text paint now strips plan fences too — raw ```plan walls
+  never appear mid-turn; the plan surfaces via the plan widget / status
+  strip, and the terminal render formats exactly once as before.
+- 9 new assertions in `tests/js/test_plan_render.js` cover the five-fence
+  report, mixed prose ordering, the streaming open-tail shape, and the
+  plan-only contract.
+
 ## Unreleased — status strip no longer flaps mid-stream (the flicker, root-caused) (2026-08-27)
 
 Operator lead: "it's the MD markers — started after the plan-fence work."

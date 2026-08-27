@@ -158,4 +158,43 @@ function mdPre(langLabel, code) {
     && !r.prose.includes("- one"), JSON.stringify(r));
 }
 
+// ── 9. MULTIPLE distinct plan fences: later wins, none leak into prose ─────
+// (2026-08-27 report: a five-fence reply rendered fences #2..#5 as raw ```
+//  walls because the splitter only recognized the FIRST fence.)
+{
+  const five = "```plan\n- Check scheduled jobs\n```\n"
+    + "```plan\n- Locate outbound attempts\n```\n"
+    + "```plan\n- Inspect live cron.db\n```\n"
+    + "```plan\n- Find send failures\n```\n"
+    + "```plan\n- Inspect session history\n```\n";
+  const r = api.splitPlanAndProse(five);
+  assert("later fence wins", r.plan === "- Inspect session history", JSON.stringify(r));
+  assert("no fence leaks into prose", !r.prose.includes("```"), JSON.stringify(r));
+
+  const mixed = "Intro prose.\n```plan\n- first plan\n```\nMiddle prose.\n"
+    + "```plan\n- second plan\n```\nClosing prose.";
+  const m = api.splitPlanAndProse(mixed);
+  assert("mixed: later plan wins", m.plan === "- second plan", JSON.stringify(m));
+  assert("mixed: all prose kept in order",
+    m.prose.includes("Intro prose.") && m.prose.includes("Middle prose.")
+    && m.prose.includes("Closing prose."), JSON.stringify(m));
+  assert("mixed: no plan text in prose", !m.prose.includes("first plan"), JSON.stringify(m));
+
+  // streaming shape: closed fence then an OPEN fence still arriving
+  const openTail = "```plan\n- closed one\n```\nWorking…\n```plan\n- still streaming";
+  const o = api.splitPlanAndProse(openTail);
+  assert("open tail: streaming plan captured", o.plan.includes("still streaming"), JSON.stringify(o));
+  assert("open tail: prose kept", o.prose.includes("Working…"), JSON.stringify(o));
+}
+
+// ── 10. stripPlanFenceForDisplay over multiple fences ─────────────────────
+{
+  const multi = "```plan\n- a\n```\nReal answer here.\n```plan\n- b\n```\nMore answer.";
+  const d = api.stripPlanFenceForDisplay(multi);
+  assert("strip: prose only", d === "Real answer here.\n\nMore answer.", JSON.stringify(d));
+  const planOnly = "```plan\n- only plan items\n```";
+  const po = api.stripPlanFenceForDisplay(planOnly);
+  assert("strip: plan-only turn returns raw (widget path)", po === planOnly, JSON.stringify(po));
+}
+
 process.exit(fail ? 1 : 0);

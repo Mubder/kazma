@@ -175,7 +175,10 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     assert "_LIVE_RENDER_MIN_MS = 150" in js
     assert "function _scheduleLiveTextPaint(textEl)" in js
     assert js.count("_scheduleLiveTextPaint(textEl);") >= 2  # main + approve-resume
-    assert "textEl.textContent = stripPlanFenceForDisplay(tokenAccum)" in js
+    # Live paint strips plan fences — raw ```plan walls never show mid-turn
+    # (2026-08-27: five-fence reply rendered fences #2..#5 as raw code walls).
+    assert "var liveParts = splitPlanAndProse(tokenAccum);" in js
+    assert "textEl.textContent = liveParts.prose || '\\u00a0';" in js
     assert "function _flushLiveTextPaint()" in js
     assert "_paintLiveTextNow(_liveRenderEl, true)" in js
 
