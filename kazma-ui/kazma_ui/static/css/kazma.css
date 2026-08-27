@@ -5153,6 +5153,10 @@ body {
   background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+  /* Desktop padding: the composer was full-bleed (chat-container bleeds to the
+     viewport edges), so the Enter hint sat flush against the bottom clip edge
+     and read as cut off. Give the dock breathing room (operator 2026-08-27). */
+  padding: var(--sp-2) var(--sp-4) var(--sp-3);
 }
 .input-wrapper {
   background: color-mix(in srgb, var(--bg-surface) 70%, transparent);

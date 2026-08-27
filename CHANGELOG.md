@@ -16,6 +16,12 @@
   transcript's `clamp(64px, 12vw, 180px)` side slab read too slim, so it is
   now `clamp(16px, 3vw, 40px)` and the message measure widened to
   `min(100%, 96ch)` — more usable width, still a bounded document measure.
+- **Enter hint no longer clipped at the bottom edge.** The desktop
+  `.chat-input-area` was full-bleed (the immersive `.chat-container` bleeds to
+  the viewport edges), so the composer's `Enter` footer hint sat flush against
+  the bottom clip edge and read as cut off. The dock now carries
+  `padding: var(--sp-2) var(--sp-4) var(--sp-3)`, giving the hint 12px of
+  clearance (verified in-browser: footer bottom 720→708).
 
 ## Unreleased — chat header restored + RTL session-search containment (2026-08-27)
 
