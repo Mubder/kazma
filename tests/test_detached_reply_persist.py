@@ -244,3 +244,61 @@ async def test_cancelled_turn_persists_full_streamed_narration():
     ]}
     await sc._persist_detached_reply(_Graph(), {}, "s1", "th1", streamed_text="short")
     assert _Sess.messages[-1]["content"] == long_final
+
+
+@pytest.mark.asyncio
+async def test_interrupted_turn_never_mutates_history():
+    """2026-08-27 incident (text-swap on app-switch): an interrupted (HITL)
+    turn persisted its interim narration as durable truth. In a resume cycle
+    the trailing message is already an assistant row, so the else-branch
+    REPLACED the previous good reply with a short pre-approval segment
+    (1,080 -> 225 -> 151 chars). The client's visibility resync then painted
+    that corrupted row over the visible bubble. An interrupted turn must
+    never append or replace history — only settle a pending bubble."""
+    import kazma_ui.sse_chat as sc
+
+    class _Snap:
+        values = {"messages": [
+            {"role": "user", "content": "post the tweets"},
+            {"role": "assistant", "content": "FULL GOOD REPLY (1080 chars worth)"},
+        ]}
+
+    class _Graph:
+        async def aget_state(self, config):
+            return _Snap()
+
+    class _Sess:
+        messages = [
+            {"role": "user", "content": "post the tweets", "ts": "t0"},
+            {"role": "assistant", "content": "FULL GOOD REPLY (1080 chars worth)", "ts": "t1"},
+        ]
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    class _Store:
+        def transact(self, sid):
+            return _Sess()
+
+    sc._module_store = lambda: _Store()
+    await sc._persist_detached_reply(
+        _Graph(), {}, "s1", "th1",
+        streamed_text="Short interim narration before the next approval",
+        interrupted=True,
+    )
+    # History untouched — no append, no replacement.
+    assert len(_Sess.messages) == 2
+    assert _Sess.messages[-1]["content"] == "FULL GOOD REPLY (1080 chars worth)"
+
+    # But a lingering pending bubble still gets settled with the narration,
+    # so a refresh mid-pause shows text instead of an empty in-progress row.
+    _Sess.messages.append({"role": "assistant", "content": "", "pending": True})
+    await sc._persist_detached_reply(
+        _Graph(), {}, "s1", "th1",
+        streamed_text="Short interim narration before the next approval",
+        interrupted=True,
+    )
+    assert _Sess.messages[-1].get("pending") is None
+    assert _Sess.messages[-1]["content"] == "Short interim narration before the next approval"
+    assert _Sess.messages[1]["content"] == "FULL GOOD REPLY (1080 chars worth)"

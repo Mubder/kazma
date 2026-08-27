@@ -227,7 +227,7 @@ def _module_graph() -> Any:
 
 async def _persist_detached_reply(
     graph: Any, config: dict, session_id: str, thread_id: str,
-    streamed_text: str = "",
+    streamed_text: str = "", interrupted: bool = False,
 ) -> None:
     """Persist a detached turn's final reply into the session store.
 
@@ -247,6 +247,17 @@ async def _persist_detached_reply(
       96-second 40-lookup sweep persisted as a 158-char fragment after the
       user stopped the turn mid-stream; the 2,272 streamed chars were
       discarded).
+    * An INTERRUPTED turn (HITL pause) is NOT a completed reply. Persisting
+      its interim narration used to append it as a durable assistant row —
+      and in the resume cycle (trailing message already assistant) it
+      REPLACED the previous good reply with a short pre-approval segment
+      (1,080 → 225 → 151 chars). On tab-switch, the client resync paints
+      durable truth — so the visible "great ending text" swapped to a
+      completely different (interim) message (2026-08-27 incident). When
+      ``interrupted`` is True we only resolve lingering ``pending`` rows
+      with the interim text (so a refresh mid-pause still shows narration);
+      we never append or replace history. The resumed turn persists the
+      real final reply when it completes.
     """
     try:
         snap = await graph.aget_state(config)
@@ -258,6 +269,28 @@ async def _persist_detached_reply(
         if streamed and len(streamed) > len((asst or "").strip()):
             asst = streamed
         with _module_store().transact(session_id) as sess:
+            if interrupted:
+                # HITL pause: the turn is not over — never append/replace
+                # durable history with interim narration. Only settle a
+                # pending bubble (client disconnected before any text) so a
+                # reload shows the narration instead of an empty row.
+                if asst:
+                    for m in reversed(sess.messages):
+                        if (
+                            isinstance(m, dict)
+                            and m.get("role") == "assistant"
+                            and m.get("pending")
+                        ):
+                            m["content"] = asst
+                            m.pop("pending", None)
+                            break
+                logger.info(
+                    "[SSE] Interrupted turn for thread=%s — interim text NOT "
+                    "persisted to history (HITL pause; %d chars held live)",
+                    thread_id[:12],
+                    len(asst),
+                )
+                return
             if asst:
                 trailing = next(
                     (
@@ -628,6 +661,7 @@ async def _stream_langgraph_events(
                             _persist_detached_reply(
                                 graph, config, session_id, thread_id,
                                 streamed_text=content_acc,
+                                interrupted=interrupted,
                             )
                         )
                     )

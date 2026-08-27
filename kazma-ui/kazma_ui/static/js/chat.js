@@ -405,6 +405,13 @@
 
       // Server idle with a durable assistant answer → paint server truth,
       // unconditionally (applyFinal replaces the open-turn bubble).
+      // EXCEPT while an approval is pending: the graph is paused on HITL,
+      // so "idle + last durable reply" is the PREVIOUS turn's answer —
+      // painting it over the live bubble swapped the visible interim text
+      // for a completely different (older) message on every app-switch
+      // (2026-08-27). The paused bubble + approval card are already correct.
+      if (hasInlineApprovalCard() || _awaitingApproval) return;
+
       if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
         if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
           window.KazmaChat.applyFinalAssistantText(lastMsg.content, lastMsg.model || '', { source: 'resync' });
