@@ -37,6 +37,10 @@ from kazma_core.summarizer import _normalize_msg
 
 logger = logging.getLogger(__name__)
 
+# Loop breaker floor: never fire before this iteration (early legit bursts
+# of similar-shaped calls — batch posts, parallel reads — must not trip).
+_LOOP_BREAK_MIN_ITERATION = 6
+
 # ── Failover state (module-level, process-wide) ──────────────────────
 # One-off failover clients cached by model id (created only on primary
 # failure; never mutate the active profile). Cooldowns give a failing
@@ -1806,6 +1810,87 @@ async def supervisor_node(
 
     pending = [PendingToolCall(id=tc.id, name=tc.name, arguments=tc.arguments) for tc in response.tool_calls]
 
+    # ── Repetition loop breaker (2026-08-27 live incident) ─────────────
+    # max_iterations is operator-configurable up to 100; a model that locks
+    # onto a paging pattern (one python_exec per 40k-hex-char slice of
+    # checkpoints.db) burns the ENTIRE budget with no final answer — the
+    # user watches tool calls scroll for minutes. detect_tool_loop existed
+    # but was never wired. Signatures are digit-normalized so offset paging
+    # counts as repetition; distinct real work (different files, different
+    # tweet bodies) does not. Breaks to RESPOND exactly like the budget
+    # divert: synthetic tool responses keep the message chain valid.
+    _next_iter = int(iteration or 0) + 1
+    # NOTE: _finish_reason/_tool_patch must be computed BEFORE the divert
+    # returns below — the budget-divert return used them while they were
+    # still assigned only after it (latent NameError whenever the divert
+    # fired; found while wiring the loop breaker, 2026-08-27).
+    _finish_reason = getattr(response, "finish_reason", "") or ""
+    _tool_patch = dict(intent_patch)
+    if _tool_patch.get("task_status") != "superseded":
+        _tool_patch["task_status"] = "in_progress"
+
+    _loop_sig = None
+    try:
+        from kazma_core.agent.long_task import (
+            detect_tool_loop,
+            normalized_tool_signature,
+        )
+
+        if int(iteration or 0) >= _LOOP_BREAK_MIN_ITERATION:
+            _sigs: list[str] = []
+            for _m in messages:
+                if isinstance(_m, dict) and _m.get("tool_calls"):
+                    for _tc in _m["tool_calls"]:
+                        _fn = _tc.get("function") or {}
+                        try:
+                            _args = json.loads(_fn.get("arguments") or "{}")
+                        except Exception:
+                            _args = _fn.get("arguments") or {}
+                        _sigs.append(
+                            normalized_tool_signature(_fn.get("name") or "", _args)
+                        )
+            _sigs.extend(
+                normalized_tool_signature(p.name, p.arguments) for p in pending
+            )
+            _loop_sig = detect_tool_loop(_sigs, window=10, max_repeats=4)
+    except Exception:
+        logger.debug("[Supervisor] loop-signature scan failed", exc_info=True)
+
+    if _loop_sig:
+        logger.warning(
+            "[Supervisor] Tool LOOP detected (iteration=%d, sig=%s…) — "
+            "breaking to respond with loop-notice",
+            iteration,
+            _loop_sig[:80],
+        )
+        _loop_synth = [
+            {
+                "role": "tool",
+                "tool_call_id": p.id,
+                "content": (
+                    f"REPETITION LOOP BREAKER: '{p.name}' was NOT executed — "
+                    "the same call shape (modulo numbers) has already run "
+                    "repeatedly. Do NOT retry it. Produce the final answer "
+                    "NOW from what you already have; if information is "
+                    "missing, say so explicitly."
+                ),
+            }
+            for p in pending
+        ]
+        return {
+            **breaker_reset,
+            **_tool_patch,
+            **_mission_carry,
+            "messages": messages + [assistant_msg] + _loop_synth,
+            "tool_calls_pending": [],
+            "tool_calls_done": [],
+            "next_node": NodeName.RESPOND,
+            "iteration": _next_iter,
+            "last_model": response.model,
+            "last_tokens": response.usage.get("total_tokens", 0),
+            "last_cost_usd": response.cost_usd,
+        }
+
     # Budget-exhausted divert (audit H5): iteration was already advanced for
     # this hop, so when THIS increment reaches the cap the router force-
     # diverts to RESPOND and the sanitizer silently strips the dangling
@@ -1815,7 +1900,6 @@ async def supervisor_node(
     # AND the model is told its calls were discarded by budget, not lost.
     # Mission-mode extension mirrors the router's own hard-wall predicate so
     # legit mission hops past a soft cap are untouched.
-    _next_iter = int(iteration or 0) + 1
     _soft_max = int(state.get("max_iterations") or 15)
     _budget_divert = _next_iter >= _soft_max
     if _budget_divert:
@@ -1867,7 +1951,6 @@ async def supervisor_node(
     # response at max_tokens — tool-call JSON is likely severed mid-string.
     # The tool worker reads this to give a truncation-specific corrective
     # error ("write in smaller chunks") instead of a generic schema complaint.
-    _finish_reason = getattr(response, "finish_reason", "") or ""
     if _finish_reason == "length":
         logger.warning(
             "[Supervisor] Response TRUNCATED at max_tokens (finish_reason=length); "
@@ -1875,9 +1958,7 @@ async def supervisor_node(
         )
 
     # Tools imply an open multi-step focus (unless user already superseded).
-    _tool_patch = dict(intent_patch)
-    if _tool_patch.get("task_status") != "superseded":
-        _tool_patch["task_status"] = "in_progress"
+    # (_tool_patch computed above with the loop-breaker prelude.)
 
     return {
         **breaker_reset,

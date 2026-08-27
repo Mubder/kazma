@@ -724,6 +724,28 @@ def tool_call_signature(name: str, arguments: Any) -> str:
     return f"{name}:{digest}"
 
 
+def normalized_tool_signature(name: str, arguments: Any) -> str:
+    """Digit-normalized signature — repetition detector for PAGING loops.
+
+    ``tool_call_signature`` hashes exact args, so a model that pages through
+    a blob in slices (``substr(hex(checkpoint), 40001, 40000)`` → ``80001``
+    → ``120001`` …) never repeats. Collapsing digits to ``#`` makes every
+    page of the same query shape identical, which is exactly the pathology
+    the loop breaker must catch (2026-08-27 live incident: 26+ iterations
+    of one-python_exec-per-page on checkpoints.db, no final answer).
+    """
+    import json as _json
+    import re as _re
+
+    try:
+        blob = _json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
+    except Exception:
+        blob = str(arguments)
+    blob = _re.sub(r"\d+", "#", blob)
+    blob = _re.sub(r"\s+", " ", blob).strip()
+    return f"{name}:{blob[:140]}"
+
+
 def detect_tool_loop(
     signatures: list[str],
     *,
