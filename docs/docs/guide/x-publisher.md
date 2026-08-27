@@ -59,6 +59,19 @@ Media, polls, quote tweets, and v1.1 upload are **not** in this version (Free-ti
 
 Swarm workers stay capped by the commitment swarm-scope (outbound CRITICAL denied by default).
 
+## Audit log (2026-08)
+
+Every X API call is recorded in an append-only audit trail —
+`kazma-data/x_audit.db` (SQLite WAL): local date-and-time with timezone,
+action (`post` / `reply` / `delete` / `verify_credentials`), endpoint, HTTP
+status, tweet id, the **full request payload and full response body**
+(success, HTTP error, and network failure alike), and duration. The hook
+lives at `XClient._request` — the single choke point covering the native
+skill, `/api/x/*`, and scheduled tweets. Recording is best-effort and never
+blocks the call. Inspect with any SQLite browser or
+`query_x_audit(action="post", limit=50)`; nothing is auto-pruned
+(`purge_x_audit(older_than_days=…)` exists if you ever want retention).
+
 ## Honest limits
 
 - Free tier is tight. Your X developer dashboard is the source of truth for quota.

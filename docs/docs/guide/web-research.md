@@ -284,6 +284,22 @@ Stage progress is streamed as tool/status events (WS) or italic stage lines (SSE
 
 `/swarm research …` / `dispatch_swarm` auto-researcher includes save/digest/pipeline tools.
 
+## Diagnostics & fixes operators should know (2026-08-27)
+
+- **SearXNG status notes are now truthful.** When a search reports
+  `searxng:empty@…`, the log note carries SearXNG's OWN
+  `unresponsive_engines` list (e.g. `brave: suspended`,
+  `duckduckgo: CAPTCHA`) — the real story behind "all backends empty" for
+  obscure queries. Suspensions self-heal; the note tells you which engines
+  to wait on. A reachable instance returning 0 results no longer triggers
+  the 60s dead-cooldown that used to make the next query skip SearXNG
+  entirely.
+- **Registry API JSON unblocked.** `read_url` accepts RFC 6839
+  `+json`/`+xml` content types (`application/rdap+json`, `ld+json`, …) —
+  taken-domain RDAP checks (HTTP 200 + rdap+json) previously died at the
+  content-type gate while free-domain checks (404) worked. Domain
+  availability sweeps now work end-to-end through `read_url`.
+
 ## Related
 
 - [Tools catalog](../reference/tools-catalog)  

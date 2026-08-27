@@ -301,6 +301,32 @@ Postgres dual-mirror and sparse ILIKE assist already exist as **optional** found
 
 ---
 
+## Transcript recall fallback (2026-08)
+
+Facts that live only in **past chat transcripts** (a naming shortlist, a
+decision table) are invisible to V2 recall — recall reads beliefs/episodes,
+not raw session text. Until 2026-08-27 the agent compensated by hand-writing
+SQL against `chat_sessions.db` (one task burned 21 iterations and a YOLO
+gate to answer "what did we decide before?").
+
+Now, when V2 recall returns **nothing** for a query, the supervisor
+automatically searches past web chat sessions (title + message text;
+longest/most-specific terms win, title matches rank highest, Arabic
+supported) and injects the top hits as a **prompt-fenced untrusted block**
+(`chat_history` source) next to the memory block — zero extra iterations, no
+danger tools, no permissions. Suppressed-recall turns skip it too.
+
+- Read-only, opens `kazma-data/chat_sessions.db` by path, never raises
+  (missing store = silent no-op).
+- Kill-switch: `KAZMA_TRANSCRIPT_RECALL=0` env or ConfigStore
+  `memory.transcript_fallback=false` (live-read, default ON).
+- Module: `kazma_core/memory/transcript_recall.py`; wired in
+  `graph_supervisor.py` (log line: `[Supervisor] transcript fallback: N
+  past-session hit(s)`).
+- Tip for durable facts: after the agent finds such data, tell it to
+  *remember it permanently* — an explicit user store becomes a high-trust
+  belief that recall surfaces first, no fallback needed.
+
 ## Related
 
 - [Memory best path](./memory-best-path.md) — operator checklist  

@@ -12,6 +12,12 @@ research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
 
+**New in 2026-08-27:** [Task Ledger](./task-ledger) (durable intent
+resolution + git-write blast radius), transcript recall fallback
+([Memory & RAG](./memory-and-rag)), the X audit log
+([X publisher](./x-publisher)), and the SearXNG truth-notes fix
+([Web research](./web-research)).
+
 **Smoke checklist (when you test later):** [Smoke matrix](../ops/smoke-matrix).  
 **Architecture context:** [Web research](./web-research) · [Knowledge Library](./knowledge-library) · [Document Intelligence](./document-intelligence) · [Document phases](./document-phases) · [Memory best path](./memory-best-path).
 

@@ -241,6 +241,14 @@ Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_
 
 **Always-HITL (X ToU):** `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`) require approval even when YOLO, standing grants, or HITL-disabled would skip other danger tools. Official API only — see [X publisher](x-publisher).
 
+**Git-write always-gate (2026-08):** `git commit`, `push`, `merge`,
+`rebase`, `reset`, `checkout --`, `restore`, `clean`, `rm` and friends
+require an approval card on **every** execution path — **YOLO cannot
+auto-approve repo mutations** (a misread intent must cost a dialog, never a
+commit; 2026-08-27 incident). Read-only git (`status`/`log`/`diff`) is
+exempt. YOLO windows also default to **1 hour** (was 4) —
+`KAZMA_YOLO_TTL_SECONDS` overrides. See [Task Ledger](task-ledger).
+
 Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "shell_exec", "vault_retrieve", "vault_delete"]` (`safety/hitl.py:41`). The vault tools protect secret retrieval/deletion.
 
 > **Narrowing guard (2026-08-19):** the effective list can drift below the
