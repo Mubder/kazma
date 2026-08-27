@@ -796,6 +796,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الافتراضي 50. كل لقطة تخزّن حالة المحادثة الكاملة عند تكرار مشرف واحد. القيم الأقل تصغّر قاعدة اللقطات؛ تُحذف لقطات المحادثات القديمة فقط عند التقاط جديد لنفس المحادثة.",
     },
     "settings.time_travel_save": {"en": "Save time travel settings", "ar": "حفظ إعدادات السفر عبر الزمن"},
+    "settings.cron_tz_title": {"en": "Scheduled tasks timezone", "ar": "المنطقة الزمنية للمهام المجدولة"},
+    "settings.cron_tz_hint": {
+        "en": "Timezone for scheduled tasks and reminders — \"daily at 9am\" fires at 9am here. Applies to newly scheduled tasks; existing jobs keep their stored fire times. Type an IANA zone (the list is a shortcut, not a limit).",
+        "ar": "المنطقة الزمنية للمهام المجدولة والتذكيرات — \"يومياً الساعة 9 صباحاً\" تُطلق 9 صباحاً بتوقيتها هنا. تنطبق على المهام الجديدة؛ المهمّات الحالية تحتفظ بوقتها المخزَّن. اكتب اسم منطقة IANA (القائمة اختصار وليست حداً).",
+    },
+    "settings.cron_tz_label": {"en": "IANA timezone", "ar": "منطقة زمنية (IANA)"},
+    "settings.cron_tz_save": {"en": "Save schedule timezone", "ar": "حفظ المنطقة الزمنية"},
+    "settings.cron_tz_source_config": {"en": "Set from Settings.", "ar": "مضبوطة من الإعدادات."},
+    "settings.cron_tz_source_env": {"en": "Set via the KAZMA_TZ environment variable (Settings value is overridden while it is present).", "ar": "مضبوطة عبر متغير البيئة KAZMA_TZ (قيمة الإعدادات مُتجاوَزة ما دام موجوداً)."},
+    "settings.cron_tz_source_default": {"en": "Default: UTC. Save to set your local zone.", "ar": "الافتراضي: UTC. احفظ لضبط منطقتك المحلية."},
     "settings.turn_notify_title": {"en": "Task notifications", "ar": "إشعارات المهام"},
     "settings.turn_notify_label": {"en": "Notify me when a running task finishes", "ar": "أشعرني عند انتهاء المهمة الجارية"},
     "settings.turn_notify_hint": {

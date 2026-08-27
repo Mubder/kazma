@@ -11,7 +11,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, Response
 
 from kazma_ui.rate_limit import rate_limit
@@ -289,8 +289,48 @@ class SettingsRouterBuilder:
         @router.put("/api/settings/single")
         async def api_update_single(setting: SettingsUpdate) -> dict[str, str]:
             """Update a single setting."""
+            # cron.timezone is validated at save time: get_cron_timezone()
+            # falls back to UTC with only a warn-once on unresolvable names,
+            # so a typo here would silently become "always UTC" — reject it
+            # with an actionable 400 instead.
+            if setting.key == "cron.timezone":
+                from zoneinfo import ZoneInfo
+
+                name = str(setting.value or "").strip()
+                if not name:
+                    setting.value = ""  # explicit clear → UTC default
+                else:
+                    try:
+                        ZoneInfo(name)
+                    except Exception:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"Invalid timezone {name!r} — use an IANA name "
+                                "(e.g. 'Asia/Kuwait', 'Europe/London', 'UTC')."
+                            ),
+                        )
             config_store.set(setting.key, setting.value, category=setting.category)
             return {"status": "ok"}
+
+        @router.get("/api/settings/cron-timezone")
+        async def api_get_cron_timezone() -> dict[str, str]:
+            """Current operator timezone for scheduled tasks (name + source).
+
+            Reads through THIS router's config store first (the builder may
+            hold an instance distinct from the process-global singleton),
+            then falls back to the resolver's env/default precedence.
+            """
+            from kazma_core.cron.scheduler import resolve_cron_timezone_name
+
+            try:
+                stored = str(config_store.get("cron.timezone") or "").strip()
+            except Exception:
+                stored = ""
+            if stored:
+                return {"timezone": stored, "source": "config"}
+            zone_name, source = resolve_cron_timezone_name()
+            return {"timezone": zone_name, "source": source}
 
         @router.get("/api/settings/backup/offsite")
         async def api_get_offsite_config() -> dict[str, Any]:

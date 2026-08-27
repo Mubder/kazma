@@ -634,6 +634,46 @@
             }
             this.timeTravelSaving = false;
         },
+
+        async loadCronTimezone() {
+            try {
+                const data = await this._fetch('/api/settings/cron-timezone');
+                if (!data) return;
+                this.cronTz = {
+                    value: String(data.timezone || 'UTC'),
+                    source: String(data.source || 'default'),
+                };
+            } catch (e) {
+                console.error('[Settings] Failed to load schedule timezone:', e);
+            }
+        },
+
+        async saveCronTimezone() {
+            const value = String(this.cronTz.value || '').trim();
+            if (!value) return;
+            this.cronTzSaving = true;
+            try {
+                const resp = await fetch('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ key: 'cron.timezone', value: value }),
+                });
+                if (!resp.ok) {
+                    let detail = 'Save failed';
+                    try {
+                        const err = await resp.json();
+                        detail = err.detail || detail;
+                    } catch (e0) { /* non-JSON body */ }
+                    showToast(detail, 'error');
+                    return;
+                }
+                await this.loadCronTimezone();
+                showToast('Schedule timezone saved — applies to newly scheduled tasks.', 'success');
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+            this.cronTzSaving = false;
+        },
         };
     };
 })(typeof window !== "undefined" ? window : globalThis);

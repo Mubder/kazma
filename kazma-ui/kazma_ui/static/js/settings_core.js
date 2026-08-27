@@ -138,6 +138,15 @@
         timeTravelSaving: false,
         timeTravelRestarting: false,
 
+        // ── Scheduled tasks timezone (cron) ──
+        cronTz: { value: 'UTC', source: 'default' },
+        cronTzSaving: false,
+        cronTzZones: [
+            'UTC', 'Asia/Kuwait', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Qatar',
+            'Africa/Cairo', 'Europe/London', 'Europe/Berlin', 'Europe/Istanbul',
+            'America/New_York', 'America/Chicago', 'America/Los_Angeles',
+        ],
+
         // ── Connectors Tab ──
         connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },
         connectorStatuses: {},
@@ -612,7 +621,7 @@
                 case 'models': break; // Loaded on init
                 case 'agent': break;
                 case 'memory':
-                    await Promise.all([this.loadEmbedder(), this.loadTimeTravel()]);
+                    await Promise.all([this.loadEmbedder(), this.loadTimeTravel(), this.loadCronTimezone()]);
                     if (scrollEmbedder || (window.location.hash || '').includes('embedder')) {
                         setTimeout(function() {
                             var el = document.getElementById('memory-embedder-section');

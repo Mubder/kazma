@@ -762,6 +762,48 @@ class TestSettingsAPI:
 
 
 
+    def test_cron_timezone_get_default(self, client):
+        """GET /api/settings/cron-timezone reflects the effective zone."""
+        resp = client.get("/api/settings/cron-timezone")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["timezone"] == "UTC"
+        assert data["source"] in ("default", "config", "env")
+
+    def test_cron_timezone_single_put_valid_and_invalid(self, client):
+        """PUT single validates cron.timezone; valid saves, typo 400s."""
+        resp = client.put(
+            "/api/settings/single",
+            json={"key": "cron.timezone", "value": "Asia/Kuwait"},
+        )
+        assert resp.status_code == 200
+        after = client.get("/api/settings/cron-timezone").json()
+        assert after["timezone"] == "Asia/Kuwait"
+        assert after["source"] == "config"
+
+        bad = client.put(
+            "/api/settings/single",
+            json={"key": "cron.timezone", "value": "Not/AZone"},
+        )
+        assert bad.status_code == 400
+        # The rejected write must not have clobbered the stored value.
+        still = client.get("/api/settings/cron-timezone").json()
+        assert still["timezone"] == "Asia/Kuwait"
+
+    def test_cron_timezone_clear_resets_to_utc(self, client):
+        """Empty value on cron.timezone clears to the UTC default."""
+        ok = client.put(
+            "/api/settings/single", json={"key": "cron.timezone", "value": "Asia/Kuwait"}
+        )
+        assert ok.status_code == 200
+        clear = client.put(
+            "/api/settings/single", json={"key": "cron.timezone", "value": ""}
+        )
+        assert clear.status_code == 200
+        after = client.get("/api/settings/cron-timezone").json()
+        assert after["timezone"] == "UTC"
+
+
 # ══════════════════════════════════════════════════════════════════════
 # TestUnifiedProvidersRouterAPI — New unified providers & connectors hub
 # ══════════════════════════════════════════════════════════════════════

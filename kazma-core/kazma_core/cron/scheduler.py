@@ -94,6 +94,31 @@ class ScheduledJob:
 _tz_warned = False
 
 
+def resolve_cron_timezone_name() -> tuple[str, str]:
+    """Return ``(operator_zone_name_or_'UTC', source)`` for the cron zone.
+
+    Source is ``"config"`` (ConfigStore ``cron.timezone``), ``"env"``
+    (``KAZMA_TZ``), or ``"default"``. Does NOT validate — pair with
+    :func:`get_cron_timezone` (which falls back to UTC on unresolvable
+    names) or an explicit ``ZoneInfo(name)`` probe at the validation site
+    (e.g. the Settings API rejects typos with a 400 instead of silently
+    running UTC).
+    """
+    name = ""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        name = str(get_config_store().get("cron.timezone") or "").strip()
+    except Exception:
+        pass
+    if name:
+        return name, "config"
+    name = os.environ.get("KAZMA_TZ", "").strip()
+    if name:
+        return name, "env"
+    return "UTC", "default"
+
+
 def get_cron_timezone() -> tzinfo:
     """Resolve the operator-configured timezone for clock-time anchors.
 
@@ -111,16 +136,10 @@ def get_cron_timezone() -> tzinfo:
     """
     global _tz_warned
 
-    name = ""
-    try:
-        from kazma_core.config_store import get_config_store
-
-        name = str(get_config_store().get("cron.timezone") or "").strip()
-    except Exception:
-        pass
-    if not name:
-        name = os.environ.get("KAZMA_TZ", "").strip()
-    if not name:
+    name, _source = resolve_cron_timezone_name()
+    if name == "UTC":
+        # Both the default AND an operator explicitly asking for UTC land
+        # here; nothing to warn about either way.
         return UTC
     try:
         return ZoneInfo(name)

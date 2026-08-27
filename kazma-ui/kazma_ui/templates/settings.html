@@ -1024,6 +1024,29 @@
         </div>
 
         <div class="settings-group">
+            <h3>{{ t('settings.cron_tz_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.cron_tz_hint') }}
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.cron_tz_label') }}</label>
+                <input class="form-input" list="cronTzZoneOptions" x-model="cronTz.value"
+                       spellcheck="false" style="max-width:280px" dir="ltr">
+                <datalist id="cronTzZoneOptions">
+                    <template x-for="z in cronTzZones" :key="z">
+                        <option :value="z" x-text="z"></option>
+                    </template>
+                </datalist>
+                <div class="form-hint">{{ t('settings.cron_tz_source_' + (cronTz.source || 'default')) }}</div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <button class="btn btn-primary" @click="saveCronTimezone()" :disabled="cronTzSaving"
+                        x-text="cronTzSaving ? '…' : t('settings.cron_tz_save')"></button>
+            </div>
+        </div>
+
+        <div class="settings-group">
             <h3>{{ t('settings.turn_notify_title') }}</h3>
             <div style="margin-bottom:12px;padding:10px 12px;background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
                 <span class="ki" data-icon="info" aria-hidden="true"></span>

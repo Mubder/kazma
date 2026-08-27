@@ -26,6 +26,9 @@ dependencies = [
     "trafilatura>=1.12",
     "markdown>=3.6",
     "pygments>=2.19",
+    # zoneinfo database — bare Windows/containers have no system tzdata;
+    # cron.timezone (and anything using ZoneInfo) needs it to resolve names.
+    "tzdata>=2024.1",
     "tenacity>=8.0.0",
     "networkx>=3.1",
     "click>=8.1.0",
