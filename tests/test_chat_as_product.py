@@ -78,6 +78,18 @@ def test_session_search_input_contained() -> None:
     assert "min-width: 0;" in css.split(".session-search-wrapper {")[1].split("}")[0]
 
 
+def test_transcript_wider_measure_small_side_margins() -> None:
+    """Operator decision 2026-08-27: the inner chat column was too slim —
+    message measure widened to 96ch and the 12vw side slab reduced to a
+    small clamp() margin."""
+    v5 = _V5.read_text(encoding="utf-8")
+    css = _V5.parent.joinpath("kazma.css").read_text(encoding="utf-8")
+    assert "max-width: min(100%, 96ch);" in v5
+    assert "72ch" not in v5
+    assert "clamp(16px, 3vw, 40px)" in css
+    assert "clamp(64px, 12vw, 180px)" not in css
+
+
 def test_sidebar_is_grouped_not_more_disclosure() -> None:
     """Operator rejected always-on More that hid Work to 3 items."""
     html = _SIDEBAR.read_text(encoding="utf-8")

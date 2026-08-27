@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Unreleased — composer metrics restored + wider chat column (2026-08-27)
+
+- **Session usage counters are back under the text field.** The
+  `cost / tokens / context` metrics had been nested inside the `⋯` details
+  popover (`#capacity-bar`), where `.composer-more:not([open]) .capacity-bar
+  { display: none; }` hid them — so they disappeared from the composer
+  chrome. They now live in `.input-footer` (always visible under the input,
+  next to the char counter and Enter hint); the popover keeps only the mode
+  pills + Reset. Mobile rule retargeted `.input-footer .session-metrics`.
+- **Wider chat column with small side margins** (operator decision): the
+  transcript's `clamp(64px, 12vw, 180px)` side slab read too slim, so it is
+  now `clamp(16px, 3vw, 40px)` and the message measure widened to
+  `min(100%, 96ch)` — more usable width, still a bounded document measure.
+
 ## Unreleased — chat header restored + RTL session-search containment (2026-08-27)
 
 - **Chat keeps the page header** (operator decision): the immersive hide

@@ -1905,6 +1905,9 @@ tbody tr:last-child td {
 }
 .capacity-pill-power,
 .capacity-pill-off { /* back-compat no-ops — power look is .is-on only */ }
+/* Session usage metrics sit in .input-footer (always visible under the
+   composer, 2026-08-27) — the auto margin pushes them + the Enter hint
+   to the row's end. */
 .session-metrics {
   margin-inline-start: auto;
 }
@@ -2668,9 +2671,11 @@ tbody tr:last-child td {
    "Done · N tools · M steps · Xs · $cost · tokens" — keep it one line */
 .agent-progress.is-done .agent-progress-title { white-space: nowrap; }
 
-/* Chat transcript: stretchable column with wide side margins (approved
-   mockup look). Mobile (≤768px) rules below still clamp to --sp-3. */
-.chat-messages { padding: var(--sp-6) clamp(64px, 12vw, 180px); }
+/* Chat transcript: stretchable column with a small side margin
+   (operator decision 2026-08-27 — the old clamp(64px,12vw,180px) slab
+   made the column too slim). Mobile (≤768px) rules below still clamp
+   to --sp-3. */
+.chat-messages { padding: var(--sp-6) clamp(16px, 3vw, 40px); }
 .message { max-width: none; }
 
 /* ── ≤520px: usable single-hand layout (AC#7) ── */
@@ -4030,14 +4035,15 @@ tbody tr:last-child td {
   .chat-input-area { padding: var(--sp-3); }
   .chat-welcome { padding: var(--sp-6) var(--sp-4); }
   .chat-input-footer-hint { display: none; }   /* hide "Enter / Ctrl+Enter" hint */
-  /* Metrics drop under the mode buttons instead of scrolling off-screen. */
-  .capacity-bar .session-metrics {
+  /* Metrics live in .input-footer now (2026-08-27) — drop them to a full
+     row under the draft counter instead of scrolling off-screen. */
+  .input-footer .session-metrics {
     flex: 1 0 100%;
     width: 100%;
     margin-inline-start: 0;
     display: flex;
   }
-  .capacity-bar .session-metrics .capacity-stat {
+  .input-footer .session-metrics .capacity-stat {
     flex: 1;
     text-align: center;
   }
