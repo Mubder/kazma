@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Unreleased — un-glue streamed narration segments (2026-08-27)
+
+Report: during multi-iteration turns (batch domain checks) the live bubble
+showed "…(both TLDs):Batch 1/4: 🔥…" — narration segments glued with no
+separator — while the final reply rendered clean. Root cause: each batch's
+narration comes from a SEPARATE LLM invocation, and the model often drops
+the trailing newline before a tool call; the streamed deltas therefore had
+no break at invocation boundaries. (The markdown renderer already breaks
+single newlines — the characters simply weren't there.)
+
+- `sse_chat.py` now emits a `\n\n` paragraph-break token on the FIRST token
+  of a new LLM invocation when the accumulated narration doesn't already end
+  in whitespace — BETWEEN invocations only, so mid-word chunks of one
+  invocation are never split. The client accumulates it like any token, so
+  the live bubble, the journal, and the persisted reply stay consistent.
+- The final reply was never affected (it is a separate, properly formatted
+  message that replaces the bubble at turn end).
+- Pin test `tests/test_sse_segment_break.py`; 45 existing SSE tests green.
+
 ## Unreleased — Kazma WAS using your SearXNG; the note lied (2026-08-27)
 
 Diagnosis of "why is Kazma not using my SearXNG": it was — reachable at

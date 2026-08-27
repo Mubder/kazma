@@ -452,6 +452,9 @@ async def _stream_langgraph_events(
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
+    # True between an on_chat_model_start and its first streamed token — used
+    # to insert a paragraph break BETWEEN LLM invocations of one turn.
+    _first_token_of_model_call = False
     interrupted = False
     thread_id = tid or ""
     _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
@@ -662,8 +665,29 @@ async def _stream_langgraph_events(
                                     token_text = chunk.get("content", "")
 
                                 if token_text:
+                                    if _first_token_of_model_call:
+                                        _first_token_of_model_call = False
+                                        if content_acc and not content_acc.endswith(("\n", " ", "\t")):
+                                            # Multi-iteration turns stream one
+                                            # narration per LLM invocation; the
+                                            # model frequently drops the
+                                            # trailing newline before a tool
+                                            # call, gluing "…(both TLDs):"
+                                            # straight into "Batch 1/4: …" in
+                                            # the live bubble (2026-08-27).
+                                            # Emit a paragraph break BETWEEN
+                                            # invocations only — mid-word
+                                            # chunks belong to ONE invocation
+                                            # and never hit this branch.
+                                            sep = "\n\n"
+                                            content_acc += sep
+                                            yield await emit_j("token", {"content": sep})
                                     content_acc += token_text
                                     yield await emit_j("token", {"content": token_text})
+
+                        # ── on_chat_model_start: a new LLM invocation ────────
+                        elif kind == "on_chat_model_start":
+                            _first_token_of_model_call = True
 
                         # ── on_chat_model_end: LLM finished — extract usage ────
                         elif kind == "on_chat_model_end":
