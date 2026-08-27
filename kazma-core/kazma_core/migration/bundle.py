@@ -208,11 +208,34 @@ class KazmaBundle:
             with zipfile.ZipFile(self.path, "r") as zf:
                 infos = zf.infolist()
                 names = {i.filename for i in infos}
+                # File entries only (directory members end with "/" and carry no data).
+                arc_files = {i.filename for i in infos if not i.is_dir()}
+                manifest_files = set(self.manifest.file_hashes)
                 for required in _META_FILES:
                     if required not in names:
                         report.add_error(f"missing required file: {required}")
                 if "data" not in names and not any(n.startswith("data/") for n in names):
                     report.add_warning("bundle has no data/ files (empty export?)")
+
+                # Manifest ↔ archive cross-check, BOTH directions. Previously
+                # only manifest→archive was checked, so a rogue member slipped
+                # into the zip passed verification silently and the importer
+                # then swapped it onto live databases (audit H13). A missing
+                # manifest file is also failed unconditionally now — the old
+                # check skipped it when check_hashes=False.
+                for rel in sorted(manifest_files - arc_files):
+                    report.add_error(f"manifest lists {rel} but it is not in the archive")
+                # Extra archive members the manifest never heard of get
+                # extracted and restored unchecked — treat them as tampering.
+                # manifest.json itself is the one member legitimately absent
+                # from file_hashes (it *carries* them; written after hashing).
+                unlisted = sorted(arc_files - manifest_files - {"manifest.json"})
+                if unlisted:
+                    report.add_error(
+                        f"{len(unlisted)} archive file(s) NOT listed in the manifest "
+                        f"(tamper signal — they would be restored unchecked): "
+                        + ", ".join(unlisted)
+                    )
 
                 for info in infos:
                     if info.is_dir():
@@ -222,9 +245,8 @@ class KazmaBundle:
 
                 if check_hashes:
                     for rel, expected in self.manifest.file_hashes.items():
-                        if rel not in names:
-                            report.add_error(f"manifest lists {rel} but it is not in the archive")
-                            continue
+                        if rel not in arc_files:
+                            continue  # already reported above as missing
                         actual = hashlib.sha256(zf.read(rel)).hexdigest()
                         if actual != expected:
                             report.add_error(
