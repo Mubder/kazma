@@ -168,11 +168,13 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     """The 'double vision' flicker (2026-08-27): onToken replaced the FULL
     accumulated markdown innerHTML on EVERY token event — measured 5,311 DOM
     mutations (2,643 add / 2,624 del on .message-text) for one 150-word
-    reply. Live paints must go through the coalescing scheduler and the
-    terminal frame must flush the final text."""
+    reply. Live paints must be plain-text growth on a single text node
+    (flicker-free by construction, throttled to one paint per 150 ms window),
+    with markdown rendered exactly once at the terminal flush."""
     js = _CHAT_JS.read_text(encoding="utf-8")
     assert "_LIVE_RENDER_MIN_MS = 150" in js
     assert "function _scheduleLiveTextPaint(textEl)" in js
     assert js.count("_scheduleLiveTextPaint(textEl);") >= 2  # main + approve-resume
+    assert "textEl.textContent = stripPlanFenceForDisplay(tokenAccum)" in js
     assert "function _flushLiveTextPaint()" in js
-    assert "_flushLiveTextPaint();" in js
+    assert "_paintLiveTextNow(_liveRenderEl, true)" in js

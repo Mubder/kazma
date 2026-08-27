@@ -9,11 +9,13 @@ event** — one 150-word reply produced **5,311 DOM mutations** (2,643 add /
 per token. The eye reads that full-rebuild churn as flicker / double vision.
 
 - **Live-token paint throttle**: streaming paints now go through
-  `_scheduleLiveTextPaint` — at most one markdown re-render per 150 ms window
-  (first token paints immediately). Both token paths (main stream +
+  `_scheduleLiveTextPaint` — plain-text growth on a single text node (no
+  element teardown/rebuild at all — flicker-free by construction), coalesced
+  to one paint per 150 ms window. Markdown renders exactly once, at the
+  terminal `_flushLiveTextPaint` frame. Both token paths (main stream +
   approve-resume) are rewired. Verified live on the running install: the same
   150-word story prompt now causes **24 mutation events** (~175× less churn)
-  with the final text flushed intact by the terminal `_flushLiveTextPaint()`.
+  with the final text rendered as formatted markdown.
 - Not Qwen's doing: the only working-tree changes Qwen left were two tool
   registrations in `side_effects.py` and one MCP server entry in
   `kazma.yaml` — no UI files. The flicker was the pre-existing per-token

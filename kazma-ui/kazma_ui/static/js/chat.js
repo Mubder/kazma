@@ -3422,13 +3422,21 @@
   var _liveRenderDirty = false;
   var _liveRenderEl = null;
 
-  function _paintLiveTextNow(textEl) {
+  function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
-    textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
-    // Re-apply dir="auto" after innerHTML (the attribute survives but the
-    // bidi direction may need recalculating for the new content).
+    if (final) {
+      textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
+      // Re-apply dir="auto" after innerHTML (the attribute survives but the
+      // bidi direction may need recalculating for the new content).
+      textEl.setAttribute('dir', 'auto');
+      if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
+      return;
+    }
+    // Live streaming paints as PLAIN TEXT on a single text node: the text
+    // just grows (no element teardown/rebuild at all — flicker-free by
+    // construction). Markdown renders exactly once, at the terminal frame.
+    textEl.textContent = stripPlanFenceForDisplay(tokenAccum) || tokenAccum;
     textEl.setAttribute('dir', 'auto');
-    if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
   }
 
   function _scheduleLiveTextPaint(textEl) {
@@ -3439,7 +3447,7 @@
       if (_liveRenderTimer) { clearTimeout(_liveRenderTimer); _liveRenderTimer = null; }
       _liveRenderLastAt = Date.now();
       _liveRenderDirty = false;
-      _paintLiveTextNow(textEl);
+      _paintLiveTextNow(textEl, false);
       return;
     }
     _liveRenderDirty = true;
@@ -3448,18 +3456,19 @@
       _liveRenderTimer = null;
       _liveRenderLastAt = Date.now();
       _liveRenderDirty = false;
-      if (_liveRenderEl) _paintLiveTextNow(_liveRenderEl);
+      if (_liveRenderEl) _paintLiveTextNow(_liveRenderEl, false);
     }, _LIVE_RENDER_MIN_MS - since);
   }
 
   /** Terminal flush: cancel any pending throttled paint and render the final
-   *  accumulated text immediately (called from the done/finally paths). */
+   *  accumulated text as formatted markdown, exactly once (called from the
+   *  done/finally paths). */
   function _flushLiveTextPaint() {
     if (_liveRenderTimer) { clearTimeout(_liveRenderTimer); _liveRenderTimer = null; }
-    if (_liveRenderDirty && _liveRenderEl) {
+    if (_liveRenderEl) {
       _liveRenderLastAt = Date.now();
       _liveRenderDirty = false;
-      _paintLiveTextNow(_liveRenderEl);
+      _paintLiveTextNow(_liveRenderEl, true);
     }
   }
 
