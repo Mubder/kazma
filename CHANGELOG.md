@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased — pin-to-bottom scrolling (streaming view stops bouncing) (2026-08-27)
+
+Third angle on the flicker report, measured this time: `scrollToBottom` ran
+from ~20 call sites (every token batch included) and unconditionally snapped
+`scrollTop = scrollHeight`. While other turn elements mutate heights above
+(status strip, activity rows, the plain→markdown terminal render), the view
+was yanked up and down during streaming — **13 direction reversals and 18
+>30px jumps measured in one 25-second stream** — which reads as
+flicker/double-vision, and it also fought any reader who scrolled up.
+
+- **Pin-to-bottom scrolling** (standard chat behaviour): auto-scroll only
+  while the user is within 80px of the bottom; scrolling up detaches for the
+  rest of the turn; returning to the bottom re-pins. Sending a message and
+  loading a session force the jump (`scrollToBottomForce`).
+- Earlier angles already shipped: plain-text live streaming (no per-token
+  rebuild — 5,311 DOM mutations → 19) and single terminal markdown render.
+
 ## Unreleased — X integration audit log (2026-08-27)
 
 Operator decision: every X (Twitter) API call now leaves an append-only audit

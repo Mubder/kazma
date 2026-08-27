@@ -89,6 +89,7 @@
   // ── Initialize ────────────────────────────────────────
   function init() {
     messagesEl = $('chat-messages');
+    _installScrollPinTracker();
     inputEl = $('chat-input');
     sendBtn = $('send-btn');
     typingEl = $('thinking-indicator');
@@ -1714,9 +1715,10 @@
       return { id: u.id, kind: u.kind, mime: u.mime, filename: u.filename };
     });
 
-    // Show user message
+    // Show user message — sending always re-pins the view to the bottom
+    // (a new turn starts; the reader's scroll-up detach must not carry over).
     appendMessage('user', content, displayAttachName);
-    scrollToBottom();
+    scrollToBottomForce();
 
     // Start a clean assistant turn (must clear currentMsgEl *before* beginTurn
     // so progress attaches to a new bubble, not the previous reply).
@@ -4448,7 +4450,7 @@
         // live delivery arrives via the resumed WS cursor stream.
         _resyncDelivery('load');
 
-        scrollToBottom();
+        scrollToBottomForce(); // session load shows the latest turn
         checkPendingApprovals();
         updateContextBadge();
         refreshCapacity();
@@ -4742,8 +4744,48 @@
   // rAF-coalesced: rapid row appends during streaming trigger one scroll
   // per frame instead of a forced layout per row (no jank / layout jumps).
   var _scrollRafPending = false;
+  // ── Pin-to-bottom scrolling ─────────────────────────────────────────
+  // scrollToBottom is called from ~20 sites (every token batch included).
+  // Unconditionally snapping scrollTop to scrollHeight while OTHER parts of
+  // the turn mutate heights above (status strip, activity rows, the
+  // plain→markdown terminal render) makes the view bounce up and down while
+  // the reply streams — measured 13 direction reversals / 18 >30px jumps in
+  // one 25s stream — and it fights a reader who scrolled up. Standard chat
+  // behaviour: auto-scroll ONLY while the user is pinned near the bottom;
+  // scrolling up detaches for the rest of the turn, returning re-pins.
+  var _userPinnedToBottom = true;
+
+  function _isNearBottom() {
+    if (!messagesEl) return true;
+    return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight <= 80;
+  }
+
+  function _installScrollPinTracker() {
+    if (!messagesEl || messagesEl.__pinTracked) return;
+    messagesEl.__pinTracked = true;
+    messagesEl.addEventListener('scroll', function() {
+      _userPinnedToBottom = _isNearBottom();
+    }, { passive: true });
+  }
+
   function scrollToBottom() {
-    if (!messagesEl || _scrollRafPending) return;
+    if (!messagesEl) return;
+    if (!_userPinnedToBottom) return; // reader scrolled up — don't fight them
+    if (_scrollRafPending) return;
+    _scrollRafPending = true;
+    requestAnimationFrame(function() {
+      _scrollRafPending = false;
+      if (messagesEl && _userPinnedToBottom) {
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+      }
+    });
+  }
+
+  /** Jump to the bottom unconditionally (send / session load / new turn). */
+  function scrollToBottomForce() {
+    _userPinnedToBottom = true;
+    if (!messagesEl) return;
+    if (_scrollRafPending) return;
     _scrollRafPending = true;
     requestAnimationFrame(function() {
       _scrollRafPending = false;

@@ -178,3 +178,18 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     assert "textEl.textContent = stripPlanFenceForDisplay(tokenAccum)" in js
     assert "function _flushLiveTextPaint()" in js
     assert "_paintLiveTextNow(_liveRenderEl, true)" in js
+
+
+def test_scroll_is_pin_to_bottom_not_forced() -> None:
+    """scrollToBottom is called from ~20 sites (every token batch). Snapping
+    unconditionally while other turn elements change height made the view
+    bounce up/down during streaming (measured: 13 direction reversals and 18
+    >30px jumps in one 25s stream) — perceived as flicker — and it fought a
+    reader who scrolled up. Auto-scroll must respect the pin state; only send
+    and session load force the jump."""
+    js = _CHAT_JS.read_text(encoding="utf-8")
+    assert "function _installScrollPinTracker()" in js
+    assert "var _userPinnedToBottom = true;" in js
+    assert "if (!_userPinnedToBottom) return; // reader scrolled up — don't fight them" in js
+    assert "function scrollToBottomForce()" in js
+    assert js.count("scrollToBottomForce();") >= 2  # send + session load
