@@ -741,7 +741,20 @@ def normalized_tool_signature(name: str, arguments: Any) -> str:
         blob = _json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
     except Exception:
         blob = str(arguments)
-    blob = _re.sub(r"\d+", "#", blob)
+    # Long digit runs only. Collapsing EVERY digit also collapses
+    # "/src/module_0.py" and "/src/module_8.py" into one signature, so
+    # reading nine numbered files tripped the breaker as a paging loop --
+    # while the call site's own comment promised "distinct real work
+    # (different files, different tweet bodies) does not" count. A breaker
+    # that stops legitimate numbered iteration is worse than no breaker,
+    # because it fails exactly the long multi-step tasks it exists to
+    # protect, and it does so silently.
+    #
+    # Paging offsets are large by nature (40001 -> 80001 -> 120001); index
+    # numbers in real work are small. Four digits separates them cleanly.
+    # The residual gap is a paging loop with small offsets, which produces
+    # distinct signatures and is left to the iteration-budget divert.
+    blob = _re.sub(r"\d{4,}", "#", blob)
     blob = _re.sub(r"\s+", " ", blob).strip()
     return f"{name}:{blob[:140]}"
 
