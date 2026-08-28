@@ -35,12 +35,21 @@ services:
       KAZMA_SEARXNG_URL: "${KAZMA_SEARXNG_URL:-http://searxng:8080}"
     restart: unless-stopped
     healthcheck:
-      # /health is always open; /api/gateway/status requires auth when secret set
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # /health/ready, not /health: the latter is liveness only and reports
+      # healthy for a server whose database is gone. /health/ready checks
+      # config store, database, swarm engine, model registry and agent runner.
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      # Kazma's cold start loads a local embedding model and connects MCP
+      # servers: measured 60-212s. A 15s start_period marked the container
+      # unhealthy during every NORMAL startup.
+      start_period: 300s
+    # NOTE: `restart: unless-stopped` acts on process EXIT, not on health.
+    # Under plain compose an unhealthy container is labelled and left alone.
+    # For health-gated restart, either run under an orchestrator that acts on
+    # health, or make scripts/service/kazma_guard.py the entrypoint.
 
   # Optional privacy-friendly meta-search (enables reliable web_search).
   # Start: docker compose --profile search up -d searxng

@@ -487,6 +487,24 @@ class AsyncMCPManager:
                 len(self._connection_errors),
                 "; ".join(f"{n} ({m[:80]})" for n, m in self._connection_errors.items()),
             )
+            # 60 failures across eight days, never surfaced anywhere the
+            # operator would see. Tools silently vanish from the agent's
+            # repertoire and it plans around capabilities it no longer has.
+            try:
+                from kazma_core.observability.ops_alerts import alert
+
+                alert(
+                    "mcp.servers_unavailable",
+                    f"{len(self._connection_errors)} MCP server(s) unavailable "
+                    f"— their tools are gone until fixed.",
+                    "; ".join(
+                        f"{n}: {m[:60]}"
+                        for n, m in list(self._connection_errors.items())[:5]
+                    ),
+                    severity="warn",
+                )
+            except Exception:
+                pass
         if raise_on_error and self._connection_errors:
             details = "; ".join(
                 f"{name}: {message}" for name, message in self._connection_errors.items()

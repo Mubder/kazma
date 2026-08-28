@@ -388,12 +388,42 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
 
 
 def build_command() -> list[str]:
-    raw = os.environ.get("KAZMA_GUARD_CMD", "").strip()
-    if raw:
-        import shlex
+    r"""Resolve the command to supervise.
 
-        return shlex.split(raw, posix=(os.name != "nt"))
-    return [sys.executable, "serve.py"]
+    Windows quoting makes the obvious one-liner wrong in both directions:
+    ``shlex.split(posix=True)`` treats backslashes as escapes and mangles
+    ``C:\path\to\x`` into ``C:pathtox``, while ``posix=False`` keeps the
+    surrounding quotes inside the token, so the executable name literally
+    contains a quote character and the spawn fails. Any path with a space --
+    the reason you would quote it at all -- hit one or the other.
+
+    A JSON list is unambiguous everywhere and is preferred:
+
+        KAZMA_GUARD_CMD='["C:\Program Files\py.exe", "serve.py"]'
+    """
+    raw = os.environ.get("KAZMA_GUARD_CMD", "").strip()
+    if not raw:
+        return [sys.executable, "serve.py"]
+
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and parsed:
+                return [str(x) for x in parsed]
+        except Exception:
+            pass
+
+    import shlex
+
+    if os.name == "nt":
+        parts = shlex.split(raw, posix=False)
+        out = []
+        for part in parts:
+            if len(part) > 1 and part[0] == part[-1] and part[0] in "\"'":
+                part = part[1:-1]
+            out.append(part)
+        return out
+    return shlex.split(raw, posix=True)
 
 
 def _pid_alive(pid: int) -> bool:
