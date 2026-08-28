@@ -352,3 +352,77 @@ def test_both_repositories_are_snapshotted(monkeypatch, tmp_path):
     res = universal._snapshot_to_restic(tmp_path)
     assert seen == ["/l", "rclone:r/restic"]
     assert set(res) == {"local", "remote"}
+
+
+# ── scheduled retention and verification ──────────────────────────────
+
+
+def _handler():
+    from kazma_core.memory.worker_bootstrap import _handle_restic_maintenance
+
+    return _handle_restic_maintenance
+
+
+def test_maintenance_prunes_then_verifies_each_repo(monkeypatch):
+    """Verify AFTER pruning: prune rewrites the repository, so checking
+    beforehand validates a state that no longer exists."""
+    import asyncio
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("pw", False))
+    monkeypatch.setattr(rr, "repo_paths", lambda: {"local": "/l", "remote": "rc:/r"})
+    monkeypatch.setattr(rr, "forget_prune",
+                        lambda repo, pw, policy=None: calls.append(("forget", repo))
+                        or rr.ResticResult(ok=True))
+    monkeypatch.setattr(rr, "check",
+                        lambda repo, pw, read_data=False: calls.append(("check", repo))
+                        or rr.ResticResult(ok=True))
+
+    assert asyncio.run(_handler()({})) is True
+    assert calls == [("forget", "/l"), ("check", "/l"),
+                     ("forget", "rc:/r"), ("check", "rc:/r")]
+
+
+def test_a_failing_check_alerts_the_operator(monkeypatch):
+    """A repository that fails verification is a backup you do not have."""
+    import asyncio
+
+    sent: list[str] = []
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("pw", False))
+    monkeypatch.setattr(rr, "repo_paths", lambda: {"local": "/l"})
+    monkeypatch.setattr(rr, "forget_prune",
+                        lambda repo, pw, policy=None: rr.ResticResult(ok=True))
+    monkeypatch.setattr(rr, "check", lambda repo, pw, read_data=False:
+                        rr.ResticResult(ok=False, error="pack is damaged"))
+    monkeypatch.setattr(
+        "kazma_core.observability.ops_alerts.alert",
+        lambda key, title, detail="", **kw: sent.append(key) or True,
+    )
+
+    asyncio.run(_handler()({}))
+    assert "backup.restic_check_failed" in sent
+
+
+def test_maintenance_never_retry_storms(monkeypatch):
+    """It runs on a durable queue. A permanent condition -- no restic, no
+    passphrase -- must not be retried forever."""
+    import asyncio
+
+    monkeypatch.setattr(rr, "restic_available", lambda: False)
+    assert asyncio.run(_handler()({})) is True
+
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("", False))
+    assert asyncio.run(_handler()({})) is True
+
+
+def test_maintenance_is_scheduled_with_the_nightly_backups():
+    import inspect
+
+    from kazma_core.memory import worker_bootstrap
+
+    src = inspect.getsource(worker_bootstrap)
+    assert 'enqueue_task("restic_maintenance", {})' in src
+    assert 'register_handler("restic_maintenance"' in src
