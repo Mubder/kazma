@@ -487,6 +487,52 @@ def _read_retention() -> int:
 _OFFSITE_ALERT_COOLDOWN_S = 6 * 3600
 
 
+def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
+    """Snapshot the finished backup into the restic repositories.
+
+    Runs AFTER the manifest is written, so the snapshot contains a complete,
+    self-describing backup rather than a directory mid-assembly.
+
+    Additive on purpose. The existing local generations and offsite zip keep
+    running untouched until a restore has been rehearsed twice -- a migration
+    is precisely when you want the old copies, and cutting over before the
+    new path has proven itself is how a backup rewrite loses data.
+
+    Never raises: the backup has already succeeded by this point.
+    """
+    try:
+        from kazma_core.backup.restic_repo import (
+            backup as restic_backup,
+        )
+        from kazma_core.backup.restic_repo import (
+            ensure_password,
+            repo_paths,
+            restic_available,
+        )
+
+        if not restic_available():
+            return None
+        password, _ = ensure_password()
+        if not password:
+            logger.info("[universal-backup] restic configured but no passphrase set")
+            return {"skipped": "no restic passphrase"}
+
+        out: dict[str, Any] = {}
+        for name, repo in repo_paths().items():
+            if not repo:
+                continue
+            res = restic_backup(repo, password, [str(dest)],
+                                tags=["kazma", "universal"])
+            out[name] = res.as_dict()
+            if not res.ok:
+                logger.warning("[universal-backup] restic %s failed: %s",
+                               name, res.error[:200])
+        return out or None
+    except Exception:  # noqa: BLE001 -- must never fail a completed backup
+        logger.warning("[universal-backup] restic snapshot failed", exc_info=True)
+        return {"ok": False, "error": "restic snapshot raised"}
+
+
 def _alert_on_backup_gaps(offsite: dict[str, Any], db_fail: int) -> None:
     """Tell the operator when a backup silently stopped protecting them.
 
@@ -694,6 +740,10 @@ def perform_universal_backup(
     manifest["elapsed_seconds"] = elapsed
     manifest["offsite"] = offsite
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    restic_result = _snapshot_to_restic(dest)
+    if restic_result:
+        manifest["restic"] = restic_result
+        manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     _alert_on_backup_gaps(offsite, db_fail)
 
     # 6. Prune old backups (live-configured retention, env override, >= 1).

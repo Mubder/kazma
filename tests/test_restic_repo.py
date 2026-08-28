@@ -277,3 +277,78 @@ def test_a_real_restore_failure_is_never_forgiven():
 def test_no_error_summary_is_not_treated_as_benign():
     benign, _ = rr._only_directory_timestamp_errors("some unrelated stderr")
     assert benign is False
+
+
+# ── the pipeline wiring ───────────────────────────────────────────────
+
+
+def test_the_snapshot_runs_after_the_manifest_is_written():
+    """Snapshotting mid-assembly would capture a directory that describes
+    itself incorrectly, or not at all."""
+    import inspect
+
+    from kazma_core.backup import universal
+
+    src = inspect.getsource(universal.perform_universal_backup)
+    assert src.index('manifest["offsite"] = offsite') < src.index("_snapshot_to_restic")
+
+
+def test_the_snapshot_is_additive_not_a_cutover():
+    """The existing generations and offsite zip keep running until a restore
+    has been rehearsed twice. A migration is exactly when you want the old
+    copies, and cutting over early is how a backup rewrite loses data."""
+    import inspect
+
+    from kazma_core.backup import universal
+
+    src = inspect.getsource(universal.perform_universal_backup)
+    # The legacy paths must still be invoked alongside the new one.
+    assert "_offsite_sync(dest)" in src
+    assert "_prune(keep)" in src
+    assert "_snapshot_to_restic" in src
+
+
+def test_a_restic_failure_cannot_fail_a_completed_backup():
+    import inspect
+
+    from kazma_core.backup import universal
+
+    src = inspect.getsource(universal._snapshot_to_restic)
+    assert "except Exception" in src
+    assert "must never fail a completed backup" in src
+
+
+def test_a_missing_passphrase_is_reported_not_guessed(monkeypatch, tmp_path):
+    from kazma_core.backup import universal
+
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("", False))
+    res = universal._snapshot_to_restic(tmp_path)
+    assert res == {"skipped": "no restic passphrase"}
+
+
+def test_no_restic_binary_is_silent(monkeypatch, tmp_path):
+    """An install without restic must not have its backup annotated with a
+    failure it cannot act on."""
+    from kazma_core.backup import universal
+
+    monkeypatch.setattr(rr, "restic_available", lambda: False)
+    assert universal._snapshot_to_restic(tmp_path) is None
+
+
+def test_both_repositories_are_snapshotted(monkeypatch, tmp_path):
+    """Two destinations means two snapshots, or the second one is fiction."""
+    from kazma_core.backup import universal
+
+    seen: list[str] = []
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("pw", False))
+    monkeypatch.setattr(rr, "repo_paths",
+                        lambda: {"local": "/l", "remote": "rclone:r/restic"})
+    monkeypatch.setattr(
+        rr, "backup",
+        lambda repo, pw, paths, tags=None: seen.append(repo) or rr.ResticResult(
+            ok=True, action="backup", repo=repo),
+    )
+    res = universal._snapshot_to_restic(tmp_path)
+    assert seen == ["/l", "rclone:r/restic"]
+    assert set(res) == {"local", "remote"}
