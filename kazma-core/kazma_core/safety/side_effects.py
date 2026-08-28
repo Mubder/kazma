@@ -181,6 +181,13 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "sqlite_query": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "current_datetime": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "send_message": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    # Operator-directed messaging: outbound, but ungated on purpose.
+    # send_approval_request IS the HITL card -- putting it behind the
+    # send_outbound gate would require an approval in order to ask for one.
+    # Both deliver to the operator, never to a third party, so the gate that
+    # every other OUTBOUND tool carries would protect nobody here.
+    "send_approval_request": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
+    "dispatch_notification": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
     "context_info": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "update_scratchpad": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     # Internal task-state bookkeeping (mutates only the ledger DB, never the
