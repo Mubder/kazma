@@ -873,12 +873,22 @@
     }
   }
 
-  function beginTurn() {
+  /**
+   * @param {{resume?: boolean}} [opts] `resume: true` continues the turn that
+   *   is already on screen (HITL approve / deny) instead of starting a new
+   *   one. A resume MUST NOT reset the workbench: the panel below belongs to
+   *   this same turn and holds every step that led up to the approval card.
+   *   Wiping it made the whole CoT vanish the instant you clicked Approve,
+   *   leaving a lone "Thinking…" row above the answer.
+   */
+  function beginTurn(opts) {
+    var resume = !!(opts && opts.resume);
     _isGenerating = true;
     _awaitingApproval = false;
     // Tidy the transcript BEFORE this turn adds to it (see the function's
-    // comment for why this cannot happen at the end of a turn).
-    _collapseFinishedWorkbenches();
+    // comment for why this cannot happen at the end of a turn). A resume is
+    // not a new turn, so there is nothing new to tidy for.
+    if (!resume) _collapseFinishedWorkbenches();
     _lastTurnActivityTs = Date.now();
     _serverActivitySeen = false;
     // Status strip shows the instant ANY turn starts (SSE, WS, or
@@ -887,18 +897,22 @@
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     _armTurnWatchdog();
-    // Fresh progress log for this turn (don't reuse previous bubble's panel)
-    if (currentMsgEl) {
-      var oldProg = currentMsgEl.querySelector('.agent-progress');
-      if (oldProg) oldProg.remove();
+    // Fresh progress log for this turn (don't reuse previous bubble's panel).
+    // Skipped on resume: the panel in this bubble IS this turn's workbench,
+    // and its steps are the reason the approval card exists.
+    if (!resume) {
+      if (currentMsgEl) {
+        var oldProg = currentMsgEl.querySelector('.agent-progress');
+        if (oldProg) oldProg.remove();
+      }
+      _progressEl = null;
+      _progressStepCount = 0;
+      _progressToolCount = 0;
+      _planItems = [];
+      _planParsedFromText = false;
+      _lastTurnStats = null;
+      logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     }
-    _progressEl = null;
-    _progressStepCount = 0;
-    _progressToolCount = 0;
-    _planItems = [];
-    _planParsedFromText = false;
-    _lastTurnStats = null;
-    logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = ti('thinking_queue', 'Kazma is thinking\u2026 type to queue your next message');
@@ -3736,7 +3750,9 @@
           var act = _semCard.querySelector('.hitl-approval-actions');
           if (act) act.innerHTML = '<span class="hitl-status">Resolving\u2026</span>';
           tokenAccum = '';
-          beginTurn();
+          // Resolving a semantic choice resumes THIS turn \u2014 same rule as the
+          // security card: keep the workbench and its steps.
+          beginTurn({ resume: true });
           var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once',
                           session_id: chatSessionId || '', choices: {} };
           payload.choices[_semTcid] = optId;
@@ -3836,7 +3852,20 @@
       setCardState('pending', pendingLabel);
       // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
       tokenAccum = '';
-      beginTurn();
+      // RESUME, not a new turn: keep this turn's workbench and its steps.
+      beginTurn({ resume: true });
+      // Record the decision itself so the log reads as one continuous story
+      // (…tool proposed → you approved → tool ran → answer) instead of
+      // restarting at "Thinking…".
+      logProgress({
+        kind: 'status',
+        title: action === 'deny'
+          ? ti('denied', 'Denied ✗')
+          : (scope === 'yolo' ? ti('yolo_on', 'YOLO on ✓')
+            : (scope === 'tool' ? ti('tool_allowed', 'Tool allowed ✓')
+              : ti('approved', 'Approved ✓'))),
+        state: 'running',
+      });
 
       // HITL resume is SSE (`POST /api/approve/{thread_id}`). WS approve_tool
       // is off unless KAZMA_WS_GRAPH=1; the browser never uses that path.
@@ -3889,38 +3918,47 @@
           _scheduleLiveTextPaint(textEl);
           scrollToBottom();
         },
+        // Tool activity goes into the WORKBENCH, exactly as the main stream
+        // does it (see the main onToolCall). This path used to append raw
+        // .tool-call-box divs straight into the message body instead \u2014 so
+        // everything the agent did after an approval was invisible to the
+        // CoT, which is why the panel looked empty post-approval while the
+        // answer sprouted loose boxes above it.
         onToolCall: function(toolData) {
           KS.hideTyping(approvalTypingEl);
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
           if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-          var contentEl = currentMsgEl.querySelector('.message-content');
-          var box = document.createElement('div');
-          box.className = 'tool-call-box';
-          box.innerHTML = '<span class="tool-name">\u2699 ' + escapeHtml(toolData.tool_name || toolData.name || 'tool') + '</span>' +
-            '<code class="tool-inputs">' + escapeHtml(truncateStr(toolData.inputs || '{}', 200)) + '</code>' +
-            '<span class="tool-status running">Running\u2026</span>';
-          contentEl.appendChild(box);
+          var inputs = toolData.inputs;
+          if (typeof inputs === 'object') {
+            try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
+          }
+          logProgress({
+            kind: 'tool',
+            title: toolData.tool_name || toolData.name || 'tool',
+            detail: String(inputs || ''),
+            state: 'running',
+          });
           scrollToBottom();
         },
+        // Mirrors the main stream's onToolResult: the result lands in the
+        // workbench row for that tool. Only a dispatched swarm still gets an
+        // inline badge, because it describes work that outlives this turn.
         onToolResult: function(resultData) {
           if (!currentMsgEl) return;
-          var contentEl = currentMsgEl.querySelector('.message-content');
-          var boxes = contentEl.querySelectorAll('.tool-call-box');
-          var lastBox = boxes.length ? boxes[boxes.length - 1] : null;
-          if (lastBox) {
-            var statusEl = lastBox.querySelector('.tool-status');
-            if (statusEl) { statusEl.textContent = 'Done'; statusEl.className = 'tool-status done'; }
-          }
           var isSwarm = (resultData.tool_name === 'dispatch_swarm' || resultData.tool_name === 'swarm_dispatch' || (resultData.result && resultData.result.indexOf('Swarm task dispatched') !== -1));
-          var resultBox = document.createElement('div');
+          logProgress({
+            kind: 'tool',
+            title: resultData.tool_name || 'tool',
+            detail: String(resultData.result || ''),
+            state: isSwarm ? 'running' : 'done',
+          });
           if (isSwarm) {
+            var contentEl = currentMsgEl.querySelector('.message-content');
+            var resultBox = document.createElement('div');
             resultBox.className = 'swarm-bg-badge';
             resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>Background Task Active:</strong> ' + escapeHtml(truncateStr(resultData.result, 300)) + '</div>';
-          } else {
-            resultBox.className = 'tool-result-box';
-            resultBox.innerHTML = '<strong>Result:</strong> ' + escapeHtml(truncateStr(resultData.result, 500));
+            contentEl.appendChild(resultBox);
           }
-          contentEl.appendChild(resultBox);
           scrollToBottom();
         },
         onApprovalRequired: function(nextApproval) {

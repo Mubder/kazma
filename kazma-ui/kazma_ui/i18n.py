@@ -286,6 +286,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "chat.stop_generation": {"en": "Stop generation", "ar": "إيقاف التوليد"},
     "chat.yolo_running": {"en": "YOLO on — running…", "ar": "YOLO مفعّل — جارٍ التشغيل…"},
     "chat.executing_approved": {"en": "Executing approved action…", "ar": "جارٍ تنفيذ الإجراء الموافق عليه…"},
+    # HITL decision, recorded as a workbench step so the CoT reads as one
+    # continuous story across the approval pause.
+    "chat.approved": {"en": "Approved ✓", "ar": "تمت الموافقة ✓"},
+    "chat.denied": {"en": "Denied ✗", "ar": "تم الرفض ✗"},
+    "chat.tool_allowed": {"en": "Tool allowed ✓", "ar": "تم السماح بالأداة ✓"},
+    "chat.yolo_on": {"en": "YOLO on ✓", "ar": "YOLO مفعّل ✓"},
     "chat.denying_tool": {"en": "Denying tool…", "ar": "جارٍ رفض الأداة…"},
     "chat.processing_approval": {
         "en": "Processing approval…",
