@@ -17,6 +17,7 @@ import importlib.util
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -627,3 +628,81 @@ def test_foreign_server_detection_also_clears_the_squatter():
 
     src = inspect.getsource(guard.Guard._wait_ready)
     assert "reap_port_holder(" in src
+
+
+# ── maintenance switch ────────────────────────────────────────────────
+
+
+@pytest.fixture
+def pause_file(monkeypatch, tmp_path):
+    path = tmp_path / "guard.paused"
+    monkeypatch.setenv("KAZMA_GUARD_PAUSE_FILE", str(path))
+    return path
+
+
+def test_pause_round_trip(pause_file):
+    assert guard.read_pause() is None
+    rec = guard.write_pause("debugging a hang", 3600)
+    assert pause_file.exists()
+    live = guard.read_pause()
+    assert live["reason"] == "debugging a hang"
+    assert rec["until"] > rec["since"]
+    assert guard.clear_pause() is True
+    assert guard.read_pause() is None
+
+
+def test_pause_expires_on_its_own(pause_file, monkeypatch):
+    """A forgotten pause is an outage nobody is looking for -- the exact
+    failure this project exists to prevent."""
+    guard.write_pause("short", 1)
+    # Capture the REAL clock first: a lambda calling time.time() would call
+    # the patched function and recurse forever.
+    later = time.time() + 10
+    monkeypatch.setattr(guard.time, "time", lambda: later)
+    assert guard.read_pause() is None
+    assert not pause_file.exists(), "an expired pause must clean itself up"
+
+
+def test_indefinite_pause_is_allowed(pause_file):
+    guard.write_pause("long investigation", 0)
+    live = guard.read_pause()
+    assert live is not None and float(live["until"]) == 0.0
+
+
+def test_unreadable_pause_file_still_pauses(pause_file):
+    """Fail toward the operator's intent: never restart under someone who
+    asked for quiet, even if the flag is corrupt."""
+    pause_file.write_text("{ this is not json", encoding="utf-8")
+    assert guard.read_pause() is not None
+
+
+def test_maintenance_is_not_treated_as_a_crash():
+    """A deliberate pause must not consume restart budget or trip the
+    crash-loop cooldown -- that would punish the operator for resuming."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    idx = src.index('if reason == "maintenance"')
+    tail = src[idx:idx + 400]
+    assert "continue" in tail
+    assert src.index('if reason == "maintenance"') < src.index("self.restarts += 1")
+
+
+def test_supervise_stops_the_child_when_paused_mid_run():
+    """Diagnosis should happen against a stopped Kazma, not a moving one."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard._supervise)
+    assert "read_pause()" in src
+    assert "stop_child(" in src
+    assert 'return "maintenance"' in src
+
+
+def test_pause_is_a_file_not_a_stopped_task():
+    """Stop-ScheduledTask does not survive logon or reboot; Kazma would come
+    back mid-diagnosis. The switch has to outlive all of that."""
+    import inspect
+
+    doc = inspect.getdoc(guard._pause_path) or ""
+    assert "reboot" in doc.lower()
+    assert guard._pause_path().name.endswith("paused")

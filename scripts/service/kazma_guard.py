@@ -128,6 +128,73 @@ def _state_path() -> Path:
     return Path.home() / ".kazma" / "guard.state.json"
 
 
+def _pause_path() -> Path:
+    """Maintenance flag. Its PRESENCE is the switch.
+
+    A file, not an env var or a stopped task, because it has to outlive
+    everything: the guard restarting, the task retriggering at logon, and
+    the machine rebooting. Stop-ScheduledTask does none of that -- Kazma
+    would quietly come back mid-diagnosis at the next logon.
+    """
+    env = os.environ.get("KAZMA_GUARD_PAUSE_FILE")
+    if env:
+        return Path(env)
+    return Path.home() / ".kazma" / "guard.paused"
+
+
+# A forgotten pause is an outage nobody is looking for -- the exact failure
+# this whole project exists to prevent. So a pause EXPIRES by default, and
+# nags on Telegram every hour until it does.
+DEFAULT_PAUSE_TTL_S = 2 * 3600
+PAUSE_NAG_EVERY_S = 3600
+
+
+def read_pause() -> dict | None:
+    """Active pause record, or None. Expired pauses clear themselves."""
+    path = _pause_path()
+    try:
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+    except Exception:
+        # An unreadable pause file still means "paused" -- fail safe toward
+        # the operator's intent rather than restarting under them.
+        return {"reason": "unreadable pause file", "until": 0.0, "since": 0.0}
+    until = float(data.get("until") or 0.0)
+    if until and time.time() >= until:
+        try:
+            path.unlink()
+        except Exception:
+            pass
+        return None
+    return data
+
+
+def write_pause(reason: str, ttl_s: float) -> dict:
+    now = time.time()
+    rec = {
+        "since": now,
+        "until": (now + ttl_s) if ttl_s > 0 else 0.0,
+        "reason": reason or "manual maintenance",
+        "by": os.environ.get("USERNAME") or os.environ.get("USER") or "?",
+    }
+    path = _pause_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(rec, indent=2), encoding="utf-8")
+    return rec
+
+
+def clear_pause() -> bool:
+    path = _pause_path()
+    try:
+        if path.exists():
+            path.unlink()
+            return True
+    except Exception:
+        pass
+    return False
+
+
 # -- logging (deliberately not the app's logger) ----------------------
 
 
@@ -669,6 +736,12 @@ class Guard:
 
         first = True
         while not self._stop:
+            # Maintenance gate. Checked before every spawn so a pause taken
+            # while the guard is mid-backoff is still honoured.
+            if self._await_resume():
+                continue
+            if self._stop:
+                break
             spawned_at = time.time()
             self.proc = spawn(self.cmd, self.cwd, self.log)
 
@@ -699,6 +772,14 @@ class Guard:
                 self.log("info", "guard.once_exit", reason=reason)
                 return 1
 
+            if reason == "maintenance":
+                # Not a failure: no restart count, no backoff, no crash-loop
+                # accounting. Treating a deliberate pause as a crash would
+                # push the guard into a 30-minute cooldown the moment the
+                # operator resumed.
+                self.log("info", "guard.paused_by_operator")
+                continue
+
             self.restarts += 1
             if self._crash_looping():
                 self.log("error", "guard.crash_loop", restarts=self.restarts,
@@ -726,6 +807,51 @@ class Guard:
         self.log("info", "guard.stopped")
         return 0
 
+    def _await_resume(self) -> bool:
+        """Block while a maintenance pause is active. True if we waited.
+
+        Nags on Telegram every hour so a forgotten pause cannot become a
+        silent outage, and announces the resume so the operator knows
+        supervision is live again.
+        """
+        pause = read_pause()
+        if pause is None:
+            return False
+
+        until = float(pause.get("until") or 0.0)
+        human_until = (
+            datetime.fromtimestamp(until, UTC).strftime("%H:%M UTC")
+            if until else "no expiry"
+        )
+        self.log("warn", "maintenance.active",
+                 reason=pause.get("reason"), by=pause.get("by"),
+                 expires=human_until, file=str(_pause_path()))
+        self.notify.send(
+            f"[guard] Kazma supervision PAUSED ({pause.get('reason')}). "
+            f"It will not be restarted until resumed. Expires: {human_until}."
+        )
+
+        next_nag = time.monotonic() + PAUSE_NAG_EVERY_S
+        while not self._stop:
+            self._sleep(10.0)
+            if self._stop:
+                return True
+            if read_pause() is None:
+                self.log("info", "maintenance.resumed")
+                self.notify.send(
+                    "[guard] Kazma supervision RESUMED. Restarting the server."
+                )
+                return True
+            if time.monotonic() >= next_nag:
+                next_nag += PAUSE_NAG_EVERY_S
+                mins = int((time.time() - float(pause.get("since") or 0)) / 60)
+                self.log("warn", "maintenance.still_paused", minutes=mins)
+                self.notify.send(
+                    f"[guard] Reminder: Kazma is still PAUSED after {mins} min "
+                    f"and is NOT being supervised."
+                )
+        return True
+
     def _supervise(self) -> str:
         """Watch a healthy child. Returns the reason it needs restarting."""
         consecutive = 0
@@ -733,6 +859,14 @@ class Guard:
             self._sleep(PROBE_INTERVAL_S)
             if self._stop:
                 return "guard shutting down"
+
+            if read_pause() is not None:
+                # Operator asked for quiet. Stop the child so diagnosis
+                # happens against a stopped Kazma, not a moving target.
+                self.log("info", "maintenance.requested_while_running")
+                if self.proc:
+                    stop_child(self.proc, self.log)
+                return "maintenance"
 
             assert self.proc is not None
             if self.proc.poll() is not None:
@@ -755,13 +889,116 @@ class Guard:
         return "guard shutting down"
 
 
+# -- operator commands ------------------------------------------------
+
+
+def _cmd_status() -> int:
+    pause = read_pause()
+    holder = _port_holder_pid(_port_from_url(DEFAULT_HEALTH_URL))
+    ok, detail = probe(DEFAULT_HEALTH_URL, 5.0)
+    print(f"supervision : {'PAUSED' if pause else 'active'}")
+    if pause:
+        until = float(pause.get("until") or 0.0)
+        print(f"  reason    : {pause.get('reason')}")
+        print(f"  paused by : {pause.get('by')}")
+        print("  expires   : " + (
+            datetime.fromtimestamp(until, UTC).strftime("%Y-%m-%d %H:%M UTC")
+            if until else "never (will nag hourly)"))
+        print(f"  flag file : {_pause_path()}")
+    print(f"server      : {'healthy' if ok else 'not answering'} ({detail})")
+    if holder:
+        print(f"  port {_port_from_url(DEFAULT_HEALTH_URL)}  : held by pid {holder}")
+    try:
+        state = json.loads(_state_path().read_text(encoding="utf-8"))
+        print(f"guard child : pid {state.get('child_pid')}")
+    except Exception:
+        print("guard child : unknown")
+    return 0
+
+
+def _cmd_pause(reason: str, ttl: float, *, stop_now: bool) -> int:
+    rec = write_pause(reason, ttl)
+    log = GuardLog(_default_log_path())
+    log("warn", "maintenance.pause_requested", reason=rec["reason"], ttl_s=ttl)
+    until = float(rec.get("until") or 0.0)
+    print("Supervision PAUSED. Kazma will not be auto-restarted.")
+    print(f"  reason  : {rec['reason']}")
+    print("  expires : " + (
+        datetime.fromtimestamp(until, UTC).strftime("%Y-%m-%d %H:%M UTC")
+        if until else "never -- you will be reminded hourly"))
+    print(f"  file    : {_pause_path()}")
+
+    if stop_now:
+        # Stop via the recorded child so the whole tree goes, including the
+        # uvicorn grandchild that would otherwise keep holding the port.
+        try:
+            state = json.loads(_state_path().read_text(encoding="utf-8"))
+            pid = int(state.get("child_pid") or 0)
+        except Exception:
+            pid = 0
+        if pid and _pid_alive(pid):
+            print(f"  stopping server (pid {pid})...")
+            try:
+                if os.name == "nt":
+                    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                                   capture_output=True, timeout=30, check=False)
+                else:
+                    os.killpg(os.getpgid(pid), signal.SIGTERM)
+                log("info", "maintenance.server_stopped", pid=pid)
+                print("  server stopped.")
+            except Exception as exc:
+                print(f"  could not stop pid {pid}: {exc}")
+        else:
+            print("  no running server recorded; nothing to stop.")
+    print("")
+    print("Resume with:  python scripts/service/kazma_guard.py --resume")
+    return 0
+
+
+def _cmd_resume() -> int:
+    log = GuardLog(_default_log_path())
+    if clear_pause():
+        log("info", "maintenance.resume_requested")
+        print("Supervision RESUMED. The guard will restart Kazma within ~10s.")
+    else:
+        print("Not paused; nothing to resume.")
+    return 0
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Health-gated supervisor for Kazma.")
+    ap = argparse.ArgumentParser(
+        description="Health-gated supervisor for Kazma.",
+        epilog=(
+            "Maintenance:  --pause to stop auto-restart while you diagnose, "
+            "--resume when done. A pause survives guard restarts, task "
+            "retriggers and reboots, and expires on its own so it cannot "
+            "become a forgotten outage."
+        ),
+    )
     ap.add_argument("--once", action="store_true",
                     help="run the server once; do not restart it")
     ap.add_argument("--dry-run", action="store_true",
                     help="print resolved configuration and exit")
+    ap.add_argument("--pause", action="store_true",
+                    help="stop auto-restart (Kazma is left alone for diagnosis)")
+    ap.add_argument("--resume", action="store_true",
+                    help="lift a pause and let the guard restart Kazma")
+    ap.add_argument("--status", action="store_true",
+                    help="show whether supervision is active or paused")
+    ap.add_argument("--stop", action="store_true",
+                    help="with --pause: also stop the running server now")
+    ap.add_argument("--reason", default="", help="why (recorded and alerted)")
+    ap.add_argument("--ttl", type=float, default=DEFAULT_PAUSE_TTL_S,
+                    help="seconds before the pause auto-expires; 0 = never "
+                         f"(default {DEFAULT_PAUSE_TTL_S:.0f})")
     args = ap.parse_args()
+
+    if args.status:
+        return _cmd_status()
+    if args.pause:
+        return _cmd_pause(args.reason, args.ttl, stop_now=args.stop)
+    if args.resume:
+        return _cmd_resume()
 
     guard = Guard(once=args.once)
     if args.dry_run:
