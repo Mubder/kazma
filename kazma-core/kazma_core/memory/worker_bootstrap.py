@@ -506,6 +506,12 @@ def _start_backup_export_scheduler() -> None:
                 # or the backups.pg.enabled kill-switch — checked live here).
                 if pg_backup_enabled():
                     enqueue_task("native_pg_backup", {})
+                # Retention + verification for the restic repositories. Kept
+                # separate from the snapshot itself (which rides along with
+                # universal_backup) because forget/prune rewrites the repo and
+                # check reads it: neither belongs in the path that has to
+                # finish before the next backup can start.
+                enqueue_task("restic_maintenance", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
                 # their own file (not overwritten by "default").
                 for tenant in _distinct_tenants():
@@ -632,6 +638,7 @@ def register_backup_export_handlers() -> None:
     register_handler("native_backup", _handle_native_backup)
     register_handler("nightly_export", _handle_nightly_export)
     register_handler("native_pg_backup", _handle_native_pg_backup)
+    register_handler("restic_maintenance", _handle_restic_maintenance)
     register_handler("universal_backup", _handle_universal_backup)
     _backup_export_registered = True
     logger.info("[memory_worker] backup/export task handlers registered")
@@ -735,6 +742,73 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
     except Exception:
         logger.warning("[memory_worker] nightly_export handler failed", exc_info=True)
         return False
+
+
+async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
+    """Apply retention and verify the restic repositories.
+
+    Retention here is time-based (7 daily / 8 weekly / 12 monthly) rather
+    than the count-based rule the legacy generations use. "Keep the last
+    30" is thirty days or thirty hours depending on how often the loop
+    happened to run, which is not a recovery guarantee.
+
+    ``check`` is metadata-only on this cadence. Reading every pack would
+    verify against bit rot but costs a full read of the repository; that
+    belongs on a slower schedule than nightly.
+
+    Self-disabling and non-retrying: an install without restic, or without
+    a passphrase, is not a failure the durable queue should keep retrying.
+    """
+    try:
+        import asyncio
+
+        from kazma_core.backup.restic_repo import (
+            check,
+            ensure_password,
+            forget_prune,
+            repo_paths,
+            restic_available,
+        )
+
+        if not restic_available():
+            return True
+        password, _ = ensure_password()
+        if not password:
+            return True
+
+        for name, repo in repo_paths().items():
+            if not repo:
+                continue
+            pruned = await asyncio.to_thread(forget_prune, repo, password)
+            if not pruned.ok:
+                logger.warning("[memory_worker] restic forget %s: %s",
+                               name, pruned.error[:200])
+                continue
+            verified = await asyncio.to_thread(check, repo, password)
+            if not verified.ok:
+                logger.error("[memory_worker] restic check FAILED for %s: %s",
+                             name, verified.error[:200])
+                _alert_repo_unhealthy(name, verified.error)
+        return True
+    except Exception:
+        logger.warning("[memory_worker] restic maintenance failed", exc_info=True)
+        return True  # never retry-storm on a maintenance task
+
+
+def _alert_repo_unhealthy(name: str, error: str) -> None:
+    """A repository that fails `check` is a backup you do not have."""
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "backup.restic_check_failed",
+            f"The {name} backup repository failed verification.",
+            f"{error[:250]} Snapshots in this repository may not restore. "
+            "Investigate before relying on it.",
+            severity="critical",
+        )
+    except Exception:
+        logger.debug("[memory_worker] restic alert failed", exc_info=True)
 
 
 async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
