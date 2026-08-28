@@ -706,3 +706,36 @@ def test_pause_is_a_file_not_a_stopped_task():
     doc = inspect.getdoc(guard._pause_path) or ""
     assert "reboot" in doc.lower()
     assert guard._pause_path().name.endswith("paused")
+
+
+# ── command parsing (found by the integration lab) ────────────────────
+
+
+def test_quoted_windows_path_survives_parsing(monkeypatch):
+    r"""Windows quoting breaks the obvious one-liner in BOTH directions.
+
+    shlex.split(posix=True) treats backslashes as escapes and turns
+    C:\a b\serve.py into C:\x07 b\serve.py; posix=False leaves the quotes
+    inside the token so the executable name literally contains a quote.
+    Any path with a space -- the only reason to quote it -- hit one or the
+    other, and the guard silently failed to spawn anything.
+    """
+    monkeypatch.setenv("KAZMA_GUARD_CMD", r'"C:\Program Files\py.exe" "C:\a b\serve.py"')
+    cmd = guard.build_command()
+    assert cmd == [r"C:\Program Files\py.exe", r"C:\a b\serve.py"]
+    assert not any(c.startswith('"') for c in cmd), "quotes must be stripped"
+    assert all("\\" in c for c in cmd), "backslashes must survive"
+
+
+def test_json_list_command_is_unambiguous(monkeypatch):
+    # Build the value with json.dumps rather than hand-escaping. A bare
+    # backslash is not a legal JSON escape, and getting that wrong is how
+    # the first version of this test "failed" against correct code.
+    want = [r"C:\Program Files\py.exe", "serve.py"]
+    monkeypatch.setenv("KAZMA_GUARD_CMD", json.dumps(want))
+    assert guard.build_command() == want
+
+
+def test_default_command_is_serve_py(monkeypatch):
+    monkeypatch.delenv("KAZMA_GUARD_CMD", raising=False)
+    assert guard.build_command()[-1] == "serve.py"
