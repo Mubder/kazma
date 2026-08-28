@@ -198,8 +198,28 @@ class FailureInjector:
                     return injection
         return None
     
+    def has_injections(self, target: InjectionTarget) -> bool:
+        """Is anything registered against *target*? Lock-free by design.
+
+        This is the gate that keeps decorated hot paths cheap on a
+        deployment where chaos is armed but idle. A plain dict read cannot
+        deadlock, cannot block the loop, and cannot serialise callers --
+        properties worth more here than being exactly current, since an
+        injection registered microseconds ago being missed by one call is
+        not a wrong answer for a test harness.
+        """
+        return bool(self._target_injections.get(target))
+
     async def record_call(self, target: InjectionTarget):
-        """Record a call to the target for statistics."""
+        """Record a call to the target for statistics.
+
+        Guarded by the kill switch as well as the decorator's fast path:
+        this takes a process-wide lock, and nothing that takes a
+        process-wide lock should be reachable on a hot path when the
+        feature is off.
+        """
+        if not _chaos_enabled():
+            return
         async with self._lock:
             for inj_id in self._target_injections.get(target, []):
                 if inj_id in self._stats:
@@ -242,22 +262,131 @@ def chaos_injection(target: InjectionTarget):
             ...
     """
     def decorator(func: Callable):
+        if not asyncio.iscoroutinefunction(func):
+            @wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                # Same fast path as below; see the note there.
+                if not _chaos_enabled():
+                    return func(*args, **kwargs)
+                if not get_injector().has_injections(target):
+                    return func(*args, **kwargs)
+                injection = _should_inject_sync(target)
+                if injection:
+                    logger.warning(
+                        "[Chaos] Injecting %s into %s: %s",
+                        injection.failure_type.value, target.value,
+                        injection.error_message,
+                    )
+                    _apply_injection_sync(injection)
+                return func(*args, **kwargs)
+            return sync_wrapper
+
         @wraps(func)
         async def wrapper(*args, **kwargs):
+            # Fast path FIRST, before touching the injector at all.
+            #
+            # This decorator is meant to sit on hot paths -- the LLM call,
+            # the database, the tool executor. The obvious implementation
+            # (record_call, then should_inject, then call through) costs two
+            # awaits and a shared asyncio.Lock acquisition on EVERY call,
+            # in production, forever, with chaos switched off: record_call
+            # takes the lock unconditionally, so one global lock would
+            # serialise every decorated call in the process. Instrumenting
+            # for resilience testing must not itself become a bottleneck.
+            #
+            # os.environ.get is a dict lookup, and reading it per call
+            # rather than caching keeps the kill switch live: an operator
+            # can turn chaos off without a restart, which matters most in
+            # exactly the situation where they want it off.
+            if not _chaos_enabled():
+                return await func(*args, **kwargs)
+
             injector = get_injector()
+            # Second fast path, and on this deployment the important one.
+            # KAZMA_CHAOS_ENABLED is switched ON against the live install,
+            # so the disabled path above never runs there. "Armed but
+            # nothing aimed at this target" is the steady state of a chaos
+            # framework -- injections are registered per experiment and
+            # live only in memory -- and it must not cost two locks.
+            if not injector.has_injections(target):
+                return await func(*args, **kwargs)
+
             await injector.record_call(target)
-            
+
             injection = await injector.should_inject(target)
             if injection:
                 logger.warning(
-                    f"[Chaos] Injecting {injection.failure_type.value} "
-                    f"into {target.value}: {injection.error_message}"
+                    "[Chaos] Injecting %s into %s: %s",
+                    injection.failure_type.value, target.value,
+                    injection.error_message,
                 )
                 await _apply_injection(injection)
-            
+
             return await func(*args, **kwargs)
         return wrapper
     return decorator
+
+
+def _should_inject_sync(target: InjectionTarget) -> FailureInjection | None:
+    """Pick a due injection without touching the async lock.
+
+    Sync call sites (most database access) cannot await, and a decorator
+    that only supports coroutines would leave the database target -- one of
+    the nine -- permanently unwireable.
+
+    Reading the dicts without the lock is safe enough here: the worst case
+    is that an injection added in the same millisecond is missed by one
+    call. Chaos is a test harness, and a fault that fires one call later is
+    not a wrong answer.
+    """
+    injector = get_injector()
+    for inj_id in list(injector._target_injections.get(target, [])):
+        injection = injector._injections.get(inj_id)
+        if injection and injection.should_inject():
+            stats = injector._stats.get(inj_id)
+            if stats is not None:
+                stats["triggered"] += 1
+                stats["last_triggered"] = datetime.now(UTC).isoformat()
+            return injection
+    return None
+
+
+def _apply_injection_sync(injection: FailureInjection) -> None:
+    """Synchronous twin of :func:`_apply_injection`.
+
+    Latency blocks the calling thread rather than yielding the loop, which
+    is the honest simulation of a slow blocking driver -- the thing a sync
+    database call actually does to an event loop when it goes slow.
+    """
+    ft = injection.failure_type
+    if ft == FailureType.LATENCY:
+        delay = injection.latency_ms / 1000.0
+        if delay > 0:
+            time.sleep(delay)
+        return
+    if ft == FailureType.PARTIAL_DEGRADATION:
+        time.sleep(random.uniform(0.5, 2.0))
+        return
+    if ft == FailureType.TIMEOUT:
+        time.sleep(30.0)
+        raise ChaosInjectionError(
+            "Chaos injection: simulated timeout", error_code=504,
+            injection_id=injection.injection_id,
+        )
+    _codes = {
+        FailureType.CIRCUIT_BREAKER_OPEN: (503, "circuit breaker forced open"),
+        FailureType.RESOURCE_EXHAUSTION: (507, "resource exhausted (memory/connections)"),
+        FailureType.NETWORK_PARTITION: (503, "network partition simulated"),
+        FailureType.DATA_CORRUPTION: (500, "data corruption detected"),
+    }
+    if ft in _codes:
+        code, msg = _codes[ft]
+        raise ChaosInjectionError(f"Chaos injection: {msg}", error_code=code,
+                                  injection_id=injection.injection_id)
+    raise ChaosInjectionError(
+        injection.error_message, error_code=injection.error_code,
+        injection_id=injection.injection_id, metadata=injection.metadata,
+    )
 
 
 async def _apply_injection(injection: FailureInjection) -> None:

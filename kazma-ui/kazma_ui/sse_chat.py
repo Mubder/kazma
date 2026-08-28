@@ -57,9 +57,9 @@ from kazma_ui.active_turns import (
     active_turns,
     cancel_turn,
     get_active_turn,
-    get_orphan_stamp,
     is_turn_running,
     mark_turn_orphaned,
+    pump_is_stalled,
     reap_stale_turn,
     register_turn,
     unregister_turn,
@@ -748,11 +748,7 @@ async def _stream_langgraph_events(
                 async def _pump_watchdog() -> None:
                     while not pump_task.done():
                         await asyncio.sleep(5.0)
-                        stamp = get_orphan_stamp(thread_id)
-                        if stamp is None:
-                            continue
-                        idle_since = max(stamp, _progress["last"])
-                        if time.monotonic() - idle_since < DETACHED_TTL_S:
+                        if not pump_is_stalled(thread_id, _progress["last"]):
                             continue
                         logger.warning(
                             "[SSE] Reaping stalled detached pump for thread=%s "

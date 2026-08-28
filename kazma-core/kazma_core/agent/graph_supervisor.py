@@ -1849,12 +1849,29 @@ async def supervisor_node(
                         _sigs.append(
                             normalized_tool_signature(_fn.get("name") or "", _args)
                         )
+            # PendingToolCall is a TypedDict, so `pending` holds plain
+            # dicts. Attribute access raised AttributeError on EVERY scan,
+            # the bare except below swallowed it, and the loop breaker has
+            # therefore never fired -- not "no loop occurred", but "it
+            # could not fire". Found 2026-08-28 by driving supervisor_node
+            # instead of testing detect_tool_loop in isolation.
             _sigs.extend(
-                normalized_tool_signature(p.name, p.arguments) for p in pending
+                normalized_tool_signature(
+                    p.get("name") or "", p.get("arguments") or {}
+                )
+                for p in pending
             )
             _loop_sig = detect_tool_loop(_sigs, window=10, max_repeats=4)
     except Exception:
-        logger.debug("[Supervisor] loop-signature scan failed", exc_info=True)
+        # WARNING, not DEBUG. This except is what hid the bug above for as
+        # long as it existed: a safety mechanism that disables itself must
+        # say so somewhere an operator will actually look. Still swallowed
+        # -- a failed scan must not take down the turn -- but no longer
+        # silent about it.
+        logger.warning(
+            "[Supervisor] loop-signature scan failed -- the repetition "
+            "breaker is INACTIVE for this turn", exc_info=True,
+        )
 
     if _loop_sig:
         logger.warning(
@@ -1866,9 +1883,9 @@ async def supervisor_node(
         _loop_synth = [
             {
                 "role": "tool",
-                "tool_call_id": p.id,
+                "tool_call_id": p.get("id") or "",
                 "content": (
-                    f"REPETITION LOOP BREAKER: '{p.name}' was NOT executed — "
+                    f"REPETITION LOOP BREAKER: '{p.get('name') or ''}' was NOT executed — "
                     "the same call shape (modulo numbers) has already run "
                     "repeatedly. Do NOT retry it. Produce the final answer "
                     "NOW from what you already have; if information is "
@@ -1924,10 +1941,10 @@ async def supervisor_node(
         _synth = [
             {
                 "role": "tool",
-                "tool_call_id": p.id,
+                "tool_call_id": p.get("id") or "",
                 "content": (
                     f"Iteration budget exhausted ({_next_iter}/{_soft_max}) — "
-                    f"'{p.name}' was NOT executed. Work with what you have."
+                    f"'{p.get('name') or ''}' was NOT executed. Work with what you have."
                 ),
             }
             for p in pending

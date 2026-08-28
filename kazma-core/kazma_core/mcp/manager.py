@@ -49,6 +49,8 @@ from typing import Any
 
 import httpx
 
+from kazma_core.chaos import InjectionTarget, chaos_injection
+
 __all__ = [
     "AsyncMCPManager",
     "MCPBridgeError",
@@ -175,8 +177,8 @@ def _gate_mcp_path_access(
     mode = "write" if any(kw in name_lower for kw in _WRITE_KEYWORDS) else "read"
 
     try:
-        from kazma_core.workspace.path_policy import check_path_access
         from kazma_core.safety.hitl import get_current_thread_id
+        from kazma_core.workspace.path_policy import check_path_access
     except ImportError:
         # Fail-closed: this gate is the ONLY filesystem-containment check for
         # MCP tools. If the path-policy module cannot be imported (broken/partial
@@ -1148,7 +1150,7 @@ class AsyncMCPManager:
                 timeout=handle.timeout,
             )
             await self._notify(handle, "notifications/initialized", {})
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # npx cold-start or server never replied.  Capture stderr so the
             # user can see WHY (npm fetch failure / missing dependency /
             # bad config) instead of an opaque empty error.
@@ -1757,6 +1759,7 @@ class UnifiedToolExecutor:
 
     # ── Unified execution ───────────────────────────────────────────
 
+    @chaos_injection(InjectionTarget.TOOL_EXECUTOR)
     async def execute(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         """Execute a tool by name, routing to local or MCP.
 

@@ -212,6 +212,45 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
     if not cfg["enabled"]:
         return {"skipped": "offsite sync disabled"}
 
+    async def _rclone(reason: str = "") -> dict[str, Any]:
+        """Copy the backup out with rclone. The independent second path.
+
+        rclone carries its OWN OAuth credential, which is the entire point:
+        the native google_drive provider borrows the Gmail refresh token, so
+        one revoked grant takes out mail AND every offsite backup at once.
+        A fallback that shares the failing credential is not a fallback.
+        """
+        if not cfg["rclone_remote"]:
+            return {"skipped": "no offsite provider configured"} if not reason else {
+                "ok": False, "error": reason,
+                "note": "no rclone remote configured to fall back to",
+            }
+        if shutil.which("rclone") is None:
+            return {"skipped": "rclone not found on PATH (configure a native provider instead)"} if not reason else {
+                "ok": False, "error": reason, "note": "rclone not on PATH",
+            }
+        import subprocess
+
+        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        if proc.returncode == 0:
+            logger.info("[universal-backup] offsite sync complete via rclone: %s", remote)
+            out: dict[str, Any] = {"ok": True, "remote": remote, "via": "rclone"}
+            if reason:
+                out["fallback_used"] = True
+                out["primary_error"] = reason[:300]
+            return out
+        err = (proc.stderr or "")[:300]
+        logger.warning("[universal-backup] rclone offsite sync failed: %s", err)
+        return {"ok": False, "remote": remote, "via": "rclone",
+                "error": f"{reason} | rclone: {err}" if reason else err}
+
     async def _run() -> dict[str, Any]:
         # Native providers take priority
         if cfg["provider"]:
@@ -240,35 +279,20 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
                         "[universal-backup] offsite sync complete: %s",
                         result.get("remote"),
                     )
-                else:
-                    logger.warning(
-                        "[universal-backup] offsite sync failed: %s",
-                        result.get("error"),
-                    )
-                return result
+                    result.setdefault("via", cfg["provider"])
+                    return result
+                logger.warning(
+                    "[universal-backup] offsite sync failed: %s — trying rclone",
+                    result.get("error"),
+                )
+                return await _rclone(str(result.get("error") or "native provider failed"))
             except Exception as exc:
-                logger.warning("[universal-backup] native offsite sync error: %s", exc)
-                return {"ok": False, "error": str(exc)}
+                logger.warning(
+                    "[universal-backup] native offsite sync error: %s — trying rclone", exc
+                )
+                return await _rclone(str(exc))
 
-        # Legacy rclone fallback (only when rclone_remote is set)
-        if not cfg["rclone_remote"]:
-            return {"skipped": "no offsite provider configured"}
-        if shutil.which("rclone") is None:
-            return {"skipped": "rclone not found on PATH (configure a native provider instead)"}
-        import subprocess
-
-        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
-            capture_output=True,
-            text=True,
-            timeout=1800,
-        )
-        if proc.returncode == 0:
-            logger.info("[universal-backup] offsite sync complete: %s", remote)
-            return {"ok": True, "remote": remote}
-        return {"ok": False, "remote": remote, "error": (proc.stderr or "")[:300]}
+        return await _rclone()
 
     try:
         try:
@@ -384,7 +408,7 @@ def _copy_assets(src: Path, dest: Path) -> list[dict[str, Any]]:
 def _backup_postgres(dest_dir: Path) -> dict[str, Any] | None:
     """Delegate to pg_backup for a Postgres dump, then copy into the universal folder."""
     try:
-        from kazma_core.db.pg_backup import pg_backup_enabled, perform_pg_backup
+        from kazma_core.db.pg_backup import perform_pg_backup, pg_backup_enabled
 
         if not pg_backup_enabled():
             return None
@@ -440,6 +464,70 @@ def _read_retention() -> int:
     except Exception:
         logger.debug("[universal-backup] retention read failed", exc_info=True)
     return _DEFAULT_RETENTION
+
+
+# Offsite failure is a slow-moving condition, not an incident: it stays
+# broken until a human re-authorises. Six hours between reminders is often
+# enough to be impossible to miss and rare enough not to be tuned out.
+_OFFSITE_ALERT_COOLDOWN_S = 6 * 3600
+
+
+def _alert_on_backup_gaps(offsite: dict[str, Any], db_fail: int) -> None:
+    """Tell the operator when a backup silently stopped protecting them.
+
+    Live, 2026-08-28: 29 of 29 universal backups had
+    ``offsite.ok == False`` -- "Token has been expired or revoked" -- going
+    back over a day. Every backup was local-only, so one disk failure would
+    have taken the data AND all 29 generations with it. _offsite_sync's own
+    docstring calls itself "The ONLY protection against disk death".
+
+    Nothing said so. The failure was recorded faithfully in a JSON file
+    nobody reads, which is the exact shape of the silent failures the
+    alerting layer was built for -- the backup path simply predated it.
+
+    Fail-open, like everything else here: an alerting problem must never
+    turn a completed backup into a failed one.
+    """
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        if db_fail:
+            alert(
+                "backup.databases_failed",
+                f"{db_fail} database(s) failed to back up.",
+                "The local backup is incomplete. Check disk space and file locks.",
+                severity="critical",
+            )
+        if offsite.get("skipped"):
+            return  # deliberately disabled -- not a failure
+        if offsite.get("ok") and offsite.get("fallback_used"):
+            # Offsite protection is intact, so this is not critical -- but a
+            # silently-degraded primary is how you end up with one path left
+            # and no idea. Warn, and say which half is broken.
+            alert(
+                "backup.offsite_degraded",
+                "Offsite backups are running on the FALLBACK path only.",
+                f"The primary provider failed: "
+                f"{str(offsite.get('primary_error') or '')[:200]} "
+                f"rclone succeeded, so backups are still going offsite. "
+                "Fix the primary before the fallback is the only thing left.",
+                severity="warn",
+                cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
+            )
+            return
+        if not offsite.get("ok"):
+            alert(
+                "backup.offsite_failed",
+                "Backups are LOCAL ONLY -- the offsite copy is failing.",
+                f"{str(offsite.get('error') or 'unknown error')[:300]} "
+                "A single disk failure would take the data and every backup "
+                "generation with it. Re-authorise the cloud provider in "
+                "Settings to restore offsite protection.",
+                severity="critical",
+                cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
+            )
+    except Exception:  # noqa: BLE001 -- alerting must never fail a backup
+        logger.warning("[universal-backup] backup-gap alert failed", exc_info=True)
 
 
 def perform_universal_backup(
@@ -577,6 +665,7 @@ def perform_universal_backup(
     manifest["elapsed_seconds"] = elapsed
     manifest["offsite"] = offsite
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    _alert_on_backup_gaps(offsite, db_fail)
 
     # 6. Prune old backups (live-configured retention, env override, >= 1).
     keep = max(1, retention if retention is not None else _read_retention())

@@ -84,7 +84,15 @@ def test_distinct_work_does_not_trip():
 
 
 def test_normalized_signature_shapes():
-    assert normalized_tool_signature("t", {"a": 1}) == normalized_tool_signature(
+    # Long digit runs collapse -- that is the paging pathology.
+    assert normalized_tool_signature("t", {"a": 40001}) == normalized_tool_signature(
+        "t", {"a": 120001}
+    )
+    # Short indices do NOT. Collapsing every digit made "/src/module_0.py"
+    # and "/src/module_8.py" the same call, so reading nine numbered files
+    # tripped the breaker as a loop. The sibling test above only ever used
+    # letters (a.py, b.py, c.py), which is why that never showed up here.
+    assert normalized_tool_signature("t", {"a": 1}) != normalized_tool_signature(
         "t", {"a": 999}
     )
     assert normalized_tool_signature("t", {"a": 1}) != normalized_tool_signature(

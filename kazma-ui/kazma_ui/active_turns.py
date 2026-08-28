@@ -33,6 +33,7 @@ __all__ = [
     "get_orphan_stamp",
     "is_turn_running",
     "mark_turn_orphaned",
+    "pump_is_stalled",
     "reap_stale_turn",
     "register_turn",
     "unbind_live_socket",
@@ -196,6 +197,35 @@ def get_orphan_stamp(thread_id: str) -> float | None:
         except Exception:
             logger.debug("[active-turns] task.done() check failed for thread=%s", thread_id[:12], exc_info=True)
         return _orphaned_at.get(thread_id)
+
+
+def pump_is_stalled(
+    thread_id: str,
+    last_progress: float,
+    *,
+    ttl_s: float = DETACHED_TTL_S,
+    now: float | None = None,
+) -> bool:
+    """True when the client is gone AND nothing has streamed for *ttl_s*.
+
+    The detached-pump watchdog guards the documented ``astream_events``
+    hang: a client disconnects, the stream wedges, and the turn occupies
+    the thread forever. It engaged zero times in 367 disconnects.
+
+    That zero is only reassuring if the decision can be shown to work, and
+    it previously lived in a closure inside the SSE generator where nothing
+    could reach it -- the same shape as the repetition breaker, which
+    turned out to have been incapable of firing for its entire life. This
+    predicate is that decision, extracted so it can be tested directly.
+    Behaviour is unchanged: fire at or past the TTL, measured from the
+    LATER of the disconnect and the last streamed event, so a background
+    turn still making progress is never reaped.
+    """
+    stamp = get_orphan_stamp(thread_id)
+    if stamp is None:
+        return False
+    _now = time.monotonic() if now is None else now
+    return (_now - max(stamp, last_progress)) >= ttl_s
 
 
 def cancel_turn(thread_id: str) -> Any | None:
