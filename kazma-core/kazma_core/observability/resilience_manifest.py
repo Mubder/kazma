@@ -134,6 +134,18 @@ MECHANISMS: tuple[Mechanism, ...] = (
         note="544 lines with zero call sites until Phase 4.",
     ),
     Mechanism(
+        name="backup-gap alerting",
+        fault="backups keep succeeding while silently protecting nothing",
+        module="kazma_core.backup.universal",
+        symbol="_alert_on_backup_gaps",
+        proof="tests/test_backup_alerting.py",
+        proven_in_production=False,
+        note=(
+            "Found live 2026-08-28: 29 of 29 backups had a failing offsite "
+            "copy for over a day, recorded only in a JSON file nobody reads."
+        ),
+    ),
+    Mechanism(
         name="scheduled-post recurrence refusal",
         fault="a recurring time is accepted and the post fires exactly once",
         module="kazma_core.x_api.booking",
