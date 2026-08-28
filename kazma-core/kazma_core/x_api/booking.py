@@ -18,6 +18,7 @@ Policy applied at booking:
 from __future__ import annotations
 
 import logging
+import re
 import time
 from typing import Any
 
@@ -26,11 +27,44 @@ logger = logging.getLogger(__name__)
 __all__ = ["book_x_post"]
 
 
+# The shared timing parser accepts one RECURRING form ("daily at 9am") and
+# collapses it to the next single occurrence. That is correct for cron,
+# which reschedules itself after each run, and wrong for scheduled X posts,
+# where the fire loop is deliberately one-shot.
+_RECURRING_TIMING = re.compile(r"^\s*(daily|hourly|weekly|every)\b", re.IGNORECASE)
+
+
 def _parse_when(when: str) -> float:
-    """Parse a timing expression into a future epoch. Raises ValueError."""
+    """Parse a timing expression into a future epoch. Raises ValueError.
+
+    Recurring expressions are refused rather than silently degraded. The
+    parser would happily turn "daily at 9am" into tomorrow at 09:00, the
+    post would fire once, and the operator would believe they had scheduled
+    a daily tweet -- a silent single-shot dressed as a recurrence.
+
+    Refusing is also the right answer on the merits, not just a limitation
+    of the fire loop. The post ledger enforces a duplicate window
+    (``connectors.x.duplicate_window_days``, 30 by default) and X itself
+    rejects identical tweets, so an honestly-implemented daily repeat of the
+    same text would start failing on its second run. Recurring identical
+    posts are also the pattern automation rules flag.
+
+    Recurring work that genuinely needs to repeat belongs on the cron path,
+    which reschedules itself correctly after every fire.
+    """
     from kazma_core.cron.scheduler import parse_timing
 
-    dt = parse_timing((when or "").strip())
+    raw = (when or "").strip()
+    if _RECURRING_TIMING.match(raw):
+        raise ValueError(
+            f"'{raw}' is a recurring time, and scheduled X posts fire once. "
+            "Give a one-off time instead ('2h', '2026-09-01T09:00', or an ISO "
+            "timestamp). For something that must repeat, schedule a recurring "
+            "task rather than a post -- X rejects identical tweets, so the "
+            "same text cannot be republished on a schedule anyway."
+        )
+
+    dt = parse_timing(raw)
     epoch = dt.timestamp()
     if epoch <= time.time():
         raise ValueError("The requested time is in the past. Pick a future time.")

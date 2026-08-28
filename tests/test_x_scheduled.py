@@ -11,10 +11,10 @@ POST /2/tweets at the appointed time. These tests pin:
 from __future__ import annotations
 
 import time
+from datetime import UTC
 from pathlib import Path
 
 import pytest
-
 from kazma_core.x_api.schedule import (
     STATUS_CANCELLED,
     STATUS_FAILED,
@@ -159,9 +159,9 @@ async def test_booking_success_returns_id_and_fire_time(booking_env) -> None:
 async def test_booking_rejects_past_time(booking_env) -> None:
     t, _, _ = booking_env
     import json as _json
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
-    past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
     out = _json.loads(await t.x_schedule_post("hello", past))
     assert out["ok"] is False
     assert "past" in out["error"].lower()
@@ -180,6 +180,7 @@ async def test_booking_enforces_policy(booking_env) -> None:
 async def test_booking_reserves_quota(booking_env, monkeypatch: pytest.MonkeyPatch) -> None:
     t, ledger, sched = booking_env
     import json as _json
+
     import kazma_core.x_api.config as config_mod
 
     # Tighten the daily cap to 1, then book one and try a second.
@@ -345,3 +346,54 @@ async def test_fire_loop_does_not_post_a_cancelled_item(fire_env) -> None:
     # The cancel-race guard must prevent publication.
     assert _FakeXClient.calls == []
     assert sched.get(pid).status == STATUS_CANCELLED
+
+
+# ── recurring timings must be refused, not silently degraded ──────────
+
+
+class TestRecurringTimingsAreRefused:
+    """`daily at 9am` parsed fine and fired ONCE.
+
+    The shared timing parser collapses a recurring expression to its next
+    single occurrence. That is correct for cron, which reschedules itself
+    after every run, and wrong for scheduled X posts, where the fire loop is
+    deliberately one-shot: the operator would believe they had scheduled a
+    daily tweet and get exactly one.
+
+    Refusing is also right on the merits. The ledger enforces a duplicate
+    window (connectors.x.duplicate_window_days, 30 by default) and X rejects
+    identical tweets, so an honestly-implemented daily repeat of the same
+    text would begin failing on its second run.
+    """
+
+    def _parse(self):
+        from kazma_core.x_api.booking import _parse_when
+
+        return _parse_when
+
+    @pytest.mark.parametrize("when", [
+        "daily at 9am", "Daily At 9AM", "  daily at 9am  ",
+        "hourly", "weekly", "every day",
+    ])
+    def test_recurring_is_refused(self, when):
+        with pytest.raises(ValueError) as exc:
+            self._parse()(when)
+        assert "fire once" in str(exc.value), (
+            "the error must explain WHY, not just reject"
+        )
+
+    def test_the_error_points_at_the_alternative(self):
+        with pytest.raises(ValueError) as exc:
+            self._parse()("daily at 9am")
+        msg = str(exc.value)
+        assert "recurring task" in msg, "tell the operator what to do instead"
+        assert "identical tweets" in msg, "and why repeating a post cannot work"
+
+    @pytest.mark.parametrize("when", ["2h", "45m", "2099-01-01T09:00:00"])
+    def test_one_shot_times_still_work(self, when):
+        assert self._parse()(when) > 0
+
+    def test_past_times_are_still_rejected_separately(self):
+        with pytest.raises(ValueError) as exc:
+            self._parse()("2000-01-01T09:00:00")
+        assert "past" in str(exc.value).lower()
