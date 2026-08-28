@@ -478,3 +478,50 @@ def test_the_new_key_is_verified_before_the_old_is_removed():
 
     src = inspect.getsource(rr.rotate_password)
     assert src.index('out["verified"]') < src.index('"key", "remove"')
+
+
+def test_the_new_passphrase_is_stored_before_any_key_is_revoked(repo, payload):
+    """The window this closes was walked into on the first live rotation.
+
+    Storing only after the function returns leaves an interval -- old keys
+    revoked, new passphrase still in memory -- where killing the process
+    locks every repository forever. Mid-rotation, the local repository
+    genuinely stopped opening with the stored passphrase.
+    """
+    rr.backup(repo, _PW, [str(payload)])
+    order: list[str] = []
+
+    real_run = rr._run
+
+    def _tracking(args, repo_, pw, **kw):
+        if args[:2] == ["key", "remove"]:
+            order.append("revoke")
+        return real_run(args, repo_, pw, **kw)
+
+    import kazma_core.backup.restic_repo as mod
+    mod._run = _tracking
+    try:
+        res = rr.rotate_password({"local": repo}, _PW, "stored-first-pw",
+                                 persist=lambda p: order.append("persist"))
+    finally:
+        mod._run = real_run
+
+    assert res["ok"], res["errors"]
+    assert order and order[0] == "persist", (
+        f"the passphrase must be stored before the first revoke; got {order}"
+    )
+
+
+def test_a_failed_store_revokes_nothing(repo, payload):
+    """If the replacement cannot be saved, revoking the working key would
+    lock the repository with a passphrase nobody has."""
+    rr.backup(repo, _PW, [str(payload)])
+
+    def _cannot_write(_pw):
+        raise OSError("disk full")
+
+    res = rr.rotate_password({"local": repo}, _PW, "never-stored",
+                             persist=_cannot_write)
+    assert res["ok"] is False
+    assert res["removed"] == []
+    assert rr.snapshots(repo, _PW).ok, "the original passphrase must still work"

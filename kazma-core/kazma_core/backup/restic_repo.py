@@ -36,6 +36,7 @@ import logging
 import os
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -284,7 +285,13 @@ def snapshots(repo: str, password: str) -> ResticResult:
     return res
 
 
-def rotate_password(repos: dict[str, str], old: str, new: str) -> dict[str, Any]:
+def rotate_password(
+    repos: dict[str, str],
+    old: str,
+    new: str,
+    *,
+    persist: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
     """Replace the repository passphrase without re-encrypting the data.
 
     restic keys are indirection: the data is encrypted with a master key,
@@ -297,6 +304,19 @@ def rotate_password(repos: dict[str, str], old: str, new: str) -> dict[str, Any]
     another still rejects the new key, would leave a repository nobody can
     open -- turning a precautionary rotation into the data loss it was
     meant to prevent.
+
+    ``persist`` closes the last window in that ordering, and it exists
+    because the first live rotation walked straight into it. The caller
+    used to store the new passphrase only after this function returned,
+    which leaves an interval -- old keys revoked, new passphrase still
+    only in memory -- where killing the process locks every repository
+    forever. That interval was observed: mid-rotation the local repository
+    genuinely stopped opening with the stored passphrase.
+
+    So the new passphrase is written HERE, after every repository has
+    verified it and before the first old key is revoked. Worst case the
+    file names a passphrase that both keys accept, which is harmless; the
+    alternative worst case is a repository nobody can ever open.
     """
     out: dict[str, Any] = {"added": [], "verified": [], "removed": [], "errors": []}
     targets = {k: v for k, v in repos.items() if v}
@@ -345,6 +365,20 @@ def rotate_password(repos: dict[str, str], old: str, new: str) -> dict[str, Any]
         out["ok"] = False
         out["note"] = "no old key removed; the old passphrase still works"
         return out
+
+    # Persist BEFORE revoking anything -- see the note in the docstring.
+    if persist is not None:
+        try:
+            persist(new)
+            out["persisted"] = True
+        except Exception as exc:  # noqa: BLE001
+            out["ok"] = False
+            out["errors"].append(f"could not store the new passphrase: {exc}")
+            out["note"] = (
+                "no old key removed; refusing to revoke a working passphrase "
+                "when the replacement could not be saved"
+            )
+            return out
 
     for name, repo in targets.items():
         listed = _run(["key", "list", "--json"], repo, new,
