@@ -178,16 +178,50 @@ def launchd_plist() -> str:
 """
 
 
-def windows_task_ps1() -> str:
+def windows_task_ps1(*, elevated: bool = True) -> str:
+    """Scheduled Task definition.
+
+    ``elevated=True`` is the real deployment: S4U + AtStartup + Highest runs
+    the agent whether or not anyone is logged in and brings it back after a
+    reboot. Registering it requires an elevated PowerShell.
+
+    ``elevated=False`` is the fallback a normal user can register without a
+    UAC prompt. It is genuinely useful -- restart-on-failure works and the
+    agent comes back at logon -- but it does NOT survive a reboot into the
+    login screen, so it is a stepping stone, not the destination.
+    """
+    if elevated:
+        triggers = """@(
+    (New-ScheduledTaskTrigger -AtStartup),
+    (New-ScheduledTaskTrigger -AtLogOn)
+)"""
+        principal = (
+            "New-ScheduledTaskPrincipal -UserId $env:USERNAME "
+            "-LogonType S4U -RunLevel Highest"
+        )
+        header = """\
+# Session-independent: behaves like a service without requiring NSSM or
+# WinSW - no third-party wrapper to install, update or trust.
+#
+# Run from an ELEVATED PowerShell:
+#     powershell -ExecutionPolicy Bypass -File install_windows_task.ps1"""
+    else:
+        triggers = "@( (New-ScheduledTaskTrigger -AtLogOn) )"
+        principal = (
+            "New-ScheduledTaskPrincipal -UserId $env:USERNAME "
+            "-LogonType Interactive -RunLevel Limited"
+        )
+        header = """\
+# USER-LEVEL fallback - registers without elevation.
+#
+# Restart-on-failure works and the agent returns at logon, but it will NOT
+# start after a reboot until someone logs in. Upgrade with an elevated:
+#     powershell -ExecutionPolicy Bypass -File install_windows_task.ps1"""
+
     return f"""\
 # Kazma agent - health-gated supervision via Scheduled Task.
 #
-# A Scheduled Task with "run whether user is logged on or not" is
-# session-independent, so it behaves like a service without requiring NSSM
-# or WinSW - no third-party wrapper to install, update or trust.
-#
-# Run from an elevated PowerShell:
-#     powershell -ExecutionPolicy Bypass -File install_windows_task.ps1
+{header}
 
 $ErrorActionPreference = "Stop"
 
@@ -197,15 +231,9 @@ $Root   = "{REPO_ROOT}"
 
 $action = New-ScheduledTaskAction -Execute $Python -Argument "`"$Guard`"" -WorkingDirectory $Root
 
-# At boot, and again at logon, so a crashed task recovers on either event.
-$triggers = @(
-    (New-ScheduledTaskTrigger -AtStartup),
-    (New-ScheduledTaskTrigger -AtLogOn)
-)
+$triggers = {triggers}
 
-# Highest privileges so it can bind ports and read the workspace; S4U runs
-# without storing a password and without a visible window.
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Highest
+$principal = {principal}
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
@@ -322,17 +350,60 @@ def _run(cmd: list[str]) -> tuple[int, str]:
         return 1, str(exc)
 
 
+def _is_elevated() -> bool:
+    try:
+        import ctypes
+
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
 def install_windows() -> int:
-    script = REPO_ROOT / "scripts" / "service" / "install_windows_task.ps1"
-    script.write_text(windows_task_ps1(), encoding="utf-8")
+    """Register the task, degrading to a user-level one when not elevated.
+
+    A failed install that leaves nothing behind is worse than a partial one
+    that works until someone reboots -- so when elevation is missing we
+    register what we can and say plainly what it does not cover.
+    """
+    svc_dir = REPO_ROOT / "scripts" / "service"
+    elevated = _is_elevated()
+
+    script = svc_dir / "install_windows_task.ps1"
+    script.write_text(windows_task_ps1(elevated=True), encoding="utf-8")
+
+    if elevated:
+        code, out = _run([
+            "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+            "-File", str(script),
+        ])
+        print(out)
+        return code
+
+    fallback = svc_dir / "install_windows_task_userlevel.ps1"
+    fallback.write_text(windows_task_ps1(elevated=False), encoding="utf-8")
     code, out = _run([
         "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-        "-File", str(script),
+        "-File", str(fallback),
     ])
     print(out)
-    if code != 0:
-        print("\nIf this failed with an access error, run the same command "
-              "from an elevated PowerShell.", file=sys.stderr)
+    if code == 0:
+        print(
+            "\nNOT ELEVATED -- registered the user-level task instead.\n"
+            "  what works: restart-on-failure, health-gated restart, and\n"
+            "              recovery at logon\n"
+            "  what does NOT: it will not start after a reboot until someone\n"
+            "              logs in\n"
+            "\nTo upgrade to boot-start, run this ONCE from an elevated "
+            "PowerShell:\n"
+            f"  powershell -ExecutionPolicy Bypass -File \"{script}\"\n"
+        )
+    else:
+        print(
+            "\nCould not register a task at all. Run this from an elevated "
+            f"PowerShell:\n  powershell -ExecutionPolicy Bypass -File \"{script}\"\n",
+            file=sys.stderr,
+        )
     return code
 
 

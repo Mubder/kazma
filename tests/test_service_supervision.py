@@ -256,3 +256,27 @@ def test_wsl_requires_both_layers():
 
 def test_platform_detection_returns_a_known_target():
     assert installer.detect_platform() in ("windows", "linux", "macos", "wsl", "unknown")
+
+
+def test_userlevel_fallback_registers_without_elevation():
+    """A failed install that leaves nothing behind is worse than a partial
+    one that works until reboot.
+
+    The elevated task needs S4U + Highest, which a normal user cannot
+    register. The fallback must still give restart-on-failure and recovery
+    at logon, and must not silently claim boot-start it cannot deliver.
+    """
+    limited = installer.windows_task_ps1(elevated=False)
+    assert "-RunLevel Limited" in limited
+    assert "S4U" not in limited, "S4U requires elevation"
+    assert "-AtStartup" not in limited, "must not claim boot-start it lacks"
+    assert "-AtLogOn" in limited
+    assert "-RestartCount 3" in limited, "restart-on-failure still applies"
+    assert "USER-LEVEL" in limited, "must say what it does not cover"
+
+
+def test_elevated_task_is_still_the_default_and_the_documented_upgrade():
+    elevated = installer.windows_task_ps1(elevated=True)
+    assert "-AtStartup" in elevated and "S4U" in elevated
+    # default arg must remain the real deployment
+    assert installer.windows_task_ps1() == elevated
