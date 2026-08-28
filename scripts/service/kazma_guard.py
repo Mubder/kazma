@@ -131,24 +131,71 @@ class GuardLog:
 
 
 class Notifier:
-    """Best-effort out-of-band alerting. Never raises, never blocks long."""
+    """Best-effort out-of-band alerting. Never raises, never blocks long.
+
+    Credentials are resolved in this order, first hit wins:
+
+    1. ``KAZMA_GUARD_TELEGRAM_TOKEN`` / ``KAZMA_GUARD_TELEGRAM_CHAT``
+    2. ``SWARM_BOT_TOKEN`` / ``SWARM_CHAT_ID``
+    3. Kazma's own config store, which resolves the token out of the
+       encrypted vault (``connectors.telegram.token``)
+
+    Step 3 is the only place the guard reaches into the application, and it
+    is deliberately last and fully guarded. The supervision loop stays
+    standard-library-only: if the venv is too broken to import kazma_core,
+    the guard loses ALERTING but never loses SUPERVISION. That is the right
+    way round -- a supervisor that dies because its notifier could not load
+    is worse than one that restarts silently.
+    """
 
     def __init__(self, log: GuardLog) -> None:
         self._log = log
-        self.token = (
+        token = (
             os.environ.get("KAZMA_GUARD_TELEGRAM_TOKEN")
             or os.environ.get("SWARM_BOT_TOKEN")
             or ""
         ).strip()
-        self.chat = (
+        chat = (
             os.environ.get("KAZMA_GUARD_TELEGRAM_CHAT")
             or os.environ.get("SWARM_CHAT_ID")
             or ""
         ).strip()
+        if not (token and chat):
+            v_token, v_chat = self._from_config_store()
+            token = token or v_token
+            chat = chat or v_chat
+        self.token = token
+        self.chat = chat
+        self._source = "env" if os.environ.get(
+            "KAZMA_GUARD_TELEGRAM_TOKEN"
+        ) or os.environ.get("SWARM_BOT_TOKEN") else "vault"
+
+    def _from_config_store(self) -> tuple[str, str]:
+        """Resolve token + chat from the app's config store. Never raises."""
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            token = str(cs.get("connectors.telegram.token", "") or "")
+            chat = (
+                str(cs.get("guard.telegram.chat_id", "") or "")
+                or str(cs.get("swarm.group_chat_id", "") or "")
+            )
+            return token.strip(), chat.strip()
+        except Exception as exc:
+            self._log("info", "notify.config_store_unavailable",
+                      error=str(exc)[:120])
+            return "", ""
 
     @property
     def configured(self) -> bool:
         return bool(self.token and self.chat)
+
+    def describe(self) -> str:
+        """Safe-to-log description. Never includes the token."""
+        if not self.configured:
+            return "not configured"
+        return f"telegram via {self._source} -> chat {self.chat}"
 
     def send(self, text: str) -> None:
         if not self.configured:
@@ -321,7 +368,7 @@ class Guard:
         self.log(
             "info", "guard.start",
             cmd=" ".join(self.cmd), cwd=str(self.cwd),
-            health=self.health_url, notifier="on" if self.notify.configured else "off",
+            health=self.health_url, notifier=self.notify.describe(),
         )
 
         first = True
@@ -424,6 +471,7 @@ def main() -> int:
                 "cooldown_s": CRASH_LOOP_COOLDOWN_S,
             },
             "notifier_configured": guard.notify.configured,
+            "notifier": guard.notify.describe(),
         }, indent=2))
         return 0
     return guard.run()

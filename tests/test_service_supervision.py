@@ -280,3 +280,69 @@ def test_elevated_task_is_still_the_default_and_the_documented_upgrade():
     assert "-AtStartup" in elevated and "S4U" in elevated
     # default arg must remain the real deployment
     assert installer.windows_task_ps1() == elevated
+
+
+# ── credential resolution ─────────────────────────────────────────────
+
+
+def _clear_notifier_env(monkeypatch):
+    for var in ("KAZMA_GUARD_TELEGRAM_TOKEN", "KAZMA_GUARD_TELEGRAM_CHAT",
+                "SWARM_BOT_TOKEN", "SWARM_CHAT_ID"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_env_credentials_win_over_the_vault(monkeypatch, tmp_path):
+    monkeypatch.setenv("KAZMA_GUARD_TELEGRAM_TOKEN", "env-token")
+    monkeypatch.setenv("KAZMA_GUARD_TELEGRAM_CHAT", "env-chat")
+    called = {"vault": False}
+
+    def _boom(self):
+        called["vault"] = True
+        return ("vault-token", "vault-chat")
+
+    monkeypatch.setattr(guard.Notifier, "_from_config_store", _boom)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert n.token == "env-token" and n.chat == "env-chat"
+    assert called["vault"] is False, "must not touch the vault when env is set"
+
+
+def test_falls_back_to_the_vault(monkeypatch, tmp_path):
+    _clear_notifier_env(monkeypatch)
+    monkeypatch.setattr(
+        guard.Notifier, "_from_config_store",
+        lambda self: ("vault-token", "vault-chat"),
+    )
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert n.configured is True
+    assert n.token == "vault-token"
+
+
+def test_broken_venv_loses_alerting_never_supervision(monkeypatch, tmp_path):
+    """The config-store import is the guard's ONLY reach into the app.
+
+    If kazma_core cannot be imported -- exactly the situation where the
+    guard matters most -- resolution must degrade to "no alerts" rather
+    than raise and take the supervisor down with it.
+    """
+    _clear_notifier_env(monkeypatch)
+
+    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
+
+    def _explode(name, *a, **k):
+        if name.startswith("kazma_core"):
+            raise ImportError("simulated broken venv")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr("builtins.__import__", _explode)
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert n.configured is False
+    n.send("should be a no-op")  # must not raise
+
+
+def test_describe_never_leaks_the_token(monkeypatch, tmp_path):
+    monkeypatch.setenv("KAZMA_GUARD_TELEGRAM_TOKEN", "SUPER-SECRET-TOKEN")
+    monkeypatch.setenv("KAZMA_GUARD_TELEGRAM_CHAT", "12345")
+    n = guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    desc = n.describe()
+    assert "SUPER-SECRET-TOKEN" not in desc
+    assert "12345" in desc, "the destination is useful; the credential is not"
