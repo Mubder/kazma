@@ -21,15 +21,15 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import AsyncGenerator
-from typing import Any, Callable
+from collections.abc import AsyncGenerator, Callable
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from kazma_ui.rate_limit import rate_limit
 from fastapi.responses import StreamingResponse
-
 from kazma_core.exceptions import sanitize_error
 from kazma_core.shutdown import is_shutting_down
+
+from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -225,124 +225,161 @@ def _module_graph() -> Any:
         return None
 
 
+def _persist_turn_reply(
+    session_id: str,
+    reply_turn_id: str,
+    content: str,
+    *,
+    interrupted: bool = False,
+    thread_id: str = "",
+    model: str = "",
+    tokens: int | None = None,
+    cost: float | None = None,
+    activity: list[dict[str, Any]] | None = None,
+    allow_shrink: bool | None = None,
+) -> bool:
+    """Write this turn's reply through the sink. Never raises.
+
+    ``allow_shrink`` defaults to "this write is authoritative iff the turn
+    finished": a FINAL answer may legitimately be shorter than the narration
+    it replaces ("Posted all 4 Arabic tweets." after a paragraph of
+    reasoning), while an INTERIM write must never trade accumulated text for
+    a fragment. Callers doing best-effort flushes (disconnect, crash) pass
+    ``False`` explicitly.
+
+    An INTERRUPTED turn (HITL pause) is not finished: its text is stored so
+    a reload mid-pause shows the narration, but the row stays ``open`` so
+    the approval resume writes the final answer into the SAME row instead of
+    adding a second bubble for one question.
+
+    This replaces the ``interrupted`` guard added in 4d646e2b, which never
+    fired in production: the flag it read is set in the post-stream block at
+    line ~912, while the detached done-callback that read it runs the moment
+    the pump task completes. The live log caught the race at 8 ms —
+    ``persisted (125 chars)`` at 00:00:21.405, ``HITL interrupt`` at .413.
+    Turn-keyed writes make the ordering irrelevant rather than re-fixing it.
+    """
+    if not session_id or not reply_turn_id:
+        return False
+    if allow_shrink is None:
+        allow_shrink = not interrupted
+    try:
+        from kazma_ui.reply_sink import close_reply_turn, upsert_reply
+
+        ok = upsert_reply(
+            session_id,
+            reply_turn_id,
+            content,
+            open_turn=interrupted,
+            activity=activity,
+            model=model or None,
+            tokens=tokens,
+            cost=cost,
+            allow_shrink=allow_shrink,
+        )
+        if not interrupted:
+            # The upsert already cleared the row's ``open`` marker, so the
+            # close only has to drop the in-memory identity — passing the
+            # session here would cost a second store write per turn. If the
+            # upsert failed, do the marker cleanup the slow way.
+            if ok:
+                close_reply_turn(thread_id)
+            else:
+                close_reply_turn(thread_id, session_id, reply_turn_id)
+        logger.info(
+            "[SSE] Reply persisted thread=%s turn=%s chars=%d interrupted=%s",
+            (thread_id or "")[:12],
+            reply_turn_id[:12],
+            len(str(content or "")),
+            interrupted,
+        )
+        return ok
+    except Exception:
+        logger.warning(
+            "[SSE] Reply persist FAILED thread=%s turn=%s (the reply is still "
+            "in the checkpoint; the session was NOT updated)",
+            (thread_id or "")[:12],
+            reply_turn_id[:12],
+            exc_info=True,
+        )
+        return False
+
+
+def _snapshot_paused(snap: Any) -> bool:
+    """True when the graph snapshot is parked on a pending interrupt.
+
+    Derived from the checkpoint instead of a mutable flag. The flag version
+    was unreadable at callback time: it is assigned in the post-stream block
+    that runs *after* the pump task finishes, so every done-callback saw
+    ``False`` and the HITL guard it protected never once fired in production
+    (2026-08-28, 8 ms apart in the live log).
+    """
+    try:
+        if snap is None:
+            return False
+        for task in getattr(snap, "tasks", None) or []:
+            if getattr(task, "interrupts", None):
+                return True
+        return bool(getattr(snap, "next", None))
+    except Exception:
+        return False
+
+
 async def _persist_detached_reply(
     graph: Any, config: dict, session_id: str, thread_id: str,
     streamed_text: str = "", interrupted: bool = False,
+    reply_turn_id: str = "",
 ) -> None:
-    """Persist a detached turn's final reply into the session store.
+    """Persist a DETACHED turn's reply — the client is gone, the graph ran on.
 
-    Extracted from the pump done-callback (live incident 2026-08-21) so the
-    persistence contract is testable:
+    The pump survives client disconnects, so this done-callback is the only
+    writer for a turn whose browser left mid-stream (live incident
+    2026-08-21: the reply sat in the checkpoint for hours while the session
+    store showed nothing and the failure was DEBUG-swallowed).
 
-    * The reply is APPENDED after a trailing USER message. The old
-      ``has_asst`` logic overwrote the PREVIOUS turn's assistant reply in
-      multi-turn sessions — it would have replaced the prior answer with
-      the new one and lost history.
-    * Failures log at WARNING (they were debug-swallowed, leaving the user
-      waiting hours for a reply that existed in the checkpoint while the
-      log showed nothing).
-    * A CANCELLED/stop mid-turn leaves the checkpoint holding only the LAST
-      interim segment — the streamed accumulation (all narration + final)
-      is the richer truth and wins when longer (2026-08-27 incident: a
-      96-second 40-lookup sweep persisted as a 158-char fragment after the
-      user stopped the turn mid-stream; the 2,272 streamed chars were
-      discarded).
-    * An INTERRUPTED turn (HITL pause) is NOT a completed reply. Persisting
-      its interim narration used to append it as a durable assistant row —
-      and in the resume cycle (trailing message already assistant) it
-      REPLACED the previous good reply with a short pre-approval segment
-      (1,080 → 225 → 151 chars). On tab-switch, the client resync paints
-      durable truth — so the visible "great ending text" swapped to a
-      completely different (interim) message (2026-08-27 incident). When
-      ``interrupted`` is True we only resolve lingering ``pending`` rows
-      with the interim text (so a refresh mid-pause still shows narration);
-      we never append or replace history. The resumed turn persists the
-      real final reply when it completes.
+    It reads the checkpoint, reconciles it with whatever was streamed, and
+    hands the result to the turn-keyed sink. Because the sink upserts on
+    ``reply_turn_id``, this write and the streamer's own terminal write
+    converge on ONE row no matter which of them lands first — the race that
+    produced duplicate assistant bubbles (2026-08-28) is gone by
+    construction rather than by ordering luck.
     """
     try:
-        snap = await graph.aget_state(config)
         asst = ""
-        if snap and snap.values:
-            msgs = snap.values.get("messages") or []
-            asst = _user_facing_reply(_last_assistant_text(msgs))
-        streamed = str(streamed_text or "").strip()
-        if streamed and len(streamed) > len((asst or "").strip()):
-            asst = streamed
-        with _module_store().transact(session_id) as sess:
-            if interrupted:
-                # HITL pause: the turn is not over — never append/replace
-                # durable history with interim narration. Only settle a
-                # pending bubble (client disconnected before any text) so a
-                # reload shows the narration instead of an empty row.
-                if asst:
-                    for m in reversed(sess.messages):
-                        if (
-                            isinstance(m, dict)
-                            and m.get("role") == "assistant"
-                            and m.get("pending")
-                        ):
-                            m["content"] = asst
-                            m.pop("pending", None)
-                            break
-                logger.info(
-                    "[SSE] Interrupted turn for thread=%s — interim text NOT "
-                    "persisted to history (HITL pause; %d chars held live)",
-                    thread_id[:12],
-                    len(asst),
-                )
-                return
-            if asst:
-                trailing = next(
-                    (
-                        m
-                        for m in reversed(sess.messages)
-                        if isinstance(m, dict)
-                        and m.get("role") in ("user", "assistant")
-                        and str(m.get("content") or "").strip()
-                    ),
-                    None,
-                )
-                if trailing is not None and trailing.get("role") == "user":
-                    # Normal detached completion: the user bubble is the last
-                    # entry — append the reply after it. Stamp ``ts`` like the
-                    # inline persist — mixed shapes (ts-less rows from one
-                    # writer, ts from the other) showed up as duplicate
-                    # consecutive replies after restarts (2026-08-26).
-                    from datetime import UTC as _UTC
-                    from datetime import datetime as _dtmod
+        snap = None
+        try:
+            snap = await graph.aget_state(config)
+            if snap and snap.values:
+                msgs = snap.values.get("messages") or []
+                asst = _last_assistant_text(msgs)
+        except Exception:
+            logger.debug("[SSE] detached persist: aget_state failed", exc_info=True)
+        # Trust the checkpoint over the caller's flag: a turn that paused on
+        # a (possibly chained) approval must keep its row open so the resume
+        # writes the final answer into it.
+        interrupted = bool(interrupted) or _snapshot_paused(snap)
+        from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
 
-                    sess.messages.append({
-                        "role": "assistant",
-                        "content": asst,
-                        "ts": _dtmod.now(_UTC).isoformat(),
-                    })
-                else:
-                    # No trailing user turn (e.g. a pending bubble from an
-                    # incremental persist) — replace the last assistant /
-                    # pending message as before.
-                    for m in reversed(sess.messages):
-                        if isinstance(m, dict) and m.get("role") == "assistant":
-                            m["content"] = asst
-                            m.pop("pending", None)
-                            break
-            else:
-                # The turn completed WITHOUT producing any assistant text.
-                # Never leave the pending bubble stuck — resolve it with a
-                # recovery notice so returning users see an explanation.
-                for m in reversed(sess.messages):
-                    if isinstance(m, dict) and m.get("role") == "assistant" and m.pop(
-                        "pending", False
-                    ):
-                        m["content"] = (
-                            "⚠️ Your previous turn finished without producing "
-                            "a reply (the model may have failed silently). "
-                            "Please try again."
-                        )
-                        break
-        logger.info(
-            "[SSE] Detached turn completed for thread=%s — response persisted (%d chars)",
-            thread_id[:12],
-            len(asst),
+        # A caller that forgot the id still gets a correct write: resolve the
+        # thread's open turn (or start one). This function is the last line
+        # of defence for a detached turn — it must never silently no-op.
+        if not reply_turn_id:
+            reply_turn_id = resolve_reply_turn(thread_id, session_id)
+
+        text = resolve_reply_text(asst, streamed_text)
+        if not text and not interrupted:
+            # The turn completed WITHOUT producing any assistant text. Never
+            # leave the user with a silent gap or a stuck spinner.
+            text = (
+                "⚠️ Your previous turn finished without producing a reply "
+                "(the model may have failed silently). Please try again."
+            )
+        _persist_turn_reply(
+            session_id,
+            reply_turn_id,
+            text,
+            interrupted=interrupted,
+            thread_id=thread_id,
         )
     except Exception:
         logger.warning(
@@ -352,6 +389,30 @@ async def _persist_detached_reply(
             session_id[:12],
             exc_info=True,
         )
+
+
+def _persist_instant_turn(
+    session: Any,
+    thread_id: str,
+    user_text: str,
+    reply_text: str,
+    kind: str = "",
+) -> None:
+    """Record a slash command and its immediate reply as one durable turn.
+
+    These handlers answer without touching the graph (``/yolo``, ``/plan``,
+    ``/long``, ``/compact``, usage text). Each used to hand-roll its own
+    append — and three of them (``/research``, ``/swarm``, ``/compact``)
+    stored nothing at all, so the question AND the answer vanished on
+    reload. Routing them through the sink gives them the same turn-keyed
+    row as every other reply, so a double-submit updates one row instead of
+    stacking duplicates.
+    """
+    from kazma_ui.reply_sink import record_instant_turn
+
+    record_instant_turn(
+        getattr(session, "session_id", ""), thread_id, user_text, reply_text, kind
+    )
 
 
 async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
@@ -374,7 +435,17 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
         ),
         None,
     )
-    if not isinstance(last, dict) or (last.get("role") or "").lower() != "user":
+    if not isinstance(last, dict):
+        return messages
+    _role = (last.get("role") or "").lower()
+    # An unanswered turn is one ending with the user's message — OR one whose
+    # trailing assistant row is still marked ``open``/``pending``, i.e. a turn
+    # that never delivered its final answer. Requiring a trailing USER row
+    # meant a stranded interim narration disabled the only recovery net there
+    # is: on 2026-08-28 the 1,781-char answer sat in the checkpoint while this
+    # returned early because a 125-char narration row was in the way.
+    _stranded = _role == "assistant" and bool(last.get("open") or last.get("pending"))
+    if _role != "user" and not _stranded:
         return messages
     try:
         live = _module_graph()
@@ -408,30 +479,29 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
             for m in messages
         ):
             return messages
-        messages = messages + [{"role": "assistant", "content": asst}]
-        with _module_store().transact(session.session_id) as sess:
-            trailing = next(
-                (
-                    m
-                    for m in reversed(sess.messages)
-                    if isinstance(m, dict) and str(m.get("content") or "").strip()
-                ),
-                None,
+        # Heal through the sink so the recovered answer lands in the STRANDED
+        # row when there is one (replacing the interim narration the user was
+        # left staring at) instead of stacking a second bubble under it.
+        from kazma_ui.reply_sink import open_reply_turn, upsert_reply
+
+        _heal_turn = ""
+        if _stranded and last.get("turn_id"):
+            _heal_turn = str(last["turn_id"])
+            messages = [
+                dict(m, content=asst) if m is last else m for m in messages
+            ]
+        else:
+            _heal_turn = open_reply_turn(tid)
+            messages = messages + [
+                {"role": "assistant", "content": asst, "turn_id": _heal_turn}
+            ]
+        if upsert_reply(session.session_id, _heal_turn, asst):
+            logger.info(
+                "[SSE] Backfilled unanswered turn from checkpoint for "
+                "session=%s (%d chars)",
+                session.session_id[:12],
+                len(asst),
             )
-            already = any(
-                isinstance(m, dict)
-                and m.get("role") == "assistant"
-                and str(m.get("content") or "") == asst
-                for m in sess.messages
-            )
-            if trailing is not None and trailing.get("role") == "user" and not already:
-                sess.messages.append({"role": "assistant", "content": asst})
-                logger.info(
-                    "[SSE] Backfilled unanswered turn from checkpoint for "
-                    "session=%s (%d chars)",
-                    session.session_id[:12],
-                    len(asst),
-                )
         return messages
     except Exception:
         logger.debug("[SSE] unanswered-turn checkpoint backfill skipped", exc_info=True)
@@ -450,6 +520,7 @@ async def _stream_langgraph_events(
     *,
     thread_id: str = "",
     session_id: str = "",
+    reply_turn_id: str = "",
 ) -> AsyncGenerator[str, None]:
     """Consume LangGraph astream_events and yield SSE frames.
 
@@ -468,25 +539,43 @@ async def _stream_langgraph_events(
     ``astream_events`` to hang without producing any frames.  The post-stream
     backfill logic still runs and surfaces assistant text from the checkpoint.
 
+    **Terminal persistence lives here, not in the callers.** Every endpoint
+    that streams a graph turn (``/api/chat/stream``, ``/api/approve``,
+    hard-steer resume, and anything added later) reaches the same terminal
+    block, so the durable write cannot be forgotten by a new caller — which
+    is exactly how ``/api/approve`` shipped delivering answers it never
+    saved (live incident 2026-08-28). The write goes through
+    :mod:`kazma_ui.reply_sink` keyed on *reply_turn_id*, and happens BEFORE
+    the ``done`` frame so a refresh the instant the answer appears cannot
+    beat the store.
+
     Args:
         graph: Compiled LangGraph app (must support astream_events/ainvoke).
         input_state: The SupervisorState dict, or a Command for HITL resume.
         config: LangGraph config dict (thread_id, checkpoint_ns, etc.).
+        thread_id: Delivery/journal thread (defaults to the config value).
+        session_id: Session store id; without it no durable write happens.
+        reply_turn_id: Identity of the reply row this turn owns. A HITL
+            resume passes the id of the turn it is continuing so the pause
+            narration and the final answer share one bubble.
 
     Yields:
         SSE-formatted strings.
     """
-    from kazma_core.safety.hitl import set_current_thread_id, reset_current_thread_id
     from kazma_core.observability.correlation import (
         bind_turn_id,
         current_turn_id,
         new_turn_id,
         reset_turn_id,
     )
+    from kazma_core.safety.hitl import reset_current_thread_id, set_current_thread_id
 
-    # Turn correlation id — binds once per streamed turn so every log line
-    # and the terminal done payload carry the same identifier.
-    _turn_token = bind_turn_id(current_turn_id() or new_turn_id())
+    # Turn correlation id — binds once per streamed turn so every log line,
+    # the terminal done payload, and the stored reply row carry the same
+    # identifier. The reply turn id wins when the caller supplied one (HITL
+    # resume continuing an earlier turn), so logs follow the turn across the
+    # approval pause instead of splitting into two unrelated ids.
+    _turn_token = bind_turn_id(reply_turn_id or current_turn_id() or new_turn_id())
 
     tid = config.get("configurable", {}).get("thread_id") if config else None
     token = set_current_thread_id(tid) if tid else None
@@ -564,11 +653,35 @@ async def _stream_langgraph_events(
                     "[SSE] HITL resume path — using ainvoke() for thread=%s",
                     thread_id,
                 )
-                register_turn(thread_id, asyncio.current_task())
-                try:
-                    await graph.ainvoke(input_state, config)
-                finally:
-                    unregister_turn(thread_id)
+                # Detach the resume the same way the streaming path detaches
+                # its pump. Previously ``ainvoke`` was awaited inline on the
+                # request task, so closing the tab after clicking Approve
+                # cancelled the graph mid-tool — an approved action could be
+                # half-executed and its answer lost. Now the graph owns its
+                # own task: a disconnect cancels only the delivery, and the
+                # done-callback persists the result for the next page load.
+                _resume_loop = asyncio.get_running_loop()
+                _resume_task = asyncio.create_task(graph.ainvoke(input_state, config))
+                register_turn(thread_id, _resume_task)
+
+                def _on_resume_done(t: asyncio.Task) -> None:
+                    unregister_turn(thread_id, t)
+                    if not session_id or not reply_turn_id:
+                        return
+                    _resume_loop.call_soon_threadsafe(
+                        lambda: _resume_loop.create_task(
+                            _persist_detached_reply(
+                                graph, config, session_id, thread_id,
+                                streamed_text=content_acc,
+                                reply_turn_id=reply_turn_id,
+                            )
+                        )
+                    )
+
+                _resume_task.add_done_callback(_on_resume_done)
+                # shield: cancelling this generator (client left) must not
+                # cancel the graph run it detached.
+                await asyncio.shield(_resume_task)
             else:
                 # Wrap astream_events with a keepalive generator so long LLM
                 # processing (e.g. DeepSeek 30-40s on 150K-token contexts)
@@ -662,6 +775,7 @@ async def _stream_langgraph_events(
                                 graph, config, session_id, thread_id,
                                 streamed_text=content_acc,
                                 interrupted=interrupted,
+                                reply_turn_id=reply_turn_id,
                             )
                         )
                     )
@@ -681,7 +795,7 @@ async def _stream_langgraph_events(
                             break
                         try:
                             event = await asyncio.wait_for(_event_queue.get(), timeout=10.0)
-                        except asyncio.TimeoutError:
+                        except TimeoutError:
                             # No event in 10s — send keepalive to hold the
                             # connection open during long LLM processing.
                             yield ": keepalive\n\n"
@@ -1045,6 +1159,21 @@ async def _stream_langgraph_events(
                 "session_tokens": sess_tokens,
                 "session_cost": round(float(sess_cost or 0.0), 6),
             }
+            # ── Durable write, BEFORE the client is told the turn is over ──
+            # Ordering matters: a user who refreshes the instant the answer
+            # paints must find it in the store. Emitting `done` first left a
+            # window where the browser reloaded into a transcript that did
+            # not yet contain the reply it had just rendered.
+            _persist_turn_reply(
+                session_id,
+                reply_turn_id,
+                content_acc,
+                interrupted=interrupted,
+                thread_id=thread_id,
+                model=_done_model,
+                tokens=total_tokens,
+                cost=total_cost,
+            )
             yield await emit_j("done", _done_payload)
             yield await emit_j("turn_complete", _done_payload)
             logger.info(
@@ -1085,6 +1214,16 @@ async def _stream_langgraph_events(
                     "[SSE] Empty turn recovered on exception — thread=%s tokens=%s",
                     thread_id, total_tokens,
                 )
+            # A crashed turn still owes the user a durable record of whatever
+            # it managed to say; without this the transcript reloads blank.
+            _persist_turn_reply(
+                session_id,
+                reply_turn_id,
+                content_acc,
+                interrupted=interrupted,
+                thread_id=thread_id,
+                allow_shrink=False,
+            )
             yield await emit_j("error", {"content": sanitize_error(exc)})
     finally:
         if token is not None:
@@ -1185,7 +1324,7 @@ async def _sse_attach_stream(
                 frame = await asyncio.wait_for(
                     queue.get(), timeout=_ATTACH_IDLE_TIMEOUT_S
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 idle_ticks += 1
                 yield ": keepalive\n\n"
                 still_running = is_turn_running(thread_id)
@@ -1459,13 +1598,14 @@ def create_sse_chat_router(
         # Bare /research with no topic — usage only. Work slashes fall through
         # to the supervisor (same brain as Telegram / TUI).
         if raw_msg.lower().startswith("/research"):
+            _usage = (
+                "Usage: `/research deep <topic>` — runs through "
+                "the same agent as chat (tools + HITL)."
+            )
+            _persist_instant_turn(session, thread_id, raw_msg, _usage)
+
             async def _research_gen() -> AsyncGenerator[str, None]:
-                yield await _journal_fast_path(thread_id, "token", {
-                    "content": (
-                        "Usage: `/research deep <topic>` — runs through "
-                        "the same agent as chat (tools + HITL)."
-                    )
-                })
+                yield await _journal_fast_path(thread_id, "token", {"content": _usage})
                 yield await _journal_fast_path(thread_id, "done", {"tokens": 0, "cost": 0.0, "duration_ms": 0})
 
             return StreamingResponse(
@@ -1483,16 +1623,9 @@ def create_sse_chat_router(
             _cap = apply_capacity_command(
                 thread_id, raw_msg, actor=f"web:{session_id[:12]}",
             )
-            session.messages.append({"role": "user", "content": raw_msg})
-            session.messages.append({
-                "role": "assistant",
-                "content": _cap.reply,
-                "kind": "capacity",
-            })
-            try:
-                _get_store().put(session)
-            except Exception:
-                logger.exception("[SSE] failed to persist /long message")
+            _persist_instant_turn(
+                session, thread_id, raw_msg, _cap.reply, kind="capacity"
+            )
 
             async def _long_generator() -> AsyncGenerator[str, None]:
                 yield await _journal_fast_path(thread_id, "capacity", {
@@ -1521,16 +1654,9 @@ def create_sse_chat_router(
                 raw_msg = _pl.rewrite_user_text
                 user_message = _pl.rewrite_user_text
             elif _pl.handled:
-                session.messages.append({"role": "user", "content": raw_msg})
-                session.messages.append({
-                    "role": "assistant",
-                    "content": _pl.reply,
-                    "kind": "capacity",
-                })
-                try:
-                    _get_store().put(session)
-                except Exception:
-                    logger.exception("[SSE] failed to persist /plan message")
+                _persist_instant_turn(
+                    session, thread_id, raw_msg, _pl.reply, kind="capacity"
+                )
 
                 async def _plan_generator() -> AsyncGenerator[str, None]:
                     yield await _journal_fast_path(thread_id, "capacity", {
@@ -1617,16 +1743,9 @@ def create_sse_chat_router(
                 except YoloDisabledError as yde:
                     confirmation = f"🛡️ {yde}"
 
-            session.messages.append({"role": "user", "content": raw_msg})
-            session.messages.append({
-                "role": "assistant",
-                "content": confirmation,
-                "kind": "capacity",
-            })
-            try:
-                _get_store().put(session)
-            except Exception:
-                logger.exception("[SSE] failed to persist YOLO message")
+            _persist_instant_turn(
+                session, thread_id, raw_msg, confirmation, kind="capacity"
+            )
 
             async def _yolo_generator() -> AsyncGenerator[str, None]:
                 yield await _journal_fast_path(thread_id, "capacity", {"action": "yolo", "reply": confirmation})
@@ -1699,6 +1818,11 @@ def create_sse_chat_router(
             else:
                 confirmation = "⚠️ Live graph not loaded."
 
+            # /compact rewrites the transcript from the compacted checkpoint
+            # and used to stream its confirmation without storing it — the
+            # user reloaded into a compacted history with no sign of why.
+            _persist_instant_turn(session, thread_id, raw_msg, confirmation)
+
             async def _compact_generator() -> AsyncGenerator[str, None]:
                 yield _sse_frame("token", {"content": confirmation})
                 yield _sse_frame("done", {
@@ -1716,14 +1840,15 @@ def create_sse_chat_router(
         # Work /swarm and /research are rewritten above and fall through
         # to the supervisor. Bare `/swarm` is usage only.
         if raw_msg.lower().strip() in ("/swarm", "/swarm help"):
+            _swarm_usage = (
+                "🐝 `/swarm <task>` goes through the same agent as chat "
+                "(tools + HITL). Example: `/swarm analyze competitor pricing`\n"
+                "`/swarm status` and `/swarm list` still answer instantly."
+            )
+            _persist_instant_turn(session, thread_id, raw_msg, _swarm_usage)
+
             async def _swarm_usage_gen() -> AsyncGenerator[str, None]:
-                yield _sse_frame("token", {
-                    "content": (
-                        "🐝 `/swarm <task>` goes through the same agent as chat "
-                        "(tools + HITL). Example: `/swarm analyze competitor pricing`\n"
-                        "`/swarm status` and `/swarm list` still answer instantly."
-                    )
-                })
+                yield _sse_frame("token", {"content": _swarm_usage})
                 yield _sse_frame("done", {"tokens": 1, "cost": 0.0, "duration_ms": 100})
 
             return StreamingResponse(
@@ -1831,7 +1956,8 @@ def create_sse_chat_router(
                     await asyncio.wait_for(_old, timeout=15.0)
 
         # ── Persist UI projection (display only) ───────────────────
-        from datetime import UTC, datetime as _dt
+        from datetime import UTC
+        from datetime import datetime as _dt
 
         _ts = _dt.now(UTC).isoformat()
         session.messages.append({"role": "user", "content": user_message, "ts": _ts})
@@ -1925,8 +2051,8 @@ def create_sse_chat_router(
             logger.debug("[sse_chat] language lock skipped", exc_info=True)
 
         from kazma_core.agent.hitl_supersede import cancel_pending_hitl
-        from kazma_core.agent.turn_input import build_turn_messages
         from kazma_core.agent.long_task import consume_long_task_turn
+        from kazma_core.agent.turn_input import build_turn_messages
 
         # Consume a long_task turn-budget at the START of each new user message.
         consume_long_task_turn(thread_id)
@@ -1963,6 +2089,7 @@ def create_sse_chat_router(
         if raw_attachments and messages:
             try:
                 from kazma_gateway.agent_handler.attachments import build_user_content
+
                 from kazma_ui.chat_attachments import attachments_from_client_payload
 
                 atts = attachments_from_client_payload(raw_attachments)
@@ -2048,11 +2175,18 @@ def create_sse_chat_router(
             len(user_message),
         )
 
+        # ── Reply identity for this turn ───────────────────────────
+        # One id owns the reply row from here until the turn produces its
+        # final answer — across a HITL pause and its separate approve
+        # request. Every writer for this turn upserts on it.
+        from kazma_ui.reply_sink import open_reply_turn as _open_reply_turn
+        from kazma_ui.reply_sink import upsert_reply as _upsert_reply
+
+        _reply_turn = _open_reply_turn(thread_id)
+
         # ── Stream the response ────────────────────────────────────
         async def _event_generator() -> AsyncGenerator[str, None]:
             content_acc = ""
-            # Track if we've started persisting assistant messages
-            assistant_message_started = False
             # Stamp active model on the assistant bubble for reload / meta.
             _turn_model = requested_model
             if not _turn_model:
@@ -2145,41 +2279,32 @@ def create_sse_chat_router(
                 except Exception:
                     logger.debug("[SSE] activity capture failed", exc_info=True)
 
-            def _attach_activity(msg: dict[str, Any]) -> None:
-                if activity_log:
-                    msg["activity"] = list(activity_log)
-                if _turn_model and not msg.get("model"):
-                    msg["model"] = _turn_model
-
             def _persist_now() -> None:
-                """Persist the current temp_assistant_msg to the store.
+                """Flush in-progress text into this turn's reply row.
 
-                T4: runs under the per-session mutation lock so this live
-                persist never interleaves with the detached done_callback
-                persist (or /reset) on the same ChatSession.
+                Turn-keyed upsert: repeated calls update the same row, so it
+                no longer matters whether this ran before the detached
+                callback did. The old version appended on first call and
+                overwrote ``messages[-1]`` after — and since it only fired
+                on ``len(content_acc) % 50 == 0``, a single 125-char
+                backfilled chunk skipped it entirely and let two other
+                writers each append their own row (2026-08-28 duplicates).
                 """
-                nonlocal assistant_message_started
-                try:
-                    _attach_activity(temp_assistant_msg)
-                    with _get_store().transact(session_id) as sess:
-                        if not assistant_message_started:
-                            sess.messages.append(temp_assistant_msg.copy())
-                            assistant_message_started = True
-                        else:
-                            if sess.messages:
-                                sess.messages[-1]["content"] = temp_assistant_msg["content"]
-                                _attach_activity(sess.messages[-1])
-                                if _turn_model:
-                                    sess.messages[-1]["model"] = _turn_model
-                except Exception:
-                    logger.debug(
-                        "[SSE] failed to persist assistant message for session=%s",
-                        session_id,
-                    )
+                _upsert_reply(
+                    session_id,
+                    _reply_turn,
+                    temp_assistant_msg["content"],
+                    open_turn=True,
+                    pending=not temp_assistant_msg["content"].strip(),
+                    activity=activity_log or None,
+                    model=_turn_model or None,
+                )
 
             # Per-turn usage captured from the done/turn_complete frame so the
             # final persist can stamp it on the assistant message (reload stats).
             turn_usage: dict[str, Any] = {}
+            # Chars already flushed to the store by _persist_now.
+            _flushed_at = [0]
 
             try:
                 async for frame in _stream_langgraph_events(
@@ -2188,6 +2313,7 @@ def create_sse_chat_router(
                     config=graph_config,
                     thread_id=thread_id,
                     session_id=session_id,
+                    reply_turn_id=_reply_turn,
                 ):
                     parsed = _parse_frame(frame)
                     if parsed is None:
@@ -2201,10 +2327,13 @@ def create_sse_chat_router(
                         content_acc += token_text
                         temp_assistant_msg["content"] += token_text
 
-                        # Persist incrementally every few tokens to prevent data loss.
-                        # _persist_now performs the append/update under the
-                        # per-session mutation lock (T4) — no inline mutation.
-                        if len(content_acc) % 50 == 0:
+                        # Flush every ~50 chars of GROWTH. The old
+                        # ``len(content_acc) % 50 == 0`` test only fired when
+                        # the running length landed exactly on a multiple of
+                        # 50, so a reply delivered as one backfilled chunk
+                        # (125 chars → 125 % 50 == 25) never flushed at all.
+                        if len(content_acc) - _flushed_at[0] >= 50:
+                            _flushed_at[0] = len(content_acc)
                             _persist_now()
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
                         _record_activity(ev_type, data)
@@ -2213,6 +2342,11 @@ def create_sse_chat_router(
                             turn_usage["tokens"] = data.get("tokens")
                         if data.get("cost") is not None:
                             turn_usage["cost"] = data.get("cost")
+                        # A turn that paused for approval is NOT finished —
+                        # its row must stay open so the approve request can
+                        # find it after a restart.
+                        if data.get("interrupted"):
+                            turn_usage["interrupted"] = True
                         # Terminal frame is SoT — replace glued token concat
                         # with the un-glued checkpoint/normalized payload.
                         done_text = str(data.get("content") or "")
@@ -2222,95 +2356,56 @@ def create_sse_chat_router(
 
                     yield frame
 
-                # Store final assistant response in session history + persist to disk.
+                # The streamer already wrote the reply before emitting `done`.
+                # This upsert stamps what only the caller knows — the CoT
+                # activity log, the per-turn usage, the pinned model — onto
+                # the SAME row. It cannot duplicate: same turn id, same row.
                 if content_acc:
-                    _ats = _dt.now(UTC).isoformat()
-                    if assistant_message_started and session.messages:
-                        if session.messages[-1].get("role") == "assistant":
-                            session.messages[-1]["content"] = content_acc
-                            _attach_activity(session.messages[-1])
-                            session.messages[-1].setdefault("ts", _ats)
-                            if "tokens" in turn_usage:
-                                session.messages[-1]["tokens"] = int(turn_usage["tokens"] or 0)
-                            if "cost" in turn_usage:
-                                session.messages[-1]["cost"] = round(
-                                    float(turn_usage["cost"] or 0.0), 6
-                                )
-                    else:
-                        final_msg: dict[str, Any] = {
-                            "role": "assistant",
-                            "content": content_acc,
-                            "ts": _ats,
-                        }
-                        _attach_activity(final_msg)
-                        if "tokens" in turn_usage:
-                            final_msg["tokens"] = int(turn_usage["tokens"] or 0)
-                        if "cost" in turn_usage:
-                            final_msg["cost"] = round(float(turn_usage["cost"] or 0.0), 6)
-                        session.messages.append(final_msg)
-                try:
-                    _get_store().put(session)
-                except Exception:
-                    logger.exception(
-                        "[SSE] failed to persist turn for session=%s", session_id
+                    _upsert_reply(
+                        session_id,
+                        _reply_turn,
+                        content_acc,
+                        open_turn=bool(turn_usage.get("interrupted")),
+                        activity=activity_log or None,
+                        model=_turn_model or None,
+                        tokens=turn_usage.get("tokens"),
+                        cost=turn_usage.get("cost"),
                     )
 
             except asyncio.CancelledError:
                 logger.warning("SSE generator cancelled for session=%s (client refresh/tab switch?)", session_id)
                 # Flush whatever partial content we have so the user's question
-                # isn't left without an answer on reload.
-                try:
-                    if content_acc:
-                        content_acc = _user_facing_reply(content_acc) or content_acc
-                        has_assistant = any(
-                            msg.get("role") == "assistant" for msg in session.messages
-                        )
-                        if not has_assistant:
-                            session.messages.append(
-                                {"role": "assistant", "content": content_acc}
-                            )
-                        else:
-                            for msg in reversed(session.messages):
-                                if msg.get("role") == "assistant":
-                                    msg["content"] = content_acc
-                                    break
-                    else:
-                        # No content yet — the LLM was still processing when
-                        # the client disconnected. Mark the turn as in-progress
-                        # so loadSession can detect it and show a "still
-                        # processing" indicator instead of a blank response.
-                        has_assistant = any(
-                            msg.get("role") == "assistant" for msg in session.messages
-                        )
-                        if not has_assistant:
-                            session.messages.append(
-                                {"role": "assistant", "content": "", "pending": True}
-                            )
-                    _get_store().put(session)
-                except Exception:
-                    pass
+                # isn't left without an answer on reload. The turn stays OPEN:
+                # the pump is detached and still running, and its callback
+                # writes the real final answer into this same row.
+                #
+                # The previous version walked backwards for "the last
+                # assistant message anywhere" and overwrote it — on a turn
+                # that had not yet written a row of its own, that target was
+                # the PREVIOUS turn's answer, silently replacing good history
+                # with a fragment.
+                _upsert_reply(
+                    session_id,
+                    _reply_turn,
+                    _user_facing_reply(content_acc) or content_acc,
+                    open_turn=True,
+                    pending=not content_acc,
+                    activity=activity_log or None,
+                    model=_turn_model or None,
+                    allow_shrink=False,
+                )
                 yield _sse_frame("error", {"content": "Connection closed"})
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
-                try:
-                    if content_acc:
-                        # Ensure assistant message is persisted even on error
-                        has_assistant = any(
-                            msg.get("role") == "assistant" for msg in session.messages
-                        )
-                        if not has_assistant:
-                            session.messages.append(
-                                {"role": "assistant", "content": content_acc}
-                            )
-                        else:
-                            for msg in reversed(session.messages):
-                                if msg.get("role") == "assistant":
-                                    msg["content"] = content_acc
-                                    break
-                    _get_store().put(session)
-                except Exception:
-                    pass
+                _upsert_reply(
+                    session_id,
+                    _reply_turn,
+                    content_acc,
+                    activity=activity_log or None,
+                    model=_turn_model or None,
+                    allow_shrink=False,
+                )
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
         async def _guarded_events() -> AsyncGenerator[str, None]:
@@ -2555,20 +2650,33 @@ def create_sse_chat_router(
                         if _ui_ok(m)
                     ]
                     if ui:
+                        # An in-flight turn's row lives only here — the
+                        # checkpoint has no reply for it yet — and carries the
+                        # turn_id its resume needs. Hydrating over it would
+                        # drop the narration and split the answer in two.
+                        _in_flight = [
+                            m
+                            for m in messages
+                            if isinstance(m, dict)
+                            and m.get("role") == "assistant"
+                            and (m.get("open") or m.get("pending"))
+                        ]
                         # The checkpointer is the source of truth for gw-*
                         # sessions. Replace if the checkpoint has more content
                         # (e.g. it has assistant replies the cached row lacks),
                         # or if the cache was empty.
                         if len(ui) >= len(messages):
-                            session.messages = ui
+                            session.messages = ui + _in_flight
                         else:
-                            # Merge: add any checkpoint messages missing from cache
+                            # Merge: add any checkpoint messages missing from
+                            # cache. Keyed on FULL text — an 80-char prefix
+                            # collapsed distinct replies sharing an opening.
                             existing_keys = {
-                                (m.get("role"), str(m.get("content") or "")[:80])
+                                (m.get("role"), str(m.get("content") or ""))
                                 for m in messages if isinstance(m, dict)
                             }
                             for m in ui:
-                                key = (m.get("role"), str(m.get("content") or "")[:80])
+                                key = (m.get("role"), str(m.get("content") or ""))
                                 if key not in existing_keys:
                                     messages.append(m)
                             session.messages = messages
@@ -2669,8 +2777,8 @@ def create_sse_chat_router(
         _raw_url = body.get("base_url", "")
         if _raw_url:
             try:
-                from kazma_core.url_utils import normalize_provider_url
                 from kazma_core.security.ssrf import validate_url
+                from kazma_core.url_utils import normalize_provider_url
 
                 validate_url(normalize_provider_url(_raw_url), allow_private=True)
             except Exception as exc:
@@ -2898,10 +3006,14 @@ def create_sse_chat_router(
         from kazma_core.safety.commitment.resume import build_resume_command
 
         resume_input = build_resume_command(action="apply")
+        # Same turn as the steered reply — the answer continues one bubble.
+        from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
+
         return StreamingResponse(
             _stream_langgraph_events(
                 graph_inst, resume_input, config,
                 thread_id=thread_id, session_id=session_id,
+                reply_turn_id=_resolve_steer_turn(thread_id, session_id),
             ),
             media_type="text/event-stream",
         )

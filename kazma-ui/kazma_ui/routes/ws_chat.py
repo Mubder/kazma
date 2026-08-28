@@ -16,14 +16,14 @@ import os
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from langgraph.types import Command
+from kazma_core.tracing.events import EventBridge, TelemetryEvent
 from starlette.websockets import WebSocketState
 
-from kazma_core.tracing.events import EventBridge, TelemetryEvent
 from kazma_ui.active_turns import (
     bind_live_socket,
     cancel_turn,
@@ -37,6 +37,7 @@ from kazma_ui.active_turns import (
     unregister_turn,
 )
 from kazma_ui.delivery import get_turn_broker, is_replayable
+from kazma_ui.reply_sink import record_instant_turn
 from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
@@ -534,23 +535,30 @@ def create_ws_chat_router(
         a mid-resume refresh still arms the background poller.
         """
         try:
-            with get_session_manager().transact(session_id) as sess:
-                last = sess.messages[-1] if sess.messages else None
-                if last and last.get("role") == "assistant":
-                    # Empty trailing bubble, or force during HITL resume.
-                    if force or not (last.get("content") or "").strip():
-                        last["pending"] = True
-                else:
-                    from datetime import UTC, datetime
+            # The bubble IS this turn's reply row, created early and empty —
+            # not a separate object to be reconciled later. Creating it
+            # through the sink means the final persist updates it instead of
+            # appending a second row beside it.
+            from kazma_ui.reply_sink import resolve_reply_turn, upsert_reply
 
-                    sess.messages.append(
-                        {
-                            "role": "assistant",
-                            "content": "",
-                            "pending": True,
-                            "ts": datetime.now(UTC).isoformat(),
-                        }
-                    )
+            sess = get_session_manager().get(session_id)
+            turn_id = resolve_reply_turn(
+                getattr(sess, "thread_id", "") or session_id, session_id
+            )
+            existing = ""
+            try:
+                for m in reversed(getattr(sess, "messages", None) or []):
+                    if isinstance(m, dict) and m.get("turn_id") == turn_id:
+                        existing = str(m.get("content") or "")
+                        break
+            except Exception:
+                existing = ""
+            # ``force`` re-arms the poller during a HITL resume even though
+            # the row already holds pre-approval text — keep that text.
+            if force or not existing.strip():
+                upsert_reply(
+                    session_id, turn_id, existing, open_turn=True, pending=True
+                )
         except Exception as exc:
             logger.warning("[WS-Chat] Failed ensuring pending bubble: %s", exc)
 
@@ -644,54 +652,25 @@ def create_ws_chat_router(
             if not text:
                 text = ti_("ws.task_completed", "Task completed.")
 
-            # T4: mutate + persist under the per-session mutation lock so this
-            # never interleaves with the SSE live/detached persist paths on the
-            # same ChatSession.
-            with get_session_manager().transact(session_id) as sess:
-                # Upsert trailing assistant bubble so incremental flushes don't
-                # create duplicate rows for the same turn.
-                activity_rows = list(activity) if activity else None
-                if sess.messages and sess.messages[-1].get("role") == "assistant":
-                    # Idempotent upsert (re-persist after reconnect / double complete).
-                    sess.messages[-1]["content"] = text
-                    sess.messages[-1].pop("pending", None)
-                    if activity_rows:
-                        sess.messages[-1]["activity"] = activity_rows
-                    if model_id:
-                        sess.messages[-1]["model"] = model_id
-                    if tokens is not None:
-                        sess.messages[-1]["tokens"] = int(tokens)
-                    if cost is not None:
-                        sess.messages[-1]["cost"] = round(float(cost), 6)
-                else:
-                    from datetime import UTC, datetime
+            # One writer, one row: the SSE stream, the SSE approve-resume and
+            # this socket all upsert the SAME turn-keyed row (see
+            # kazma_ui.reply_sink). The previous positional upsert needed a
+            # duplicate-collapsing band-aid underneath it precisely because
+            # two transports could each append their own copy of one reply.
+            from kazma_ui.reply_sink import resolve_reply_turn, upsert_reply
 
-                    msg: dict[str, Any] = {
-                        "role": "assistant",
-                        "content": text,
-                        "ts": datetime.now(UTC).isoformat(),
-                    }
-                    if activity_rows:
-                        msg["activity"] = activity_rows
-                    if model_id:
-                        msg["model"] = model_id
-                    if tokens is not None:
-                        msg["tokens"] = int(tokens)
-                    if cost is not None:
-                        msg["cost"] = round(float(cost), 6)
-                    sess.messages.append(msg)
-
-                # Collapse accidental identical consecutive assistant rows
-                # (legacy double-persist left duplicates visible on refresh).
-                while (
-                    len(sess.messages) >= 2
-                    and sess.messages[-1].get("role") == "assistant"
-                    and sess.messages[-2].get("role") == "assistant"
-                    and (sess.messages[-1].get("content") or "").strip()
-                    and (sess.messages[-1].get("content") or "").strip()
-                    == (sess.messages[-2].get("content") or "").strip()
-                ):
-                    sess.messages.pop()
+            upsert_reply(
+                session_id,
+                resolve_reply_turn(
+                    (config.get("configurable") or {}).get("thread_id", ""),
+                    session_id,
+                ),
+                text,
+                activity=list(activity) if activity else None,
+                model=model_id or None,
+                tokens=tokens,
+                cost=cost,
+            )
             return text
         except Exception as exc:
             logger.warning("[WS-Chat] Failed persisting assistant message: %s", exc)
@@ -1114,16 +1093,10 @@ def create_ws_chat_router(
                             thread_id,
                         )
                         await _emit_journaled("stream_end", {"capacity": True}, thread_id)
-                        session.messages.append({"role": "user", "content": text})
-                        session.messages.append({
-                            "role": "assistant",
-                            "content": confirmation,
-                            "kind": "capacity",
-                        })
-                        try:
-                            get_session_manager().put(session)
-                        except Exception:
-                            logger.debug("[WS-Chat] Failed persisting YOLO message")
+                        record_instant_turn(
+                            session_id, thread_id, text, confirmation,
+                            kind="capacity",
+                        )
                         continue  # ← CRITICAL: do NOT fall through to the LLM
 
                     # ── /long /mission /unrestricted /long yolo (parity) ─
@@ -1143,16 +1116,10 @@ def create_ws_chat_router(
                             "reply": _cap.reply,
                         }, thread_id)
                         await _emit_journaled("stream_end", {"capacity": True}, thread_id)
-                        session.messages.append({"role": "user", "content": text})
-                        session.messages.append({
-                            "role": "assistant",
-                            "content": _cap.reply,
-                            "kind": "capacity",
-                        })
-                        try:
-                            get_session_manager().put(session)
-                        except Exception:
-                            logger.debug("[WS-Chat] Failed persisting /long message")
+                        record_instant_turn(
+                            session_id, thread_id, text, _cap.reply,
+                            kind="capacity",
+                        )
                         continue
 
                     from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command
@@ -1170,16 +1137,10 @@ def create_ws_chat_router(
                                 "reply": _pl.reply,
                             }, thread_id)
                             await _emit_journaled("stream_end", {"capacity": True}, thread_id)
-                            session.messages.append({"role": "user", "content": text})
-                            session.messages.append({
-                                "role": "assistant",
-                                "content": _pl.reply,
-                                "kind": "capacity",
-                            })
-                            try:
-                                get_session_manager().put(session)
-                            except Exception:
-                                logger.debug("[WS-Chat] Failed persisting /plan message")
+                            record_instant_turn(
+                                session_id, thread_id, text, _pl.reply,
+                                kind="capacity",
+                            )
                             continue
 
                     # ── /reset — REAL reset on WS too (parity with the SSE
@@ -1490,11 +1451,11 @@ def create_ws_chat_router(
                         )
                         continue
 
-                    from kazma_core.agent.turn_input import build_turn_messages
-                    from kazma_core.agent.state import initial_supervisor_state
                     from kazma_core.agent.long_task import consume_long_task_turn
-                    from kazma_core.memory.config import resolve_tenant_id
+                    from kazma_core.agent.state import initial_supervisor_state
+                    from kazma_core.agent.turn_input import build_turn_messages
                     from kazma_core.ide.env_context import build_env_context
+                    from kazma_core.memory.config import resolve_tenant_id
 
                     # Consume a long_task turn-budget at the START of each new
                     # user message — so a /long from a previous task doesn't
@@ -1521,6 +1482,7 @@ def create_ws_chat_router(
                             from kazma_gateway.agent_handler.attachments import (
                                 build_user_content,
                             )
+
                             from kazma_ui.chat_attachments import (
                                 attachments_from_client_payload,
                             )
@@ -2359,7 +2321,7 @@ def create_ws_chat_router(
                                     await asyncio.wait_for(
                                         asyncio.shield(resume_task), timeout=4.0
                                     )
-                                except asyncio.TimeoutError:
+                                except TimeoutError:
                                     heartbeat_n += 1
                                     if heartbeat_n % 8 == 1:
                                         # Diagnosability (2026-08-21 YOLO-silent

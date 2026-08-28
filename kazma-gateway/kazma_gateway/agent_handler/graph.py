@@ -140,20 +140,49 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         session = canonical_web_session(thread_id) or store.get_or_create(thread_id)
         session.thread_id = thread_id
         converted = _convert_messages_to_dicts(messages)
+        # A turn that is still in flight has no checkpoint reply yet: its row
+        # exists only in the session store, marked ``open``/``pending`` and
+        # carrying the turn_id its resume needs (kazma_ui.reply_sink).
+        # Replacing the transcript wholesale used to delete it, which both
+        # destroyed the narration the user was watching and left the approval
+        # resume unable to find the turn it was continuing — producing a
+        # second bubble for one question.
+        _in_flight = [
+            m
+            for m in (session.messages or [])
+            if isinstance(m, dict)
+            and m.get("role") == "assistant"
+            and (m.get("open") or m.get("pending"))
+        ]
+
+        def _restore_in_flight() -> None:
+            for m in _in_flight:
+                if not any(
+                    isinstance(x, dict) and x.get("turn_id") == m.get("turn_id")
+                    for x in session.messages
+                ):
+                    session.messages.append(m)
+
         # Prefer richer checkpoint-derived history when available; never wipe
         # a longer UI transcript with an empty convert.
         if converted and len(converted) >= len(session.messages):
             session.messages = converted
+            _restore_in_flight()
         elif converted and not session.messages:
             session.messages = converted
+            _restore_in_flight()
         elif converted:
-            # Merge: keep UI rows, append new tail from platform if missing
+            # Merge: keep UI rows, append new tail from platform if missing.
+            # Keyed on the FULL text — an 80-char prefix silently collapsed
+            # two distinct replies that opened the same way (a plan fence, a
+            # greeting) into one.
             existing_keys = {
-                (m.get("role"), (m.get("content") or "")[:80])
+                (m.get("role"), m.get("content") or "")
                 for m in session.messages
+                if isinstance(m, dict)
             }
             for m in converted:
-                key = (m.get("role"), (m.get("content") or "")[:80])
+                key = (m.get("role"), m.get("content") or "")
                 if key not in existing_keys:
                     session.messages.append(m)
                     existing_keys.add(key)
@@ -1176,8 +1205,8 @@ def create_graph_handler(
             # checkpoint messages. Checkpointer is the sole agent transcript;
             # shared helper matches the Web SSE path.
             try:
-                from kazma_core.agent.turn_input import build_turn_messages
                 from kazma_core.agent.long_task import consume_long_task_turn
+                from kazma_core.agent.turn_input import build_turn_messages
 
                 # Consume long_task turn-budget at the start of each new message.
                 consume_long_task_turn(thread_id)
@@ -1474,8 +1503,8 @@ def create_graph_handler(
                 # current cultural context (Ramadan warm, Eid celebratory,
                 # formal business, general polite).
                 try:
-                    from kazma_core.tone_adapter import ToneAdapter
                     from kazma_core.cultural_context import CulturalContext
+                    from kazma_core.tone_adapter import ToneAdapter
 
                     _cc = CulturalContext()
                     _ta = ToneAdapter()
@@ -1899,7 +1928,7 @@ def create_graph_handler(
     async def _handle_replay(thread_id: str, config: dict[str, Any], iteration: int) -> str:
         """Restore a snapshot in-place: rewind the live thread to *iteration*."""
         try:
-            from kazma_core.time_travel import create_recorder, ReplayEngine
+            from kazma_core.time_travel import ReplayEngine, create_recorder
 
             recorder = create_recorder()
             engine = ReplayEngine(recorder)
@@ -1937,7 +1966,7 @@ def create_graph_handler(
         try:
             import uuid
 
-            from kazma_core.time_travel import create_recorder, ReplayEngine
+            from kazma_core.time_travel import ReplayEngine, create_recorder
 
             recorder = create_recorder()
             engine = ReplayEngine(recorder)
@@ -1974,7 +2003,7 @@ def create_graph_handler(
 
             # Create a Web UI session for the fork (visible in the sidebar).
             try:
-                from kazma_ui.session_manager import get_session_manager, ChatSession
+                from kazma_ui.session_manager import ChatSession, get_session_manager
 
                 web_store = get_session_manager()
                 username = msg.context_metadata.get("username") or "fork"
