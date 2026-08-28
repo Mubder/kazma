@@ -1655,6 +1655,21 @@ def create_ws_chat_router(
                                             "— breaking stream (KAZMA_TURN_TIMEOUT_SECONDS)",
                                             _turn_timeout_s, thread_id,
                                         )
+                                        try:
+                                            from kazma_core.observability.ops_alerts import (
+                                                alert,
+                                            )
+
+                                            alert(
+                                                "turn.timed_out",
+                                                f"A turn hit the {int(_turn_timeout_s)}s "
+                                                f"wall-clock limit and was cut off.",
+                                                f"thread={thread_id[:12]}. Usually a "
+                                                f"runaway tool loop.",
+                                                severity="warn",
+                                            )
+                                        except Exception:
+                                            pass
                                         break
                                     last_progress_at["t"] = time.monotonic()
                                     _record_ws_activity(activity_log, ev, thought_recorded=thought_recorded)

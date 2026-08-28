@@ -342,6 +342,21 @@ def upsert_reply(
             len(text),
             exc_info=True,
         )
+        # This is the failure that lost four answers on 2026-08-28 and was
+        # found by the operator scrolling a transcript. It must interrupt.
+        try:
+            from kazma_core.observability.ops_alerts import alert
+
+            alert(
+                "reply.persist_failed",
+                "A reply was produced but NOT saved to the transcript.",
+                f"session={str(session_id)[:12]} turn={str(turn_id)[:12]} "
+                f"chars={len(text)}. The answer is still in the checkpoint; "
+                f"a reload may show it missing.",
+                severity="error",
+            )
+        except Exception:
+            pass
         return False
 
 

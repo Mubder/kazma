@@ -389,6 +389,18 @@ async def _persist_detached_reply(
             session_id[:12],
             exc_info=True,
         )
+        try:
+            from kazma_core.observability.ops_alerts import alert
+
+            alert(
+                "reply.detached_persist_failed",
+                "A background turn finished but its reply was NOT saved.",
+                f"thread={thread_id[:12]} session={session_id[:12]}. The "
+                f"answer exists in the checkpoint only.",
+                severity="error",
+            )
+        except Exception:
+            pass
 
 
 def _persist_instant_turn(
@@ -1082,6 +1094,18 @@ async def _stream_langgraph_events(
                     thread_id,
                     total_tokens,
                 )
+                try:
+                    from kazma_core.observability.ops_alerts import alert
+
+                    alert(
+                        "turn.empty",
+                        "A turn finished without producing any reply.",
+                        f"thread={thread_id[:12]} tokens={total_tokens}. The "
+                        f"user saw a recovery notice instead of an answer.",
+                        severity="warn",
+                    )
+                except Exception:
+                    pass
 
             # ── Turn complete ──────────────────────────────────────────
             duration_ms = (time.monotonic() - turn_start) * 1000
