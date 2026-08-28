@@ -88,3 +88,32 @@ def test_alerting_can_never_fail_a_completed_backup(monkeypatch):
 
     monkeypatch.setattr("kazma_core.observability.ops_alerts.alert", _boom)
     _alert_on_backup_gaps({"ok": False, "error": "x"}, 2)  # must not raise
+
+
+# ── the fallback path ─────────────────────────────────────────────────
+
+
+def test_a_successful_fallback_is_a_warning_not_a_crisis(sent):
+    """Offsite protection is intact, so this is not critical. But a
+    silently-degraded primary is how you end up with one path left and no
+    idea that is the case."""
+    _alert_on_backup_gaps(
+        {"ok": True, "via": "rclone", "fallback_used": True,
+         "primary_error": "invalid_grant: token revoked"}, 0)
+    c = next(c for c in sent if c["key"] == "backup.offsite_degraded")
+    assert c["severity"] == "warn"
+    assert "invalid_grant" in c["detail"], "name the primary failure"
+    assert "FALLBACK" in c["title"]
+
+
+def test_a_fallback_success_is_not_reported_as_a_failure(sent):
+    """The backup DID go offsite. Calling that critical would be crying
+    wolf, and the next real one gets ignored."""
+    _alert_on_backup_gaps({"ok": True, "fallback_used": True,
+                           "primary_error": "boom"}, 0)
+    assert not any(c["key"] == "backup.offsite_failed" for c in sent)
+
+
+def test_a_clean_primary_upload_stays_silent(sent):
+    _alert_on_backup_gaps({"ok": True, "via": "google_drive"}, 0)
+    assert not sent

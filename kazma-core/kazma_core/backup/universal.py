@@ -212,6 +212,45 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
     if not cfg["enabled"]:
         return {"skipped": "offsite sync disabled"}
 
+    async def _rclone(reason: str = "") -> dict[str, Any]:
+        """Copy the backup out with rclone. The independent second path.
+
+        rclone carries its OWN OAuth credential, which is the entire point:
+        the native google_drive provider borrows the Gmail refresh token, so
+        one revoked grant takes out mail AND every offsite backup at once.
+        A fallback that shares the failing credential is not a fallback.
+        """
+        if not cfg["rclone_remote"]:
+            return {"skipped": "no offsite provider configured"} if not reason else {
+                "ok": False, "error": reason,
+                "note": "no rclone remote configured to fall back to",
+            }
+        if shutil.which("rclone") is None:
+            return {"skipped": "rclone not found on PATH (configure a native provider instead)"} if not reason else {
+                "ok": False, "error": reason, "note": "rclone not on PATH",
+            }
+        import subprocess
+
+        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
+            capture_output=True,
+            text=True,
+            timeout=1800,
+        )
+        if proc.returncode == 0:
+            logger.info("[universal-backup] offsite sync complete via rclone: %s", remote)
+            out: dict[str, Any] = {"ok": True, "remote": remote, "via": "rclone"}
+            if reason:
+                out["fallback_used"] = True
+                out["primary_error"] = reason[:300]
+            return out
+        err = (proc.stderr or "")[:300]
+        logger.warning("[universal-backup] rclone offsite sync failed: %s", err)
+        return {"ok": False, "remote": remote, "via": "rclone",
+                "error": f"{reason} | rclone: {err}" if reason else err}
+
     async def _run() -> dict[str, Any]:
         # Native providers take priority
         if cfg["provider"]:
@@ -240,35 +279,20 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
                         "[universal-backup] offsite sync complete: %s",
                         result.get("remote"),
                     )
-                else:
-                    logger.warning(
-                        "[universal-backup] offsite sync failed: %s",
-                        result.get("error"),
-                    )
-                return result
+                    result.setdefault("via", cfg["provider"])
+                    return result
+                logger.warning(
+                    "[universal-backup] offsite sync failed: %s — trying rclone",
+                    result.get("error"),
+                )
+                return await _rclone(str(result.get("error") or "native provider failed"))
             except Exception as exc:
-                logger.warning("[universal-backup] native offsite sync error: %s", exc)
-                return {"ok": False, "error": str(exc)}
+                logger.warning(
+                    "[universal-backup] native offsite sync error: %s — trying rclone", exc
+                )
+                return await _rclone(str(exc))
 
-        # Legacy rclone fallback (only when rclone_remote is set)
-        if not cfg["rclone_remote"]:
-            return {"skipped": "no offsite provider configured"}
-        if shutil.which("rclone") is None:
-            return {"skipped": "rclone not found on PATH (configure a native provider instead)"}
-        import subprocess
-
-        remote = f"{cfg['rclone_remote'].rstrip('/')}/{dest.name}"
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["rclone", "copy", str(dest), remote, "--transfers", "4"],
-            capture_output=True,
-            text=True,
-            timeout=1800,
-        )
-        if proc.returncode == 0:
-            logger.info("[universal-backup] offsite sync complete: %s", remote)
-            return {"ok": True, "remote": remote}
-        return {"ok": False, "remote": remote, "error": (proc.stderr or "")[:300]}
+        return await _rclone()
 
     try:
         try:
@@ -476,6 +500,21 @@ def _alert_on_backup_gaps(offsite: dict[str, Any], db_fail: int) -> None:
             )
         if offsite.get("skipped"):
             return  # deliberately disabled -- not a failure
+        if offsite.get("ok") and offsite.get("fallback_used"):
+            # Offsite protection is intact, so this is not critical -- but a
+            # silently-degraded primary is how you end up with one path left
+            # and no idea. Warn, and say which half is broken.
+            alert(
+                "backup.offsite_degraded",
+                "Offsite backups are running on the FALLBACK path only.",
+                f"The primary provider failed: "
+                f"{str(offsite.get('primary_error') or '')[:200]} "
+                f"rclone succeeded, so backups are still going offsite. "
+                "Fix the primary before the fallback is the only thing left.",
+                severity="warn",
+                cooldown_s=_OFFSITE_ALERT_COOLDOWN_S,
+            )
+            return
         if not offsite.get("ok"):
             alert(
                 "backup.offsite_failed",
