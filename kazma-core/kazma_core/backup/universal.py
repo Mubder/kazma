@@ -27,6 +27,13 @@ _EXCLUDE_DIRS = frozenset({"backups", "__pycache__", ".git", "node_modules", ".t
 _EXCLUDE_SUFFIXES = (".pyc", "-wal", "-shm", "-journal", ".tmp")
 _DEFAULT_RETENTION = 7
 
+# Root files that must be in every backup regardless of how an operator
+# has configured backups.extra_paths. Setting extra_paths REPLACES the
+# default list, so anyone who set it to name their own folder silently
+# dropped these -- a config change should not be able to quietly remove
+# the file that makes a restore usable.
+_ALWAYS_ROOT: tuple[str, ...] = ("kazma.yaml",)
+
 # Live progress for the UI (phase + detail). Updated by perform_universal_backup,
 # read by GET /api/backup/status.
 _backup_progress: dict[str, Any] = {"phase": "idle", "detail": "", "error": ""}
@@ -137,7 +144,12 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
         logger.warning("[universal-backup] .env copy failed", exc_info=True)
         result["env"] = {"path": ".env", "error": True}
 
-    extra: list[str] = ["research"]
+    # kazma.yaml is the MCP server registry, connector wiring and model
+    # routing -- the difference between a restored install that runs and one
+    # that boots with no tools and no connectors. It sits at the install root
+    # rather than in kazma-data, so the sweep never saw it. Configured
+    # extra_paths REPLACE this default, so _ALWAYS_ROOT below re-adds it.
+    extra: list[str] = ["research", *_ALWAYS_ROOT]
     try:
         from kazma_core.config_store import get_config_store
 
@@ -146,6 +158,9 @@ def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
             extra = [p.strip() for p in raw.split(",") if p.strip()]
         elif isinstance(raw, (list, tuple)) and raw:
             extra = [str(p).strip() for p in raw if str(p).strip()]
+        for must in _ALWAYS_ROOT:
+            if must not in extra:
+                extra.append(must)
     except Exception:
         logger.debug("[universal-backup] extra_paths read failed", exc_info=True)
 
@@ -634,6 +649,19 @@ def perform_universal_backup(
     # separately into backups/pg/. Running it here was redundant (two pg_dump
     # calls) and added 3-5s of I/O. The PG dump is listed in the manifest as
     # "handled by native_pg_backup" for documentation.
+    # 3b. Graph memory. Neo4j lives in a Docker volume, and nothing here
+    # walks Docker volumes -- so 323 nodes of graph memory sat in no backup
+    # at all until 2026-08-29. Self-disabling when Neo4j is not the
+    # configured graph backend.
+    _set_progress("graph", detail="Exporting graph memory…")
+    try:
+        from kazma_core.backup.neo4j_backup import export_graph
+
+        graph_result = export_graph(dest).as_dict()
+    except Exception as exc:  # noqa: BLE001 -- a graph failure must not lose the rest
+        logger.warning("[universal-backup] graph export failed", exc_info=True)
+        graph_result = {"ok": False, "error": str(exc)[:300]}
+
     _set_progress("manifest", detail="Writing manifest…")
     pg_result = {"ok": True, "note": "handled by native_pg_backup task"}
 
@@ -654,6 +682,7 @@ def perform_universal_backup(
         "assets": asset_results,
         "root_artifacts": root_artifacts,
         "postgres": pg_result,
+        "graph": graph_result,
         "offsite": {"status": "pending", "note": "cloud upload in flight at archive time"},
     }
     manifest_path = dest / "manifest.json"

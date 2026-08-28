@@ -134,6 +134,20 @@ MECHANISMS: tuple[Mechanism, ...] = (
         note="544 lines with zero call sites until Phase 4.",
     ),
     Mechanism(
+        name="graph memory backup",
+        fault="Neo4j lives in a Docker volume the backup sweep never walked",
+        module="kazma_core.backup.neo4j_backup",
+        symbol="export_graph",
+        proof="tests/test_neo4j_backup.py",
+        proven_in_production=True,
+        note=(
+            "323 nodes were in no backup at all until 2026-08-29. Community "
+            "edition has no online neo4j-admin backup and no APOC here, so "
+            "this is a driver-level JSONL export. Round-trip verified against "
+            "a scratch database: identical content hashes."
+        ),
+    ),
+    Mechanism(
         name="restore drill",
         fault="a backup that cannot actually be restored",
         module="kazma_core.backup.restore_drill",
