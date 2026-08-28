@@ -77,6 +77,7 @@ class SafetyConfig(BaseModel):
             "python_exec",
             "schedule_task",
             "cancel_scheduled",
+            "edit_scheduled",
             "vault_retrieve",
             "vault_delete",
             "config_save",
@@ -99,6 +100,8 @@ class SafetyConfig(BaseModel):
             "browser_eval_js",
             "x_post",
             "x_delete_post",
+            "x_schedule_post",
+            "x_cancel_scheduled_post",
         ],
         "timeout_seconds": 300,
     })

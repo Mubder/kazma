@@ -23,3 +23,9 @@ tools:
     category: "automation"
     prompt_chain:
       - "قم بإلغاء المهمة المجدولة المحددة بالمعرف"
+  edit_scheduled:
+    arabic_name: "تعديل مهمة مجدولة"
+    description: "Edit an existing scheduled task's timing and/or prompt. Provide the job ID plus at least one of timing ('5m', '1h', 'daily at 9am') or a new prompt."
+    category: "automation"
+    prompt_chain:
+      - "عدّل وقت أو نص المهمة المجدولة"

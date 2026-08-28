@@ -258,6 +258,41 @@ class TestCronScheduler:
 
         await store.close()
 
+    @pytest.mark.asyncio
+    async def test_reschedule_updates_prompt_and_timing(self) -> None:
+        store = SQLiteCronStore(":memory:")
+        await store.init()
+        scheduler = CronScheduler(store=store)
+
+        result = await scheduler.schedule(timing="5m", prompt="Original prompt")
+        job_id = result["job_id"]
+
+        res = await scheduler.reschedule(job_id, timing="1h", prompt="Edited prompt")
+        assert res["status"] == "rescheduled"
+        assert res["next_run"]
+
+        jobs = await scheduler.list_jobs()
+        assert jobs[0]["prompt"] == "Edited prompt"
+        assert jobs[0]["timing"] == "1h"
+        assert jobs[0]["status"] == "pending"
+
+        await store.close()
+
+    @pytest.mark.asyncio
+    async def test_reschedule_not_found_and_bad_timing(self) -> None:
+        store = SQLiteCronStore(":memory:")
+        await store.init()
+        scheduler = CronScheduler(store=store)
+
+        missing = await scheduler.reschedule("cron-doesnotexist", timing="5m")
+        assert missing["status"] == "not_found"
+
+        result = await scheduler.schedule(timing="5m", prompt="x")
+        bad = await scheduler.reschedule(result["job_id"], timing="not a time")
+        assert bad["status"] == "error"
+
+        await store.close()
+
 
 class TestToolsRegistered:
     """Test 7-8: Cron tools in registry."""
@@ -285,6 +320,14 @@ class TestToolsRegistered:
         tools = registry.get_tool_definitions()
         tool_names = [t["function"]["name"] for t in tools]
         assert "cancel_scheduled" in tool_names
+
+    def test_edit_scheduled_registered(self) -> None:
+        from kazma_core.agent.tool_registry import LocalToolRegistry
+
+        registry = LocalToolRegistry(include_builtins=True)
+        tools = registry.get_tool_definitions()
+        tool_names = [t["function"]["name"] for t in tools]
+        assert "edit_scheduled" in tool_names
 
 
 class TestSingleton:

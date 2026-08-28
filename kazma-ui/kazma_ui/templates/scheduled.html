@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% set active_page = "scheduled" %}
+{% block title %}Kazma — {{ t('nav.scheduled') }}{% endblock %}
+{% block page_title %}<svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5" style="vertical-align:middle;margin-right:6px;"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>{{ t('nav.scheduled') }}{% endblock %}
+
+{% block head %}
+<style>
+  [x-cloak] { display: none !important; }
+  .sched-wrap { max-width: 1100px; margin: 0 auto; padding: 0 1rem; box-sizing: border-box; }
+  .sched-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  .sched-table th { text-align: start; color: var(--text-muted); padding: 8px 10px; font-weight: 600; border-bottom: 1px solid var(--border-subtle); }
+  .sched-table td { padding: 8px 10px; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .sched-summary { max-width: 460px; white-space: pre-wrap; word-break: break-word; }
+  .sched-when { white-space: nowrap; font-family: var(--font-mono, monospace); font-size: 0.76rem; }
+  .type-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+  .type-cron { background: rgba(59,130,246,.15); color: #3b82f6; }
+  .type-x { background: rgba(29,155,240,.18); color: #1d9bf0; }
+  .st-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+  .st-pending { background: rgba(245,158,11,.15); color: #f59e0b; }
+  .st-running { background: rgba(59,130,246,.15); color: #3b82f6; }
+  .st-done, .st-fired { background: rgba(34,197,94,.15); color: #22c55e; }
+  .st-failed { background: rgba(239,68,68,.15); color: #ef4444; }
+  .st-cancelled { background: var(--bg-elevated); color: var(--text-muted); }
+  .row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+  .modal { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 10px); padding: 1.25rem; width: 92%; max-width: 520px; max-height: 88vh; overflow: auto; }
+  .modal h3 { margin: 0 0 .75rem 0; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
+  .form-group { margin-bottom: .75rem; }
+  .form-group label { display: block; font-size: .78rem; color: var(--text-muted); margin-bottom: 4px; }
+  .form-group input, .form-group textarea, .form-group select { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px); background: var(--bg-elevated); color: var(--text-primary); font-size: .84rem; }
+  .form-group textarea { min-height: 84px; resize: vertical; }
+  .hint { font-size: .72rem; color: var(--text-muted); margin-top: 3px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="sched-wrap" x-data="scheduledPage()" x-init="init()" role="main" aria-label="{{ t('nav.scheduled') }}">
+
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
+    <div>
+      <strong>{{ t('scheduled.title') }}</strong>
+      <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px;">{{ t('scheduled.hint') }}</div>
+    </div>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
+      <button class="btn btn-secondary btn-sm" @click="load()">{{ t('scheduled.refresh') }}</button>
+      <button class="btn btn-secondary btn-sm" @click="openCreateX()">{{ t('scheduled.new_x') }}</button>
+      <button class="btn btn-primary btn-sm" @click="openCreateCron()">{{ t('scheduled.new_task') }}</button>
+    </div>
+  </div>
+
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div style="overflow-x:auto;">
+      <table class="sched-table">
+        <thead>
+          <tr>
+            <th>{{ t('scheduled.when') }}</th>
+            <th>{{ t('scheduled.type') }}</th>
+            <th>{{ t('scheduled.summary') }}</th>
+            <th>{{ t('scheduled.status') }}</th>
+            <th style="text-align:end;">{{ t('scheduled.actions') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(task, i) in tasks" :key="(task.source||'') + '-' + task.id">
+            <tr>
+              <td class="sched-when" x-text="task.when || '—'"></td>
+              <td><span class="type-badge" :class="task.source === 'x' ? 'type-x' : 'type-cron'"
+                        x-text="task.source === 'x' ? 'X post' : 'Task'"></span></td>
+              <td class="sched-summary">
+                <span x-text="task.summary || '—'"></span>
+                <div x-show="task.error" x-cloak style="color:#ef4444;font-size:.72rem;margin-top:2px;" x-text="task.error"></div>
+              </td>
+              <td><span class="st-badge" :class="'st-' + (task.status || 'pending')" x-text="task.status"></span></td>
+              <td>
+                <div class="row-actions" style="justify-content:flex-end;">
+                  <button class="btn btn-secondary btn-sm" x-show="canEdit(task)" x-cloak @click="openEdit(task)">{{ t('scheduled.edit') }}</button>
+                  <button class="btn btn-danger btn-sm" x-show="canDelete(task)" x-cloak @click="remove(task)">{{ t('scheduled.delete') }}</button>
+                </div>
+              </td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    <p x-show="!loading && !tasks.length" x-cloak style="padding:1rem;font-size:.8rem;color:var(--text-muted);">
+      {{ t('scheduled.empty') }}
+    </p>
+    <p x-show="loading" x-cloak style="padding:1rem;font-size:.8rem;color:var(--text-muted);">…</p>
+  </div>
+
+  {# ── Create / edit: cron task ── #}
+  <div class="modal-overlay" x-show="showCronModal" x-cloak @click.self="showCronModal = false">
+    <div class="modal">
+      <h3 x-text="cronForm.job_id ? t('scheduled.edit_task') : t('scheduled.new_task')"></h3>
+      <div class="form-group">
+        <label>{{ t('scheduled.prompt') }}</label>
+        <textarea x-model="cronForm.prompt" :placeholder="t('scheduled.prompt_ph')"></textarea>
+      </div>
+      <div class="form-group">
+        <label>{{ t('scheduled.timing') }}</label>
+        <input type="text" x-model="cronForm.timing" :placeholder="t('scheduled.timing_ph')">
+        <div class="hint">{{ t('scheduled.timing_hint') }}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" @click="showCronModal = false">{{ t('scheduled.cancel') }}</button>
+        <button class="btn btn-primary btn-sm" @click="saveCron()" :disabled="cronSaving" x-text="cronSaving ? '…' : t('scheduled.save')"></button>
+      </div>
+    </div>
+  </div>
+
+  {# ── Create / edit: X post ── #}
+  <div class="modal-overlay" x-show="showXModal" x-cloak @click.self="showXModal = false">
+    <div class="modal">
+      <h3 x-text="xForm.id ? t('scheduled.edit_x') : t('scheduled.new_x')"></h3>
+      <template x-if="!xForm.id">
+        <div class="form-group">
+          <label>{{ t('scheduled.x_text') }}</label>
+          <textarea x-model="xForm.text" :placeholder="t('scheduled.x_text_ph')" maxlength="280"></textarea>
+          <div class="hint" x-text="(xForm.text || '').length + ' / 280'"></div>
+        </div>
+      </template>
+      <div class="form-group">
+        <label>{{ t('scheduled.timing') }}</label>
+        <input type="text" x-model="xForm.when" :placeholder="t('scheduled.timing_ph')">
+        <div class="hint">{{ t('scheduled.timing_hint') }} {{ t('scheduled.x_fire_note') }}</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary btn-sm" @click="showXModal = false">{{ t('scheduled.cancel') }}</button>
+        <button class="btn btn-primary btn-sm" @click="saveX()" :disabled="xSaving" x-text="xSaving ? '…' : t('scheduled.save')"></button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/static/js/scheduled.js?v={{ js_version() }}"></script>
+{% endblock %}

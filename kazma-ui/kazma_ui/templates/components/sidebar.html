@@ -152,6 +152,18 @@
             <span class="nav-label">{{ t('nav.replay') }}</span>
         </a>
 
+        <a href="/scheduled" class="nav-link {{ 'active' if active_page == 'scheduled' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.scheduled') }}</span>
+        </a>
+
         <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.configuration') }}</span>
 
         <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}" @click="closeMobileNav()">

@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "XAuditLog",
+    "enrich_row",
     "get_x_audit",
     "log_x_event",
     "query_x_audit",
@@ -67,6 +68,87 @@ def _dumps(payload: Any) -> str:
         return json.dumps(payload, ensure_ascii=False, default=str)
     except Exception:
         return str(payload)
+
+
+def _loads(raw: Any) -> dict:
+    """Parse a stored JSON body into a dict; returns {} on any failure."""
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def enrich_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Derive human-readable fields from the stored JSON bodies.
+
+    Adds (never removes) keys so the audit table can show the actual post
+    text instead of a raw JSON hover blob:
+
+      * ``text``        — the post body (request ``text``, falling back to the
+                          ``data.text`` X echoes on success; for ``delete`` rows
+                          the removed post's text is pulled from the ledger).
+      * ``reply_to``    — ``reply.in_reply_to_tweet_id`` (thread context).
+      * ``post_url``    — ``https://x.com/i/web/status/{tweet_id}`` when known.
+      * ``error_detail``— short message extracted from error responses.
+
+    Best-effort and never raises — an enrichment failure must not break the
+    audit feed (mirrors the never-raises posture of ``log_x_event``). The raw
+    ``request_body``/``response_body`` columns stay in the row untouched.
+    """
+    out = dict(row)
+    try:
+        req = _loads(row.get("request_body"))
+        resp = _loads(row.get("response_body"))
+        action = str(row.get("action") or "")
+        tweet_id = str(row.get("tweet_id") or "").strip()
+
+        text = ""
+        if isinstance(req.get("text"), str) and req["text"].strip():
+            text = req["text"]
+
+        reply_to = ""
+        reply = req.get("reply")
+        if isinstance(reply, dict):
+            reply_to = str(reply.get("in_reply_to_tweet_id") or "")
+
+        # X echoes the created post in the success payload — use it as a
+        # fallback source of truth for the text (and the id, if missing).
+        data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+        if not text and isinstance(data.get("text"), str) and data["text"].strip():
+            text = data["text"]
+        if not tweet_id and data.get("id"):
+            tweet_id = str(data["id"])
+
+        # Delete rows carry only the id; recover the removed text from the ledger.
+        if action == "delete" and not text and tweet_id:
+            try:
+                from kazma_core.x_api.ledger import get_ledger
+
+                text = get_ledger().text_for_tweet(tweet_id) or ""
+            except Exception:
+                text = ""
+
+        error_detail = ""
+        if str(row.get("status") or "") != "success":
+            detail = resp.get("detail") or resp.get("error") or ""
+            if isinstance(detail, str):
+                error_detail = detail[:300]
+
+        out["text"] = text
+        out["reply_to"] = reply_to
+        out["error_detail"] = error_detail
+        out["post_url"] = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else ""
+        if tweet_id:
+            out["tweet_id"] = tweet_id
+    except Exception:  # noqa: BLE001
+        # Enrichment is cosmetic — never let it break the audit feed.
+        pass
+    return out
 
 
 class XAuditLog:
@@ -170,7 +252,7 @@ class XAuditLog:
         params.append(int(max(1, min(limit, 5000))))
         conn = self._connect()
         try:
-            return [dict(r) for r in conn.execute(sql, params).fetchall()]
+            return [enrich_row(dict(r)) for r in conn.execute(sql, params).fetchall()]
         finally:
             conn.close()
 

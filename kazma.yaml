@@ -157,6 +157,7 @@ safety:
     - email_categorize
     - email_delete
     - email_send
+    - edit_scheduled
     - file_apply_patch
     - file_delete
     - file_write
@@ -175,8 +176,10 @@ safety:
     - uninstall_agent_skill
     - vault_delete
     - vault_retrieve
+    - x_cancel_scheduled_post
     - x_delete_post
     - x_post
+    - x_schedule_post
     approval_timeout_seconds: 60
     auto_deny_on_timeout: true
 notifications:

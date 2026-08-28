@@ -2379,35 +2379,51 @@
                         x-text="xAudit.loading ? '…' : t('settings.x_audit_refresh')"></button>
             </div>
             <p style="margin:4px 0 8px 0;font-size:0.78rem;color:var(--text-muted);">{{ t('settings.x_audit_hint') }}</p>
-            <div x-show="xAudit.entries.length" x-cloak style="max-height:340px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;">
+            <div x-show="xAudit.entries.length" x-cloak style="max-height:420px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:8px;">
                 <table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
                     <thead style="position:sticky;top:0;background:var(--bg-surface);">
                         <tr style="text-align:start;color:var(--text-muted);">
                             <th style="padding:6px 8px;">{{ t('settings.x_audit_when') }}</th>
                             <th style="padding:6px 8px;">{{ t('settings.x_audit_action') }}</th>
+                            <th style="padding:6px 8px;min-width:220px;">{{ t('settings.x_audit_text') }}</th>
                             <th style="padding:6px 8px;">{{ t('settings.x_audit_status') }}</th>
                             <th style="padding:6px 8px;">HTTP</th>
-                            <th style="padding:6px 8px;">Tweet</th>
+                            <th style="padding:6px 8px;">{{ t('settings.x_audit_tweet') }}</th>
                             <th style="padding:6px 8px;">ms</th>
                         </tr>
                     </thead>
                     <tbody>
                         <template x-for="(e, i) in xAudit.entries" :key="i">
-                            <tr style="border-top:1px solid var(--border-subtle);cursor:help;"
-                                :title="((e.response_body || '') + ' ' + (e.request_body || '')).slice(0, 300)">
+                            <tr style="border-top:1px solid var(--border-subtle);cursor:pointer;"
+                                @click="xAudit.detail = (xAudit.detail === i ? null : i)"
+                                :style="xAudit.detail === i ? 'background:var(--bg-surface);' : ''"
+                                :title="t('settings.x_audit_details')">
                                 <td style="padding:5px 8px;white-space:nowrap;" x-text="(e.ts || '').replace('T', ' ').slice(0, 19)"></td>
                                 <td style="padding:5px 8px;" x-text="e.action"></td>
+                                <td style="padding:5px 8px;max-width:420px;white-space:pre-wrap;word-break:break-word;color:var(--text-primary);"
+                                    x-text="e.text || '—'"></td>
                                 <td style="padding:5px 8px;">
                                     <span x-text="e.status"
                                           :style="e.status === 'success' ? 'color:var(--success, #22c55e);' : 'color:var(--danger);'"></span>
                                 </td>
                                 <td style="padding:5px 8px;" x-text="e.http_status == null ? '—' : e.http_status"></td>
-                                <td style="padding:5px 8px;font-family:var(--font-mono,monospace);" x-text="(e.tweet_id || '—').slice(0, 10)"></td>
+                                <td style="padding:5px 8px;">
+                                    <a x-show="e.post_url" x-cloak :href="e.post_url" target="_blank" rel="noopener noreferrer"
+                                       @click.stop style="color:var(--accent);font-family:var(--font-mono,monospace);"
+                                       x-text="(e.tweet_id || '').slice(0, 10)"></a>
+                                    <span x-show="!e.post_url" x-cloak style="font-family:var(--font-mono,monospace);" x-text="(e.tweet_id || '—').slice(0, 10)"></span>
+                                </td>
                                 <td style="padding:5px 8px;" x-text="e.duration_ms == null ? '—' : e.duration_ms"></td>
                             </tr>
                         </template>
                     </tbody>
                 </table>
+            </div>
+            <!-- Expanded detail for the selected audit row (full request/response) -->
+            <div x-show="xAudit.detail != null && xAudit.entries[xAudit.detail]" x-cloak
+                 style="margin-top:8px;border:1px solid var(--border-subtle);border-radius:8px;background:var(--bg-surface);padding:10px;">
+                <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:0.72rem;color:var(--text-muted);max-height:280px;overflow:auto;"
+                     x-text="'REQUEST\n' + ((xAudit.entries[xAudit.detail] || {}).request_body || '(none)') + '\n\nRESPONSE\n' + ((xAudit.entries[xAudit.detail] || {}).response_body || '(none)') + (((xAudit.entries[xAudit.detail] || {}).error_detail) ? ('\n\nERROR\n' + xAudit.entries[xAudit.detail].error_detail) : '')"></pre>
             </div>
             <p x-show="!xAudit.entries.length && !xAudit.loading" x-cloak style="font-size:0.8rem;color:var(--text-muted);">
                 {{ t('settings.x_audit_empty') }}

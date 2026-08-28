@@ -210,3 +210,64 @@ async def test_audit_endpoint_bounds_limit(monkeypatch):
     import json as _json
     payload = _json.loads((await x_audit(limit=9999)).body)
     assert payload["ok"] is True and seen["limit"] == 500
+
+
+# ── Row enrichment (visible post text in the audit table) ────────────
+
+
+def test_enrich_post_row_exposes_text_and_url(audit_db: Path) -> None:
+    log_x_event(
+        action="post", status="success", http_status=201,
+        tweet_id="1770000000000000123",
+        request_body={"text": "Kazma ships scheduled posts"},
+        response_body={"data": {"id": "1770000000000000123", "text": "Kazma ships scheduled posts"}},
+    )
+    row = query_x_audit(action="post")[0]
+    assert row["text"] == "Kazma ships scheduled posts"
+    assert row["post_url"] == "https://x.com/i/web/status/1770000000000000123"
+    assert row["reply_to"] == ""
+    # Raw JSON columns are preserved for the expandable detail view.
+    assert "scheduled posts" in row["request_body"]
+
+
+def test_enrich_reply_row_exposes_reply_to(audit_db: Path) -> None:
+    log_x_event(
+        action="reply", status="success", http_status=201,
+        tweet_id="2", request_body={"text": "a reply", "reply": {"in_reply_to_tweet_id": "1"}},
+        response_body={"data": {"id": "2"}},
+    )
+    row = query_x_audit(action="reply")[0]
+    assert row["text"] == "a reply"
+    assert row["reply_to"] == "1"
+
+
+def test_enrich_delete_row_pulls_ledger_text(audit_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.x_api.ledger import XPostLedger
+
+    ledger = XPostLedger(tmp_path / "x.db")
+    ledger.record(tweet_id="999", text="the post being deleted", handle="@kazma")
+    monkeypatch.setattr("kazma_core.x_api.ledger.get_ledger", lambda: ledger)
+
+    log_x_event(action="delete", status="success", http_status=200, tweet_id="999",
+                request_body=None, response_body={"data": {"deleted": True}})
+    row = query_x_audit(action="delete")[0]
+    assert row["text"] == "the post being deleted"
+
+
+def test_enrich_error_row_exposes_error_detail(audit_db: Path) -> None:
+    log_x_event(action="post", status="error", http_status=429, tweet_id=None,
+                request_body={"text": "will fail"},
+                response_body={"detail": "Too Many Requests"})
+    row = query_x_audit(status="error")[0]
+    assert row["error_detail"] == "Too Many Requests"
+    assert row["post_url"] == ""
+
+
+def test_enrich_never_raises_on_garbage_bodies(audit_db: Path) -> None:
+    log_x_event(action="post", status="success", request_body="{not valid json",
+                response_body="{{{{")
+    row = query_x_audit()[0]
+    # No text derivable, but enrichment must not raise and must still return keys.
+    assert row["text"] == ""
+    assert row["post_url"] == ""
+    assert "request_body" in row
