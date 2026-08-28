@@ -592,6 +592,35 @@ def reap_port_holder(url: str, log: GuardLog) -> bool:
     return True
 
 
+def clear_stale_port(url: str, log: GuardLog) -> bool:
+    """Free the guard's port before spawning, if anything still holds it.
+
+    ``reap_orphan`` only knows the PID it wrote down. On 2026-08-28 a
+    deliberate restart killed the recorded child (76408) and left its
+    uvicorn grandchild (4160) holding 9090 and still serving the OLD build.
+    The recorded PID was dead, so ``reap_orphan`` returned immediately and
+    did nothing -- the one case it exists for, missed on a technicality.
+
+    The guard then spawned, discovered 36ms later that a foreign server
+    owned the port, threw away its own perfectly good child and backed off
+    30 seconds. It recovered, which is the point of a supervisor, but it
+    recovered the expensive way: ~45s of extra downtime and two alarming
+    messages ("never became healthy") for what was a clean deploy.
+
+    Anything listening on our port BEFORE we spawn cannot be ours -- we
+    have not started yet. That makes clearing it here unambiguous, and
+    demotes the foreign-server branch in ``_wait_ready`` from the ordinary
+    path to the backstop it was meant to be (it still catches a server that
+    binds the port during our boot, which this check cannot see).
+    """
+    port = _port_from_url(url)
+    if not port or not _port_holder_pid(port):
+        return False
+    log("warn", "port.stale_before_spawn", port=port,
+        note="port still held and we have not spawned yet; clearing first")
+    return reap_port_holder(url, log)
+
+
 def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     kwargs: dict = {"cwd": str(cwd)}
     if os.name == "nt":
@@ -791,6 +820,10 @@ class Guard:
                 continue
             if self._stop:
                 break
+            # A previous instance (or its orphaned grandchild) may still own
+            # the port. Clearing it here costs one netstat; discovering it
+            # after the spawn costs a discarded child and a backoff.
+            clear_stale_port(self.health_url, self.log)
             spawned_at = time.time()
             self.proc = spawn(self.cmd, self.cwd, self.log)
 
