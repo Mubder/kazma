@@ -13,7 +13,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import Depends, Request, WebSocket
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse as _JSONResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import JSONResponse as _JSONResponse
 
 from kazma_ui.rate_limit import rate_limit
 
@@ -117,7 +118,6 @@ def register_direct_routes(self: Any) -> None:
             logger.debug("Worker registry cache flush failed: %s", exc)
         # Flush tool registry (the real registry is LocalToolRegistry)
         try:
-            from kazma_core.agent.tool_registry import get_tool_registry
 
             # LocalToolRegistry caches the singleton in _builtin_registry.
             import kazma_core.agent.tool_registry as _tr_mod
@@ -253,7 +253,6 @@ def register_direct_routes(self: Any) -> None:
         """
         import json
         import sqlite3
-        import time
 
         tid = (tenant or "default").strip() or "default"
 
@@ -543,7 +542,6 @@ def register_direct_routes(self: Any) -> None:
         tokenized) and falls back to ``LIKE`` if FTS is unavailable or the
         query has no usable tokens — matching the recall engine's own pattern.
         """
-        import re
         import sqlite3
 
         from kazma_core.memory.schema_v2 import ensure_primary_schema
@@ -1127,7 +1125,6 @@ def register_direct_routes(self: Any) -> None:
         import xml.sax.saxutils as xu
 
         from fastapi.responses import Response
-
         from kazma_core.memory.schema_v2 import ensure_primary_schema
         from kazma_core.paths import primary_memory_db
 
@@ -2010,7 +2007,6 @@ def register_direct_routes(self: Any) -> None:
     @self.app.get("/api/alerts/recent")
     async def _get_recent_alerts():
         from fastapi.encoders import jsonable_encoder
-
         from kazma_core.observability.alerts import AlertDispatcher
 
         # Serialize defensively: one non-JSON-safe alert field (NaN from a
@@ -2073,10 +2069,10 @@ def register_direct_routes(self: Any) -> None:
     async def _auth_status(request: Request) -> dict[str, Any]:
         """Whether auth is enabled and whether this request is authenticated."""
         from kazma_ui.auth import (
+            _is_loopback_client,
             get_kazma_secret,
             get_request_principal,
             is_authenticated,
-            _is_loopback_client,
         )
 
         expected = get_kazma_secret()
@@ -2133,9 +2129,9 @@ def register_direct_routes(self: Any) -> None:
 
         from kazma_ui.auth import (
             SECRET_COOKIE,
+            _is_https,
             get_kazma_secret,
             verify_secret,
-            _is_https,
         )
 
         client_ip = (request.client.host if request.client else "") or "unknown"
@@ -2269,6 +2265,7 @@ def register_direct_routes(self: Any) -> None:
     async def _oidc_callback(request: Request) -> Response:
         """OIDC callback — mint opaque session from IdP claims."""
         from fastapi.responses import RedirectResponse
+
         from kazma_ui.auth import SESSION_COOKIE, _is_https
 
         code = request.query_params.get("code") or ""
@@ -2309,8 +2306,9 @@ def register_direct_routes(self: Any) -> None:
     @self.app.get("/api/auth/me")
     async def _auth_me(request: Request) -> Response:
         """Return current principal (role/username) for UI chrome."""
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
         import os as _os
+
+        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
 
         # Public demo mode: report as an authenticated demo visitor.
         if _os.environ.get("KAZMA_DEMO_MODE", "").lower() in ("1", "true", "yes"):
@@ -2633,7 +2631,7 @@ def register_direct_routes(self: Any) -> None:
 
         # Runtime DB backend badge for the Packages tab
         try:
-            from kazma_core.db.backend import is_postgres, get_database_url
+            from kazma_core.db.backend import get_database_url, is_postgres
 
             _db_backend = "postgres" if is_postgres() else "sqlite"
             _db_url = get_database_url() or ""
@@ -2875,8 +2873,7 @@ def register_direct_routes(self: Any) -> None:
         Retention is read LIVE from the ConfigStore (Settings UI), so the
         manual run and the daily auto-loop always agree.
         """
-        from kazma_core.time_travel import maintain_snapshots
-        from kazma_core.time_travel import _live_maintenance_config
+        from kazma_core.time_travel import _live_maintenance_config, maintain_snapshots
 
         try:
             cfg = _live_maintenance_config()
@@ -3249,7 +3246,6 @@ def register_direct_routes(self: Any) -> None:
             )
 
         try:
-            from langgraph.types import Command
 
             # Prefer the live checkpointed graph (same instance as SSE).
             graph_ref = _resolve_hitl_graph() or self._graph_holder.get("graph")
@@ -3366,13 +3362,43 @@ def register_direct_routes(self: Any) -> None:
                     approved=approved, scope=scope, reason=body.get("reason", ""),
                 )
 
+            from collections.abc import AsyncGenerator
+
             from fastapi.responses import StreamingResponse
-            from typing import AsyncGenerator
-            from kazma_ui.sse_chat import _stream_langgraph_events, _sse_frame
             from kazma_core.safety.hitl import (
                 reset_current_thread_id,
                 set_current_thread_id,
             )
+
+            # ── Durable identity for the resumed reply ─────────────────
+            # This endpoint used to stream the post-approval answer to the
+            # browser and persist NOTHING: it passed no session_id, and the
+            # Command path inside the streamer takes ainvoke (no pump, so no
+            # done-callback). Two finished answers were lost that way on
+            # 2026-08-28 (1,402 and 1,781 chars) — present on screen, absent
+            # after refresh.
+            #
+            # Resolving the OPEN turn (rather than minting a new one) keeps
+            # the pre-approval narration and the final answer in one bubble,
+            # which is what the user asked one question to get.
+            from kazma_ui.reply_sink import resolve_reply_turn
+            from kazma_ui.session_manager import get_session_manager as _gsm_resume
+            from kazma_ui.sse_chat import _sse_frame, _stream_langgraph_events
+
+            _resume_session_id = ""
+            try:
+                _owner = _gsm_resume().get_by_thread_id(thread_id)
+                if _owner is not None:
+                    _resume_session_id = _owner.session_id
+            except Exception:
+                logger.debug("[HITL] could not resolve session for resume", exc_info=True)
+            _resume_turn = resolve_reply_turn(thread_id, _resume_session_id)
+            if not _resume_session_id:
+                logger.warning(
+                    "[HITL] Resume has no session for thread=%s — the answer "
+                    "will stream but cannot be persisted",
+                    thread_id,
+                )
 
             async def _approval_stream_generator() -> AsyncGenerator[str, None]:
                 status_msg = (
@@ -3437,6 +3463,9 @@ def register_direct_routes(self: Any) -> None:
                         graph_ref,
                         resume_cmd,
                         config=config,
+                        thread_id=thread_id,
+                        session_id=_resume_session_id,
+                        reply_turn_id=_resume_turn,
                     ):
                         yield frame
                 finally:
@@ -3595,9 +3624,9 @@ def register_direct_routes(self: Any) -> None:
     async def _backup_download(dir_name: str) -> Any:
         """Download an archived backup (.zip)."""
         import re
-        from pathlib import Path
-        from kazma_core.backup.universal import _universal_dir
+
         from fastapi.responses import FileResponse
+        from kazma_core.backup.universal import _universal_dir
 
         # Same containment guard as delete/archive (universal.py) — without
         # it, an encoded ..\ segment could read arbitrary .zip files outside

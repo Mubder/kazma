@@ -214,12 +214,44 @@ class TestV2ArchitecturePresent:
         assert "diag('load-messages-failed'" in src
 
     def test_persist_writers_stamp_ts(self):
-        """Both assistant-row append paths (incremental temp message and
-        detached reply) stamp ts — mixed shapes produced ts-less duplicate
-        rows after restarts."""
-        src = (_ROOT / "kazma-ui" / "kazma_ui" / "sse_chat.py").read_text(encoding="utf-8")
-        assert '"ts": _dtc.now(_UTCc).isoformat(),' in src
-        assert '"ts": _dtmod.now(_UTC).isoformat(),' in src
+        """Every assistant row carries ``ts`` — mixed shapes produced ts-less
+        duplicate rows after restarts (2026-08-26).
+
+        This used to be checked as two literal snippets in ``sse_chat.py``,
+        one per append path. There is now exactly ONE append path: rows are
+        created by ``reply_sink.upsert_reply``, so the invariant is asserted
+        against its behaviour rather than against the source text of the
+        writers that no longer exist.
+        """
+        from kazma_ui import reply_sink
+
+        class _Sess:
+            session_id = "s1"
+            messages: list = []
+
+        class _Txn:
+            def __enter__(self):
+                return _Sess
+
+            def __exit__(self, *exc):
+                return False
+
+        class _Store:
+            def transact(self, sid):
+                return _Txn()
+
+        original = reply_sink._store
+        reply_sink._store = lambda: _Store()
+        try:
+            reply_sink.upsert_reply("s1", "turn-1", "answer")
+        finally:
+            reply_sink._store = original
+
+        assert _Sess.messages, "the sink must create the row"
+        row = _Sess.messages[-1]
+        assert row["role"] == "assistant"
+        assert row["ts"], "every assistant row must be timestamped"
+        assert row["turn_id"] == "turn-1"
 
     def test_status_strip_single_owner(self):
         """The top status strip (#thinking-indicator) is Alpine-store-owned:
