@@ -702,15 +702,41 @@ class TestPlanFencePresentation:
         assert abs(at_tf - at_strip) < 8000
 
     def test_every_paint_site_applies_the_transform(self):
+        """One render function, and paints are idempotent.
+
+        Reply text used to be turned into HTML at four sites with three
+        different expressions — ``appendLiveToken`` and the voice hook both
+        skipped ``_scrubDsml``, so scaffolding showed while streaming and
+        disappeared on the terminal paint. Worse, the terminal paint
+        assigned ``innerHTML`` unconditionally, rebuilding the whole message
+        subtree even when server truth matched what was already on screen:
+        the visible "blink" at the end of every reply.
+        """
         src = _CHAT_JS.read_text(encoding="utf-8")
-        # SSE onToken + WS approve-resume token + appendLiveToken +
-        # voice onStreamToken all share this exact expression…
-        assert src.count(
-            "transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)))"
-        ) >= 4
-        # …and applyFinalAssistantText wraps its rendered display too.
+
+        # A single canonical text -> HTML pipeline, applied everywhere.
+        assert "function _renderReplyHTML(text)" in src
+        assert (
+            "transformRenderedForPlan(\n      KS.markdown(_scrubDsml(stripPlanFenceForDisplay(text)))\n    )"
+            in src
+        )
+        assert src.count("_renderReplyHTML(tokenAccum)") >= 4
+
+        # Paints go through the idempotent helper, never a bare assignment.
+        assert "function _paintHTML(textEl, html)" in src
+        # Compared against the source string we wrote, not the browser's
+        # re-serialization of the DOM — innerHTML round-trips lossily, so an
+        # innerHTML comparison never matches and repaints every time.
+        assert "if (textEl._kzPaintedHTML === html) return false;" in src
+        assert "textEl._kzPaintedHTML = html;" in src
+        assert (
+            "textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)))"
+            not in src
+        ), "raw unconditional paint reintroduced — this is the end-of-reply flash"
+
+        # Server truth still always wins when it actually differs.
         final_fn = src.split("applyFinalAssistantText: function", 1)[1]
-        assert "transformRenderedForPlan(KS.markdown(display))" in final_fn
+        assert "_paintHTML(textEl, _renderReplyHTML(tokenAccum));" in final_fn
         # textContent fallback still uses the raw stripped text.
         assert "textEl.textContent = display;" in final_fn
 
@@ -739,3 +765,34 @@ class TestPlanFencePresentation:
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "FAIL" not in proc.stdout
+
+
+class TestWorkbenchCollapseTiming:
+    """When the CoT panel collapses — and when it must NOT.
+
+    Collapsing removes a few hundred pixels from above the reply. Doing that
+    in ``finalizeProgress`` put a large visual change on the terminal frame,
+    which the user saw as the CoT "flashing" as streaming stopped (reported
+    right after that change shipped). The transcript still ends up as
+    one-line summaries; the collapse just happens at the START of the next
+    turn, where the view is already moving to the new user message.
+    """
+
+    def test_finalize_does_not_collapse(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        fin = src.split("function finalizeProgress(", 1)[1].split("\n  function ", 1)[0]
+        assert "classList.add('is-collapsed')" not in fin, (
+            "collapsing at the terminal frame is the end-of-turn flash"
+        )
+        assert "panel.classList.remove('is-collapsed');" in fin
+
+    def test_next_turn_collapses_finished_panels(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function _collapseFinishedWorkbenches()" in src
+        begin = src.split("function beginTurn()", 1)[1].split("\n  function ", 1)[0]
+        assert "_collapseFinishedWorkbenches();" in begin, (
+            "finished panels must be tidied at the start of the next turn"
+        )
+        fn = src.split("function _collapseFinishedWorkbenches()", 1)[1].split("\n  function ", 1)[0]
+        assert ".agent-progress.is-done" in fn
+        assert "aria-expanded" in fn
