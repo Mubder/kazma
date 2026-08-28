@@ -54,7 +54,7 @@ mcp:
     - hello
     url: ''
     env: {}
-    enabled: true
+    enabled: false
     connected: false
     tool_count: 0
     tools: []
