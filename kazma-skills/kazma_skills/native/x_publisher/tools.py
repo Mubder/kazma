@@ -9,6 +9,7 @@ from kazma_core.x_api.client import XApiError, XClient
 from kazma_core.x_api.config import get_x_config
 from kazma_core.x_api.ledger import get_ledger
 from kazma_core.x_api.policy import evaluate_delete, evaluate_post
+from kazma_core.x_api.schedule import get_x_scheduled_store
 
 logger = logging.getLogger(__name__)
 
@@ -119,3 +120,138 @@ async def x_delete_post(tweet_id: str) -> str:
     except Exception as exc:
         logger.exception("x_delete_post failed")
         return _json({"ok": False, "deleted": False, "error": str(exc)})
+
+
+# ── Scheduled posts ───────────────────────────────────────────────────
+# X has no native scheduled-post API, so Kazma stores the draft and fires
+# POST /2/tweets at the appointed time (see kazma_core/x_api/schedule.py).
+# HITL approval happens once, at booking. Quota is reserved at booking so
+# the schedule cannot be used to exceed the daily/monthly caps.
+
+
+def _booking_identity() -> tuple[str, str, str]:
+    """(tenant_id, thread_id, delivery_target) captured at booking time."""
+    tenant_id = "default"
+    try:
+        from kazma_core.tenant_isolation import require_tenant_id
+
+        tenant_id = require_tenant_id() or "default"
+    except Exception:  # noqa: BLE001
+        pass
+    thread_id = ""
+    try:
+        from kazma_core.safety.hitl import get_current_thread_id
+
+        thread_id = get_current_thread_id() or ""
+    except Exception:  # noqa: BLE001
+        pass
+    delivery_target = ""
+    try:
+        from kazma_core.tools.send_message import get_current_delivery_target
+
+        delivery_target = get_current_delivery_target() or ""
+    except Exception:  # noqa: BLE001
+        pass
+    return tenant_id, thread_id, delivery_target
+
+
+async def x_schedule_post(text: str, when: str, reply_to_id: str = "") -> str:
+    """Schedule a tweet to be posted automatically at a future time.
+
+    HITL approval is required at booking. Kazma stores the draft and publishes
+    it at the appointed time (X has no native post scheduling). The post only
+    fires while the Kazma server is running.
+
+    Args:
+        text: The exact tweet text to publish.
+        when: When to post: '5m', '1h', 'daily at 9am', or an ISO timestamp.
+        reply_to_id: Optional tweet id to reply to (thread).
+
+    Returns:
+        JSON with the scheduled post id, text and fire time.
+    """
+    try:
+        from kazma_core.x_api.booking import book_x_post
+
+        tenant_id, thread_id, delivery_target = _booking_identity()
+        ok, payload = book_x_post(
+            text=text,
+            when=when,
+            reply_to_id=reply_to_id or "",
+            tenant_id=tenant_id,
+            thread_id=thread_id,
+            delivery_target=delivery_target,
+        )
+        if ok:
+            payload = dict(payload)
+            payload["ok"] = True
+            payload["note"] = (
+                "Approved at booking. Kazma publishes it at the scheduled time "
+                "while the server runs."
+            )
+        else:
+            payload = {"ok": False, "scheduled": False, "error": payload.get("error", "")}
+        return _json(payload)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("x_schedule_post failed")
+        return _json({"ok": False, "scheduled": False, "error": str(exc)})
+
+
+async def x_list_scheduled() -> str:
+    """List scheduled X posts (pending first, then recent fired/cancelled/failed).
+
+    Returns:
+        JSON with the scheduled posts and their status.
+    """
+    try:
+        tenant_id, _, _ = _booking_identity()
+        store = get_x_scheduled_store()
+        posts = store.list_all(tenant_id=tenant_id, limit=100)
+        from datetime import datetime
+
+        out = []
+        for p in posts:
+            out.append({
+                "id": p.id,
+                "text": p.text,
+                "status": p.status,
+                "fire_at": datetime.fromtimestamp(p.fire_at).astimezone().isoformat(timespec="seconds"),
+                "tz": p.tz,
+                "reply_to_id": p.reply_to_id,
+                "tweet_id": p.tweet_id,
+                "error": p.error,
+            })
+        return _json({"ok": True, "count": len(out), "posts": out})
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("x_list_scheduled failed")
+        return _json({"ok": False, "error": str(exc)})
+
+
+async def x_cancel_scheduled_post(post_id: int) -> str:
+    """Cancel a scheduled X post before it fires (releases its reserved quota).
+
+    Args:
+        post_id: The id of the scheduled post to cancel.
+
+    Returns:
+        JSON indicating whether the post was cancelled.
+    """
+    try:
+        pid = int(post_id)
+    except (TypeError, ValueError):
+        return _json({"ok": False, "cancelled": False, "error": "post_id must be a number."})
+    try:
+        store = get_x_scheduled_store()
+        cancelled = store.cancel(pid)
+        if cancelled:
+            return _json({"ok": True, "cancelled": True, "id": pid})
+        existing = store.get(pid)
+        if existing is None:
+            return _json({"ok": False, "cancelled": False, "error": f"No scheduled post with id {pid}."})
+        return _json({
+            "ok": False, "cancelled": False,
+            "error": f"Post {pid} is already '{existing.status}' and cannot be cancelled.",
+        })
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("x_cancel_scheduled_post failed")
+        return _json({"ok": False, "cancelled": False, "error": str(exc)})

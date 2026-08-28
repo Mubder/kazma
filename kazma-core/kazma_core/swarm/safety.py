@@ -69,7 +69,12 @@ _DEFAULT_APPROVAL_TIMEOUT = 60.0  # seconds
 
 # Defensive fallback when safety.hitl cannot be imported (mirrors the ALWAYS
 # set — YOLO must never widen beyond this on an import failure).
-_ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({"x_post", "x_delete_post"})
+_ALWAYS_HITL_FALLBACK: frozenset[str] = frozenset({
+    "x_post",
+    "x_delete_post",
+    "x_schedule_post",
+    "x_cancel_scheduled_post",
+})
 
 
 class SafetyViolationError(Exception):

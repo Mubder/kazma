@@ -183,6 +183,60 @@ def check_cron() -> dict[str, Any]:
         return {"status": "failed", "component": "cron", "error": "check failed"}
 
 
+def check_schedulers() -> dict[str, Any]:
+    """Both schedulers in one check, because Kazma has two by design.
+
+    ``CronScheduler`` wakes the agent with a PROMPT at time T; the X fire
+    loop publishes a fixed PAYLOAD at time T. They are not duplicates -- one
+    is non-deterministic and costs LLM tokens, the other is deterministic and
+    costs nothing -- but a partial outage of either is invisible without
+    this, and "scheduled work silently stopped" is the failure mode that
+    started this project.
+
+    Overdue counts are reported but do NOT mark the check degraded: both
+    schedulers fire overdue work on their next poll by design, so a non-zero
+    count during a sweep is normal rather than a fault.
+    """
+    out: dict[str, Any] = {"status": "ok", "component": "schedulers"}
+    problems: list[str] = []
+
+    try:
+        from kazma_core.cron.scheduler import get_cron_scheduler
+
+        sched = get_cron_scheduler()
+        if sched is None:
+            out["cron"] = "not_initialized"
+        else:
+            running = bool(getattr(sched, "_running", False))
+            out["cron"] = "running" if running else "stopped"
+            if not running:
+                problems.append("cron scheduler stopped")
+    except Exception:
+        out["cron"] = "error"
+        problems.append("cron check failed")
+
+    try:
+        from kazma_core.x_api.scheduled_fire import get_scheduled_x_task
+
+        task = get_scheduled_x_task()
+        if task is None:
+            out["x_posts"] = "not_started"
+        elif task.done():
+            # A finished fire loop is silent, permanent, and looks identical
+            # to "nothing scheduled" from outside.
+            out["x_posts"] = "stopped"
+            problems.append("X fire loop is no longer running")
+        else:
+            out["x_posts"] = "running"
+    except Exception:
+        out["x_posts"] = "unavailable"
+
+    if problems:
+        out["status"] = "degraded"
+        out["problems"] = problems
+    return out
+
+
 def check_llm_provider() -> dict[str, Any]:
     """Is an LLM provider configured with usable credentials?
 
@@ -308,6 +362,7 @@ async def readiness():
     # invisible to every health endpoint (audit 2026-08-28).
     checks["mcp"] = check_mcp()
     checks["cron"] = check_cron()
+    checks["schedulers"] = check_schedulers()
     checks["llm_provider"] = check_llm_provider()
     
     # Determine overall status — database + config_store are critical

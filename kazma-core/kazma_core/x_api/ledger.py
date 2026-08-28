@@ -130,6 +130,27 @@ class XPostLedger:
             finally:
                 conn.close()
 
+    def text_for_tweet(self, tweet_id: str) -> str:
+        """Return the stored text preview for a tweet id ("" when unknown).
+
+        Used by the audit-log enrichment to show what a *delete* row removed —
+        the delete request body carries no text, only the id.
+        """
+        tid = str(tweet_id or "").strip()
+        if not tid:
+            return ""
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "SELECT text_preview FROM x_posts WHERE tweet_id = ? LIMIT 1",
+                    (tid,),
+                )
+                row = cur.fetchone()
+                return str(row["text_preview"] or "") if row is not None else ""
+            finally:
+                conn.close()
+
     def recent(self, limit: int = 10) -> list[dict[str, Any]]:
         lim = max(1, min(50, int(limit)))
         with self._lock:

@@ -659,6 +659,7 @@
 
         async loadXAudit() {
             this.xAudit.loading = true;
+            this.xAudit.detail = null;
             try {
                 const data = await this._fetch('/api/x/audit?limit=50');
                 if (data && data.ok) this.xAudit.entries = data.entries || [];

@@ -1309,6 +1309,16 @@ class KazmaAppBuilder:
             logger.warning("X API router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "x_api", "error": str(e)})
 
+        # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
+        try:
+            from kazma_ui.scheduled_api import create_scheduled_router
+
+            self.app.include_router(create_scheduled_router(self.agent, self.templates))
+            logger.info("Scheduled router mounted at /scheduled, /api/scheduled/*")
+        except Exception as e:
+            logger.warning("Scheduled router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "scheduled_api", "error": str(e)})
+
         # ── Documents API (shared DocumentIngestionService) ──
         # The router delegates to app.state.documents (wired in _on_startup).
         # Mounted unconditionally so the /documents page always has an API;
@@ -1748,6 +1758,20 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Cron] Failed to start: %s", e)
 
+        # ── Scheduled X posts fire loop ───────────────────────────────
+        # Deterministic publisher for scheduled X posts (X has no native
+        # post scheduling). Started here — the single boot entry — so it
+        # actually runs; honors KAZMA_X_SCHEDULE / KAZMA_X_POST live. The
+        # first poll also catches up any post missed while the server was
+        # down. Best-effort: never blocks boot.
+        try:
+            from kazma_core.x_api.scheduled_fire import start_scheduled_x_loop
+
+            await start_scheduled_x_loop()
+            logger.info("[X] Scheduled-post fire loop started")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[X] Failed to start scheduled-post fire loop: %s", e)
+
         # ── Lifecycle status notification: "started" (or "restarted") ─
         # Emitted once all subsystems are up. The notifier upgrades this to
         # "🔄 Restarted" when a recent graceful-shutdown marker exists, so
@@ -1855,6 +1879,14 @@ class KazmaAppBuilder:
                 logger.info("[app] Cron scheduler stopped")
         except Exception as e:
             logger.warning("[app] cron stop failed: %s", e)
+
+        # Stop the scheduled-X fire loop so no scheduled post fires mid-shutdown.
+        try:
+            from kazma_core.x_api.scheduled_fire import stop_scheduled_x_loop
+
+            await stop_scheduled_x_loop()
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[app] scheduled-X fire loop stop failed: %s", e)
 
         # 2) Drain swarm in-flight tasks
         try:

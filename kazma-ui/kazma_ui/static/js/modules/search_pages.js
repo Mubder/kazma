@@ -11,6 +11,7 @@ export const KAZMA_SEARCH_PAGES = [
     { href: "/swarm", title: "Swarm" },
     { href: "/knowledge", title: "Knowledge" },
     { href: "/replay", title: "Time Travel" },
+    { href: "/scheduled", title: "Scheduled" },
     { href: "/skills", title: "Skills" },
     { href: "/mcp", title: "MCP" },
     { href: "/settings", title: "Settings" },

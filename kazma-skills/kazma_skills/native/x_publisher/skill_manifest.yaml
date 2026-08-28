@@ -40,3 +40,32 @@ tools:
     category: social
     prompt_chain:
       - "احذف التغريدة (يتطلب موافقة)"
+  x_schedule_post:
+    arabic_name: "جدولة تغريدة"
+    description: >
+      Schedule a tweet to be posted automatically at a future time. HITL is
+      ALWAYS required at booking — the operator approves the exact draft and
+      time once. Kazma stores it and publishes it at the appointed time (X has
+      no native post scheduling). Daily/monthly caps and the 30-day duplicate
+      rule are enforced at booking. Args: text (required), when (required —
+      '5m', '1h', 'daily at 9am', or ISO timestamp), reply_to_id (optional).
+      The post fires only while the Kazma server is running.
+    category: social
+    prompt_chain:
+      - "جدول تغريدة لتنشر لاحقًا بعد موافقتي"
+  x_list_scheduled:
+    arabic_name: "عرض التغريدات المجدولة"
+    description: >
+      List scheduled X posts with their status (pending, fired, cancelled,
+      failed), text and fire time. Read-only.
+    category: social
+    prompt_chain:
+      - "اعرض التغريدات المجدولة"
+  x_cancel_scheduled_post:
+    arabic_name: "إلغاء تغريدة مجدولة"
+    description: >
+      Cancel a scheduled X post before it fires (releases its reserved quota).
+      HITL always required. Args: post_id (the scheduled post id).
+    category: social
+    prompt_chain:
+      - "ألغِ التغريدة المجدولة (يتطلب موافقة)"

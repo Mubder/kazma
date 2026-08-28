@@ -107,3 +107,38 @@ async def cancel_scheduled(job_id: str) -> str:
     except Exception as e:
         logger.error("Error cancelling scheduled task: %s", e)
         return f"Error cancelling scheduled task: {e}"
+
+
+async def edit_scheduled(job_id: str, timing: str = "", prompt: str = "") -> str:
+    """Edit an existing scheduled task's timing and/or prompt.
+
+    Provide at least one of timing or prompt. When timing is supplied it is
+    re-parsed and the job's next run is reset accordingly.
+
+    Args:
+        job_id: The unique identifier of the job to edit.
+        timing: New timing expression, e.g. '5m', '1h', 'daily at 9am' (optional).
+        prompt: New task prompt/goal (optional).
+
+    Returns:
+        JSON response with the updated job info.
+    """
+    from kazma_core.cron.scheduler import get_cron_scheduler
+
+    scheduler = get_cron_scheduler()
+    if scheduler is None:
+        return "Error: Cron scheduler not initialized."
+
+    if not (timing or "").strip() and not (prompt or "").strip():
+        return "Error: provide at least one of timing or prompt to edit."
+
+    try:
+        result = await scheduler.reschedule(
+            job_id,
+            timing=(timing or "").strip() or None,
+            prompt=(prompt or "").strip() or None,
+        )
+        return _json.dumps(result, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("Error editing scheduled task: %s", e)
+        return f"Error editing scheduled task: {e}"

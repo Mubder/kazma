@@ -161,3 +161,77 @@ def test_scheduler_is_registered_at_boot_and_held():
     assert "_start_daily_digest_scheduler()" in src
     fn = src.split("def _start_daily_digest_scheduler()", 1)[1][:1500]
     assert "_scheduler_tasks.add(task)" in fn
+
+
+# ── scheduler coverage (Phase 3) ──────────────────────────────────────
+
+
+class TestSchedulerHealth:
+    """Kazma has TWO schedulers, and that is deliberate.
+
+    CronScheduler wakes the agent with a PROMPT at time T; the X fire loop
+    publishes a fixed PAYLOAD at time T. One is non-deterministic and costs
+    LLM tokens, the other is deterministic and costs nothing. They are not
+    duplicates -- but a partial outage of either is invisible without a
+    check, and "scheduled work silently stopped" is the failure mode this
+    whole project is about.
+    """
+
+    def _check(self):
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "kazma-ui"))
+        from kazma_ui.health import check_schedulers
+
+        return check_schedulers
+
+    def test_reports_both_schedulers(self):
+        out = self._check()()
+        assert "cron" in out and "x_posts" in out
+
+    def test_a_finished_x_loop_is_degraded_not_ok(self, monkeypatch):
+        """A fire loop that has exited is silent, permanent, and looks
+        exactly like 'nothing scheduled' from outside."""
+        class _Done:
+            def done(self):
+                return True
+
+        monkeypatch.setattr(
+            "kazma_core.x_api.scheduled_fire.get_scheduled_x_task",
+            lambda: _Done(),
+        )
+        out = self._check()()
+        assert out["x_posts"] == "stopped"
+        assert out["status"] == "degraded"
+
+    def test_never_raises_when_a_scheduler_is_missing(self, monkeypatch):
+        monkeypatch.setattr(
+            "kazma_core.cron.scheduler.get_cron_scheduler",
+            lambda: (_ for _ in ()).throw(RuntimeError("gone")),
+        )
+        out = self._check()()
+        assert out["cron"] == "error"
+
+
+def test_cron_fires_overdue_jobs_after_downtime():
+    """Corrects an audit finding rather than implementing one.
+
+    The audit reported "no evidence a schedule missed during downtime is
+    ever recovered", based on grepping the logs for catch-up lines. There
+    are none -- because the recovery is implicit: due means now >= next_run,
+    so an overdue job fires on the next poll. It works and says nothing.
+    """
+    import sys
+    from datetime import UTC, datetime, timedelta
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "kazma-core"))
+    from kazma_core.cron.scheduler import CronScheduler
+
+    now = datetime.now(UTC)
+    missed = (now - timedelta(hours=8)).isoformat()
+    assert CronScheduler._is_due(missed, now) is True, (
+        "a job whose fire time passed while Kazma was down must still fire"
+    )
+    assert CronScheduler._is_due((now + timedelta(hours=1)).isoformat(), now) is False

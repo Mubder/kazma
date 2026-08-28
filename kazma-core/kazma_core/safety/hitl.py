@@ -109,6 +109,7 @@ TOOL_TIERS: dict[str, str] = {
     "python_exec": "danger",
     "schedule_task": "danger",
     "cancel_scheduled": "danger",
+    "edit_scheduled": "danger",
     "vault_retrieve": "danger",
     "vault_delete": "danger",
     "config_save": "danger",
@@ -135,6 +136,9 @@ TOOL_TIERS: dict[str, str] = {
     "email_categorize": "danger",
     "x_post": "danger",
     "x_delete_post": "danger",
+    "x_schedule_post": "danger",
+    "x_cancel_scheduled_post": "danger",
+    "x_list_scheduled": "read",
     "x_status": "read",
     # Unsafe — always blocked (reserved)
 }
@@ -150,6 +154,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "python_exec",
     "schedule_task",
     "cancel_scheduled",
+    "edit_scheduled",
     "vault_retrieve",
     "vault_delete",
     "config_save",
@@ -172,11 +177,20 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     # Official X API writes — also in ALWAYS_HITL_TOOLS (YOLO cannot skip).
     "x_post",
     "x_delete_post",
+    "x_schedule_post",
+    "x_cancel_scheduled_post",
 )
 
 # Public posts cannot be YOLO-skipped, granted, or run with HITL disabled.
 # X ToU / automation rules require a human to approve each outbound tweet.
-ALWAYS_HITL_TOOLS: frozenset[str] = frozenset({"x_post", "x_delete_post"})
+# Scheduling/cancelling a public post is an outbound X write too, so it is
+# gated the same way (approve once at booking).
+ALWAYS_HITL_TOOLS: frozenset[str] = frozenset({
+    "x_post",
+    "x_delete_post",
+    "x_schedule_post",
+    "x_cancel_scheduled_post",
+})
 
 # Backward-compatible alias used throughout the codebase / tests.
 DEFAULT_DANGER_TOOLS: list[str] = list(CANONICAL_DANGER_TOOLS)

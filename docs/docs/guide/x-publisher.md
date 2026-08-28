@@ -56,8 +56,24 @@ Media, polls, quote tweets, and v1.1 upload are **not** in this version (Free-ti
 | `x_status` | no | Configured?, handle, remaining caps. Never returns secrets. |
 | `x_post` | **always** | `text`, optional `reply_to_id` for a thread hop. |
 | `x_delete_post` | **always** | `tweet_id` from a previous post. |
+| `x_schedule_post` | **always** | `text` + `when` ('5m', '1h', 'daily at 9am', ISO) — schedule a post for later. |
+| `x_list_scheduled` | no | List scheduled X posts and their status. |
+| `x_cancel_scheduled_post` | **always** | Cancel a scheduled post before it fires. |
 
 Swarm workers stay capped by the commitment swarm-scope (outbound CRITICAL denied by default).
+
+## Scheduled posts
+
+X has **no native scheduled-post API** — the `/2/broadcasts/scheduled` endpoint schedules live *video* streams (it needs an RTMP `source_id`), and `POST /2/tweets` has no scheduling field. So Kazma owns the clock: a scheduled post is stored in `kazma-data/x_scheduled.db` and the scheduler fires `POST /2/tweets` directly at the appointed time (the same client-side pattern X's own docs describe).
+
+- **Approve once at booking.** `x_schedule_post` is always-HITL; you approve the exact draft + time when you book it. The fire is deterministic (no LLM re-reading the post).
+- **Caps + dedupe are reserved at booking.** Pending scheduled posts count toward the daily/monthly caps and the 30-day duplicate rule, so the schedule cannot be used to exceed them.
+- **Double-post guard.** A failed fire is never auto-retried on an ambiguous error (we can't know whether it reached X). A 429 is deferred by the Retry-After window (bounded); anything else is marked failed and you're notified.
+- **Kill-switch.** `KAZMA_X_SCHEDULE=0` disables scheduling (and `KAZMA_X_POST=0` disables posting entirely).
+
+**Honest limitation:** a scheduled post fires only while the Kazma server is running. If the server is down at fire time, the post is caught up on the next boot. X cannot hold the schedule for you.
+
+Manage scheduled posts (and all other scheduled tasks) in the **Scheduled** page, or via chat — both stay in sync.
 
 ## Audit log (2026-08)
 

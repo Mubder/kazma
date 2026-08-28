@@ -84,6 +84,10 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
                       ("event_ref|event_at", "fire_at|lead", "prompt")),
     "cancel_scheduled": (EffectKind.SCHEDULE, SemanticTier.HIGH, "cancel_job",
                          ("job_id",)),
+    # Editing a scheduled job mutates what runs autonomously; HITL gates it.
+    # act=None → audit-only in the commitment gate (no remind/cancel resolver).
+    "edit_scheduled": (EffectKind.SCHEDULE, SemanticTier.HIGH, None,
+                       ("job_id",)),
     # memory (graph cleanup + store — omitting these fail-closes merge/delete)
     "memory_store": (EffectKind.WRITE_MEMORY, SemanticTier.HIGH,
                      "store_fact|revise_fact",
@@ -153,6 +157,13 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "x_delete_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
                       ("tweet_id",)),
     "x_status": (EffectKind.READ, SemanticTier.NONE, None, ()),
+    # Scheduling a post is an outbound public write (approve once at booking);
+    # cancelling it is the matching outbound mutation. Both ALWAYS-HITL.
+    "x_schedule_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL, "send_outbound",
+                        ("text",)),
+    "x_cancel_scheduled_post": (EffectKind.OUTBOUND, SemanticTier.CRITICAL,
+                                "send_outbound", ("post_id",)),
+    "x_list_scheduled": (EffectKind.READ, SemanticTier.NONE, None, ()),
     # git / github
     "git_commit": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),
     "git_push_pull": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs", ()),

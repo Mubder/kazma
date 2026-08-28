@@ -413,6 +413,53 @@ class SQLiteCronStore:
         )
         await self._db.commit()
 
+    async def update_job(
+        self,
+        job_id: str,
+        *,
+        timing: str | None = None,
+        prompt: str | None = None,
+        next_run: str | None = None,
+    ) -> bool:
+        """Edit a job's timing/prompt/next_run in place (only supplied fields).
+
+        Returns True when the job existed and was updated. Used by the
+        reschedule path (chat ``edit_scheduled`` + the /scheduled page) so a
+        job can be modified without recreating it.
+        """
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
+        sets: list[str] = []
+        params: list[Any] = []
+        if timing is not None:
+            sets.append("timing = ?")
+            params.append(timing)
+        if prompt is not None:
+            sets.append("prompt = ?")
+            params.append(prompt)
+        if next_run is not None:
+            sets.append("next_run = ?")
+            params.append(next_run)
+            sets.append("status = 'pending'")
+        if not sets:
+            return False
+        params.append(job_id)
+        cursor = await self._db.execute(
+            f"UPDATE cron_jobs SET {', '.join(sets)} WHERE job_id = ?",
+            tuple(params),
+        )
+        await self._db.commit()
+        return cursor.rowcount > 0
+
+    async def job_exists(self, job_id: str) -> bool:
+        """True when a job row exists (any status)."""
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
+        async with self._db.execute(
+            "SELECT 1 FROM cron_jobs WHERE job_id = ?", (job_id,)
+        ) as cursor:
+            return await cursor.fetchone() is not None
+
     async def update_delivery_target(self, job_id: str, delivery_target: str) -> None:
         """Repair a job's delivery_target (self-heal from a sibling job)."""
         if self._db is None:
@@ -649,6 +696,47 @@ class CronScheduler:
         if cancelled:
             return {"status": "cancelled", "job_id": job_id}
         return {"status": "not_found", "job_id": job_id}
+
+    async def reschedule(
+        self,
+        job_id: str,
+        *,
+        timing: str | None = None,
+        prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Edit a scheduled job in place (its timing and/or prompt).
+
+        Re-parses ``timing`` (when supplied) into a fresh ``next_run`` and
+        resets the job to ``pending`` so the poll loop picks it up. Returns
+        ``not_found`` when the job does not exist. Mirrors the chat
+        ``edit_scheduled`` tool and backs the /scheduled page edit action.
+        """
+        if not await self._store.job_exists(job_id):
+            return {"status": "not_found", "job_id": job_id}
+
+        next_run: str | None = None
+        if timing:
+            try:
+                next_run = parse_timing(timing).isoformat()
+            except ValueError as exc:
+                return {"status": "error", "job_id": job_id, "error": str(exc)}
+
+        await self._store.update_job(
+            job_id,
+            timing=timing or None,
+            prompt=prompt or None,
+            next_run=next_run,
+        )
+        logger.info(
+            "[CronScheduler] Rescheduled %s (timing=%r prompt_edited=%s next_run=%s)",
+            job_id, timing or "(unchanged)", bool(prompt), next_run or "(unchanged)",
+        )
+        return {
+            "status": "rescheduled",
+            "job_id": job_id,
+            "timing": timing or "",
+            "next_run": next_run or "",
+        }
 
     async def _loop(self) -> None:
         """Check every N seconds for due jobs."""

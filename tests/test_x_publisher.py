@@ -62,8 +62,15 @@ def test_always_hitl_survives_yolo(monkeypatch: pytest.MonkeyPatch) -> None:
         cfg = {"enabled": True, "require_approval_for": set(CANONICAL_DANGER_TOOLS)}
         assert requires_approval("x_post", cfg) is True
         assert requires_approval("x_delete_post", cfg) is True
+        assert requires_approval("x_schedule_post", cfg) is True
+        assert requires_approval("x_cancel_scheduled_post", cfg) is True
         assert requires_approval("file_write", cfg) is False  # YOLO skips ordinary danger
-        assert ALWAYS_HITL_TOOLS == frozenset({"x_post", "x_delete_post"})
+        assert ALWAYS_HITL_TOOLS == frozenset({
+            "x_post",
+            "x_delete_post",
+            "x_schedule_post",
+            "x_cancel_scheduled_post",
+        })
     finally:
         from kazma_core.safety.hitl import reset_current_thread_id
 
