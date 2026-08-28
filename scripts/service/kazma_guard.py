@@ -366,18 +366,37 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
             if resp.status != 200:
                 return False, f"HTTP {resp.status}"
             raw = resp.read(4096).decode("utf-8", "replace")
+        # HTTP 200 IS the contract. /health/ready returns 503 only when a
+        # CRITICAL dependency (config store, database) is gone; a partial
+        # failure is reported as "degraded" with 200 and the explicit
+        # meaning "still accepts traffic".
+        #
+        # Restarting on any non-"ready" word would mean a single failing MCP
+        # server -- which happens routinely -- kills a perfectly good agent
+        # every 90 seconds forever. The guard restarts what the app says is
+        # unable to serve, not what it says is imperfect.
         try:
             data = json.loads(raw)
         except Exception:
             return True, "200 (unparsed body)"
         status = str(data.get("status", "")).lower()
-        if status in ("ready", "alive", "healthy", "ok"):
-            return True, status
-        failing = [
+        if status == "not_ready":
+            failing = [
+                k for k, v in (data.get("checks") or {}).items()
+                if isinstance(v, dict) and v.get("status") == "failed"
+            ]
+            return False, f"not_ready failing={failing or '?'}"
+        degraded = [
             k for k, v in (data.get("checks") or {}).items()
-            if isinstance(v, dict) and v.get("status") not in ("ok", "healthy")
+            if isinstance(v, dict)
+            and v.get("status") not in ("ok", "healthy", "not_initialized")
         ]
-        return False, f"status={status or '?'} failing={failing or '?'}"
+        detail = status or "200"
+        if degraded:
+            # Serving, but say so -- this is how a partial outage becomes
+            # visible in the guard log instead of passing silently.
+            detail = f"{detail} (degraded: {','.join(sorted(degraded)[:4])})"
+        return True, detail
     except urllib.error.URLError as exc:
         return False, f"unreachable: {getattr(exc, 'reason', exc)}"
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise

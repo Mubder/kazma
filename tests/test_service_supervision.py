@@ -72,14 +72,41 @@ def test_ready_status_is_healthy(monkeypatch):
     assert ok is True and detail == "ready"
 
 
-def test_degraded_status_is_unhealthy_and_names_the_failing_check(monkeypatch):
-    """A 200 with failing checks is NOT alive.
+def test_degraded_is_still_serving_and_is_not_restarted(monkeypatch):
+    """HTTP 200 is the contract, not the word in the body.
 
-    This is the case every OS supervisor misses: the process is up, the port
-    answers, and the agent does nothing useful.
+    /health/ready returns 503 only when a CRITICAL dependency is gone; a
+    partial failure is "degraded" with 200 and the explicit meaning "still
+    accepts traffic". Restarting on any non-"ready" word would mean one
+    failing MCP server -- which happens routinely -- killing a healthy agent
+    every 90 seconds forever.
     """
     body = json.dumps({
         "status": "degraded",
+        "checks": {"mcp": {"status": "degraded"}, "config_store": {"status": "ok"}},
+    })
+    _patch_urlopen(monkeypatch, _Resp(200, body))
+    ok, detail = guard.probe("http://x/health/ready", 1)
+    assert ok is True, "a degraded-but-serving app must not be restarted"
+    assert "mcp" in detail, "but the degradation must be visible in the log"
+
+
+def test_starting_is_not_treated_as_dead(monkeypatch):
+    """Uninitialised subsystems report not_initialized -> overall 'starting',
+    still HTTP 200. Killing that would restart the app during its own boot."""
+    body = json.dumps({
+        "status": "starting",
+        "checks": {"cron": {"status": "not_initialized"}},
+    })
+    _patch_urlopen(monkeypatch, _Resp(200, body))
+    ok, _ = guard.probe("http://x/health/ready", 1)
+    assert ok is True
+
+
+def test_not_ready_is_unhealthy_and_names_the_failing_check(monkeypatch):
+    """The one status that DOES mean stop routing traffic."""
+    body = json.dumps({
+        "status": "not_ready",
         "checks": {"database": {"status": "failed"}, "config_store": {"status": "ok"}},
     })
     _patch_urlopen(monkeypatch, _Resp(200, body))

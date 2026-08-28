@@ -13,8 +13,10 @@ each of the specific ways that broke the guard in production:
     FAKE_BOOT_DELAY_S     seconds before the port is bound (slow cold start)
     FAKE_EXIT_AFTER_S     exit abruptly this long after becoming ready
     FAKE_EXIT_CODE        exit code to use
-    FAKE_UNHEALTHY_AFTER_S  keep serving, but report degraded (the "alive but
-                          wedged" case no OS supervisor catches)
+    FAKE_NOT_READY_AFTER_S  report not_ready + 503: a CRITICAL dependency is
+                          gone and the app says stop routing traffic
+    FAKE_DEGRADED_AFTER_S   report degraded + 200: a partial failure that is
+                          explicitly still serving and must NOT be restarted
     FAKE_HANG_AFTER_S     stop answering entirely without exiting
     FAKE_NEVER_READY      bind nothing at all; run forever
     FAKE_PORT             port to bind (default 9099)
@@ -39,13 +41,14 @@ STARTED_AT = time.time()
 BOOT_DELAY_S = float(os.environ.get("FAKE_BOOT_DELAY_S", "0"))
 EXIT_AFTER_S = float(os.environ.get("FAKE_EXIT_AFTER_S", "0"))
 EXIT_CODE = int(os.environ.get("FAKE_EXIT_CODE", "1"))
-UNHEALTHY_AFTER_S = float(os.environ.get("FAKE_UNHEALTHY_AFTER_S", "0"))
+NOT_READY_AFTER_S = float(os.environ.get("FAKE_NOT_READY_AFTER_S", "0"))
+DEGRADED_AFTER_S = float(os.environ.get("FAKE_DEGRADED_AFTER_S", "0"))
 HANG_AFTER_S = float(os.environ.get("FAKE_HANG_AFTER_S", "0"))
 NEVER_READY = os.environ.get("FAKE_NEVER_READY", "").lower() in ("1", "true", "yes")
 PORT = int(os.environ.get("FAKE_PORT", "9099"))
 MARKER = os.environ.get("FAKE_MARKER", "")
 
-_state = {"hung": False, "unhealthy": False}
+_state = {"hung": False, "not_ready": False, "degraded": False}
 
 
 def _note(event: str) -> None:
@@ -78,10 +81,28 @@ class Handler(BaseHTTPRequestHandler):
                 "build": {"started_at": STARTED_AT, "commit": "fake"},
             }
         elif self.path.startswith("/health/ready"):
-            if _state["unhealthy"]:
+            if _state["not_ready"]:
+                # Critical dependency gone: the app itself says stop
+                # routing traffic. This is the only shape that should
+                # cause a restart.
+                raw = json.dumps({
+                    "status": "not_ready",
+                    "checks": {"database": {"status": "failed"}},
+                }).encode()
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+                return
+            if _state["degraded"]:
+                # Partial failure, explicitly still serving (200). A guard
+                # that restarts this kills a healthy agent over one bad
+                # MCP server.
                 body = {
                     "status": "degraded",
-                    "checks": {"database": {"status": "failed"}},
+                    "checks": {"mcp": {"status": "degraded"},
+                               "database": {"status": "ok"}},
                 }
             else:
                 body = {
@@ -131,13 +152,18 @@ def main() -> int:
         _note("hanging")
         _state["hung"] = True
 
+    def _not_ready():
+        _note("not_ready")
+        _state["not_ready"] = True
+
     def _degrade():
         _note("degraded")
-        _state["unhealthy"] = True
+        _state["degraded"] = True
 
     _timer(EXIT_AFTER_S, _die)
     _timer(HANG_AFTER_S, _hang)
-    _timer(UNHEALTHY_AFTER_S, _degrade)
+    _timer(NOT_READY_AFTER_S, _not_ready)
+    _timer(DEGRADED_AFTER_S, _degrade)
 
     server.serve_forever()
     return 0

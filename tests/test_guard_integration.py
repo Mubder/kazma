@@ -173,13 +173,32 @@ def test_a_wedged_child_is_killed_and_replaced(tmp_path):
         assert "unhealthy" in str(ev.get("reason", ""))
 
 
-def test_a_degraded_child_is_treated_as_dead(tmp_path):
-    """200 OK with a failed database check is NOT healthy."""
+def test_a_not_ready_child_is_restarted(tmp_path):
+    """503 / not_ready means a critical dependency is gone: restart it."""
     port = _free_port()
-    with GuardRun(tmp_path, port, FAKE_UNHEALTHY_AFTER_S="4", FAILURES="2") as g:
+    with GuardRun(tmp_path, port, FAKE_NOT_READY_AFTER_S="4", FAILURES="2") as g:
         g.wait_for("child.ready", timeout=60)
-        failed = g.wait_for("health.failed", timeout=60)
-        assert "database" in str(failed.get("detail", ""))
+        g.wait_for("health.failed", timeout=60)
+        g.wait_for("guard.restarting", timeout=90)
+
+
+def test_a_degraded_child_keeps_serving_and_is_not_restarted(tmp_path):
+    """The dangerous false positive.
+
+    /health/ready reports "degraded" with HTTP 200 when a NON-critical
+    dependency fails -- one bad MCP server, say -- and explicitly means
+    "still accepts traffic". A guard that restarts on any word other than
+    "ready" would kill a healthy agent every 90 seconds forever.
+    """
+    port = _free_port()
+    with GuardRun(tmp_path, port, FAKE_DEGRADED_AFTER_S="3",
+                  FAILURES="2", INTERVAL="2") as g:
+        g.wait_for("child.ready", timeout=60)
+        time.sleep(12)  # several probe cycles against a degraded server
+        assert g.count("guard.restarting") == 0, (
+            "a degraded-but-serving app must never be restarted"
+        )
+        assert g.count("child.spawned") == 1
 
 
 def test_a_child_that_never_binds_is_reaped_after_the_budget(tmp_path):

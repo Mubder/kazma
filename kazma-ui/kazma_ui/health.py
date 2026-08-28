@@ -125,6 +125,96 @@ def check_model_registry() -> dict[str, Any]:
         return {"status": "failed", "component": "model_registry", "error": "check failed"}
 
 
+def check_mcp() -> dict[str, Any]:
+    """Connected vs failed MCP servers.
+
+    MCP failed to connect 60 times in the eight days the audit covered, and
+    no health endpoint reported it. Tools silently vanish from the agent's
+    repertoire and it keeps planning around capabilities it no longer has,
+    so a partial outage is ``degraded`` -- visible -- rather than ok.
+    """
+    try:
+        from kazma_core.mcp import get_active_mcp_manager
+
+        manager = get_active_mcp_manager()
+        if manager is None:
+            return {"status": "not_initialized", "component": "mcp"}
+        errors = dict(getattr(manager, "connection_errors", {}) or {})
+        tools = 0
+        try:
+            listed = manager.list_tools() if hasattr(manager, "list_tools") else []
+            tools = len(listed or [])
+        except Exception:
+            tools = 0
+        if errors:
+            return {
+                "status": "degraded",
+                "component": "mcp",
+                "failed_servers": sorted(errors)[:10],
+                "failed": len(errors),
+                "tools": tools,
+            }
+        return {"status": "ok", "component": "mcp", "tools": tools}
+    except Exception as e:
+        logger.error("MCP health check failed: %s", e)
+        return {"status": "failed", "component": "mcp", "error": "check failed"}
+
+
+def check_cron() -> dict[str, Any]:
+    """Is the scheduler actually running, and how many jobs does it hold?
+
+    A stopped scheduler is indistinguishable from "no jobs due" without
+    this: scheduled work simply never fires and nothing says so.
+    """
+    try:
+        from kazma_core.cron.scheduler import get_cron_scheduler
+
+        sched = get_cron_scheduler()
+        if sched is None:
+            return {"status": "not_initialized", "component": "cron"}
+        running = bool(getattr(sched, "_running", False))
+        return {
+            "status": "ok" if running else "stopped",
+            "component": "cron",
+            "running": running,
+        }
+    except Exception as e:
+        logger.error("Cron health check failed: %s", e)
+        return {"status": "failed", "component": "cron", "error": "check failed"}
+
+
+def check_llm_provider() -> dict[str, Any]:
+    """Is an LLM provider configured with usable credentials?
+
+    Deliberately does NOT call the provider: a health endpoint that bills
+    money and takes seconds gets polled less, or not at all. This reports
+    configuration, which is what actually breaks -- a missing key after an
+    edit, or a profile pointing at nothing.
+    """
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        registry = get_model_registry()
+        if registry is None:
+            return {"status": "not_initialized", "component": "llm_provider"}
+        profile = registry.get_active_profile() or {}
+        model = str(profile.get("model") or "")
+        base_url = str(profile.get("base_url") or "")
+        key = str(profile.get("api_key") or "")
+        needs_key = base_url.startswith("http") and "localhost" not in base_url             and "127.0.0.1" not in base_url
+        if not model:
+            return {"status": "degraded", "component": "llm_provider",
+                    "error": "no active model"}
+        if needs_key and key in ("", "not-needed"):
+            return {"status": "degraded", "component": "llm_provider",
+                    "model": model, "error": "no API key for a remote provider"}
+        return {"status": "ok", "component": "llm_provider", "model": model}
+    except Exception as e:
+        logger.error("LLM provider health check failed: %s", e)
+        return {"status": "failed", "component": "llm_provider",
+                "error": "check failed"}
+
+
 def check_agent_runner() -> dict[str, Any]:
     """Check AgentRunner availability (structural — module + class importable).
 
@@ -214,6 +304,11 @@ async def readiness():
     checks["swarm_engine"] = check_swarm_engine()
     checks["model_registry"] = check_model_registry()
     checks["agent_runner"] = check_agent_runner()
+    # The three components that actually failed in production and were
+    # invisible to every health endpoint (audit 2026-08-28).
+    checks["mcp"] = check_mcp()
+    checks["cron"] = check_cron()
+    checks["llm_provider"] = check_llm_provider()
     
     # Determine overall status — database + config_store are critical
     critical_failed = [
