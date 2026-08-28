@@ -184,25 +184,36 @@ class Notifier:
 
     def __init__(self, log: GuardLog) -> None:
         self._log = log
-        token = (
+        # ENV ONLY here. Resolving from the vault means importing
+        # kazma_core, which is a heavy application import -- and this
+        # constructor runs before supervision begins. When that import was
+        # slow, the guard started, blocked, and logged NOTHING, so it looked
+        # dead while the server stayed down (live, 2026-08-28 12:37).
+        # Credential lookup must never sit on the critical path of starting
+        # supervision, so the vault is consulted lazily on first use.
+        self.token = (
             os.environ.get("KAZMA_GUARD_TELEGRAM_TOKEN")
             or os.environ.get("SWARM_BOT_TOKEN")
             or ""
         ).strip()
-        chat = (
+        self.chat = (
             os.environ.get("KAZMA_GUARD_TELEGRAM_CHAT")
             or os.environ.get("SWARM_CHAT_ID")
             or ""
         ).strip()
-        if not (token and chat):
-            v_token, v_chat = self._from_config_store()
-            token = token or v_token
-            chat = chat or v_chat
-        self.token = token
-        self.chat = chat
-        self._source = "env" if os.environ.get(
-            "KAZMA_GUARD_TELEGRAM_TOKEN"
-        ) or os.environ.get("SWARM_BOT_TOKEN") else "vault"
+        self._source = "env" if (self.token and self.chat) else "unresolved"
+        self._resolved = bool(self.token and self.chat)
+
+    def _resolve(self) -> None:
+        """Fill in missing credentials from the vault. Once, lazily."""
+        if self._resolved:
+            return
+        self._resolved = True
+        v_token, v_chat = self._from_config_store()
+        self.token = self.token or v_token
+        self.chat = self.chat or v_chat
+        if self.token and self.chat:
+            self._source = "vault"
 
     def _from_config_store(self) -> tuple[str, str]:
         """Resolve token + chat from the app's config store. Never raises."""
@@ -223,10 +234,12 @@ class Notifier:
 
     @property
     def configured(self) -> bool:
+        self._resolve()
         return bool(self.token and self.chat)
 
     def describe(self) -> str:
         """Safe-to-log description. Never includes the token."""
+        self._resolve()
         if not self.configured:
             return "not configured"
         return f"telegram via {self._source} -> chat {self.chat}"
@@ -539,11 +552,17 @@ class Guard:
 
     def run(self) -> int:
         self._install_signals()
+        # Logged FIRST, and with nothing that can block: if the guard is
+        # alive, this line exists. Anything slower (credential resolution)
+        # comes after, so a hang is diagnosable instead of silent.
         self.log(
             "info", "guard.start",
-            cmd=" ".join(self.cmd), cwd=str(self.cwd),
-            health=self.health_url, notifier=self.notify.describe(),
+            cmd=" ".join(self.cmd), cwd=str(self.cwd), health=self.health_url,
         )
+        # NOT resolved here. describe() reaches into the vault, which means
+        # importing kazma_core -- measured at tens of seconds on a cold
+        # cache. Doing it before spawning delays the server by exactly that
+        # long for a log line. It is emitted after the child is up instead.
 
         # Order matters: reap a known orphan from a previous guard FIRST,
         # then check whether anything else is serving. Reversed, a booting
@@ -573,6 +592,11 @@ class Guard:
                     "Kazma is up." if first
                     else f"Kazma restarted and is healthy (restart #{self.restarts})."
                 )
+                if first:
+                    # Safe to resolve now: the server is already running, so
+                    # a slow vault import costs nothing but a delayed alert.
+                    self.log("info", "guard.notifier",
+                             target=self.notify.describe())
                 self.notify.send(msg)
                 first = False
                 reason = self._supervise()

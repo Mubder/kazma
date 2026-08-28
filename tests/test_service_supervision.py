@@ -521,3 +521,37 @@ def test_missing_build_info_does_not_block_readiness(monkeypatch, tmp_path):
     monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
     monkeypatch.setattr(guard, "server_started_at", lambda url, t: None)
     assert guard.Guard._wait_ready(g, 1000.0) is True
+
+
+def test_startup_never_blocks_on_credential_resolution():
+    """The guard must reach spawn() without importing kazma_core.
+
+    Resolving the vault means importing the application -- tens of seconds
+    on a cold cache. With that on the startup path the guard logged nothing
+    and the server stayed down while it waited (live, 2026-08-28 12:37).
+    """
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    spawn_at = src.index("spawn(self.cmd")
+    # describe() is the vault-touching call; it must not appear before spawn
+    # Match the CALL, not the comment that explains why it was moved.
+    head = src[:spawn_at]
+    assert "self.notify.describe()" not in head, (
+        "credential resolution must not precede spawn"
+    )
+    assert 'guard.start' in head, "the guard must announce itself first"
+
+
+def test_notifier_constructor_touches_only_env(monkeypatch, tmp_path):
+    """Construction must not import the app; that is what made it hang."""
+    called = {"vault": False}
+    monkeypatch.setattr(
+        guard.Notifier, "_from_config_store",
+        lambda self: (called.__setitem__("vault", True), ("", ""))[1],
+    )
+    for var in ("KAZMA_GUARD_TELEGRAM_TOKEN", "KAZMA_GUARD_TELEGRAM_CHAT",
+                "SWARM_BOT_TOKEN", "SWARM_CHAT_ID"):
+        monkeypatch.delenv(var, raising=False)
+    guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
+    assert called["vault"] is False, "constructor must not reach the vault"
