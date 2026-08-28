@@ -98,6 +98,11 @@ CRASH_LOOP_COOLDOWN_S = 1800
 
 TERMINATE_GRACE_S = 20.0
 
+# A server whose build.started_at predates our spawn by more than this is
+# NOT the child we launched -- it is an orphan or another install that won
+# the port. Small negative slack absorbs clock jitter only.
+FOREIGN_SERVER_SLACK_S = 5.0
+
 
 def _default_log_path() -> Path:
     env = os.environ.get("KAZMA_GUARD_LOG")
@@ -245,6 +250,32 @@ class Notifier:
 
 
 # -- health probe -----------------------------------------------------
+
+
+def _live_url(ready_url: str) -> str:
+    """Derive /health/live from the configured readiness URL."""
+    if ready_url.endswith("/health/ready"):
+        return ready_url[: -len("/ready")] + "/live"
+    return ready_url
+
+
+def server_started_at(ready_url: str, timeout: float) -> float | None:
+    """Unix time the CURRENTLY SERVING process booted, or None.
+
+    ``/health/live`` reports ``build.started_at``. Comparing it against the
+    moment we spawned our child answers the question no port check can:
+    *is the thing answering actually the thing I launched?*
+    """
+    try:
+        req = urllib.request.Request(_live_url(ready_url), method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            data = json.loads(resp.read(4096).decode("utf-8", "replace"))
+        val = (data.get("build") or {}).get("started_at")
+        return float(val) if val is not None else None
+    except Exception:
+        return None
 
 
 def probe(url: str, timeout: float) -> tuple[bool, str]:
@@ -423,7 +454,7 @@ class Guard:
             except Exception:
                 pass
 
-    def _wait_ready(self) -> bool:
+    def _wait_ready(self, spawned_at: float) -> bool:
         """Poll until the server reports ready or the start budget expires.
 
         A child that EXITS is failure detected instantly. The budget only
@@ -442,6 +473,16 @@ class Guard:
                 return False
             ok, detail = probe(self.health_url, PROBE_TIMEOUT_S)
             if ok:
+                # Is the thing answering actually the thing we launched?
+                # After a restart, an orphan holding the port answers this
+                # probe perfectly, and the guard would supervise a stranger
+                # while reporting healthy (live, 2026-08-28 12:33).
+                boot = server_started_at(self.health_url, PROBE_TIMEOUT_S)
+                if boot is not None and boot < spawned_at - FOREIGN_SERVER_SLACK_S:
+                    self.log("error", "child.foreign_server_holds_port",
+                             server_started_at=boot, our_child_spawned_at=spawned_at,
+                             note="another process owns the port; not supervising it")
+                    return False
                 self.log("info", "child.ready",
                          detail=detail, after_s=round(time.monotonic() - started, 1))
                 return True
@@ -524,9 +565,10 @@ class Guard:
 
         first = True
         while not self._stop:
+            spawned_at = time.time()
             self.proc = spawn(self.cmd, self.cwd, self.log)
 
-            if self._wait_ready():
+            if self._wait_ready(spawned_at):
                 msg = (
                     "Kazma is up." if first
                     else f"Kazma restarted and is healthy (restart #{self.restarts})."

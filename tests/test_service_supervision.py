@@ -464,3 +464,60 @@ def test_start_budget_survives_a_cold_boot():
     """180s killed a healthy boot three minutes in, every time. Kazma loads
     a local embedding model before it can answer."""
     assert guard.START_TIMEOUT_S >= 600
+
+
+# ── ownership: is the server answering actually OUR child? ────────────
+
+
+def test_live_url_is_derived_from_the_ready_url():
+    assert guard._live_url("http://h:9090/health/ready") == "http://h:9090/health/live"
+    # a custom endpoint is left alone rather than mangled
+    assert guard._live_url("http://h/custom") == "http://h/custom"
+
+
+def test_ready_is_rejected_when_the_server_predates_our_child(monkeypatch, tmp_path):
+    """The failure a port check cannot catch.
+
+    After a restart, an orphan holding the port answers /health/ready
+    perfectly. The guard would declare its own child ready and supervise a
+    stranger while reporting healthy (live, 2026-08-28 12:33: server booted
+    at 12:33:12, our child spawned at 12:33:31).
+    """
+    g = guard.Guard.__new__(guard.Guard)
+    g.log = guard.GuardLog(tmp_path / "g.log")
+    g.health_url = "http://127.0.0.1:9090/health/ready"
+    g._stop = False
+    g.proc = type("P", (), {"poll": lambda self: None})()
+
+    spawned_at = 1000.0
+    monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
+    # server booted BEFORE we spawned -> not ours
+    monkeypatch.setattr(guard, "server_started_at", lambda url, t: spawned_at - 60)
+    assert guard.Guard._wait_ready(g, spawned_at) is False
+
+
+def test_ready_is_accepted_when_the_server_is_our_child(monkeypatch, tmp_path):
+    g = guard.Guard.__new__(guard.Guard)
+    g.log = guard.GuardLog(tmp_path / "g.log")
+    g.health_url = "http://127.0.0.1:9090/health/ready"
+    g._stop = False
+    g.proc = type("P", (), {"poll": lambda self: None})()
+
+    spawned_at = 1000.0
+    monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
+    monkeypatch.setattr(guard, "server_started_at", lambda url, t: spawned_at + 40)
+    assert guard.Guard._wait_ready(g, spawned_at) is True
+
+
+def test_missing_build_info_does_not_block_readiness(monkeypatch, tmp_path):
+    """Older builds may not expose build.started_at. Absence of evidence
+    must not be treated as evidence of a stranger."""
+    g = guard.Guard.__new__(guard.Guard)
+    g.log = guard.GuardLog(tmp_path / "g.log")
+    g.health_url = "http://127.0.0.1:9090/health/ready"
+    g._stop = False
+    g.proc = type("P", (), {"poll": lambda self: None})()
+
+    monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
+    monkeypatch.setattr(guard, "server_started_at", lambda url, t: None)
+    assert guard.Guard._wait_ready(g, 1000.0) is True
