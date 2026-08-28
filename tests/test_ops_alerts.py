@@ -188,3 +188,68 @@ class TestSilentFailuresAreWired:
                 # the import must be preceded by a `try:` within a few lines
                 head = src[max(0, m.start() - 200):m.start()]
                 assert "try:" in head, f"unguarded ops_alerts import in {rel}"
+
+
+# ── delivery must never silently succeed ──────────────────────────────
+
+
+class TestDeliveryIsNeverSilent:
+    """The bug the author shipped and then claimed to have verified.
+
+    alert() returned True meaning "the throttle decided to send". In any
+    process the gateway did not initialise -- a worker, a CLI command, a
+    script -- the bus adapter is NullBusAdapter, and the first version of
+    _deliver simply RETURNED there. Success reported, nothing delivered:
+    the same "looks fine, does nothing" failure this project exists to
+    eliminate, reproduced inside the tool built to report it.
+    """
+
+    def test_no_bus_and_no_credentials_reports_failure_loudly(
+        self, monkeypatch, caplog
+    ):
+        import asyncio
+
+        class _Null:
+            pass
+
+        monkeypatch.setattr(
+            ops_alerts, "_telegram_direct", lambda text: False
+        )
+        monkeypatch.setattr(
+            "kazma_core.swarm.bus.get_message_bus",
+            lambda: type("B", (), {"adapter": _Null()})(),
+        )
+        with caplog.at_level("WARNING"):
+            delivered = asyncio.run(ops_alerts._deliver("x"))
+        assert delivered is False, "must not claim success"
+
+    def test_falls_back_to_direct_send_when_there_is_no_bus(self, monkeypatch):
+        """An alert raised from a worker still has to reach the operator."""
+        import asyncio
+
+        from kazma_core.swarm.bus import NullBusAdapter
+
+        monkeypatch.setattr(
+            "kazma_core.swarm.bus.get_message_bus",
+            lambda: type("B", (), {"adapter": NullBusAdapter()})(),
+        )
+        used: list[str] = []
+        monkeypatch.setattr(
+            ops_alerts, "_telegram_direct",
+            lambda text: (used.append(text), True)[1],
+        )
+        assert asyncio.run(ops_alerts._deliver("hello")) is True
+        assert used == ["hello"], "the direct path must actually be used"
+
+    def test_missing_credentials_logs_what_is_missing(self, monkeypatch, caplog):
+        """A silent no-op is what made this invisible; name the gap."""
+        class _CS:
+            def get(self, *_a, **_k):
+                return ""
+
+        monkeypatch.setattr(
+            "kazma_core.config_store.get_config_store", lambda: _CS()
+        )
+        with caplog.at_level("WARNING"):
+            assert ops_alerts._telegram_direct("x") is False
+        assert any("NOT DELIVERED" in r.message for r in caplog.records)

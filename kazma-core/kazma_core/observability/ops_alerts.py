@@ -35,7 +35,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -139,23 +139,87 @@ def _format(severity: str, title: str, detail: str, suppressed: int,
     return text
 
 
-async def _deliver(text: str) -> None:
-    from kazma_core.swarm.bus import BusMessage, NullBusAdapter, get_message_bus
+def _telegram_direct(text: str) -> bool:
+    """Send straight to Telegram, bypassing the in-process bus.
 
-    bus = get_message_bus()
-    adapter = bus.adapter
-    if isinstance(adapter, NullBusAdapter):
-        return  # no platform configured (or under pytest)
-    await asyncio.wait_for(
-        adapter.send(
-            BusMessage(
-                worker_name="Kazma",
-                worker_role="ops",
-                content=text[:4000],
-                level="warn",
+    The bus adapter only exists in the process the gateway initialised. An
+    alert raised from a worker, a CLI command, or a standalone script gets
+    ``NullBusAdapter`` -- and the first version of this module simply
+    RETURNED there, reporting success while delivering nothing. That is the
+    same "looks fine, does nothing" failure this whole project is about,
+    and it fooled its own author on 2026-08-28.
+
+    Credentials come from the vault the same way the supervisor reads them,
+    over stdlib urllib so this works with nothing else initialised.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        token = str(cs.get("connectors.telegram.token", "") or "").strip()
+        chat = (
+            str(cs.get("guard.telegram.chat_id", "") or "").strip()
+            or str(cs.get("swarm.group_chat_id", "") or "").strip()
+        )
+        if not (token and chat):
+            logger.warning(
+                "[ops_alerts] NOT DELIVERED: no bus adapter and no Telegram "
+                "credentials (connectors.telegram.token / "
+                "guard.telegram.chat_id). The alert exists only in this log."
             )
-        ),
-        timeout=10.0,
+            return False
+
+        import urllib.parse
+        import urllib.request
+
+        body = urllib.parse.urlencode({
+            "chat_id": chat,
+            "text": text[:4000],
+            "disable_web_page_preview": "true",
+        }).encode()
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=body, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10):
+            pass
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[ops_alerts] Telegram delivery failed: %s", exc)
+        return False
+
+
+async def _deliver(text: str) -> bool:
+    """Deliver an alert. Returns whether it actually went anywhere.
+
+    Prefers the in-process bus (it reaches every configured platform, not
+    just Telegram) and falls back to a direct send. Silence is never an
+    acceptable outcome here: if neither works, that is logged at WARNING
+    rather than swallowed.
+    """
+    try:
+        from kazma_core.swarm.bus import BusMessage, NullBusAdapter, get_message_bus
+
+        adapter = get_message_bus().adapter
+        if not isinstance(adapter, NullBusAdapter):
+            await asyncio.wait_for(
+                adapter.send(
+                    BusMessage(
+                        worker_name="Kazma",
+                        worker_role="ops",
+                        content=text[:4000],
+                        level="warn",
+                    )
+                ),
+                timeout=10.0,
+            )
+            return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[ops_alerts] bus delivery failed, trying direct: %s", exc)
+
+    # No platform bus in this process (worker/CLI/script) -- go direct.
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _telegram_direct, text
     )
 
 
@@ -170,18 +234,23 @@ def _dispatch(text: str) -> None:
         # Already on an event loop: fire and forget. Never await here — the
         # caller is usually inside an exception handler on a hot path.
         task = loop.create_task(_deliver(text))
-        task.add_done_callback(
-            lambda t: t.exception() and logger.debug(
-                "[ops_alerts] delivery failed: %s", t.exception()
-            )
-        )
+
+        def _report(t: asyncio.Task) -> None:
+            exc = t.exception() if not t.cancelled() else None
+            if exc is not None:
+                logger.warning("[ops_alerts] delivery raised: %s", exc)
+            elif t.done() and t.result() is False:
+                logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+
+        task.add_done_callback(_report)
         return
 
     def _run() -> None:
         try:
-            asyncio.run(_deliver(text))
+            if not asyncio.run(_deliver(text)):
+                logger.warning("[ops_alerts] alert was NOT delivered anywhere")
         except Exception as exc:  # noqa: BLE001
-            logger.debug("[ops_alerts] delivery failed: %s", exc)
+            logger.warning("[ops_alerts] delivery raised: %s", exc)
 
     threading.Thread(target=_run, name="ops-alert", daemon=True).start()
 
