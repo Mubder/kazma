@@ -40,10 +40,11 @@ Configuration (all optional, env vars):
     KAZMA_GUARD_CMD             command to run       (default: serve.py)
     KAZMA_GUARD_CWD             working directory    (default: repo root)
     KAZMA_GUARD_HEALTH_URL      health endpoint      (default: :9090/health/ready)
-    KAZMA_GUARD_START_TIMEOUT   seconds to first ready       (default: 180)
+    KAZMA_GUARD_START_TIMEOUT   seconds to first ready       (default: 900)
     KAZMA_GUARD_INTERVAL        seconds between probes       (default: 30)
     KAZMA_GUARD_FAILURES        consecutive fails = dead     (default: 3)
     KAZMA_GUARD_LOG             guard log path
+    KAZMA_GUARD_STATE           child-PID state file (orphan reaping)
     KAZMA_GUARD_TELEGRAM_TOKEN  bot token (falls back to SWARM_BOT_TOKEN)
     KAZMA_GUARD_TELEGRAM_CHAT   chat id   (falls back to SWARM_CHAT_ID)
 """
@@ -69,7 +70,18 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULT_HEALTH_URL = "http://127.0.0.1:9090/health/ready"
-START_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_START_TIMEOUT", "180"))
+
+# Kazma's cold start is SLOW: it loads a local embedding model (bge-m3),
+# connects MCP servers, hydrates the config store and warms the graph. The
+# first version of this guard budgeted 180s and killed a perfectly healthy
+# boot three minutes in, every time -- turning a working agent into a
+# restart loop (live, 2026-08-28 12:22). Measured cold start on the
+# reference host is ~3-5 minutes, so the budget is 15 with room to spare.
+#
+# Being generous here is safe because a child that has genuinely DIED is
+# detected immediately by poll() rather than by this timeout; the budget
+# only bounds the "started but never answered" case.
+START_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_START_TIMEOUT", "900"))
 PROBE_INTERVAL_S = float(os.environ.get("KAZMA_GUARD_INTERVAL", "30"))
 PROBE_TIMEOUT_S = float(os.environ.get("KAZMA_GUARD_PROBE_TIMEOUT", "10"))
 FAILURES_TO_KILL = int(os.environ.get("KAZMA_GUARD_FAILURES", "3"))
@@ -92,6 +104,23 @@ def _default_log_path() -> Path:
     if env:
         return Path(env)
     return Path.home() / ".kazma" / "guard.log"
+
+
+def _state_path() -> Path:
+    """Where the guard records the PID of the child it launched.
+
+    Windows' Stop-ScheduledTask terminates the guard without giving it a
+    chance to clean up, which ORPHANS the server it launched. The next
+    guard then starts a second one, and two agents race for the port while
+    sharing one Postgres and one workspace (live, 2026-08-28 12:26).
+
+    Recording the child PID on disk lets the next guard find and reap that
+    orphan before spawning, which no in-memory state could survive to do.
+    """
+    env = os.environ.get("KAZMA_GUARD_STATE")
+    if env:
+        return Path(env)
+    return Path.home() / ".kazma" / "guard.state.json"
 
 
 # -- logging (deliberately not the app's logger) ----------------------
@@ -256,6 +285,71 @@ def build_command() -> list[str]:
     return [sys.executable, "serve.py"]
 
 
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        if os.name == "nt":
+            out = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True, timeout=15, check=False,
+            ).stdout
+            return str(pid) in out
+        os.kill(pid, 0)
+        return True
+    except Exception:
+        return False
+
+
+def reap_orphan(log: GuardLog) -> None:
+    """Kill a server left behind by a previous guard, before spawning ours.
+
+    Without this, every hard stop of the guard (Stop-ScheduledTask, a task
+    restart, a machine going to sleep mid-run) leaves the server running
+    and the next guard starts a SECOND one.
+    """
+    path = _state_path()
+    try:
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8") or "{}")
+        pid = int(data.get("child_pid") or 0)
+    except Exception:
+        return
+    if not pid or pid == os.getpid() or not _pid_alive(pid):
+        return
+    log("warn", "orphan.reaping", pid=pid,
+        note="left by a previous guard that was killed without cleanup")
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, timeout=30, check=False)
+        else:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+    except Exception as exc:
+        log("error", "orphan.reap_failed", pid=pid, error=str(exc)[:200])
+        return
+    # Give the OS a moment to release the listening socket.
+    for _ in range(20):
+        if not _pid_alive(pid):
+            break
+        time.sleep(0.5)
+    log("info", "orphan.reaped", pid=pid)
+
+
+def _record_child(pid: int | None) -> None:
+    """Persist (or clear) the child PID. Never raises."""
+    try:
+        path = _state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"child_pid": pid or 0, "guard_pid": os.getpid()}),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
 def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     kwargs: dict = {"cwd": str(cwd)}
     if os.name == "nt":
@@ -265,6 +359,7 @@ def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     else:
         kwargs["start_new_session"] = True
     proc = subprocess.Popen(cmd, **kwargs)
+    _record_child(proc.pid)
     log("info", "child.spawned", pid=proc.pid, cmd=" ".join(cmd))
     return proc
 
@@ -296,6 +391,7 @@ def stop_child(proc: subprocess.Popen, log: GuardLog) -> None:
             proc.kill()
         except Exception:
             pass
+    _record_child(None)
 
 
 # -- supervisor -------------------------------------------------------
@@ -328,20 +424,39 @@ class Guard:
                 pass
 
     def _wait_ready(self) -> bool:
-        """Poll until the server reports ready or the start budget expires."""
-        deadline = time.monotonic() + START_TIMEOUT_S
+        """Poll until the server reports ready or the start budget expires.
+
+        A child that EXITS is failure detected instantly. The budget only
+        bounds the slower "running but never answered" case, so it can
+        afford to be generous -- see START_TIMEOUT_S.
+        """
+        started = time.monotonic()
+        deadline = started + START_TIMEOUT_S
         last = ""
+        next_progress = started + 60.0
         while time.monotonic() < deadline and not self._stop:
             if self.proc and self.proc.poll() is not None:
-                self.log("error", "child.exited_during_startup", code=self.proc.returncode)
+                self.log("error", "child.exited_during_startup",
+                         code=self.proc.returncode,
+                         after_s=round(time.monotonic() - started, 1))
                 return False
             ok, detail = probe(self.health_url, PROBE_TIMEOUT_S)
             if ok:
-                self.log("info", "child.ready", detail=detail)
+                self.log("info", "child.ready",
+                         detail=detail, after_s=round(time.monotonic() - started, 1))
                 return True
             last = detail
+            # Heartbeat while waiting, so a slow boot is visibly different
+            # from a hang when someone reads this log at 3am.
+            if time.monotonic() >= next_progress:
+                self.log("info", "child.starting",
+                         waited_s=round(time.monotonic() - started),
+                         budget_s=START_TIMEOUT_S, last=last)
+                next_progress += 60.0
             time.sleep(3.0)
-        self.log("error", "child.never_ready", last=last, budget_s=START_TIMEOUT_S)
+        self.log("error", "child.never_ready", last=last,
+                 budget_s=START_TIMEOUT_S,
+                 waited_s=round(time.monotonic() - started, 1))
         return False
 
     def _backoff(self) -> float:
@@ -388,6 +503,12 @@ class Guard:
             cmd=" ".join(self.cmd), cwd=str(self.cwd),
             health=self.health_url, notifier=self.notify.describe(),
         )
+
+        # Order matters: reap a known orphan from a previous guard FIRST,
+        # then check whether anything else is serving. Reversed, a booting
+        # orphan is invisible to the probe (nothing bound yet) and both
+        # instances race for the port.
+        reap_orphan(self.log)
 
         if self._foreign_server_present():
             msg = (

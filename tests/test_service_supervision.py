@@ -14,6 +14,7 @@ platform.
 from __future__ import annotations
 
 import importlib.util
+import os
 import json
 import sys
 from pathlib import Path
@@ -387,3 +388,79 @@ def test_refusal_alerts_and_exits_nonzero(monkeypatch, tmp_path):
     rc = guard.Guard.run(g)
     assert rc == 2, "must not exit 0 and look like a success"
     assert sent and "already serving" in sent[0]
+
+
+# ── orphan reaping (live incident 2026-08-28 12:26) ───────────────────
+
+
+def test_child_pid_is_recorded_and_cleared(monkeypatch, tmp_path):
+    """In-memory state cannot survive the guard being killed outright.
+
+    Stop-ScheduledTask terminates the guard without cleanup, orphaning the
+    server. Only a PID written to disk lets the NEXT guard find it.
+    """
+    state = tmp_path / "guard.state.json"
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(state))
+    guard._record_child(4321)
+    assert json.loads(state.read_text())["child_pid"] == 4321
+    guard._record_child(None)
+    assert json.loads(state.read_text())["child_pid"] == 0
+
+
+def test_reaper_kills_a_live_orphan(monkeypatch, tmp_path):
+    state = tmp_path / "guard.state.json"
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(state))
+    state.write_text(json.dumps({"child_pid": 4321}), encoding="utf-8")
+
+    killed: list[list[str]] = []
+    alive = {"v": True}
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: alive["v"])
+
+    def _run(cmd, **kw):
+        killed.append(cmd)
+        alive["v"] = False
+        return type("R", (), {"returncode": 0})()
+
+    monkeypatch.setattr(guard.subprocess, "run", _run)
+    guard.reap_orphan(guard.GuardLog(tmp_path / "g.log"))
+    assert killed, "a live orphan must be killed before spawning a second server"
+    assert "4321" in " ".join(killed[0])
+
+
+def test_reaper_is_a_noop_when_the_orphan_is_gone(monkeypatch, tmp_path):
+    state = tmp_path / "guard.state.json"
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(state))
+    state.write_text(json.dumps({"child_pid": 4321}), encoding="utf-8")
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: False)
+
+    called = []
+    monkeypatch.setattr(guard.subprocess, "run",
+                        lambda cmd, **kw: called.append(cmd))
+    guard.reap_orphan(guard.GuardLog(tmp_path / "g.log"))
+    assert not called, "must not kill a PID that has already exited"
+
+
+def test_reaper_never_kills_itself(monkeypatch, tmp_path):
+    state = tmp_path / "guard.state.json"
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(state))
+    state.write_text(json.dumps({"child_pid": os.getpid()}), encoding="utf-8")
+    called = []
+    monkeypatch.setattr(guard.subprocess, "run",
+                        lambda cmd, **kw: called.append(cmd))
+    guard.reap_orphan(guard.GuardLog(tmp_path / "g.log"))
+    assert not called
+
+
+def test_reap_runs_before_the_foreign_server_check():
+    """A BOOTING orphan has bound nothing yet, so the health probe cannot
+    see it. Reaping must come first or both instances race for the port."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    assert src.index("reap_orphan(") < src.index("_foreign_server_present(")
+
+
+def test_start_budget_survives_a_cold_boot():
+    """180s killed a healthy boot three minutes in, every time. Kazma loads
+    a local embedding model before it can answer."""
+    assert guard.START_TIMEOUT_S >= 600
