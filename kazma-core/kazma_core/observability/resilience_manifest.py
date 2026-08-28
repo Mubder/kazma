@@ -134,6 +134,20 @@ MECHANISMS: tuple[Mechanism, ...] = (
         note="544 lines with zero call sites until Phase 4.",
     ),
     Mechanism(
+        name="restic snapshots and restore",
+        fault="backups that cannot be restored, are unencrypted, and never dedupe",
+        module="kazma_core.backup.restic_repo",
+        symbol="restore",
+        proof="tests/test_restic_repo.py",
+        proven_in_production=False,
+        note=(
+            "The restore half that never existed. Tests run against a real "
+            "restic binary: byte-identical round trip, secrets unreadable in "
+            "the repository, dedup across snapshots, and --read-data catching "
+            "a deliberately corrupted pack."
+        ),
+    ),
+    Mechanism(
         name="graph memory backup",
         fault="Neo4j lives in a Docker volume the backup sweep never walked",
         module="kazma_core.backup.neo4j_backup",

@@ -1,0 +1,279 @@
+"""Restic: the layer that finally makes a restore exist.
+
+These run against a REAL restic binary and a real repository in tmp_path,
+not a mock. The entire point of adopting restic is that its restore works;
+asserting that a mocked subprocess returned zero would prove nothing about
+the thing being bought.
+
+Skipped when restic is not installed, so CI on a bare runner stays green
+without silently pretending the round trip happened.
+"""
+
+from __future__ import annotations
+
+import os
+
+import pytest
+from kazma_core.backup import restic_repo as rr
+
+pytestmark = pytest.mark.skipif(
+    not rr.restic_available(), reason="restic is not installed"
+)
+
+_PW = "test-passphrase-not-a-real-secret"
+
+
+@pytest.fixture
+def repo(tmp_path):
+    path = str(tmp_path / "repo")
+    res = rr.init_repo(path, _PW)
+    assert res.ok, res.error
+    return path
+
+
+@pytest.fixture
+def payload(tmp_path):
+    d = tmp_path / "data"
+    (d / "dbs").mkdir(parents=True)
+    (d / "dbs" / "sessions.db").write_bytes(b"SQLite format 3\x00" + b"x" * 4096)
+    (d / ".env").write_text("KAZMA_SECRET=hunter2\n", encoding="utf-8")
+    (d / "kazma.yaml").write_text("mcp:\n  - name: fs\n", encoding="utf-8")
+    (d / "neo4j_graph.jsonl").write_text('{"kind":"meta"}\n', encoding="utf-8")
+    return d
+
+
+# ── the round trip, which is the whole reason for the change ──────────
+
+
+def test_backup_then_restore_returns_identical_bytes(repo, payload, tmp_path):
+    """A backup is a hypothesis until something reads it back."""
+    b = rr.backup(repo, _PW, [str(payload)])
+    assert b.ok, b.error
+
+    target = tmp_path / "restored"
+    r = rr.restore(repo, _PW, str(target))
+    assert r.ok, r.error
+
+    restored_root = next(target.rglob("kazma.yaml")).parent
+    for rel in ("kazma.yaml", ".env", "neo4j_graph.jsonl", "dbs/sessions.db"):
+        original = payload / rel
+        copy = restored_root / rel
+        assert copy.is_file(), f"{rel} did not come back"
+        assert copy.read_bytes() == original.read_bytes(), f"{rel} differs"
+
+
+def test_the_repository_is_actually_encrypted(repo, payload):
+    """The reason to move: KAZMA_SECRET currently travels to Google Drive in
+    the clear. If the secret is greppable in the repo, nothing was gained."""
+    rr.backup(repo, _PW, [str(payload)])
+    from pathlib import Path
+
+    blobs = b""
+    for f in Path(repo).rglob("*"):
+        if f.is_file():
+            blobs += f.read_bytes()
+    assert b"hunter2" not in blobs, "the secret is readable inside the repository"
+    assert b"KAZMA_SECRET" not in blobs
+
+
+def test_a_wrong_passphrase_cannot_read_the_repository(repo, payload):
+    rr.backup(repo, _PW, [str(payload)])
+    res = rr.snapshots(repo, "definitely-the-wrong-passphrase")
+    assert not res.ok
+
+
+def test_deduplication_across_snapshots(repo, payload):
+    """The 43 GB problem. Backing up unchanged data twice must not store it
+    twice."""
+    first = rr.backup(repo, _PW, [str(payload)])
+    second = rr.backup(repo, _PW, [str(payload)])
+    assert first.ok and second.ok
+    added = int(second.detail.get("data_added") or 0)
+    assert added < 65536, f"unchanged data re-stored {added} bytes"
+
+
+# ── retention ─────────────────────────────────────────────────────────
+
+
+def test_forget_prune_runs_and_keeps_the_recent_snapshot(repo, payload):
+    rr.backup(repo, _PW, [str(payload)])
+    res = rr.forget_prune(repo, _PW)
+    assert res.ok, res.error
+    snaps = rr.snapshots(repo, _PW)
+    assert snaps.ok and snaps.detail["count"] >= 1
+
+
+def test_the_policy_is_time_based_not_count_based():
+    """Retention by count gives no guarantee: thirty backups is thirty days
+    or thirty hours depending on how often the loop happened to run."""
+    joined = " ".join(rr.KEEP_POLICY)
+    assert "--keep-daily" in joined
+    assert "--keep-weekly" in joined
+    assert "--keep-monthly" in joined
+
+
+# ── verification ──────────────────────────────────────────────────────
+
+
+def test_check_passes_on_a_healthy_repository(repo, payload):
+    rr.backup(repo, _PW, [str(payload)])
+    assert rr.check(repo, _PW).ok
+
+
+def test_check_read_data_catches_a_corrupted_pack(repo, payload):
+    """Metadata-only checks pass over bit rot in the stored data. This is
+    the difference between 'the index looks fine' and 'the bytes are there'."""
+    from pathlib import Path
+
+    rr.backup(repo, _PW, [str(payload)])
+    packs = sorted(Path(repo).glob("data/*/*"))
+    assert packs, "expected pack files"
+    victim = max(packs, key=lambda p: p.stat().st_size)
+    raw = bytearray(victim.read_bytes())
+    for i in range(0, min(len(raw), 512)):
+        raw[i] ^= 0xFF
+    victim.write_bytes(bytes(raw))
+
+    assert not rr.check(repo, _PW, read_data=True).ok, (
+        "--read-data must notice a corrupted pack"
+    )
+
+
+# ── the safety rails ──────────────────────────────────────────────────
+
+
+def test_restore_refuses_a_non_empty_target(repo, payload, tmp_path):
+    """Restoring over an existing tree interleaves two states into one that
+    looks plausible and is neither."""
+    rr.backup(repo, _PW, [str(payload)])
+    target = tmp_path / "occupied"
+    target.mkdir()
+    (target / "leftover.txt").write_text("i was here", encoding="utf-8")
+
+    res = rr.restore(repo, _PW, str(target))
+    assert not res.ok
+    assert "not empty" in res.error
+    assert (target / "leftover.txt").is_file(), "must not have touched anything"
+
+
+def test_init_is_idempotent(repo):
+    again = rr.init_repo(repo, _PW)
+    assert again.ok
+    assert again.detail.get("already") is True
+
+
+def test_a_missing_passphrase_refuses_rather_than_guessing(repo):
+    res = rr.backup(repo, "", ["."])
+    assert not res.ok
+    assert "refusing to guess" in res.error
+
+
+# ── passphrase handling ───────────────────────────────────────────────
+
+
+def test_a_passphrase_is_never_generated_silently(tmp_path, monkeypatch):
+    """A key that exists only on the disk it protects is a second copy of
+    the same single point of failure."""
+    monkeypatch.delenv("KAZMA_RESTIC_PASSWORD", raising=False)
+    monkeypatch.setattr(rr, "password_file", lambda: tmp_path / "restic.pass")
+
+    secret, created = rr.ensure_password(create=False)
+    assert secret == ""
+    assert created is False
+    assert not (tmp_path / "restic.pass").exists()
+
+
+def test_generating_a_passphrase_is_explicit_and_loud(tmp_path, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.delenv("KAZMA_RESTIC_PASSWORD", raising=False)
+    monkeypatch.setattr(rr, "password_file", lambda: tmp_path / "restic.pass")
+
+    with caplog.at_level(logging.CRITICAL):
+        secret, created = rr.ensure_password(create=True)
+
+    assert created is True and len(secret) > 20
+    assert (tmp_path / "restic.pass").read_text(encoding="utf-8").strip() == secret
+    assert any("NOT THIS MACHINE" in r.message for r in caplog.records), (
+        "the operator must be told the key has to leave this machine"
+    )
+
+
+def test_the_environment_wins_over_the_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(rr, "password_file", lambda: tmp_path / "restic.pass")
+    (tmp_path / "restic.pass").write_text("from-file", encoding="utf-8")
+    monkeypatch.setenv("KAZMA_RESTIC_PASSWORD", "from-env")
+    assert rr.ensure_password()[0] == "from-env"
+
+
+def test_the_passphrase_is_not_kazma_secret(monkeypatch, tmp_path):
+    """Reusing the vault key would rebuild the exact circularity this
+    replaces: the key and the thing it protects travelling together."""
+    monkeypatch.setenv("KAZMA_SECRET", "the-vault-key")
+    monkeypatch.delenv("KAZMA_RESTIC_PASSWORD", raising=False)
+    monkeypatch.setattr(rr, "password_file", lambda: tmp_path / "restic.pass")
+
+    secret, _ = rr.ensure_password(create=True)
+    assert secret != os.environ["KAZMA_SECRET"]
+
+    import inspect
+
+    assert "KAZMA_SECRET" not in inspect.getsource(rr.ensure_password)
+
+
+# ── two independent destinations ──────────────────────────────────────
+
+
+def test_the_offsite_repo_goes_through_rclone(monkeypatch):
+    """rclone carries its own credential. The native Google provider borrows
+    the Gmail token, and one revoked grant took out 29 backups in a row."""
+    class _Store:
+        def get(self, key):
+            if key == "backups.offsite.rclone_remote":
+                return "kazma-backup:kazma-backups"
+            return None
+
+    import kazma_core.config_store as cs
+    monkeypatch.setattr(cs, "get_config_store", lambda: _Store())
+
+    paths = rr.repo_paths()
+    assert paths["remote"].startswith("rclone:")
+    assert paths["local"] and not paths["local"].startswith("rclone:")
+    assert paths["local"] != paths["remote"], "two destinations, not one"
+
+
+# ── the Windows path-reconstruction quirk ─────────────────────────────
+
+
+def test_a_directory_timestamp_failure_does_not_fail_the_restore():
+    """restic rebuilds the source's absolute path under the target, which
+    means synthesising drive-letter directories it cannot set timestamps
+    on -- so it exits non-zero having restored every byte correctly.
+    Verified live: "Restored 13 / 14 files/dirs", all data present, the
+    single failure a directory mtime."""
+    benign, count = rr._only_directory_timestamp_errors(
+        r'ignoring error: failed to restore timestamp of "C:\x\C\Users": '
+        'Access is denied.' + "\nFatal: There were 1 errors"
+    )
+    assert benign is True and count == 1
+
+
+def test_a_real_restore_failure_is_never_forgiven():
+    """The worst bug this file could have is turning a failed restore into a
+    reported success, so the exemption is narrow: only timestamp errors, and
+    only when they are the ONLY errors."""
+    benign, _ = rr._only_directory_timestamp_errors(
+        'error: could not decrypt pack\nFatal: There were 1 errors'
+    )
+    assert benign is False
+
+    mixed, _ = rr._only_directory_timestamp_errors(
+        'failed to restore timestamp of "x": Access is denied.\n'
+        'error: pack is corrupt\nFatal: There were 2 errors'
+    )
+    assert mixed is False, "one real error among timestamp noise must still fail"
+
+
+def test_no_error_summary_is_not_treated_as_benign():
+    benign, _ = rr._only_directory_timestamp_errors("some unrelated stderr")
+    assert benign is False
