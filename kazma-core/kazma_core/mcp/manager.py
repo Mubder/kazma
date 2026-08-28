@@ -1680,6 +1680,19 @@ class UnifiedToolExecutor:
             rbac = RBACEngine()
         self._rbac = rbac
 
+    @property
+    def mcp(self) -> AsyncMCPManager:
+        """The underlying MCP manager.
+
+        UnifiedToolExecutor delegates *some* MCP surface (is_server_connected,
+        connect_server) but not all of it -- ``connect_from_config`` and
+        ``connection_errors`` live only on the manager. A caller that needs
+        those had to reach for ``_mcp``, and reaching for a private is how the
+        reconnect supervisor was first wired to an object that silently
+        answered "no errors, nothing connected" forever.
+        """
+        return self._mcp
+
     # ── MCP server lifecycle (delegates to AsyncMCPManager) ─────────
 
     async def connect_server(self, server_config: dict[str, Any]) -> int:

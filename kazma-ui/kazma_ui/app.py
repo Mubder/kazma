@@ -1419,6 +1419,32 @@ class KazmaAppBuilder:
             except Exception as exc:
                 logger.warning("[App] MCP server connection failed at startup: %s", exc)
 
+            # ── Keep MCP servers coming back ───────────────────────────
+            # Before this, a server that failed at boot stayed dead until
+            # someone restarted Kazma: the audit counted 60 connection
+            # failures in eight days and zero reconnects, while the agent
+            # kept planning around tools that were no longer there.
+            try:
+                from kazma_core.mcp.reconnect import start_mcp_reconnector
+
+                # agent.tools is a UnifiedToolExecutor, which delegates only
+                # PART of the MCP surface -- connect_from_config and
+                # connection_errors live on the manager it wraps. Passing the
+                # executor here produced a reconnector that saw no errors and
+                # could never reconnect: wired, running, useless.
+                executor = getattr(self.agent, "tools", None)
+                mcp_mgr = getattr(executor, "mcp", None)
+                if mcp_mgr is not None:
+                    self._mcp_reconnector = start_mcp_reconnector(
+                        mcp_mgr, self.agent.get_mcp_servers_config
+                    )
+                else:
+                    logger.warning(
+                        "[App] no MCP manager available — reconnector not started"
+                    )
+            except Exception as exc:
+                logger.warning("[App] MCP reconnector failed to start: %s", exc)
+
             from kazma_gateway.stores.checkpoint import create_checkpointer
 
             self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
