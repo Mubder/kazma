@@ -3133,10 +3133,20 @@
     _tickProgressElapsed();
     panel.classList.remove('is-active');
     panel.classList.add('is-done');
-    // Stay expanded — user can collapse; tool results remain visible
-    panel.classList.remove('is-collapsed');
+    // Collapse to the one-line summary the moment the turn ends.
+    //
+    // This used to stay expanded, so every finished turn left a wall of step
+    // rows sitting above its answer for the rest of the session -- while the
+    // SAME conversation reloaded with every panel collapsed
+    // (_buildRestoredWorkbench builds them `is-collapsed`). The summary line
+    // built just below is already written for the collapsed state
+    // ("Done - 5 tools - 12 steps - 42s - $0.003 - 8.1k tokens"), so a
+    // finished panel now reads as one informative row and opens on click.
+    panel.classList.add('is-collapsed');
     var chev = panel.querySelector('.agent-progress-chevron');
-    if (chev) chev.textContent = '\u25BE';
+    if (chev) chev.textContent = '▸';
+    var doneHdr = panel.querySelector('.agent-progress-header');
+    if (doneHdr) doneHdr.setAttribute('aria-expanded', 'false');
     var titleEl = panel.querySelector('.agent-progress-title');
     var elapsed = _progressStartedAt ? _formatElapsed(Date.now() - _progressStartedAt) : '';
     if (titleEl) {
@@ -3460,14 +3470,49 @@
   var _liveRenderDirty = false;
   var _liveRenderEl = null;
 
+  /**
+   * The ONE way reply text becomes HTML. Every paint site funnels through
+   * here so the last streamed frame and the terminal frame cannot render
+   * the same text two different ways — appendLiveToken used to skip
+   * _scrubDsml, so the final paint visibly changed the message.
+   */
+  function _renderReplyHTML(text) {
+    return transformRenderedForPlan(
+      KS.markdown(_scrubDsml(stripPlanFenceForDisplay(text)))
+    );
+  }
+
+  /**
+   * Idempotent paint: assign only when the markup actually differs.
+   *
+   * Assigning innerHTML tears the whole message subtree down and rebuilds
+   * it, so re-painting identical HTML still costs a reflow — visible as a
+   * "blink" at the end of every reply, because the terminal frame always
+   * repainted the finished message even when server truth matched what was
+   * already on screen. Returns true when the DOM changed.
+   */
+  function _paintHTML(textEl, html) {
+    if (!textEl) return false;
+    // Compare against the SOURCE string we last wrote, not textEl.innerHTML:
+    // reading innerHTML returns the browser's re-serialization of the DOM
+    // (attribute order, entity and void-tag normalisation), which routinely
+    // differs from the string that produced it — so an innerHTML comparison
+    // would report "changed" every time and repaint anyway.
+    if (textEl._kzPaintedHTML === html) return false;
+    textEl.innerHTML = html;
+    textEl._kzPaintedHTML = html;
+    return true;
+  }
+
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
     if (final) {
-      textEl.innerHTML = transformRenderedForPlan(KS.markdown(_scrubDsml(stripPlanFenceForDisplay(tokenAccum))));
+      if (_paintHTML(textEl, _renderReplyHTML(tokenAccum))) {
+        if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
+      }
       // Re-apply dir="auto" after innerHTML (the attribute survives but the
       // bidi direction may need recalculating for the new content).
       textEl.setAttribute('dir', 'auto');
-      if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
       return;
     }
     // Live paints render FULL markdown at the throttled cadence (≤ ~7
@@ -3480,9 +3525,10 @@
     var liveParts = splitPlanAndProse(tokenAccum);
     liveParts.prose = _scrubDsml(liveParts.prose);
     if (liveParts.prose) {
-      textEl.innerHTML = transformRenderedForPlan(KS.markdown(liveParts.prose));
-      if (window.KazmaBidi) KazmaBidi.apply(textEl, liveParts.prose);
-    } else {
+      if (_paintHTML(textEl, transformRenderedForPlan(KS.markdown(liveParts.prose)))) {
+        if (window.KazmaBidi) KazmaBidi.apply(textEl, liveParts.prose);
+      }
+    } else if (textEl.textContent !== '\u00a0') {
       textEl.textContent = '\u00a0';
     }
     textEl.setAttribute('dir', 'auto');
@@ -5032,9 +5078,13 @@
       var display = _scrubDsml(stripPlanFenceForDisplay(tokenAccum));
       if (textEl) {
         try {
-          textEl.innerHTML = transformRenderedForPlan(KS.markdown(display));
+          // Idempotent: when server truth renders to what the stream already
+          // painted — the normal case — this is a no-op instead of a full
+          // subtree rebuild, which is what made every reply blink as it
+          // finished. Server truth still ALWAYS wins when it differs.
+          _paintHTML(textEl, _renderReplyHTML(tokenAccum));
         } catch (mdErr) {
-          textEl.textContent = display;
+          if (textEl.textContent !== display) textEl.textContent = display;
         }
         textEl.setAttribute('data-final-len', String(display.length));
       }
@@ -5083,7 +5133,11 @@
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
+      // Funnels through the shared render + idempotent paint: these two
+      // sites skipped _scrubDsml, so scaffolding showed while streaming
+      // and vanished on the terminal paint - a guaranteed end-of-reply
+      // flash.
+      if (textEl) _paintHTML(textEl, _renderReplyHTML(tokenAccum));
       scrollToBottom();
     },
     setPlan: setPlan,
@@ -5113,7 +5167,11 @@
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');
-      if (textEl) textEl.innerHTML = transformRenderedForPlan(KS.markdown(stripPlanFenceForDisplay(tokenAccum)));
+      // Funnels through the shared render + idempotent paint: these two
+      // sites skipped _scrubDsml, so scaffolding showed while streaming
+      // and vanished on the terminal paint - a guaranteed end-of-reply
+      // flash.
+      if (textEl) _paintHTML(textEl, _renderReplyHTML(tokenAccum));
       scrollToBottom();
     },
     onStreamDone: function() {

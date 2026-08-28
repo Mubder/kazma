@@ -2172,19 +2172,50 @@ tbody tr:last-child td {
   align-items: center;
   gap: 8px;
   row-gap: 4px;
-  padding: 10px 12px;
+  padding: 7px 11px;
   cursor: pointer;
   user-select: none;
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--bg-surface) 45%, transparent);
   flex-wrap: wrap;
 }
+/* A finished turn is a summary line, not a section header: drop the accent
+   wash and let it sit quietly above the answer it describes. */
+.agent-progress.is-done.is-collapsed {
+  background: var(--bg-elevated, var(--bg-panel));
+}
+.agent-progress.is-done.is-collapsed .agent-progress-header {
+  padding: 5px 11px;
+  background: transparent;
+}
+.agent-progress.is-done.is-collapsed .agent-progress-title {
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+/* On a finished LIVE panel the title already reads
+   "Done · 5 tools · 12 steps · 42s · $0.003 · 8.1k tokens", so the separate
+   elapsed and step-count chips beside it repeat the same numbers, and the
+   Think/Act/Write pills have nothing left to track. Restored panels
+   (.kazma-cot-restored) keep their count — there the chip IS the summary. */
+.agent-progress.is-done:not(.kazma-cot-restored) .cot-phases,
+.agent-progress.is-done:not(.kazma-cot-restored) .agent-progress-elapsed,
+.agent-progress.is-done:not(.kazma-cot-restored) .agent-progress-count {
+  display: none;
+}
+/* One row, not two. The kicker ("REASONING") sat stacked ABOVE the title, so
+   the header was always two lines tall before any content wrapped. Inline
+   them: the kicker is a 0.62rem uppercase label and costs no extra height
+   beside the title. */
 .agent-progress-heading {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: baseline;
   min-width: 0;
   flex: 1;
-  gap: 1px;
+  gap: 7px;
+}
+.agent-progress-kicker {
+  flex-shrink: 0;
 }
 /* Status metadata (phase pills / elapsed / count) must WRAP to the next row
    when crowded — a shrinkable flex item with nowrap content just overflows
@@ -2503,15 +2534,22 @@ tbody tr:last-child td {
 .agent-progress-steps {
   list-style: none;
   margin: 0;
-  padding: 6px 0 12px;
-  max-height: 340px;
+  padding: 4px 0 8px;
+  /* The activity log is reference material, not the message — keep it to a
+     glanceable window and scroll the rest. This is the ONLY scroll container
+     in the panel; do not add one on .agent-progress-body too or a long turn
+     gets nested scrollbars. */
+  max-height: 260px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .agent-progress-step {
   display: flex;
   gap: 8px;
   position: relative;
-  padding-block: 8px;
+  /* 8px block padding on an 11px font made every row 34px tall; a 12-step
+     turn was ~400px of chrome above its own answer. */
+  padding-block: 6px;
   padding-inline: 40px 14px;
   align-items: flex-start;
   color: var(--text-secondary);
