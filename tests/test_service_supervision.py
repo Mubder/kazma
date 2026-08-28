@@ -766,3 +766,71 @@ def test_json_list_command_is_unambiguous(monkeypatch):
 def test_default_command_is_serve_py(monkeypatch):
     monkeypatch.delenv("KAZMA_GUARD_CMD", raising=False)
     assert guard.build_command()[-1] == "serve.py"
+
+
+# -- the grandchild that outlived its parent (live, 2026-08-28 21:27) --
+
+
+def test_reap_orphan_misses_a_grandchild_and_clear_stale_port_covers_it(
+        monkeypatch, tmp_path):
+    """The exact live failure, in one test.
+
+    A deliberate restart killed the recorded child (76408). Its uvicorn
+    grandchild (4160) survived, kept port 9090, and kept serving the OLD
+    build. reap_orphan saw a dead recorded PID and returned -- correct by
+    its own contract and useless here. clear_stale_port is what closes it.
+    """
+    state = tmp_path / "guard.state.json"
+    monkeypatch.setenv("KAZMA_GUARD_STATE", str(state))
+    state.write_text(json.dumps({"child_pid": 76408}), encoding="utf-8")
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: False)  # parent dead
+
+    killed = []
+    monkeypatch.setattr(guard.subprocess, "run",
+                        lambda cmd, **kw: killed.append(cmd))
+    guard.reap_orphan(guard.GuardLog(tmp_path / "g.log"))
+    assert not killed, "reap_orphan cannot see a PID it never recorded"
+
+    # The grandchild still holds the port.
+    monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 4160)
+    reaped = []
+    monkeypatch.setattr(guard, "reap_port_holder",
+                        lambda url, log: reaped.append(url) or True)
+    assert guard.clear_stale_port("http://127.0.0.1:9090/health/ready",
+                                  guard.GuardLog(tmp_path / "g.log"))
+    assert reaped, "the surviving grandchild must be cleared before spawning"
+
+
+def test_clear_stale_port_is_a_noop_when_the_port_is_free(monkeypatch, tmp_path):
+    """The overwhelmingly common case: one netstat, nothing killed."""
+    monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 0)
+    reaped = []
+    monkeypatch.setattr(guard, "reap_port_holder",
+                        lambda url, log: reaped.append(url) or True)
+    assert not guard.clear_stale_port("http://127.0.0.1:9090/health/ready",
+                                      guard.GuardLog(tmp_path / "g.log"))
+    assert not reaped, "a free port must not trigger a kill"
+
+
+def test_the_port_is_cleared_before_the_spawn_not_after():
+    """Ordering is the whole fix.
+
+    Detecting the squatter after spawning still recovers -- that is what
+    happened live -- but it costs a discarded child and a 30s backoff, and
+    it tells the operator "never became healthy" during a clean deploy.
+    """
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    assert "clear_stale_port" in src, "the loop must clear the port itself"
+    assert src.index("clear_stale_port") < src.index("spawn(self.cmd"), (
+        "clearing must precede the spawn, or it is the slow path again"
+    )
+
+
+def test_the_foreign_server_check_survives_as_the_backstop():
+    """clear_stale_port cannot see a server that binds DURING our boot."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard._wait_ready)
+    assert "foreign_server_holds_port" in src
