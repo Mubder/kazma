@@ -426,3 +426,55 @@ def test_maintenance_is_scheduled_with_the_nightly_backups():
     src = inspect.getsource(worker_bootstrap)
     assert 'enqueue_task("restic_maintenance", {})' in src
     assert 'register_handler("restic_maintenance"' in src
+
+
+# ── passphrase rotation ───────────────────────────────────────────────
+
+
+def test_rotation_changes_the_key_and_the_old_one_stops_working(repo, payload):
+    """A passphrase that leaks must be revocable without re-encrypting the
+    data. restic keys unlock a copy of the master key, so this costs
+    nothing and rewrites nothing."""
+    rr.backup(repo, _PW, [str(payload)])
+    new = "a-brand-new-passphrase-after-a-leak"
+
+    res = rr.rotate_password({"local": repo}, _PW, new)
+    assert res["ok"], res["errors"]
+
+    assert rr.snapshots(repo, new).ok, "the new passphrase must open the repo"
+    assert not rr.snapshots(repo, _PW).ok, "the leaked passphrase must be dead"
+
+
+def test_data_survives_rotation(repo, payload, tmp_path):
+    """Rotation must not touch the snapshots."""
+    rr.backup(repo, _PW, [str(payload)])
+    new = "second-passphrase"
+    assert rr.rotate_password({"local": repo}, _PW, new)["ok"]
+
+    target = tmp_path / "after-rotation"
+    r = rr.restore(repo, new, str(target))
+    assert r.ok, r.error
+    restored = next(target.rglob("kazma.yaml"))
+    assert restored.read_bytes() == (payload / "kazma.yaml").read_bytes()
+
+
+def test_a_failure_on_one_repo_removes_no_old_key_anywhere(repo, payload, tmp_path):
+    """The whole safety of rotation is its ordering. If the new key cannot
+    be added everywhere, nothing is revoked -- otherwise a precautionary
+    rotation becomes the data loss it was meant to prevent."""
+    rr.backup(repo, _PW, [str(payload)])
+    unreachable = str(tmp_path / "no-such-repo")
+
+    res = rr.rotate_password({"local": repo, "remote": unreachable}, _PW, "new-pw")
+    assert res["ok"] is False
+    assert res["removed"] == [], "nothing may be revoked on a partial failure"
+    assert "still opens with it" in res["note"]
+    assert rr.snapshots(repo, _PW).ok, "the original passphrase must still work"
+
+
+def test_the_new_key_is_verified_before_the_old_is_removed():
+    """Adding a key is not proof it opens the repository."""
+    import inspect
+
+    src = inspect.getsource(rr.rotate_password)
+    assert src.index('out["verified"]') < src.index('"key", "remove"')

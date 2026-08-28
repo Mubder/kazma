@@ -185,7 +185,8 @@ def password_is_offsite_ack() -> bool:
 
 
 def _run(args: list[str], repo: str, password: str, *,
-         action: str, timeout: int = _TIMEOUT_S) -> ResticResult:
+         action: str, timeout: int = _TIMEOUT_S,
+         stdin: str | None = None) -> ResticResult:
     """Invoke restic. Never raises; the caller is usually a backup path."""
     res = ResticResult(action=action, repo=repo)
     if not restic_available():
@@ -205,7 +206,7 @@ def _run(args: list[str], repo: str, password: str, *,
     try:
         proc = subprocess.run(
             ["restic", *args], env=env, capture_output=True, text=True,
-            timeout=timeout, check=False,
+            timeout=timeout, check=False, input=stdin,
         )
     except Exception as exc:  # noqa: BLE001
         res.error = f"{action} would not run: {exc}"
@@ -281,6 +282,90 @@ def snapshots(repo: str, password: str) -> ResticResult:
         except Exception:  # noqa: BLE001
             res.detail["count"] = 0
     return res
+
+
+def rotate_password(repos: dict[str, str], old: str, new: str) -> dict[str, Any]:
+    """Replace the repository passphrase without re-encrypting the data.
+
+    restic keys are indirection: the data is encrypted with a master key,
+    and each passphrase merely unlocks a copy of it. Adding a key and
+    removing the old one therefore costs nothing and rewrites nothing.
+
+    Order matters and is the whole safety of this function. The new key is
+    added to EVERY repository and verified to actually work before ANY old
+    key is removed. Removing first, or removing from one repository while
+    another still rejects the new key, would leave a repository nobody can
+    open -- turning a precautionary rotation into the data loss it was
+    meant to prevent.
+    """
+    out: dict[str, Any] = {"added": [], "verified": [], "removed": [], "errors": []}
+    targets = {k: v for k, v in repos.items() if v}
+
+    # restic reads the new passphrase from a FILE, not stdin ("--new-password-file -"
+    # is taken literally and fails with "- does not exist"). The file is written
+    # with a restrictive mode, lives only for the duration of the call, and is
+    # removed in a finally so a crash mid-rotation cannot leave a passphrase
+    # lying in the temp directory.
+    import tempfile
+
+    fd, pw_path = tempfile.mkstemp(prefix="kazma-restic-", suffix=".pw")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(new)
+        try:
+            os.chmod(pw_path, 0o600)
+        except OSError:
+            pass
+
+        for name, repo in targets.items():
+            res = _run(["key", "add", "--new-password-file", pw_path], repo, old,
+                       action="key-add", timeout=600)
+            if res.ok:
+                out["added"].append(name)
+            else:
+                out["errors"].append(f"{name}: add failed: {res.error[:200]}")
+    finally:
+        try:
+            os.remove(pw_path)
+        except OSError:
+            pass
+
+    if out["errors"]:
+        out["ok"] = False
+        out["note"] = "no old key removed; every repository still opens with it"
+        return out
+
+    for name, repo in targets.items():
+        if _run(["cat", "config"], repo, new, action="verify", timeout=300).ok:
+            out["verified"].append(name)
+        else:
+            out["errors"].append(f"{name}: the new passphrase does not open it")
+
+    if len(out["verified"]) != len(targets):
+        out["ok"] = False
+        out["note"] = "no old key removed; the old passphrase still works"
+        return out
+
+    for name, repo in targets.items():
+        listed = _run(["key", "list", "--json"], repo, new,
+                      action="key-list", timeout=300)
+        old_ids: list[str] = []
+        try:
+            import json as _json
+
+            for k in _json.loads(listed.stdout or "[]"):
+                if not k.get("current"):
+                    old_ids.append(str(k.get("id") or ""))
+        except Exception:  # noqa: BLE001
+            out["errors"].append(f"{name}: could not list keys")
+            continue
+        for kid in old_ids:
+            if _run(["key", "remove", kid], repo, new,
+                    action="key-remove", timeout=300).ok:
+                out["removed"].append(f"{name}:{kid[:8]}")
+
+    out["ok"] = not out["errors"]
+    return out
 
 
 def restore(repo: str, password: str, target: str, *,
