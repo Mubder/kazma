@@ -1905,9 +1905,8 @@ tbody tr:last-child td {
 }
 .capacity-pill-power,
 .capacity-pill-off { /* back-compat no-ops — power look is .is-on only */ }
-/* Session usage metrics sit in .input-footer (always visible under the
-   composer, 2026-08-27) — the auto margin pushes them + the Enter hint
-   to the row's end. */
+/* Session usage metrics sit at the end of .capacity-bar (always visible
+   under the composer) — the auto margin pushes them to the row's end. */
 .session-metrics {
   margin-inline-start: auto;
 }
@@ -2092,31 +2091,15 @@ tbody tr:last-child td {
 .send-btn.stop-mode:hover { background: #dc2626; }
 @keyframes pulse-stop { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
 
-.input-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-top: 0;
-  font-size: 0.72rem;
-  color: var(--text-tertiary);
-}
+/* .input-footer / .chat-input-footer-hint removed: that row existed only to
+   carry the composer char count and an "Enter to send" hint, and it cost a
+   full line of vertical space under the composer. The count now lives in
+   .session-metrics beside the cost/token/context stats; the hint is gone
+   (mobile had already been hiding it). */
 .cost-badge,
 .token-badge,
 .context-badge {
   color: inherit;
-}
-.chat-input-footer-hint {
-  margin-inline-start: auto;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-.chat-input-footer-hint kbd {
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  padding: 1px 5px;
-  border-radius: 3px;
-  color: var(--text-secondary);
 }
 
 /* Thinking indicator */
@@ -2737,7 +2720,6 @@ tbody tr:last-child td {
 /* ── ≤520px: usable single-hand layout (AC#7) ── */
 @media (max-width: 520px) {
   .chat-messages { padding: var(--sp-3); }
-  .input-footer { gap: 6px; }
   .message { gap: var(--sp-2); }
   .message-avatar { width: 28px; height: 28px; }
   .agent-progress-steps { max-height: 240px; }
@@ -3628,7 +3610,6 @@ tbody tr:last-child td {
 [dir="rtl"] .input-wrapper {
   flex-direction: row-reverse;
 }
-[dir="rtl"] .chat-input-area .input-footer,
 [dir="rtl"] .chat-input-area .capacity-bar {
   flex-direction: row;
 }
@@ -4090,7 +4071,6 @@ tbody tr:last-child td {
   .chat-messages { padding: var(--sp-3); }
   .chat-input-area { padding: var(--sp-3); }
   .chat-welcome { padding: var(--sp-6) var(--sp-4); }
-  .chat-input-footer-hint { display: none; }   /* hide "Enter / Ctrl+Enter" hint */
   /* Session usage drops to a full row under the mode pills instead of
      scrolling off-screen (metrics restored to .capacity-bar 2026-08-27). */
   .capacity-bar .session-metrics {

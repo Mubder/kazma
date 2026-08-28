@@ -789,10 +789,88 @@ class TestWorkbenchCollapseTiming:
     def test_next_turn_collapses_finished_panels(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _collapseFinishedWorkbenches()" in src
-        begin = src.split("function beginTurn()", 1)[1].split("\n  function ", 1)[0]
+        begin = src.split("function beginTurn(opts)", 1)[1].split("\n  function ", 1)[0]
         assert "_collapseFinishedWorkbenches();" in begin, (
             "finished panels must be tidied at the start of the next turn"
         )
         fn = src.split("function _collapseFinishedWorkbenches()", 1)[1].split("\n  function ", 1)[0]
         assert ".agent-progress.is-done" in fn
         assert "aria-expanded" in fn
+
+
+class TestHitlResumeKeepsWorkbench:
+    """Approving a permission card RESUMES a turn — it does not start one.
+
+    ``beginTurn()`` wipes the workbench for a fresh turn. submitApproval
+    called it unqualified, so clicking Approve deleted the panel holding
+    every step that produced the approval card, leaving a lone "Thinking…"
+    row above the answer. And the approve stream rendered its tool activity
+    as inline boxes rather than workbench rows, so nothing that happened
+    after the approval reached the CoT either.
+    """
+
+    def test_begin_turn_takes_a_resume_flag(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function beginTurn(opts)" in src
+        begin = src.split("function beginTurn(opts)", 1)[1].split("\n  function ", 1)[0]
+        assert "var resume = !!(opts && opts.resume);" in begin
+        # The panel wipe + counter reset must be inside the non-resume branch.
+        assert "if (!resume) {" in begin
+        wipe_at = begin.index("oldProg.remove()")
+        guard_at = begin.index("if (!resume) {")
+        assert guard_at < wipe_at, "the workbench wipe must be guarded by !resume"
+
+    def test_approval_paths_resume_instead_of_restarting(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        # security card + semantic-choice card both resume the open turn
+        assert src.count("beginTurn({ resume: true })") >= 2
+        approve = src.split("function submitApproval(action, scope)", 1)[1][:2000]
+        assert "beginTurn({ resume: true })" in approve
+        assert "beginTurn();" not in approve
+
+    def test_approve_stream_logs_tools_into_the_workbench(self):
+        """Parity with the main stream: tool activity is workbench rows."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        approve = src.split("function submitApproval(action, scope)", 1)[1]
+        approve = approve[: approve.index("onError: function")]
+        assert approve.count("logProgress({") >= 2, "tool call + tool result"
+        # the divergent inline rendering is gone (the swarm badge stays: it
+        # describes work outliving the turn). Match the CODE, not the comment
+        # that explains why it was removed.
+        assert "box.className = 'tool-call-box'" not in approve
+        assert "resultBox.className = 'tool-result-box'" not in approve
+        assert "swarm-bg-badge" in approve
+
+
+class TestComposerFooterRemoved:
+    """The "Enter to send" row under the composer is gone.
+
+    It reserved a full line under the input for a shortcut hint the mobile
+    stylesheet had already been hiding. The composer char count moved into
+    the always-present session-metrics group, so removing the row costs
+    nothing and the transcript gains the space.
+    """
+
+    _CHAT_HTML = _UI / "templates" / "chat.html"
+
+    def test_hint_and_footer_are_gone_from_the_template(self):
+        src = self._CHAT_HTML.read_text(encoding="utf-8")
+        assert 'class="input-footer"' not in src
+        assert "chat-input-footer-hint" not in src
+        assert "send_shortcut" not in src
+
+    def test_char_count_moved_into_session_metrics(self):
+        src = self._CHAT_HTML.read_text(encoding="utf-8")
+        metrics = src.split('class="capacity-group session-metrics"', 1)[1]
+        metrics = metrics[: metrics.index("</div>")]
+        assert 'id="composer-chars"' in metrics
+
+    def test_dead_footer_css_removed(self):
+        css = (_UI / "static" / "css" / "kazma.css").read_text(encoding="utf-8")
+        for sel in (
+            ".input-footer {",
+            ".chat-input-footer-hint {",
+            ".chat-input-footer-hint kbd {",
+            '[dir="rtl"] .chat-input-area .input-footer',
+        ):
+            assert sel not in css, f"dead rule left behind: {sel}"

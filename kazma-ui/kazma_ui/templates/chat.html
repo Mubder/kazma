@@ -177,17 +177,17 @@
             <button type="button" class="capacity-pill" data-cap="/unrestricted" aria-pressed="false" title="Mission + YOLO — finish this job">Unrestricted</button>
           </div>
           <button type="button" class="capacity-reset" data-cap="/unrestricted off" title="Restore baseline budget and HITL">Reset</button>
+          {# The composer char count joins the session stats instead of
+             sitting on a row of its own. The old .input-footer reserved a
+             whole line under the composer just to hold it and an "Enter to
+             send" hint — a permanent gap for a shortcut everyone already
+             knows, and one mobile had been hiding anyway. #}
           <div class="capacity-group session-metrics" aria-label="Session usage">
+            <span id="composer-chars" class="capacity-stat char-badge is-empty" title="{{ t('chat.composer_chars') }}" hidden>0</span>
             <span id="session-cost" class="capacity-stat cost-badge">$0.0000</span>
             <span id="session-tokens" class="capacity-stat token-badge">0 tok</span>
             <span id="context-size" class="capacity-stat context-badge" title="{{ t('chat.context_size_hint') }}">—</span>
           </div>
-        </div>
-        <div class="input-footer">
-          <span id="composer-chars" class="char-badge is-empty" title="{{ t('chat.composer_chars') }}" hidden>0</span>
-          <span class="chat-input-footer-hint">
-            <kbd>Enter</kbd> {{ t('chat.send_shortcut') }}
-          </span>
         </div>
       </div>
       </div>
@@ -231,6 +231,10 @@
     yolo_running: {{ t('chat.yolo_running') | tojson }},
     tokens: {{ t('chat.tokens') | tojson }},
     executing_approved: {{ t('chat.executing_approved') | tojson }},
+    approved: {{ t('chat.approved') | tojson }},
+    denied: {{ t('chat.denied') | tojson }},
+    tool_allowed: {{ t('chat.tool_allowed') | tojson }},
+    yolo_on: {{ t('chat.yolo_on') | tojson }},
     denying_tool: {{ t('chat.denying_tool') | tojson }},
     processing_approval: {{ t('chat.processing_approval') | tojson }},
     resuming_execution: {{ t('chat.resuming_execution') | tojson }},
