@@ -321,8 +321,46 @@ def start_memory_worker() -> None:
         _start_backup_export_scheduler()
         _start_reconsolidation_scheduler()
         _start_commitment_gc_scheduler()
+        _start_daily_digest_scheduler()
     except Exception:
         logger.warning("[memory_worker] could not start worker", exc_info=True)
+
+
+def _start_daily_digest_scheduler() -> None:
+    """Once-a-day operational summary (fire-and-forget).
+
+    Incident alerts cannot distinguish "a quiet day" from "the alerting is
+    broken". The digest makes silence meaningful: if it stops arriving,
+    something is wrong even though nothing has alerted.
+
+    Held in ``_scheduler_tasks`` for the same reason the others are -- an
+    unreferenced task can be garbage-collected mid-loop, which is exactly
+    the "scheduler existed but never ran" failure this codebase has hit
+    before.
+    """
+    try:
+        import asyncio
+
+        from kazma_core.observability.daily_digest import (
+            digest_enabled,
+            digest_scheduler,
+        )
+
+        if not digest_enabled():
+            logger.info("[memory_worker] daily digest disabled")
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("[memory_worker] no loop - daily digest deferred")
+            return
+        task = asyncio.create_task(digest_scheduler())
+        _scheduler_tasks.add(task)
+        task.add_done_callback(_scheduler_tasks.discard)
+        logger.info("[memory_worker] daily digest scheduler started")
+    except Exception:
+        logger.warning("[memory_worker] daily digest scheduler failed to start",
+                       exc_info=True)
 
 
 async def stop_memory_worker() -> None:
