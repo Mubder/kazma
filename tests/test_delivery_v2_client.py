@@ -765,3 +765,34 @@ class TestPlanFencePresentation:
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "FAIL" not in proc.stdout
+
+
+class TestWorkbenchCollapseTiming:
+    """When the CoT panel collapses — and when it must NOT.
+
+    Collapsing removes a few hundred pixels from above the reply. Doing that
+    in ``finalizeProgress`` put a large visual change on the terminal frame,
+    which the user saw as the CoT "flashing" as streaming stopped (reported
+    right after that change shipped). The transcript still ends up as
+    one-line summaries; the collapse just happens at the START of the next
+    turn, where the view is already moving to the new user message.
+    """
+
+    def test_finalize_does_not_collapse(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        fin = src.split("function finalizeProgress(", 1)[1].split("\n  function ", 1)[0]
+        assert "classList.add('is-collapsed')" not in fin, (
+            "collapsing at the terminal frame is the end-of-turn flash"
+        )
+        assert "panel.classList.remove('is-collapsed');" in fin
+
+    def test_next_turn_collapses_finished_panels(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function _collapseFinishedWorkbenches()" in src
+        begin = src.split("function beginTurn()", 1)[1].split("\n  function ", 1)[0]
+        assert "_collapseFinishedWorkbenches();" in begin, (
+            "finished panels must be tidied at the start of the next turn"
+        )
+        fn = src.split("function _collapseFinishedWorkbenches()", 1)[1].split("\n  function ", 1)[0]
+        assert ".agent-progress.is-done" in fn
+        assert "aria-expanded" in fn

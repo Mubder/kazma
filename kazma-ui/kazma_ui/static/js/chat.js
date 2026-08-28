@@ -850,9 +850,35 @@
     } catch (e) { /* store not ready */ }
   }
 
+  /**
+   * Collapse every FINISHED workbench to its one-line summary.
+   *
+   * Called at the start of a turn, never at the end. Collapsing a panel
+   * removes a few hundred pixels from above the reply; doing that at the
+   * terminal frame yanked the just-painted answer up the screen (the
+   * end-of-turn "flash"). At the start of the next turn the view is already
+   * moving to the new user message, so the same shift is invisible.
+   */
+  function _collapseFinishedWorkbenches() {
+    if (!messagesEl) return;
+    var panels = messagesEl.querySelectorAll('.agent-progress.is-done');
+    for (var i = 0; i < panels.length; i++) {
+      var p = panels[i];
+      if (p.classList.contains('is-collapsed')) continue;
+      p.classList.add('is-collapsed');
+      var chev = p.querySelector('.agent-progress-chevron');
+      if (chev) chev.textContent = '▸';
+      var hdr = p.querySelector('.agent-progress-header');
+      if (hdr) hdr.setAttribute('aria-expanded', 'false');
+    }
+  }
+
   function beginTurn() {
     _isGenerating = true;
     _awaitingApproval = false;
+    // Tidy the transcript BEFORE this turn adds to it (see the function's
+    // comment for why this cannot happen at the end of a turn).
+    _collapseFinishedWorkbenches();
     _lastTurnActivityTs = Date.now();
     _serverActivitySeen = false;
     // Status strip shows the instant ANY turn starts (SSE, WS, or
@@ -3133,20 +3159,15 @@
     _tickProgressElapsed();
     panel.classList.remove('is-active');
     panel.classList.add('is-done');
-    // Collapse to the one-line summary the moment the turn ends.
-    //
-    // This used to stay expanded, so every finished turn left a wall of step
-    // rows sitting above its answer for the rest of the session -- while the
-    // SAME conversation reloaded with every panel collapsed
-    // (_buildRestoredWorkbench builds them `is-collapsed`). The summary line
-    // built just below is already written for the collapsed state
-    // ("Done - 5 tools - 12 steps - 42s - $0.003 - 8.1k tokens"), so a
-    // finished panel now reads as one informative row and opens on click.
-    panel.classList.add('is-collapsed');
-    var chev = panel.querySelector('.agent-progress-chevron');
-    if (chev) chev.textContent = '▸';
-    var doneHdr = panel.querySelector('.agent-progress-header');
-    if (doneHdr) doneHdr.setAttribute('aria-expanded', 'false');
+    // DO NOT collapse here. Collapsing at the terminal frame removes ~230px
+    // of height from ABOVE the reply while the view is pinned to the bottom,
+    // so the freshly painted answer visibly jerks upward — a layout-shift
+    // flash at the exact moment the previous repaint flash used to happen.
+    // The panel is collapsed by _collapseFinishedWorkbenches() when the NEXT
+    // turn begins, where the view is scrolling to the new user message anyway
+    // and the shift cannot be seen. History still ends up as one-line
+    // summaries; only the turn you are currently reading stays open.
+    panel.classList.remove('is-collapsed');
     var titleEl = panel.querySelector('.agent-progress-title');
     var elapsed = _progressStartedAt ? _formatElapsed(Date.now() - _progressStartedAt) : '';
     if (titleEl) {
