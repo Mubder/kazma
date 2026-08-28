@@ -9,7 +9,6 @@ quick refresh / tab switch.
 from __future__ import annotations
 
 import pytest
-
 from kazma_ui import active_turns as at
 
 
@@ -156,3 +155,74 @@ def test_live_socket_empty_thread_ignored():
     at.bind_live_socket("", object())
     assert at.get_live_socket("") is None
     at.unbind_live_socket("", object())
+
+
+# ── the detached-pump watchdog decision ───────────────────────────────
+#
+# 367 disconnects, zero engagements. That zero only reassures if the
+# decision can be shown to work -- the repetition breaker had a comparable
+# zero and turned out to have been incapable of firing for its whole life.
+
+
+def test_a_connected_client_is_never_reaped():
+    """No orphan stamp means the client is still there. A turn someone is
+    watching must never be cancelled, however long it runs."""
+    from kazma_ui.active_turns import pump_is_stalled, register_turn
+
+    task = _FakeTask()
+    register_turn("t-connected", task)
+    assert pump_is_stalled("t-connected", 0.0) is False
+
+
+def test_a_gone_client_with_a_progressing_stream_is_left_alone():
+    """The reason this is progress-based and not a plain disconnect timer:
+    a background turn still emitting events is doing exactly what the
+    detached pump exists to allow. Reaping it would break the feature."""
+    import time as _t
+
+    from kazma_ui.active_turns import mark_turn_orphaned, pump_is_stalled, register_turn
+
+    task = _FakeTask()
+    register_turn("t-progress", task)
+    mark_turn_orphaned("t-progress")
+    now = _t.monotonic()
+    assert pump_is_stalled("t-progress", now, ttl_s=300.0, now=now + 299) is False
+
+
+def test_a_gone_client_with_a_stalled_stream_is_reaped():
+    """The astream_events hang: client gone, nothing streamed, thread held
+    hostage. This is the case the watchdog exists for."""
+    import time as _t
+
+    from kazma_ui.active_turns import mark_turn_orphaned, pump_is_stalled, register_turn
+
+    task = _FakeTask()
+    register_turn("t-stalled", task)
+    mark_turn_orphaned("t-stalled")
+    now = _t.monotonic()
+    assert pump_is_stalled("t-stalled", now, ttl_s=300.0, now=now + 301) is True
+
+
+def test_the_deadline_is_measured_from_the_later_of_disconnect_and_progress():
+    """A turn that streamed AFTER the disconnect resets the clock; using
+    the disconnect alone would reap turns that are plainly still working."""
+    import time as _t
+
+    from kazma_ui.active_turns import mark_turn_orphaned, pump_is_stalled, register_turn
+
+    task = _FakeTask()
+    register_turn("t-later", task)
+    mark_turn_orphaned("t-later")
+    now = _t.monotonic()
+    # Disconnected long ago, but an event arrived one second ago.
+    assert pump_is_stalled("t-later", now + 400, ttl_s=300.0, now=now + 401) is False
+
+
+def test_the_sse_watchdog_uses_this_predicate():
+    """Extracting the decision only helps if the live path calls it."""
+    import inspect
+
+    from kazma_ui import sse_chat
+
+    src = inspect.getsource(sse_chat)
+    assert "pump_is_stalled(thread_id" in src
