@@ -14,8 +14,8 @@ platform.
 from __future__ import annotations
 
 import importlib.util
-import os
 import json
+import os
 import sys
 from pathlib import Path
 
