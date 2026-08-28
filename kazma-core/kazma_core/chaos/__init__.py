@@ -198,6 +198,18 @@ class FailureInjector:
                     return injection
         return None
     
+    def has_injections(self, target: InjectionTarget) -> bool:
+        """Is anything registered against *target*? Lock-free by design.
+
+        This is the gate that keeps decorated hot paths cheap on a
+        deployment where chaos is armed but idle. A plain dict read cannot
+        deadlock, cannot block the loop, and cannot serialise callers --
+        properties worth more here than being exactly current, since an
+        injection registered microseconds ago being missed by one call is
+        not a wrong answer for a test harness.
+        """
+        return bool(self._target_injections.get(target))
+
     async def record_call(self, target: InjectionTarget):
         """Record a call to the target for statistics.
 
@@ -256,6 +268,8 @@ def chaos_injection(target: InjectionTarget):
                 # Same fast path as below; see the note there.
                 if not _chaos_enabled():
                     return func(*args, **kwargs)
+                if not get_injector().has_injections(target):
+                    return func(*args, **kwargs)
                 injection = _should_inject_sync(target)
                 if injection:
                     logger.warning(
@@ -288,6 +302,15 @@ def chaos_injection(target: InjectionTarget):
                 return await func(*args, **kwargs)
 
             injector = get_injector()
+            # Second fast path, and on this deployment the important one.
+            # KAZMA_CHAOS_ENABLED is switched ON against the live install,
+            # so the disabled path above never runs there. "Armed but
+            # nothing aimed at this target" is the steady state of a chaos
+            # framework -- injections are registered per experiment and
+            # live only in memory -- and it must not cost two locks.
+            if not injector.has_injections(target):
+                return await func(*args, **kwargs)
+
             await injector.record_call(target)
 
             injection = await injector.should_inject(target)

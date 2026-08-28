@@ -55,6 +55,8 @@ from collections import OrderedDict
 from datetime import UTC, datetime
 from typing import Any
 
+from kazma_core.chaos import InjectionTarget, chaos_injection
+
 __all__ = [
     "close_reply_turn",
     "current_reply_turn",
@@ -252,6 +254,7 @@ def resolve_reply_text(checkpoint_text: str = "", streamed_text: str = "") -> st
 # ══════════════════════════════════════════════════════════════════════
 
 
+@chaos_injection(InjectionTarget.DATABASE)
 def upsert_reply(
     session_id: str,
     turn_id: str,
