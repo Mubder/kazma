@@ -555,3 +555,75 @@ def test_notifier_constructor_touches_only_env(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     guard.Notifier(guard.GuardLog(tmp_path / "g.log"))
     assert called["vault"] is False, "constructor must not reach the vault"
+
+
+# ── no duplicate alerting with the app's own notifier ─────────────────
+
+
+def test_guard_does_not_announce_a_healthy_start():
+    """kazma_core.lifecycle_notifier already sends "server starting up",
+    "server started" and "server restarted" from inside the app.
+
+    The guard must only report what the app CANNOT -- because when those
+    things are true, the app is dead. Announcing healthy starts doubled
+    every message in the operator's Telegram.
+    """
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    ready_block = src[src.index("if self._wait_ready("):src.index("reason = self._supervise()")]
+    assert "notify.send" not in ready_block, (
+        "the app announces its own successful start; the guard must not"
+    )
+
+
+def test_failure_alerts_are_attributed_to_the_guard():
+    """Operators need to tell guard messages apart from the app's."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    for fragment in ("[guard] Kazma stopped", "[guard] Kazma is crash-looping"):
+        assert fragment in src
+
+
+# ── port-holder reaping ───────────────────────────────────────────────
+
+
+def test_port_is_parsed_from_the_health_url():
+    assert guard._port_from_url("http://127.0.0.1:9090/health/ready") == 9090
+    assert guard._port_from_url("not a url") == 0
+
+
+def test_only_python_holders_are_killed(monkeypatch, tmp_path):
+    """A mistyped port must not take out an unrelated service."""
+    monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 4242)
+    monkeypatch.setattr(guard.subprocess, "run",
+                        lambda cmd, **kw: type("R", (), {"stdout": "sqlservr.exe  4242"})())
+    log = guard.GuardLog(tmp_path / "g.log")
+    assert guard.reap_port_holder("http://127.0.0.1:9090/health/ready", log) is False
+
+
+def test_python_holder_is_killed(monkeypatch, tmp_path):
+    monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 4242)
+    killed: list[list[str]] = []
+
+    def _run(cmd, **kw):
+        if cmd and cmd[0] == "tasklist":
+            return type("R", (), {"stdout": "python.exe  4242"})()
+        killed.append(cmd)
+        return type("R", (), {"stdout": ""})()
+
+    monkeypatch.setattr(guard.subprocess, "run", _run)
+    monkeypatch.setattr(guard, "_pid_alive", lambda pid: False)
+    log = guard.GuardLog(tmp_path / "g.log")
+    assert guard.reap_port_holder("http://127.0.0.1:9090/health/ready", log) is True
+    assert killed, "a python squatter on our own port must be cleared"
+
+
+def test_foreign_server_detection_also_clears_the_squatter():
+    """Detection alone left the guard refusing forever and escalating to a
+    human (live, 2026-08-28 12:54)."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard._wait_ready)
+    assert "reap_port_holder(" in src

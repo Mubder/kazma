@@ -394,6 +394,88 @@ def _record_child(pid: int | None) -> None:
         pass
 
 
+def _port_from_url(url: str) -> int:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        return int(parsed.port or 0)
+    except Exception:
+        return 0
+
+
+def _port_holder_pid(port: int) -> int:
+    """PID listening on *port*, or 0. Standard library / OS tools only."""
+    if not port:
+        return 0
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                                 capture_output=True, text=True,
+                                 timeout=20, check=False).stdout
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 5 and parts[0].upper() == "TCP"                         and parts[3].upper() == "LISTENING"                         and parts[1].endswith(f":{port}"):
+                    return int(parts[4])
+            return 0
+        out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                             capture_output=True, text=True,
+                             timeout=20, check=False).stdout.strip()
+        return int(out.splitlines()[0]) if out else 0
+    except Exception:
+        return 0
+
+
+def reap_port_holder(url: str, log: GuardLog) -> bool:
+    """Kill whatever is squatting on the port this guard owns.
+
+    Detecting a foreign server is not enough on its own: without this the
+    guard refuses forever and escalates to a human, which is exactly what
+    happened live (2026-08-28 12:54) when a manual kill removed serve.py
+    but left its uvicorn grandchild holding port 9090 and serving.
+
+    The guard is the designated owner of its configured port, so clearing a
+    squatter is legitimate recovery -- but it is deliberately narrow: only
+    a python process is ever killed, so a mistyped port cannot take out
+    something unrelated.
+    """
+    port = _port_from_url(url)
+    pid = _port_holder_pid(port)
+    if not pid:
+        return False
+    name = ""
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                                 capture_output=True, text=True,
+                                 timeout=15, check=False).stdout
+            name = out.split()[0].lower() if out.split() else ""
+        else:
+            name = subprocess.run(["ps", "-p", str(pid), "-o", "comm="],
+                                  capture_output=True, text=True,
+                                  timeout=15, check=False).stdout.strip().lower()
+    except Exception:
+        name = ""
+    if "python" not in name:
+        log("error", "port.holder_not_ours", pid=pid, port=port, name=name,
+            note="refusing to kill a non-python process")
+        return False
+    log("warn", "port.reaping_holder", pid=pid, port=port, name=name)
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                           capture_output=True, timeout=30, check=False)
+        else:
+            os.kill(pid, signal.SIGKILL)
+    except Exception as exc:
+        log("error", "port.reap_failed", pid=pid, error=str(exc)[:200])
+        return False
+    for _ in range(20):
+        if not _pid_alive(pid):
+            break
+        time.sleep(0.5)
+    log("info", "port.holder_reaped", pid=pid, port=port)
+    return True
+
+
 def spawn(cmd: list[str], cwd: Path, log: GuardLog) -> subprocess.Popen:
     kwargs: dict = {"cwd": str(cwd)}
     if os.name == "nt":
@@ -495,6 +577,9 @@ class Guard:
                     self.log("error", "child.foreign_server_holds_port",
                              server_started_at=boot, our_child_spawned_at=spawned_at,
                              note="another process owns the port; not supervising it")
+                    # Clear the squatter so the NEXT attempt can bind.
+                    # Detection alone left the guard refusing forever.
+                    reap_port_holder(self.health_url, self.log)
                     return False
                 self.log("info", "child.ready",
                          detail=detail, after_s=round(time.monotonic() - started, 1))
@@ -572,7 +657,7 @@ class Guard:
 
         if self._foreign_server_present():
             msg = (
-                "Kazma guard did NOT start: something is already serving "
+                "[guard] Kazma guard did NOT start: something is already serving "
                 f"{self.health_url}. Stop the existing instance first, then "
                 "start the guard -- otherwise it would supervise a process "
                 "it did not launch."
@@ -588,16 +673,20 @@ class Guard:
             self.proc = spawn(self.cmd, self.cwd, self.log)
 
             if self._wait_ready(spawned_at):
-                msg = (
-                    "Kazma is up." if first
-                    else f"Kazma restarted and is healthy (restart #{self.restarts})."
-                )
                 if first:
                     # Safe to resolve now: the server is already running, so
                     # a slow vault import costs nothing but a delayed alert.
                     self.log("info", "guard.notifier",
                              target=self.notify.describe())
-                self.notify.send(msg)
+                # NO notification on a healthy start. Kazma's own
+                # lifecycle_notifier already sends "server starting up",
+                # "server started" and "server restarted (was down ~Ns)"
+                # from inside the app. The guard exists to say the things
+                # the app CANNOT say -- because when they are true, the app
+                # is dead. Announcing a successful start here just doubles
+                # every message in the operator's Telegram.
+                self.log("info", "guard.supervising",
+                         restarts=self.restarts, note="app announces its own start")
                 first = False
                 reason = self._supervise()
             else:
@@ -615,7 +704,7 @@ class Guard:
                 self.log("error", "guard.crash_loop", restarts=self.restarts,
                          window_s=CRASH_LOOP_WINDOW_S)
                 self.notify.send(
-                    f"Kazma is crash-looping ({CRASH_LOOP_COUNT} restarts in "
+                    f"[guard] Kazma is crash-looping ({CRASH_LOOP_COUNT} restarts in "
                     f"{CRASH_LOOP_WINDOW_S // 60} min). Last reason: {reason}. "
                     f"Pausing {CRASH_LOOP_COOLDOWN_S // 60} min -- this needs a human."
                 )
@@ -626,7 +715,10 @@ class Guard:
             delay = self._backoff()
             self.log("warn", "guard.restarting", reason=reason, in_s=delay,
                      restarts=self.restarts)
-            self.notify.send(f"Kazma stopped ({reason}). Restarting in {int(delay)}s.")
+            self.notify.send(
+                f"[guard] Kazma stopped: {reason}. Restarting in {int(delay)}s "
+                f"(attempt {self.restarts})."
+            )
             self._sleep(delay)
 
         if self.proc:

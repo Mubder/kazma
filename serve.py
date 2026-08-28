@@ -67,8 +67,22 @@ try:
             "--port",
             "9090",
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # stdout/stderr are INHERITED, never piped.
+        #
+        # This used to capture both into pipes that nothing ever read, and
+        # then call proc.wait(). Once uvicorn wrote more than the OS pipe
+        # buffer (~4-64 KB) it blocked forever on write, freezing the whole
+        # server -- alive, listening on nothing, logging nothing.
+        #
+        # Interactively you might never reach the buffer limit. Under a
+        # service manager you do, which is why this only surfaced when
+        # Kazma was first run under supervision (2026-08-28): the process
+        # stayed up, the app log stopped mid-startup, and there was nothing
+        # to diagnose from.
+        #
+        # Inheriting means output goes to the console when run by hand and
+        # to the supervisor's stream otherwise. Kazma's real logs go to
+        # .kazma/kazma.log either way.
     )
 
     print(f"Server started with PID {proc.pid}")
@@ -78,12 +92,15 @@ try:
     # Wait for server to start
     time.sleep(2)
 
-    # Check if process is still running
+    # Check if process is still running. With stdio inherited, uvicorn's
+    # own error output has already reached the console/supervisor, so there
+    # is nothing to drain here -- just report and fail loudly.
     if proc.poll() is not None:
-        stdout, stderr = proc.communicate()
-        if stderr:
-            print(f"❌ Server failed to start:\n{stderr.decode()}")
-            sys.exit(1)
+        print(
+            f"Server failed to start (uvicorn exited {proc.returncode}). "
+            "See the output above and .kazma/kazma.log."
+        )
+        sys.exit(1)
 
     try:
         proc.wait()
