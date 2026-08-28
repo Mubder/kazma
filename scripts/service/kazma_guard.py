@@ -363,6 +363,24 @@ class Guard:
 
     # -- main loop ----------------------------------------------------
 
+    def _foreign_server_present(self) -> bool:
+        """True if something is ALREADY serving our health URL.
+
+        Without this check the guard can supervise nothing at all: it spawns
+        a child, the child fails to bind because another Kazma still holds
+        the port, and the probe is satisfied by that other process. The
+        guard then reports healthy forever while the thing it launched is
+        gone -- a supervisor fooled into watching a stranger.
+
+        Refusing to start is the safe outcome. Two agents sharing one
+        Postgres and one workspace is worse than a delayed handover.
+        """
+        ok, detail = probe(self.health_url, PROBE_TIMEOUT_S)
+        if ok:
+            self.log("error", "guard.port_already_served",
+                     health=self.health_url, detail=detail)
+        return ok
+
     def run(self) -> int:
         self._install_signals()
         self.log(
@@ -370,6 +388,18 @@ class Guard:
             cmd=" ".join(self.cmd), cwd=str(self.cwd),
             health=self.health_url, notifier=self.notify.describe(),
         )
+
+        if self._foreign_server_present():
+            msg = (
+                "Kazma guard did NOT start: something is already serving "
+                f"{self.health_url}. Stop the existing instance first, then "
+                "start the guard -- otherwise it would supervise a process "
+                "it did not launch."
+            )
+            self.log("error", "guard.refused_to_start")
+            self.notify.send(msg)
+            print(msg, file=sys.stderr)
+            return 2
 
         first = True
         while not self._stop:

@@ -346,3 +346,44 @@ def test_describe_never_leaks_the_token(monkeypatch, tmp_path):
     desc = n.describe()
     assert "SUPER-SECRET-TOKEN" not in desc
     assert "12345" in desc, "the destination is useful; the credential is not"
+
+
+def test_guard_refuses_to_start_when_the_port_is_already_served(monkeypatch, tmp_path):
+    """A supervisor fooled into watching a stranger is worse than none.
+
+    If another instance already answers the health URL, the guard's child
+    cannot bind -- but the probe still returns 200 from that other process,
+    so the guard would report healthy while supervising nothing.
+    """
+    g = guard.Guard.__new__(guard.Guard)
+    g.log = guard.GuardLog(tmp_path / "g.log")
+    g.health_url = "http://127.0.0.1:9090/health/ready"
+
+    monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
+    assert guard.Guard._foreign_server_present(g) is True
+
+    monkeypatch.setattr(guard, "probe", lambda url, t: (False, "unreachable"))
+    assert guard.Guard._foreign_server_present(g) is False
+
+
+def test_refusal_alerts_and_exits_nonzero(monkeypatch, tmp_path):
+    sent: list[str] = []
+
+    g = guard.Guard.__new__(guard.Guard)
+    g.log = guard.GuardLog(tmp_path / "g.log")
+    g.health_url = "http://x/health/ready"
+    g.cmd = ["python", "serve.py"]
+    g.cwd = tmp_path
+    g._stop = False
+    g.notify = type("N", (), {
+        "describe": lambda self: "test",
+        "send": lambda self, t: sent.append(t),
+        "configured": True,
+    })()
+
+    monkeypatch.setattr(guard, "probe", lambda url, t: (True, "ready"))
+    monkeypatch.setattr(guard.Guard, "_install_signals", lambda self: None)
+
+    rc = guard.Guard.run(g)
+    assert rc == 2, "must not exit 0 and look like a success"
+    assert sent and "already serving" in sent[0]
