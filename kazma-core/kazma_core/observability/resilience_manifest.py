@@ -134,6 +134,20 @@ MECHANISMS: tuple[Mechanism, ...] = (
         note="544 lines with zero call sites until Phase 4.",
     ),
     Mechanism(
+        name="restore drill",
+        fault="a backup that cannot actually be restored",
+        module="kazma_core.backup.restore_drill",
+        symbol="verify_backup",
+        proof="tests/test_restore_drill.py",
+        proven_in_production=True,
+        note=(
+            "Non-destructive: integrity-checks every SQLite file in scratch "
+            "and parses the Postgres TOC via pg_restore --list. Kazma has no "
+            "restore path for universal backups, so verification is the half "
+            "that can be rehearsed safely."
+        ),
+    ),
+    Mechanism(
         name="backup-gap alerting",
         fault="backups keep succeeding while silently protecting nothing",
         module="kazma_core.backup.universal",
