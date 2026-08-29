@@ -234,6 +234,60 @@ async def gmail_disconnect() -> JSONResponse:
 
 # ── Gmail OAuth (browser) ──────────────────────────────────────────────
 
+#: A Google OAuth **client ID** always ends with this.
+_GOOGLE_CLIENT_ID_SUFFIX = ".apps.googleusercontent.com"
+
+#: A Google OAuth **client secret** always starts with this.
+_GOOGLE_CLIENT_SECRET_PREFIX = "GOCSPX-"
+
+
+def _gmail_client_format_error(client_id: str, client_secret: str) -> str:
+    """Return an operator-facing message when the two fields are swapped/wrong.
+
+    Google's failure for a bad client ID is ``Error 401: invalid_client — The
+    OAuth client was not found``, raised on its own consent page long after
+    the value was saved and with no indication of which field is wrong. The
+    two values are visually similar in the Cloud Console and sit next to each
+    other, so pasting the secret into both is an easy slip that costs a
+    debugging session.
+
+    The formats are unambiguous, so catch it at the point of entry instead.
+    """
+    cid, sec = client_id.strip(), client_secret.strip()
+
+    if cid == sec:
+        return (
+            "Client ID and Client Secret are identical — the same value was "
+            "pasted into both fields. In Google Cloud Console → APIs & "
+            "Services → Credentials, the Client ID ends with "
+            f"'{_GOOGLE_CLIENT_ID_SUFFIX}' and the secret starts with "
+            f"'{_GOOGLE_CLIENT_SECRET_PREFIX}'."
+        )
+
+    if cid.startswith(_GOOGLE_CLIENT_SECRET_PREFIX):
+        return (
+            "That looks like the Client SECRET, not the Client ID — it starts "
+            f"with '{_GOOGLE_CLIENT_SECRET_PREFIX}'. The Client ID is the "
+            f"longer value ending in '{_GOOGLE_CLIENT_ID_SUFFIX}'. Google "
+            "would reject this with 'Error 401: invalid_client — The OAuth "
+            "client was not found'."
+        )
+
+    if not cid.endswith(_GOOGLE_CLIENT_ID_SUFFIX):
+        return (
+            f"Client ID must end with '{_GOOGLE_CLIENT_ID_SUFFIX}'. Copy it "
+            "from Google Cloud Console → APIs & Services → Credentials → your "
+            "OAuth 2.0 Client ID."
+        )
+
+    if sec.endswith(_GOOGLE_CLIENT_ID_SUFFIX):
+        return (
+            "The Client Secret field contains a Client ID. The secret is the "
+            f"shorter value starting with '{_GOOGLE_CLIENT_SECRET_PREFIX}'."
+        )
+
+    return ""
+
 
 @protected_router.post("/oauth/gmail/client", dependencies=[Depends(_verify_same_origin)])
 async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
@@ -247,6 +301,9 @@ async def gmail_set_oauth_client(body: GmailOAuthClientBody) -> JSONResponse:
                 {"ok": False, "error": "client_id and client_secret are required"},
                 status_code=400,
             )
+        problem = _gmail_client_format_error(cid, secret)
+        if problem:
+            return JSONResponse({"ok": False, "error": problem}, status_code=400)
         os.environ["EMAIL_GMAIL_CLIENT_ID"] = cid
         os.environ["EMAIL_GMAIL_CLIENT_SECRET"] = secret
         ok_id = vault_store("email.gmail.client_id", cid, category="email")

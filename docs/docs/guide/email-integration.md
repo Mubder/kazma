@@ -110,6 +110,28 @@ Your OAuth app is in **Testing**. Google only allows **test users** until the ap
 
 **Do not** need full Google verification unless you ship Kazma as a multi-tenant product to arbitrary Gmail users.
 
+#### Error: `401: invalid_client` / “The OAuth client was not found”
+
+Google cannot find a client with the ID you sent. This is a credentials
+problem, not a publishing or scopes one — the consent screen never loads.
+
+Almost always the **Client ID field holds the Client Secret**. The two sit
+next to each other in the Cloud Console and look alike:
+
+| Field | Always looks like |
+|-------|-------------------|
+| Client **ID** | `1234567890-abcdef.apps.googleusercontent.com` |
+| Client **Secret** | `GOCSPX-…` |
+
+Fix: Google Cloud Console → **APIs & Services** → **Credentials** → your
+OAuth 2.0 Client ID → copy the **Client ID** (the long one ending in
+`.apps.googleusercontent.com`) → Settings → Email → OAuth → re-save both
+fields → **Connect with Google**.
+
+Kazma now rejects a mismatched pair when you save it, and again when you
+click Connect, naming the field. Both checks are format-only — a well-formed
+client that was *deleted* in the Console still fails at Google.
+
 #### Testing vs In production — pick one deliberately
 
 The publishing status is not cosmetic; it decides how often you have to reconnect.
