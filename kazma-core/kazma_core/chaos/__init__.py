@@ -16,13 +16,13 @@ import logging
 import os
 import random
 import time
-from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
-from typing import Any, Callable, Optional
 from functools import wraps
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -76,14 +76,14 @@ class FailureInjection:
     target: InjectionTarget
     probability: float = 0.1  # 0.0 to 1.0
     severity: str = "medium"  # low, medium, high, critical
-    duration_seconds: Optional[float] = None  # None = permanent until removed
+    duration_seconds: float | None = None  # None = permanent until removed
     error_message: str = "Chaos injection: simulated failure"
     error_code: int = 500
     latency_ms: int = 0  # For latency injection
     metadata: dict[str, Any] = field(default_factory=dict)
     enabled: bool = True
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     injection_id: str = field(default_factory=lambda: f"inj_{int(time.time()*1000)}_{random.randint(1000,9999)}")
 
     def __post_init__(self):
@@ -145,11 +145,11 @@ class FailureInjector:
                 return True
             return False
     
-    async def get_injection(self, injection_id: str) -> Optional[FailureInjection]:
+    async def get_injection(self, injection_id: str) -> FailureInjection | None:
         """Get injection by ID."""
         return self._injections.get(injection_id)
     
-    async def list_injections(self, target: Optional[InjectionTarget] = None) -> list[FailureInjection]:
+    async def list_injections(self, target: InjectionTarget | None = None) -> list[FailureInjection]:
         """List all active injections, optionally filtered by target."""
         async with self._lock:
             if target:
@@ -183,7 +183,7 @@ class FailureInjector:
                 await self.remove_injection(inj_id)
             return len(expired_ids)
     
-    async def should_inject(self, target: InjectionTarget) -> Optional[FailureInjection]:
+    async def should_inject(self, target: InjectionTarget) -> FailureInjection | None:
         """Check if any injection should trigger for the given target."""
         if not _chaos_enabled():
             return None
@@ -225,7 +225,7 @@ class FailureInjector:
                 if inj_id in self._stats:
                     self._stats[inj_id]["total_calls"] += 1
     
-    async def get_stats(self, injection_id: Optional[str] = None) -> dict:
+    async def get_stats(self, injection_id: str | None = None) -> dict:
         """Get injection statistics."""
         async with self._lock:
             if injection_id:
@@ -234,7 +234,7 @@ class FailureInjector:
 
 
 # Global injector instance
-_injector: Optional[FailureInjector] = None
+_injector: FailureInjector | None = None
 
 
 def get_injector() -> FailureInjector:
@@ -459,12 +459,19 @@ class ChaosInjectionError(Exception):
         message: str,
         error_code: int = 500,
         injection_id: str = "",
-        metadata: Optional[dict] = None,
+        metadata: dict | None = None,
     ):
         super().__init__(message)
         self.error_code = error_code
         self.injection_id = injection_id
         self.metadata = metadata or {}
+        # Retry paths across the codebase decide by asking the exception
+        # whether it is transient. An injected 503 that presents as
+        # permanent skips the very retry it was injected to exercise --
+        # the experiment would then "pass" without the mechanism running.
+        # 408/429/5xx are the codes a provider returns when trying again
+        # is the correct response; everything else is a real refusal.
+        self.transient = error_code in (408, 429) or 500 <= error_code < 600
 
 
 # ─── Context Manager for Scoped Injections ────────────────────────────────

@@ -54,6 +54,56 @@ def _is_transient(exc: BaseException) -> bool:
     return bool(getattr(exc, "transient", False))
 
 
+def _chaos_error() -> type[BaseException]:
+    """The injected-failure type, or a class nothing ever raises."""
+    try:
+        from kazma_core.chaos import ChaosInjectionError
+
+        return ChaosInjectionError
+    except Exception:  # noqa: BLE001
+
+        class _UnraisableError(Exception):
+            pass
+
+        return _UnraisableError
+
+
+def _chaos_gate() -> Any:
+    """Return the chaos hook for LLM calls, or None when chaos is off.
+
+    Injected here rather than around ``resilient_chat`` as a whole,
+    because the point of an experiment is to exercise the retry and
+    failover this function performs. A failure injected on the outside
+    would bypass both and prove only that an exception propagates.
+    """
+    try:
+        from kazma_core.chaos import InjectionTarget, get_injector
+
+        injector = get_injector()
+        if not injector.has_injections(InjectionTarget.LLM_PROVIDER):
+            return None
+        return (injector, InjectionTarget.LLM_PROVIDER)
+    except Exception:  # noqa: BLE001 -- chaos must never break a real call
+        return None
+
+
+async def _maybe_inject(gate: Any) -> None:
+    if not gate:
+        return
+    injector, target = gate
+    try:
+        injection = await injector.should_inject(target)
+    except Exception:  # noqa: BLE001
+        return
+    if injection is None:
+        return
+    from kazma_core import chaos as _chaos
+
+    logger.warning("[Chaos] Injecting %s into LLM_PROVIDER (%s)",
+                   injection.failure_type.value, injection.injection_id)
+    await _chaos._apply_injection(injection)
+
+
 def _record(**kwargs: Any) -> None:
     try:
         from kazma_core.agent.nonstop import get_nonstop_config
@@ -101,12 +151,16 @@ async def resilient_chat(
     from kazma_core.llm_provider import LLMError
 
     retryable = _retryable()
+    _ChaosInjectionError = _chaos_error()
     attempts = max(1, int(max_attempts))
     last_exc: BaseException | None = None
     start = time.monotonic()
 
+    gate = _chaos_gate()
+
     for attempt in range(1, attempts + 1):
         try:
+            await _maybe_inject(gate)
             response = await client.chat(
                 messages,
                 tools=tools if tools else None,
@@ -132,6 +186,13 @@ async def resilient_chat(
             last_exc = exc
             if not getattr(exc, "transient", False):
                 raise  # permanent — fail fast, no retry, no failover
+        except _ChaosInjectionError as exc:
+            # Same rule as a real provider error, deliberately: an
+            # injected 503 must take the retry path, or the experiment
+            # measures nothing but exception propagation.
+            last_exc = exc
+            if not getattr(exc, "transient", False):
+                raise
         if attempt < attempts:
             wait = min(backoff_base * (2 ** (attempt - 1)), 30.0)
             logger.warning(

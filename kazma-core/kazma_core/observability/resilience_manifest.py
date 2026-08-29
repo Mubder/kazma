@@ -216,6 +216,23 @@ MECHANISMS: tuple[Mechanism, ...] = (
         ),
     ),
     Mechanism(
+        name="chaos injection on the LLM retry path",
+        fault=(
+            "the provider fails mid-turn and the retry/failover chain is "
+            "never exercised, so nobody knows whether it works"
+        ),
+        module="kazma_core.agent.resilient_chat",
+        symbol="_maybe_inject",
+        proof="tests/test_chaos_llm_retry.py",
+        proven_in_production=False,
+        note=(
+            "Injected inside the retry loop, not around it: a failure "
+            "raised outside skips both retry and failover and proves only "
+            "that exceptions propagate. Injected errors now declare "
+            "transience by status code for the same reason."
+        ),
+    ),
+    Mechanism(
         name="read-only offsite detection",
         fault=(
             "the offsite repository accepts reads and refuses every write, "
