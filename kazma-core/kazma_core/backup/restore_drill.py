@@ -139,12 +139,12 @@ def _check_pg_dump(dump: Path, res: DrillResult) -> None:
             with dump.open("rb") as fh:
                 proc = subprocess.run(
                     [*prefix, "--list"], stdin=fh, capture_output=True,
-                    text=True, timeout=_PG_LIST_TIMEOUT_S, check=False,
+                    text=True, encoding="utf-8", errors="replace", timeout=_PG_LIST_TIMEOUT_S, check=False,
                 )
         else:
             proc = subprocess.run(
                 [*prefix, "--list", str(dump)], capture_output=True,
-                text=True, timeout=_PG_LIST_TIMEOUT_S, check=False,
+                text=True, encoding="utf-8", errors="replace", timeout=_PG_LIST_TIMEOUT_S, check=False,
             )
     except Exception as exc:  # noqa: BLE001
         res.add("postgres:toc", False, f"pg_restore --list would not run: {exc}")

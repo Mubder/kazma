@@ -251,7 +251,7 @@ def _offsite_sync(dest: Path) -> dict[str, Any]:
             subprocess.run,
             ["rclone", "copy", str(dest), remote, "--transfers", "4"],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             timeout=1800,
         )
         if proc.returncode == 0:
