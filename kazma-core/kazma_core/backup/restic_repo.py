@@ -215,10 +215,42 @@ def _run(args: list[str], repo: str, password: str, *,
 
     res.stdout = proc.stdout or ""
     if proc.returncode != 0:
-        res.error = ((proc.stderr or proc.stdout or "").strip())[:400]
+        res.error = _meaningful_error(proc.stderr, proc.stdout)
         return res
     res.ok = True
     return res
+
+
+def _meaningful_error(stderr: str | None, stdout: str | None) -> str:
+    """Return the part of the output that actually says what went wrong.
+
+    rclone prints a NOTICE about its shared Google client_id on EVERY
+    invocation, and it lands on stderr before anything else. Taking the
+    first 400 characters therefore reported the notice and truncated away
+    the real error -- a failed offsite restore whose message said only that
+    a client id is being retired in 2026.
+
+    An error message that hides the error is worse than no message: it
+    looks like a diagnosis and sends you somewhere else entirely.
+    """
+    text = ((stderr or "") + chr(10) + (stdout or "")).strip()
+    if not text:
+        return "failed with no output"
+    lines = [
+        ln.strip() for ln in text.splitlines()
+        if ln.strip() and "NOTICE:" not in ln
+    ]
+    if not lines:
+        return text[:400]
+    # Prefer lines that name a failure; fall back to the tail, which is
+    # where a CLI usually puts its verdict.
+    flagged = [
+        ln for ln in lines
+        if any(w in ln.lower() for w in ("error", "fatal", "failed", "cannot",
+                                         "denied", "no such", "unable"))
+    ]
+    chosen = flagged or lines[-3:]
+    return " | ".join(chosen)[:400]
 
 
 def init_repo(repo: str, password: str) -> ResticResult:
