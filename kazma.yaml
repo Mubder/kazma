@@ -47,15 +47,6 @@ mcp:
     - '@modelcontextprotocol/server-filesystem'
     - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
-  - name: test-mcp
-    transport: stdio
-    command:
-    - echo
-    - hello
-    url: ''
-    env: {}
-    enabled: true
-    connected: false
     tool_count: 0
     tools: []
     trust: approval_required
