@@ -787,6 +787,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كل طلب أرسله كازما إلى إكس مع النص الكامل — أصبح الآن في صفحة المهام المجدولة بجوار المنشورات التي أنتجته.",
     },
     "settings.x_audit_open": {"en": "Open X activity", "ar": "فتح نشاط إكس"},
+    "scheduled.tz_note": {
+        "en": "Times shown in your timezone ({viewer}). Recurring tasks are interpreted in the scheduler's timezone ({cron}). ",
+        "ar": "الأوقات معروضة بمنطقتك الزمنية ({viewer}). المهام المتكررة تُفسَّر بمنطقة المجدول الزمنية ({cron}). ",
+    },
+    "scheduled.tz_change": {"en": "Change", "ar": "تغيير"},
     "scheduled.stat_upcoming": {"en": "Upcoming", "ar": "قادمة"},
     "scheduled.stat_overdue": {"en": "Overdue", "ar": "متأخرة"},
     "scheduled.stat_failed": {"en": "Failed", "ar": "فاشلة"},
@@ -922,6 +927,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Timezone for scheduled tasks and reminders — \"daily at 9am\" fires at 9am here. Applies to newly scheduled tasks; existing jobs keep their stored fire times. Type an IANA zone (the list is a shortcut, not a limit).",
         "ar": "المنطقة الزمنية للمهام المجدولة والتذكيرات — \"يومياً الساعة 9 صباحاً\" تُطلق 9 صباحاً بتوقيتها هنا. تنطبق على المهام الجديدة؛ المهمّات الحالية تحتفظ بوقتها المخزَّن. اكتب اسم منطقة IANA (القائمة اختصار وليست حداً).",
     },
+    "settings.cron_tz_use_mine": {"en": "Use my timezone", "ar": "استخدم منطقتي الزمنية"},
+    "settings.cron_tz_invalid": {
+        "en": "Not a timezone your browser recognises. Use an IANA name such as Asia/Kuwait.",
+        "ar": "ليست منطقة زمنية يعرفها المتصفح. استخدم اسم IANA مثل Asia/Kuwait.",
+    },
+    "settings.cron_tz_saved": {
+        "en": "Schedule timezone saved — applies to newly scheduled tasks.",
+        "ar": "تم حفظ المنطقة الزمنية — تنطبق على المهام المجدولة الجديدة.",
+    },
+    "settings.cron_tz_save_failed": {"en": "Save failed", "ar": "فشل الحفظ"},
     "settings.cron_tz_label": {"en": "IANA timezone", "ar": "منطقة زمنية (IANA)"},
     "settings.cron_tz_save": {"en": "Save schedule timezone", "ar": "حفظ المنطقة الزمنية"},
     "settings.cron_tz_source_config": {"en": "Set from Settings.", "ar": "مضبوطة من الإعدادات."},

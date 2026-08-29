@@ -141,11 +141,33 @@
         // ── Scheduled tasks timezone (cron) ──
         cronTz: { value: 'UTC', source: 'default' },
         cronTzSaving: false,
-        cronTzZones: [
-            'UTC', 'Asia/Kuwait', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Qatar',
-            'Africa/Cairo', 'Europe/London', 'Europe/Berlin', 'Europe/Istanbul',
-            'America/New_York', 'America/Chicago', 'America/Los_Angeles',
-        ],
+        cronTzNow: '',
+        cronTzOffset: '',
+        cronTzError: false,
+
+        /* Every IANA zone the browser knows, not a curated dozen.
+         *
+         * The list was twelve hand-picked zones. It is a datalist, so an
+         * operator in Asia/Karachi could always type their own -- but they
+         * got no completion, no confirmation, and a typo only surfaced as a
+         * 400 on save. Intl.supportedValuesOf gives roughly 400 zones on
+         * any current browser; the hand-picked set stays as the fallback
+         * for engines that lack it, and leads so the common choices are
+         * still one keystroke away. */
+        get cronTzZones() {
+            const common = [
+                'UTC', 'Asia/Kuwait', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Qatar',
+                'Africa/Cairo', 'Europe/London', 'Europe/Berlin', 'Europe/Istanbul',
+                'America/New_York', 'America/Chicago', 'America/Los_Angeles',
+            ];
+            try {
+                const all = Intl.supportedValuesOf('timeZone');
+                if (Array.isArray(all) && all.length) {
+                    return common.concat(all.filter(z => !common.includes(z)));
+                }
+            } catch (e) { /* older engine — the shortlist still works */ }
+            return common;
+        },
 
         // ── Connectors Tab ──
         connectors: { telegram: {}, discord: {}, slack: {}, email: {}, webhook: {} },

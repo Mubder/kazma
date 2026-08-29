@@ -635,6 +635,51 @@
             this.timeTravelSaving = false;
         },
 
+        /* What the browser thinks you are in — offered, never imposed. */
+        browserTimezone() {
+            try {
+                return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            } catch (e) {
+                return '';
+            }
+        },
+
+        useBrowserTimezone() {
+            const tz = this.browserTimezone();
+            if (tz) {
+                this.cronTz.value = tz;
+                this.cronTzPreview();
+            }
+        },
+
+        /* Show the current time in the chosen zone, as it is typed.
+         *
+         * The zone NAME does not tell you whether you picked the right one;
+         * the clock does. It also turns an invalid entry into immediate
+         * feedback rather than a 400 discovered on save -- the backend
+         * still rejects bad zones, this just stops you getting there. */
+        cronTzPreview() {
+            const tz = String(this.cronTz.value || '').trim();
+            this.cronTzNow = '';
+            this.cronTzOffset = '';
+            this.cronTzError = false;
+            if (!tz) return;
+            try {
+                const now = new Date();
+                this.cronTzNow = new Intl.DateTimeFormat(
+                    document.documentElement.lang || 'en',
+                    { timeZone: tz, dateStyle: 'medium', timeStyle: 'short' },
+                ).format(now);
+                const parts = new Intl.DateTimeFormat('en', {
+                    timeZone: tz, timeZoneName: 'shortOffset',
+                }).formatToParts(now);
+                const off = parts.find(p => p.type === 'timeZoneName');
+                this.cronTzOffset = off ? off.value : '';
+            } catch (e) {
+                this.cronTzError = true;
+            }
+        },
+
         async loadCronTimezone() {
             try {
                 const data = await this._fetch('/api/settings/cron-timezone');
@@ -643,6 +688,7 @@
                     value: String(data.timezone || 'UTC'),
                     source: String(data.source || 'default'),
                 };
+                this.cronTzPreview();
             } catch (e) {
                 console.error('[Settings] Failed to load schedule timezone:', e);
             }
@@ -668,9 +714,9 @@
                     return;
                 }
                 await this.loadCronTimezone();
-                showToast('Schedule timezone saved — applies to newly scheduled tasks.', 'success');
+                showToast(window.t('settings.cron_tz_saved'), 'success');
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(window.t('settings.cron_tz_save_failed') + ': ' + e.message, 'error');
             }
             this.cronTzSaving = false;
         },

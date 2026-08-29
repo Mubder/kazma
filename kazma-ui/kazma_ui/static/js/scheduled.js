@@ -21,6 +21,12 @@ function scheduledPage() {
         // produced it rather than inside the connector setup form.
         audit: { entries: [], loading: false, open: null, loaded: false },
 
+        // Times on this page render in the VIEWER's zone; recurring jobs
+        // ("daily at 9am") are interpreted in the SCHEDULER's zone. When
+        // those differ, "9am" means neither what the row shows nor what the
+        // operator assumed, and nothing on the page said so.
+        cronTz: '',
+
         get counts() {
             const c = { upcoming: 0, failed: 0, done: 0, overdue: 0 };
             for (const t of this.tasks) {
@@ -131,6 +137,31 @@ function scheduledPage() {
 
         async init() {
             await this.load();
+            this.loadCronTz();
+        },
+
+        async loadCronTz() {
+            try {
+                const resp = await fetch('/api/settings/cron-timezone', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                this.cronTz = String((data && data.timezone) || '');
+            } catch (e) {
+                this.cronTz = '';
+            }
+        },
+
+        viewerTz() {
+            try {
+                return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+            } catch (e) {
+                return '';
+            }
+        },
+
+        // Only worth saying when the two disagree.
+        tzMismatch() {
+            const v = this.viewerTz();
+            return !!(this.cronTz && v && this.cronTz !== v);
         },
 
         async refreshAll() {

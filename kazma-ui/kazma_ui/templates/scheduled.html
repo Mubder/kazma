@@ -158,6 +158,14 @@
     <div class="sched-empty" x-show="!loading && !filtered.length" x-cloak
          x-text="filter === 'upcoming' ? t('scheduled.empty_upcoming') : t('scheduled.empty_history')"></div>
     <div class="sched-empty" x-show="loading" x-cloak>…</div>
+
+    {# Said only when the two zones disagree — otherwise it is noise. #}
+    <div x-show="tzMismatch()" x-cloak
+         style="border-top:1px solid var(--border-subtle);padding:.7rem 1.1rem;font-size:.74rem;color:var(--text-muted);">
+      <span class="ki" data-icon="info" aria-hidden="true"></span>
+      <span x-text="t('scheduled.tz_note').replace('{viewer}', viewerTz()).replace('{cron}', cronTz)"></span>
+      <a href="/settings#agent" style="color:var(--accent);">{{ t('scheduled.tz_change') }}</a>
+    </div>
   </div>
 
   {# ── X activity: what was actually published ── #}
