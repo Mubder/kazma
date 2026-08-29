@@ -829,6 +829,7 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
             ensure_password,
             forget_prune,
             repo_paths,
+            unlock_stale,
             restic_available,
         )
 
@@ -841,6 +842,11 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
         for name, repo in repo_paths().items():
             if not repo:
                 continue
+            # Clear locks whose owner is gone BEFORE anything else. A killed
+            # restic leaves an exclusive lock, and every later backup then
+            # fails with "repository is already locked" while the schedule
+            # keeps reporting success -- silent, and worse than any disk leak.
+            await asyncio.to_thread(unlock_stale, repo, password)
             pruned = await asyncio.to_thread(forget_prune, repo, password)
             if not pruned.ok:
                 logger.warning("[memory_worker] restic forget %s: %s",

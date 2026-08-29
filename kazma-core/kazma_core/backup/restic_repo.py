@@ -263,6 +263,32 @@ def init_repo(repo: str, password: str) -> ResticResult:
     return _run(["init"], repo, password, action="init", timeout=600)
 
 
+# restic treats a lock as stale once it is older than this and its owning
+# process is gone. Matching restic's own default rather than inventing one.
+_STALE_LOCK_AGE_S = 30 * 60
+
+
+def unlock_stale(repo: str, password: str) -> ResticResult:
+    """Remove locks whose owning process is dead. Safe on a live repository.
+
+    ``restic unlock`` without ``--remove-all`` only clears locks restic
+    itself judges stale -- the owner is gone and the lock is older than its
+    threshold. A lock held by a running backup is left alone, which is what
+    makes this safe to run unattended.
+
+    It matters because a killed restic leaves an EXCLUSIVE lock behind, and
+    every subsequent backup then fails with "repository is already locked".
+    That is worse than the orphaned temp files this codebase already grew:
+    those merely wasted disk, this silently stops backing anything up while
+    the schedule keeps reporting that it ran. Kazma is restarted mid-backup
+    regularly, so it is a matter of time rather than bad luck.
+
+    Observed 2026-08-29: a check killed by a shell timeout held the offsite
+    repository until it was unlocked by hand.
+    """
+    return _run(["unlock"], repo, password, action="unlock", timeout=600)
+
+
 def backup(repo: str, password: str, paths: list[str], *,
            tags: list[str] | None = None) -> ResticResult:
     args = ["backup", "--json"]

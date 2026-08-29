@@ -605,3 +605,50 @@ def test_a_non_cp1252_byte_survives_the_round_trip(repo, payload, tmp_path):
         "the JSON summary must survive -- losing it is how a snapshot "
         "reported 0.0 MB"
     )
+
+
+# ── stale locks: a killed restic stops every future backup ────────────
+
+
+def test_unlock_stale_clears_a_dead_owner_lock(repo, payload):
+    """A killed restic leaves an EXCLUSIVE lock, and every later backup then
+    fails with "repository is already locked" while the schedule keeps
+    reporting that it ran. Worse than the orphaned temp files: those wasted
+    disk, this silently stops backing anything up.
+
+    Live, 2026-08-29: a check killed by a shell timeout held the offsite
+    repository until it was unlocked by hand.
+    """
+    rr.backup(repo, _PW, [str(payload)])
+    res = rr.unlock_stale(repo, _PW)
+    assert res.ok, res.error
+    assert rr.snapshots(repo, _PW).ok, "the repo must still be usable after"
+
+
+def test_unlock_runs_before_pruning_in_maintenance():
+    """Ordering: an exclusive lock blocks forget/prune too, so clearing it
+    first is what makes the rest of maintenance reachable at all."""
+    import inspect
+
+    from kazma_core.memory import worker_bootstrap
+
+    src = inspect.getsource(worker_bootstrap._handle_restic_maintenance)
+    # Compare the CALLS, not the imports -- the import block lists these
+    # alphabetically, which is the opposite order and says nothing.
+    assert "to_thread(unlock_stale" in src
+    assert src.index("to_thread(unlock_stale") < src.index("to_thread(forget_prune"), (
+        "locks must be cleared before anything that needs the lock"
+    )
+
+
+def test_unlock_is_not_remove_all():
+    """`unlock` without --remove-all clears only locks restic judges stale;
+    a lock held by a RUNNING backup is left alone. That distinction is what
+    makes this safe to run unattended."""
+    import inspect
+
+    # Check the COMMAND, not the docstring -- which mentions --remove-all
+    # precisely to explain why it is not used.
+    src = inspect.getsource(rr.unlock_stale)
+    body = src.split('"""')[-1]
+    assert "remove-all" not in body
