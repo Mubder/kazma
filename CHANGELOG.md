@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Unreleased — backups rebuilt on restic, and a restore that exists (2026-08-29)
+
+The backups worked; the restore did not exist. Recovery meant sequencing
+five steps from memory at the worst possible moment, and three live stores
+were in no backup at all.
+
+**Coverage gaps closed.** Neo4j graph memory (323 nodes) sat in a Docker
+volume the data-dir sweep never walked — a driver-level JSONL export now
+covers it, round-trip verified to identical content hashes. `kazma.yaml`
+(MCP registry, connectors, model routing) sat at the install root and is now
+pinned so a config change cannot silently drop it. Postgres had **never**
+had an offsite copy: the sweep excludes `backups/`, and the nightly dump
+wrote only to local disk.
+
+**Storage replaced, dump layer kept.** restic snapshots to two repositories
+with independent credentials. The dump layer stays because restic cannot
+know a WAL-mode SQLite file needs the Online Backup API. Measured: four
+generations cost 131 MB against 3.8 GB, each additional generation ~2 MB.
+Disk went 43 GB → 7.0 GB while holding *more* history. Retention is now
+time-based (7 daily / 8 weekly / 12 monthly) instead of "last 30 copies".
+
+**Secrets.** `.env` — carrying `KAZMA_SECRET` — was uploaded to Drive in
+plaintext. Repositories are encrypted with a passphrase that is
+deliberately not the vault key, since the defect was the key travelling
+with the data it protects.
+
+**Restore.** `python -m kazma_core.backup.restore` selects by GENERATION,
+never restic's `latest`: bulk-ingested generations carry recent snapshot
+timestamps and old content, so `latest` can return a backup missing
+`kazma.yaml` and look like a clean success. Rehearsed three times including
+from Drive; 25 databases integrity-checked inline each run.
+
+Bugs found by running the real thing, all of which passed their unit tests:
+the repetition breaker could never fire (three sites used attribute access
+on a TypedDict); errors truncated at 400 characters hid the real failure
+behind an rclone notice; `subprocess(text=True)` decoded as cp1252 and lost
+output in a reader thread, including in the guard that parses `netstat` to
+decide what to kill; 3.83 GB of orphaned `.tmp` dumps from killed processes;
+passphrase rotation stored the replacement only after revoking the old one;
+and a killed restic left an exclusive lock that would have silently stopped
+every future backup.
+
 ## Unreleased — task_ledger_update registered (2026-08-27, live fix)
 
 First live end-to-end run of the approval pipeline worked (tweet posted,
