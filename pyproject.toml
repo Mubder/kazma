@@ -54,6 +54,12 @@ dev = [
     "ruff>=0.4.0",
     "mypy>=1.10.0",
     "locust>=2.20.0",
+    # Runs .pre-commit-config.yaml: the import gates (every module imports,
+    # no dangling kazma_* refs) and the static gates (no blocking DB call on
+    # the event loop, no fire-and-forget task, every tool tiered for HITL,
+    # web tool output fenced). ~8s total. Activate once per clone with
+    # `pre-commit install`; until you do, the hooks never fire.
+    "pre-commit>=3.7.0",
 ]
 test = [
     "pytest>=8.0.0",

@@ -28,10 +28,13 @@ git checkout -b feature/my-new-feature
 # 3. Install dependencies (Python 3.11+ required)
 uv sync --all-extras
 
-# 4. Run the test suite to confirm everything works
+# 4. Activate the git hooks (once per clone — they do not fire until you do)
+uv run pre-commit install
+
+# 5. Run the test suite to confirm everything works
 uv run pytest tests/ -v
 
-# 5. Make your changes, commit, push, and open a PR
+# 6. Make your changes, commit, push, and open a PR
 ```
 
 ## Development Setup
@@ -59,9 +62,29 @@ uv sync --all-extras
 uv lock --upgrade && uv sync --all-extras
 ```
 
-### Pre-commit Checks
+### Pre-commit Hooks
 
-Run these before every commit:
+`pre-commit` ships in the `dev` extra, but the hooks are **inert until you
+install them into your clone** — a fresh clone commits with no checks:
+
+```bash
+uv run pre-commit install
+```
+
+Two gates then run on every commit (~8s combined):
+
+| Gate | Catches |
+|------|---------|
+| `kazma-import-gates` | A module that no longer imports, or a dangling `kazma_*` reference left by a deletion. Born from the `crawl.py` incident, where `py_compile` passed and research broke in production at first use. |
+| `kazma-static-gates` | A blocking DB call inside `async def` (stalls the loop serving every SSE/WebSocket stream), a fire-and-forget `asyncio.create_task` the GC can cancel mid-run, a registered tool with no HITL tier, and web-tool output that reaches the model unfenced. |
+
+Both are AST-only — they never boot the app. Run them by hand at any time:
+
+```bash
+uv run pre-commit run --all-files
+```
+
+### Checks to Run Before Every Commit
 
 ```bash
 # Lint and fix

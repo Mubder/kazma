@@ -1,27 +1,41 @@
-# Pre-commit hooks (opt-in): pip install pre-commit && pre-commit install
+# Pre-commit hooks (opt-in): `uv sync --all-extras` then `pre-commit install`.
+# `pre-commit` ships in the `dev` extra; the hooks do nothing until you
+# install them into your clone.
+#
+# Both gates are AST-only and never boot the app (~8s combined).
 #
 # import-gates: the crawl.py incident class (2026-08-14) — a module deletion
 # left a dangling import that py_compile (syntax-only) and the behavioral
 # suite both missed; it broke research in production at first use. These
 # two tests import every product module and AST-verify every kazma_*
-# import reference resolves. ~5s. See tests/test_imports.py.
+# import reference resolves. See tests/test_imports.py.
+#
+# static-gates: the 2026-08-29 audit class — defects found by grepping the
+# tree, not by a failing test. Blocking sqlite on the event loop (F-06),
+# fire-and-forget tasks the GC can cancel (F-07), a tool missing its HITL
+# tier (F-04), and unfenced web content reaching the model (F-09).
+# See tests/test_static_gates.py.
+#
+# NOTE ON `entry`: both hooks go through scripts/run_gates.py rather than
+# naming an interpreter directly. Under `language: system` pre-commit runs
+# the entry without a shell, so a relative `.venv/Scripts/python.exe` fails
+# on Windows with WinError 2 — which is how these hooks silently never ran
+# there — and a bare `python` resolves to pre-commit's OWN interpreter
+# (PATH is sanitised), which has no pytest. The shim is stdlib-only, locates
+# the project virtualenv itself, and honours KAZMA_GATE_PYTHON as an override.
 repos:
   - repo: local
     hooks:
       - id: kazma-import-gates
         name: kazma import gates (every module imports + no dangling refs)
-        entry: .venv/Scripts/python.exe -m pytest tests/test_imports.py -q
+        entry: python scripts/run_gates.py tests/test_imports.py
         language: system
         pass_filenames: false
         types: [python]
         stages: [pre-commit]
-      # static-gates: the 2026-08-29 audit class — defects found by grepping
-      # the tree, not by a failing test. Blocking sqlite on the event loop
-      # (F-06), fire-and-forget tasks the GC can cancel (F-07), tools missing
-      # a HITL tier (F-04), and unfenced web content (F-09). AST-only, ~3s.
       - id: kazma-static-gates
         name: kazma static gates (async/blocking, task retention, HITL tiers, fencing)
-        entry: .venv/Scripts/python.exe -m pytest tests/test_static_gates.py -q
+        entry: python scripts/run_gates.py tests/test_static_gates.py
         language: system
         pass_filenames: false
         types: [python]

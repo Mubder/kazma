@@ -1046,6 +1046,80 @@ executing commands after a mission ended Partial) — full diagnosis in
 - `/long off` (or `/abort`) remains the immediate manual clear on any
   build.
 
+### 26. Default-Deny Boundaries (2026-08-29 security audit)
+
+Full report and reproductions: the audit artifact and
+`tests/test_audit_2026_08_29_regressions.py`. Four boundaries were
+default-OPEN; they are now default-CLOSED, and CI keeps them that way.
+
+**A. Peer address is not a credential behind a proxy.**
+- `_should_auto_issue_cookie()` mints an admin session for a loopback client
+  with no credential — that is what makes localhost use work with no login.
+  Behind a same-host nginx/Caddy, `request.client.host` is `127.0.0.1` for
+  EVERY internet visitor, so all of them inherited it (finding F-01).
+- `KAZMA_TRUSTED_PROXIES` declares the proxy. `X-Forwarded-For` and
+  `X-Forwarded-Proto` are honoured from those addresses ONLY; peer trust
+  switches off entirely when a proxy is declared. Same rule in
+  `websocket_is_authenticated()` — its Origin guard passes when the header
+  is absent, so a curl client used to get the agent.
+- Anything keying state per client (rate limit, login throttle, audit log)
+  must call `auth.client_address(request)`, never `request.client.host`.
+
+**B. HITL default-denies.**
+- `requires_approval()` ends on the `TOOL_TIERS` classification, not on a
+  name list. An unclassified tool is GATED. **Every tool you register needs
+  a tier** — `read` / `write` / `danger`; anything destructive, outbound, or
+  credential-touching is `danger` and also belongs in
+  `CANONICAL_DANGER_TOOLS` + `kazma.yaml`.
+- A configured `require_approval_for` list ADDS to that floor. It can no
+  longer un-gate `shell_exec` by omission.
+- CI: `test_every_registered_tool_has_a_tier`, `test_danger_tools_are_gated`.
+
+**C. Allowlisting a binary is not allowlisting what it runs.**
+- `shell_exec` vets `argv[0]` and rejects shell metacharacters, but a bare
+  program name is not path-shaped and `find`'s `+` terminator sidesteps the
+  `;` rejection — `find . -exec whoami +` walked past the allowlist (F-03).
+- `_EXEC_CAPABLE_ARGS` rejects per-binary flags that execute another
+  program (`find -exec`, `git --upload-pack`/`-c`, `tar
+  --use-compress-program`, …). Add an entry when you add a binary.
+
+**D. Secret masking recurses.**
+- `settings.mask_deep()` walks dicts, lists, and JSON-encoded strings.
+  The old two-level version skipped lists, so `providers.list` shipped six
+  live API keys in the clear (F-02). Key matching is on `.`/`_` token
+  boundaries — a substring test made `pat` match `selected_path`.
+- New API surfaces that echo config must go through `mask_deep`.
+
+**E. Nothing blocking on the event loop; nothing fire-and-forget.**
+- A sync `sqlite3.connect` inside `async def` pins the loop that serves
+  every SSE and WebSocket stream. Drop `async` (FastAPI threadpools sync
+  handlers) or wrap in `asyncio.to_thread`.
+- `asyncio` holds only a WEAK reference to a task, so a discarded
+  `create_task(...)` can be garbage-collected mid-run, silently. Use
+  `kazma_core.background.spawn_background(coro, name=…)`.
+- CI: `test_no_blocking_db_driver_in_async`, `test_no_bare_create_task`.
+
+**F. Errors do not carry internals.**
+- API handlers return `kazma_core.errors.safe_error(exc)` — a stable code
+  plus a correlation id, with the real exception logged under that id.
+- 4xx **validation** paths use `validation_error(exc)` instead: the message
+  is the caller's answer, and replacing it with a code makes the API
+  unusable. Redaction applies either way.
+
+**G. Fenced tool output.**
+- Fetched pages, search results, saved research chunks and MCP resource
+  bodies go through `prompt_fence.fence_untrusted()`. They are the largest
+  source of attacker-controlled text in the system and used to reach the
+  model raw. CI: `test_no_unfenced_web_tool_output`.
+
+**Known, deliberately unfixed:** `ConfigStore` hands one
+`sqlite3.Connection` (`check_same_thread=False`) to every thread, which
+segfaults `test_truncation_retry.py` on Windows at interpreter teardown. It
+is pre-existing and unmodified `main` crashes more often than the current
+tree; the per-thread fix trades it for write contention and needs its own
+measured change.
+
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

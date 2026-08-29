@@ -1,5 +1,107 @@
 # CHANGELOG
 
+## Unreleased — the audit closed: default-deny everywhere it was default-open (2026-08-29)
+
+A whole-repository audit found the codebase unusually security-conscious —
+one fail-closed path policy, `eval`/`exec`/`pickle` appearing only inside the
+linter that bans them, SQL parameterised throughout, no hardcoded
+credentials in the tree or its history. Which is what made the two critical
+findings matter: both were places where a well-built control silently
+inverted, and both were reachable in the topology our own deployment guide
+recommends.
+
+**Anyone could log in as the operator.** `_should_auto_issue_cookie` treated
+a loopback TCP peer as the local operator and minted an admin session for
+it, with no credential, on `GET /`. That is what makes single-operator
+localhost use work with no login — and behind a same-host nginx/Caddy, which
+the deployment guide tells operators to run, `request.client.host` is
+`127.0.0.1` for *every* internet visitor. Nothing in the tree read
+`X-Forwarded-For`; uvicorn started without `--proxy-headers`. An anonymous
+request came back holding a valid session cookie that then opened
+`/api/settings`. The WebSocket handshake applied the same rule, and its
+Origin guard passes when the header is absent, so a curl client got the
+agent too. `KAZMA_TRUSTED_PROXIES` now declares the proxy, forwarded headers
+are honoured from it alone, and peer address stops being a credential the
+moment a proxy exists. **The fix is inert until that variable is set** —
+verify with `curl -s <host>/api/auth/status`, where `authenticated` must
+read `false` before login.
+
+**Six live API keys shipped in the clear.** `_mask_sensitive_values` was
+documented as recursive and was not: two levels deep, handling only `str`
+and flat `dict`. A **list** fell through every branch — and `providers.list`
+is a list of provider objects each holding an `api_key`. They went out in
+the body of `GET /api/settings` and again from
+`/api/system/debug/registry`, which masked its neighbour and not this. The
+mask now walks lists and JSON-encoded values at any depth, matching on
+`.`/`_` token boundaries after discovering the old substring test made `pat`
+match `selected_path`. The leak is closed; the keys still need rotating.
+
+**Underneath both: open by omission.** The HTTP layer default-denies every
+`/api/*` route and says why in a comment. Three other gates did not. HITL
+approval was a 31-name list against 153 registered tools, so 125 ran
+unapproved — `file_append` while `file_write` was gated, and `git_push`
+while its deprecated, never-registered predecessor still was, a stale entry
+left by a refactor that moved the capability and not the gate. `shell_exec`
+vetted `argv[0]` and never the arguments, so `find . -exec whoami +` and
+`git clone --upload-pack=` walked past the allowlist that exists to stop
+exactly that; a bare program name is not path-shaped, and `find`'s `+`
+terminator sidesteps the `;` rejection. Approval is now the default —
+54 tools gated, an unclassified tool gated rather than exempt, and a
+configured list that *adds* to the tier floor instead of replacing it. Note
+this reaches Agent Skills installed later: unknown third-party tools ask
+first, the posture MCP tools already had.
+
+**Reliability.** Twenty-eight synchronous `sqlite3.connect` calls sat inside
+`async` route handlers, pinning the event loop that also serves every SSE
+and WebSocket stream — one slow memory query froze the process for every
+concurrent client. Seventeen background tasks were created with no reference
+retained; `asyncio` holds only a weak one, so a knowledge-base crawl or an
+embedding rebuild could be garbage-collected mid-run with no exception, no
+log line, and a job record frozen at whatever phase it reached while the UI
+polled a status that never advanced.
+
+Also: tenant resolution failed *open* — a wrapper's `except: return
+"default"` mapped to an empty SQL predicate, widening a failed lookup to
+every tenant instead of narrowing it to none. SSRF was re-checked across
+redirect hops rather than once at the start. Fetched pages, search results
+and MCP resource bodies are fenced as untrusted, which the README already
+claimed. Expired web sessions are swept (309 stale rows on the dev store —
+they had accumulated since there was no sweeper at all). Rate-limit windows
+evict least-recently-used instead of flushing wholesale, which anyone could
+trigger to reset everyone's limit. API errors return a code plus a
+correlation id instead of `str(exc)` across 140 handlers, with 4xx
+validation paths keeping their message so the API stays usable.
+
+`routes_direct`, `sse_chat`, `i18n` and `tool_builtins` — 12,600 lines
+between them — became packages behind unchanged facades, with the route
+table and tool registry verified byte-identical before and after. Six static
+gates now fail the build on a blocking DB call inside `async def`, a
+fire-and-forget task, an untiered tool, or unfenced web output; they are
+AST-only and run in about eight seconds. Thirty behavioural regression tests
+hold the security findings, each written to fail against the pre-fix code.
+
+Verified against a source-pinned baseline of unmodified `main` over the full
+6,900-test suite: this tree fails a strict subset of what `main` already
+fails. Zero regressions.
+
+**The gates themselves had never run on Windows.** `pre-commit` was not
+declared as a dependency anywhere, and once installed both hooks failed with
+`WinError 2`: under `language: system` pre-commit executes the entry without
+a shell, and CreateProcess will not resolve a relative
+`.venv/Scripts/python.exe`. The obvious repair — a bare `python` — is worse,
+because pre-commit sanitises PATH and `python` then resolves to its own
+interpreter, which has no pytest. Both hooks now go through
+`scripts/run_gates.py`, a stdlib-only shim that locates the project
+virtualenv itself and honours `KAZMA_GATE_PYTHON`. `pre-commit` is in the
+`dev` extra, and the hooks are verified to fail on an injected violation
+rather than passing vacuously.
+
+Not fixed, deliberately: `ConfigStore` hands one `sqlite3.Connection` to
+every thread, which segfaults `test_truncation_retry.py` on Windows at
+interpreter teardown. Pre-existing, and unmodified `main` crashes more often
+than this tree (7/10 vs 2/6). The per-thread fix trades the crash for write
+contention — measured, then backed out. It deserves its own change.
+
 ## Unreleased — backups rebuilt on restic, and a restore that exists (2026-08-29)
 
 The backups worked; the restore did not exist. Recovery meant sequencing
