@@ -342,7 +342,6 @@
         xLoading: false,
         xSaving: false,
         // X audit log (append-only x_audit.db; loaded on demand)
-        xAudit: { entries: [], loading: false, detail: null },
         xShowKeys: false,
 
         async init() {
