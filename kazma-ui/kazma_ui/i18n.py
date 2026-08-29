@@ -787,6 +787,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كل طلب أرسله كازما إلى إكس مع النص الكامل — أصبح الآن في صفحة المهام المجدولة بجوار المنشورات التي أنتجته.",
     },
     "settings.x_audit_open": {"en": "Open X activity", "ar": "فتح نشاط إكس"},
+    "scheduled.sort_toggle": {"en": "Change sort order", "ar": "تغيير ترتيب الفرز"},
+    "scheduled.sort_newest": {"en": "Newest first — click for oldest first", "ar": "الأحدث أولاً — اضغط للأقدم أولاً"},
+    "scheduled.sort_oldest": {"en": "Oldest first — click for newest first", "ar": "الأقدم أولاً — اضغط للأحدث أولاً"},
     "scheduled.tz_note": {
         "en": "Times shown in your timezone ({viewer}). Recurring tasks are interpreted in the scheduler's timezone ({cron}). ",
         "ar": "الأوقات معروضة بمنطقتك الزمنية ({viewer}). المهام المتكررة تُفسَّر بمنطقة المجدول الزمنية ({cron}). ",

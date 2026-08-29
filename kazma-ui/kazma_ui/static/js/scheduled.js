@@ -15,6 +15,11 @@ function scheduledPage() {
         // the thing you came to check was the hardest thing to find.
         filter: 'upcoming',
 
+        // Newest first by default. History arrived oldest-first, so the run
+        // that just happened -- the one you open the page to check -- was
+        // at the bottom of thirty-four rows.
+        sortDir: 'desc',
+
         // X activity — the audit log, moved here from Settings. It answers
         // "what did Kazma actually post", which is an operational question,
         // not a configuration one: it belongs beside the schedule that
@@ -41,11 +46,34 @@ function scheduledPage() {
         },
 
         get filtered() {
-            if (this.filter === 'all') return this.tasks;
-            if (this.filter === 'history') {
-                return this.tasks.filter(t => !['pending', 'running'].includes(t.status || ''));
+            let rows;
+            if (this.filter === 'all') {
+                rows = this.tasks.slice();
+            } else if (this.filter === 'history') {
+                rows = this.tasks.filter(t => !['pending', 'running'].includes(t.status || ''));
+            } else {
+                rows = this.tasks.filter(t => ['pending', 'running'].includes(t.status || ''));
             }
-            return this.tasks.filter(t => ['pending', 'running'].includes(t.status || ''));
+            // Sort on a copy: the API's own order is the fallback for rows
+            // with no usable timestamp, and mutating this.tasks would make
+            // the sort compound every time the getter re-ran.
+            const dir = this.sortDir === 'asc' ? 1 : -1;
+            return rows.slice().sort((a, b) => {
+                const ta = this._ms(a), tb = this._ms(b);
+                if (ta === tb) return 0;
+                if (ta === null) return 1;   // undated rows sink, either way
+                if (tb === null) return -1;
+                return (ta - tb) * dir;
+            });
+        },
+
+        _ms(task) {
+            const d = this._date(task);
+            return d ? d.getTime() : null;
+        },
+
+        toggleSort() {
+            this.sortDir = this.sortDir === 'desc' ? 'asc' : 'desc';
         },
 
         _locale() {

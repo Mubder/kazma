@@ -154,19 +154,44 @@
          * any current browser; the hand-picked set stays as the fallback
          * for engines that lack it, and leads so the common choices are
          * still one keystroke away. */
-        get cronTzZones() {
-            const common = [
+        get cronTzCommon() {
+            return [
                 'UTC', 'Asia/Kuwait', 'Asia/Riyadh', 'Asia/Dubai', 'Asia/Qatar',
                 'Africa/Cairo', 'Europe/London', 'Europe/Berlin', 'Europe/Istanbul',
                 'America/New_York', 'America/Chicago', 'America/Los_Angeles',
             ];
+        },
+
+        get cronTzAll() {
             try {
                 const all = Intl.supportedValuesOf('timeZone');
-                if (Array.isArray(all) && all.length) {
-                    return common.concat(all.filter(z => !common.includes(z)));
-                }
+                if (Array.isArray(all) && all.length) return all;
             } catch (e) { /* older engine — the shortlist still works */ }
-            return common;
+            return this.cronTzCommon;
+        },
+
+        /* Grouped by region for a real <select>.
+         *
+         * A free-text field with a datalist let you type a zone that does
+         * not exist, which the backend then rejected on save -- correct,
+         * but the wrong moment to find out. Four hundred options are a lot
+         * for one flat list, so they are grouped by region with the common
+         * ones first; native selects also support type-to-jump, so the
+         * shortcut the datalist gave is not lost. A value that cannot be
+         * typed cannot be mistyped. */
+        get cronTzGroups() {
+            const common = this.cronTzCommon;
+            const groups = [{ label: '★', zones: common.slice() }];
+            const byRegion = {};
+            for (const z of this.cronTzAll) {
+                if (common.includes(z)) continue;
+                const region = z.includes('/') ? z.split('/')[0] : 'Other';
+                (byRegion[region] = byRegion[region] || []).push(z);
+            }
+            for (const region of Object.keys(byRegion).sort()) {
+                groups.push({ label: region, zones: byRegion[region].sort() });
+            }
+            return groups;
         },
 
         // ── Connectors Tab ──
