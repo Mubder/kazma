@@ -482,6 +482,50 @@
          TAB 3: AGENT
          ═══════════════════════════════════════════════════════════════ -->
     <div x-show="tab === 'agent'" x-transition x-cloak>
+        <div class="settings-group">
+            <h3>{{ t('settings.cron_tz_title') }}</h3>
+            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:start;">
+                <span class="ki" data-icon="info" aria-hidden="true"></span>
+                {{ t('settings.cron_tz_hint') }}
+            </div>
+            <div class="form-group">
+                <label>{{ t('settings.cron_tz_label') }}</label>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
+                    <input class="form-input" list="cronTzZoneOptions" x-model="cronTz.value"
+                           @input="cronTzPreview()" spellcheck="false" style="max-width:280px" dir="ltr">
+                    <button class="btn btn-secondary btn-sm" type="button" @click="useBrowserTimezone()"
+                            x-show="browserTimezone() && cronTz.value !== browserTimezone()" x-cloak
+                            x-text="t('settings.cron_tz_use_mine') + ' (' + browserTimezone() + ')'"></button>
+                </div>
+                <datalist id="cronTzZoneOptions">
+                    <template x-for="z in cronTzZones" :key="z">
+                        <option :value="z" x-text="z"></option>
+                    </template>
+                </datalist>
+
+                {# Live confirmation. The zone name alone does not tell you
+                   whether you picked the right one; the current time there
+                   does, immediately, before saving. #}
+                <div class="form-hint" style="margin-top:6px;" x-show="cronTzNow" x-cloak>
+                    <strong x-text="cronTzNow"></strong>
+                    <span x-show="cronTzOffset" x-cloak x-text="' · ' + cronTzOffset"></span>
+                </div>
+                <div class="form-hint" style="color:var(--danger);" x-show="cronTzError" x-cloak
+                     x-text="t('settings.cron_tz_invalid')"></div>
+
+                <!-- Alpine-side binding: cronTz.source is a client model, and
+                     the fallback must use JS `||` semantics — Jinja only knows
+                     `or` and cannot see Alpine state, so a server-side t()
+                     concatenation here was a template compile error that 500'd
+                     the whole page (2026-08-27). -->
+                <div class="form-hint" x-text="t('settings.cron_tz_source_' + (cronTz.source || 'default'))"></div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+                <button class="btn btn-primary" @click="saveCronTimezone()" :disabled="cronTzSaving || cronTzError"
+                        x-text="cronTzSaving ? '…' : t('settings.cron_tz_save')"></button>
+            </div>
+        </div>
+
         <!-- Basic Config -->
         <div class="settings-group">
             <h3>{{ t('settings.agent_config') }}</h3>
@@ -1020,34 +1064,6 @@
                     message: t('settings.time_travel_restart_message'),
                     noRestartMsg: t('settings.time_travel_restart_noop')
                 })" :disabled="timeTravelRestarting || timeTravelRestartNeeded() === false" x-text="timeTravelRestarting ? '…' : t('settings.time_travel_restart_btn')"></button>
-            </div>
-        </div>
-
-        <div class="settings-group">
-            <h3>{{ t('settings.cron_tz_title') }}</h3>
-            <div style="margin-bottom:12px;padding:10px 12px;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:var(--radius);font-size:0.8rem;color:var(--text-muted);text-align:left;">
-                <span class="ki" data-icon="info" aria-hidden="true"></span>
-                {{ t('settings.cron_tz_hint') }}
-            </div>
-            <div class="form-group">
-                <label>{{ t('settings.cron_tz_label') }}</label>
-                <input class="form-input" list="cronTzZoneOptions" x-model="cronTz.value"
-                       spellcheck="false" style="max-width:280px" dir="ltr">
-                <datalist id="cronTzZoneOptions">
-                    <template x-for="z in cronTzZones" :key="z">
-                        <option :value="z" x-text="z"></option>
-                    </template>
-                </datalist>
-                <!-- Alpine-side binding: cronTz.source is a client model, and
-                     the fallback must use JS `||` semantics — Jinja only knows
-                     `or` and cannot see Alpine state, so a server-side t()
-                     concatenation here was a template compile error that 500'd
-                     the whole page (2026-08-27). -->
-                <div class="form-hint" x-text="t('settings.cron_tz_source_' + (cronTz.source || 'default'))"></div>
-            </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-                <button class="btn btn-primary" @click="saveCronTimezone()" :disabled="cronTzSaving"
-                        x-text="cronTzSaving ? '…' : t('settings.cron_tz_save')"></button>
             </div>
         </div>
 
