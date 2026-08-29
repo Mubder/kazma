@@ -162,6 +162,20 @@ MECHANISMS: tuple[Mechanism, ...] = (
         ),
     ),
     Mechanism(
+        name="install restore",
+        fault="a backup nobody can turn back into a working install",
+        module="kazma_core.backup.restore",
+        symbol="restore_files",
+        proof="tests/test_restore.py",
+        proven_in_production=True,
+        note=(
+            "Selects by GENERATION, never restic's 'latest' -- which on this "
+            "install resolves to a bulk-ingested legacy generation with the "
+            "newest snapshot time and the oldest content. Rehearsed against "
+            "the live repository: 9/9 steps, 25 databases integrity-checked."
+        ),
+    ),
+    Mechanism(
         name="restore drill",
         fault="a backup that cannot actually be restored",
         module="kazma_core.backup.restore_drill",
