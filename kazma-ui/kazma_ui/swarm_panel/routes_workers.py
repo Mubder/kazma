@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from kazma_ui.services import get_swarm_service
+from kazma_core.errors import validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ def register_workers_routes(
             )
         except ValueError as exc:
             return JSONResponse(
-                {"status": "error", "message": str(exc)},
+                {"status": "error", "message": validation_error(exc)},
                 status_code=409,
             )
 

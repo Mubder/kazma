@@ -417,12 +417,15 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
         import gzip
 
         from kazma_core.proxy.client import get_scraping_client
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import SSRFError, resolve_redirects, validate_url
 
         validate_url(url)
-        # Sitemap/robots discovery uses the same Proxy Provider as page fetch
+        # Sitemap/robots discovery uses the same Proxy Provider as page fetch.
+        # Redirects are resolved with every hop SSRF-checked, then fetched with
+        # redirects OFF (audit F-08). Validating only the *final* URL still let
+        # a public -> internal -> public chain reach an internal service.
         async with get_scraping_client(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=timeout,
             headers={
                 "User-Agent": _BROWSER_UA,
@@ -430,7 +433,13 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
             },
             rotate_ua=True,
         ) as client:
-            r = await client.get(url)
+            try:
+                target = await resolve_redirects(client, url, timeout=timeout)
+            except SSRFError:
+                return None, url
+            except Exception:
+                target = url
+            r = await client.get(target)
             final = str(r.url)
             try:
                 validate_url(final)
@@ -1296,7 +1305,6 @@ def _save_provenance(library_id: str, url: str, text: str) -> None:
     """
     try:
         import hashlib
-        from pathlib import Path
 
         from kazma_core.tools.read_url import _workspace_root
 
@@ -1332,7 +1340,7 @@ async def ingest_url(
     result = IngestResult(pages_discovered=1)
     index = get_knowledge_index()
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import validate_url
 
         validate_url(url)
     except Exception as exc:
@@ -1405,7 +1413,7 @@ async def ingest_site(
         await progress_q.put(msg)
 
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import validate_url
 
         validate_url(seed_url)
     except Exception as exc:

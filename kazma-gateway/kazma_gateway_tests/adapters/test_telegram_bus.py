@@ -1,6 +1,5 @@
 """Tests for Telegram platform adapter."""
 
-import pytest
 
 
 class TestTelegramBusAdapter:

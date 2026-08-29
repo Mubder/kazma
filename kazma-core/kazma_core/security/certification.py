@@ -8,6 +8,7 @@ and revocation operations.
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import subprocess
 import threading
@@ -298,15 +299,19 @@ class KazmaCertification:
         test_files = list(skill_path.rglob("test_*.py")) + list(skill_path.rglob("*_test.py"))
         if not test_files:
             return False
-        try:
-            result = subprocess.run(
-                ["pytest", str(skill_path), "-q", "--tb=no"],
-                capture_output=True, text=True, timeout=60,
-                cwd=str(skill_path.parent),
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
-            return False
+        def _run_pytest() -> bool:
+            # Up to 60s of blocking work — never on the event loop (audit F-06).
+            try:
+                result = subprocess.run(
+                    ["pytest", str(skill_path), "-q", "--tb=no"],
+                    capture_output=True, text=True, timeout=60,
+                    cwd=str(skill_path.parent),
+                )
+                return result.returncode == 0
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                return False
+
+        return await asyncio.to_thread(_run_pytest)
 
     @staticmethod
     async def _has_coverage_evidence(skill_path: Path) -> bool:

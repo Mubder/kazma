@@ -29,12 +29,14 @@ Security:
 
 from __future__ import annotations
 
-import asyncio
+from collections import OrderedDict
 import logging
 from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Body, Query
+from kazma_core.background import spawn_background
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +46,23 @@ __all__ = ["create_kb_router"]
 # In-process job registry for low-latency polling.  Durable mirror lives
 # in ConfigStore via ``kazma_core.stores.kb_jobs`` so restarts don't
 # orphan the UI on "Unknown job_id".
-_kb_api_jobs: dict[str, dict[str, Any]] = {}
+#
+# Bounded LRU (audit F-14): this was an unbounded dict that kept every job
+# ever run resident for the process lifetime, and `_bootstrap_jobs` reloaded
+# the entire durable history at router construction. The durable store stays
+# the source of truth — `job_status` already falls back to it — so evicting
+# the oldest in-memory entries costs one lookup, not correctness.
+_KB_JOBS_MAX = 500
+_kb_api_jobs: OrderedDict[str, dict[str, Any]] = OrderedDict()
 _kb_jobs_bootstrapped = False
 
 
 def _remember_job(job_id: str, data: dict[str, Any]) -> None:
     """Update in-memory + durable job snapshot."""
     _kb_api_jobs[job_id] = data
+    _kb_api_jobs.move_to_end(job_id)
+    while len(_kb_api_jobs) > _KB_JOBS_MAX:
+        _kb_api_jobs.popitem(last=False)
     try:
         from kazma_core.stores.kb_jobs import upsert_job
 
@@ -59,8 +71,33 @@ def _remember_job(job_id: str, data: dict[str, Any]) -> None:
         logger.debug("[kb_api] durable job write failed: %s", exc)
 
 
+#: Only jobs this recent (or still running) are pre-loaded into memory at boot.
+_KB_BOOTSTRAP_MAX_AGE_S = 7 * 24 * 3600
+
+#: Phases that mean "not finished" — always reloaded regardless of age.
+_KB_LIVE_PHASES = frozenset({"queued", "running", "crawling", "indexing", "starting"})
+
+
+def _job_is_recent(row: dict[str, Any]) -> bool:
+    """True when a durable job row is still live or finished within the window."""
+    if str(row.get("phase") or "").lower() in _KB_LIVE_PHASES:
+        return True
+    stamp = row.get("finished_at") or row.get("started_at") or ""
+    if not stamp:
+        return True  # no timestamp — keep rather than silently drop
+    try:
+        from datetime import UTC, datetime
+
+        ts = datetime.fromisoformat(str(stamp))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - ts).total_seconds() <= _KB_BOOTSTRAP_MAX_AGE_S
+    except (ValueError, TypeError):
+        return True
+
+
 def _bootstrap_jobs() -> None:
-    """Load durable jobs + mark mid-crawl jobs interrupted after restart."""
+    """Load recent/live durable jobs + mark mid-crawl jobs interrupted."""
     global _kb_jobs_bootstrapped
     if _kb_jobs_bootstrapped:
         return
@@ -69,10 +106,16 @@ def _bootstrap_jobs() -> None:
         from kazma_core.stores.kb_jobs import list_jobs, mark_stale_jobs_interrupted
 
         mark_stale_jobs_interrupted()
+        loaded = 0
         for row in list_jobs():
             jid = row.pop("job_id", None)
-            if jid:
-                _kb_api_jobs[jid] = row
+            if not jid or not _job_is_recent(row):
+                continue
+            _kb_api_jobs[jid] = row
+            loaded += 1
+            if loaded >= _KB_JOBS_MAX:
+                break
+        logger.debug("[kb_api] bootstrapped %d recent job(s)", loaded)
     except Exception as exc:
         logger.debug("[kb_api] job bootstrap failed: %s", exc)
 
@@ -102,7 +145,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "libraries": libs}
         except Exception as exc:
             logger.exception("[kb_api] list_libraries failed")
-            return {"ok": False, "error": str(exc), "libraries": []}
+            return {"ok": False, "error": safe_error(exc), "libraries": []}
 
     @router.post("/libraries")
     async def create_library(
@@ -128,7 +171,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "library": lib}
         except Exception as exc:
             logger.exception("[kb_api] create_library failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": safe_error(exc)}
 
     @router.get("/libraries/{library_id}")
     async def get_library(library_id: str) -> dict[str, Any]:
@@ -145,7 +188,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "libraries": libs}
         except Exception as exc:
             logger.exception("[kb_api] list_archived failed")
-            return {"ok": False, "error": str(exc), "libraries": []}
+            return {"ok": False, "error": safe_error(exc), "libraries": []}
 
     @router.post("/libraries/{library_id}/archive")
     async def archive_library(library_id: str) -> dict[str, Any]:
@@ -156,7 +199,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True}
         except Exception as exc:
             logger.exception("[kb_api] archive_library failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": safe_error(exc)}
 
     @router.post("/libraries/{library_id}/unarchive")
     async def unarchive_library(library_id: str) -> dict[str, Any]:
@@ -167,7 +210,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True}
         except Exception as exc:
             logger.exception("[kb_api] unarchive_library failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": safe_error(exc)}
 
     @router.patch("/libraries/{library_id}")
     async def update_library(
@@ -193,7 +236,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "library": lib}
         except Exception as exc:
             logger.exception("[kb_api] update_library failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": safe_error(exc)}
 
     @router.delete("/libraries/{library_id}")
     async def delete_library(library_id: str) -> dict[str, Any]:
@@ -205,7 +248,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True}
         except Exception as exc:
             logger.exception("[kb_api] delete_library failed")
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": safe_error(exc)}
 
     # ── Chunk browser ───────────────────────────────────────────────────
 
@@ -236,7 +279,7 @@ def create_kb_router() -> APIRouter:
             return {"ok": True, "chunks": slim, "total": total}
         except Exception as exc:
             logger.exception("[kb_api] list_chunks failed")
-            return {"ok": False, "error": str(exc), "chunks": [], "total": 0}
+            return {"ok": False, "error": safe_error(exc), "chunks": [], "total": 0}
 
     # ── Ingestion (page sync / site background) ─────────────────────────
 
@@ -283,7 +326,7 @@ def create_kb_router() -> APIRouter:
                 }
             except Exception as exc:
                 logger.exception("[kb_api] page ingest failed")
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": safe_error(exc)}
 
         # mode == "site" → background job.
         job_id = f"{lib_id}:{datetime.now(UTC).strftime('%H%M%S%f')}"
@@ -332,13 +375,13 @@ def create_kb_router() -> APIRouter:
                 snap.update(
                     {
                         "phase": "error",
-                        "message": str(exc),
+                        "message": safe_error(exc),
                         "finished_at": datetime.now(UTC).isoformat(),
                     }
                 )
                 _remember_job(job_id, snap)
 
-        asyncio.create_task(_run())
+        spawn_background(_run(), name=f"kb-ingest-url:{job_id}")
         return {"ok": True, "mode": "site", "job_id": job_id}
 
     @router.get("/jobs/{job_id}")
@@ -389,7 +432,7 @@ def create_kb_router() -> APIRouter:
             }
         except Exception as exc:
             logger.exception("[kb_api] search failed")
-            return {"ok": False, "error": str(exc), "hits": []}
+            return {"ok": False, "error": safe_error(exc), "hits": []}
 
     # ── Refresh (re-ingest from seed_url) ───────────────────────────────
 
@@ -452,12 +495,12 @@ def create_kb_router() -> APIRouter:
                         "library_id": library_id,
                         "url": seed,
                         "kind": "refresh",
-                        "message": str(exc),
+                        "message": safe_error(exc),
                         "finished_at": datetime.now(UTC).isoformat(),
                     },
                 )
 
-        asyncio.create_task(_run())
+        spawn_background(_run(), name=f"kb-ingest-site:{job_id}")
         return {"ok": True, "job_id": job_id}
 
     return router

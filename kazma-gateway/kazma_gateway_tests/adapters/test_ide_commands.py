@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import types
 
-import pytest
 
 
 def _fake_message(text: str, platform: str = "slack") -> types.SimpleNamespace:

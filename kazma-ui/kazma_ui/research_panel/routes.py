@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 
 from kazma_ui.rate_limit import rate_limit
 from kazma_ui.sse_utils import sse_frame
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ async def _set_archived(task_id: str, archived: bool) -> JSONResponse:
             store.persist_task(task)
         except Exception as exc:
             logger.exception("[research] archive persist failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
     else:
         return JSONResponse({"error": "store unavailable"}, status_code=503)
 
@@ -122,7 +123,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "papers": papers, "count": len(papers)})
         except Exception as exc:
             logger.exception("[research] list papers failed")
-            return JSONResponse({"ok": False, "error": str(exc), "papers": []}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc), "papers": []}, status_code=500)
 
     @router.get("/api/research/papers/file")
     async def get_paper_file(path: str) -> Any:
@@ -188,7 +189,7 @@ def create_research_router() -> APIRouter:
         except Exception as exc:
             logger.exception("[research] ready probe failed")
             return JSONResponse(
-                {"ok": False, "ready": False, "error": str(exc), "checks": []},
+                {"ok": False, "ready": False, "error": safe_error(exc), "checks": []},
                 status_code=500,
             )
 
@@ -220,7 +221,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "session": sess.to_dict()})
         except Exception as exc:
             logger.exception("[research] start session failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/research/sessions")
     async def list_research_sessions(
@@ -245,7 +246,7 @@ def create_research_router() -> APIRouter:
         except Exception as exc:
             logger.exception("[research] list sessions failed")
             return JSONResponse(
-                {"ok": False, "error": str(exc), "sessions": []}, status_code=500
+                {"ok": False, "error": safe_error(exc), "sessions": []}, status_code=500
             )
 
     @router.post("/api/research/sessions/{session_id}/archive")
@@ -260,7 +261,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "session": sess.to_dict() if sess else None})
         except Exception as exc:
             logger.exception("[research] archive session failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/research/sessions/{session_id}/unarchive")
     async def unarchive_research_session(session_id: str) -> JSONResponse:
@@ -274,7 +275,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "session": sess.to_dict() if sess else None})
         except Exception as exc:
             logger.exception("[research] unarchive session failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.delete("/api/research/sessions/{session_id}")
     async def delete_research_session(session_id: str) -> JSONResponse:
@@ -288,7 +289,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "deleted": session_id})
         except Exception as exc:
             logger.exception("[research] delete session failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/research/sessions/{session_id}")
     async def get_research_session(session_id: str) -> JSONResponse:
@@ -302,7 +303,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "session": sess.to_dict()})
         except Exception as exc:
             logger.exception("[research] get session failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/research/sessions/{session_id}/cancel")
     async def cancel_research_session(session_id: str) -> JSONResponse:
@@ -318,7 +319,7 @@ def create_research_router() -> APIRouter:
             )
         except Exception as exc:
             logger.exception("[research] cancel session failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/research/sessions/{session_id}/export")
     async def export_research_session(session_id: str, body: dict[str, Any]) -> JSONResponse:
@@ -338,7 +339,7 @@ def create_research_router() -> APIRouter:
             sess = get_session(session_id)
         except Exception as exc:
             logger.exception("[research] session export lookup failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
         if sess is None:
             return JSONResponse({"error": "session not found"}, status_code=404)
 
@@ -360,7 +361,7 @@ def create_research_router() -> APIRouter:
                 try:
                     md = target.read_text(encoding="utf-8", errors="replace")
                 except Exception as exc:
-                    return JSONResponse({"error": str(exc)}, status_code=500)
+                    return JSONResponse({"error": safe_error(exc)}, status_code=500)
         if not md:
             md = (
                 f"# {(sess.topic or 'Research session')[:120]}\n\n"
@@ -400,7 +401,7 @@ def create_research_router() -> APIRouter:
                 msg = await generate_markdown_doc(title, sections)
         except Exception as exc:
             logger.exception("[research] session export failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
         path = ""
         if isinstance(msg, str) and "Saved to:" in msg:
@@ -466,7 +467,7 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "eval": result})
         except Exception as exc:
             logger.exception("[research] eval failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/research/sessions/{session_id}/stream")
     async def stream_research_session(
@@ -573,7 +574,7 @@ def create_research_router() -> APIRouter:
         try:
             md = target.read_text(encoding="utf-8", errors="replace")
         except Exception as exc:
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
         # Build sections for document generator
         sections: list[dict[str, str]] = []
@@ -606,7 +607,7 @@ def create_research_router() -> APIRouter:
                 msg = await generate_markdown_doc(title, sections)
         except Exception as exc:
             logger.exception("[research] paper export failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
         path = ""
         if isinstance(msg, str) and "Saved to:" in msg:
@@ -769,7 +770,7 @@ def create_research_router() -> APIRouter:
                 msg = await generate_markdown_doc(title, sections)
         except Exception as exc:
             logger.exception("[research] export failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
         # Parse the file path from the success message.
         path = ""
@@ -846,6 +847,6 @@ def create_research_router() -> APIRouter:
             return JSONResponse({"ok": True, "deleted": task_id})
         except Exception as exc:
             logger.exception("[research] delete failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
     return router

@@ -22,7 +22,7 @@ import hashlib
 import os
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -30,11 +30,13 @@ from fastapi import HTTPException, Request, status
 __all__ = ["rate_limit"]
 
 _WINDOW_SECONDS = 60.0
-# Bound the tracking dict (one deque per bucket+principal). Cleared wholesale
-# when exceeded — a fresh window costs one minute of leniency, never a leak.
+# Bound the tracking dict (one deque per bucket+principal). Evicted
+# least-recently-touched first (audit F-13): this used to `.clear()` the whole
+# map at the cap, so anyone able to mint 10k distinct keys could reset every
+# other principal's window — including their own.
 _MAX_TRACKED_KEYS = 10_000
 
-_windows: dict[tuple[str, str], deque[float]] = {}
+_windows: OrderedDict[tuple[str, str], deque[float]] = OrderedDict()
 _lock = threading.Lock()
 
 
@@ -64,6 +66,28 @@ def _per_minute(bucket: str, default: int) -> int:
 
 
 def _principal(request: Request) -> str:
+    """Stable identity for one caller.
+
+    Cookie/token identity is combined with the client address rather than used
+    alone (audit F-13): keying on the raw cookie string let a caller claim a
+    fresh bucket per request just by varying the value. Pairing it with the
+    address caps how far that gets them, and the address is proxy-aware (audit
+    F-01/F-12) so a reverse proxy no longer collapses every caller into one
+    shared bucket.
+
+    Deliberately does NOT validate the session here — this runs as a FastAPI
+    dependency on the event loop, and a ConfigStore lookup per request would
+    reintroduce the blocking-I/O problem fixed in F-06. Bucket *isolation* is
+    what matters here, not authenticity; the auth middleware has already
+    decided whether the caller may reach the endpoint at all.
+    """
+    try:
+        from kazma_ui.auth import client_address
+
+        addr = client_address(request) or "unknown"
+    except Exception:
+        addr = (request.client.host if request.client else "unknown")
+
     try:
         from kazma_ui.auth import SECRET_COOKIE, SESSION_COOKIE
 
@@ -73,11 +97,11 @@ def _principal(request: Request) -> str:
     for name in cookies:
         v = request.cookies.get(name)
         if v:
-            return "cookie:" + hashlib.sha256(v.encode()).hexdigest()[:16]
+            return f"cookie:{hashlib.sha256(v.encode()).hexdigest()[:16]}@{addr}"
     authz = request.headers.get("authorization")
     if authz:
-        return "token:" + hashlib.sha256(authz.encode()).hexdigest()[:16]
-    return "ip:" + (request.client.host if request.client else "unknown")
+        return f"token:{hashlib.sha256(authz.encode()).hexdigest()[:16]}@{addr}"
+    return "ip:" + addr
 
 
 def _allow(key: tuple[str, str], limit: int) -> tuple[bool, float]:
@@ -87,9 +111,17 @@ def _allow(key: tuple[str, str], limit: int) -> tuple[bool, float]:
         return True, 0.0
     now = time.monotonic()
     with _lock:
-        if len(_windows) > _MAX_TRACKED_KEYS:
-            _windows.clear()
-        win = _windows.setdefault(key, deque())
+        win = _windows.get(key)
+        if win is None:
+            win = _windows[key] = deque()
+        _windows.move_to_end(key)  # most-recently touched last
+        # Evict the least-recently-touched entries only — never live windows
+        # belonging to other principals (audit F-13).
+        while len(_windows) > _MAX_TRACKED_KEYS:
+            stale_key, _ = _windows.popitem(last=False)
+            if stale_key == key:  # pathological cap of 0/1; keep our own
+                _windows[key] = win
+                break
         while win and now - win[0] >= _WINDOW_SECONDS:
             win.popleft()
         if len(win) >= limit:

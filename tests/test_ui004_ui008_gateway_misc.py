@@ -14,6 +14,8 @@ Validates:
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 import pytest
@@ -68,13 +70,13 @@ class TestGatewayRefreshOnSave:
         )
 
     def test_refresh_adapters_endpoint_exists(self) -> None:
-        app_source = (_UI_DIR / "routes_direct.py").read_text(encoding="utf-8")
+        app_source = module_source(_UI_DIR / "routes_direct.py")
         assert "/api/gateway/refresh-adapters" in app_source
         assert "refresh_gateway_adapters" in app_source
 
     def test_refresh_adapters_reads_config_store_for_telegram(self) -> None:
         """The refresh endpoint must re-read tokens from config_store (not env only)."""
-        app_source = (_UI_DIR / "routes_direct.py").read_text(encoding="utf-8")
+        app_source = module_source(_UI_DIR / "routes_direct.py")
         # Find the refresh_gateway_adapters function body
         fn_start = app_source.find("async def refresh_gateway_adapters")
         assert fn_start != -1, "refresh_gateway_adapters function not found"
@@ -87,7 +89,7 @@ class TestGatewayRefreshOnSave:
 
     def test_refresh_adapters_no_syntax_error_star(self) -> None:
         """The old 'telegram_token *' typo (should be '=') must be gone."""
-        app_source = (_UI_DIR / "routes_direct.py").read_text(encoding="utf-8")
+        app_source = module_source(_UI_DIR / "routes_direct.py")
         fn_start = app_source.find("async def refresh_gateway_adapters")
         fn_body = app_source[fn_start : fn_start + 1800]
         # The buggy line was: telegram_token * config_store.get(...)

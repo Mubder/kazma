@@ -97,7 +97,14 @@ class TestKazmaAgent:
 
         mock_tool_result = {"content": "tool output data", "is_error": False}
 
+        # HITL default-denies any tool it cannot classify (audit F-04), so a
+        # made-up tool name would be gated and the run would return "". Give
+        # the fixture tool a read tier for the duration of this test — the
+        # mechanism under test is tool execution, not the approval gate.
+        from kazma_core.safety.hitl import TOOL_TIERS
+
         with (
+            patch.dict(TOOL_TIERS, {"test_tool": "read"}),
             patch.object(agent.llm, "chat", new_callable=AsyncMock, side_effect=[tool_call_response, final_response]),
             patch.object(agent.tools, "execute", new_callable=AsyncMock, return_value=mock_tool_result),
             patch.object(

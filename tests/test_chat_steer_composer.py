@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 _CHAT_JS = (
@@ -49,12 +51,10 @@ def test_followup_supersedes_instead_of_wait() -> None:
     """A new message must not be blocked behind Stop / 'still processing'."""
     js = _js()
     assert "function abortThenSend()" in js
-    sse = (
-        Path(__file__).resolve().parent.parent
+    sse = module_source(Path(__file__).resolve().parent.parent
         / "kazma-ui"
         / "kazma_ui"
-        / "sse_chat.py"
-    ).read_text(encoding="utf-8")
+        / "sse_chat.py")
     assert "Superseding in-flight turn" in sse
     assert "It will appear here shortly" not in sse
     assert "cancel_turn(thread_id)" in sse

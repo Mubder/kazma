@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 from kazma_core.system.installer import ALLOWED_EXTRAS, ALLOWED_PACKAGES
@@ -32,9 +34,7 @@ def test_no_arbitrary_packages():
 
 
 def test_packages_tab_catalog_lists_new_extras():
-    src = (
-        _ROOT / "kazma-ui" / "kazma_ui" / "routes_direct.py"
-    ).read_text(encoding="utf-8")
+    src = module_source(_ROOT / "kazma-ui" / "kazma_ui" / "routes_direct.py")
     for extra in (
         "index",
         "sandbox",

@@ -14,9 +14,11 @@ then retries up to ``max_attempts``).
 
 from __future__ import annotations
 
-import json
+import asyncio
+import functools
 import logging
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -39,6 +41,33 @@ _backup_export_registered = False
 _scheduler_tasks: set = set()
 
 
+def _offload(fn: Callable[[dict[str, Any]], bool]) -> Callable[[dict[str, Any]], Any]:
+    """Adapt a blocking handler into a coroutine that runs in a worker thread.
+
+    Audit F-06: these handlers run long SQLite sweeps (macro sleep, entity
+    reconciliation, global reconsolidation) with no await point, so awaiting
+    them directly pinned the event loop that also serves every SSE and
+    WebSocket stream.
+    """
+
+    @functools.wraps(fn)
+    async def _wrapped(payload: dict[str, Any]) -> bool:
+        return await asyncio.to_thread(fn, payload)
+
+    return _wrapped
+
+
+# The public handler names stay coroutines — the queue awaits them, and so do
+# the tests that exercise a handler directly. Each delegates its blocking
+# SQLite work to a worker thread (audit F-06); the `_sync` bodies below hold
+# the actual logic and may be called directly from a thread context.
+_handle_macro_sleep = _offload(lambda payload: _handle_macro_sleep_sync(payload))
+_handle_entity_merge = _offload(lambda payload: _handle_entity_merge_sync(payload))
+_handle_global_reconsolidation = _offload(
+    lambda payload: _handle_global_reconsolidation_sync(payload)
+)
+
+
 def register_v2_handlers() -> None:
     """Register all V2 task handlers on the durable queue (idempotent)."""
     global _registered
@@ -48,13 +77,16 @@ def register_v2_handlers() -> None:
 
     register_handler("macro_sleep", _handle_macro_sleep)
     register_handler("entity_merge", _handle_entity_merge)
+    # micro_consolidation interleaves an awaited LLM call with its SQLite work,
+    # so it cannot be offloaded wholesale. Its synchronous queries are a single
+    # indexed lookup by episode id; the expensive part already yields.
     register_handler("micro_consolidation", _handle_micro_consolidation)
     register_handler("global_reconsolidation", _handle_global_reconsolidation)
     _registered = True
     logger.info("[memory_worker] V2 task handlers registered")
 
 
-async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
+def _handle_macro_sleep_sync(payload: dict[str, Any]) -> bool:
     """Run one macro-consolidation sweep (decay + tier transitions + archive)."""
     try:
         from kazma_core.memory.config import DEFAULT_MEMORY_CFG, read_memory_cfg
@@ -107,7 +139,7 @@ async def _handle_macro_sleep(payload: dict[str, Any]) -> bool:
         return False
 
 
-async def _handle_entity_merge(payload: dict[str, Any]) -> bool:
+def _handle_entity_merge_sync(payload: dict[str, Any]) -> bool:
     """Resolve a pending entity merge (approve/reject via configured policy).
 
     ``entity_merges`` lives on the primary memory DB (not ops). Auto-approves
@@ -152,7 +184,7 @@ async def _handle_entity_merge(payload: dict[str, Any]) -> bool:
         return False
 
 
-async def _handle_global_reconsolidation(payload: dict[str, Any]) -> bool:
+def _handle_global_reconsolidation_sync(payload: dict[str, Any]) -> bool:
     """Nightly/global re-consolidation (dedupe beliefs + re-embed missing).
 
     Huge corpora auto-partition by subject hash; remaining shards are
@@ -321,6 +353,7 @@ def start_memory_worker() -> None:
         _start_backup_export_scheduler()
         _start_reconsolidation_scheduler()
         _start_commitment_gc_scheduler()
+        _start_session_purge_scheduler()
         _start_daily_digest_scheduler()
     except Exception:
         logger.warning("[memory_worker] could not start worker", exc_info=True)
@@ -436,7 +469,6 @@ def _start_macro_sleep_scheduler() -> None:
         return
 
     async def _loop() -> None:
-        import time
 
         # Run once shortly after boot (skip the full interval for the first sweep)
         await asyncio.sleep(60)
@@ -550,6 +582,47 @@ def _start_backup_export_scheduler() -> None:
         )
     except Exception:
         logger.debug("[memory_worker] could not start backup/export scheduler", exc_info=True)
+
+
+#: How often expired web sessions are swept out of the ConfigStore.
+_SESSION_PURGE_INTERVAL_MINUTES = 360  # 6h
+
+
+def _start_session_purge_scheduler() -> None:
+    """Sweep expired opaque web sessions on a slow cadence (audit F-11).
+
+    Session records were only ever expired lazily, when the *same* session was
+    presented again after its TTL, so a session never revisited stayed in the
+    ConfigStore forever. One purge at boot plus a 6h cadence keeps the auth
+    category bounded without any hot-path cost.
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.debug("[memory_worker] no loop — session purge scheduler deferred")
+        return
+
+    async def _loop() -> None:
+        await asyncio.sleep(120)  # first sweep shortly after boot
+        while True:
+            try:
+                from kazma_core.security.web_sessions import purge_expired_sessions
+
+                await asyncio.to_thread(purge_expired_sessions)
+            except Exception:
+                logger.debug("[memory_worker] session purge failed", exc_info=True)
+            await asyncio.sleep(_SESSION_PURGE_INTERVAL_MINUTES * 60)
+
+    try:
+        _t = loop.create_task(_loop())
+        _scheduler_tasks.add(_t)
+        _t.add_done_callback(_scheduler_tasks.discard)
+        logger.info(
+            "[memory_worker] session purge scheduler started (every %dm)",
+            _SESSION_PURGE_INTERVAL_MINUTES,
+        )
+    except Exception:
+        logger.debug("[memory_worker] could not start session purge scheduler", exc_info=True)
 
 
 def _start_commitment_gc_scheduler() -> None:

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from kazma_core.errors import validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ async def x_test() -> JSONResponse:
         return JSONResponse(payload)
     except XApiError as exc:
         return JSONResponse(
-            {"ok": False, "error": "x_api", "detail": str(exc)},
+            {"ok": False, "error": "x_api", "detail": validation_error(exc)},
             status_code=400,
         )
     except Exception as exc:

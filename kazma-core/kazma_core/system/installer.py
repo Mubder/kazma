@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from kazma_core.config_store import get_config_store
+from kazma_core.background import spawn_background
 
 __all__ = ["ALLOWED_EXTRAS", "ALLOWED_PACKAGES", "asynchronous_install_extra", "asynchronous_install_package"]
 
@@ -76,7 +77,7 @@ async def asynchronous_install_package(package_name: str) -> None:
     except Exception as e:
         logger.error("[Installer] Failed to set status to INSTALLING: %s", e)
 
-    asyncio.create_task(_run_install_task(package_name=package_name, extra=None, track_key=key))
+    spawn_background(_run_install_task(package_name=package_name, extra=None, track_key=key), name=f"install:{package_name}")
 
 
 async def asynchronous_install_extra(extra_name: str) -> None:
@@ -103,7 +104,7 @@ async def asynchronous_install_extra(extra_name: str) -> None:
     except Exception as e:
         logger.error("[Installer] Failed to set install status: %s", e)
 
-    asyncio.create_task(_run_install_task(package_name=None, extra=extra, track_key=key))
+    spawn_background(_run_install_task(package_name=None, extra=extra, track_key=key), name=f"install-extra:{extra}")
 
 
 async def _run_install_task(

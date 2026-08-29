@@ -7,6 +7,7 @@ appearance, shortcuts, account, tools, system, and import/export.
 
 from __future__ import annotations
 
+import re
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -17,6 +18,7 @@ from fastapi.responses import HTMLResponse, Response
 from kazma_ui.rate_limit import rate_limit
 from fastapi.templating import Jinja2Templates
 
+from kazma_core.errors import safe_error, validation_error
 from kazma_ui.models import (
     AgentConfigUpdate,
     AppearanceUpdate,
@@ -42,7 +44,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SettingsRouterBuilder", "create_settings_router"]
+__all__ = [
+    "SettingsRouterBuilder",
+    "create_settings_router",
+    "mask_deep",
+    "key_is_secret",
+    "MASK",
+]
 
 # Keys whose values are secrets and must be masked in API responses.
 _SENSITIVE_KEY_FRAGMENTS = (
@@ -52,40 +60,134 @@ _SENSITIVE_KEY_FRAGMENTS = (
 )
 
 
-def _mask_sensitive_values(data: dict[str, dict[str, Any]]) -> None:
-    """Recursively mask values whose key name looks like a secret."""
-    import json
+#: Constant replacement — no last-4, no length hint.
+MASK = "***"
+
+#: Depth ceiling for the recursive walk. Config values are shallow; anything
+#: deeper is a cycle or a pathological payload and is replaced wholesale rather
+#: than returned unmasked.
+_MAX_MASK_DEPTH = 12
+
+
+#: Fragment match on ``.``/``_`` token boundaries, not raw substring. A plain
+#: ``in`` test made ``pat`` match ``workspace.selected_path`` and ``token``
+#: match ``tokenizer`` — masking real config as if it were a credential.
+_SENSITIVE_KEY_RE = re.compile(
+    r"(?:^|[._])(?:" + "|".join(re.escape(f) for f in _SENSITIVE_KEY_FRAGMENTS) + r")(?:$|[._])"
+)
+
+
+def key_is_secret(key: str) -> bool:
+    """True when *key* names a credential, at any nesting depth.
+
+    Combines the local fragment list with ``is_sensitive_config_key`` (which
+    also drives vault routing) so both layers agree on what a secret is.
+    """
+    normalised = str(key).lower().replace("-", "_")
+    if _SENSITIVE_KEY_RE.search(normalised):
+        return True
     try:
         from kazma_core.config_store import is_sensitive_config_key
-    except Exception:
-        is_sensitive_config_key = lambda k: False  # noqa: E731
 
+        return bool(is_sensitive_config_key(key))
+    except Exception:
+        return False
+
+
+def mask_deep(node: Any, _depth: int = 0) -> Any:
+    """Return *node* with every secret-named member masked, at any depth.
+
+    Audit F-02: the previous implementation was documented as recursive but
+    descended exactly two levels and handled only ``str`` and flat ``dict``
+    values. A **list** fell through every branch, so ``providers.list`` — a
+    list of provider objects each holding an ``api_key`` — was returned
+    entirely unmasked, leaking live provider credentials over
+    ``GET /api/settings``.
+
+    Handles dicts, lists/tuples, and JSON-encoded strings (config values are
+    frequently stored as serialized JSON).
+    """
+    import json
+
+    if _depth > _MAX_MASK_DEPTH:
+        return MASK
+
+    if isinstance(node, dict):
+        out: dict[Any, Any] = {}
+        for k, v in node.items():
+            if key_is_secret(k):
+                out[k] = _mask_leaf(v, _depth)
+            else:
+                out[k] = mask_deep(v, _depth + 1)
+        return out
+
+    if isinstance(node, (list, tuple)):
+        masked = [mask_deep(v, _depth + 1) for v in node]
+        return type(node)(masked) if isinstance(node, tuple) else masked
+
+    if isinstance(node, str) and node.strip():
+        # Config values are often JSON-encoded; mask inside, then re-encode so
+        # the wire shape is unchanged.
+        stripped = node.strip()
+        if stripped[0] in "{[":
+            try:
+                decoded = json.loads(stripped)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return node
+            return json.dumps(mask_deep(decoded, _depth + 1))
+        return node
+
+    return node
+
+
+def _mask_leaf(value: Any, depth: int) -> Any:
+    """Mask a value reached through a secret-named key.
+
+    A non-empty scalar becomes ``***``. Containers are still walked, so a
+    secret-named subtree keeps its shape (and any nested non-secret metadata)
+    while every scalar inside it is masked.
+    """
+    import json
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return value
+        if stripped[0] in "{[":
+            try:
+                return json.dumps(_mask_all_scalars(json.loads(stripped), depth + 1))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                return MASK
+        return MASK
+    if isinstance(value, (dict, list, tuple)):
+        return _mask_all_scalars(value, depth + 1)
+    if value is None or isinstance(value, bool):
+        return value
+    return MASK
+
+
+def _mask_all_scalars(node: Any, depth: int) -> Any:
+    """Mask every non-empty scalar in *node*, regardless of key name."""
+    if depth > _MAX_MASK_DEPTH:
+        return MASK
+    if isinstance(node, dict):
+        return {k: _mask_all_scalars(v, depth + 1) for k, v in node.items()}
+    if isinstance(node, (list, tuple)):
+        masked = [_mask_all_scalars(v, depth + 1) for v in node]
+        return type(node)(masked) if isinstance(node, tuple) else masked
+    if node is None or isinstance(node, bool):
+        return node
+    if isinstance(node, str) and not node.strip():
+        return node
+    return MASK
+
+
+def _mask_sensitive_values(data: dict[str, dict[str, Any]]) -> None:
+    """Mask every secret-named value in *data*, in place, at any depth."""
     for category, settings_dict in data.items():
         if not isinstance(settings_dict, dict):
             continue
-        for key, val in list(settings_dict.items()):
-            key_lower = key.lower()
-            sensitive = any(frag in key_lower for frag in _SENSITIVE_KEY_FRAGMENTS)
-            try:
-                sensitive = sensitive or bool(is_sensitive_config_key(key))
-            except Exception:
-                pass
-            if not sensitive:
-                continue
-            # Only mask non-empty string values — constant *** (no last-4).
-            raw = val
-            if isinstance(raw, str):
-                try:
-                    raw = json.loads(raw)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if isinstance(raw, str) and raw.strip():
-                settings_dict[key] = "***"
-            elif isinstance(raw, dict):
-                for sub_k, sub_v in list(raw.items()):
-                    if isinstance(sub_v, str) and sub_v.strip():
-                        raw[sub_k] = "***"
-                settings_dict[key] = json.dumps(raw)
+        data[category] = mask_deep(settings_dict)
 
 
 class SettingsRouterBuilder:
@@ -525,7 +627,7 @@ class SettingsRouterBuilder:
                         return {"ok": True, "message": "Connection successful"}
                     return {"ok": False, "error": f"rclone: {(proc.stderr or '')[:200]}"}
                 except Exception as exc:
-                    return {"ok": False, "error": str(exc)}
+                    return {"ok": False, "error": safe_error(exc)}
 
             # Native provider test — persist the form first so freshly-typed
             # credentials are what gets tested, then call test_connection().
@@ -537,7 +639,7 @@ class SettingsRouterBuilder:
                     return {"ok": False, "error": f"Unknown provider: {provider_name}"}
                 return await provider.test_connection()
             except Exception as exc:
-                return {"ok": False, "error": str(exc)}
+                return {"ok": False, "error": safe_error(exc)}
 
         @router.get("/api/settings/backup/retention")
         async def api_get_backup_retention() -> dict[str, Any]:
@@ -660,7 +762,7 @@ class SettingsRouterBuilder:
             try:
                 _get_sm().save_embedder_settings(req)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"status": "error", "error": validation_error(exc)}
             return {"status": "ok"}
 
         @router.post(
@@ -744,7 +846,7 @@ class SettingsRouterBuilder:
                             "done": get_rebuild_status().get("done", 0),
                             "started_at": get_rebuild_status().get("started_at"),
                             "finished_at": None,
-                            "error": str(exc),
+                            "error": safe_error(exc),
                         },
                         category="embedding",
                     )
@@ -797,7 +899,7 @@ class SettingsRouterBuilder:
             try:
                 _get_sm().save_time_travel_settings(req)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"status": "error", "error": validation_error(exc)}
             return {"status": "ok"}
 
         # ══════════════════════════════════════════════════════════════
@@ -976,7 +1078,7 @@ class SettingsRouterBuilder:
                 }
             except Exception as exc:  # noqa: BLE001
                 logger.warning("document settings get failed: %s", exc)
-                return {"error": str(exc)}
+                return {"error": safe_error(exc)}
 
         @router.put("/api/settings/documents")
         async def api_save_document_settings(req: dict[str, Any]) -> dict[str, str]:
@@ -1334,7 +1436,7 @@ class SettingsRouterBuilder:
             try:
                 return await VulnerabilityDisclosure().acknowledge(report_id)
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"status": "error", "error": validation_error(exc)}
 
         @router.post("/api/security/disclosure/{report_id}/status")
         async def api_disclosure_status(report_id: str, req: dict[str, Any]) -> dict[str, Any]:
@@ -1348,7 +1450,7 @@ class SettingsRouterBuilder:
                 )
                 return {"status": "ok"}
             except ValueError as exc:
-                return {"status": "error", "error": str(exc)}
+                return {"status": "error", "error": validation_error(exc)}
 
         @router.get("/api/security/deps")
         async def api_security_deps() -> dict[str, Any]:
@@ -1360,7 +1462,7 @@ class SettingsRouterBuilder:
                 hits = await scanner.scan_skill_manifests()
             except Exception as exc:
                 logger.debug("[security] skill dep scan failed", exc_info=True)
-                return {"status": "error", "error": str(exc), "results": []}
+                return {"status": "error", "error": safe_error(exc), "results": []}
             out = []
             for h in hits or []:
                 if hasattr(h, "__dict__"):
@@ -1550,7 +1652,7 @@ class SettingsRouterBuilder:
                     "model": model,
                     "status": "error",
                     "ok": False,
-                    "error": str(exc),
+                    "error": safe_error(exc),
                     "error_code": "rebind_failed",
                 }
 
@@ -1564,7 +1666,7 @@ class SettingsRouterBuilder:
                 return {"status": "ok", "stats": stats}
             except Exception as exc:
                 logger.warning("[Settings] Memory cleanup failed: %s", exc)
-                return {"status": "error", "error": str(exc)}
+                return {"status": "error", "error": safe_error(exc)}
 
     def _build_mcp_routes(self) -> None:
         router = self.mcp_router

@@ -59,6 +59,7 @@ from fastapi import APIRouter, Body, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -1078,7 +1079,7 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
         )
     if isinstance(exc, InvalidJobTransitionError):
         return JSONResponse(
-            status_code=409, content={"ok": False, "error": str(exc)}
+            status_code=409, content={"ok": False, "error": safe_error(exc)}
         )
     # Surface DocumentAccessError from the repository with a clear message
     # instead of a generic "Not found" when not_found_default is set.
@@ -1088,7 +1089,7 @@ def _error_for(exc: Exception, op: str, *, not_found_default: bool = False) -> J
             status_code=403,
             content={
                 "ok": False,
-                "error": str(exc) or "Not allowed to delete this document",
+                "error": safe_error(exc) or "Not allowed to delete this document",
                 "code": "document_access_denied",
             },
         )

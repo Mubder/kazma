@@ -32,9 +32,13 @@ class TestToolTiers:
             assert requires_approval(tool, config) is False, f"{tool} should not require approval"
 
     def test_write_tools_never_interrupt(self) -> None:
-        """Write-tier tools never require approval."""
+        """Write-tier tools never require approval.
+
+        `send_message` moved to the danger tier in audit F-04 (it dispatches
+        to Telegram/Discord/Slack), so it is no longer an example here.
+        """
         config = get_hitl_config({"safety": {"hitl": {"enabled": True}}})
-        write_tools = ["send_message", "memory_store"]
+        write_tools = ["memory_store", "update_scratchpad", "document_index"]
         for tool in write_tools:
             assert requires_approval(tool, config) is False, f"{tool} should not require approval"
 
@@ -45,10 +49,15 @@ class TestToolTiers:
         for tool in danger_tools:
             assert requires_approval(tool, config) is True, f"{tool} should require approval"
 
-    def test_unknown_tools_deny(self) -> None:
-        """Unknown tools should not require approval (not in danger set)."""
+    def test_unknown_tools_require_approval(self) -> None:
+        """An unclassified tool is gated, not exempt (audit F-04).
+
+        This asserted the opposite until the audit: a tool nobody remembered
+        to classify ran with no approval, which is how 125 of 153 registered
+        tools ended up ungated. Approval is now the default.
+        """
         config = get_hitl_config({"safety": {"hitl": {"enabled": True}}})
-        assert requires_approval("some_unknown_tool", config) is False
+        assert requires_approval("some_unknown_tool", config) is True
 
 
 class TestDisabledHITL:
@@ -67,8 +76,14 @@ class TestDisabledHITL:
 class TestConfigDrivenTiers:
     """Test 7: Changing require_approval_for changes behavior."""
 
-    def test_custom_danger_list(self) -> None:
-        """Custom danger list overrides defaults."""
+    def test_custom_danger_list_extends_the_tier_floor(self) -> None:
+        """A custom list ADDS to the tier classification; it cannot un-gate.
+
+        Behaviour change from audit F-04. The configured list used to be the
+        entire policy, so narrowing it silently un-gated `file_write` and
+        `shell_exec` — open-by-omission. Danger-tier tools are now gated
+        regardless of the list; the list only adds tools on top.
+        """
         config = get_hitl_config({
             "safety": {
                 "hitl": {
@@ -77,17 +92,23 @@ class TestConfigDrivenTiers:
                 }
             }
         })
-        # These are now danger
+        # Explicitly listed -> gated (memory_store is otherwise tier 'write').
         assert requires_approval("memory_store", config) is True
         assert requires_approval("send_message", config) is True
-        # These are no longer danger
-        assert requires_approval("file_write", config) is False
-        assert requires_approval("shell_exec", config) is False
+        # Danger-tier tools stay gated even though the list omits them.
+        assert requires_approval("file_write", config) is True
+        assert requires_approval("shell_exec", config) is True
+        # Read-tier tools stay ungated.
+        assert requires_approval("file_read", config) is False
 
-    def test_empty_danger_list(self) -> None:
-        """Empty danger list means no tools require approval — EXCEPT the
-        ALWAYS_HITL_TOOLS (x_post/x_delete_post, X ToU fail-safes), which
-        stay gated no matter how narrow the configured list is."""
+    def test_empty_danger_list_still_gates_by_tier(self) -> None:
+        """An empty list cannot open the gate (audit F-04).
+
+        Previously an empty `require_approval_for` meant *nothing* needed
+        approval except ALWAYS_HITL_TOOLS. Approval is now the default:
+        read/write-tier tools run freely, danger-tier tools do not, and an
+        unknown tool is gated rather than exempt.
+        """
         config = get_hitl_config({
             "safety": {
                 "hitl": {
@@ -96,13 +117,13 @@ class TestConfigDrivenTiers:
                 }
             }
         })
-        for tool in TOOL_TIERS:
-            if tool in ALWAYS_HITL_TOOLS:
-                assert requires_approval(tool, config) is True, (
-                    f"{tool} is always-HITL and must stay gated"
-                )
-            else:
-                assert requires_approval(tool, config) is False
+        for tool, tier in TOOL_TIERS.items():
+            expected = tool in ALWAYS_HITL_TOOLS or tier not in ("read", "write", "safe")
+            assert requires_approval(tool, config) is expected, (
+                f"{tool} (tier={tier}) approval expected={expected}"
+            )
+        # An unclassified tool defaults to requiring approval.
+        assert requires_approval("some_tool_added_next_week", config) is True
 
     def test_default_config(self) -> None:
         """Empty config uses defaults (file_write, file_delete, shell_exec)."""
@@ -151,8 +172,10 @@ class TestConfigDrivenTiers:
             }
         })
         assert requires_approval("memory_store", config) is True
-        assert requires_approval("file_write", config) is False
-        assert requires_approval("shell_exec", config) is False
+        # Danger-tier tools remain gated whatever the configured list says
+        # (audit F-04) — the list adds to the floor, it does not replace it.
+        assert requires_approval("file_write", config) is True
+        assert requires_approval("shell_exec", config) is True
 
 
 class TestToolTierLookup:
@@ -160,7 +183,9 @@ class TestToolTierLookup:
 
     def test_known_tiers(self) -> None:
         assert get_tool_tier("file_read") == "read"
-        assert get_tool_tier("send_message") == "write"
+        # send_message dispatches to Telegram/Discord/Slack — outbound side
+        # effect, reclassified from "write" to "danger" by audit F-04.
+        assert get_tool_tier("send_message") == "danger"
         assert get_tool_tier("shell_exec") == "danger"
 
     def test_unknown_tier(self) -> None:

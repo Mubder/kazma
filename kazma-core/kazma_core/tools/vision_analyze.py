@@ -167,15 +167,32 @@ async def _download_image(url: str) -> tuple[bytes, str]:
     if not _is_safe_url(url):
         raise ValueError(f"Blocked potentially unsafe URL: {url}")
     from kazma_core.http_pool import get_http_client
+    from kazma_core.security.ssrf import SSRFError, resolve_redirects
 
+    headers = {"User-Agent": "KazmaBot/1.0 (vision analyzer)"}
     try:
         client = get_http_client()
+        # Resolve the redirect chain with every hop SSRF-checked, then fetch
+        # the final URL with redirects OFF (audit F-08). Following redirects
+        # inside the fetch bypassed the guard entirely: a public URL could
+        # 302 to 169.254.169.254 and the response bytes came back to the
+        # caller.
+        try:
+            fetch_url = await resolve_redirects(
+                client, url, timeout=REQUEST_TIMEOUT, headers=headers
+            )
+        except SSRFError:
+            raise
+        except Exception:
+            # HEAD unsupported / probe failed — fall back to the original URL
+            # with redirects still disabled, which is fail-closed.
+            fetch_url = url
         async with client.stream(
             "GET",
-            url,
-            follow_redirects=True,
+            fetch_url,
+            follow_redirects=False,
             timeout=REQUEST_TIMEOUT,
-            headers={"User-Agent": "KazmaBot/1.0 (vision analyzer)"},
+            headers=headers,
         ) as resp:
             resp.raise_for_status()
 

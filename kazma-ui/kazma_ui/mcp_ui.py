@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from kazma_ui.models import MCPServerAddRequest, MCPServerTestRequest
+from kazma_core.errors import safe_error
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -148,7 +149,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             )
             return result
         except MCPOAuthError as exc:
-            return {"status": "error", "error": str(exc)}
+            return {"status": "error", "error": safe_error(exc)}
         except Exception as exc:  # noqa: BLE001
             logger.exception("[mcp_api] OAuth start failed for %s", name)
             return {"status": "error", "error": f"OAuth login failed: {exc}"}
@@ -174,7 +175,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
             return {"ok": True, "categories": categories}
         except Exception as exc:
             logger.exception("[mcp_api] list_presets failed")
-            return {"ok": False, "error": str(exc), "categories": []}
+            return {"ok": False, "error": safe_error(exc), "categories": []}
 
     @router.post("/api/mcp/servers")
     async def api_add_server(req: MCPServerAddRequest) -> dict[str, str]:
@@ -319,7 +320,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                     await client.disconnect()
                 except Exception:
                     pass
-                return {"success": False, "error": str(e), "stderr": stderr_text}
+                return {"success": False, "error": safe_error(e), "stderr": stderr_text}
 
         # HTTP-based transports: test via the same manager path Start uses.
         try:
@@ -336,7 +337,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                 "stderr": "",
             }
         except Exception as e:
-            return {"success": False, "error": str(e), "stderr": ""}
+            return {"success": False, "error": safe_error(e), "stderr": ""}
 
     @router.post("/api/mcp/test-config")
     async def api_test_config(server_cfg: dict[str, Any] = None) -> dict[str, Any]:
@@ -399,7 +400,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                     await client.disconnect()
                 except Exception:
                     pass
-                return {"success": False, "error": str(e), "stderr": stderr_text}
+                return {"success": False, "error": safe_error(e), "stderr": stderr_text}
 
         try:
             from kazma_core.mcp.manager import AsyncMCPManager
@@ -415,7 +416,7 @@ def create_mcp_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRoute
                 "stderr": "",
             }
         except Exception as e:
-            return {"success": False, "error": str(e), "stderr": ""}
+            return {"success": False, "error": safe_error(e), "stderr": ""}
 
     @router.get("/api/mcp/servers/{name}/tools")
     async def api_server_tools(name: str) -> list[dict[str, str]]:

@@ -291,7 +291,10 @@ class SecretVault:
                 try:
                     self._conn.close()
                 except Exception:
-                    pass
+                    # Safe to ignore (audit O3): the handle is dropped either
+                    # way, and close() on an already-closed/broken connection
+                    # has no recoverable failure mode.
+                    logger.debug("[Vault] close() failed", exc_info=True)
                 self._conn = None
 
 

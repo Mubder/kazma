@@ -22,6 +22,11 @@ graph and a fake store, and asserts the transcript a reload would render.
 
 from __future__ import annotations
 
+# Patch the seam at its definition site: these helpers moved into
+# kazma_ui.sse_chat._helpers when the module was split (audit O5),
+# and the callers resolve them through that module object.
+from kazma_ui.sse_chat import _helpers as _sse_helpers
+
 import asyncio
 from types import SimpleNamespace
 
@@ -120,7 +125,7 @@ def store(monkeypatch):
     monkeypatch.setattr(reply_sink, "_store", lambda: st)
     from kazma_ui import sse_chat
 
-    monkeypatch.setattr(sse_chat, "_module_store", lambda: st)
+    monkeypatch.setattr(_sse_helpers, "_module_store", lambda: st)
     reply_sink.reset_reply_turns()
     yield st
     reply_sink.reset_reply_turns()

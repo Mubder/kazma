@@ -229,6 +229,24 @@ def _run_command_sync(
     timeout: float,
     cwd: str | None,
 ) -> subprocess.CompletedProcess[str]:
+    """Run one operator-configured tool hook.
+
+    NOTE ON ``shell=True`` BELOW — this is the only ``shell=True`` in the tree
+    and it is deliberate (audit O8).
+
+    Hook commands come from the operator's own settings, not from the model:
+    ``_parse_command`` first tries ``shlex.split`` and returns a **list**,
+    which takes the ``shell=False`` branch. The string branch is reached only
+    when the operator wrote something ``shlex`` cannot parse — typically a
+    genuine shell pipeline they intended. Treating that as a shell command is
+    the expected behaviour for a hook, in the same way editor and git hooks
+    work.
+
+    This is NOT a model-reachable path. Model-driven execution goes through
+    ``shell_exec`` in ``tool_builtins``, which parses with ``shlex``, enforces
+    a binary allowlist plus a per-binary argument policy, and hard-rejects
+    shell metacharacters.
+    """
     if isinstance(command, str):
         return subprocess.run(
             command,

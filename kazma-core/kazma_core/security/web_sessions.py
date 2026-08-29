@@ -15,11 +15,16 @@ from typing import Any
 
 __all__ = [
     "SESSION_COOKIE",
+    "SESSION_KEY_PREFIX",
     "create_session",
     "revoke_session",
     "validate_session",
     "use_opaque_sessions",
+    "purge_expired_sessions",
 ]
+
+#: ConfigStore key prefix for session records.
+SESSION_KEY_PREFIX = "web_session."
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +122,50 @@ def get_session_payload(session_id: str | None) -> dict[str, Any] | None:
 def validate_session(session_id: str | None) -> bool:
     """Return True if *session_id* is a live opaque session."""
     return get_session_payload(session_id) is not None
+
+
+def purge_expired_sessions() -> int:
+    """Delete every expired ``web_session.*`` record. Returns the count removed.
+
+    Audit F-11: expiry was only ever enforced lazily, inside
+    :func:`get_session_payload`, and only for the specific session being
+    presented. A session never presented again was never removed, so the auth
+    category of the ConfigStore grew without bound — one row per issued
+    session, forever, and into every backup snapshot.
+
+    Safe to call repeatedly; runs at startup and on the memory-ops cadence.
+    """
+    from kazma_core.config_store import get_config_store
+
+    store = get_config_store()
+    now = time.time()
+    removed = 0
+    try:
+        records = store.get_category("auth")
+    except Exception:
+        logger.warning("[web_sessions] purge skipped — cannot read auth category", exc_info=True)
+        return 0
+
+    for key, payload in list(records.items()):
+        if not str(key).startswith(SESSION_KEY_PREFIX):
+            continue
+        expired = True
+        if isinstance(payload, dict):
+            try:
+                expired = float(payload.get("expires_at") or 0) <= now
+            except (TypeError, ValueError):
+                expired = True  # unparseable expiry — treat as stale
+        if not expired:
+            continue
+        try:
+            store.delete(key)
+            removed += 1
+        except Exception:
+            logger.debug("[web_sessions] could not delete %s", key, exc_info=True)
+
+    if removed:
+        logger.info("[web_sessions] purged %d expired session(s)", removed)
+    return removed
 
 
 def revoke_session(session_id: str | None) -> None:

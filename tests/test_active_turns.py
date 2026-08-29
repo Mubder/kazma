@@ -220,9 +220,11 @@ def test_the_deadline_is_measured_from_the_later_of_disconnect_and_progress():
 
 def test_the_sse_watchdog_uses_this_predicate():
     """Extracting the decision only helps if the live path calls it."""
-    import inspect
-
     from kazma_ui import sse_chat
 
-    src = inspect.getsource(sse_chat)
+    from tests._module_source import module_source
+
+    # sse_chat became a package in audit O5; inspect.getsource() would only
+    # return the __init__ shim, and the watchdog lives in _streaming.
+    src = module_source(sse_chat.__file__)
     assert "pump_is_stalled(thread_id" in src

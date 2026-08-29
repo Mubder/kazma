@@ -140,14 +140,15 @@ def _extract_links(html: str, base_url: str) -> list[str]:
 async def _fetch_html(url: str) -> tuple[str | None, str]:
     """Return (html_or_none, final_url)."""
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import SSRFError, resolve_redirects, validate_url
         from kazma_core.proxy.client import get_scraping_client
 
         validate_url(url)
         # Route through the proxy provider (opt-in) + rotate UA. The multi-page
         # spider is the highest block-risk, so proxying it is the biggest win.
+        # Every redirect hop is SSRF-checked before the body fetch (audit F-08).
         async with get_scraping_client(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=30.0,
             headers={
                 "User-Agent": (
@@ -157,7 +158,13 @@ async def _fetch_html(url: str) -> tuple[str | None, str]:
             },
             rotate_ua=True,
         ) as client:
-            r = await client.get(url)
+            try:
+                target = await resolve_redirects(client, url, timeout=30.0)
+            except SSRFError:
+                return None, url
+            except Exception:
+                target = url
+            r = await client.get(target)
             # Re-validate final URL after redirects
             final = str(r.url)
             try:
@@ -238,7 +245,7 @@ async def crawl_site(
         max_pages, max_depth, delay_ms = 8, 2, 300
 
     try:
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import validate_url
 
         validate_url(start)
     except Exception as exc:

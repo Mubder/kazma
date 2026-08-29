@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 import logging
 import re
 from pathlib import Path
@@ -840,7 +841,20 @@ async def _try_ide_command(
 # ``/kb status`` reply can read live progress for jobs kicked off from chat.
 import asyncio as _asyncio_kb  # module-private alias to avoid clashing below
 
-_kb_jobs: dict[str, dict[str, Any]] = {}
+# Bounded LRU (audit F-14): an unbounded dict kept every chat-initiated crawl
+# resident for the process lifetime. The durable ``kazma_core.stores.kb_jobs``
+# table remains the source of truth — ``/kb status`` already falls back to it —
+# so evicting the oldest entries costs a lookup, not correctness.
+_KB_JOBS_MAX = 500
+_kb_jobs: OrderedDict[str, dict[str, Any]] = OrderedDict()
+
+
+def _remember_kb_job(job_id: str, row: dict[str, Any]) -> None:
+    """Record a chat-initiated KB job, evicting the least-recently-touched."""
+    _kb_jobs[job_id] = row
+    _kb_jobs.move_to_end(job_id)
+    while len(_kb_jobs) > _KB_JOBS_MAX:
+        _kb_jobs.popitem(last=False)
 
 
 async def _try_kb_command(
@@ -984,7 +998,7 @@ async def _try_kb_command(
                 "url": url,
                 **payload,
             }
-            _kb_jobs[job_id] = row
+            _remember_kb_job(job_id, row)
             try:
                 from kazma_core.stores.kb_jobs import upsert_job
 
@@ -1069,7 +1083,7 @@ async def _try_kb_command(
             "kind": "refresh",
             "message": f"refreshing {seed}",
         }
-        _kb_jobs[job_id] = row
+        _remember_kb_job(job_id, row)
         try:
             from kazma_core.stores.kb_jobs import upsert_job
 
@@ -1096,7 +1110,7 @@ async def _try_kb_command(
                         "current_url": update.current_url,
                         "message": update.message,
                     }
-                    _kb_jobs[job_id] = snap
+                    _remember_kb_job(job_id, snap)
                     try:
                         from kazma_core.stores.kb_jobs import upsert_job as _uj
 
@@ -1111,7 +1125,7 @@ async def _try_kb_command(
                     "kind": "refresh",
                     "message": final_msg,
                 }
-                _kb_jobs[job_id] = done
+                _remember_kb_job(job_id, done)
                 try:
                     from kazma_core.stores.kb_jobs import upsert_job as _uj2
 
@@ -1125,7 +1139,7 @@ async def _try_kb_command(
             except Exception as exc:
                 logger.warning("[AgentHandler] /kb refresh failed: %s", exc)
                 err = {"phase": "error", "library_id": lib_id, "message": str(exc)}
-                _kb_jobs[job_id] = err
+                _remember_kb_job(job_id, err)
                 try:
                     from kazma_core.stores.kb_jobs import upsert_job as _uj3
 

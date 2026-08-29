@@ -61,7 +61,10 @@ def test_always_hitl_tools_blocked_under_yolo(yolo_thread) -> None:
 def test_canonical_danger_tools_allowed_under_yolo(yolo_thread) -> None:
     """YOLO still bypasses ordinary CANONICAL danger tools (unchanged behavior)."""
     mw = SafetyMiddleware()
-    for tool in ("shell_exec", "file_write", "git_push_pull", "schedule_task"):
+    # `git_push_pull` was removed from CANONICAL in audit F-04 — it is
+    # deprecated and never registered, so gating it protected nothing. The
+    # tools that replaced it (git_push / git_pull) are gated instead.
+    for tool in ("shell_exec", "file_write", "git_push", "schedule_task"):
         assert tool in CANONICAL_DANGER_TOOLS
         assert _run(mw, tool) is True, f"{tool} should be YOLO-auto-approved"
 

@@ -15,7 +15,10 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
 
-import kazma_ui.sse_chat as sse_chat_mod
+# _sse_attach_stream and the journal fast path moved into
+# kazma_ui.sse_chat._streaming when the module was split (audit O5);
+# patch get_turn_broker where those functions actually resolve it.
+from kazma_ui.sse_chat import _streaming as sse_streaming
 from kazma_ui.delivery import TurnBroker, TurnJournal, get_turn_broker, reset_turn_broker
 from kazma_ui.sse_chat import (
     _frame_from_journaled,
@@ -160,7 +163,7 @@ class TestAttachStream:
         small = TurnBroker(journal=TurnJournal(max_events_per_thread=2))
         for _ in range(8):
             await small.emit("tGap", {"type": "llm_delta"})
-        monkeypatch.setattr(sse_chat_mod, "get_turn_broker", lambda: small)
+        monkeypatch.setattr(sse_streaming, "get_turn_broker", lambda: small)
 
         frames = await _collect(_sse_attach_stream("tGap", "sess-G", 1), timeout=5.0)
         joined = "\n".join(frames)

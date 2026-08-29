@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 import pytest
@@ -37,7 +39,7 @@ class TestSourceContractsSprint2:
         assert "model=" in src  # _persist_final_assistant_message(..., model=)
 
     def test_sse_stamps_model_on_assistant(self):
-        src = _SSE.read_text(encoding="utf-8")
+        src = module_source(_SSE)
         assert 'temp_assistant_msg["model"]' in src or "_turn_model" in src
 
     def test_chat_js_sse_status_cot(self):

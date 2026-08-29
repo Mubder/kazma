@@ -51,6 +51,25 @@ def _bootstrap_bind_and_secret() -> str:
     return host
 
 
+def _proxy_args() -> list[str]:
+    """uvicorn flags so forwarded headers are parsed from declared proxies only.
+
+    Without these, ``request.client.host`` is the proxy for every request and
+    the app cannot tell an internet visitor from the local operator (audit
+    F-01). ``KAZMA_TRUSTED_PROXIES`` is the single source of truth: unset means
+    no proxy, and uvicorn is told to trust nothing.
+    """
+    proxies = [
+        h.strip()
+        for h in (os.environ.get("KAZMA_TRUSTED_PROXIES") or "").split(",")
+        if h.strip()
+    ]
+    if not proxies:
+        return ["--no-proxy-headers"]
+    print(f"  [proxy] trusting forwarded headers from: {', '.join(proxies)}")
+    return ["--proxy-headers", "--forwarded-allow-ips", ",".join(proxies)]
+
+
 host = _bootstrap_bind_and_secret()
 
 try:
@@ -66,6 +85,7 @@ try:
             host,
             "--port",
             "9090",
+            *_proxy_args(),
         ],
         # stdout/stderr are INHERITED, never piped.
         #

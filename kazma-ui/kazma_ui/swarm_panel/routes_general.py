@@ -13,6 +13,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from kazma_ui.services import get_swarm_service
+from kazma_core.errors import safe_error, validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -251,9 +252,9 @@ def register_general_routes(
             response_target = {**target, "bot_token": "***" if bot_token else ""}
             return JSONResponse({"status": "ok", "output_target": response_target})
         except ValueError as exc:
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=400)
+            return JSONResponse({"status": "error", "message": validation_error(exc)}, status_code=400)
         except Exception as exc:
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=500)
+            return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
     @router.get("/api/swarm/models")
     async def swarm_models() -> dict[str, Any]:
@@ -309,7 +310,7 @@ def register_general_routes(
             scaler.save_templates()
             return JSONResponse({"status": "ok", "template": template.to_dict()})
         except Exception as exc:
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=500)
+            return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
     @router.delete("/api/swarm/templates/{name}")
     async def delete_template(name: str) -> JSONResponse:
@@ -324,7 +325,7 @@ def register_general_routes(
             scaler.save_templates()
             return JSONResponse({"status": "ok"})
         except Exception as exc:
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=500)
+            return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
     @router.post("/api/swarm/autoscaler/reap")
     async def reap_idle_workers() -> JSONResponse:
@@ -338,7 +339,7 @@ def register_general_routes(
             reaped = scaler.reap_idle()
             return JSONResponse({"status": "ok", "reaped": reaped})
         except Exception as exc:
-            return JSONResponse({"status": "error", "message": str(exc)}, status_code=500)
+            return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
 
 def _fallback_html(has_core: bool, workers: list[dict[str, Any]]) -> str:

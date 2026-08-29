@@ -64,7 +64,12 @@ class TestAgentUsesGraph:
         final = LLMResponse(content="tool done", finish_reason="stop", model="stub")
 
         exec_mock = AsyncMock(return_value={"content": "OUT", "is_error": False})
+        # HITL default-denies unclassified tools (audit F-04); give the
+        # fixture tool a read tier so the graph path is what's tested.
+        from kazma_core.safety.hitl import TOOL_TIERS
+
         with (
+            patch.dict(TOOL_TIERS, {"my_tool": "read"}),
             patch.object(agent.llm, "chat", new_callable=AsyncMock, side_effect=[tool_resp, final]),
             patch.object(agent.tools, "execute", exec_mock),
             patch.object(

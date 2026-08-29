@@ -30,6 +30,7 @@ from typing import Any
 
 import httpx
 
+from kazma_core.background import spawn_background
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -366,7 +367,7 @@ class DiscordAdapter(BaseAdapter):
             package_name = package_from_install(custom_id)
             from kazma_core.system.runtime_manager import trigger_package_promotion
 
-            asyncio.create_task(trigger_package_promotion(package_name))
+            spawn_background(trigger_package_promotion(package_name), name=f"discord-promote:{package_name}")
             content = (
                 "[⏳ Installing package... please wait]"
                 if action.kind == "sys_install"
@@ -466,7 +467,7 @@ class DiscordAdapter(BaseAdapter):
         from kazma_gateway.adapters.discord_send import chunk_message, resolve_channel_id, sanitize_outbound
 
         # Fire typing indicator before sending
-        asyncio.create_task(self._trigger_typing(outbound.target_id))
+        spawn_background(self._trigger_typing(outbound.target_id), name="discord-typing")
         if not self._http:
             self._http = httpx.AsyncClient(
                 base_url=_DISCORD_API,
@@ -532,7 +533,7 @@ class DiscordAdapter(BaseAdapter):
             # Voice reply: if the inbound turn was transcribed audio and TTS
             # is enabled, synthesize the text and send it back as audio.
             if outbound.context_metadata.get("voice_transcribed") and outbound.text:
-                asyncio.create_task(self._send_voice_reply(channel_id, outbound.text))
+                spawn_background(self._send_voice_reply(channel_id, outbound.text), name="discord-voice-reply")
         return all_sent
 
     async def _send_voice_reply(self, channel_id: str, text: str) -> bool:

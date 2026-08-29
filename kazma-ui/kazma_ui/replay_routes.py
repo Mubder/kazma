@@ -20,6 +20,7 @@ from typing import Any
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def create_replay_router(
             return JSONResponse({"threads": threads, "count": len(threads)})
         except Exception as exc:
             logger.exception("[replay] list threads failed")
-            return JSONResponse({"threads": [], "count": 0, "error": str(exc)}, status_code=500)
+            return JSONResponse({"threads": [], "count": 0, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/replay/snapshots/{thread_id}")
     async def list_snapshots(thread_id: str) -> JSONResponse:
@@ -108,7 +109,7 @@ def create_replay_router(
             return JSONResponse({"snapshots": items, "count": len(items)})
         except Exception as exc:
             logger.exception("[replay] list snapshots failed for %s", thread_id)
-            return JSONResponse({"snapshots": [], "count": 0, "error": str(exc)}, status_code=500)
+            return JSONResponse({"snapshots": [], "count": 0, "error": safe_error(exc)}, status_code=500)
 
     @router.get("/api/replay/snapshots/{thread_id}/{iteration}")
     async def get_snapshot(thread_id: str, iteration: int) -> JSONResponse:
@@ -131,7 +132,7 @@ def create_replay_router(
             })
         except Exception as exc:
             logger.exception("[replay] get snapshot failed: %s/%d", thread_id, iteration)
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/replay/restore")
     async def restore_snapshot(body: dict[str, Any]) -> JSONResponse:
@@ -164,7 +165,7 @@ def create_replay_router(
             })
         except Exception as exc:
             logger.exception("[replay] restore failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/replay/fork")
     async def fork_snapshot(body: dict[str, Any]) -> JSONResponse:
@@ -216,7 +217,7 @@ def create_replay_router(
             })
         except Exception as exc:
             logger.exception("[replay] fork failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/replay/compare")
     async def compare_snapshots(body: dict[str, Any]) -> JSONResponse:
@@ -240,7 +241,7 @@ def create_replay_router(
             return JSONResponse({"diff": diff})
         except Exception as exc:
             logger.exception("[replay] compare failed")
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
     @router.delete("/api/replay/threads/{thread_id}")
     async def clear_snapshots(thread_id: str) -> JSONResponse:
@@ -252,6 +253,6 @@ def create_replay_router(
             return JSONResponse({"ok": True, "cleared": count})
         except Exception as exc:
             logger.exception("[replay] clear failed for %s", thread_id)
-            return JSONResponse({"error": str(exc)}, status_code=500)
+            return JSONResponse({"error": safe_error(exc)}, status_code=500)
 
     return router

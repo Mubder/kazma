@@ -186,7 +186,14 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
         cs.delete("auth.oidc.pkce_verifier")
         cs.delete("auth.oidc.state_exp")
     except Exception:
-        pass
+        # NOT safe to ignore silently (audit O3): these are one-time values.
+        # If they survive, the same state + PKCE verifier stay valid and the
+        # callback becomes replayable until they expire.
+        logger.error(
+            "[oidc] failed to clear one-time state/PKCE verifier — the "
+            "callback may be replayable until auth.oidc.state_exp lapses",
+            exc_info=True,
+        )
 
     return {
         "claims": claims,
