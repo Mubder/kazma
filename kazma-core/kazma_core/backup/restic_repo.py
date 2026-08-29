@@ -231,8 +231,176 @@ _WRITE_PROBE_TTL_S = 300.0
 _write_probe_cache: dict[str, tuple[float, bool, str]] = {}
 
 
+#: The probe writes and deletes one object under ``locks/``. That prefix is
+#: chosen deliberately: an append-only backup key must still be allowed to
+#: delete locks -- restic writes one at the start of every run and removes it
+#: at the end -- so probing there exercises exactly the permission the policy
+#: is meant to grant, and leaves nothing behind when it succeeds.
+_S3_PROBE_PREFIX = "locks"
+
+
+def _parse_s3_repo(repo: str) -> tuple[str, str, str] | None:
+    """Split a restic ``s3:`` URL into (endpoint, bucket, key prefix)."""
+    rest = repo[len("s3:"):]
+    if rest.startswith(("http://", "https://")):
+        scheme, _, tail = rest.partition("://")
+    else:
+        scheme, tail = "https", rest
+    host, _, path = tail.partition("/")
+    parts = [seg for seg in path.split("/") if seg]
+    if not host or not parts:
+        return None
+    return f"{scheme}://{host}", parts[0], "/".join(parts[1:])
+
+
+def _sigv4_request(
+    method: str, endpoint: str, bucket: str, key: str, payload: bytes, timeout: float
+) -> tuple[int, str]:
+    """One path-style S3 call signed with SigV4. Returns (status, detail).
+
+    Deliberately hand-rolled against the standard library rather than pulling
+    in boto3: the point of this function is to run when the backup path is
+    already suspect, so it should not depend on anything that path does not
+    already need.
+    """
+    import datetime
+    import hashlib
+    import hmac
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    access = os.environ.get("AWS_ACCESS_KEY_ID", "")
+    secret = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+    token = os.environ.get("AWS_SESSION_TOKEN", "")
+    if not access or not secret:
+        return 0, "no AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY in the environment"
+    # R2 wants "auto"; B2 and AWS supply a real region. Either signs fine.
+    region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION") or "auto"
+
+    host = urllib.parse.urlsplit(endpoint).netloc
+    now = datetime.datetime.now(datetime.UTC)
+    amzdate = now.strftime("%Y%m%dT%H%M%SZ")
+    datestamp = now.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(payload).hexdigest()
+
+    canonical_uri = "/" + urllib.parse.quote(f"{bucket}/{key}", safe="/~")
+    headers = {
+        "host": host,
+        "x-amz-content-sha256": payload_hash,
+        "x-amz-date": amzdate,
+    }
+    if token:
+        headers["x-amz-security-token"] = token
+    signed_headers = ";".join(sorted(headers))
+    canonical_headers = "".join(f"{k}:{headers[k]}\n" for k in sorted(headers))
+    # Fields: method, URI, query (empty), headers, signed-header list, digest.
+    canonical_request = "\n".join(
+        [
+            method,
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+
+    scope = f"{datestamp}/{region}/s3/aws4_request"
+    to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amzdate,
+            scope,
+            hashlib.sha256(canonical_request.encode()).hexdigest(),
+        ]
+    )
+
+    def _sign(key_bytes: bytes, msg: str) -> bytes:
+        return hmac.new(key_bytes, msg.encode(), hashlib.sha256).digest()
+
+    signing_key = _sign(
+        _sign(_sign(_sign(f"AWS4{secret}".encode(), datestamp), region), "s3"),
+        "aws4_request",
+    )
+    signature = hmac.new(signing_key, to_sign.encode(), hashlib.sha256).hexdigest()
+    headers["Authorization"] = (
+        f"AWS4-HMAC-SHA256 Credential={access}/{scope}, "
+        f"SignedHeaders={signed_headers}, Signature={signature}"
+    )
+
+    req = urllib.request.Request(
+        f"{endpoint}{canonical_uri}", data=payload, method=method, headers=headers
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+            return resp.status, ""
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", "replace")[:400]
+        except Exception:  # noqa: BLE001
+            pass
+        return exc.code, f"HTTP {exc.code}: {body or exc.reason}"
+    except Exception as exc:  # noqa: BLE001
+        return 0, f"{type(exc).__name__}: {str(exc)[:200]}"
+
+
+def _s3_writable(repo: str) -> tuple[bool, str]:
+    """PUT then DELETE one object under ``locks/``. Never raises."""
+    parsed = _parse_s3_repo(repo)
+    if parsed is None:
+        return False, f"could not parse the S3 repository URL {repo!r}"
+    endpoint, bucket, prefix = parsed
+    key = "/".join(
+        seg
+        for seg in (prefix, _S3_PROBE_PREFIX, f".kazma-write-probe-{int(time.time())}")
+        if seg
+    )
+
+    status, detail = _sigv4_request("PUT", endpoint, bucket, key, b"probe", 30.0)
+    if status not in (200, 201):
+        if status in (401, 403):
+            detail = (
+                "the remote is READ-ONLY for this credential: the S3 key was "
+                f"refused on PUT ({detail}). Offsite restic snapshots are NOT "
+                "being written until this is changed."
+            )
+        return False, detail or f"unexpected status {status} on PUT"
+
+    # Cleaning up is part of the test, not politeness. An append-only key that
+    # cannot delete its own locks wedges restic a few runs later, and that
+    # should surface here rather than at 3am.
+    status, detail = _sigv4_request("DELETE", endpoint, bucket, key, b"", 30.0)
+    if status not in (200, 204):
+        return False, (
+            "writes succeed but this key cannot delete under locks/ "
+            f"({detail or status}). restic writes a lock on every run and "
+            "removes it at the end, so stale locks will accumulate until it "
+            "refuses to back up. Grant DeleteObject on the locks/ prefix."
+        )
+    return True, ""
+
+
 def remote_writable(repo: str, *, force: bool = False) -> tuple[bool, str]:
-    """Can we actually PUT to this rclone remote? Cached; never raises."""
+    """Can we actually PUT to this remote? Cached; never raises.
+
+    A local path is writable or the backup has already failed loudly. Anything
+    remote gets proved rather than assumed, because a destination that reads
+    fine and refuses every write is the one shape where all the cheap checks
+    lie -- which is exactly how this went unnoticed the first time.
+    """
+    if repo.startswith("s3:"):
+        now = time.time()
+        hit = _write_probe_cache.get(repo)
+        if hit and not force and now - hit[0] < _WRITE_PROBE_TTL_S:
+            return hit[1], hit[2]
+        try:
+            ok, detail = _s3_writable(repo)
+        except Exception as exc:  # noqa: BLE001
+            ok, detail = False, f"write probe would not run: {str(exc)[:200]}"
+        _write_probe_cache[repo] = (now, ok, detail)
+        return ok, detail
     if not repo.startswith("rclone:"):
         return True, ""
     remote = repo[len("rclone:"):]

@@ -1,5 +1,85 @@
 # CHANGELOG
 
+## Unreleased — the write probe that skipped the destination it was for (2026-08-30)
+
+`remote_writable()` was added because a Google service account read fine and
+refused every write, and every check that only listed said the backups were
+healthy. It probed `rclone:` remotes and returned `(True, "")` for everything
+else — including `s3:`, which is where the repository is moving precisely
+because Drive cannot be made to work. The fix for the outage would have
+shipped with the outage's own blind spot pointed at its replacement.
+
+`s3:` repositories are now probed with a SigV4-signed `PUT` followed by
+`DELETE`, written against the standard library rather than boto3: this code
+runs when the backup path is already suspect, so it must not depend on
+anything that path does not already need.
+
+The probe object goes under the **`locks/` prefix**, which is a deliberate
+choice rather than a convenient one. An append-only key must still be able to
+delete locks — restic writes one at the start of every run and removes it at
+the end — so a key with no delete permission wedges restic a few runs after
+it is installed, as a brand new failure introduced by the hardening. Probing
+`locks/` tests exactly the permission the policy is supposed to grant, and
+cleans up after itself. The DELETE half is checked too: a key that can write
+but not clear locks fails the probe now instead of at 3am.
+
+`tests/test_restic_s3_write_probe.py` runs a local HTTP server that
+recomputes the signature the way S3 does instead of accepting it, because
+signing code that is never exercised fails as a 403 against the real bucket
+and gets blamed on the bucket policy.
+
+Also fixed here: the procedural recorder's single worker bound its SQLite
+connection **once, at thread start**, pinning whichever data directory it
+first saw and silently writing every later record there. Harmless in
+production, where that directory never moves; wrong everywhere else, and it
+made `test_procedural_feed_via_tool_registry` fail with `no such table:
+procedural_dags` whenever another test file started the worker first. The
+worker now resolves the path per item and reopens only when it changes.
+
+## Unreleased — the crash that looked like three bugs (2026-08-29)
+
+`tests/test_truncation_retry.py` segfaulted on Windows roughly four runs in
+ten, and had for long enough that the suite was simply run without it. The
+faulthandler traceback pointed somewhere different each time —
+`_ensure_fts5`, `ensure_primary_schema`, `config_store.get` — which is why it
+read as three unrelated problems, and why the first diagnosis (a shared
+`sqlite3.Connection` in ConfigStore) was wrong.
+
+The faulting frame was never the signal. The other threads were. Every crash
+dump showed two or three threads inside
+`tool_registry._record_procedural_outcome`, which spawned a fresh
+`daemon=True` thread on EVERY tool execution — each opening its own SQLite
+connection and running the whole schema-ensure, DDL and FTS5 rebuild probes
+included, to write a single row. Under any burst of tool calls that is
+several threads hammering the same two databases at once.
+
+Bisecting by disabling that one thread gave 0/10. Three narrower fixes did
+not move the rate at all — draining the threads at exit, giving ConfigStore a
+per-thread connection, serialising `ensure_primary_schema` — and non-daemon
+threads did not help either, ruling out an interpreter-teardown race. So
+rather than keep hunting which shared object corrupts, the concurrency
+itself is gone: a **single worker thread** drains a bounded queue, so exactly
+one thread ever touches those databases. The schema is ensured once per
+process instead of once per tool call, a full queue drops rather than
+blocking a tool call, and `atexit` drains it.
+
+That took it from 4/10 to 1/80, and the residual turned out to be the actual
+root cause — which this codebase had already found once and then failed to
+apply. `reset_config_store()` **closes** the sqlite handle, and its own
+docstring warned that doing so "frees the native sqlite handle underneath
+such a reader and hard-crashes the interpreter", naming the procedural
+recorder specifically, and told harnesses to pass `close=False`. Not one of
+the seventeen call sites did. The guidance was correct, documented, and
+completely inert.
+
+So closing is now opt-in rather than something every caller must remember to
+disable, and the recorder reads its config on the calling thread so the
+worker never touches ConfigStore at all — a reset cannot race it either way.
+
+**4/10 before, 0/30 after**, and the full suite runs clean with the file that
+was previously excluded. The unbounded thread-per-call spawn — its own
+problem, quietly — is gone with it.
+
 ## Unreleased — the audit closed: default-deny everywhere it was default-open (2026-08-29)
 
 A whole-repository audit found the codebase unusually security-conscious —

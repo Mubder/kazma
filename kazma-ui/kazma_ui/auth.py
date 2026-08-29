@@ -182,10 +182,19 @@ def _note_forwarded_headers(request: Request) -> None:
 
 
 def _peer_host(request: Request) -> str:
-    """The raw TCP peer address (never the forwarded client)."""
-    if request.client is None:
+    """The raw TCP peer address (never the forwarded client).
+
+    Tolerates a connection object without ``.client``: WebSocket handlers are
+    called with whatever the ASGI server hands over, and some servers leave
+    the peer unset. Returning "" there is the fail-closed answer -- an unknown
+    peer cannot be loopback, so it grants nothing -- and it keeps a missing
+    attribute from raising out of the authentication path, which would turn
+    an unusual connection into a 500 rather than a refusal.
+    """
+    client = getattr(request, "client", None)
+    if client is None:
         return ""
-    return (request.client.host or "").strip().lower()
+    return (getattr(client, "host", "") or "").strip().lower()
 
 
 def _client_host(request: Request) -> str:

@@ -1333,18 +1333,26 @@ def peek_config_store() -> "ConfigStore | None":
     return _config_store
 
 
-def reset_config_store(*, close: bool = True) -> None:
+def reset_config_store(*, close: bool = False) -> None:
     """Drop the singleton reference (used by test teardown).
 
-    ``close=False`` drops the reference WITHOUT closing the underlying DB —
-    the instance is left to the GC, which cannot finalize it while any
-    thread (e.g. a leftover daemon reader like the procedural-outcome
-    recorder) still holds a reference into it. An explicit eager
-    ``close()``, by contrast, frees the native sqlite handle underneath
-    such a reader and hard-crashes the interpreter (Windows access
-    violation observed in ``tests/test_mcp_server.py`` via the root-conftest
-    isolation fixture's teardown). Test harnesses should pass
-    ``close=False``; production callers never race this way.
+    Default is ``close=False``: drop the reference WITHOUT closing the
+    underlying DB. The instance is left to the GC, which cannot finalize it
+    while any thread (e.g. a background reader like the procedural-outcome
+    recorder) still holds a reference into it. An eager ``close()``, by
+    contrast, frees the native sqlite handle underneath such a reader and
+    hard-crashes the interpreter — a Windows access violation, faulting
+    inside ``conn.execute`` on whatever the reader happened to be doing.
+
+    This used to default to ``True`` with a docstring telling harnesses to
+    pass ``False``. **Not one of the 17 call sites did**, so the guidance
+    protected nothing and the crash stayed live: it was still costing ~4/10
+    runs of ``tests/test_truncation_retry.py`` on 2026-08-29. A default that
+    every caller has to override to be safe is the wrong default — closing is
+    now opt-in, for the one caller that genuinely owns the lifecycle.
+
+    Pass ``close=True`` only when you know no other thread can be inside the
+    store.
     """
     global _config_store
     if _config_store is not None:
