@@ -108,7 +108,52 @@ def _default_log_path() -> Path:
     env = os.environ.get("KAZMA_GUARD_LOG")
     if env:
         return Path(env)
-    return Path.home() / ".kazma" / "guard.log"
+    return _guard_file("guard.log")
+
+
+def _kazma_home() -> Path:
+    """Kazma's own home: ``<install>/.kazma``, not ``~/.kazma``.
+
+    The guard originally wrote here under the user's home, which broke a
+    rule this project documents in paths.py: state is PROJECT-LOCAL so the
+    whole install travels together. Worse, ``migrate_legacy_user_home``
+    tells operators in a warning that ``~/.kazma`` is "safe to
+    archive/delete" once the project home exists -- advice written before
+    anything important lived there. The restic passphrase did, and it is
+    gone (live, 2026-08-29).
+
+    Resolved without importing kazma_core: the guard has to run before and
+    independently of the app, including when the app cannot start at all.
+    """
+    env = (os.environ.get("KAZMA_USER_HOME") or "").strip()
+    if env:
+        return Path(env)
+    # scripts/service/kazma_guard.py -> <install>
+    root = Path(__file__).resolve().parents[2]
+    if (root / "pyproject.toml").is_file():
+        return root / ".kazma"
+    cwd = Path.cwd()
+    if (cwd / "pyproject.toml").is_file():
+        return cwd / ".kazma"
+    return Path.home() / ".kazma"        # last resort, the old behaviour
+
+
+def _legacy_home() -> Path:
+    return Path.home() / ".kazma"
+
+
+def _guard_file(name: str) -> Path:
+    """Project-local path for *name*, honouring an existing legacy file.
+
+    An install that already has state under ``~/.kazma`` keeps using it
+    until someone moves it: silently switching paths mid-life would orphan
+    a recorded child PID and hand the next guard an empty state file --
+    precisely the orphan-server bug the state file exists to prevent.
+    """
+    legacy = _legacy_home() / name
+    if legacy.exists():
+        return legacy
+    return _kazma_home() / name
 
 
 def _state_path() -> Path:
@@ -125,7 +170,7 @@ def _state_path() -> Path:
     env = os.environ.get("KAZMA_GUARD_STATE")
     if env:
         return Path(env)
-    return Path.home() / ".kazma" / "guard.state.json"
+    return _guard_file("guard.state.json")
 
 
 def _pause_path() -> Path:
@@ -139,7 +184,7 @@ def _pause_path() -> Path:
     env = os.environ.get("KAZMA_GUARD_PAUSE_FILE")
     if env:
         return Path(env)
-    return Path.home() / ".kazma" / "guard.paused"
+    return _guard_file("guard.paused")
 
 
 # A forgotten pause is an outage nobody is looking for -- the exact failure

@@ -279,6 +279,32 @@ def user_home() -> Path:
     return h
 
 
+def _is_throwaway(path: Path) -> bool:
+    """True when *path* lives under a system temp directory.
+
+    Checked by resolved path rather than by name so a symlinked or
+    8.3-shortened temp dir cannot slip past.
+    """
+    import tempfile
+
+    try:
+        target = path.resolve()
+    except Exception:  # noqa: BLE001
+        return False
+    roots = [tempfile.gettempdir()]
+    for var in ("TEMP", "TMP", "TMPDIR"):
+        val = os.environ.get(var)
+        if val:
+            roots.append(val)
+    for root in roots:
+        try:
+            if target.is_relative_to(Path(root).resolve()):
+                return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
 def migrate_legacy_user_home() -> bool:
     """One-time migration: move ``~/.kazma`` → ``<repo>/.kazma`` if needed.
 
@@ -301,6 +327,32 @@ def migrate_legacy_user_home() -> bool:
     # Resolve target without creating it (we want to detect existence).
     env = (os.environ.get("KAZMA_USER_HOME") or "").strip()
     target = Path(env).expanduser() if env else (get_project_root() / ".kazma")
+
+    # Never migrate INTO a throwaway directory.
+    #
+    # get_project_root() walks up for a pyproject.toml, so running Kazma
+    # from any copy -- a test clone, a CI checkout, an agent scratchpad --
+    # makes that copy the "project root". This function then MOVES the
+    # user's global ~/.kazma into it and deletes the original. When the
+    # copy is cleaned up, the state is gone.
+    #
+    # That is not hypothetical: on 2026-08-29 a session running from
+    # %TEMP%\claude\...\scratchpadase took ~/.kazma with it, including
+    # the restic passphrase that decrypts every backup. The marker file it
+    # left behind is what identified the cause.
+    #
+    # A migration is a one-way move of the only copy; refusing to aim it at
+    # temp costs nothing and is the difference between an inconvenience and
+    # unrecoverable data.
+    if not env and _is_throwaway(target):
+        _log.warning(
+            "[paths] Refusing to migrate %s into a temporary location (%s). "
+            "Kazma appears to be running from a copy; the legacy home is "
+            "left untouched. Set KAZMA_USER_HOME to override.",
+            legacy, target,
+        )
+        return False
+
     if target.exists():
         # Both exist — user has state in both places. Don't clobber the
         # target; leave legacy in place for manual reconciliation.
