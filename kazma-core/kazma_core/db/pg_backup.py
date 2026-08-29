@@ -220,7 +220,44 @@ def prune_pg_backups(*, retention: int = _DEFAULT_RETENTION) -> int:
             deleted += 1
         except Exception:
             logger.debug("[pg_backup] could not prune %s", stale.name, exc_info=True)
+    deleted += _sweep_orphaned_tmp(out_dir)
     return deleted
+
+
+# A dump takes seconds to minutes. Anything still called .tmp an hour later
+# belongs to a process that is not coming back.
+_TMP_ORPHAN_AGE_S = 3600
+
+
+def _sweep_orphaned_tmp(out_dir: Path) -> int:
+    """Delete .tmp dumps left behind by a process that was killed.
+
+    perform_pg_backup removes its temp file when the dump RAISES, but a
+    killed process never runs that handler -- and each abandoned file is a
+    full-size dump. Live, 2026-08-29: four orphans totalling 3.83 GB, one
+    per Kazma restart that happened to land mid-dump, and nothing had ever
+    swept them. Retention only ever matched ``pg_shared_*.dump``, so they
+    were invisible to it and grew without bound.
+    """
+    removed = 0
+    cutoff = time.time() - _TMP_ORPHAN_AGE_S
+    try:
+        for tmp in out_dir.glob(".pg_shared_*.dump.tmp"):
+            try:
+                if tmp.stat().st_mtime < cutoff:
+                    size = tmp.stat().st_size
+                    tmp.unlink()
+                    removed += 1
+                    logger.warning(
+                        "[pg_backup] swept orphaned temp dump %s (%.0f MB) -- "
+                        "left by an interrupted backup",
+                        tmp.name, size / (1024 * 1024),
+                    )
+            except Exception:
+                logger.debug("[pg_backup] could not sweep %s", tmp.name, exc_info=True)
+    except Exception:
+        logger.debug("[pg_backup] temp sweep failed", exc_info=True)
+    return removed
 
 
 def latest_pg_backup() -> Path | None:

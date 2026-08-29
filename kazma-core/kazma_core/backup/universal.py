@@ -438,6 +438,40 @@ def _backup_postgres(dest_dir: Path) -> dict[str, Any] | None:
         return {"ok": False, "error": str(exc)[:200]}
 
 
+# A zip takes seconds to minutes. Anything still .tmp an hour later belongs
+# to a process that is not coming back.
+_TMP_ORPHAN_AGE_S = 3600
+
+
+def _sweep_orphaned_tmp(root: Path) -> int:
+    """Delete .zip.tmp archives left behind by a killed process.
+
+    _zip_backup_dir cleans up in a finally, which covers an exception but
+    NOT a kill -- and the Postgres path had the identical hole, where four
+    interrupted dumps had quietly accumulated 3.83 GB because retention
+    only ever matched finished files. Same shape, same fix, before this one
+    grows too.
+    """
+    removed = 0
+    cutoff = time.time() - _TMP_ORPHAN_AGE_S
+    try:
+        for tmp in root.glob(".*.zip.tmp"):
+            try:
+                if tmp.stat().st_mtime < cutoff:
+                    size = tmp.stat().st_size
+                    tmp.unlink()
+                    removed += 1
+                    logger.warning(
+                        "[universal-backup] swept orphaned archive %s (%.0f MB)",
+                        tmp.name, size / (1024 * 1024),
+                    )
+            except OSError:
+                logger.debug("[universal-backup] could not sweep %s", tmp.name)
+    except Exception:  # noqa: BLE001
+        logger.debug("[universal-backup] temp sweep failed", exc_info=True)
+    return removed
+
+
 def _prune(retention: int) -> int:
     """Delete oldest universal backups beyond retention. Returns count deleted."""
     base = _universal_dir()
@@ -458,6 +492,7 @@ def _prune(retention: int) -> int:
             deleted += 1
         except Exception:
             logger.debug("[universal-backup] could not prune %s", stale.name, exc_info=True)
+    deleted += _sweep_orphaned_tmp(_universal_dir())
     return deleted
 
 
