@@ -108,8 +108,38 @@ def _data_dir() -> Path:
 
 
 def password_file() -> Path:
-    """Where the repository passphrase lives on this machine."""
-    return Path(os.path.expanduser("~")) / ".kazma" / "restic.pass"
+    """Where the repository passphrase lives on this machine.
+
+    Project-local (``<install>/.kazma``), because that is the rule this
+    project documents in paths.py -- state travels with the install -- and
+    because the alternative actively bit us. It was written to
+    ``~/.kazma``, and ``migrate_legacy_user_home`` tells operators in a
+    warning that that directory is "safe to archive/delete" once the
+    project home exists. On 2026-08-29 it went, and every encrypted
+    snapshot became unreadable while backups carried on reporting success.
+
+    An existing legacy file still wins, so an install that already has one
+    keeps working until it is moved deliberately. ``.kazma/`` is
+    gitignored, so the passphrase cannot be committed from here.
+
+    It still belongs in a password manager as well: this is where the
+    software looks, not where the only copy should live.
+    """
+    legacy = Path(os.path.expanduser("~")) / ".kazma" / "restic.pass"
+    try:
+        # Non-EMPTY only: a stray zero-byte file is not state worth
+        # honouring, and pinning to it would send the operator's passphrase
+        # to the directory this move exists to get out of.
+        if legacy.is_file() and legacy.stat().st_size > 0:
+            return legacy
+    except OSError:
+        pass
+    try:
+        from kazma_core.paths import user_home
+
+        return Path(user_home()) / "restic.pass"
+    except Exception:  # noqa: BLE001
+        return legacy
 
 
 def repo_paths() -> dict[str, str]:
