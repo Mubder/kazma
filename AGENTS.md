@@ -1128,6 +1128,63 @@ tree; the per-thread fix trades it for write contention and needs its own
 measured change.
 
 
+### 27. Backups that report success (2026-08-29)
+
+Three failures found the same day, all the same shape: the system kept
+running, kept logging "complete", and stopped protecting the data. Each
+is now detected in seconds and says what to do. `tests/test_backup_
+silent_failures.py` holds the reproductions.
+
+**A. A Drive remote that reads fast and cannot write at all.**
+- A Google **service account has no Drive storage quota of its own**. It
+  will list a folder shared with it in milliseconds, and fail every upload
+  with `403 storageQuotaExceeded`. Only a Shared Drive escapes this, and
+  Shared Drives need Workspace — a consumer account cannot have one.
+- restic takes a **lock before it will even LIST**, so on such a remote
+  `restic snapshots` does not fail: it retries with exponential backoff
+  for about fifteen minutes and presents as a hang. Two 600-second probes
+  were spent proving "still failing" before the cause was visible.
+- `restic_repo.remote_writable()` now PUTs a probe object before any
+  restic call against an `rclone:` repo (cached 5 min). 900s of silent
+  retrying became a 3.1s error naming the credential. `_run` refuses to
+  invoke restic when it fails and raises `backup.restic_remote_read_only`.
+- Any offsite check that only reads is worthless. Prove the write.
+
+**B. A missing passphrase is not a config note.**
+- `ensure_password()` returning empty used to log one INFO line and skip
+  every snapshot. It did that for four hours while backups reported
+  success, because the local dump really had been written.
+- `alert_missing_password()` is critical, and deliberately silent when no
+  repository exists yet — on a fresh install nothing is at stake, and an
+  alert there teaches the operator to ignore the one that matters.
+
+**C. Mechanisms that only speak when they break cannot be told from
+mechanisms that never run.** A successful restic snapshot logged nothing;
+a completed restore logged nothing. Both now log one line, and
+`observability/firing_ledger.py` counts them.
+
+**The firing ledger** (`run_weekly_sweep`, scheduled from the memory
+worker) turns "unproven: N" from a hand-computed number into a measured
+one. Two lessons from its own first day, because it made both mistakes:
+- It read only `kazma.log` and reported ZERO guard restarts on an evening
+  they fired. **The guard logs to its own file on purpose**, so the app's
+  logging config cannot silence it — which is exactly why a ledger that
+  reads one file is worse than none. `_log_paths()` reads all of them.
+- Two of its patterns matched strings that appear nowhere in the codebase.
+  A signature must be copied from the emitting line, not guessed from the
+  mechanism name, or the dial is welded to zero.
+- It shipped unscheduled: it imported, passed its tests, and nothing
+  called it. That is its own finding, happening to itself.
+
+**Chaos injection is only real where it lands.** `InjectionTarget.
+LLM_PROVIDER` is injected INSIDE `resilient_chat`'s attempt loop, not
+around the function: a failure raised outside skips both the retry and
+the failover and proves only that exceptions propagate.
+`ChaosInjectionError` carries `.transient` (408/429/5xx), because the
+retry paths decide by asking, and an injected 503 that claims to be
+permanent skips the very retry it was injected to exercise.
+
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

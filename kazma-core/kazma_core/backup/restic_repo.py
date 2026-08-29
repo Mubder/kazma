@@ -36,6 +36,7 @@ import logging
 import os
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -215,6 +216,131 @@ def password_is_offsite_ack() -> bool:
         return False
 
 
+# A remote that can be read but not written is the worst shape a backup
+# destination can take, because every check that only reads says it is
+# fine. A Google service account is exactly that: it has no Drive storage
+# quota of its own, so it lists a shared folder in milliseconds and fails
+# every upload with 403 storageQuotaExceeded. restic writes a lock file
+# before it will even LIST snapshots, so on such a remote `restic
+# snapshots` does not fail -- it retries with exponential backoff for
+# fifteen minutes and reads as a hang. Two 600-second probes were spent
+# proving that before the cause was visible.
+#
+# So prove the remote is writable first, cheaply, and say so plainly.
+_WRITE_PROBE_TTL_S = 300.0
+_write_probe_cache: dict[str, tuple[float, bool, str]] = {}
+
+
+def remote_writable(repo: str, *, force: bool = False) -> tuple[bool, str]:
+    """Can we actually PUT to this rclone remote? Cached; never raises."""
+    if not repo.startswith("rclone:"):
+        return True, ""
+    remote = repo[len("rclone:"):]
+    now = time.time()
+    hit = _write_probe_cache.get(remote)
+    if hit and not force and now - hit[0] < _WRITE_PROBE_TTL_S:
+        return hit[1], hit[2]
+
+    ok, detail = False, ""
+    name = f".kazma-write-probe-{int(now)}"
+    try:
+        env = dict(os.environ)
+        env.setdefault("RCLONE_RETRIES", "1")
+        env.setdefault("RCLONE_LOW_LEVEL_RETRIES", "1")
+        proc = subprocess.run(
+            ["rclone", "rcat", f"{remote.rstrip('/')}/{name}"],
+            input="probe", env=env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=90, check=False,
+        )
+        ok = proc.returncode == 0
+        if not ok:
+            detail = _meaningful_error(proc.stderr, proc.stdout)
+        else:
+            subprocess.run(
+                ["rclone", "deletefile", f"{remote.rstrip('/')}/{name}"],
+                env=env, capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=90, check=False,
+            )
+    except Exception as exc:  # noqa: BLE001
+        detail = f"write probe would not run: {str(exc)[:200]}"
+
+    if not ok and "storageQuotaExceeded" in detail:
+        detail = (
+            "the remote is READ-ONLY for this credential: Google service "
+            "accounts have no Drive storage quota, so uploads fail with 403 "
+            "storageQuotaExceeded even when reads succeed. Use a user OAuth "
+            "remote (or a Shared Drive, which needs Workspace) instead. "
+            "Offsite restic snapshots are NOT being written until this is "
+            "changed."
+        )
+    _write_probe_cache[remote] = (now, ok, detail)
+    return ok, detail
+
+
+
+def alert_missing_password(source: str) -> bool:
+    """Shout when snapshots are being skipped for want of a passphrase.
+
+    This used to be a single INFO line, and on 2026-08-29 that is exactly
+    what it looked like for four hours while every snapshot was silently
+    dropped -- the backup still reported "complete", because the local
+    dump had in fact been written. A missing passphrase with an existing
+    repository is not a configuration note. It means new data is not being
+    protected AND the history already in that repository cannot be read
+    back without the key.
+
+    A FRESH install with no repository is a different case: nothing is at
+    stake yet, and alerting there would train the operator to ignore this.
+    So the alert fires only when a repository actually exists.
+
+    Returns whether an alert was raised.
+    """
+    try:
+        local = repo_paths().get("local") or ""
+        exists = bool(local) and (Path(local) / "config").is_file()
+        if not exists:
+            logger.info("[restic] no passphrase and no repository yet (%s)", source)
+            return False
+
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "backup.restic_passphrase_missing",
+            "Encrypted snapshots are being SKIPPED -- no restic passphrase.",
+            (f"{source} found an existing repository at {local} but no "
+             f"passphrase, so every snapshot is being dropped silently. "
+             f"Restore {password_file()} from wherever you saved it, or set "
+             "KAZMA_RESTIC_PASSWORD. Until then new data is unprotected and "
+             "the history already in that repository cannot be decrypted."),
+            severity="critical",
+            cooldown_s=6 * 3600,
+        )
+        return True
+    except Exception:  # noqa: BLE001 -- alerting must never break a backup
+        logger.warning("[restic] could not raise missing-passphrase alert",
+                       exc_info=True)
+        return False
+
+
+def alert_read_only_remote(repo: str, why: str) -> bool:
+    """Shout when the offsite repository accepts reads but refuses writes."""
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "backup.restic_remote_read_only",
+            "Offsite snapshots are NOT being written -- the remote is read-only.",
+            f"{repo}: {why[:400]}",
+            severity="critical",
+            cooldown_s=6 * 3600,
+        )
+        return True
+    except Exception:  # noqa: BLE001
+        logger.warning("[restic] could not raise read-only-remote alert",
+                       exc_info=True)
+        return False
+
+
 def _run(args: list[str], repo: str, password: str, *,
          action: str, timeout: int = _TIMEOUT_S,
          stdin: str | None = None) -> ResticResult:
@@ -231,9 +357,19 @@ def _run(args: list[str], repo: str, password: str, *,
         )
         return res
 
+    writable, why = remote_writable(repo)
+    if not writable:
+        res.error = f"{action} skipped -- {why}"
+        alert_read_only_remote(repo, why)
+        return res
+
     env = dict(os.environ)
     env["RESTIC_REPOSITORY"] = repo
     env["RESTIC_PASSWORD"] = password
+    # Bound the rclone child restic spawns. Without this a permanently
+    # failing PUT is retried until the whole operation looks hung.
+    env.setdefault("RCLONE_RETRIES", "2")
+    env.setdefault("RCLONE_LOW_LEVEL_RETRIES", "3")
     try:
         proc = subprocess.run(
             ["restic", *args], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",

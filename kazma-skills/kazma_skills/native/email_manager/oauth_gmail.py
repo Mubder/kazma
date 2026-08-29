@@ -92,6 +92,45 @@ def scopes_include_gmail_mail(scope_str: str) -> bool:
     return any(m in s or m in parts for m in mail_markers)
 
 
+#: A Google OAuth client ID always ends with this; a client secret starts
+#: with ``GOCSPX-``. The two sit next to each other in the Cloud Console and
+#: look alike, so pasting the secret into both fields is an easy slip.
+CLIENT_ID_SUFFIX = ".apps.googleusercontent.com"
+CLIENT_SECRET_PREFIX = "GOCSPX-"
+
+
+def _client_shape_error(client_id: str, client_secret: str) -> str:
+    """Operator-facing message when the ID/secret pair is obviously wrong.
+
+    Returns ``""`` when the shapes are plausible. Deliberately format-only —
+    it cannot tell whether a well-formed client still exists in the Cloud
+    Console, just that this value could never be a client ID.
+    """
+    cid, sec = (client_id or "").strip(), (client_secret or "").strip()
+    if cid and cid == sec:
+        return (
+            "Client ID and Client Secret hold the same value — one was pasted "
+            "into both fields. In Google Cloud Console → APIs & Services → "
+            f"Credentials, the Client ID ends with '{CLIENT_ID_SUFFIX}' and "
+            f"the secret starts with '{CLIENT_SECRET_PREFIX}'. Re-save both in "
+            "Settings → Email → OAuth."
+        )
+    if cid.startswith(CLIENT_SECRET_PREFIX):
+        return (
+            "The saved Client ID is actually the Client SECRET (it starts with "
+            f"'{CLIENT_SECRET_PREFIX}'). The Client ID is the longer value "
+            f"ending in '{CLIENT_ID_SUFFIX}'. Re-save both in Settings → "
+            "Email → OAuth."
+        )
+    if cid and not cid.endswith(CLIENT_ID_SUFFIX):
+        return (
+            f"The saved Client ID does not end with '{CLIENT_ID_SUFFIX}', so "
+            "Google will reject it as 'invalid_client'. Copy it from Google "
+            "Cloud Console → APIs & Services → Credentials."
+        )
+    return ""
+
+
 def start_gmail_oauth(request_base: str | None = None) -> dict[str, Any]:
     """Return Google authorize URL for browser redirect."""
     cid = _client_id()
@@ -116,6 +155,13 @@ def start_gmail_oauth(request_base: str | None = None) -> dict[str, Any]:
                 "in Settings → Email, click Save OAuth client, then Connect again."
             ),
         }
+    # Stored credentials can predate the save-time format check, and Google's
+    # own failure for a bad client ID is an opaque "Error 401: invalid_client
+    # — The OAuth client was not found" on its consent page. Catch it here so
+    # the message names the field instead.
+    shape = _client_shape_error(cid, secret)
+    if shape:
+        return {"ok": False, "code": "malformed_client", "error": shape}
     redirect = gmail_redirect_uri(request_base)
     state = new_state("gmail", redirect_uri=redirect)
     # Persist client for callback process

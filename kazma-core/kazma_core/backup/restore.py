@@ -283,6 +283,10 @@ def restore_files(
     _force_rmtree(staging)
     res.add("cleanup", not staging.exists(),
             "" if not staging.exists() else f"could not remove {staging}")
+    # A restore that leaves no trace in the log is a recovery nobody can
+    # confirm ever ran -- which is the audit's whole finding. Say it once,
+    # in a line the firing ledger can count.
+    logger.info("[restore] %s", res.summary())
     return res
 
 
