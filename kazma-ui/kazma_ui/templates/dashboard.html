@@ -9,12 +9,12 @@
   <!-- ── Header ── -->
   <div class="dash-pro-header">
     <div>
-      <p class="dash-pro-kicker">Control plane</p>
+      <p class="dash-pro-kicker">{{ t('dashboard.control_plane') }}</p>
       <h1 class="dash-pro-title">
         {{ t('dashboard.observability') }}
       </h1>
       <p class="dash-pro-sub">
-        Live cost, tokens, sessions, and system health — memory ops live on the Memory page.
+        {{ t('dashboard.observability_sub') }}
       </p>
     </div>
     <div class="dash-pro-toolbar">
@@ -192,7 +192,7 @@
         <p id="sessions-summary" style="margin:4px 0 0;font-size:0.75rem;color:var(--text-muted);">—</p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
-        <a href="/chat" class="btn btn-sm btn-secondary" style="text-decoration:none;font-size:0.75rem;">Open chat</a>
+        <a href="/chat" class="btn btn-sm btn-secondary" style="text-decoration:none;font-size:0.75rem;">{{ t('dashboard.open_chat') }}</a>
         <button id="clear-all-btn" class="btn btn-sm btn-danger">{{ t('dashboard.clear_all') }}</button>
       </div>
     </div>
@@ -311,6 +311,16 @@
 </script>
 <script src="/static/js/streaming.js?v={{ js_version() }}"></script>
 <script src="/static/js/dash_lists.js?v={{ js_version() }}"></script>
+<script>
+  // Session-list strings for dashboard.js (rendered server-side)
+  window.__DASH_SESS_I18N = {
+    noSessions: "{{ t('dashboard.no_sessions') }}",
+    sessionsCount: "{{ t('dashboard.sessions_count', n='{n}') }}",
+    showingFirst: "{{ t('dashboard.sessions_showing_first', n='{n}') }}",
+    showLess: "{{ t('dashboard.show_less_sessions') }}",
+    showMore: "{{ t('dashboard.show_n_more_sessions', n='{n}') }}"
+  };
+</script>
 <script src="/static/js/dashboard.js?v={{ js_version() }}"></script>
 <script src="/static/js/hitl_approval.js?v={{ js_version() }}"></script>
 <script>

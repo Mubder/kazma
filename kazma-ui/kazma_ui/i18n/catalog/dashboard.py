@@ -288,6 +288,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "جاري الاتصال…",
         "en": "Connecting…",
     },
+    "dashboard.control_plane": {
+        "ar": "مستوى التحكم",
+        "en": "Control plane",
+    },
     "dashboard.cost_over_time": {
         "ar": "التكلفة عبر الوقت",
         "en": "Cost Over Time",
@@ -624,6 +628,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الأدوات التي تتطلب موافقة بشرية ستظهر هنا",
         "en": "Tools requiring human approval will appear here",
     },
+    "dashboard.no_sessions": {
+        "ar": "لا توجد جلسات",
+        "en": "No sessions",
+    },
     "dashboard.no_traces": {
         "ar": "لا توجد تتبعات بعد",
         "en": "No traces yet",
@@ -635,6 +643,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.observability": {
         "ar": "لوحة المراقبة",
         "en": "Observability Dashboard",
+    },
+    "dashboard.observability_sub": {
+        "ar": "التكلفة والرموز والجلسات وصحة النظام مباشرة — عمليات الذاكرة في صفحة الذاكرة.",
+        "en": "Live cost, tokens, sessions, and system health — memory ops live on the Memory page.",
+    },
+    "dashboard.open_chat": {
+        "ar": "فتح المحادثة",
+        "en": "Open chat",
     },
     "dashboard.optimize_db": {
         "ar": "تحسين قاعدة البيانات",
@@ -700,9 +716,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إدارة الجلسات",
         "en": "Session Management",
     },
+    "dashboard.sessions_count": {
+        "ar": "{n} جلسة",
+        "en": "{n} sessions",
+    },
     "dashboard.sessions_hint": {
         "ar": "تظهر الجلسات هنا عندما يبدأ المستخدمون بالمحادثة",
         "en": "Sessions appear here when users start chatting",
+    },
+    "dashboard.sessions_showing_first": {
+        "ar": "تعرض أول {n}",
+        "en": "showing first {n}",
     },
     "dashboard.show_less_sessions": {
         "ar": "عرض أقل",
@@ -711,6 +735,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.show_more_sessions": {
         "ar": "عرض المزيد من الجلسات",
         "en": "Show more sessions",
+    },
+    "dashboard.show_n_more_sessions": {
+        "ar": "عرض {n} جلسة أخرى",
+        "en": "Show {n} more sessions",
     },
     "dashboard.snapshot_maintain": {
         "ar": "تنظيف اللقطات",

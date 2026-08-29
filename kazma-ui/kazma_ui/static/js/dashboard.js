@@ -473,6 +473,11 @@
   // soft-nav / re-entry always re-bind. Soft-nav to /dashboard is now a
   // hard reload, but keep this in the bundle for F5 and future soft-nav.)
   var SESSION_PREVIEW = 5;
+  var SESS_I18N = window.__DASH_SESS_I18N || {};
+  function sessT(key, fallback, n) {
+    var text = SESS_I18N[key] || fallback;
+    return n === undefined ? text : text.replace('{n}', n);
+  }
   var _sessionsExpanded = false;
   var _sessionsCache = [];
 
@@ -547,8 +552,8 @@
           if (expandBtn) {
             var hidden = list.length - SESSION_PREVIEW;
             expandBtn.textContent = _sessionsExpanded
-              ? 'Show less'
-              : ('Show ' + hidden + ' more session' + (hidden === 1 ? '' : 's'));
+              ? sessT('showLess', 'Show less')
+              : sessT('showMore', 'Show {n} more sessions', hidden);
           }
         } else {
           expandWrap.style.display = 'none';
@@ -556,11 +561,11 @@
       }
       if (summaryEl) {
         summaryEl.textContent = list.length
-          ? (list.length + ' session' + (list.length === 1 ? '' : 's')
+          ? (sessT('sessionsCount', '{n} sessions', list.length)
             + (list.length > SESSION_PREVIEW && !_sessionsExpanded
-              ? ' · showing first ' + SESSION_PREVIEW
+              ? ' · ' + sessT('showingFirst', 'showing first {n}', SESSION_PREVIEW)
               : ''))
-          : 'No sessions';
+          : sessT('noSessions', 'No sessions');
       }
     }
 
@@ -576,7 +581,7 @@
           if (tableEl) tableEl.style.display = 'none';
           if (cardsEl) cardsEl.innerHTML = '';
           if (expandWrap) expandWrap.style.display = 'none';
-          if (summaryEl) summaryEl.textContent = 'No sessions';
+          if (summaryEl) summaryEl.textContent = sessT('noSessions', 'No sessions');
           return;
         }
         if (emptyEl) emptyEl.style.display = 'none';
