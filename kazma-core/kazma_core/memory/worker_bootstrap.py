@@ -492,6 +492,21 @@ def _start_backup_export_scheduler() -> None:
         # repeat once per day. The body only enqueues; the durable worker
         # drains the actual backup/export work on its own loop.
         await asyncio.sleep(120)
+        if _backup_ran_recently():
+            # Skip the boot sweep when a backup is already fresh.
+            #
+            # "Run shortly after boot" is right for a machine that has been
+            # off for a week and wrong for one restarted five times in an
+            # evening: it produced 29 generations in two days, each a full
+            # ~954 MB copy plus a 1.55 GB Postgres dump, and the operator
+            # watched their disk fill up. Deduplication has since made each
+            # one cheap, but churning them is still pointless work.
+            logger.info(
+                "[memory_worker] a backup is younger than %.0fh -- skipping "
+                "the boot sweep, next run on the normal schedule",
+                _FRESH_BACKUP_HOURS,
+            )
+            await asyncio.sleep(_BACKUP_EXPORT_INTERVAL_HOURS * 3600)
         while True:
             try:
                 from kazma_core.memory.task_queue import enqueue_task
@@ -624,6 +639,35 @@ def _start_reconsolidation_scheduler() -> None:
         logger.debug(
             "[memory_worker] could not start reconsolidation scheduler", exc_info=True
         )
+
+
+# A backup younger than this makes the boot-time sweep redundant.
+_FRESH_BACKUP_HOURS = 6.0
+
+
+def _backup_ran_recently() -> bool:
+    """True when a universal backup completed within _FRESH_BACKUP_HOURS.
+
+    Read from the newest generation directory on disk rather than tracked
+    state, so it stays correct across restarts -- which is precisely the
+    case it exists for.
+    """
+    try:
+        import time as _time
+        from pathlib import Path
+
+        from kazma_core.paths import data_dir
+
+        newest = 0.0
+        base = Path(data_dir()) / "backups" / "universal"
+        for child in base.glob("1*"):
+            if child.is_dir():
+                newest = max(newest, child.stat().st_mtime)
+        if not newest:
+            return False
+        return (_time.time() - newest) < _FRESH_BACKUP_HOURS * 3600
+    except Exception:
+        return False  # unknown age -> take the backup; never skip on doubt
 
 
 def register_backup_export_handlers() -> None:
@@ -829,6 +873,48 @@ def _alert_repo_unhealthy(name: str, error: str) -> None:
         logger.debug("[memory_worker] restic alert failed", exc_info=True)
 
 
+def _snapshot_pg_to_restic(path: Any) -> None:
+    """Put the Postgres dump in the restic repositories, offsite included.
+
+    Until 2026-08-29 the Postgres database -- chat sessions, memory vectors,
+    shared state -- had NO offsite copy at all. The universal sweep excludes
+    the whole ``backups`` directory, and the nightly dump writes only to
+    local disk, so a disk failure lost the primary datastore outright while
+    every other component was protected.
+
+    Deduplication makes this nearly free: a second 1.55 GB dump adds about
+    2 MB, because pg_dump -Fc compresses each data block independently and
+    unchanged tables produce byte-identical blocks.
+
+    Never raises. The dump itself has already succeeded by this point.
+    """
+    try:
+        from kazma_core.backup.restic_repo import (
+            backup,
+            ensure_password,
+            repo_paths,
+            restic_available,
+        )
+
+        if not restic_available():
+            return
+        password, _ = ensure_password()
+        if not password:
+            logger.info("[memory_worker] pg dump not snapshotted: no restic passphrase")
+            return
+        for name, repo in repo_paths().items():
+            if not repo:
+                continue
+            res = backup(repo, password, [str(path)], tags=["kazma", "pg"])
+            if res.ok:
+                logger.info("[memory_worker] pg dump snapshotted to %s", name)
+            else:
+                logger.warning("[memory_worker] pg dump -> %s failed: %s",
+                               name, res.error[:200])
+    except Exception:
+        logger.warning("[memory_worker] pg restic snapshot failed", exc_info=True)
+
+
 async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
     """Run one nightly pg_dump of the Postgres shared-state tables.
 
@@ -845,6 +931,8 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
         if not pg_backup_enabled():
             return True  # not on Postgres / kill-switched — nothing to do
         path = await asyncio.to_thread(perform_pg_backup)
+        if path is not None:
+            await asyncio.to_thread(_snapshot_pg_to_restic, path)
         if path is None:
             logger.warning("[memory_worker] native_pg_backup produced no dump")
             return False  # real failure — let the queue retry
