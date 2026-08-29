@@ -216,6 +216,55 @@ MECHANISMS: tuple[Mechanism, ...] = (
         ),
     ),
     Mechanism(
+        name="read-only offsite detection",
+        fault=(
+            "the offsite repository accepts reads and refuses every write, "
+            "so nothing is stored and nothing complains"
+        ),
+        module="kazma_core.backup.restic_repo",
+        symbol="remote_writable",
+        proof="tests/test_backup_silent_failures.py",
+        proven_in_production=True,
+        note=(
+            "Found live 2026-08-29: a Google service account listed the "
+            "shared folder in milliseconds and failed every upload with 403 "
+            "storageQuotaExceeded. restic locks before it will even LIST, so "
+            "each command retried for 15 minutes and read as a hang."
+        ),
+    ),
+    Mechanism(
+        name="missing-passphrase alerting",
+        fault=(
+            "the restic passphrase is gone, every snapshot is skipped, and "
+            "the backup still reports 'complete' because the local dump ran"
+        ),
+        module="kazma_core.backup.restic_repo",
+        symbol="alert_missing_password",
+        proof="tests/test_backup_silent_failures.py",
+        proven_in_production=True,
+        note=(
+            "Found live 2026-08-29: four hours of skipped snapshots behind a "
+            "single INFO line. Silent on a fresh install, where no repository "
+            "means nothing is yet at stake."
+        ),
+    ),
+    Mechanism(
+        name="firing ledger",
+        fault=(
+            "a recovery stops running and the only evidence is a log line "
+            "that stops appearing, which nobody is counting"
+        ),
+        module="kazma_core.observability.firing_ledger",
+        symbol="run_weekly_sweep",
+        proof="tests/test_backup_silent_failures.py",
+        proven_in_production=True,
+        note=(
+            "Its own first version read one log file and reported zero guard "
+            "restarts on an evening they fired -- a false silence in the "
+            "report whose job is to find silence."
+        ),
+    ),
+    Mechanism(
         name="scheduled-post recurrence refusal",
         fault="a recurring time is accepted and the post fires exactly once",
         module="kazma_core.x_api.booking",

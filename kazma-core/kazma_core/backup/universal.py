@@ -549,7 +549,9 @@ def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
             return None
         password, _ = ensure_password()
         if not password:
-            logger.info("[universal-backup] restic configured but no passphrase set")
+            from kazma_core.backup.restic_repo import alert_missing_password
+
+            alert_missing_password("universal backup")
             return {"skipped": "no restic passphrase"}
 
         out: dict[str, Any] = {}
@@ -559,7 +561,14 @@ def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
             res = restic_backup(repo, password, [str(dest)],
                                 tags=["kazma", "universal"])
             out[name] = res.as_dict()
-            if not res.ok:
+            if res.ok:
+                # Success was silent, so the firing ledger read "restic
+                # snapshot: never" while snapshots were being taken every
+                # night. A mechanism that only speaks when it breaks cannot
+                # be told apart from one that is not running at all.
+                logger.info("[universal-backup] restic %s snapshot ok: %s",
+                            name, res.detail.get("snapshot_id") or "(no id)")
+            else:
                 logger.warning("[universal-backup] restic %s failed: %s",
                                name, res.error[:200])
         return out or None

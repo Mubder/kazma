@@ -979,7 +979,9 @@ def _snapshot_pg_to_restic(path: Any) -> None:
             return
         password, _ = ensure_password()
         if not password:
-            logger.info("[memory_worker] pg dump not snapshotted: no restic passphrase")
+            from kazma_core.backup.restic_repo import alert_missing_password
+
+            alert_missing_password("memory worker pg dump")
             return
         for name, repo in repo_paths().items():
             if not repo:
