@@ -73,6 +73,7 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 | `KAZMA_ENV` | unset | Optional | Some paths treat `production` specially. |
 | `KAZMA_PUBLIC_URL` | unset | Recommended behind proxy | Public origin for OAuth/OIDC redirects. |
 | `KAZMA_CORS_ORIGINS` | unset | If browser cross-origin | Comma-separated origins. |
+| `KAZMA_ENV_FILE` | unset | No | Absolute path to an extra `.env`, loaded **last** so it wins. The `.env` ladder is: `<kazma home>/.env` → `<cwd>/.env` → this. Nothing outside the installation is read unless you name it here. |
 | `KAZMA_TRUSTED_PROXIES` | unset | **Yes** behind any proxy | Comma-separated addresses the reverse proxy connects **from** (`127.0.0.1` for same-host nginx/Caddy, the bridge IP under Docker). Only these peers may set `X-Forwarded-For` / `X-Forwarded-Proto`. See the warning below. |
 | `KAZMA_LOOPBACK_AUTOLOGIN` | `0` | Keep `0` | Re-enables credential-less loopback login even with a proxy declared. Only for a host where `127.0.0.1` really is just you. |
 | `KAZMA_TRUST_LAN` | `0` | Keep `0` unless needed | LAN trust for auth middleware. |

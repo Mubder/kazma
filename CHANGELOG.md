@@ -84,6 +84,21 @@ Verified against a source-pinned baseline of unmodified `main` over the full
 6,900-test suite: this tree fails a strict subset of what `main` already
 fails. Zero regressions.
 
+**One developer's absolute path was the config default.** `app.py` loaded
+`.env` from `KAZMA_WORKSPACE`, defaulting to a hardcoded
+`C:/Users/balfa/kazma` — and loaded it *last with override*, so on that
+machine any clone at any other path silently inherited a different clone's
+secrets, database DSN and safety flags, and the repo actually being run lost
+to one that was not. Three defects: a guessed path shipped in a public repo,
+config location derived from `KAZMA_WORKSPACE` (which is the agent's *code*
+workspace and is switchable from the UI, so "Switch Repo" could change which
+`.env` is authoritative), and precedence inverted so the general beat the
+specific. The ladder is now `<kazma home>/.env` → `<cwd>/.env` →
+`$KAZMA_ENV_FILE`, lowest first, with nothing outside the installation read
+unless the operator names it — and the loaded files are logged, because a
+`.env` arriving from an unexpected place was previously invisible, which is
+how this went unnoticed.
+
 **A wrong proxy address no longer fails open.** `KAZMA_TRUSTED_PROXIES` is
 the operator's claim about the topology, and the claim is easy to get wrong:
 under Docker the proxy is the bridge IP, so `127.0.0.1` is the natural guess
