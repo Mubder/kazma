@@ -512,6 +512,10 @@ def _start_backup_export_scheduler() -> None:
                 # check reads it: neither belongs in the path that has to
                 # finish before the next backup can start.
                 enqueue_task("restic_maintenance", {})
+                # Connector credentials. The Google grant expires every
+                # 7 days on this install (OAuth status: Testing), so the
+                # useful check is the one that warns a day early.
+                enqueue_task("connector_health", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
                 # their own file (not overwritten by "default").
                 for tenant in _distinct_tenants():
@@ -639,6 +643,7 @@ def register_backup_export_handlers() -> None:
     register_handler("nightly_export", _handle_nightly_export)
     register_handler("native_pg_backup", _handle_native_pg_backup)
     register_handler("restic_maintenance", _handle_restic_maintenance)
+    register_handler("connector_health", _handle_connector_health)
     register_handler("universal_backup", _handle_universal_backup)
     _backup_export_registered = True
     logger.info("[memory_worker] backup/export task handlers registered")
@@ -742,6 +747,19 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
     except Exception:
         logger.warning("[memory_worker] nightly_export handler failed", exc_info=True)
         return False
+
+
+async def _handle_connector_health(payload: dict[str, Any]) -> bool:
+    """Probe connector credentials and warn before they expire."""
+    try:
+        from kazma_core.observability.connector_health import check_google
+
+        st = await check_google()
+        logger.info("[memory_worker] connector health: %s", st.as_dict())
+        return True
+    except Exception:
+        logger.warning("[memory_worker] connector health failed", exc_info=True)
+        return True  # a health check must not retry-storm
 
 
 async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:

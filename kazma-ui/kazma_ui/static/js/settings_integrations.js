@@ -495,6 +495,7 @@
                 const resp = await fetch('/api/email/gmail/disconnect', {
                     method: 'POST',
                     credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
@@ -546,6 +547,7 @@
                 const resp = await fetch('/api/email/oauth/microsoft/device/start', {
                     method: 'POST',
                     credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || !data.ok) {
@@ -624,6 +626,7 @@
                 const resp = await fetch('/api/email/oauth/microsoft/disconnect', {
                     method: 'POST',
                     credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json().catch(() => ({}));
                 if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
