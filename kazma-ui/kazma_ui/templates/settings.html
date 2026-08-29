@@ -491,17 +491,20 @@
             <div class="form-group">
                 <label>{{ t('settings.cron_tz_label') }}</label>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start;">
-                    <input class="form-input" list="cronTzZoneOptions" x-model="cronTz.value"
-                           @input="cronTzPreview()" spellcheck="false" style="max-width:280px" dir="ltr">
+                    <select class="form-input" x-model="cronTz.value" @change="cronTzPreview()"
+                            style="max-width:320px" dir="ltr">
+                        <template x-for="g in cronTzGroups" :key="g.label">
+                            <optgroup :label="g.label">
+                                <template x-for="z in g.zones" :key="g.label + z">
+                                    <option :value="z" x-text="z"></option>
+                                </template>
+                            </optgroup>
+                        </template>
+                    </select>
                     <button class="btn btn-secondary btn-sm" type="button" @click="useBrowserTimezone()"
                             x-show="browserTimezone() && cronTz.value !== browserTimezone()" x-cloak
                             x-text="t('settings.cron_tz_use_mine') + ' (' + browserTimezone() + ')'"></button>
                 </div>
-                <datalist id="cronTzZoneOptions">
-                    <template x-for="z in cronTzZones" :key="z">
-                        <option :value="z" x-text="z"></option>
-                    </template>
-                </datalist>
 
                 {# Live confirmation. The zone name alone does not tell you
                    whether you picked the right one; the current time there
