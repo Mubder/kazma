@@ -1120,12 +1120,42 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   source of attacker-controlled text in the system and used to reach the
   model raw. CI: `test_no_unfenced_web_tool_output`.
 
-**Known, deliberately unfixed:** `ConfigStore` hands one
-`sqlite3.Connection` (`check_same_thread=False`) to every thread, which
-segfaults `test_truncation_retry.py` on Windows at interpreter teardown. It
-is pre-existing and unmodified `main` crashes more often than the current
-tree; the per-thread fix trades it for write contention and needs its own
-measured change.
+**H. One writer for the procedural recorder.**
+- `_record_procedural_outcome` used to spawn a `daemon=True` thread PER TOOL
+  CALL, each opening its own SQLite connection and running the full
+  `ensure_primary_schema` (DDL + FTS5 rebuild probes) before writing one row.
+  Concurrent record threads crashed the interpreter with a Windows access
+  violation whose traceback moved between `_ensure_fts5`,
+  `ensure_primary_schema` and `config_store.get` — which is why it looked
+  like three unrelated bugs and was first mis-diagnosed as a ConfigStore
+  shared-connection problem.
+- Measured on `tests/test_truncation_retry.py`: **4/10 runs crashed before,
+  1/80 after**. Disabling the threads entirely gave 0/10, which is what
+  identified the concurrency between them as the fault. Three narrower
+  hypotheses were tested and are NOT the cause, each still crashing at
+  roughly the same rate: draining the threads at exit, giving ConfigStore a
+  per-thread connection, and serialising `ensure_primary_schema`. Non-daemon
+  threads did not help either, so it is not a teardown race.
+- Now a **single worker thread** drains a bounded queue: exactly one thread
+  ever touches these databases, the schema is ensured once per process
+  instead of once per tool call, the queue drops rather than blocks when
+  full, and `atexit` drains it. Do not reintroduce a thread per call.
+- The residual after that was the actual root cause, and the codebase had
+  already found it once: `reset_config_store()` **closed** the sqlite handle
+  out from under any background reader. Its own docstring named the
+  procedural recorder and said harnesses should pass `close=False` — and not
+  one of the 17 call sites did, so the guidance protected nothing. Closing is
+  now opt-in (`close=False` is the default), and the recorder reads
+  `read_memory_cfg()` on the CALLER's thread so the worker never touches
+  ConfigStore at all and cannot be raced by a reset regardless.
+- General rule this leaves behind: **a default that every caller must
+  override to be safe is the wrong default.** If you add a background reader
+  of a shared store, it must not hold that store across a lifecycle reset.
+- Debugging note: in a faulthandler dump the faulting frame is the least
+  useful part. The signal is which OTHER threads are alive and what they are
+  inside.
+
+
 
 
 ### 27. Backups that report success (2026-08-29)
@@ -1149,6 +1179,26 @@ silent_failures.py` holds the reproductions.
   retrying became a 3.1s error naming the credential. `_run` refuses to
   invoke restic when it fails and raises `backup.restic_remote_read_only`.
 - Any offsite check that only reads is worthless. Prove the write.
+- **The probe had a hole exactly where it was about to matter.**
+  `remote_writable()` returned `(True, "")` for anything that was not an
+  `rclone:` URL, so an `s3:` repository was assumed writable and never
+  tested. Migrating off Drive to object storage would therefore have carried
+  the same blind spot to the new destination on day one. `s3:` repos are now
+  probed with a SigV4-signed PUT + DELETE built on the standard library — no
+  boto3, because a check that runs when the backup path is already suspect
+  should not depend on anything that path does not already need.
+- The probe writes under the **`locks/` prefix**, and that is not arbitrary.
+  An append-only backup key must still be allowed to delete locks, because
+  restic writes one at the start of every run and removes it at the end; a
+  key with no delete permission at all accumulates stale locks and refuses
+  to back up a few runs later. Probing `locks/` exercises exactly the
+  permission the policy is meant to grant and leaves nothing behind. The
+  matching bucket policy is: `PutObject`/`GetObject`/`ListBucket` on the
+  whole prefix, `DeleteObject` on `locks/*` only.
+- `tests/test_restic_s3_write_probe.py` stands up a local HTTP server that
+  **recomputes the signature the way S3 does** rather than trusting it.
+  Unexercised signing code fails as a 403 against the real bucket and gets
+  blamed on the bucket policy.
 
 **B. A missing passphrase is not a config note.**
 - `ensure_password()` returning empty used to log one INFO line and skip
