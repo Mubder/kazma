@@ -22,6 +22,7 @@ future feature that injects untrusted text into a system prompt.
 
 from __future__ import annotations
 
+import logging
 import re
 
 __all__ = [
@@ -30,7 +31,27 @@ __all__ = [
     "is_override_delta",
     "filter_injection",
     "format_untrusted_block",
+    "fence_untrusted",
 ]
+
+
+def fence_untrusted(content: str, *, source: str) -> str:
+    """Best-effort :func:`format_untrusted_block` for tool return values.
+
+    Tool results are plain strings on a hot path, so fencing must never be the
+    reason a tool fails. Errors and empty bodies pass through unchanged;
+    anything else comes back fenced (audit F-09).
+    """
+    text = content or ""
+    if not text.strip() or text.startswith("Error:"):
+        return text
+    try:
+        return format_untrusted_block(text, source=source)
+    except Exception:  # pragma: no cover - defensive
+        logging.getLogger(__name__).warning(
+            "[prompt_fence] fencing failed for source=%s", source, exc_info=True
+        )
+        return text
 
 
 # Classic prompt-injection override markers. Matched case-insensitively.

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -13,7 +15,7 @@ _I18N = _ROOT / "kazma-ui" / "kazma_ui" / "i18n.py"
 def test_dash_caps_includes_new_surfaces() -> None:
     html = _HTML.read_text(encoding="utf-8")
     js = _JS.read_text(encoding="utf-8")
-    i18n = _I18N.read_text(encoding="utf-8")
+    i18n = module_source(_I18N)
     assert "window.DASH_CAPS" in html
     for cap_id in ("cua", "voice", "ide", "mcp", "hitl", "doc", "x"):
         assert f'id: "{cap_id}"' in html or f"id: '{cap_id}'" in html

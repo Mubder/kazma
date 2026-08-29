@@ -169,8 +169,10 @@ packages = ["kazma-core/kazma_core", "kazma-skills/kazma_skills", "kazma-ui/kazm
 testpaths = [
     "kazma-core/kazma_core_tests",
     "kazma-core/tests",  # IDE / env_context / embedder suite (was orphaned from CI)
+    # The bus/commands suite used to live at kazma-gateway/kazma_gateway/tests
+    # — inside the shipped package, so test code was installed with it. Moved
+    # to kazma_gateway_tests/adapters (audit O8); this path now covers both.
     "kazma-gateway/kazma_gateway_tests",
-    "kazma-gateway/kazma_gateway/tests",  # embedded bus/commands suite (was orphaned from CI; deep-audit 2026-08-19)
     "kazma-ui/kazma_ui_tests",
     "kazma-tui/kazma_tui_tests",
     "tests",

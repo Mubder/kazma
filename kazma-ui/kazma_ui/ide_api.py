@@ -38,6 +38,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, Query
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_core.errors import safe_error, validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ def create_ide_router() -> APIRouter:
             return await _service().read_file(path)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] read failed: %s", exc)
-            return {"ok": False, "error": str(exc), "content": ""}
+            return {"ok": False, "error": safe_error(exc), "content": ""}
 
     # ── POST /api/ide/write ────────────────────────────────────────────
     @router.post("/write")
@@ -82,7 +83,7 @@ def create_ide_router() -> APIRouter:
             return await _service().write_file(path, str(content))
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] write failed: %s", exc)
-            return {"ok": False, "error": str(exc), "path": path}
+            return {"ok": False, "error": safe_error(exc), "path": path}
 
     # ── POST /api/ide/apply_patch ──────────────────────────────────────
     @router.post("/apply_patch")
@@ -100,7 +101,7 @@ def create_ide_router() -> APIRouter:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] apply_patch failed: %s", exc)
-            return {"ok": False, "error": str(exc), "path": path}
+            return {"ok": False, "error": safe_error(exc), "path": path}
 
     # ── POST /api/ide/delete ───────────────────────────────────────────
     @router.post("/delete")
@@ -112,7 +113,7 @@ def create_ide_router() -> APIRouter:
             return await _service().delete_file(path)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] delete failed: %s", exc)
-            return {"ok": False, "error": str(exc), "path": path}
+            return {"ok": False, "error": safe_error(exc), "path": path}
 
     # ── GET /api/ide/list ──────────────────────────────────────────────
     @router.get("/list")
@@ -123,7 +124,7 @@ def create_ide_router() -> APIRouter:
             return await _service().list_path(path or "")
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] list failed: %s", exc)
-            return {"ok": False, "error": str(exc), "files": []}
+            return {"ok": False, "error": safe_error(exc), "files": []}
 
     # ── GET /api/ide/codebase ──────────────────────────────────────────
     @router.get("/codebase")
@@ -141,7 +142,7 @@ def create_ide_router() -> APIRouter:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] codebase search failed: %s", exc)
-            return {"ok": False, "error": str(exc), "output": ""}
+            return {"ok": False, "error": safe_error(exc), "output": ""}
 
     # ── GET /api/ide/lsp ───────────────────────────────────────────────
     @router.get("/lsp")
@@ -152,7 +153,7 @@ def create_ide_router() -> APIRouter:
             return handle_lsp("status")
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] lsp status failed: %s", exc)
-            return {"ok": False, "enabled": False, "error": str(exc)}
+            return {"ok": False, "enabled": False, "error": safe_error(exc)}
 
     @router.post("/lsp")
     async def lsp_request(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
@@ -178,7 +179,7 @@ def create_ide_router() -> APIRouter:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] lsp %s failed: %s", method, exc)
-            return {"ok": False, "error": str(exc)}
+            return {"ok": False, "error": safe_error(exc)}
 
     # ── GET /api/ide/grep ──────────────────────────────────────────────
     @router.get("/grep")
@@ -193,7 +194,7 @@ def create_ide_router() -> APIRouter:
             return await _service().search(pattern, glob=glob or "*", limit=limit)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] grep failed: %s", exc)
-            return {"ok": False, "error": str(exc), "matches": []}
+            return {"ok": False, "error": safe_error(exc), "matches": []}
 
     # ── POST /api/ide/run ──────────────────────────────────────────────
     @router.post("/run", dependencies=[Depends(rate_limit("ide_exec", 15))])
@@ -206,7 +207,7 @@ def create_ide_router() -> APIRouter:
             return await _service().run(command, timeout=timeout)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] run failed: %s", exc)
-            return {"ok": False, "error": str(exc), "output": ""}
+            return {"ok": False, "error": safe_error(exc), "output": ""}
 
     # ── POST /api/ide/runfile ──────────────────────────────────────────
     @router.post("/runfile", dependencies=[Depends(rate_limit("ide_exec", 15))])
@@ -219,7 +220,7 @@ def create_ide_router() -> APIRouter:
             return await _service().run_file(path, timeout=timeout)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] runfile failed: %s", exc)
-            return {"ok": False, "error": str(exc), "output": ""}
+            return {"ok": False, "error": safe_error(exc), "output": ""}
 
     # ── POST /api/ide/diff ─────────────────────────────────────────────
     @router.post("/diff")
@@ -233,7 +234,7 @@ def create_ide_router() -> APIRouter:
             return await _service().diff(path, str(old or ""), str(new or ""))
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] diff failed: %s", exc)
-            return {"ok": False, "error": str(exc), "diff": "", "changed": False}
+            return {"ok": False, "error": safe_error(exc), "diff": "", "changed": False}
 
     # ── POST /api/ide/git ──────────────────────────────────────────────
     @router.post("/git", dependencies=[Depends(rate_limit("ide_exec", 15))])
@@ -246,7 +247,7 @@ def create_ide_router() -> APIRouter:
             return await _service().git(subcommand, timeout=timeout)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] git failed: %s", exc)
-            return {"ok": False, "error": str(exc), "output": ""}
+            return {"ok": False, "error": safe_error(exc), "output": ""}
 
     # ── POST /api/ide/swarm ────────────────────────────────────────────
     @router.post("/swarm", dependencies=[Depends(rate_limit("ide_exec", 15))])
@@ -267,7 +268,7 @@ def create_ide_router() -> APIRouter:
             )
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] swarm failed: %s", exc)
-            return {"ok": False, "error": str(exc), "task_id": None}
+            return {"ok": False, "error": safe_error(exc), "task_id": None}
 
     # ── GET /api/ide/skills ────────────────────────────────────────────
     @router.get("/skills")
@@ -279,7 +280,7 @@ def create_ide_router() -> APIRouter:
             return {"ok": True, "skills": list_coding_skills()}
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] list skills failed: %s", exc)
-            return {"ok": False, "error": str(exc), "skills": []}
+            return {"ok": False, "error": safe_error(exc), "skills": []}
 
     # ── POST /api/ide/skill ────────────────────────────────────────────
     @router.post("/skill", dependencies=[Depends(rate_limit("ide_exec", 15))])
@@ -296,15 +297,15 @@ def create_ide_router() -> APIRouter:
 
             instruction = render_instruction(skill_name, path)
         except ValueError as exc:
-            return {"ok": False, "error": str(exc), "task_id": None}
+            return {"ok": False, "error": validation_error(exc), "task_id": None}
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] render skill failed: %s", exc)
-            return {"ok": False, "error": str(exc), "task_id": None}
+            return {"ok": False, "error": safe_error(exc), "task_id": None}
         try:
             return await _service().send_to_swarm(instruction, pattern="auto")
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[ide_api] skill dispatch failed: %s", exc)
-            return {"ok": False, "error": str(exc), "task_id": None}
+            return {"ok": False, "error": safe_error(exc), "task_id": None}
 
     return router
 

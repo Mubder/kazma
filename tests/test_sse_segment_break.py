@@ -11,12 +11,12 @@ one invocation).
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
-_SSE = (
-    Path(__file__).resolve().parents[1]
-    / "kazma-ui" / "kazma_ui" / "sse_chat.py"
-).read_text(encoding="utf-8")
+_SSE = module_source(Path(__file__).resolve().parents[1]
+    / "kazma-ui" / "kazma_ui" / "sse_chat.py")
 
 
 def test_segment_break_emitted_between_model_calls() -> None:

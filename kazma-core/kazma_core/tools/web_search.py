@@ -548,4 +548,9 @@ async def web_search(query: str, max_results: int = 8) -> str:
     except Exception as exc:
         logger.debug("[web_search] record_chat_research notice: %s", exc)
 
-    return res_text
+    # Titles and snippets are remote-authored text (audit F-09) — a result
+    # snippet is a cheap injection vector precisely because it looks like
+    # metadata rather than content.
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    return fence_untrusted(res_text, source=f"web_search:{q[:80]}")

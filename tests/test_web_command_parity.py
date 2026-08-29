@@ -7,6 +7,8 @@ cannot silently turn a real command back into a client-side-only mock.
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +24,7 @@ def test_reset_is_real_on_both_transports():
     clear was the only effect and "/reset" rode to the LLM as a prompt —
     a cosmetic-only command on the default (WS) transport.
     """
-    sse = _SSE.read_text(encoding="utf-8")
+    sse = module_source(_SSE)
     ws = _WS.read_text(encoding="utf-8")
     assert '"/reset"' in sse and "adelete_thread" in sse
     assert '"/reset"' in ws and "adelete_thread" in ws
@@ -30,7 +32,7 @@ def test_reset_is_real_on_both_transports():
 
 def test_compact_is_real_on_both_transports():
     """`/compact` must run the compaction cycle on SSE AND WS (was SSE-only)."""
-    sse = _SSE.read_text(encoding="utf-8")
+    sse = module_source(_SSE)
     ws = _WS.read_text(encoding="utf-8")
     assert '"/compact"' in sse and "needs_compaction" in sse
     assert '"/compact"' in ws and "needs_compaction" in ws
@@ -53,7 +55,7 @@ def test_unknown_slash_gets_a_hint():
 def test_capacity_and_yolo_intercepts_exist_on_both_transports():
     """The genuinely-wired commands stay wired: /yolo + capacity commands
     are intercepted server-side on both SSE and WS."""
-    sse = _SSE.read_text(encoding="utf-8")
+    sse = module_source(_SSE)
     ws = _WS.read_text(encoding="utf-8")
     assert '"/yolo"' in sse and "is_capacity_command" in sse
     assert '"/yolo"' in ws and "is_capacity_command" in ws

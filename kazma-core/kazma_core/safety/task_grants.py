@@ -129,7 +129,13 @@ def task_grant_status(thread_id: str | None) -> dict[str, Any]:
             try:
                 _cs().delete(key)
             except Exception:
-                pass
+                # Safe to ignore (audit O3): the grant is already treated as
+                # expired below regardless of whether the row was removed, so
+                # a failed delete costs a stale row, never a live grant.
+                logger.debug(
+                    "[task_grants] could not delete expired grant %s", key,
+                    exc_info=True,
+                )
             logger.info(
                 "[SECURITY] TASK GRANT expired (TTL %ds) for thread=%s",
                 ttl,

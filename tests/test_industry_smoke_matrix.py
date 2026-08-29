@@ -6,6 +6,8 @@ Live rows remain in docs/docs/ops/smoke-matrix.md for manual pass.
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 from unittest.mock import patch
 
@@ -237,7 +239,7 @@ def test_merge_kb_api_keys_include_explain_and_smart():
     """Settings merge-kb contract includes industry toggles."""
     from pathlib import Path
 
-    src = Path("kazma-ui/kazma_ui/routes_direct.py").read_text(encoding="utf-8")
+    src = module_source("kazma-ui/kazma_ui/routes_direct.py")
     assert "explain_recall" in src
     assert "smart_search" in src
     assert "knowledge.smart_search" in src

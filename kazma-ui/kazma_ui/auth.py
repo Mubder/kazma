@@ -69,21 +69,69 @@ except Exception:  # pragma: no cover
 
 
 def _is_https(request: Request) -> bool:
-    """Check if the request is over HTTPS (either direct or via proxy)."""
-    return (
-        request.url.scheme == "https"
-        or request.headers.get("x-forwarded-proto") == "https"
-    )
+    """Check if the request is over HTTPS (either direct or via proxy).
+
+    ``X-Forwarded-Proto`` is honoured only from a declared trusted proxy — a
+    direct client could otherwise claim HTTPS and get a ``Secure`` cookie it
+    can never send back (audit F-01, same trust boundary as ``_client_host``).
+    """
+    if request.url.scheme == "https":
+        return True
+    if _peer_host(request) not in trusted_proxies():
+        return False
+    return (request.headers.get("x-forwarded-proto") or "").strip().lower() == "https"
 
 
-def _client_host(request: Request) -> str:
+#: Comma-separated peer addresses whose ``X-Forwarded-For`` we trust, e.g.
+#: ``KAZMA_TRUSTED_PROXIES=127.0.0.1,::1``. Empty (default) = no proxy, so the
+#: TCP peer is the client and ``X-Forwarded-For`` is ignored entirely.
+TRUSTED_PROXIES_ENV_VAR = "KAZMA_TRUSTED_PROXIES"
+
+
+def trusted_proxies() -> frozenset[str]:
+    """Peer addresses allowed to speak for a client via ``X-Forwarded-For``.
+
+    Read live (not cached) so tests and Settings changes take effect without a
+    restart. Only these peers may rewrite the apparent client address — a
+    client-supplied ``X-Forwarded-For`` from anywhere else is ignored.
+    """
+    raw = os.environ.get(TRUSTED_PROXIES_ENV_VAR, "")
+    return frozenset(h.strip().lower() for h in raw.split(",") if h.strip())
+
+
+def behind_proxy() -> bool:
+    """True when the operator declared a reverse proxy in front of us."""
+    return bool(trusted_proxies())
+
+
+def _peer_host(request: Request) -> str:
+    """The raw TCP peer address (never the forwarded client)."""
     if request.client is None:
         return ""
     return (request.client.host or "").strip().lower()
 
 
+def _client_host(request: Request) -> str:
+    """The *client* address — forwarded value only when the peer is a trusted proxy.
+
+    Audit F-01: this used to return the TCP peer unconditionally. Behind a
+    same-host reverse proxy (the topology ``docs/guide/deployment.md``
+    recommends) the peer is ``127.0.0.1`` for every internet visitor, which
+    made every anonymous request look like the local operator. We now honour
+    ``X-Forwarded-For`` — but *only* from a peer the operator listed in
+    ``KAZMA_TRUSTED_PROXIES``, so a spoofed header from a direct client is
+    still ignored.
+    """
+    peer = _peer_host(request)
+    if not peer or peer not in trusted_proxies():
+        return peer
+    # Left-most entry is the original client; the proxy appends its own view.
+    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+    return forwarded.lower() or peer
+
+
 def _is_loopback_client(request: Request) -> bool:
-    """True when the TCP peer is loopback (local single-operator use)."""
+    """True when the resolved client address is loopback (local operator)."""
     host = _client_host(request)
     return host in ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1")
 
@@ -140,7 +188,7 @@ def _extract_ws_header(websocket: Any, name: str) -> str:
         if value:
             return str(value).strip()
     except Exception:
-        pass
+        pass  # not a Starlette Headers mapping — try the raw scope below
     # Raw ASGI scope headers: sequence of (name, value) byte pairs.
     try:
         target = name.lower().encode("latin-1")
@@ -151,7 +199,7 @@ def _extract_ws_header(websocket: Any, name: str) -> str:
                 return val.decode("latin-1", "ignore").strip()
             return str(val).strip()
     except Exception:
-        pass
+        pass  # unrecognised scope shape — header simply absent
     return ""
 
 
@@ -204,20 +252,52 @@ def _ws_origin_allowed(websocket: Any) -> bool:
     return False
 
 
+def _loopback_auto_login_enabled() -> bool:
+    """Whether a loopback peer may still auto-login when a proxy is declared.
+
+    Off by default (audit F-01). With ``KAZMA_TRUSTED_PROXIES`` set, a
+    ``127.0.0.1`` client address can legitimately be the proxy speaking for a
+    remote visitor whose ``X-Forwarded-For`` was stripped, so peer address is
+    no longer proof of local operation. Operators who genuinely want
+    credential-less loopback login alongside a proxy set
+    ``KAZMA_LOOPBACK_AUTOLOGIN=1``.
+    """
+    raw = (os.environ.get("KAZMA_LOOPBACK_AUTOLOGIN") or "0").strip().lower()
+    return raw in ("1", "true", "on", "yes")
+
+
+def _peer_trust_allowed(request: Request) -> bool:
+    """Whether peer address may be treated as a credential for this request.
+
+    Direct-bind deployments (no proxy declared): yes — the peer really is the
+    client, and single-operator localhost use depends on it. Proxied
+    deployments: no, unless explicitly re-enabled. See audit F-01.
+    """
+    if not behind_proxy():
+        return True
+    if _loopback_auto_login_enabled():
+        return True
+    # A proxy is declared: trust the peer only when it is NOT the proxy, i.e.
+    # a real direct-to-app connection that bypassed the proxy entirely.
+    return _peer_host(request) not in trusted_proxies()
+
+
 def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     """Whether to Set-Cookie the secret without an explicit login.
 
-    - Loopback clients: yes.
-    - Private LAN when ``KAZMA_TRUST_LAN=1``: yes.
+    - Loopback clients: yes, when peer trust applies (see
+      :func:`_peer_trust_allowed`).
+    - Private LAN when ``KAZMA_TRUST_LAN=1``: same condition.
     - Remote clients with a valid X-Kazma-Secret header: yes.
     - Public internet clients: no — must use /login.
     """
     if not expected:
         return False
-    if _is_loopback_client(request):
-        return True
-    if _trust_lan_enabled() and _is_private_lan_client(request):
-        return True
+    if _peer_trust_allowed(request):
+        if _is_loopback_client(request):
+            return True
+        if _trust_lan_enabled() and _is_private_lan_client(request):
+            return True
     provided = request.headers.get(SECRET_HEADER, "")
     return bool(provided and verify_secret(provided, expected))
 
@@ -334,7 +414,11 @@ ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
     # Email OAuth: Google/Microsoft redirect with ?code= only (no secret header)
     "/api/email/oauth/gmail/callback",
     "/api/email/oauth/microsoft/callback",
-    "/api/auth/",
+    # NOTE: there is deliberately no "/api/auth" prefix entry. Every route that
+    # must be reachable before login is listed individually in
+    # ALWAYS_OPEN_PATHS, so a new /api/auth/* endpoint is gated by default.
+    # A "/api/auth/" entry used to sit here and was inert anyway — the trailing
+    # slash made is_always_open test `startswith("/api/auth//")` (audit F-15).
 )
 
 
@@ -402,10 +486,21 @@ def is_sensitive_path(path: str) -> bool:
 
 
 def is_always_open(path: str) -> bool:
-    """Return *True* for read-only/page/redirect routes that bypass auth."""
+    """Return *True* for read-only/page/redirect routes that bypass auth.
+
+    Prefixes are normalised so an entry written with or without a trailing
+    slash behaves identically — a stray slash used to make an entry match
+    nothing at all (audit F-15).
+    """
     if path in ALWAYS_OPEN_PATHS:
         return True
-    return any(path == p or path.startswith(p + "/") for p in ALWAYS_OPEN_PREFIXES)
+    for prefix in ALWAYS_OPEN_PREFIXES:
+        p = prefix.rstrip("/")
+        if not p:
+            continue
+        if path == p or path.startswith(p + "/"):
+            return True
+    return False
 
 
 def verify_secret(provided: str, expected: str) -> bool:
@@ -465,7 +560,16 @@ def verify_api_token(provided: str) -> bool:
                     if (now - created_dt).days > int(expires_days):
                         return False
                 except Exception:
-                    pass
+                    # Fail CLOSED (audit O3): this used to `pass` and fall
+                    # through to `return True`, so a token whose expiry could
+                    # not be parsed was accepted forever. A token that claims
+                    # an expiry we cannot evaluate is not a valid token.
+                    logger.warning(
+                        "[SECURITY] API token has unparseable expiry "
+                        "(created_at=%r expires_days=%r) — rejecting",
+                        created, expires_days,
+                    )
+                    return False
             return True
         return False
     except Exception:
@@ -588,6 +692,10 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
          ``Origin`` must be absent / same-host / allow-listed
          (``KAZMA_WS_EXTRA_ORIGINS``). Kill-switch ``KAZMA_WS_ORIGIN_CHECK=0``.
          If the Origin check fails, credential paths below are still tried.
+         Peer trust is additionally disabled whenever a reverse proxy is
+         declared (``KAZMA_TRUSTED_PROXIES``) — see :func:`_peer_trust_allowed`
+         and audit F-01, where an absent ``Origin`` plus a proxied loopback
+         peer authenticated any anonymous non-browser client.
       7. Dev bypass: ``KAZMA_DEV_WS_BYPASS=1`` (local testing only — blocked in production)
     """
     expected = expected_secret or get_kazma_secret()
@@ -614,12 +722,17 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     # absent / same-host / explicitly allow-listed first. Callers reject
     # with websocket.close(code=1008, ...) on this policy-violation path;
     # credentialed clients still authenticate via the checks below.
-    if _is_loopback_client(websocket) and _ws_origin_allowed(websocket):
-        return True
+    if _peer_trust_allowed(websocket):
+        if _is_loopback_client(websocket) and _ws_origin_allowed(websocket):
+            return True
 
-    # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
-    if _is_private_lan_client(websocket) and _trust_lan_enabled() and _ws_origin_allowed(websocket):
-        return True
+        # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
+        if (
+            _is_private_lan_client(websocket)
+            and _trust_lan_enabled()
+            and _ws_origin_allowed(websocket)
+        ):
+            return True
 
     # Query parameter: per-session WS token only — never the raw KAZMA_SECRET
     # (URL query lands in access logs / Referer).
@@ -629,7 +742,7 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
         if query_params:
             provided = (query_params.get("token") or "").strip()
     except Exception:
-        pass
+        pass  # no query params on this transport — treated as no token
 
     if provided and verify_ws_session_token(provided):
         return True
@@ -651,7 +764,14 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
                 if validate_session(sess):
                     return True
             except Exception:
-                pass
+                # Fail-closed by construction (audit O3): an unvalidated
+                # session simply does not authenticate; the credential checks
+                # below still run. Logged because a session-store outage
+                # otherwise looks like mass credential rejection.
+                logger.warning(
+                    "[SECURITY] WebSocket session validation failed",
+                    exc_info=True,
+                )
     if not provided and _accept_legacy_secret_cookie():
         provided = (websocket.cookies.get(SECRET_COOKIE) or "").strip()
     if not provided:
@@ -1043,7 +1163,57 @@ __all__: list[str] = [
     "is_authenticated",
     "websocket_is_authenticated",
     "create_tenant_middleware",
+    "TRUSTED_PROXIES_ENV_VAR",
+    "trusted_proxies",
+    "behind_proxy",
+    "client_address",
+    "assert_proxy_configuration",
 ]
+
+
+def client_address(request: Request) -> str:
+    """Public accessor for the resolved client address (proxy-aware).
+
+    Callers that key state per client — rate limiting, login throttling, audit
+    logs — must use this rather than ``request.client.host``, or every request
+    behind a reverse proxy collapses into a single bucket (audit F-01/F-12).
+    """
+    return _client_host(request)
+
+
+def assert_proxy_configuration() -> None:
+    """Warn (loudly) when peer-address trust is active on an exposed bind.
+
+    Called at app startup. Peer trust is safe when the app owns its socket and
+    dangerous the moment something else terminates connections for it, so a
+    production instance that is neither loopback-bound nor proxy-aware is
+    almost certainly the F-01 topology.
+    """
+    production = (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+    if not production or behind_proxy():
+        return
+    bind = (os.environ.get("KAZMA_HOST") or "127.0.0.1").strip().lower()
+    if bind in ("127.0.0.1", "::1", "localhost"):
+        logger.warning(
+            "[SECURITY] KAZMA_PRODUCTION=1 with a loopback bind and no "
+            "%s set. If a reverse proxy fronts this instance, set %s to the "
+            "proxy address — otherwise every visitor is treated as the local "
+            "operator and auto-issued an admin session.",
+            TRUSTED_PROXIES_ENV_VAR,
+            TRUSTED_PROXIES_ENV_VAR,
+        )
+        return
+    logger.error(
+        "[SECURITY] KAZMA_PRODUCTION=1 bound to %s with no %s configured. "
+        "Peer-address trust is active: any client whose connection arrives "
+        "from a loopback or private address is auto-authenticated. Set %s to "
+        "your proxy's address, or set KAZMA_LOOPBACK_AUTOLOGIN=0 explicitly.",
+        bind,
+        TRUSTED_PROXIES_ENV_VAR,
+        TRUSTED_PROXIES_ENV_VAR,
+    )
 
 
 # Silence unused-import warnings for re-exported symbols.

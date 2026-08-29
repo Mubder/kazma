@@ -61,7 +61,15 @@ class TestSafetyFailClosed:
         """Non-danger tools pass through even with no bus."""
         safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
         assert safety.check_sync("file_read") is True
-        assert safety.check_sync("send_message") is True
+        assert safety.check_sync("memory_search") is True
+
+    def test_outbound_message_tool_blocked_without_bus(self):
+        """``send_message`` dispatches to Telegram/Discord/Slack, so it is a
+        danger tool and must block headless (audit F-04 reclassified it — it
+        used to be tier 'write' and ran with no approval)."""
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        assert safety.check_sync("send_message") is False
+        assert safety.check_sync("send_file") is False
 
     def test_disabled_safety_allows_all(self):
         """When safety is disabled, everything passes."""
@@ -115,7 +123,13 @@ class TestSafetyFailClosedAsync:
         """Async path still lets non-danger tools through with no bus."""
         safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
         assert await safety.check("file_read") is True
-        assert await safety.check("send_message") is True
+        assert await safety.check("memory_search") is True
+
+    @pytest.mark.asyncio
+    async def test_async_outbound_message_tool_blocked_without_bus(self):
+        """Async mirror of the sync case: ``send_message`` is danger (F-04)."""
+        safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        assert await safety.check("send_message") is False
 
     @pytest.mark.asyncio
     async def test_async_disabled_safety_allows_all(self):
@@ -144,12 +158,26 @@ class TestHitlConfig:
         assert "file_write" in cfg["require_approval_for"]
         assert "shell_exec" in cfg["require_approval_for"]
 
-    def test_custom_danger_list(self):
+    def test_custom_danger_list_adds_but_cannot_un_gate(self):
+        """A custom ``require_approval_for`` extends the gate; it is not a floor.
+
+        Behaviour change from audit F-04. This list used to be the *whole*
+        policy, so narrowing it silently un-gated `shell_exec` and every other
+        destructive tool — "open by omission", the same hazard the HTTP layer
+        already default-denies against. The list now *adds* to the tier
+        classification rather than replacing it: a tool tiered ``danger`` in
+        ``TOOL_TIERS`` always requires approval.
+
+        To actually run a danger tool without prompting, use YOLO mode or an
+        explicit per-tool grant — both are deliberate, audited, and revocable.
+        """
         cfg = get_hitl_config({
             "safety": {"hitl": {"require_approval_for": ["custom_tool"]}}
         })
         assert requires_approval("custom_tool", cfg) is True
-        assert requires_approval("shell_exec", cfg) is False
+        assert requires_approval("shell_exec", cfg) is True
+        # Read-only tools stay ungated regardless of the custom list.
+        assert requires_approval("file_read", cfg) is False
 
     def test_disabled(self):
         cfg = get_hitl_config({"safety": {"hitl": {"enabled": False}}})

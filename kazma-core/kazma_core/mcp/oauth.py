@@ -32,9 +32,10 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
+from urllib.parse import urlencode, urlparse, urlunparse
 
 import httpx
+from kazma_core.background import spawn_background
 
 logger = logging.getLogger(__name__)
 
@@ -376,7 +377,7 @@ async def start_oauth_flow(
             _pending.pop(server_name, None)
             listener_task.cancel()
 
-    asyncio.create_task(_await_and_exchange())
+    spawn_background(_await_and_exchange(), name="mcp-oauth-exchange")
     return {"status": "ok", "authorization_url": authorization_url,
             "already_pending": False}
 

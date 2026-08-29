@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 import os
 from pathlib import Path
 
@@ -159,9 +161,7 @@ def test_tui_inspectors_use_live_api():
 
 
 def test_sse_pins_turn_model_not_process_wide():
-    sse = (
-        Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "sse_chat.py"
-    ).read_text(encoding="utf-8")
+    sse = module_source(Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "sse_chat.py")
     assert "pin_turn_model" in sse
     assert "ensure_active_model" not in sse
     assert "workspace_id" in sse

@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from kazma_core.errors import safe_error, validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -189,10 +190,10 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             )
             return JSONResponse({"ok": True, **result})
         except ValueError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+            return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron create failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @protected.put("/api/scheduled/cron/{job_id}", dependencies=[Depends(_verify_same_origin)])
     async def edit_cron(job_id: str, body: CronEditBody) -> JSONResponse:
@@ -213,7 +214,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return JSONResponse({"ok": result.get("status") == "rescheduled", **result}, status_code=status_code)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron edit failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     @protected.delete("/api/scheduled/cron/{job_id}", dependencies=[Depends(_verify_same_origin)])
     async def delete_cron(job_id: str) -> JSONResponse:
@@ -228,7 +229,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
             return JSONResponse({"ok": ok, **result}, status_code=200 if ok else 404)
         except Exception as exc:  # noqa: BLE001
             logger.exception("[scheduled] cron delete failed")
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+            return JSONResponse({"ok": False, "error": safe_error(exc)}, status_code=500)
 
     # ── Scheduled X post CRUD ─────────────────────────────────────────
 
@@ -265,7 +266,7 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         try:
             new_fire = parse_timing(body.when.strip()).timestamp()
         except ValueError as exc:
-            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+            return JSONResponse({"ok": False, "error": validation_error(exc)}, status_code=400)
         if new_fire <= _time.time():
             return JSONResponse({"ok": False, "error": "New time is in the past."}, status_code=400)
         store.set_fire_time(post_id, new_fire)

@@ -10,6 +10,8 @@ Covers:
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -153,7 +155,7 @@ class TestSourceContracts:
         assert "error_code" in js or "Model switch failed" in js
 
     def test_sse_has_llm_provider_getter(self):
-        src = _SSE.read_text(encoding="utf-8")
+        src = module_source(_SSE)
         assert "llm_provider_getter" in src
         assert "pin_turn_model" in src
         assert "ensure_active_model" not in src

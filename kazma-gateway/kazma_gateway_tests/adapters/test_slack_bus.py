@@ -1,6 +1,5 @@
 """Tests for Slack platform adapter."""
 
-import pytest
 
 
 class TestSlackBusAdapter:

@@ -20,6 +20,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
+from kazma_core.errors import validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def create_bookmarks_router() -> APIRouter:
                 target=body.target,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=validation_error(exc)) from exc
         except Exception as exc:
             logger.error("[bookmarks] create_bookmark failed: %s", exc)
             raise HTTPException(status_code=500, detail="Failed to create bookmark.") from exc
@@ -147,7 +148,7 @@ def create_bookmarks_router() -> APIRouter:
                 target=body.target,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
+            raise HTTPException(status_code=422, detail=validation_error(exc)) from exc
         except Exception as exc:
             logger.error("[bookmarks] update_bookmark failed: %s", exc)
             raise HTTPException(status_code=500, detail="Failed to update bookmark.") from exc

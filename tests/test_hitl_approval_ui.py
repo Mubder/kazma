@@ -356,7 +356,10 @@ class TestYoloAllowedPlumbing:
     _ROOT = Path(__file__).resolve().parent.parent
 
     def _src(self, rel: str) -> str:
-        return (self._ROOT / rel).read_text(encoding="utf-8")
+        # module_source: a target may now be a package dir (audit O5).
+        from tests._module_source import module_source
+
+        return module_source(self._ROOT / rel)
 
     def test_sse_frame_forwards_yolo_allowed(self) -> None:
         src = self._src("kazma-ui/kazma_ui/sse_chat.py")

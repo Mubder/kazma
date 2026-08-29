@@ -41,6 +41,7 @@ import time
 import uuid
 from collections import deque
 from typing import Any
+from kazma_core.background import spawn_background
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +300,7 @@ class TurnBroker:
             data = stamped.get("data") or {}
             summary = str(data.get("content") or "").strip()
             if summary:
-                asyncio.ensure_future(self._push_terminal(summary))
+                spawn_background(self._push_terminal(summary), name="delivery-push-terminal")
 
         return stamped
 

@@ -29,7 +29,10 @@ _DELIVERY_MODULES = [
 
 
 def _src(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
+    # module_source: a target may now be a package dir (audit O5).
+    from tests._module_source import module_source
+
+    return module_source(path)
 
 
 # ── 1. The sink is the only writer ────────────────────────────────────

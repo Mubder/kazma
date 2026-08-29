@@ -135,10 +135,27 @@ For a public-facing host behind a reverse proxy:
 
 ```bash
 # ONLY with KAZMA_SECRET set does `kazma serve` bind 0.0.0.0
-KAZMA_SECRET=$(openssl rand -hex 32) kazma serve
+KAZMA_SECRET=$(openssl rand -hex 32) \
+KAZMA_TRUSTED_PROXIES=127.0.0.1 \
+kazma serve
 ```
 
 > **Never expose `0.0.0.0` without `KAZMA_SECRET`.** The HITL approval endpoint would otherwise be unauthenticated. Put Kazma behind nginx/Caddy/Traefik with TLS and let the proxy hold the public socket.
+
+> **`KAZMA_TRUSTED_PROXIES` is required whenever a reverse proxy is in front of Kazma.** Set it to the address the proxy connects *from* — `127.0.0.1` for a same-host nginx/Caddy, or the container/bridge IP in Docker.
+>
+> Without it, `request.client.host` is the proxy for every request. A same-host proxy makes every internet visitor look like `127.0.0.1`, which Kazma treats as the local operator and auto-issues an admin session to — a complete auth bypass over both HTTP and WebSocket (audit F-01, fixed 2026-08-29). With it set, Kazma reads the real client from `X-Forwarded-For` and stops trusting peer address as a credential.
+>
+> Your proxy **must** set the forwarded headers, and must overwrite rather than append a client-supplied value. The shipped `deploy/nginx-ha.conf` already does:
+>
+> ```nginx
+> proxy_set_header Host              $host;
+> proxy_set_header X-Real-IP         $remote_addr;
+> proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+> proxy_set_header X-Forwarded-Proto $scheme;
+> ```
+>
+> `serve.py` passes `--proxy-headers --forwarded-allow-ips` to uvicorn automatically from this variable. If you launch uvicorn yourself, pass them too.
 
 ---
 
@@ -233,6 +250,8 @@ cd 'G:\GitHubRepos\kazma'
 
 - [ ] `KAZMA_SECRET` set (strong random) — required to protect `/api/approve`.
 - [ ] Server bound to `127.0.0.1` (or behind a TLS-terminating reverse proxy).
+- [ ] **`KAZMA_TRUSTED_PROXIES` set to the proxy's address** whenever a reverse proxy is in front — otherwise every visitor is treated as the local operator (audit F-01). Verify with `curl -s https://your-host/api/auth/status`: `authenticated` must be `false` before login.
+- [ ] Provider API keys rotated if this instance ever served `/api/settings` on a build before 2026-08-29 (audit F-02 leaked them in plaintext).
 - [ ] Volumes persisted for `kazma-data/` and the vector memory path.
 - [ ] `kazma.yaml` `safety.hitl.enabled: true` and a complete `require_approval_for` list.
 - [ ] All three HITL build sites pass `hitl_config` (default builds do; verify any custom build).

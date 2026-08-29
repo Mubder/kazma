@@ -54,7 +54,7 @@ mcp:
     - hello
     url: ''
     env: {}
-    enabled: false
+    enabled: true
     connected: false
     tool_count: 0
     tools: []
@@ -149,33 +149,58 @@ safety:
   hitl:
     enabled: true
     require_approval_for:
+    - browser_click
     - browser_eval_js
+    - browser_fill_form
+    - browser_navigate
     - cancel_scheduled
     - code_exec
     - computer_use
     - config_save
+    - create_event
+    - delete_event
+    - dispatch_notification
+    - document_cancel
+    - document_redact
+    - edit_scheduled
     - email_categorize
     - email_delete
     - email_send
-    - edit_scheduled
+    - file_append
     - file_apply_patch
     - file_delete
     - file_write
+    - git_checkout
     - git_commit
-    - git_push_pull
+    - git_merge
+    - git_pull
+    - git_push
+    - github_comment_issue
+    - github_create_issue
     - github_create_pr
     - github_merge_pr
     - install_agent_skill
     - install_npm_packages
     - install_python_packages
+    - memory_admin
+    - memory_delete_entity
+    - memory_invalidate
+    - memory_merge_entities
+    - memory_purge_empty_entities
+    - pdf_fill_form
+    - pdf_redact
     - python_exec
     - request_path_access
     - run_tests
     - schedule_task
+    - send_file
+    - send_message
     - shell_exec
     - uninstall_agent_skill
+    - update_event
     - vault_delete
     - vault_retrieve
+    - vault_store
     - x_cancel_scheduled_post
     - x_delete_post
     - x_post

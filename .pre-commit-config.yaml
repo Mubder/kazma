@@ -15,3 +15,14 @@ repos:
         pass_filenames: false
         types: [python]
         stages: [pre-commit]
+      # static-gates: the 2026-08-29 audit class — defects found by grepping
+      # the tree, not by a failing test. Blocking sqlite on the event loop
+      # (F-06), fire-and-forget tasks the GC can cancel (F-07), tools missing
+      # a HITL tier (F-04), and unfenced web content (F-09). AST-only, ~3s.
+      - id: kazma-static-gates
+        name: kazma static gates (async/blocking, task retention, HITL tiers, fencing)
+        entry: .venv/Scripts/python.exe -m pytest tests/test_static_gates.py -q
+        language: system
+        pass_filenames: false
+        types: [python]
+        stages: [pre-commit]

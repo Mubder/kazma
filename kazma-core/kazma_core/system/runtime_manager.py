@@ -9,6 +9,7 @@ import sys
 from typing import Set
 
 from kazma_core.config_store import get_config_store
+from kazma_core.background import spawn_background
 
 __all__ = ["trigger_package_promotion"]
 
@@ -38,7 +39,7 @@ async def trigger_package_promotion(package_name: str) -> None:
         logger.error("[RuntimeManager] Failed to set status to INSTALLING: %s", e)
 
     # Spawn the promotion task as a detached background task on the running loop
-    asyncio.create_task(_run_promotion_task(package_name))
+    spawn_background(_run_promotion_task(package_name), name=f"promote:{package_name}")
 
 
 async def _run_promotion_task(package_name: str) -> None:

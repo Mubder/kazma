@@ -193,6 +193,10 @@ def test_memory_q_filter_underscore_insensitive():
     assert _qnorm("memory system") == "memory system"
     assert _qnorm("Memory_System") == "memory system"
     assert _qnorm("  prefers--dark__mode ") == "prefers dark mode"
-    src = Path(__import__("kazma_core.agent.tool_builtins", fromlist=["x"]).__file__).read_text(encoding="utf-8")
+    # tool_builtins is a package since audit O5 — module_source reads the
+    # whole package, not just its __init__ shim.
+    from tests._module_source import module_source
+
+    src = module_source(__import__("kazma_core.agent.tool_builtins", fromlist=["x"]).__file__)
     assert "REPLACE(REPLACE(subject,'_',' '),'-',' ')" in src
     assert "REPLACE(REPLACE(e.name,'_',' '),'-',' ')" in src

@@ -98,7 +98,8 @@ TOOL_TIERS: dict[str, str] = {
     "sqlite_query": "read",
     "current_datetime": "read",
     # Write — always allowed
-    "send_message": "write",
+    # (`send_message` moved to danger in the F-04 block below — it dispatches
+    # to Telegram/Discord/Slack, which is an outbound side effect.)
     "memory_store": "write",
     # Danger — require HITL approval
     "file_write": "danger",
@@ -140,8 +141,137 @@ TOOL_TIERS: dict[str, str] = {
     "x_cancel_scheduled_post": "danger",
     "x_list_scheduled": "read",
     "x_status": "read",
+    # ── Audit F-04: tiers for every remaining registered tool ─────────────
+    # `requires_approval` now default-denies anything it cannot classify, so
+    # a tool missing from this map is gated rather than silently exempt. That
+    # makes the map exhaustive by construction — `test_tool_tier_coverage`
+    # fails if a newly registered tool is not listed here.
+    #
+    # Danger — destructive, externally visible, or credential-touching.
+    "file_append": "danger",        # same blast radius as file_write
+    "git_push": "danger",           # publishes to a remote
+    "git_pull": "danger",           # rewrites the working tree
+    "git_merge": "danger",
+    "git_checkout": "danger",
+    "github_create_issue": "danger",   # public write
+    "github_comment_issue": "danger",  # public write
+    "send_message": "danger",       # outbound to Telegram/Discord/Slack
+    "send_file": "danger",          # outbound attachment
+    "dispatch_notification": "danger",
+    "vault_store": "danger",        # writes a credential
+    "memory_admin": "danger",
+    "memory_delete_entity": "danger",
+    "memory_invalidate": "danger",
+    "memory_merge_entities": "danger",
+    "memory_purge_empty_entities": "danger",
+    "create_event": "danger",       # external calendar write
+    "update_event": "danger",
+    "delete_event": "danger",
+    "browser_click": "danger",      # drives a real, logged-in browser session
+    "browser_fill_form": "danger",
+    "browser_navigate": "danger",
+    "document_redact": "danger",    # destructive, irreversible
+    "pdf_redact": "danger",
+    "pdf_fill_form": "danger",
+    "document_cancel": "danger",
+    #
+    # Write — internal, reversible state changes. No approval required.
+    "update_scratchpad": "write",
+    "task_ledger_update": "write",
+    "memory_link_entities": "write",
+    "knowledge_create_library": "write",
+    "knowledge_ingest_url": "write",
+    "knowledge_ingest_site": "write",
+    "document_import": "write",
+    "document_index": "write",
+    "document_convert": "write",
+    "convert_document": "write",
+    "generate_docx": "write",
+    "generate_pdf": "write",
+    "generate_pptx": "write",
+    "generate_xlsx": "write",
+    "generate_markdown_doc": "write",
+    "generate_image": "write",
+    "generate_ui_mockup": "write",
+    "pdf_merge": "write",
+    "pdf_split": "write",
+    "ocr_document": "write",
+    "read_url_to_file": "write",
+    "export_session": "write",
+    "format_code": "write",
+    "activate_skill": "write",
+    "browser_screenshot": "write",
+    # Delegation runs isolated sub-agent graphs whose own tool calls are gated
+    # independently; gating the spawn itself timed out research at the 60s
+    # auto-deny (pre-existing decision, preserved).
+    "spawn_agent": "write",
+    "spawn_agents": "write",
+    "dispatch_swarm": "write",
+    "run_research_pipeline": "write",
+    "start_deep_research": "write",
+    "digest_research_file": "write",
+    "summarize_research_file": "write",
+    "synthesize_from_digests": "write",
+    "plan_research_queries": "write",
+    "send_approval_request": "write",  # this IS the approval channel
+    "mcp_test_server": "write",
+    #
+    # Read — no side effects beyond caches and outbound GETs.
+    "list_scheduled": "read",
+    "browser_extract_text": "read",
+    "find_free_slots": "read",
+    "list_events": "read",
+    "lint_code": "read",
+    "run_unit_tests": "read",
+    "execute_db_query": "read",     # SELECT/WITH only, enforced in the tool
+    "inspect_db_schema": "read",
+    "context_info": "read",
+    "get_system_stats": "read",
+    "list_active_processes": "read",
+    "read_system_logs": "read",
+    "document_read": "read",
+    "document_search": "read",
+    "document_status": "read",
+    "read_document": "read",
+    "parse_document": "read",
+    "pdf_info": "read",
+    "git_status": "read",
+    "github_list_issues": "read",
+    "knowledge_list_libraries": "read",
+    "knowledge_search": "read",
+    "mcp_get_prompt": "read",
+    "mcp_list_prompts": "read",
+    "mcp_list_resources": "read",
+    "mcp_read_resource": "read",
+    "analyze_image": "read",
+    "analyze_local_image": "read",
+    "memory_list_beliefs": "read",
+    "memory_list_entities": "read",
+    "arabic_translate": "read",
+    "hijri_convert": "read",
+    "insert_diacritics": "read",
+    "critique_synthesis_gaps": "read",
+    "list_research_papers": "read",
+    "list_research_chunks": "read",
+    "read_research_chunk": "read",
+    "research_readiness": "read",
+    "crawl_site": "read",
+    "crawl_page": "read",
+    "read_url": "read",
+    "web_search": "read",
+    "web_search_duckduckgo": "read",
+    "vault_list": "read",           # names + metadata only, never values
+    "list_agent_skills": "read",
+    "search_agent_skills": "read",
+    "check_swarm_task": "read",
+    "check_environment": "read",
+    "config_read": "read",
     # Unsafe — always blocked (reserved)
 }
+
+#: Tiers that execute without human approval. Everything else — including any
+#: tool absent from :data:`TOOL_TIERS` — requires it (audit F-04).
+AUTO_APPROVED_TIERS: frozenset[str] = frozenset({"read", "write", "safe"})
 
 # Single source of truth for graph interrupt + swarm bus danger tiers.
 # Keep in sync with kazma.yaml safety.hitl.require_approval_for (parity test).
@@ -149,6 +279,7 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "file_write",
     "file_apply_patch",
     "file_delete",
+    "file_append",
     "shell_exec",
     "code_exec",
     "python_exec",
@@ -160,9 +291,36 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "config_save",
     "run_tests",
     "git_commit",
-    "git_push_pull",
+    # `git_push_pull` is deprecated and deliberately absent from the skill
+    # manifest, so it is not registered and gating it protected nothing. The
+    # tools that replaced it are gated here instead (audit F-04).
+    "git_push",
+    "git_pull",
+    "git_merge",
+    "git_checkout",
     "github_create_pr",
     "github_merge_pr",
+    "github_create_issue",
+    "github_comment_issue",
+    "send_message",
+    "send_file",
+    "dispatch_notification",
+    "vault_store",
+    "memory_admin",
+    "memory_delete_entity",
+    "memory_invalidate",
+    "memory_merge_entities",
+    "memory_purge_empty_entities",
+    "create_event",
+    "update_event",
+    "delete_event",
+    "browser_click",
+    "browser_fill_form",
+    "browser_navigate",
+    "document_redact",
+    "pdf_redact",
+    "pdf_fill_form",
+    "document_cancel",
     "install_python_packages",
     "install_npm_packages",
     "install_agent_skill",
@@ -274,9 +432,13 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     # Optional canonical floor (deep-audit 2026-08-19, finding #10): when
     # KAZMA_HITL_CANONICAL_FLOOR is set, canonical danger tools can never be
     # narrowed out of the effective list — Settings/YAML narrowing below
-    # CANONICAL is capped back up. Opt-in so existing single-operator
-    # installs that deliberately narrowed the list keep working; strict
-    # multi-operator deployments should set it.
+    # CANONICAL is capped back up.
+    #
+    # Largely superseded by audit F-04: `requires_approval` now default-denies
+    # on the TOOL_TIERS classification, so a canonical tool narrowed out of
+    # this list is still gated by its `danger` tier. The flag remains useful
+    # because it puts the tools in the *effective list* itself, which is what
+    # the graph interrupt and swarm bus read directly.
     try:
         if os.environ.get("KAZMA_HITL_CANONICAL_FLOOR", "").strip().lower() in (
             "1", "true", "yes", "on",
@@ -303,11 +465,17 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
             _canonical_only = _canonical - _effective
             _effective_only = _effective - _canonical
             if _canonical_only or _effective_only:
-                logger.warning(
-                    "[Safety] HITL/CANONICAL drift — canonical_only (danger "
-                    "tools NOT requiring approval under the effective list)=%s; "
-                    "effective_only (configured, not in canonical)=%s; set "
-                    "KAZMA_HITL_CANONICAL_FLOOR=1 to enforce the canonical floor",
+                # Informational since audit F-04: `requires_approval` now
+                # default-denies on the TOOL_TIERS classification, so a
+                # canonical tool missing from the effective list is still
+                # gated by its `danger` tier. This reports config drift worth
+                # correcting, not an open door.
+                logger.info(
+                    "[Safety] HITL config drift — canonical tools absent from "
+                    "the effective require_approval_for list=%s; extra "
+                    "configured tools=%s. These are still gated by their "
+                    "TOOL_TIERS tier (audit F-04); re-sync kazma.yaml to "
+                    "silence this.",
                     sorted(_canonical_only), sorted(_effective_only),
                 )
             _DRIFT_WARN_LAST[0] = _now
@@ -377,7 +545,22 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
             return True
 
     danger_tools = hitl_config.get("require_approval_for", set())
-    return tool_name in danger_tools
+    if tool_name in danger_tools:
+        return True
+
+    # Default-deny (audit F-04). This used to end at `tool_name in
+    # danger_tools`, so any tool nobody remembered to add ran unapproved —
+    # 125 of 153 registered tools, including `file_append` while `file_write`
+    # was gated. Approval is now the default and exemption is explicit, which
+    # matches how the HTTP layer treats new /api routes.
+    tier = get_tool_tier(tool_name)
+    if tier in AUTO_APPROVED_TIERS:
+        return False
+    logger.info(
+        "[HITL] %r has no tier — requiring approval (add it to TOOL_TIERS)",
+        tool_name,
+    )
+    return True
 
 
 def get_tool_tier(tool_name: str) -> str:

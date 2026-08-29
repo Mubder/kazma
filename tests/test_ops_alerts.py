@@ -147,7 +147,10 @@ class TestSilentFailuresAreWired:
     _ROOT = __import__("pathlib").Path(__file__).resolve().parents[1]
 
     def _src(self, rel: str) -> str:
-        return (self._ROOT / rel).read_text(encoding="utf-8")
+        # module_source: a target may now be a package dir (audit O5).
+        from tests._module_source import module_source
+
+        return module_source(self._ROOT / rel)
 
     def test_reply_persist_failure_alerts(self):
         """The exact failure that lost four answers on 2026-08-28."""

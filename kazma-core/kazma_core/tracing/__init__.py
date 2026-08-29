@@ -17,6 +17,7 @@ from typing import Any
 from kazma_core.config_schema import TracingConfig
 from kazma_core.tracing.events import EventBridge, TelemetryEvent
 from kazma_core.tracing.langfuse_enable import langfuse_keys, resolve_langfuse_enabled
+from kazma_core.background import spawn_background
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,7 @@ class TraceStore:
 
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                asyncio.ensure_future(self._broadcast(entry))
+                spawn_background(self._broadcast(entry), name="trace-broadcast")
         except RuntimeError:
             pass
 

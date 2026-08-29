@@ -11,6 +11,8 @@ Verifies that:
 
 from __future__ import annotations
 
+from tests._module_source import module_exists, module_source
+
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -355,7 +357,7 @@ class TestRealtimeEndpoints:
     def test_sse_chat_stream_endpoint_exists(self):
         """POST /api/chat/stream is defined in sse_chat module."""
         sse_path = _PROJECT_ROOT / "kazma-ui" / "kazma_ui" / "sse_chat.py"
-        content = sse_path.read_text(encoding="utf-8")
+        content = module_source(sse_path)
         assert "/api/chat/stream" in content
         assert "StreamingResponse" in content
         assert "text/event-stream" in content
@@ -367,8 +369,8 @@ class TestRealtimeEndpoints:
         content = ""
         if app_path.exists():
             content += app_path.read_text(encoding="utf-8")
-        if routes_path.exists():
-            content += routes_path.read_text(encoding="utf-8")
+        if module_exists(routes_path):
+            content += module_source(routes_path)
         assert "/ws/chat" in content
 
     def test_websocket_dashboard_endpoint(self):
@@ -378,8 +380,8 @@ class TestRealtimeEndpoints:
         content = ""
         if app_path.exists():
             content += app_path.read_text(encoding="utf-8")
-        if routes_path.exists():
-            content += routes_path.read_text(encoding="utf-8")
+        if module_exists(routes_path):
+            content += module_source(routes_path)
         assert "/ws/dashboard" in content
 
     def test_telemetry_sse_endpoint(self):

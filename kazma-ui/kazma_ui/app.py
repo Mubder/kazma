@@ -22,10 +22,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from starlette.responses import RedirectResponse
 
 logger = logging.getLogger(__name__)
 
@@ -344,9 +343,16 @@ class KazmaAppBuilder:
 
     def _setup_templates_and_middlewares(self) -> None:
         """Configure auth, CORS, CSRF, language middleware, static files, and templates."""
-        from kazma_ui.auth import create_auth_middleware, create_tenant_middleware
+        from kazma_ui.auth import (
+            assert_proxy_configuration,
+            create_auth_middleware,
+            create_tenant_middleware,
+        )
         from kazma_ui.csrf import create_csrf_middleware
         from kazma_ui.replica_affinity import create_replica_affinity_middleware
+
+        # Peer-address trust is only sound when the app owns its socket (F-01).
+        assert_proxy_configuration()
 
         self.app.middleware("http")(create_auth_middleware())
         self.app.middleware("http")(create_tenant_middleware())
@@ -1820,6 +1826,15 @@ class KazmaAppBuilder:
             logger.info("[app] signal_shutdown() fired")
         except Exception as e:
             logger.warning("[app] signal_shutdown failed: %s", e)
+
+        # Give retained background tasks (crawls, rebuilds, promotions) a
+        # bounded chance to finish before the loop closes (audit F-07).
+        try:
+            from kazma_core.background import drain_background
+
+            await drain_background(timeout=10.0)
+        except Exception as e:
+            logger.warning("[app] background drain failed: %s", e)
 
         # Stop the HITL approval-timeout watchdog
         try:

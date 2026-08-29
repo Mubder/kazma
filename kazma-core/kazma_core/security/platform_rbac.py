@@ -145,7 +145,14 @@ def _load_users_from_store() -> list[dict[str, Any]]:
         if isinstance(raw, list):
             return [u for u in raw if isinstance(u, dict)]
     except Exception:
-        pass
+        # Safe to swallow the value (audit O3): an empty user list means no
+        # local user authenticates, which is fail-closed. Logged because a
+        # store error here silently locks every local user out.
+        logger.warning(
+            "[rbac] could not read platform.users — no local user will "
+            "authenticate until the store recovers",
+            exc_info=True,
+        )
     return []
 
 

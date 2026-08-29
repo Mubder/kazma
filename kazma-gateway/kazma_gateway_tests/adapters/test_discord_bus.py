@@ -1,6 +1,5 @@
 """Tests for Discord platform adapter."""
 
-import pytest
 
 
 class TestDiscordBusAdapter:

@@ -16,6 +16,7 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +155,6 @@ async def _get_pending_approvals(
         try:
             # For SQLite (aiosqlite)
             if hasattr(conn, 'execute'):
-                import json as _json
                 cursor = await conn.execute(
                     "SELECT thread_id FROM checkpoints WHERE json_extract(metadata, '$.hitl_state') = ?",
                     ("pending_approval",)
@@ -286,7 +286,7 @@ def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
         except Exception as exc:
             logger.exception("[HITL] Failed to list pending approvals")
             return JSONResponse(
-                {"pending": [], "count": 0, "error": str(exc)},
+                {"pending": [], "count": 0, "error": safe_error(exc)},
                 status_code=500,
             )
 
@@ -300,7 +300,7 @@ def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
         except Exception as exc:
             logger.exception("[HITL] Failed to clear pending approvals")
             return JSONResponse(
-                {"status": "error", "error": str(exc)},
+                {"status": "error", "error": safe_error(exc)},
                 status_code=500,
             )
 

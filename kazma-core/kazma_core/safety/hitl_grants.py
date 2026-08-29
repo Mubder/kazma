@@ -151,7 +151,16 @@ def clear_grants(thread_id: str, *, actor: str = "unknown") -> int:
             cs.delete(key)
             cleared += 1
         except Exception:
-            pass
+            # NOT safe to ignore silently (audit O3): a grant that survives
+            # deletion keeps skipping HITL for that tool. The count returned
+            # to the caller stays accurate, and this is logged so the failure
+            # is visible rather than reported as a successful revoke.
+            logger.error(
+                "[hitl_grants] failed to clear grant %s — approval may still "
+                "be bypassed for it",
+                key,
+                exc_info=True,
+            )
 
     if cleared:
         logger.warning(

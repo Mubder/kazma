@@ -141,7 +141,15 @@ def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:
 
         clear_grants(thread_id, actor=actor)
     except Exception:
-        pass
+        # NOT safe to ignore silently (audit O3): if the per-tool grants
+        # survive, `/yolo off` reports HITL restored while approvals are still
+        # being skipped. Fail loud so the operator can re-issue the command.
+        logger.error(
+            "[yolo] could not clear per-tool grants for %s — HITL may still be "
+            "bypassed for previously granted tools; run /yolo off again",
+            thread_id,
+            exc_info=True,
+        )
     logger.warning(
         "[SECURITY] YOLO DISABLED thread=%s actor=%s",
         thread_id,

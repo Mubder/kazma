@@ -21,9 +21,19 @@ Usage::
     except SSRFError as exc:
         print(exc)  # "Blocked URL ..."
 
-The resolver walks **all** A/AAAA records and blocks if **any** resolved
-IP is non-public, preventing DNS-rebinding where the first record is
-public and subsequent ones are internal.
+The resolver walks **all** A/AAAA records and blocks if **any** resolved IP is
+non-public. That defeats a *split* record set (one public A record alongside an
+internal one) — it does **not** defeat true DNS rebinding, where a low-TTL
+record answers public to this validator and private to the socket that connects
+a moment later (audit F-08/O7: this docstring previously claimed otherwise).
+
+Two rules follow from that limitation:
+
+* Validate the URL, then connect **immediately**. The wider the gap, the wider
+  the rebinding window.
+* Never pair ``validate_url`` with ``follow_redirects=True``. The guard sees
+  only the URL you passed it; use :func:`resolve_redirects` to validate every
+  hop, then fetch the final URL with redirects disabled.
 """
 
 from __future__ import annotations
@@ -31,6 +41,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import socket
+from typing import Any
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -194,4 +205,66 @@ def is_url_safe(url: str) -> bool:
     return True
 
 
-__all__: list[str] = ["SSRFError", "validate_url", "is_url_safe"]
+#: Maximum redirect hops followed by :func:`resolve_redirects`.
+MAX_REDIRECT_HOPS = 5
+
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+
+async def resolve_redirects(
+    client: Any,
+    url: str,
+    *,
+    max_hops: int = MAX_REDIRECT_HOPS,
+    **request_kwargs: Any,
+) -> str:
+    """Walk a redirect chain, validating **every** hop, and return the final URL.
+
+    ``follow_redirects=True`` is unsafe on an SSRF-guarded fetch: the guard
+    runs once against the URL the caller supplied, and an attacker-controlled
+    public URL can then 302 to ``169.254.169.254`` or an internal service,
+    which httpx follows without a second check (audit F-08).
+
+    Use this to resolve the destination first, then issue the real request
+    against the returned URL with ``follow_redirects=False``.
+
+    Args:
+        client: An ``httpx.AsyncClient``.
+        url: Starting URL. Validated before the first request.
+        max_hops: Redirect budget; exceeding it raises :class:`SSRFError`.
+        **request_kwargs: Passed to each ``client.request`` call.
+
+    Returns:
+        The final, validated URL.
+
+    Raises:
+        SSRFError: if any hop resolves to a blocked address, or the chain is
+            longer than *max_hops*.
+    """
+    import httpx
+
+    validate_url(url)
+    current = url
+    for _ in range(max_hops):
+        resp = await client.request(
+            "HEAD", current, follow_redirects=False, **request_kwargs
+        )
+        if resp.status_code not in _REDIRECT_STATUSES:
+            return current
+        location = resp.headers.get("location", "")
+        if not location:
+            return current
+        current = str(httpx.URL(current).join(location))
+        validate_url(current)  # every hop, not just the first
+    raise SSRFError(
+        f"Blocked URL '{url}': more than {max_hops} redirects."
+    )
+
+
+__all__: list[str] = [
+    "SSRFError",
+    "validate_url",
+    "is_url_safe",
+    "resolve_redirects",
+    "MAX_REDIRECT_HOPS",
+]

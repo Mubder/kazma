@@ -18,6 +18,11 @@ be installed on the sink as well as on ``sse_chat``.
 
 from __future__ import annotations
 
+# Patch the seam at its definition site: these helpers moved into
+# kazma_ui.sse_chat._helpers when the module was split (audit O5),
+# and the callers resolve them through that module object.
+from kazma_ui.sse_chat import _helpers as _sse_helpers
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -37,7 +42,7 @@ def _install(monkeypatch, store):
     """Point both the module helpers and the reply sink at *store*."""
     from kazma_ui import sse_chat
 
-    monkeypatch.setattr(sse_chat, "_module_store", lambda: store)
+    monkeypatch.setattr(_sse_helpers, "_module_store", lambda: store)
     monkeypatch.setattr(reply_sink, "_store", lambda: store)
 
 
@@ -122,7 +127,7 @@ async def test_detached_persist_failure_logs_warning(monkeypatch, caplog):
     def _boom():
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(sse_chat, "_module_store", _boom)
+    monkeypatch.setattr(_sse_helpers, "_module_store", _boom)
     monkeypatch.setattr(reply_sink, "_store", _boom)
     graph = _fake_graph([{"role": "assistant", "content": "answer"}])
 
@@ -153,7 +158,7 @@ async def test_backfill_surfaces_unanswered_checkpoint_reply(monkeypatch):
         {"role": "assistant", "content": "XHypert (variants: HypertX, HypertAI)."},
     ])
     _install(monkeypatch, store)
-    monkeypatch.setattr(sse_chat, "_module_graph", lambda: graph)
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: graph)
 
     out = await sse_chat._checkpoint_backfill_unanswered(session)
 
@@ -178,7 +183,7 @@ async def test_backfill_noop_when_session_is_answered(monkeypatch):
     store = _FakeStore(session)
     graph = _fake_graph([])
     _install(monkeypatch, store)
-    monkeypatch.setattr(sse_chat, "_module_graph", lambda: graph)
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: graph)
 
     out = await sse_chat._checkpoint_backfill_unanswered(session)
     assert len(out) == 2
@@ -215,7 +220,7 @@ async def test_backfill_noop_when_checkpoint_does_not_end_with_assistant(monkeyp
         )
     )
     _install(monkeypatch, store)
-    monkeypatch.setattr(sse_chat, "_module_graph", lambda: graph)
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: graph)
 
     out = await sse_chat._checkpoint_backfill_unanswered(session)
     assert len(out) == 1

@@ -7,6 +7,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -20,6 +21,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
+from kazma_core.errors import safe_error, validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -191,14 +193,18 @@ async def github_status() -> JSONResponse:
             "error": "Workspace is not a Git repository."
         })
 
-    # Run git config remote.origin.url
+    # Run git config remote.origin.url — in a worker thread, since a git
+    # invocation on a cold/networked filesystem can block for seconds and this
+    # handler shares the loop with every SSE and WebSocket stream (audit F-06).
     try:
-        res = subprocess.run(
-            ["git", "config", "--get", "remote.origin.url"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=5
+        res = await asyncio.to_thread(
+            lambda: subprocess.run(
+                ["git", "config", "--get", "remote.origin.url"],
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
         )
         remote_url = res.stdout.strip() if res.returncode == 0 else ""
     except Exception as exc:
@@ -442,7 +448,7 @@ async def oauth_start(request: Request) -> RedirectResponse | JSONResponse:
         logger.warning("[github/oauth] redirect URI refused: %s", exc)
         return JSONResponse(
             {
-                "error": str(exc),
+                "error": validation_error(exc),
                 "hint": "Set KAZMA_PUBLIC_URL=https://your.public.host before OAuth.",
             },
             status_code=503,
@@ -683,7 +689,7 @@ def _gh_error_response(exc: Exception) -> JSONResponse:
     rate_limited = getattr(exc, "rate_limited", False)
     reset = getattr(exc, "rate_limit_reset", None)
     return JSONResponse({
-        "error": str(exc)[:400],
+        "error": safe_error(exc),
         "rate_limited": rate_limited,
         "rate_limit_reset": reset,
     }, status_code=200)

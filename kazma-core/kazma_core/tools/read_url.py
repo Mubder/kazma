@@ -30,6 +30,8 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
+from kazma_core.safety.prompt_fence import fence_untrusted
+
 __all__ = [
     "DEFAULT_CHUNK_SIZE",
     "MAX_CONTENT_CHARS",
@@ -618,7 +620,7 @@ async def _try_jina_reader(url: str) -> str | None:
         return None
     try:
         import httpx
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import validate_url
 
         validate_url(url)
         # Proxy is public; still SSRF-check the *target* URL above.
@@ -661,7 +663,7 @@ async def _try_firecrawl(url: str) -> str | None:
         import asyncio
 
         import httpx
-        from kazma_core.security.ssrf import SSRFError, validate_url
+        from kazma_core.security.ssrf import validate_url
 
         validate_url(url)
         headers = {
@@ -1075,7 +1077,13 @@ async def read_url(
     full = await _fetch_full_text(url)
     if full.startswith("Error:"):
         return full
-    return _slice_window(full, offset=int(offset or 0), max_chars=max_chars)
+    window = _slice_window(full, offset=int(offset or 0), max_chars=max_chars)
+    # Fenced as untrusted (audit F-09). A fetched page is the single largest
+    # source of attacker-controlled text in the system, and it used to reach
+    # the model raw — despite the README claiming all retrieved context is
+    # fenced. The window header stays outside the fence so paging metadata is
+    # still readable as our own output.
+    return fence_untrusted(window, source=f"web:{url}")
 
 
 def _workspace_root() -> Path:
@@ -1301,9 +1309,11 @@ async def read_research_chunk(
     end = min(total, start + size)
     piece = body[start:end]
     next_hint = f" next: chunk_index={idx + 1}" if idx + 1 < n else " (last chunk)"
+    # Saved research files hold fetched page text, so a chunk is still
+    # remote-authored content even though it now comes off local disk (F-09).
     return (
         f"[chunk {idx}/{n - 1} chars {start}:{end} of {total}{next_hint}]\n\n"
-        f"{piece}"
+        + fence_untrusted(piece, source="research_chunk")
     )
 
 

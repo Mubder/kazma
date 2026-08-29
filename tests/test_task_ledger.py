@@ -9,6 +9,8 @@ and git-write blast-radius limits on every execution path.
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 from pathlib import Path
 
 import pytest
@@ -162,10 +164,8 @@ def test_supervisor_wires_ledger_end_to_end() -> None:
 
 
 def test_task_ledger_tool_registered() -> None:
-    src = (
-        Path(__file__).resolve().parents[1]
-        / "kazma-core" / "kazma_core" / "agent" / "tool_builtins.py"
-    ).read_text(encoding="utf-8")
+    src = module_source(Path(__file__).resolve().parents[1]
+        / "kazma-core" / "kazma_core" / "agent" / "tool_builtins.py")
     assert src.count('"task_ledger_update"') >= 1
     assert "DURABLE TASK LEDGER" in src
 

@@ -11,6 +11,8 @@ unit-test gap/dupe semantics without a browser.
 
 from __future__ import annotations
 
+from tests._module_source import module_source
+
 import json
 import shutil
 import subprocess
@@ -584,7 +586,7 @@ class TestTurnNotifySettingsToggle:
         assert "kazma.notifyOnComplete" in js  # instant mirror to open tabs
 
     def test_i18n_keys_present(self):
-        src = (_UI / "i18n.py").read_text(encoding="utf-8")
+        src = module_source(_UI / "i18n.py")
         for key in ("settings.turn_notify_title", "settings.turn_notify_label",
                     "settings.turn_notify_hint", "settings.turn_notify_save"):
             assert f'"{key}"' in src

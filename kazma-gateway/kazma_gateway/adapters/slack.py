@@ -32,6 +32,7 @@ from typing import Any
 
 import httpx
 
+from kazma_core.background import spawn_background
 from kazma_gateway.gateway import (
     Attachment,
     BaseAdapter,
@@ -150,7 +151,7 @@ class SlackAdapter(BaseAdapter):
             True if sent successfully.
         """
         # Fire typing indicator (fire-and-forget)
-        asyncio.create_task(self._trigger_typing(outbound.target_id))
+        spawn_background(self._trigger_typing(outbound.target_id), name="slack-typing")
 
         # Resolve channel_id
         channel_id: str | None = outbound.context_metadata.get("channel_id")
@@ -232,8 +233,9 @@ class SlackAdapter(BaseAdapter):
                             # Voice reply: if the inbound was transcribed audio, reply
                             # with synthesized speech.
                             if outbound.context_metadata.get("voice_transcribed") and outbound.text:
-                                asyncio.create_task(
-                                    self._send_voice_reply(channel_id, outbound.text, thread_ts)
+                                spawn_background(
+                                    self._send_voice_reply(channel_id, outbound.text, thread_ts),
+                                    name="slack-voice-reply",
                                 )
                         break  # success — move to next chunk
                     else:
@@ -495,7 +497,7 @@ class SlackAdapter(BaseAdapter):
                                         # (minutes) must not stall the Socket
                                         # Mode WS reader (Telegram/Discord both
                                         # use create_task here) (audit finding).
-                                        asyncio.create_task(trigger_package_promotion(package_name))
+                                        spawn_background(trigger_package_promotion(package_name), name=f"slack-promote:{package_name}")
                                         response_url = payload.get("response_url", "")
                                         if response_url:
                                             try:

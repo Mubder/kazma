@@ -6,6 +6,7 @@ over hoping the chat agent discovers the right tools.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -14,7 +15,8 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
+from kazma_core.errors import safe_error
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +192,15 @@ def _memory_tenant_id() -> str:
 
             enforce = bool(multi_user_or_production())
         except Exception:
-            enforce = False
+            # Audit F-05: a failed probe used to silently disable isolation.
+            # Treat "cannot tell" as "enforce" — a single-tenant install is
+            # unaffected (its rows are all in `default`), while a multi-tenant
+            # one stays scoped.
+            logger.warning(
+                "[tenant] multi-user probe failed — enforcing isolation",
+                exc_info=True,
+            )
+            enforce = True
     if enforce:
         try:
             from kazma_core.tenant_isolation import require_tenant_id
@@ -333,7 +343,7 @@ async def memory_vocab() -> dict[str, Any]:
         return {"ok": True, "predicates": preds, "entities": ents}
     except Exception as exc:
         logger.exception("[memory_api] vocab failed")
-        return {"ok": False, "error": str(exc)[:300], "predicates": [], "entities": []}
+        return {"ok": False, "error": safe_error(exc), "predicates": [], "entities": []}
 
 
 @router.get("/api/memory/v2/admin/summary")
@@ -401,7 +411,7 @@ async def memory_admin_summary() -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] summary failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 # ── Undo ─────────────────────────────────────────────────────────────────
@@ -433,7 +443,7 @@ async def undo_action(token: str) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] undo %s failed", entry.get("kind"))
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 # ── Entities ─────────────────────────────────────────────────────────────
@@ -577,7 +587,7 @@ async def list_entities(
         }
     except Exception as exc:
         logger.exception("[memory_api] list entities failed")
-        return {"ok": False, "entities": [], "error": str(exc)[:300]}
+        return {"ok": False, "entities": [], "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/entities/{entity_id}/rename")
@@ -694,7 +704,7 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] rename entity failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/entities/{entity_id}/protect")
@@ -738,7 +748,7 @@ async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
         return {"ok": True, "id": eid, "protected": want}
     except Exception as exc:
         logger.exception("[memory_api] protect entity failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/entities/{entity_id}/major")
@@ -773,7 +783,7 @@ async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
         return {"ok": True, "id": eid, "major": want}
     except Exception as exc:
         logger.exception("[memory_api] set major failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.delete("/api/memory/v2/entities/{entity_id}")
@@ -880,7 +890,7 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
             "receipt": {"entities_deleted": 1},
         }
     except Exception as exc:
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/entities/merge")
@@ -1005,7 +1015,7 @@ async def merge_entities(request: Request) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] merge failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 def _entity_slug(text: str) -> str:
@@ -1036,11 +1046,21 @@ def _ensure_entity_row(conn: sqlite3.Connection, eid: str, *, name: str | None =
 
 @router.post("/api/memory/v2/entities/link")
 async def link_entities(request: Request) -> dict[str, Any]:
-    """Create a belief edge subject --predicate--> object (links two nodes)."""
+    """Create a belief edge subject --predicate--> object (links two nodes).
+
+    The body is parsed on the event loop; the SQLite work runs in a worker
+    thread (audit F-06) so a lock wait cannot stall every other SSE and
+    WebSocket stream sharing this loop.
+    """
     try:
         body = await request.json()
     except Exception:
         return {"ok": False, "error": "invalid JSON"}
+    return await asyncio.to_thread(_link_entities_sync, body)
+
+
+def _link_entities_sync(body: Any) -> dict[str, Any]:
+    """Blocking half of :func:`link_entities` — runs off the event loop."""
     subject = str((body or {}).get("subject") or "").strip()
     predicate = str((body or {}).get("predicate") or "related_to").strip()
     obj = str((body or {}).get("object") or "").strip()
@@ -1155,7 +1175,12 @@ async def link_entities(request: Request) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] link failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
+    finally:
+        try:
+            ops.close()
+        except Exception:
+            pass  # already closed / never opened
 
 
 @router.post("/api/memory/v2/entities/unlink")
@@ -1261,7 +1286,7 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] unlink failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 # ── Beliefs (edit + batch invalidate) ────────────────────────────────────
@@ -1454,7 +1479,7 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] edit belief failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/beliefs/{belief_id}/repoint")
@@ -1671,7 +1696,7 @@ async def graph_groups_list() -> dict[str, Any]:
         return {"ok": True, "groups": rows, "count": len(rows)}
     except Exception as exc:
         logger.exception("[memory_api] graph groups list failed")
-        return {"ok": False, "error": str(exc)[:300], "groups": []}
+        return {"ok": False, "error": safe_error(exc), "groups": []}
 
 
 @router.post("/api/memory/v2/graph/groups")
@@ -1730,7 +1755,7 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
                 "member_tier": tier, "memory_affected": False}
     except Exception as exc:
         logger.exception("[memory_api] graph group create failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.delete("/api/memory/v2/graph/groups/{group_id}")
@@ -1758,7 +1783,7 @@ async def graph_groups_delete(group_id: str) -> dict[str, Any]:
                 "memory_affected": False}
     except Exception as exc:
         logger.exception("[memory_api] graph group delete failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/graph/groups/member/{member_id}/move")
@@ -1836,7 +1861,7 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
                 "memory_affected": False}
     except Exception as exc:
         logger.exception("[memory_api] graph group move failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/graph/groups/node/{node_id}/tier")
@@ -1874,7 +1899,7 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
                 "memory_affected": False}
     except Exception as exc:
         logger.exception("[memory_api] graph group set tier failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 # ── Hygiene ──────────────────────────────────────────────────────────────
@@ -1960,7 +1985,7 @@ async def hygiene_preview() -> dict[str, Any]:
         }
     except Exception as exc:
         logger.exception("[memory_api] hygiene preview failed")
-        return {"ok": False, "error": str(exc)[:300]}
+        return {"ok": False, "error": safe_error(exc)}
 
 
 @router.post("/api/memory/v2/hygiene/run")
@@ -2042,7 +2067,7 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
             conn.close()
             out["actions"]["archive_invalidated"] = {"archived": n}
         except Exception as exc:
-            out["actions"]["archive_invalidated"] = {"error": str(exc)[:200]}
+            out["actions"]["archive_invalidated"] = {"error": safe_error(exc)}
 
     return out
 

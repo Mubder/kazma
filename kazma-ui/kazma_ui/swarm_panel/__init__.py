@@ -20,29 +20,10 @@ from .routes_workers import register_workers_routes
 logger = logging.getLogger(__name__)
 
 
-def create_swarm_panel_routers(
-    templates: Any,
-    swarm_manager: Any = None,
-    config_store: Any = None,
-) -> dict[str, APIRouter]:
-    """Return the sub-routers for the swarm panel.
-
-    This keeps the public surface stable while allowing internal decomposition.
-    """
-    general_router = APIRouter()
-    tasks_router = APIRouter()
-    workers_router = APIRouter()
-
-    register_workers_routes(workers_router, templates, swarm_manager, config_store)
-    register_tasks_routes(tasks_router, templates, swarm_manager, config_store)
-    register_metrics_routes(general_router, templates, swarm_manager, config_store)
-    register_general_routes(general_router, templates, swarm_manager, config_store)
-
-    return {
-        "general": general_router,
-        "tasks": tasks_router,
-        "workers": workers_router,
-    }
+# `create_swarm_panel_routers` was removed (audit O5): it duplicated
+# SwarmRouterBuilder.build()'s registration order and had no callers, so the
+# two could drift apart silently. `create_swarm_router` is the single entry
+# point.
 
 
 def create_swarm_router(
