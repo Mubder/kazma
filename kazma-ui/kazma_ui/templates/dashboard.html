@@ -87,11 +87,11 @@
       <div class="metric-value" id="metric-uptime" style="color:var(--text-primary);">{{ metrics.uptime }}</div>
       <div class="metric-sub" id="silence-info">{{ silence_info }}</div>
     </div>
-    <div class="metric-card" title="Active chat model (ModelRegistry)">
+    <div class="metric-card" title="{{ t('dashboard.active_model') }}">
       <div class="metric-icon"><span class="ki" data-icon="cpu" aria-hidden="true"></span></div>
-      <div class="metric-label">Active model</div>
+      <div class="metric-label">{{ t('dashboard.active_model') }}</div>
       <div class="metric-value" id="metric-active-model" style="color:var(--text-primary);font-size:0.95rem;word-break:break-all;">{{ active_model or '—' }}</div>
-      <div class="metric-sub" id="metric-active-provider">{{ active_provider or 'provider' }}</div>
+      <div class="metric-sub" id="metric-active-provider">{{ active_provider or t('dashboard.provider') }}</div>
     </div>
   </div>
 
@@ -312,13 +312,16 @@
 <script src="/static/js/streaming.js?v={{ js_version() }}"></script>
 <script src="/static/js/dash_lists.js?v={{ js_version() }}"></script>
 <script>
-  // Session-list strings for dashboard.js (rendered server-side)
-  window.__DASH_SESS_I18N = {
+  // Strings dashboard.js renders client-side (translated server-side)
+  window.__DASH_I18N = {
     noSessions: "{{ t('dashboard.no_sessions') }}",
     sessionsCount: "{{ t('dashboard.sessions_count', n='{n}') }}",
     showingFirst: "{{ t('dashboard.sessions_showing_first', n='{n}') }}",
     showLess: "{{ t('dashboard.show_less_sessions') }}",
-    showMore: "{{ t('dashboard.show_n_more_sessions', n='{n}') }}"
+    showMore: "{{ t('dashboard.show_n_more_sessions', n='{n}') }}",
+    breakerOk: "{{ t('dashboard.breaker_ok') }}",
+    breakerHalted: "{{ t('dashboard.breaker_halted') }}",
+    breakerWarning: "{{ t('dashboard.breaker_warning') }}"
   };
 </script>
 <script src="/static/js/dashboard.js?v={{ js_version() }}"></script>

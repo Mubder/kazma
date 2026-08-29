@@ -215,11 +215,11 @@
       var cb = data.circuit_breaker;
       var breakerEl = $('metric-breaker');
       if (cb.is_halted) {
-        if (breakerEl) { breakerEl.textContent = 'HALTED'; breakerEl.style.color = 'var(--danger)'; }
+        if (breakerEl) { breakerEl.textContent = dashT('breakerHalted', 'HALTED'); breakerEl.style.color = 'var(--danger)'; }
       } else if (displayCost > 0 && headroom < 0.01 && data.cost) {
-        if (breakerEl) { breakerEl.textContent = 'WARNING'; breakerEl.style.color = 'var(--warning)'; }
+        if (breakerEl) { breakerEl.textContent = dashT('breakerWarning', 'WARNING'); breakerEl.style.color = 'var(--warning)'; }
       } else {
-        if (breakerEl) { breakerEl.textContent = 'OK'; breakerEl.style.color = 'var(--success)'; }
+        if (breakerEl) { breakerEl.textContent = dashT('breakerOk', 'OK'); breakerEl.style.color = 'var(--success)'; }
       }
     }
 
@@ -473,9 +473,9 @@
   // soft-nav / re-entry always re-bind. Soft-nav to /dashboard is now a
   // hard reload, but keep this in the bundle for F5 and future soft-nav.)
   var SESSION_PREVIEW = 5;
-  var SESS_I18N = window.__DASH_SESS_I18N || {};
-  function sessT(key, fallback, n) {
-    var text = SESS_I18N[key] || fallback;
+  var DASH_I18N = window.__DASH_I18N || {};
+  function dashT(key, fallback, n) {
+    var text = DASH_I18N[key] || fallback;
     return n === undefined ? text : text.replace('{n}', n);
   }
   var _sessionsExpanded = false;
@@ -552,8 +552,8 @@
           if (expandBtn) {
             var hidden = list.length - SESSION_PREVIEW;
             expandBtn.textContent = _sessionsExpanded
-              ? sessT('showLess', 'Show less')
-              : sessT('showMore', 'Show {n} more sessions', hidden);
+              ? dashT('showLess', 'Show less')
+              : dashT('showMore', 'Show {n} more sessions', hidden);
           }
         } else {
           expandWrap.style.display = 'none';
@@ -561,11 +561,11 @@
       }
       if (summaryEl) {
         summaryEl.textContent = list.length
-          ? (sessT('sessionsCount', '{n} sessions', list.length)
+          ? (dashT('sessionsCount', '{n} sessions', list.length)
             + (list.length > SESSION_PREVIEW && !_sessionsExpanded
-              ? ' · ' + sessT('showingFirst', 'showing first {n}', SESSION_PREVIEW)
+              ? ' · ' + dashT('showingFirst', 'showing first {n}', SESSION_PREVIEW)
               : ''))
-          : sessT('noSessions', 'No sessions');
+          : dashT('noSessions', 'No sessions');
       }
     }
 
@@ -581,7 +581,7 @@
           if (tableEl) tableEl.style.display = 'none';
           if (cardsEl) cardsEl.innerHTML = '';
           if (expandWrap) expandWrap.style.display = 'none';
-          if (summaryEl) summaryEl.textContent = sessT('noSessions', 'No sessions');
+          if (summaryEl) summaryEl.textContent = dashT('noSessions', 'No sessions');
           return;
         }
         if (emptyEl) emptyEl.style.display = 'none';

@@ -12,6 +12,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "القدرات النشطة",
         "en": "Active Capabilities",
     },
+    "dashboard.active_model": {
+        "ar": "النموذج النشط",
+        "en": "Active model",
+    },
     "dashboard.available_backups": {
         "ar": "النسخ الاحتياطية المتاحة",
         "en": "Available Backups",
@@ -139,6 +143,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.circuit_breaker": {
         "ar": "قاطع الدائرة",
         "en": "Circuit Breaker",
+    },
+    "dashboard.breaker_halted": {
+        "ar": "متوقف",
+        "en": "HALTED",
+    },
+    "dashboard.breaker_ok": {
+        "ar": "سليم",
+        "en": "OK",
+    },
+    "dashboard.breaker_warning": {
+        "ar": "تحذير",
+        "en": "WARNING",
     },
     "dashboard.clear_all": {
         "ar": "مسح الكل",
@@ -324,9 +340,17 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الحلقات",
         "en": "Episodes",
     },
+    "dashboard.halted_spent": {
+        "ar": "متوقف — أُنفق ${amount}، وتجاوز صمت المستخدم الحد",
+        "en": "Halted — ${amount} spent, user silence exceeded",
+    },
     "dashboard.headroom": {
         "ar": "هامش متاح",
         "en": "headroom",
+    },
+    "dashboard.headroom_remaining": {
+        "ar": "${amount} متبقية من الميزانية",
+        "en": "${amount} headroom remaining",
     },
     "dashboard.hitl_allow_tool": {
         "ar": "السماح بالأداة",
@@ -632,6 +656,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لا توجد جلسات",
         "en": "No sessions",
     },
+    "dashboard.no_cost_threshold": {
+        "ar": "لم يبلغ أي حد للتكلفة",
+        "en": "No cost threshold reached",
+    },
     "dashboard.no_traces": {
         "ar": "لا توجد تتبعات بعد",
         "en": "No traces yet",
@@ -664,6 +692,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اكتمل التحسين بنجاح!",
         "en": "Optimization completed successfully!",
     },
+    "dashboard.over_budget": {
+        "ar": "تجاوز الميزانية — {seconds} ثانية حتى الإيقاف",
+        "en": "Over budget — {seconds}s until halt",
+    },
     "dashboard.pending_approvals": {
         "ar": "الموافقات المعلقة",
         "en": "Pending Approvals",
@@ -671,6 +703,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "dashboard.persistence": {
         "ar": "التخزين",
         "en": "Persistence",
+    },
+    "dashboard.provider": {
+        "ar": "المزود",
+        "en": "provider",
     },
     "dashboard.range_day": {
         "ar": "يوم",
