@@ -7,21 +7,55 @@
 <style>
   [x-cloak] { display: none !important; }
   .sched-wrap { max-width: 1100px; margin: 0 auto; padding: 0 1rem; box-sizing: border-box; }
+
+  /* ── overview strip: what needs attention, before the table ── */
+  .sched-stats { display: flex; gap: 1.5rem; flex-wrap: wrap; align-items: baseline; }
+  .sched-stat { display: flex; flex-direction: column; gap: 1px; }
+  .sched-stat b { font-size: 1.35rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
+  .sched-stat span { font-size: .7rem; color: var(--text-muted); letter-spacing: .04em; text-transform: uppercase; }
+  .sched-stat.is-alert b { color: var(--danger, #ef4444); }
+
   .sched-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  .sched-table th { text-align: start; color: var(--text-muted); padding: 8px 10px; font-weight: 600; border-bottom: 1px solid var(--border-subtle); }
-  .sched-table td { padding: 8px 10px; border-top: 1px solid var(--border-subtle); vertical-align: top; }
-  .sched-summary { max-width: 460px; white-space: pre-wrap; word-break: break-word; }
-  .sched-when { white-space: nowrap; font-family: var(--font-mono, monospace); font-size: 0.76rem; }
-  .type-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+  .sched-table th { text-align: start; color: var(--text-muted); padding: 9px 12px; font-weight: 600;
+                    border-bottom: 1px solid var(--border-subtle); white-space: nowrap;
+                    font-size: .72rem; letter-spacing: .03em; text-transform: uppercase; }
+  .sched-table td { padding: 10px 12px; border-top: 1px solid var(--border-subtle); vertical-align: top; }
+  .sched-table tbody tr:hover { background: var(--bg-elevated); }
+
+  /* Two-line time cell: the absolute instant, and the part you read. */
+  .when-abs { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .when-rel { font-size: .72rem; color: var(--text-muted); white-space: nowrap; margin-top: 1px; }
+  .when-overdue .when-rel { color: var(--danger, #ef4444); font-weight: 600; }
+
+  /* Prompts are stored with their authored indentation; clamp rather than
+     let a paragraph set the row height. */
+  .sched-summary { max-width: 520px; }
+  .sched-summary .txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                        overflow: hidden; word-break: break-word; }
+  .sched-summary .why { color: var(--danger, #ef4444); font-size: .72rem; margin-top: 3px;
+                        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .type-badge, .st-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
   .type-cron { background: rgba(59,130,246,.15); color: #3b82f6; }
   .type-x { background: rgba(29,155,240,.18); color: #1d9bf0; }
-  .st-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
   .st-pending { background: rgba(245,158,11,.15); color: #f59e0b; }
   .st-running { background: rgba(59,130,246,.15); color: #3b82f6; }
   .st-done, .st-fired { background: rgba(34,197,94,.15); color: #22c55e; }
   .st-failed { background: rgba(239,68,68,.15); color: #ef4444; }
   .st-cancelled { background: var(--bg-elevated); color: var(--text-muted); }
-  .row-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+  .row-actions { display: flex; gap: 4px; flex-shrink: 0; justify-content: flex-end; }
+  .sched-empty { padding: 2.25rem 1rem; text-align: center; color: var(--text-muted); font-size: .82rem; }
+
+  /* ── X activity ── */
+  .audit-text { max-width: 420px; }
+  .audit-text .txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                     overflow: hidden; word-break: break-word; }
+  .audit-open .txt { -webkit-line-clamp: unset; overflow: visible; white-space: pre-wrap; }
+  .mono { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
+  .ok-text { color: var(--success, #22c55e); }
+  .bad-text { color: var(--danger, #ef4444); }
+
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
   .modal { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: var(--radius-md, 10px); padding: 1.25rem; width: 92%; max-width: 520px; max-height: 88vh; overflow: auto; }
   .modal h3 { margin: 0 0 .75rem 0; }
@@ -31,25 +65,60 @@
   .form-group input, .form-group textarea, .form-group select { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm, 6px); background: var(--bg-elevated); color: var(--text-primary); font-size: .84rem; }
   .form-group textarea { min-height: 84px; resize: vertical; }
   .hint { font-size: .72rem; color: var(--text-muted); margin-top: 3px; }
+
+  @media (max-width: 720px) {
+    .sched-summary, .audit-text { max-width: none; }
+    .sched-stats { gap: 1.1rem; }
+  }
 </style>
 {% endblock %}
 
 {% block content %}
 <div class="sched-wrap" x-data="scheduledPage()" x-init="init()" role="main" aria-label="{{ t('nav.scheduled') }}">
 
-  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
-    <div>
-      <strong>{{ t('scheduled.title') }}</strong>
-      <div style="font-size:.78rem;color:var(--text-muted);margin-top:2px;">{{ t('scheduled.hint') }}</div>
+  <div class="card" style="padding:1rem 1.25rem;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+    <div class="sched-stats">
+      <div class="sched-stat">
+        <b x-text="counts.upcoming"></b>
+        <span>{{ t('scheduled.stat_upcoming') }}</span>
+      </div>
+      <div class="sched-stat" :class="counts.overdue ? 'is-alert' : ''" x-show="counts.overdue" x-cloak>
+        <b x-text="counts.overdue"></b>
+        <span>{{ t('scheduled.stat_overdue') }}</span>
+      </div>
+      <div class="sched-stat" :class="counts.failed ? 'is-alert' : ''">
+        <b x-text="counts.failed"></b>
+        <span>{{ t('scheduled.stat_failed') }}</span>
+      </div>
+      <div class="sched-stat">
+        <b x-text="counts.done"></b>
+        <span>{{ t('scheduled.stat_done') }}</span>
+      </div>
     </div>
     <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-      <button class="btn btn-secondary btn-sm" @click="load()">{{ t('scheduled.refresh') }}</button>
+      <button class="btn btn-secondary btn-sm" @click="refreshAll()">{{ t('scheduled.refresh') }}</button>
       <button class="btn btn-secondary btn-sm" @click="openCreateX()">{{ t('scheduled.new_x') }}</button>
       <button class="btn btn-primary btn-sm" @click="openCreateCron()">{{ t('scheduled.new_task') }}</button>
     </div>
   </div>
 
-  <div class="card" style="padding:0;overflow:hidden;">
+  <div class="tabs" role="tablist">
+    <button class="tab" :class="filter === 'upcoming' ? 'active' : ''" role="tab"
+            :aria-selected="filter === 'upcoming'" @click="filter = 'upcoming'">
+      {{ t('scheduled.tab_upcoming') }} <span class="mono" x-text="'(' + counts.upcoming + ')'"></span>
+    </button>
+    <button class="tab" :class="filter === 'history' ? 'active' : ''" role="tab"
+            :aria-selected="filter === 'history'" @click="filter = 'history'">
+      {{ t('scheduled.tab_history') }} <span class="mono" x-text="'(' + (counts.failed + counts.done) + ')'"></span>
+    </button>
+    <button class="tab" :class="filter === 'x' ? 'active' : ''" role="tab"
+            :aria-selected="filter === 'x'" @click="showXActivity()">
+      {{ t('scheduled.tab_x_activity') }}
+    </button>
+  </div>
+
+  {# ── Scheduled work: upcoming / history ── #}
+  <div class="card" style="padding:0;overflow:hidden;" x-show="filter !== 'x'" x-cloak>
     <div style="overflow-x:auto;">
       <table class="sched-table">
         <thead>
@@ -62,18 +131,21 @@
           </tr>
         </thead>
         <tbody>
-          <template x-for="(task, i) in tasks" :key="(task.source||'') + '-' + task.id">
-            <tr>
-              <td class="sched-when" x-text="task.when || '—'"></td>
-              <td><span class="type-badge" :class="task.source === 'x' ? 'type-x' : 'type-cron'"
-                        x-text="task.source === 'x' ? 'X post' : 'Task'"></span></td>
-              <td class="sched-summary">
-                <span x-text="task.summary || '—'"></span>
-                <div x-show="task.error" x-cloak style="color:#ef4444;font-size:.72rem;margin-top:2px;" x-text="task.error"></div>
-              </td>
-              <td><span class="st-badge" :class="'st-' + (task.status || 'pending')" x-text="task.status"></span></td>
+          <template x-for="task in filtered" :key="(task.source||'') + '-' + task.id">
+            <tr :class="isOverdue(task) ? 'when-overdue' : ''">
               <td>
-                <div class="row-actions" style="justify-content:flex-end;">
+                <div class="when-abs" x-text="fmtAbs(task)"></div>
+                <div class="when-rel" x-text="isOverdue(task) ? t('scheduled.overdue') + ' · ' + fmtRel(task) : fmtRel(task)"></div>
+              </td>
+              <td><span class="type-badge" :class="task.source === 'x' ? 'type-x' : 'type-cron'"
+                        x-text="task.source === 'x' ? t('scheduled.kind_x') : t('scheduled.kind_task')"></span></td>
+              <td class="sched-summary">
+                <div class="txt" x-text="cleanSummary(task)" :title="cleanSummary(task)"></div>
+                <div class="why" x-show="reason(task)" x-cloak x-text="reason(task)" :title="reason(task)"></div>
+              </td>
+              <td><span class="st-badge" :class="'st-' + (task.status || 'pending')" x-text="statusLabel(task)"></span></td>
+              <td>
+                <div class="row-actions">
                   <button class="btn btn-secondary btn-sm" x-show="canEdit(task)" x-cloak @click="openEdit(task)">{{ t('scheduled.edit') }}</button>
                   <button class="btn btn-danger btn-sm" x-show="canDelete(task)" x-cloak @click="remove(task)">{{ t('scheduled.delete') }}</button>
                 </div>
@@ -83,10 +155,61 @@
         </tbody>
       </table>
     </div>
-    <p x-show="!loading && !tasks.length" x-cloak style="padding:1rem;font-size:.8rem;color:var(--text-muted);">
-      {{ t('scheduled.empty') }}
-    </p>
-    <p x-show="loading" x-cloak style="padding:1rem;font-size:.8rem;color:var(--text-muted);">…</p>
+    <div class="sched-empty" x-show="!loading && !filtered.length" x-cloak
+         x-text="filter === 'upcoming' ? t('scheduled.empty_upcoming') : t('scheduled.empty_history')"></div>
+    <div class="sched-empty" x-show="loading" x-cloak>…</div>
+  </div>
+
+  {# ── X activity: what was actually published ── #}
+  <div class="card" style="padding:0;overflow:hidden;" x-show="filter === 'x'" x-cloak>
+    <div style="padding:.85rem 1.1rem;border-bottom:1px solid var(--border-subtle);font-size:.78rem;color:var(--text-muted);">
+      {{ t('scheduled.x_activity_hint') }}
+    </div>
+    <div style="overflow-x:auto;max-height:560px;">
+      <table class="sched-table">
+        <thead>
+          <tr>
+            <th>{{ t('settings.x_audit_when') }}</th>
+            <th>{{ t('settings.x_audit_action') }}</th>
+            <th>{{ t('settings.x_audit_text') }}</th>
+            <th>{{ t('settings.x_audit_status') }}</th>
+            <th>HTTP</th>
+            <th>{{ t('settings.x_audit_tweet') }}</th>
+            <th>ms</th>
+          </tr>
+        </thead>
+        <tbody>
+          <template x-for="(e, i) in audit.entries" :key="i">
+            <tr @click="audit.open = (audit.open === i ? null : i)" style="cursor:pointer;"
+                :title="t('settings.x_audit_details')">
+              <td class="when-abs mono" x-text="fmtAuditWhen(e)"></td>
+              <td x-text="e.action"></td>
+              <td class="audit-text" :class="audit.open === i ? 'audit-open' : ''">
+                <div class="txt" x-text="e.text || '—'"></div>
+                <div class="why" x-show="audit.open === i && e.error" x-cloak x-text="e.error"></div>
+              </td>
+              <td><span :class="e.status === 'success' ? 'ok-text' : 'bad-text'" x-text="e.status"></span></td>
+              <td class="mono" x-text="e.http_status == null ? '—' : e.http_status"></td>
+              <td>
+                <a x-show="e.post_url" x-cloak :href="e.post_url" target="_blank" rel="noopener noreferrer"
+                   @click.stop class="mono" style="color:var(--accent);" x-text="(e.tweet_id || '').slice(0, 10)"></a>
+                <span x-show="!e.post_url" x-cloak class="mono" x-text="(e.tweet_id || '—').slice(0, 10)"></span>
+              </td>
+              <td class="mono" x-text="e.duration_ms == null ? '—' : e.duration_ms"></td>
+            </tr>
+          </template>
+        </tbody>
+      </table>
+    </div>
+    {# Full request/response for the selected call — the part that actually
+       diagnoses a failure, rather than just naming it. #}
+    <div x-show="audit.open != null && audit.entries[audit.open]" x-cloak
+         style="border-top:1px solid var(--border-subtle);background:var(--bg-surface);padding:12px 14px;">
+      <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:.72rem;color:var(--text-muted);max-height:300px;overflow:auto;"
+           x-text="auditDetail()"></pre>
+    </div>
+    <div class="sched-empty" x-show="!audit.loading && !audit.entries.length" x-cloak>{{ t('scheduled.x_activity_empty') }}</div>
+    <div class="sched-empty" x-show="audit.loading" x-cloak>…</div>
   </div>
 
   {# ── Create / edit: cron task ── #}
