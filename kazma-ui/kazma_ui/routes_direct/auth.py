@@ -29,6 +29,7 @@ def register_auth_routes(self: Any) -> None:
             get_kazma_secret,
             get_request_principal,
             is_authenticated,
+            proxy_health,
         )
 
         expected = get_kazma_secret()
@@ -71,6 +72,9 @@ def register_auth_routes(self: Any) -> None:
             "oidc": oidc,
             "multi_user": multi_user,
             "principal": principal,
+            # Makes a mis-set KAZMA_TRUSTED_PROXIES visible without reading
+            # logs — the F-01 class otherwise fails silently.
+            "proxy": proxy_health(),
         }
     # Login brute-force throttle (audit M3) — in-process sliding window per IP.
     # Keyed on the proxy-aware client address (audit F-12): keying on the raw

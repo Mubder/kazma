@@ -52,6 +52,86 @@ def test_loopback_peer_not_trusted_when_proxy_declared(clean_auth_env, monkeypat
     assert _should_auto_issue_cookie(req, "regression-test-secret") is False
 
 
+def test_undeclared_proxy_revokes_peer_trust(clean_auth_env, monkeypatch):
+    """F-01 follow-up: a proxy the operator did not declare fails CLOSED.
+
+    KAZMA_TRUSTED_PROXIES is a claim about the topology, and a wrong claim
+    used to fail open silently — under Docker the proxy's address is the
+    bridge IP, so `127.0.0.1` is the natural guess and it is wrong.
+
+    Forwarded headers only come from a proxy. Seeing one from a peer that is
+    not on the allowlist proves the claim is wrong (or a client is spoofing),
+    and either way peer address has stopped being evidence.
+    """
+    from kazma_ui import auth
+
+    auth.reset_proxy_detection()
+    try:
+        # Same-host nginx, variable never set — the original F-01 topology.
+        proxied = _FakeRequest("127.0.0.1", {"x-forwarded-for": "203.0.113.9"})
+        assert auth._peer_trust_allowed(proxied) is False
+        assert auth.undeclared_proxy_detected() is True
+
+        # The latch holds for the process: a later header-less request from
+        # the same peer must not silently restore the bypass.
+        assert auth._peer_trust_allowed(_FakeRequest("127.0.0.1")) is False
+        assert auth._should_auto_issue_cookie(
+            _FakeRequest("127.0.0.1"), "regression-test-secret"
+        ) is False
+    finally:
+        auth.reset_proxy_detection()
+
+
+def test_wrong_proxy_address_fails_closed(clean_auth_env, monkeypatch):
+    """F-01 follow-up: the Docker mis-guess (127.0.0.1 vs the bridge IP)."""
+    from kazma_ui import auth
+
+    auth.reset_proxy_detection()
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "127.0.0.1")  # wrong guess
+    try:
+        # The real proxy is the Docker bridge, which we were not told about.
+        req = _FakeRequest("172.17.0.1", {"x-forwarded-for": "203.0.113.9"})
+        assert auth._peer_trust_allowed(req) is False
+        health = auth.proxy_health()
+        assert health["state"] == "undeclared_proxy"
+        assert health["observed_proxy_peer"] == "172.17.0.1"
+        # The hint names the address to set, so the fix needs no guessing.
+        assert "172.17.0.1" in health["hint"]
+    finally:
+        auth.reset_proxy_detection()
+
+
+def test_declared_proxy_is_not_flagged(clean_auth_env, monkeypatch):
+    """A correctly declared proxy must not trip the detector."""
+    from kazma_ui import auth
+
+    auth.reset_proxy_detection()
+    monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "172.17.0.1")
+    try:
+        req = _FakeRequest("172.17.0.1", {"x-forwarded-for": "203.0.113.9"})
+        assert auth._peer_trust_allowed(req) is False  # proxied: no peer trust
+        assert auth.undeclared_proxy_detected() is False
+        assert auth.proxy_health()["state"] == "declared"
+        # …and the real client is read from the forwarded header.
+        assert auth._client_host(req) == "203.0.113.9"
+    finally:
+        auth.reset_proxy_detection()
+
+
+def test_direct_localhost_still_auto_logs_in(clean_auth_env):
+    """The detector must not break the single-operator laptop case."""
+    from kazma_ui import auth
+
+    auth.reset_proxy_detection()
+    try:
+        req = _FakeRequest("127.0.0.1")  # no forwarded headers, no proxy set
+        assert auth._peer_trust_allowed(req) is True
+        assert auth._should_auto_issue_cookie(req, "regression-test-secret") is True
+        assert auth.proxy_health()["state"] == "direct"
+    finally:
+        auth.reset_proxy_detection()
+
+
 def test_forwarded_for_only_honoured_from_trusted_proxy(clean_auth_env, monkeypatch):
     """F-01: a spoofed X-Forwarded-For from a direct client is ignored."""
     from kazma_ui.auth import _client_host

@@ -58,13 +58,35 @@ proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
-**Verify after every deploy.** `authenticated` must read `false` before login:
+### Getting the address wrong fails closed
+
+Under Docker the proxy's address is the **bridge IP** (often `172.17.0.1`, or
+the compose network's gateway), not `127.0.0.1` — so the natural guess is
+wrong, and a wrong value used to be as silent as no value at all.
+
+Kazma now detects it from the traffic. Only a proxy inserts `X-Forwarded-*`;
+if one arrives from a peer that is *not* on the allowlist, then either a proxy
+is in front and undeclared or a client is spoofing the header — and either way
+peer address has stopped being evidence of anything. Kazma latches that
+observation, logs the address to set, and **disables peer-address trust for
+the life of the process**. Nobody is auto-logged-in; the operator can still
+authenticate with the secret.
+
+Spoofing the header therefore costs an attacker the loopback convenience login
+and buys them nothing. The detector is only ever allowed to close doors.
+
+**Verify after every deploy** — `authenticated` must read `false` before login,
+and `proxy.state` tells you whether the configuration is coherent:
 
 ```bash
 curl -s https://your.domain/api/auth/status
 ```
 
-If it reads `true`, the variable did not take and the instance is open.
+| `proxy.state` | Meaning |
+|---------------|---------|
+| `direct` | No proxy declared and none observed. Correct for a directly-bound host; **wrong — and open — if a proxy really is in front**. |
+| `declared` | Proxy declared and consistent with the traffic. This is the target state behind a proxy. |
+| `undeclared_proxy` | Forwarded headers arriving from an address that is not on the allowlist. Peer trust is off (safe), but `X-Forwarded-For` is still ignored, so per-client rate limiting and login throttling are degraded. `proxy.hint` names the address to set. |
 
 ## Tool sandboxing
 

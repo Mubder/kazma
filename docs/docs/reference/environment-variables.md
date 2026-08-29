@@ -104,7 +104,15 @@ append a client-supplied value; the shipped `deploy/nginx-ha.conf` already
 does. `serve.py` passes `--proxy-headers --forwarded-allow-ips` to uvicorn
 from this variable automatically.
 
-**Verify after deploy** — `authenticated` must read `false` before login:
+Under **Docker** this is the proxy container's bridge address (often
+`172.17.0.1` or the compose network gateway), not `127.0.0.1`. Getting it
+wrong no longer fails open: a forwarded header from an undeclared peer
+disables peer-address trust for the process and logs the address to set.
+
+**Verify after deploy** — `authenticated` must read `false` before login, and
+`proxy.state` should read `declared` (`direct` behind a proxy means the
+variable did not take; `undeclared_proxy` means it is set to the wrong
+address, and `proxy.hint` names the right one):
 
 ```bash
 curl -s https://your.domain/api/auth/status

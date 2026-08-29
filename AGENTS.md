@@ -1064,6 +1064,14 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   is absent, so a curl client used to get the agent.
 - Anything keying state per client (rate limit, login throttle, audit log)
   must call `auth.client_address(request)`, never `request.client.host`.
+- The variable is the operator's CLAIM about the topology, and a wrong claim
+  used to fail open (under Docker the proxy is the bridge IP, so `127.0.0.1`
+  is the natural guess and it is wrong). `_note_forwarded_headers()` settles
+  it from the traffic: an `X-Forwarded-*` header from an undeclared peer
+  latches `undeclared_proxy_detected()` and revokes peer trust for the
+  process. `proxy_health()` surfaces the state on `/api/auth/status`.
+  The latch never clears at runtime — it may only close doors, never open
+  them, which is also why spoofing the header gains an attacker nothing.
 
 **B. HITL default-denies.**
 - `requires_approval()` ends on the `TOOL_TIERS` classification, not on a

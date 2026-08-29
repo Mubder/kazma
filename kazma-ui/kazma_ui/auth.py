@@ -104,6 +104,83 @@ def behind_proxy() -> bool:
     return bool(trusted_proxies())
 
 
+#: Headers only a reverse proxy inserts. Their presence from an *undeclared*
+#: peer is the traffic telling us the deployment topology is not what
+#: ``KAZMA_TRUSTED_PROXIES`` claims.
+_FORWARDED_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-real-ip", "forwarded")
+
+#: Set once a proxied request arrives from a peer we were not told about.
+#: Never cleared at runtime — the topology does not change mid-process, and a
+#: flag that could be cleared would be a way to re-open the hole.
+_undeclared_proxy: dict[str, Any] = {"seen": False, "peer": "", "warned": False}
+
+
+def undeclared_proxy_detected() -> bool:
+    """True once a forwarded header arrived from a peer not in the allowlist.
+
+    See :func:`_note_forwarded_headers` for why this exists.
+    """
+    return bool(_undeclared_proxy["seen"])
+
+
+def reset_proxy_detection() -> None:
+    """Clear the detection latch (tests only)."""
+    _undeclared_proxy.update({"seen": False, "peer": "", "warned": False})
+
+
+def _note_forwarded_headers(request: Request) -> None:
+    """Detect a reverse proxy the operator did not declare, and fail closed.
+
+    ``KAZMA_TRUSTED_PROXIES`` is the operator's *claim* about the topology,
+    and a wrong claim fails in two directions. Unset (or pointed at the wrong
+    address) while a same-host proxy is really in front means every visitor
+    arrives as ``127.0.0.1`` and inherits operator trust — audit F-01. Under
+    Docker the proxy's address is the bridge IP, not ``127.0.0.1``, so the
+    natural guess is wrong and the failure is silent.
+
+    The traffic itself settles it. Only a proxy inserts ``X-Forwarded-*``. If
+    one shows up from a peer that is *not* on the allowlist, then either a
+    proxy is in front and undeclared, or a client is spoofing the header —
+    and both mean peer address has stopped being evidence of anything. So we
+    latch the observation and stop treating peer address as a credential.
+
+    Spoofing therefore costs an attacker the loopback convenience login and
+    buys them nothing; the operator can still authenticate with the secret.
+    That asymmetry is deliberate — this is only ever allowed to close doors.
+    """
+    if _undeclared_proxy["seen"]:
+        return
+    peer = _peer_host(request)
+    if not peer or peer in trusted_proxies():
+        return
+    try:
+        headers = request.headers
+        present = [h for h in _FORWARDED_HEADERS if headers.get(h)]
+    except Exception:
+        return
+    if not present:
+        return
+
+    _undeclared_proxy["seen"] = True
+    _undeclared_proxy["peer"] = peer
+    if not _undeclared_proxy["warned"]:
+        _undeclared_proxy["warned"] = True
+        logger.error(
+            "[SECURITY] %s arrived from peer %s, which is not in %s. A reverse "
+            "proxy is in front of this instance and was not declared (under "
+            "Docker its address is the bridge IP, not 127.0.0.1). "
+            "Peer-address trust is now DISABLED for the life of this process "
+            "— no client will be auto-logged-in, and X-Forwarded-For is "
+            "still ignored, so per-client rate limiting is degraded. "
+            "Set %s=%s and restart.",
+            "/".join(present),
+            peer,
+            TRUSTED_PROXIES_ENV_VAR,
+            TRUSTED_PROXIES_ENV_VAR,
+            peer,
+        )
+
+
 def _peer_host(request: Request) -> str:
     """The raw TCP peer address (never the forwarded client)."""
     if request.client is None:
@@ -272,7 +349,15 @@ def _peer_trust_allowed(request: Request) -> bool:
     Direct-bind deployments (no proxy declared): yes — the peer really is the
     client, and single-operator localhost use depends on it. Proxied
     deployments: no, unless explicitly re-enabled. See audit F-01.
+
+    A proxy the operator did *not* declare also revokes peer trust, so a
+    mis-set ``KAZMA_TRUSTED_PROXIES`` (the Docker bridge address is not
+    ``127.0.0.1``) fails closed instead of silently leaving the bypass open.
     """
+    # Cheap when already latched; one header read per request otherwise.
+    _note_forwarded_headers(request)
+    if undeclared_proxy_detected():
+        return False
     if not behind_proxy():
         return True
     if _loopback_auto_login_enabled():
@@ -826,6 +911,8 @@ def _mint_auth_cookie(response: Response, request: Request, expected: str) -> No
     try:
         from kazma_core.security.web_sessions import (
             SESSION_COOKIE as _SC,
+        )
+        from kazma_core.security.web_sessions import (
             create_session,
             use_opaque_sessions,
         )
@@ -1062,7 +1149,7 @@ def create_tenant_middleware() -> Callable[[Request, Callable[[Request], Awaitab
     and cookies are **ignored** unless a verified JWT / opaque principal is
     present (audit H11 + SaaS residual). Single-tenant default is ``default``.
     """
-    from kazma_core.tenant_context import set_current_tenant_id, reset_current_tenant_id
+    from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
     from kazma_core.tenant_isolation import (
         client_tenant_spoof_allowed,
         principal_tenant_id,
@@ -1168,7 +1255,40 @@ __all__: list[str] = [
     "behind_proxy",
     "client_address",
     "assert_proxy_configuration",
+    "undeclared_proxy_detected",
+    "reset_proxy_detection",
+    "proxy_health",
 ]
+
+
+def proxy_health() -> dict[str, Any]:
+    """Operator-facing view of whether the proxy configuration is coherent.
+
+    Surfaced by ``GET /api/auth/status`` so a misconfiguration is visible
+    without reading logs — the F-01 class fails silently otherwise.
+    """
+    declared = sorted(trusted_proxies())
+    undeclared = undeclared_proxy_detected()
+    if undeclared:
+        state = "undeclared_proxy"
+    elif declared:
+        state = "declared"
+    else:
+        state = "direct"
+    return {
+        "state": state,
+        "trusted_proxies": declared,
+        "peer_trust_active": not undeclared
+        and (not declared or _loopback_auto_login_enabled()),
+        "observed_proxy_peer": _undeclared_proxy["peer"] or None,
+        "hint": (
+            f"A proxy at {_undeclared_proxy['peer']} is sending forwarded headers "
+            f"but is not in {TRUSTED_PROXIES_ENV_VAR}. Set "
+            f"{TRUSTED_PROXIES_ENV_VAR}={_undeclared_proxy['peer']} and restart."
+            if undeclared
+            else None
+        ),
+    }
 
 
 def client_address(request: Request) -> str:

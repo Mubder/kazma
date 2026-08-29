@@ -84,6 +84,19 @@ Verified against a source-pinned baseline of unmodified `main` over the full
 6,900-test suite: this tree fails a strict subset of what `main` already
 fails. Zero regressions.
 
+**A wrong proxy address no longer fails open.** `KAZMA_TRUSTED_PROXIES` is
+the operator's claim about the topology, and the claim is easy to get wrong:
+under Docker the proxy is the bridge IP, so `127.0.0.1` is the natural guess
+and it is silently incorrect. The traffic settles it — only a proxy inserts
+`X-Forwarded-*`, so one arriving from an address that is not on the allowlist
+proves the claim is wrong (or a client is spoofing, which means the same
+thing for our purposes). Kazma latches that, logs the address to set, and
+disables peer-address trust for the life of the process. Spoofing costs an
+attacker the loopback convenience login and buys them nothing; the detector
+may only close doors. `GET /api/auth/status` now carries a `proxy` block —
+`direct` / `declared` / `undeclared_proxy` plus the address to fix — so the
+misconfiguration is visible without reading logs.
+
 **The gates themselves had never run on Windows.** `pre-commit` was not
 declared as a dependency anywhere, and once installed both hooks failed with
 `WinError 2`: under `language: system` pre-commit executes the entry without
