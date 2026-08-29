@@ -101,15 +101,43 @@ App passwords still work for personal Gmail if your admin allows them; OAuth is 
 
 Your OAuth app is in **Testing**. Google only allows **test users** until the app is verified (Gmail scopes are “sensitive/restricted”).
 
-**Fix for personal / single-user use (recommended):**
+**Fix for personal / single-user use:**
 
 1. [Google Cloud Console](https://console.cloud.google.com/) → **APIs & Services** → **OAuth consent screen**.  
-2. Publishing status should be **Testing** (fine for self-host).  
-3. Open **Test users** → **Add users** → add the Gmail you sign in with (e.g. `you@gmail.com`).  
-4. Save, wait ~1 minute, try **Connect with Google** again.  
-5. On the consent screen you may still see “Google hasn’t verified this app” → **Continue** / **Advanced** → go to Kazma (unsafe) — expected for unverified personal projects.
+2. Open **Test users** → **Add users** → add the Gmail you sign in with (e.g. `you@gmail.com`).  
+3. Save, wait ~1 minute, try **Connect with Google** again.  
+4. On the consent screen you will see “Google hasn’t verified this app” → **Advanced** → go to Kazma (unsafe) — expected for an unverified personal project.
 
-**Do not** need full Google verification unless you ship Kazma as a multi-tenant product to arbitrary Gmail users. Self-host + test users is enough.
+**Do not** need full Google verification unless you ship Kazma as a multi-tenant product to arbitrary Gmail users.
+
+#### Testing vs In production — pick one deliberately
+
+The publishing status is not cosmetic; it decides how often you have to reconnect.
+
+| | **Testing** | **In production** (unverified) |
+|---|---|---|
+| Who can connect | Only accounts on the **Test users** list (max 100) | Anyone, up to a 100-user cap while unverified |
+| **Refresh token lifetime** | **Expires after 7 days** — you reconnect weekly | Does not expire on a timer |
+| Consent screen | “Google hasn’t verified this app” warning | Same warning until verified |
+| Verification needed | No | Only to lift the cap / drop the warning |
+
+For a self-hosted single-operator install, **In production** is usually the better
+choice: the scopes and the warning screen are identical, and the weekly
+`invalid_grant` reconnect goes away. Publishing does not submit anything for
+review — verification is a separate step you can decline.
+
+:::note After switching to In production, reconnect once
+A refresh token issued while the app was in **Testing** carries its 7-day
+clock; publishing does not extend a token that already exists. Go to
+**Settings → Email → Disconnect**, then **Connect with Google** again to mint
+a durable one. Skipping this looks exactly like the fix not working, a week
+later.
+:::
+
+Gmail's `gmail.modify` / `gmail.send` are **restricted** scopes, so an
+unverified app — Testing *or* published — always shows the warning screen and
+is capped at 100 users. That cap is irrelevant for self-host and is the only
+thing verification buys you.
 
 **Workspace:** if the account is a company Google Workspace user, an admin may still block third-party OAuth; use a personal test user or admin-approved app.
 
