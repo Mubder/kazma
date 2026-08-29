@@ -355,8 +355,35 @@ def start_memory_worker() -> None:
         _start_commitment_gc_scheduler()
         _start_session_purge_scheduler()
         _start_daily_digest_scheduler()
+        _start_firing_ledger_scheduler()
     except Exception:
         logger.warning("[memory_worker] could not start worker", exc_info=True)
+
+
+def _start_firing_ledger_scheduler() -> None:
+    """Weekly count of which resilience mechanisms actually fired.
+
+    Held in ``_scheduler_tasks`` like the rest: an unreferenced task can
+    be garbage-collected mid-loop, and a silently-collected sweep would
+    be this module's own finding happening to this module.
+    """
+    try:
+        import asyncio
+
+        from kazma_core.observability.firing_ledger import ledger_scheduler
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("[memory_worker] no loop - firing ledger deferred")
+            return
+        task = asyncio.create_task(ledger_scheduler())
+        _scheduler_tasks.add(task)
+        task.add_done_callback(_scheduler_tasks.discard)
+        logger.info("[memory_worker] firing ledger scheduler started")
+    except Exception:
+        logger.warning("[memory_worker] firing ledger scheduler failed to start",
+                       exc_info=True)
 
 
 def _start_daily_digest_scheduler() -> None:

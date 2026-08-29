@@ -195,3 +195,32 @@ def test_ledger_does_not_call_a_watched_mechanism_blind():
     blind = [e for e in report.entries if e.mechanism == "(no firing signature)"]
     if blind:
         assert "foreign-server detection" not in blind[0].note
+
+
+# -- a report nobody runs ------------------------------------------------
+
+def test_ledger_sweep_is_registered_at_boot_and_held():
+    """The ledger shipped unscheduled for its first day.
+
+    That is this module's own finding happening to this module: a
+    mechanism that exists, imports, passes its tests, and never runs. The
+    task must also be held, because an unreferenced asyncio task can be
+    garbage-collected mid-loop.
+    """
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1]
+           / "kazma-core" / "kazma_core" / "memory"
+           / "worker_bootstrap.py").read_text(encoding="utf-8")
+    assert "_start_firing_ledger_scheduler()" in src
+    fn = src.split("def _start_firing_ledger_scheduler()", 1)[1][:1500]
+    assert "_scheduler_tasks.add(task)" in fn
+
+
+def test_ledger_sweep_sleeps_before_its_first_report():
+    """A report on every boot fires hardest during an incident, when the
+    operator needs another message least."""
+    import inspect
+
+    src = inspect.getsource(fl.ledger_scheduler)
+    assert src.index("asyncio.sleep") < src.index("run_weekly_sweep")

@@ -26,6 +26,7 @@ problem in a new place.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -36,7 +37,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["FIRING_SIGNATURES", "scan_log", "build_report", "run_weekly_sweep"]
+__all__ = ["FIRING_SIGNATURES", "scan_log", "build_report",
+           "run_weekly_sweep", "ledger_scheduler"]
 
 
 @dataclass(frozen=True)
@@ -281,6 +283,33 @@ def run_weekly_sweep(hours: float = 168.0, *, notify: bool = True) -> LedgerRepo
     if notify:
         _send(report)
     return report
+
+
+SWEEP_INTERVAL_HOURS = 168.0
+
+
+async def ledger_scheduler() -> None:
+    """Fire the sweep once a week. Crash-isolated; sleeps first.
+
+    A report nobody schedules is the exact shape this module was written
+    to find. It sat unscheduled for its first day of life, which is worth
+    recording rather than quietly fixing: the pattern is that easy to
+    repeat.
+
+    Sleeps first for the same reason the digest does -- a report on every
+    boot fires hardest during an incident, when the operator needs another
+    message least.
+    """
+    while True:
+        try:
+            await asyncio.sleep(SWEEP_INTERVAL_HOURS * 3600)
+            run_weekly_sweep(SWEEP_INTERVAL_HOURS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- a failed sweep must not
+            # kill the cadence; the next one still fires.
+            logger.warning("[firing-ledger] scheduler iteration failed: %s", exc)
+            await asyncio.sleep(300)
 
 
 def _send(report: LedgerReport) -> None:
