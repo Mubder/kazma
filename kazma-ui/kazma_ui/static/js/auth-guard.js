@@ -45,7 +45,21 @@
         return _fetch.call(this, input, init).then(function (res) {
             // Only intercept the unauthorized responses. Never touch the body
             // or status so callers that await res.status see the real value.
-            if (res && (res.status === 401 || res.status === 403)) {
+            //
+            // 401 ONLY. 403 used to redirect here too, and it meant that any
+            // forbidden response logged the operator out of Kazma entirely.
+            // Nothing in this app returns 403 for an expired session: it is
+            // the CSRF guard (csrf.py), the RBAC check ("Forbidden for your
+            // role"), and the email endpoints' same-origin guard. Every one
+            // of those means "you are signed in, but this request is not
+            // allowed" — the opposite of a session expiry.
+            //
+            // Live, 2026-08-29: Disconnect on the Gmail settings card sent no
+            // X-Requested-With header, the same-origin guard returned 403, and
+            // this line threw the operator back to the login page. Every
+            // attempt. They logged back in and it happened again, which made a
+            // one-line missing header look like a broken session.
+            if (res && res.status === 401) {
                 // Don't intercept the auth endpoints themselves (login, status,
                 // logout) — their 401 is meaningful to the login form, not a
                 // session-expiry signal.

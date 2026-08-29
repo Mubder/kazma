@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 import httpx
@@ -318,6 +319,14 @@ def persist_gmail_tokens(
     # Mark auth mode (wins over IMAP/POP until user reconnects protocol)
     os.environ["EMAIL_GMAIL_AUTH"] = "oauth"
     vault_store("email.gmail.auth", "oauth", category="email")
+    if refresh:
+        # When this grant was minted. Google expires refresh tokens after 7
+        # days for projects whose OAuth publishing status is "Testing", which
+        # is a deliberate choice on this install -- verification is not worth
+        # it for a single-user app. Recording the time is what lets Kazma warn
+        # BEFORE the weekly expiry instead of discovering it mid-task.
+        vault_store("email.gmail.connected_at", str(int(time.time())),
+                    category="email")
 
 
 def clear_gmail_oauth() -> dict[str, Any]:
@@ -329,8 +338,8 @@ def clear_gmail_oauth() -> dict[str, Any]:
     ):
         os.environ.pop(k, None)
     try:
-        from kazma_core.security.vault import SecretVault, get_vault
         from kazma_core.paths import vault_db_path
+        from kazma_core.security.vault import SecretVault, get_vault
 
         v = get_vault() or SecretVault(db_path=vault_db_path())
         for name in (

@@ -176,6 +176,20 @@ MECHANISMS: tuple[Mechanism, ...] = (
         ),
     ),
     Mechanism(
+        name="connector credential health",
+        fault="a connector's sign-in expires and nothing says so",
+        module="kazma_core.observability.connector_health",
+        symbol="check_google",
+        proof="tests/test_connector_health.py",
+        proven_in_production=False,
+        note=(
+            "The Google grant died on 2026-08-27 and was found by looking, "
+            "not by being told. OAuth status stays on Testing by choice, so "
+            "Google expires it every 7 days -- this warns a day ahead rather "
+            "than reporting a break already tripped over."
+        ),
+    ),
+    Mechanism(
         name="backup-gap alerting",
         fault="backups keep succeeding while silently protecting nothing",
         module="kazma_core.backup.universal",
