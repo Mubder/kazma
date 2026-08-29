@@ -162,13 +162,18 @@ def _get_metrics() -> dict[str, Any]:
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request) -> HTMLResponse:
     """Render observability dashboard with traces, costs, and metrics."""
+    from kazma_ui.i18n import make_translator
+
+    cookie_lang = request.cookies.get("kazma-lang")
+    _ = make_translator(cookie_lang if cookie_lang in ("ar", "en") else "en")
+
     cost_current = 0.0
     cost_max = 0.50
     cost_headroom = 0.50
-    breaker_status = "OK"
+    breaker_status = _("dashboard.breaker_ok")
     breaker_color = "text-success"
     cost_color = "text-success"
-    silence_info = "No cost threshold reached"
+    silence_info = _("dashboard.no_cost_threshold")
 
     if _cost_breaker:
         status = _cost_breaker.status()
@@ -178,18 +183,18 @@ async def dashboard(request: Request) -> HTMLResponse:
         is_halted = status["is_halted"]
 
         if is_halted:
-            breaker_status = "HALTED"
+            breaker_status = _("dashboard.breaker_halted")
             breaker_color = "text-error"
             cost_color = "text-error"
-            silence_info = f"Halted — ${cost_current:.4f} spent, user silence exceeded"
+            silence_info = _("dashboard.halted_spent", amount=f"{cost_current:.4f}")
         elif cost_current >= cost_max:
-            breaker_status = "WARNING"
+            breaker_status = _("dashboard.breaker_warning")
             breaker_color = "text-warning"
             cost_color = "text-warning"
             remaining = status["silence_remaining"]
-            silence_info = f"Over budget — {remaining:.0f}s until halt"
+            silence_info = _("dashboard.over_budget", seconds=f"{remaining:.0f}")
         else:
-            silence_info = f"${cost_headroom:.4f} headroom remaining"
+            silence_info = _("dashboard.headroom_remaining", amount=f"{cost_headroom:.4f}")
 
     tracing_backend = "console"
     if _tracer:
