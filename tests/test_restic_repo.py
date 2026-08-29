@@ -525,3 +525,40 @@ def test_a_failed_store_revokes_nothing(repo, payload):
     assert res["ok"] is False
     assert res["removed"] == []
     assert rr.snapshots(repo, _PW).ok, "the original passphrase must still work"
+
+
+# ── error extraction ──────────────────────────────────────────────────
+
+
+def test_an_rclone_notice_never_masks_the_real_error():
+    """rclone prints a NOTICE about its shared client_id on EVERY call, and
+    it lands on stderr first. Taking the leading 400 characters reported the
+    notice and truncated the real error away -- a fully successful offsite
+    restore was reported as a failure whose message said only that a client
+    id retires in 2026."""
+    notice = ("rclone: 2026/08/29 NOTICE: kazma-backup: This remote uses "
+              "rclone's shared Google Drive client_id, which is being retired")
+    got = rr._meaningful_error(notice + chr(10) + "Fatal: unable to open repository", "")
+    assert got == "Fatal: unable to open repository"
+    assert "NOTICE" not in got
+
+
+def test_truncation_no_longer_hides_the_error_summary():
+    """The handler that forgives benign restores keys on "There were N
+    errors". Truncating that line away is what made a 952 MiB successful
+    restore look failed."""
+    notice = "rclone: NOTICE: " + ("x" * 500)
+    text = (notice + chr(10) +
+            r'failed to restore timestamp of "C:\x": Access is denied.' + chr(10) +
+            "Fatal: There were 1 errors")
+    got = rr._meaningful_error(text, "")
+    benign, count = rr._only_directory_timestamp_errors(got)
+    assert benign is True and count == 1, (
+        "the benign-restore handler must still see its evidence after extraction"
+    )
+
+
+def test_output_with_nothing_useful_still_says_something():
+    assert rr._meaningful_error("", "") == "failed with no output"
+    only_notice = rr._meaningful_error("rclone: NOTICE: shared client_id", "")
+    assert only_notice, "never return an empty error"
