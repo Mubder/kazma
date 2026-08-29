@@ -42,10 +42,13 @@ Usage
 from __future__ import annotations
 
 import asyncio
+import atexit
 import inspect
 import json
 import logging
+import queue
 import sqlite3
+import threading
 import time
 import types as _types
 import typing as _typing
@@ -158,51 +161,154 @@ def _get_permission_manager() -> Any:
     return _PERMISSION_MANAGER
 
 
+# ── Procedural-outcome recorder: ONE worker, not a thread per tool call ──
+#
+# This used to spawn a fresh `daemon=True` thread on every tool execution,
+# each opening its own SQLite connection, running `ensure_primary_schema`
+# (full DDL + FTS5 rebuild probes) and writing a row. Under any burst of tool
+# calls that is several threads writing the same two databases at once, and it
+# crashed the interpreter:
+#
+#     Windows fatal exception: access violation
+#
+# The faulting traceback moved around — `_ensure_fts5`, `config_store.get`,
+# `ensure_primary_schema` — which is why it read like several unrelated bugs.
+# Measured on `tests/test_truncation_retry.py`: 4/10 runs crashed, and 0/10
+# with these threads disabled, so the concurrency between them is the fault.
+# Three narrower hypotheses were tested and are NOT the cause (each still
+# crashed at ~the same rate): draining the threads at exit, giving ConfigStore
+# a per-thread connection, and serialising `ensure_primary_schema`. Making the
+# threads non-daemon did not help either, so it is not an interpreter-teardown
+# race.
+#
+# Rather than keep hunting which shared object corrupts, remove the
+# concurrency: a single worker thread drains a bounded queue, so exactly one
+# thread ever touches these databases. That also fixes the unbounded
+# thread-per-call spawn, which was its own problem.
+_PROCEDURAL_QUEUE: queue.Queue[tuple[str, dict[str, Any], bool, Any] | None] = queue.Queue(
+    maxsize=512
+)
+_PROCEDURAL_WORKER: threading.Thread | None = None
+_PROCEDURAL_WORKER_LOCK = threading.Lock()
+_PROCEDURAL_STOPPING = threading.Event()
+
+#: How long to wait for the queue to drain at exit. These are single-row
+#: writes; anything slower is a lock fight not worth blocking shutdown for.
+_PROCEDURAL_DRAIN_SECONDS = 3.0
+
+
+def _procedural_worker() -> None:
+    """Drain queued tool outcomes on one connection. Never raises."""
+    conn = None
+    conn_path: str | None = None
+    try:
+        import sqlite3
+
+        from kazma_core.memory.procedural import record_procedural_outcome
+        from kazma_core.memory.schema_v2 import ensure_primary_schema
+        from kazma_core.paths import primary_memory_db
+
+        while True:
+            item = _PROCEDURAL_QUEUE.get()
+            try:
+                if item is None:  # shutdown sentinel
+                    return
+                tool_name, arguments, success, cfg = item
+
+                # Resolve the target per item rather than once at startup.
+                # The data directory is fixed in production but not under
+                # test, where each case gets its own; binding the connection
+                # at thread start would pin the first directory this worker
+                # ever saw and silently write every later record to it.
+                path = str(primary_memory_db())
+                if conn is None or path != conn_path:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                    conn = sqlite3.connect(
+                        path, check_same_thread=False, isolation_level=None
+                    )
+                    # Once per database, not once per tool call.
+                    ensure_primary_schema(conn)
+                    conn_path = path
+                # Arguments are the preconditions; the tool name + args form
+                # the DAG signature. Postcondition is the success bool.
+                record_procedural_outcome(
+                    conn,
+                    name=tool_name,
+                    description=f"Tool: {tool_name}",
+                    preconditions={"tool": tool_name, "args_keys": sorted(arguments.keys())},
+                    dag_steps=[{"tool": tool_name, "args": arguments}],
+                    postconditions={"succeeded": success},
+                    success=success,
+                    cfg=cfg,
+                )
+            except Exception:
+                logger.debug("[ToolRegistry] procedural record failed", exc_info=True)
+            finally:
+                _PROCEDURAL_QUEUE.task_done()
+    except Exception:
+        logger.debug("[ToolRegistry] procedural worker stopped", exc_info=True)
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+def _stop_procedural_worker(timeout: float = _PROCEDURAL_DRAIN_SECONDS) -> None:
+    """Drain the queue and stop the worker. Registered with :mod:`atexit`."""
+    _PROCEDURAL_STOPPING.set()
+    worker = _PROCEDURAL_WORKER
+    if worker is None or not worker.is_alive():
+        return
+    try:
+        _PROCEDURAL_QUEUE.put_nowait(None)
+    except queue.Full:
+        pass
+    worker.join(timeout=timeout)
+
+
+atexit.register(_stop_procedural_worker)
+
+
 def _record_procedural_outcome(tool_name: str, arguments: dict[str, Any], *, success: bool) -> None:
     """Feed a tool-execution outcome into the V2 procedural DAG memory.
 
-    Best-effort fire-and-forget on a daemon thread — never blocks the
-    tool result or raises into the tool path. Records the outcome so the
-    procedural recorder can cluster recurring tool patterns and compute
-    Laplace-smoothed confidence. No-op when the V2 schema is absent.
+    Best-effort and non-blocking — never delays the tool result or raises into
+    the tool path. Enqueues for the single worker above; drops the record when
+    the queue is full rather than growing memory or blocking a tool call.
     """
+    if _PROCEDURAL_STOPPING.is_set():
+        return
+    global _PROCEDURAL_WORKER
     try:
-        import threading
-
-        def _run() -> None:
-            try:
-                import sqlite3
-
-                from kazma_core.memory.config import read_memory_cfg
-                from kazma_core.memory.procedural import record_procedural_outcome
-                from kazma_core.memory.schema_v2 import ensure_primary_schema
-                from kazma_core.paths import primary_memory_db
-
-                conn = sqlite3.connect(
-                    primary_memory_db(), check_same_thread=False, isolation_level=None
-                )
-                try:
-                    ensure_primary_schema(conn)
-                    # Arguments are the preconditions; the tool name + args
-                    # form the DAG signature. Postcondition is success bool.
-                    record_procedural_outcome(
-                        conn,
-                        name=tool_name,
-                        description=f"Tool: {tool_name}",
-                        preconditions={"tool": tool_name, "args_keys": sorted(arguments.keys())},
-                        dag_steps=[{"tool": tool_name, "args": arguments}],
-                        postconditions={"succeeded": success},
-                        success=success,
-                        cfg=read_memory_cfg(),
+        if _PROCEDURAL_WORKER is None or not _PROCEDURAL_WORKER.is_alive():
+            with _PROCEDURAL_WORKER_LOCK:
+                if _PROCEDURAL_WORKER is None or not _PROCEDURAL_WORKER.is_alive():
+                    _PROCEDURAL_WORKER = threading.Thread(
+                        target=_procedural_worker,
+                        daemon=True,
+                        name="kazma-procedural-record",
                     )
-                finally:
-                    conn.close()
-            except Exception:
-                logger.debug("[ToolRegistry] procedural record failed", exc_info=True)
+                    _PROCEDURAL_WORKER.start()
+        # Read config on the CALLER's thread, never in the worker. A test
+        # harness resetting the ConfigStore singleton frees the sqlite handle
+        # under any background reader; keeping the worker out of the store
+        # entirely means a reset cannot race it at all (see
+        # `reset_config_store`, whose default this also corrected).
+        from kazma_core.memory.config import read_memory_cfg
 
-        threading.Thread(target=_run, daemon=True, name="kazma-procedural-record").start()
+        cfg = read_memory_cfg()
+        try:
+            _PROCEDURAL_QUEUE.put_nowait((tool_name, arguments, success, cfg))
+        except queue.Full:
+            logger.debug("[ToolRegistry] procedural queue full — outcome dropped")
     except Exception:
-        logger.debug("[ToolRegistry] could not spawn procedural-record thread", exc_info=True)
+        logger.debug("[ToolRegistry] could not enqueue procedural outcome", exc_info=True)
 
 
 
