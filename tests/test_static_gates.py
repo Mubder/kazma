@@ -223,3 +223,38 @@ def test_no_unfenced_web_tool_output(rel):
         "Fix: `from kazma_core.safety.prompt_fence import fence_untrusted` and "
         "return `fence_untrusted(text, source=...)`."
     )
+
+
+def test_shipped_mcp_servers_can_actually_run():
+    """No MCP entry in the shipped kazma.yaml may name a shell builtin.
+
+    `test-mcp` ran `echo hello`. echo is a shell builtin, not an
+    executable, so the server could never start -- and because it shipped
+    ENABLED, every install alerted its operator about a fixture. It was
+    disabled once in 683d5198 and silently re-enabled by de6ef2cb, which is
+    the reason this is a gate and not another config edit: a value a commit
+    can flip back needs a test, not a fix.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = yaml.safe_load((root / "kazma.yaml").read_text(encoding="utf-8")) or {}
+    mcp = cfg.get("mcp")
+    servers = mcp.get("servers", []) if isinstance(mcp, dict) else (mcp or [])
+
+    # Builtins of cmd.exe / POSIX shells: never real executables.
+    builtins = {"echo", "cd", "set", "dir", "type", "exit", "true", "false"}
+    offenders = []
+    for srv in servers:
+        if not isinstance(srv, dict) or not srv.get("enabled", True):
+            continue
+        cmd = srv.get("command") or []
+        head = str(cmd[0]).lower() if cmd else ""
+        if head in builtins:
+            offenders.append(f"{srv.get('name')} -> {head}")
+
+    assert not offenders, (
+        "shipped MCP servers that cannot start: " + ", ".join(offenders)
+    )

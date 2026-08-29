@@ -73,9 +73,52 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 | `KAZMA_ENV` | unset | Optional | Some paths treat `production` specially. |
 | `KAZMA_PUBLIC_URL` | unset | Recommended behind proxy | Public origin for OAuth/OIDC redirects. |
 | `KAZMA_CORS_ORIGINS` | unset | If browser cross-origin | Comma-separated origins. |
+| `KAZMA_ENV_FILE` | unset | No | Absolute path to an extra `.env`, loaded **last** so it wins. The `.env` ladder is: `<kazma home>/.env` → `<cwd>/.env` → this. Nothing outside the installation is read unless you name it here. |
+| `KAZMA_TRUSTED_PROXIES` | unset | **Yes** behind any proxy | Comma-separated addresses the reverse proxy connects **from** (`127.0.0.1` for same-host nginx/Caddy, the bridge IP under Docker). Only these peers may set `X-Forwarded-For` / `X-Forwarded-Proto`. See the warning below. |
+| `KAZMA_LOOPBACK_AUTOLOGIN` | `0` | Keep `0` | Re-enables credential-less loopback login even with a proxy declared. Only for a host where `127.0.0.1` really is just you. |
 | `KAZMA_TRUST_LAN` | `0` | Keep `0` unless needed | LAN trust for auth middleware. |
 | `KAZMA_AUTH_DISABLED` | unset | **Never in prod** | Disables auth helpers — dev only. |
 | `KAZMA_ALLOW_YOLO` | unset | Avoid | Only way to re-enable YOLO when `KAZMA_PRODUCTION=1`. |
+| `KAZMA_VERBOSE_ERRORS` | `0` | Keep `0` | Appends the real exception message to API errors (still redacted for paths and credentials). Dev only — production returns a code plus a correlation id. |
+
+:::danger `KAZMA_TRUSTED_PROXIES` is required behind a reverse proxy
+
+Kazma treats a **loopback client as the local operator** and auto-issues an
+admin session to it — that is what makes single-operator localhost use work
+with no login.
+
+Behind a same-host nginx/Caddy, `request.client.host` is `127.0.0.1` for
+*every* internet visitor. Without `KAZMA_TRUSTED_PROXIES`, each of them is
+therefore treated as the operator and handed an admin session on the first
+page load, over HTTP **and** WebSocket. This was audit finding F-01
+(2026-08-29).
+
+Set it to the proxy's address and Kazma reads the real client from
+`X-Forwarded-For` instead, and stops treating peer address as a credential:
+
+```bash
+KAZMA_TRUSTED_PROXIES=127.0.0.1
+```
+
+Your proxy must send the forwarded headers and must *overwrite* rather than
+append a client-supplied value; the shipped `deploy/nginx-ha.conf` already
+does. `serve.py` passes `--proxy-headers --forwarded-allow-ips` to uvicorn
+from this variable automatically.
+
+Under **Docker** this is the proxy container's bridge address (often
+`172.17.0.1` or the compose network gateway), not `127.0.0.1`. Getting it
+wrong no longer fails open: a forwarded header from an undeclared peer
+disables peer-address trust for the process and logs the address to set.
+
+**Verify after deploy** — `authenticated` must read `false` before login, and
+`proxy.state` should read `declared` (`direct` behind a proxy means the
+variable did not take; `undeclared_proxy` means it is set to the wrong
+address, and `proxy.hint` names the right one):
+
+```bash
+curl -s https://your.domain/api/auth/status
+```
+:::
 
 ---
 
@@ -317,9 +360,14 @@ KAZMA_SECRET=<strong-random>
 KAZMA_PRODUCTION=1
 KAZMA_VAULT_KEY=<strong-random>
 KAZMA_PUBLIC_URL=https://your.domain
+KAZMA_TRUSTED_PROXIES=127.0.0.1   # REQUIRED — the proxy's address, not the client's
 KAZMA_TRUST_LAN=0
 KAZMA_CODE_EXEC_DOCKER=force
 ```
+
+Under Docker, `KAZMA_TRUSTED_PROXIES` is the proxy **container's** address on
+the bridge network (often `172.17.0.1` or the compose network's gateway), not
+`127.0.0.1`.
 
 ### Multi-replica SaaS
 
@@ -329,6 +377,7 @@ KAZMA_PRODUCTION=1
 KAZMA_SECRET=…
 KAZMA_VAULT_KEY=…
 KAZMA_PUBLIC_URL=https://…
+KAZMA_TRUSTED_PROXIES=<load-balancer / ingress address>
 # optional OIDC_*
 ```
 

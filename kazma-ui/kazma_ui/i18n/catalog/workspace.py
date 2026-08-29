@@ -129,8 +129,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Absolute Directory Path",
     },
     "workspace.field_path_ph": {
-        "ar": "مثال: C:/Users/balfa/my-project",
-        "en": "e.g., C:/Users/balfa/my-project",
+        "ar": "مثال: C:/Users/me/my-project",
+        "en": "e.g., C:/Users/me/my-project",
     },
     "workspace.files_title": {
         "ar": "ملفات المشروع",

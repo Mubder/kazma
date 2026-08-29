@@ -47,20 +47,15 @@ mcp:
     - '@modelcontextprotocol/server-filesystem'
     - ${KAZMA_ACTIVE_WORKSPACE}
     enabled: true
+    tool_count: 0
+    tools: []
+    trust: approval_required
+    auth: {}
   - name: sequential-thinking
     transport: stdio
     command:
     - C:\Users\balfa\kazma\AppData\Roaming\uv\tools\mcp-sequential-thinking\Scripts\mcp-sequential-thinking.exe
     enabled: true
-  - name: test-mcp
-    transport: stdio
-    command:
-    - echo
-    - hello
-    url: ''
-    env: {}
-    enabled: true
-    connected: false
     tool_count: 0
     tools: []
     trust: approval_required
