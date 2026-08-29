@@ -562,3 +562,46 @@ def test_output_with_nothing_useful_still_says_something():
     assert rr._meaningful_error("", "") == "failed with no output"
     only_notice = rr._meaningful_error("rclone: NOTICE: shared client_id", "")
     assert only_notice, "never return an empty error"
+
+
+# ── output decoding ───────────────────────────────────────────────────
+
+
+def test_subprocess_output_is_decoded_as_utf8_everywhere():
+    """subprocess.run(text=True) decodes with the ANSI code page on Windows
+    (cp1252 here). Any byte outside it raises UnicodeDecodeError inside
+    subprocess's reader THREAD -- the traceback lands on stderr, the output
+    is lost, and the call still looks like it succeeded with empty output.
+
+    Seen live on 2026-08-29 while ingesting backups: one snapshot reported
+    "+ 0.0 MB" because its JSON summary was destroyed exactly this way. The
+    guard is worse -- it parses netstat and tasklist output to decide what
+    to reap.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for rel in ("kazma-core/kazma_core/backup/restic_repo.py",
+                "kazma-core/kazma_core/backup/restore_drill.py",
+                "kazma-core/kazma_core/backup/universal.py",
+                "scripts/service/kazma_guard.py"):
+        src = (root / rel).read_text(encoding="utf-8")
+        for m in re.finditer(r"text=True(?!\s*,\s*encoding)", src):
+            offenders.append(f"{rel}:{src[:m.start()].count(chr(10)) + 1}")
+    assert not offenders, f"locale-decoded subprocess output at: {offenders}"
+
+
+def test_a_non_cp1252_byte_survives_the_round_trip(repo, payload, tmp_path):
+    """The concrete failure: a path restic echoes back containing a byte
+    cp1252 cannot represent."""
+    odd = payload / "café-中文.txt"
+    odd.write_text("unicode in the name", encoding="utf-8")
+
+    res = rr.backup(repo, _PW, [str(payload)])
+    assert res.ok, res.error
+    assert res.detail.get("snapshot_id"), (
+        "the JSON summary must survive -- losing it is how a snapshot "
+        "reported 0.0 MB"
+    )

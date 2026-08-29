@@ -206,7 +206,7 @@ def _run(args: list[str], repo: str, password: str, *,
     env["RESTIC_PASSWORD"] = password
     try:
         proc = subprocess.run(
-            ["restic", *args], env=env, capture_output=True, text=True,
+            ["restic", *args], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=timeout, check=False, input=stdin,
         )
     except Exception as exc:  # noqa: BLE001

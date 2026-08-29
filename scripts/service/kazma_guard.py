@@ -452,7 +452,7 @@ def _pid_alive(pid: int) -> bool:
         if os.name == "nt":
             out = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                capture_output=True, text=True, timeout=15, check=False,
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15, check=False,
             ).stdout
             return str(pid) in out
         os.kill(pid, 0)
@@ -525,7 +525,7 @@ def _port_holder_pid(port: int) -> int:
     try:
         if os.name == "nt":
             out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
-                                 capture_output=True, text=True,
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                                  timeout=20, check=False).stdout
             for line in out.splitlines():
                 parts = line.split()
@@ -533,7 +533,7 @@ def _port_holder_pid(port: int) -> int:
                     return int(parts[4])
             return 0
         out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
-                             capture_output=True, text=True,
+                             capture_output=True, text=True, encoding="utf-8", errors="replace",
                              timeout=20, check=False).stdout.strip()
         return int(out.splitlines()[0]) if out else 0
     except Exception:
@@ -561,12 +561,12 @@ def reap_port_holder(url: str, log: GuardLog) -> bool:
     try:
         if os.name == "nt":
             out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                                 capture_output=True, text=True,
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                                  timeout=15, check=False).stdout
             name = out.split()[0].lower() if out.split() else ""
         else:
             name = subprocess.run(["ps", "-p", str(pid), "-o", "comm="],
-                                  capture_output=True, text=True,
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace",
                                   timeout=15, check=False).stdout.strip().lower()
     except Exception:
         name = ""
