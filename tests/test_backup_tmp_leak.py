@@ -108,3 +108,113 @@ def test_both_writers_have_a_sweep(module):
     """The identical hole existed in two places. Fixing one and leaving the
     other is how it comes back."""
     assert callable(module._sweep_orphaned_tmp)
+
+
+# ── the Postgres dump must reach the offsite repository ───────────────
+
+
+def test_the_pg_dump_is_snapshotted_to_every_repo(monkeypatch, tmp_path):
+    """Until 2026-08-29 the Postgres database -- chat sessions, memory
+    vectors, shared state -- had NO offsite copy. The universal sweep
+    excludes the whole backups/ directory and the nightly dump wrote only to
+    local disk, so a disk failure lost the primary datastore while every
+    other component was protected."""
+    from kazma_core.backup import restic_repo as rr
+    from kazma_core.memory.worker_bootstrap import _snapshot_pg_to_restic
+
+    seen: list[str] = []
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("pw", False))
+    monkeypatch.setattr(rr, "repo_paths",
+                        lambda: {"local": "/l", "remote": "rclone:r/restic"})
+    monkeypatch.setattr(
+        rr, "backup",
+        lambda repo, pw, paths, tags=None: seen.append(repo)
+        or rr.ResticResult(ok=True, action="backup", repo=repo),
+    )
+
+    dump = tmp_path / "pg_shared_1.dump"
+    dump.write_bytes(b"PGDMP")
+    _snapshot_pg_to_restic(dump)
+
+    assert seen == ["/l", "rclone:r/restic"], (
+        "the offsite repository is the one that was missing"
+    )
+
+
+def test_a_snapshot_failure_never_fails_the_dump(monkeypatch, tmp_path):
+    """The dump already succeeded by this point."""
+    from kazma_core.backup import restic_repo as rr
+    from kazma_core.memory.worker_bootstrap import _snapshot_pg_to_restic
+
+    monkeypatch.setattr(rr, "restic_available", lambda: True)
+    monkeypatch.setattr(rr, "ensure_password", lambda **kw: ("pw", False))
+    monkeypatch.setattr(rr, "repo_paths", lambda: {"local": "/l"})
+
+    def _boom(*a, **k):
+        raise RuntimeError("repository unreachable")
+
+    monkeypatch.setattr(rr, "backup", _boom)
+    dump = tmp_path / "pg_shared_2.dump"
+    dump.write_bytes(b"PGDMP")
+    _snapshot_pg_to_restic(dump)  # must not raise
+
+
+def test_the_nightly_handler_actually_calls_it():
+    """Wiring that nothing invokes is the failure this whole audit is about."""
+    import inspect
+
+    from kazma_core.memory import worker_bootstrap
+
+    src = inspect.getsource(worker_bootstrap._handle_native_pg_backup)
+    assert "_snapshot_pg_to_restic" in src
+
+
+# ── the boot sweep that produced 29 generations in two days ───────────
+
+
+def test_a_fresh_backup_skips_the_boot_sweep(monkeypatch, tmp_path):
+    """"Back up shortly after boot" is right for a machine that has been off
+    for a week and wrong for one restarted five times in an evening."""
+    import time as _t
+
+    from kazma_core.memory import worker_bootstrap as wb
+
+    base = tmp_path / "backups" / "universal" / "1787963091"
+    base.mkdir(parents=True)
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: str(tmp_path))
+    assert wb._backup_ran_recently() is True
+
+    old = _t.time() - 9 * 3600
+    import os
+    os.utime(base, (old, old))
+    assert wb._backup_ran_recently() is False, "a stale backup must still run"
+
+
+def test_no_backups_at_all_means_take_one(monkeypatch, tmp_path):
+    """A fresh install must not skip its first backup."""
+    from kazma_core.memory import worker_bootstrap as wb
+
+    monkeypatch.setattr("kazma_core.paths.data_dir", lambda: str(tmp_path))
+    assert wb._backup_ran_recently() is False
+
+
+def test_an_unreadable_backup_dir_never_skips(monkeypatch):
+    """Unknown age must mean "take the backup". Skipping on doubt is how a
+    machine ends up with no recent copy at all."""
+    from kazma_core.memory import worker_bootstrap as wb
+
+    def _boom():
+        raise OSError("no such directory")
+
+    monkeypatch.setattr("kazma_core.paths.data_dir", _boom)
+    assert wb._backup_ran_recently() is False
+
+
+def test_the_guard_is_actually_used_by_the_scheduler():
+    import inspect
+
+    from kazma_core.memory import worker_bootstrap
+
+    src = inspect.getsource(worker_bootstrap)
+    assert "_backup_ran_recently()" in src
