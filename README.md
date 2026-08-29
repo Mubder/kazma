@@ -93,7 +93,7 @@ Kazma's architecture reflects those foundational principles:
 - **Bi-Temporal Beliefs**: Tracks factual assertions with both assertion time and validity time (`valid_from` / `valid_until`) to manage evolving knowledge without hallucination or historical corruption.
 - **Associative PPR Graph**: Multi-hop associative recall via Local Ego-Graph Personalized PageRank over belief entities.
 - **Hybrid Episode Retrieval**: Recalls past dialogues and actions using Reciprocal Rank Fusion (RRF) over lexical search (SQLite FTS5, or ILIKE on Postgres-primary) and dense embeddings (`sqlite-vec` on one node, **pgvector** when Postgres is on).
-- **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated 24-hour snapshot backups (`sqlite3.backup` + JSONL/GraphML exports).
+- **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated backups — WAL-safe SQLite copies, `pg_dump` of Postgres and a JSONL export of the graph, snapshotted into deduplicated, encrypted [restic](https://restic.net) repositories (local + offsite) with time-based retention and a verified one-command restore. See [Disaster Recovery](docs/docs/ops/disaster-recovery.md).
 - **Prompt-Fenced Injection**: Injects all retrieved context inside `<kazma:data untrusted>` fences to protect against prompt injection attacks.
 
 ### 🐝 Swarm Orchestration & Dynamic Autoscaler

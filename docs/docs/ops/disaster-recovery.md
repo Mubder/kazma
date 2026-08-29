@@ -9,7 +9,7 @@ description: Disaster Recovery — production ops
 
 **Version:** 0.6.x / Phase 4.5  
 **Audience:** Operators deploying single-node or multi-replica Kazma  
-**Related:** `scripts/backup_kazma.py`, `scripts/restore_kazma.py`, `SECURITY.md`
+**Related:** `kazma_core.backup.restore`, `kazma_core.backup.restore_drill`, `SECURITY.md`
 
 ---
 
@@ -27,6 +27,8 @@ description: Disaster Recovery — production ops
 | Cron jobs | `kazma-data/cron.db` | Medium |
 | Document Intelligence metadata | `{documents.storage_root}/documents.db` (or Postgres when metadata backend is PG) | High — library + jobs |
 | Document content-addressed blobs | `{documents.storage_root}/` (`quarantine`/`originals`/`artifacts` + manifests) | **Critical** — irrecoverable without backup |
+| Graph memory | Neo4j (`bolt://…`) — Docker volume, NOT in the data dir | Medium–High |
+| MCP + connector config | `kazma.yaml` at the install root, NOT in the data dir | **Critical** — a restore without it boots with no tools |
 | Opaque web sessions | ConfigStore / Postgres | Low (users re-login) |
 
 **Out of band (never only on the app disk):**
@@ -49,67 +51,133 @@ description: Disaster Recovery — production ops
 | Production single-node | ≤ 24h | Daily automated zip + offsite copy |
 | Production multi-replica | ≤ 1h | Continuous Postgres backups + nightly app snapshot |
 
-### Steps
+### How it works now (restic, since 2026-08-29)
 
-1. **Optional:** Stop writes for a clean cut (preferred for large DBs):
-   ```powershell
-   # stop uvicorn / docker compose stop kazma
-   ```
-2. Run the backup script from the repo root (or install tree):
-   ```powershell
-   python scripts/backup_kazma.py --dest D:\backups\kazma
-   ```
-3. Copy the resulting `kazma-backup-YYYYMMDD….zip` to **offsite** storage (S3, NAS, encrypted drive).
-4. Confirm secrets are in the password manager (not only in the zip).
+Backups are **automatic**. Nothing needs running by hand.
 
-> **Offsite / WebDAV TLS (2026-08-19):** cloud-sync offsite uploads
-> (including WebDAV) verify TLS certificates by default. The universal
-> backup zip can carry the plaintext `.env` (vault recovery key), so a
-> non-loopback endpoint with verification disabled is a secret-exfiltration
-> surface. Only disable for self-signed lab servers via ConfigStore
-> `backups.offsite.webdav.tls_verify=false`.
+Each cycle produces a *staging generation* under
+`kazma-data/backups/universal/<epoch>/` containing every SQLite database
+(WAL-safe via the Online Backup API), assets, `.env`, `kazma.yaml`,
+`research/`, and a JSONL export of the Neo4j graph. Postgres is dumped
+separately to `kazma-data/backups/pg/` with `pg_dump -Fc`.
 
-### What the script does
+That generation is then snapshotted into **two independent restic
+repositories**:
 
-- `PRAGMA wal_checkpoint(TRUNCATE)` on each `*.db` for a more consistent copy  
-- Zips `kazma-data/**` + `MANIFEST.json`  
-- Does **not** include `.env` unless `--include-env` (avoid by default)
+| Repository | Location | Credential |
+|---|---|---|
+| Local | `kazma-data/backups/restic` | passphrase at `~/.kazma/restic.pass` |
+| Offsite | `rclone:<remote>/restic` | rclone's own OAuth grant |
 
-### Automated example (Windows Task Scheduler / cron)
+The two use **different credentials on purpose**: the offsite path must not
+fail when a connector token is revoked. It did exactly that on 2026-08-27,
+and 29 consecutive backups went local-only without anyone noticing.
+
+**Why restic rather than the zip archives** this runbook used to describe:
+deduplication, encryption, and a restore that upstream tests harder than we
+can. On this install four generations cost **131 MB** where the zip scheme
+cost 3.8 GB, and each additional generation adds roughly **2 MB**.
+
+### Retention
+
+Time-based, not count-based: **7 daily, 8 weekly, 12 monthly**, applied
+nightly by the `restic_maintenance` task, which also clears stale locks and
+runs `restic check`. "Keep the last 30" is thirty days or thirty hours
+depending on how often the loop ran — not a recovery guarantee.
+
+On-disk staging keeps only **2** generations; the history lives in restic.
+
+### The passphrase
+
+`~/.kazma/restic.pass` decrypts **every** snapshot, local and offsite. It is
+deliberately NOT `KAZMA_SECRET` — the defect being fixed was the vault key
+travelling with the data it protects.
+
+> **Keep a copy off this machine.** Encryption moves the single point of
+> failure from the archive to the key. Without it, every backup is
+> permanently unreadable.
+
+### Verifying without restoring
 
 ```powershell
-cd G:\GitHubRepos\kazma
-& .\.venv\Scripts\python.exe scripts\backup_kazma.py --dest D:\backups\kazma
-# retain last 14 days
-Get-ChildItem D:\backups\kazma\kazma-backup-*.zip |
-  Sort-Object LastWriteTime -Descending |
-  Select-Object -Skip 14 |
-  Remove-Item -Force
+python -m kazma_core.backup.restore_drill
 ```
+
+Integrity-checks every SQLite file in a scratch copy and parses the Postgres
+archive with `pg_restore --list`. Non-zero exit on failure, so it can be
+scheduled.
+
+### The legacy scripts
+
+`scripts/backup_kazma.py` and `scripts/restore_kazma.py` still work and
+still produce zips. They are no longer the primary path and do not include
+the graph export or `kazma.yaml`.
 
 ---
 
 ## 3. Restore procedure (single-node)
 
 **RTO target:** < 1 hour for single-node with known secrets.
+**Rehearsed:** 2026-08-29, from both the local and the offsite repository.
 
-1. **Stop** all Kazma processes (UI, gateway, workers).
-2. Restore secrets to `.env` / environment:
-   ```
-   KAZMA_SECRET=…
-   KAZMA_VAULT_KEY=…
-   ```
-3. Restore data:
-   ```powershell
-   python scripts/restore_kazma.py --archive D:\backups\kazma\kazma-backup-….zip --force
-   ```
-4. Start Kazma.
-5. Smoke checks:
-   - `GET /health` → 200  
-   - Login works  
-   - A prior chat session appears  
-   - Settings → providers still configured (vault unlocks)  
-   - Swarm task history loads  
+### Step 1 — see what you can restore to
+
+```powershell
+python -m kazma_core.backup.restore --list
+```
+
+Lists every recoverable generation with its snapshot and the Postgres dump
+that accompanies it.
+
+> **Never use `restic restore latest`.** It selects the newest snapshot by
+> the time the SNAPSHOT was taken, which is not the newest DATA. Generations
+> ingested out of order — a bulk import, a re-upload — carry recent
+> timestamps and old content, so `latest` can hand you a backup missing
+> `kazma.yaml` and the graph export while looking like a clean success. The
+> command above selects by **generation**; use it rather than restic
+> directly.
+
+### Step 2 — restore the files
+
+```powershell
+python -m kazma_core.backup.restore --target D:resh-kazma
+```
+
+Add `--generation <epoch>` to pick a specific point, or `--repo <path>` to
+restore from the offsite repository when the machine is gone.
+
+The target must be **empty** — a restore over an existing tree interleaves
+two states into one that looks plausible and is neither.
+
+You get an install layout: `.env`, `kazma.yaml`, `kazma-data/`,
+`neo4j_graph.jsonl`, and the paired Postgres dump under `pg/`. Every
+restored SQLite database is integrity-checked before it reports success.
+
+### Step 3 — load the databases
+
+Not automatic, and deliberately so: these overwrite live data. The exact
+commands are printed at the end of step 2 with paths filled in.
+
+```powershell
+# Postgres
+pg_restore --clean --if-exists -d "$env:KAZMA_DATABASE_URL" "D:resh-kazma\pg\…\pg_shared_….dump"
+
+# Graph memory, into an EMPTY Neo4j (it refuses a populated one)
+python -c "from kazma_core.backup.neo4j_backup import restore_graph; print(restore_graph(r'D:resh-kazma
+eo4j_graph.jsonl'))"
+```
+
+### Step 4 — point Kazma at it and start
+
+Copy `.env`, `kazma.yaml` and `kazma-data/` into the install root, or point
+`KAZMA_DATA_DIR` at the restored tree. Then:
+
+- `GET /health/ready` → `ready`, all checks ok
+- Login works
+- A prior chat session appears
+- Settings → providers still configured (the vault unlocks — this proves
+  `.env` came back)
+- Tools are listed (this proves `kazma.yaml` came back)
 
 ### Failure modes
 
@@ -192,12 +260,18 @@ After DR restore, re-test:
 
 ## 6. Drill checklist (run quarterly)
 
-- [ ] Take backup with `backup_kazma.py`  
-- [ ] Restore to a **staging** host with `--force`  
-- [ ] Confirm chat + settings + vault secrets  
-- [ ] Confirm Postgres restore (if used)  
-- [ ] Time the restore (update RTO notes)  
-- [ ] Rotate one test secret and re-backup  
+Backups run themselves; the drill exists to prove the RESTORE still works,
+which is the half that rots unnoticed.
+
+- [ ] `python -m kazma_core.backup.restore --list` — points exist, newest is recent
+- [ ] Restore to an empty staging directory — expect all steps green
+- [ ] Confirm every SQLite database passed `integrity_check` (the restore reports it)
+- [ ] Restore once from the **offsite** repo, not just local (`--repo rclone:…`)
+- [ ] Load the Postgres dump into a throwaway database
+- [ ] Load the graph into an empty Neo4j and compare node/relationship counts
+- [ ] Confirm the vault unlocks and tools are listed (proves `.env` + `kazma.yaml`)
+- [ ] Time it (update the RTO note above)
+- [ ] Confirm the restic passphrase is still recoverable from OUTSIDE this machine
 - [ ] Document any gaps in this file  
 
 ---
