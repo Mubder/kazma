@@ -21,6 +21,17 @@ import pytest
 from kazma_core.observability import loop_stall
 
 
+@pytest.fixture(autouse=True)
+def _enable_watchdog(monkeypatch):
+    """conftest turns the watchdog off for the suite; these tests want it on.
+
+    A test process is entitled to block the loop, so a 6,000-test run was
+    reporting a 440s stall and writing a dump nobody wanted. The switch is off
+    globally and opted back in here, where blocking the loop is the point.
+    """
+    monkeypatch.delenv("KAZMA_LOOP_STALL_WATCHDOG", raising=False)
+
+
 @pytest.mark.asyncio
 async def test_a_blocked_loop_is_detected_and_dumped(tmp_path, monkeypatch, caplog):
     monkeypatch.setattr(loop_stall, "stall_dump_dir", lambda: tmp_path)
@@ -87,3 +98,54 @@ def test_the_threshold_fires_inside_the_guard_window():
         "the dump must land well before the guard terminates the process"
     )
     assert loop_stall.DEFAULT_INTERVAL_S < loop_stall.DEFAULT_THRESHOLD_S
+
+
+@pytest.mark.asyncio
+async def test_the_kill_switch_stops_it_starting(monkeypatch, tmp_path):
+    """KAZMA_LOOP_STALL_WATCHDOG=0 — the switch conftest uses for the suite."""
+    monkeypatch.setenv("KAZMA_LOOP_STALL_WATCHDOG", "0")
+    monkeypatch.setattr(loop_stall, "stall_dump_dir", lambda: tmp_path)
+
+    assert loop_stall.start_stall_watchdog(threshold_s=0.5, interval_s=0.1) is None
+
+    time.sleep(1.5)  # blocks the loop well past the threshold
+    assert not list(tmp_path.glob("stall-*.txt")), (
+        "the watchdog ran despite the kill-switch"
+    )
+
+
+def test_the_suite_disables_it():
+    """Source guard: conftest must keep the suite quiet."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "conftest.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'KAZMA_LOOP_STALL_WATCHDOG", "0"' in src
+
+
+@pytest.mark.asyncio
+async def test_cancelling_the_heartbeat_stops_the_watcher(tmp_path, monkeypatch):
+    """A stopped watchdog must stop watching.
+
+    Found by the kill-switch test above, which failed because watchdogs from
+    earlier tests were still running: the thread outlived its cancelled
+    heartbeat task, saw a beat that would never be refreshed, and reported an
+    ever-growing stall every 30s for the life of the process.
+    """
+    monkeypatch.setattr(loop_stall, "stall_dump_dir", lambda: tmp_path)
+    monkeypatch.setattr(loop_stall, "_REDUMP_EVERY_S", 0.2)
+
+    task = loop_stall.start_stall_watchdog(threshold_s=0.5, interval_s=0.1)
+    assert task is not None
+    await asyncio.sleep(0.3)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    time.sleep(2.0)  # far past the threshold, with no heartbeat running
+    assert not list(tmp_path.glob("stall-*.txt")), (
+        "the watcher thread kept firing after its heartbeat was cancelled"
+    )

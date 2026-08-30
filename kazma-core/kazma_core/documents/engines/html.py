@@ -110,12 +110,23 @@ class HtmlEngine:
 
     def _css(self) -> str:
         """Themed stylesheet. EN/AR differ by direction + typeface + measure."""
+        from kazma_core.documents.fonts import embedded_font_face_css
         from kazma_core.documents.style_theme import theme_cs_size, theme_fonts
 
         t = self.theme
         direction = self.profile.html_dir
         text_align_last = "right" if self.profile.rtl else "left"
         fonts = theme_fonts(rtl=self.profile.rtl)
+        # When a font is pinned, inline it so the export renders identically
+        # wherever it is opened. Naming a family the recipient does not have
+        # changes line breaks, page count and every Arabic metric the theme
+        # tunes for.
+        face_css, embedded_family = embedded_font_face_css(
+            arabic=bool(self.profile.shape_arabic)
+        )
+        font_stack = (
+            f"'{embedded_family}', {fonts['html']}" if embedded_family else fonts["html"]
+        )
         if self.profile.rtl:
             body_pt = theme_cs_size()
             title_pt = theme_cs_size(t.get("title_size", 22))
@@ -129,9 +140,10 @@ class HtmlEngine:
         leading = t.get("line_height_ar", 1.85) if self.profile.rtl else t.get("line_height", 1.65)
         rule = t.get("accent", "#3b82f6")
         return f"""
+    {face_css}
     *, *::before, *::after {{ box-sizing: border-box; }}
     body {{
-      font-family: {fonts["html"]};
+      font-family: {font_stack};
       direction: {direction};
       text-align: justify;
       text-align-last: {text_align_last};
@@ -188,6 +200,8 @@ class HtmlEngine:
     }}
     thead {{ display: table-header-group; }}
     tr {{ break-inside: avoid; page-break-inside: avoid; }}
+    /* Never leave one line of a paragraph alone across a page break. */
+    p, li {{ orphans: 3; widows: 3; }}
     .math-display {{
       direction: ltr !important; text-align: center; unicode-bidi: isolate;
       font-family: 'Cambria Math', 'Consolas', serif; font-size: 13pt;

@@ -93,6 +93,19 @@ def start_stall_watchdog(
     Safe to call when no loop is running: it logs and does nothing, rather
     than raising into startup.
     """
+    import os
+
+    # Kill-switch, matching KAZMA_TOOL_HOOKS / KAZMA_LANGFUSE /
+    # KAZMA_TEST_ISOLATION. "A synchronous call is blocking the loop" only
+    # means something for a long-lived service; a test process is entitled to
+    # block, and a 6,000-test run duly produced a 440s "stall" and a stack
+    # dump nobody wanted. conftest sets this to 0. Deliberately an env
+    # switch rather than a pytest check: production code should not know
+    # tests exist, and an operator gets the same escape hatch.
+    if (os.environ.get("KAZMA_LOOP_STALL_WATCHDOG") or "").strip() == "0":
+        logger.debug("[loop-stall] disabled via KAZMA_LOOP_STALL_WATCHDOG=0")
+        return None
+
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -100,16 +113,24 @@ def start_stall_watchdog(
         return None
 
     state = {"last_beat": time.monotonic()}
+    # Cancelling the heartbeat must also stop the watcher. Without this the
+    # thread outlives the task, sees a heartbeat that will never be refreshed
+    # again, and reports an ever-growing "stall" every 30s for the life of the
+    # process -- which is precisely what happened the first time a test
+    # cancelled one.
+    stopped = threading.Event()
 
     async def _heartbeat() -> None:
-        while True:
-            state["last_beat"] = time.monotonic()
-            await asyncio.sleep(interval_s)
+        try:
+            while True:
+                state["last_beat"] = time.monotonic()
+                await asyncio.sleep(interval_s)
+        finally:
+            stopped.set()
 
     def _watch() -> None:
         last_dump = 0.0
-        while True:
-            time.sleep(1.0)
+        while not stopped.wait(1.0):
             lag = time.monotonic() - state["last_beat"]
             if lag < threshold_s:
                 continue

@@ -131,9 +131,11 @@ A scheduled loop runs every `documents.gc.interval_hours` (cancelled cleanly on
 shutdown). Operators can **dry-run then confirm** from the Documents page or via
 `POST /api/documents/ops/maintenance/dry-run` and `…/run` (admin-gated).
 
-**Postgres metadata:** CRUD is multi-replica-safe, but GC mark/sweep SQL is still
-SQLite-shaped. When metadata backend is Postgres, GC **skips** with error
-`gc_postgres_metadata_sql_port_pending` (fail closed — no silent deletes).
+**Postgres metadata:** CRUD is multi-replica-safe and GC runs on both
+backends — `retention._mark` dispatches to `repository.gc_mark`, which
+`repository.py` and `repository_pg.py` each implement. (Earlier releases skipped
+GC on Postgres with `gc_postgres_metadata_sql_port_pending`; that guard has been
+removed and a test asserts it does not come back.)
 
 ---
 

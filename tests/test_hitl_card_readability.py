@@ -38,12 +38,66 @@ _CSS_DIR = (
 #: first file can still be redefined by the second, and the browser applies
 #: the later one. Checking only kazma.css reported "one rule each" while the
 #: real page had three definitions of .hitl-approval-actions.
-CSS_FILES = (_CSS_DIR / "kazma.css", _CSS_DIR / "kazma.v5.css")
+_BASE_HTML = (
+    Path(__file__).resolve().parent.parent
+    / "kazma-ui" / "kazma_ui" / "templates" / "base.html"
+)
+
+
+def _stylesheets_the_page_loads() -> tuple[Path, ...]:
+    """Read the stylesheet list from base.html, in load order.
+
+    Deliberately NOT a hardcoded tuple. This gate previously listed only
+    kazma.css while the page also loads kazma.v5.css SECOND, so it reported
+    "one rule each" while the browser applied three definitions of
+    .hitl-approval-actions -- the exact false assurance that let the card
+    render as a mixture of two designs.
+
+    A copied list is a second definition of the truth, and second definitions
+    drift; that is what the duplicate CSS rules were in the first place. So the
+    guard enumerates its inputs from the same file the server renders.
+    """
+    html = _BASE_HTML.read_text(encoding="utf-8")
+    names = re.findall(r'href="/static/css/([A-Za-z0-9._-]+\.css)', html)
+    found = tuple(_CSS_DIR / n for n in dict.fromkeys(names))
+    assert found, "no local stylesheets found in base.html — has the path changed?"
+    return found
+
+
+CSS_FILES = _stylesheets_the_page_loads()
 CSS = _CSS_DIR / "kazma.css"
 
 
 def _all_css() -> str:
     return "\n".join(f.read_text(encoding="utf-8") for f in CSS_FILES if f.is_file())
+
+
+def _count_rule(css: str, selector: str) -> int:
+    """How many times ``selector`` is defined on its own in ``css``.
+
+    Its own rule only: a grouped selector list, a state variant
+    (``.card.hitl-denied``) and a descendant (``.card pre``) are all different
+    rules and must not count. Exercised against each of those by
+    ``test_the_duplicate_counter_actually_catches_a_duplicate``.
+    """
+    lines = css.splitlines()
+    count = 0
+    for i, line in enumerate(lines):
+        # startswith, not equality: kazma.v5.css wrote whole rules on one line
+        # (".hitl-approval-card { margin: 12px 16px; }"), and a regex anchored
+        # to a line break missed exactly those.
+        if not line.strip().startswith(f"{selector} {{"):
+            continue
+        # A selector sitting under a line that ends in "," is one member of a
+        # grouped list, not its own rule. Counting those made this guard
+        # validate the wrong rule entirely.
+        prev = i - 1
+        while prev >= 0 and not lines[prev].strip():
+            prev -= 1
+        if prev >= 0 and lines[prev].rstrip().endswith(","):
+            continue
+        count += 1
+    return count
 
 
 # ── 1. nothing is hidden silently ──────────────────────────────────────────
@@ -185,13 +239,7 @@ def test_each_hitl_rule_is_defined_once(selector):
     Counted across EVERY stylesheet base.html loads, not just the first one.
     """
     counts = {
-        f.name: len(
-            re.findall(
-                rf"^{re.escape(selector)} \{{",
-                f.read_text(encoding="utf-8"),
-                re.MULTILINE,
-            )
-        )
+        f.name: _count_rule(f.read_text(encoding="utf-8"), selector)
         for f in CSS_FILES
         if f.is_file()
     }
@@ -200,6 +248,43 @@ def test_each_hitl_rule_is_defined_once(selector):
         f"{selector} is defined {total} times across {counts}; the last one "
         "silently wins and the card renders as a mixture of them"
     )
+
+
+def test_the_duplicate_counter_actually_catches_a_duplicate():
+    """Negative control.
+
+    A guard that has never been observed to fail cannot be told from one that
+    is incapable of failing -- the same sentence AGENTS.md §27C applies to
+    runtime mechanisms, pointed at the test suite. This one has already been
+    wrong twice: it read a single stylesheet while the page loads two, and an
+    earlier regex matched a grouped selector and validated the wrong rule. So
+    it is shown failing on a synthetic violation before it is trusted.
+    """
+    one = ".hitl-approval-card {\n  color: red;\n}\n"
+    assert _count_rule(one, ".hitl-approval-card") == 1
+
+    assert _count_rule(one + one, ".hitl-approval-card") == 2, (
+        "the counter cannot see a duplicate, so passing it means nothing"
+    )
+
+    # A grouped selector list is not a definition of that selector alone --
+    # counting it as one is what made the guard validate the wrong rule.
+    grouped = ".agent-progress,\n.hitl-approval-card {\n  width: 100%;\n}\n"
+    assert _count_rule(grouped, ".hitl-approval-card") == 0
+
+    # Nor is a descendant or state variant.
+    assert _count_rule(".hitl-approval-card.hitl-denied { color: red; }\n",
+                       ".hitl-approval-card") == 0
+    assert _count_rule(".hitl-approval-card pre { margin: 0; }\n",
+                       ".hitl-approval-card") == 0
+
+    # A whole rule on one line still counts. kazma.v5.css wrote its duplicate
+    # exactly like this, and a line-anchored regex walked straight past it --
+    # which is how the browser ended up applying three definitions while this
+    # guard reported one.
+    single = ".hitl-approval-card { margin: 12px 16px; }\n"
+    assert _count_rule(single, ".hitl-approval-card") == 1
+    assert _count_rule(one + single, ".hitl-approval-card") == 2
 
 
 def test_the_args_block_is_bounded_and_scrollable():

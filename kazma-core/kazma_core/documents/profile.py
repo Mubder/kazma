@@ -31,15 +31,22 @@ Empirically validated in desktop Word (Word→PDF pixel measurement):
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from kazma_core.documents.arabic import (
+    direction_of,
+    has_rtl,
+    is_rtl_dominant,
+    rtl_ratio,
+)
 from kazma_core.documents.style_theme import THEME, localized_chrome
 
 __all__ = [
     "Direction",
     "AlignIntent",
+    "Numerals",
+    "Calendar",
     "DocProfile",
     "arabic_ratio",
     "is_arabic_dominant",
@@ -49,40 +56,37 @@ __all__ = [
 
 Direction = Literal["ltr", "rtl"]
 AlignIntent = Literal["start", "justify", "end"]
+Numerals = Literal["latn", "arab"]
+Calendar = Literal["gregory", "islamic-umalqura"]
 
-# Arabic / RTL Unicode blocks: Arabic, Arabic Supplement, Arabic Extended-A,
-# Arabic Presentation Forms-A/B. Used everywhere direction is decided.
-_AR_RE = re.compile(
-    r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]"
-)
+# Direction classification lives in :mod:`kazma_core.documents.arabic`, which
+# decides by Unicode **bidi class** rather than by codepoint block. The old
+# block regex missed Hebrew / Syriac / Thaana / N'Ko and Arabic Extended-B,
+# counted harakat and Arabic-Indic digits as letters, and carried an "any Arabic
+# character in the first 200" escape hatch that made ``threshold`` dead code:
+# one Arabic word in an English report flipped the whole document to RTL, which
+# reverses table columns and swaps in Arabic chrome and body fonts. The four
+# names below stay as thin aliases so existing callers and tests keep working.
 
 
 def arabic_ratio(text: str) -> float:
-    """Fraction of alpha chars that are Arabic script (0.0 for non-Arabic text)."""
-    if not text:
-        return 0.0
-    letters = [c for c in text if c.isalpha() or _AR_RE.match(c)]
-    if not letters:
-        return 0.0
-    ar = sum(1 for c in letters if _AR_RE.match(c))
-    return ar / len(letters)
+    """Fraction of strong directional characters that are RTL."""
+    return rtl_ratio(text)
 
 
 def is_arabic_dominant(text: str, *, threshold: float = 0.35) -> bool:
-    """True when enough Arabic letters are present to drive RTL layout."""
-    if not text or not _AR_RE.search(text):
-        return False
-    return arabic_ratio(text) >= threshold or bool(_AR_RE.search(text[:200]))
+    """True when RTL text dominates enough to drive RTL page layout."""
+    return is_rtl_dominant(text, threshold=threshold)
 
 
 def has_rtl_text(text: str) -> bool:
-    """True if the string contains any RTL (Arabic) codepoint."""
-    return bool(text) and bool(_AR_RE.search(text))
+    """True if the string contains any strong RTL character."""
+    return has_rtl(text)
 
 
 def detect_direction(text: str) -> Direction:
-    """Auto-detect LTR/RTL from content."""
-    return "rtl" if is_arabic_dominant(text) else "ltr"
+    """Auto-detect LTR/RTL from content (first-strong, ratio as tiebreaker)."""
+    return direction_of(text)  # type: ignore[return-value]
 
 
 @dataclass
@@ -97,11 +101,19 @@ class DocProfile:
     language: str | None = None
     theme: dict[str, Any] = field(default_factory=lambda: dict(THEME))
     chrome: dict[str, str] = field(default_factory=dict)
-    # Whether visual engines (PDF/ReportLab) must pre-shape Arabic. Word shapes
-    # via OpenType, so DOCX ignores this; PDF needs it. Derived in
-    # :meth:`for_content` as ``rtl or is_arabic_dominant(text)`` so an LTR doc
-    # that still contains Arabic fragments gets shaped too.
+    # Whether visual engines (PDF/ReportLab) must pre-shape complex script.
+    # Word and browsers shape via OpenType, so DOCX/HTML ignore this; ReportLab
+    # needs it. True whenever the document contains ANY strong RTL character,
+    # not merely when RTL dominates — a Latin-dominant document with an Arabic
+    # passage still needs a real shaping engine, and gating the good render
+    # route on ``rtl`` while gating shaping on this flag is what stranded mixed
+    # documents on the degraded path.
     shape_arabic: bool = False
+    # Locale presentation. ``numerals`` picks the digit set used in chrome and
+    # generated numbering; ``calendar`` picks the date system. Both default from
+    # the resolved direction/language and can be overridden per document.
+    numerals: Numerals = "latn"
+    calendar: Calendar = "gregory"
 
     # ------------------------------------------------------------------ #
     # convenience
@@ -122,27 +134,52 @@ class DocProfile:
         *,
         language: str | None = None,
         rtl: bool | None = None,
-    ) -> "DocProfile":
+        numerals: str | None = None,
+        calendar: str | None = None,
+        arabic_numerals_default: bool = False,
+    ) -> DocProfile:
         """Build a profile from sample text with explicit overrides.
 
         Resolution order (last wins): auto-detect ← ``language`` ← ``rtl``.
+        ``language`` accepts a bare code or a BCP-47 tag, so a caller can pass a
+        session locale straight through. Note that an explicit ``language`` now
+        *pins* direction — passing ``en`` for a document that happens to quote
+        Arabic no longer lets content detection override the caller.
         """
         lang = (language or "").strip().lower()
+        # Accept BCP-47 tags too ("ar-SA", "en-GB") — callers threading a
+        # session locale through should not have to pre-trim it.
+        base_lang = lang.split("-")[0].split("_")[0]
         if rtl is True:
             direction: Direction = "rtl"
         elif rtl is False:
             direction = "ltr"
-        elif lang in ("ar", "arabic", "rtl"):
+        elif base_lang in ("ar", "arabic", "rtl", "fa", "ur", "he", "ps", "ckb"):
             direction = "rtl"
-        elif lang in ("en", "english", "ltr"):
+        elif base_lang in ("en", "english", "ltr"):
+            direction = "ltr"
+        elif lang:
             direction = "ltr"
         else:
             direction = detect_direction(text)
+        resolved_numerals: Numerals = (
+            numerals if numerals in ("latn", "arab")
+            else ("arab" if arabic_numerals_default and direction == "rtl" else "latn")
+        )
+        resolved_calendar: Calendar = (
+            calendar if calendar in ("gregory", "islamic-umalqura") else "gregory"
+        )
         return cls(
             direction=direction,
             language=lang or None,
-            chrome=localized_chrome(rtl=(direction == "rtl")),
-            shape_arabic=(direction == "rtl") or is_arabic_dominant(text),
+            chrome=localized_chrome(
+                rtl=(direction == "rtl"),
+                numerals=resolved_numerals,
+            ),
+            # ANY strong RTL character means the visual engine must shape.
+            shape_arabic=(direction == "rtl") or has_rtl_text(text),
+            numerals=resolved_numerals,
+            calendar=resolved_calendar,
         )
 
     # ------------------------------------------------------------------ #

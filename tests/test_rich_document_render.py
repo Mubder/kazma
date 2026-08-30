@@ -88,9 +88,21 @@ def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
 
 
 def test_is_arabic_dominant() -> None:
+    """Dominance is a ratio over strong directional characters.
+
+    The third case changed meaning in the 2026-08-30 Arabic hardening. It used
+    to pass because the predicate carried an ``or _AR_RE.search(text[:200])``
+    escape hatch: ANY Arabic character near the start returned True, which made
+    the threshold dead code and flipped English reports to RTL layout. With the
+    hatch gone, ``"Hello مرحبا mixed"`` is 5 of 15 strong characters — 33%,
+    just under the 35% threshold — and is correctly not dominant. Documents
+    that merely *contain* Arabic are handled by ``shape_arabic``, not by
+    flipping the page direction.
+    """
     assert is_arabic_dominant("هذا نص عربي طويل بما يكفي") is True
     assert is_arabic_dominant("Hello English only document") is False
-    assert is_arabic_dominant("Hello مرحبا mixed") is True  # enough AR letters
+    assert is_arabic_dominant("Hello مرحبا mixed") is False
+    assert is_arabic_dominant("Hello مرحبا بك في منصتنا") is True
 
 
 def test_parse_rich_blocks_headings_lists_bold() -> None:

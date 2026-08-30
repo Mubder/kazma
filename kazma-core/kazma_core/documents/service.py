@@ -1135,7 +1135,11 @@ class DocumentService:
             try:
                 from kazma_core.documents.extract_salvage import maybe_salvage_extract
 
-                document = maybe_salvage_extract(source_abs, document)
+                # Pass the live config so the salvage tiers read this
+                # service's policy rather than re-resolving a global one.
+                document = maybe_salvage_extract(
+                    source_abs, document, config=self.config
+                )
             except Exception:
                 logger.debug(
                     "[documents.service] extract salvage skipped", exc_info=True

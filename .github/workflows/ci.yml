@@ -67,6 +67,17 @@ jobs:
         # Playwright smoke is a *separate* job (boot-wait polls /health/live).
         # torch-bearing extras (rag) are too heavy for CI.
         run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy
+      - name: Install Arabic rendering system deps
+        # The visual RTL tests (tests/test_docx_rtl_visual.py) render DOCX
+        # through LibreOffice and measure where glyphs land on the page. They
+        # are the only Arabic tests that cannot lie — and they skipped on every
+        # CI run, because soffice and the Arabic fonts were never installed. The
+        # w:jc-inversion class of bug was free to come back green.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-writer fonts-noto-naskh-arabic fonts-noto-core \
+            tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng
       - name: Run tests (GATE — failures fail CI)
         # Industry eval pack (tests/test_eval_pack.py, marker `eval`) is in
         # tests/ and is collected by fast_test.py — do not exclude it.
