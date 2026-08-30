@@ -491,6 +491,71 @@ async def test_redaction_refuses_mixed_text_and_image_content(
     assert not (tmp_path / "exports").exists()
 
 
+HEAVY_IMPORTS = frozenset({
+    "reportlab", "docx", "openpyxl", "pptx", "weasyprint", "pypdf", "fitz",
+})
+
+
+def module_level_imports(tree: ast.Module) -> set[str]:
+    """Imports that run when the module is imported.
+
+    Deliberately NOT ``ast.walk``: that also finds imports inside function
+    bodies, which are the correct way to reach a heavy dependency -- they cost
+    nothing until the function is called. This gate exists so the legacy shim
+    stays cheap to IMPORT, and 10b241f5 rightly added a lazy ``import fitz``
+    inside the PDF verification helper to stop generate_pdf reporting success
+    for a PDF that was missing 30 of its names. Flagging that made the gate an
+    obstacle to a correct fix rather than a check on import cost.
+
+    Exercised in both directions by
+    ``test_the_heavy_import_gate_catches_what_it_should``.
+    """
+    found: set[str] = set()
+
+    def visit(nodes) -> None:
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue  # its body runs on call, not on import
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    found.add(alias.name.split(".", 1)[0])
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    found.add(node.module.split(".", 1)[0])
+            # if/try/with at module level still execute on import
+            for attr in ("body", "orelse", "finalbody", "handlers"):
+                child = getattr(node, attr, None)
+                if isinstance(child, list):
+                    visit(child)
+
+    visit(tree.body)
+    return found
+
+
+def test_the_heavy_import_gate_catches_what_it_should():
+    """Negative control for the gate below.
+
+    A guard nobody has seen fail cannot be told from one that cannot fail.
+    This gate has already been wrong once in the other direction -- it used
+    ``ast.walk``, flagged a correct lazy import, and so blocked the fix for
+    generate_pdf reporting success on incomplete PDFs.
+    """
+    def imports(src: str) -> set[str]:
+        return module_level_imports(ast.parse(src)) & HEAVY_IMPORTS
+
+    # Must catch: these all execute at import time.
+    assert imports("import fitz\n") == {"fitz"}
+    assert imports("from docx import Document\n") == {"docx"}
+    assert imports(
+        "try:\n    import pypdf\nexcept ImportError:\n    pypdf = None\n"
+    ) == {"pypdf"}
+    assert imports("if True:\n    import pptx\n") == {"pptx"}
+
+    # Must NOT catch: these cost nothing until called.
+    assert imports("def f():\n    import fitz\n    return fitz\n") == set()
+    assert imports("class C:\n    def m(self):\n        import docx\n") == set()
+    assert imports("async def f():\n    import openpyxl\n") == set()
+
+
 @pytest.mark.asyncio
 async def test_legacy_generator_delegates_without_heavy_imports(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -498,45 +563,9 @@ async def test_legacy_generator_delegates_without_heavy_imports(
     from kazma_skills.native.document_generator import tools
     from kazma_skills.native.document_processor import tools as processor_tools
 
-    heavy = {
-        "reportlab", "docx", "openpyxl", "pptx", "weasyprint", "pypdf", "fitz",
-    }
-
-    def _module_level_imports(tree: ast.Module) -> set[str]:
-        """Imports that run when the module is imported.
-
-        Deliberately NOT ``ast.walk``: that also finds imports inside function
-        bodies, which are the correct way to reach a heavy dependency -- they
-        cost nothing until the function is called. This gate exists so the
-        legacy shim stays cheap to IMPORT, and 10b241f5 rightly added a lazy
-        ``import fitz`` inside the PDF verification helper to stop generate_pdf
-        reporting success for a PDF that was missing 30 of its names. Flagging
-        that made the gate an obstacle to a correct fix rather than a check on
-        import cost.
-        """
-        found: set[str] = set()
-
-        def visit(nodes) -> None:
-            for node in nodes:
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    continue  # its body runs on call, not on import
-                if isinstance(node, (ast.Import, ast.ImportFrom)):
-                    for alias in node.names:
-                        found.add(alias.name.split(".", 1)[0])
-                    if isinstance(node, ast.ImportFrom) and node.module:
-                        found.add(node.module.split(".", 1)[0])
-                # if/try/with at module level still execute on import
-                for attr in ("body", "orelse", "finalbody", "handlers"):
-                    child = getattr(node, attr, None)
-                    if isinstance(child, list):
-                        visit(child)
-
-        visit(tree.body)
-        return found
-
     for module in (tools, processor_tools):
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-        offenders = _module_level_imports(tree) & heavy
+        offenders = module_level_imports(tree) & HEAVY_IMPORTS
         assert not offenders, (
             f"{module.__name__} imports {sorted(offenders)} at module level, so "
             "importing the legacy shim pays for the whole document stack"

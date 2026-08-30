@@ -1235,6 +1235,49 @@ retry paths decide by asking, and an injected 503 that claims to be
 permanent skips the very retry it was injected to exercise.
 
 
+### 28. A guard nobody has seen fail (2026-08-30)
+
+§27C says a mechanism that only speaks when it breaks cannot be told from
+one that never runs. The same sentence applies to the tests that enforce
+these rules, and it cost a night to learn.
+
+**Every guard test needs a negative control.** Assert it FAILS on a
+synthetic violation, in the same test file, or "passing" means nothing.
+Three examples from one evening, all of which passed while being wrong:
+
+- `test_each_hitl_rule_is_defined_once` read `kazma.css` only. `base.html`
+  loads `kazma.v5.css` **second**, which redefined two of the selectors — so
+  the guard reported "one rule each" while the browser applied three, which
+  is exactly how the card came to render as a mixture of two designs.
+- Its rule counter then matched a **grouped** selector list
+  (`.agent-progress,\n.hitl-approval-card {`) and validated the wrong rule
+  entirely, and missed whole rules written on one line — which is how
+  `kazma.v5.css` had written its duplicate.
+- The heavy-import gate used `ast.walk`, which finds imports inside function
+  bodies. It flagged a correct lazy `import fitz` and so blocked the fix for
+  `generate_pdf` reporting success on PDFs missing 30 of their names. A guard
+  can be wrong in the direction of blocking good work, too.
+
+**Enumerate a guard's inputs from the same source of truth the system
+uses.** The CSS gate now parses `base.html` for its stylesheet list instead
+of hardcoding one; a copied list is a second definition, and second
+definitions drift — which is what the duplicate rules were in the first
+place.
+
+**Prefer measuring behaviour to grepping source.** The layout bug was
+invisible in the CSS and obvious the moment the DOM was rebuilt with the
+live stylesheets and measured in a browser: the reasoning panel at 51px
+beside a 493px card. Pinning `flex: 1 1 100%` looked sufficient and was not
+— against an inline `display:flex` both children still shrank to share the
+line, which only `flex-wrap` fixed, and only the measurement showed it.
+
+The corollary for runtime code: `start_stall_watchdog` shipped without a
+way to stop. Cancelling the heartbeat left the watcher thread reporting an
+ever-growing stall every 30s forever. Nothing found that until a negative
+control — "the kill-switch means no dump is written" — failed for a reason
+that had nothing to do with the kill-switch.
+
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

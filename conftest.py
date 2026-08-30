@@ -17,6 +17,13 @@ from pathlib import Path
 
 os.environ.pop("KAZMA_SECRET", None)
 
+# The event-loop stall watchdog reports a loop that stopped responding, which
+# only means something for a long-lived service. A test process is entitled to
+# block, and a full 6,000-test run duly reported a 440s "stall" and wrote a
+# stack dump nobody wanted. Off for the suite; its own tests start it
+# explicitly with a threshold.
+os.environ.setdefault("KAZMA_LOOP_STALL_WATCHDOG", "0")
+
 # Live-operator-file shield (2026-08-27 incident): test runs boot the real
 # app (create_app), whose logging attaches a daily-rotating handler to the
 # LIVE <repo>/.kazma/kazma.log. The suite rotated it at midnight, and the
