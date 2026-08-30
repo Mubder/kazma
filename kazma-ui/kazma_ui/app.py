@@ -1821,6 +1821,20 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Alerts] health watchdog start failed: %s", e)
 
+        # ── Event-loop stall detector ────────────────────────────────
+        # A blocked loop cannot log what blocked it. On 2026-08-30 the app's
+        # last line before a total freeze was "Enqueued from ..." -- not even
+        # uvicorn's health-request logs followed -- and the guard killed the
+        # process before anything could be learned from it, four times.
+        # This dumps every thread's stack from a plain thread, which keeps
+        # running while the loop does not.
+        try:
+            from kazma_core.observability.loop_stall import start_stall_watchdog
+
+            start_stall_watchdog()
+        except Exception as e:
+            logger.warning("[loop-stall] watchdog start failed: %s", e)
+
         if self.cron_store is not None:
             try:
                 await self.cron_store.init()

@@ -8,6 +8,7 @@ covers every testpath — see that file for the incident context.
 from __future__ import annotations
 
 import os
+import pathlib
 
 # Import i18n early so the Jinja2Templates patch (which injects the default
 # ``t`` global) is applied before any test creates a Jinja2Templates instance.
@@ -84,6 +85,63 @@ def _isolated_config_store(tmp_path):
     yield
     isolated.close()
     reset_config_store()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_agent_yaml(tmp_path, monkeypatch):
+    """Point the live-agent config path at a temp file, per test.
+
+    ``_isolated_config_store`` above already gives ConfigStore its own
+    ``yaml_path``, but ``mcp_servers_store._resolve_yaml_path`` does not go
+    through ConfigStore: with no live agent registered -- which is every test
+    -- it falls back to ``agent_runner.CONFIG_FILE``, the checked-in
+    ``kazma.yaml`` at the repository root.
+
+    So ``tests/test_settings.py::test_mcp_add`` POSTed to the settings API and
+    wrote a real ``test-mcp`` server into the real file. It then failed
+    ``test_static_gates.py::test_shipped_mcp_servers_can_actually_run``,
+    because ``echo`` is a shell builtin and not a runnable command -- one test
+    breaking another through the operator's live configuration. Commit
+    47112eb2 had already deleted that fixture once and added the gate that
+    catches it; the gate works, and the suite kept re-creating what it guards
+    against.
+    """
+    import kazma_core.agent_runner as agent_runner
+
+    monkeypatch.setattr(
+        agent_runner, "CONFIG_FILE", str(tmp_path / "kazma.yaml"), raising=False
+    )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _repo_config_is_not_a_test_fixture():
+    """Fail loudly if a test still mutates the checked-in ``kazma.yaml``.
+
+    The fixture above closes the path that was actually being used. This is
+    the net under it, because the interesting failure is the one nobody
+    predicted: any future code that resolves the config path a different way
+    lands here instead of in the operator's working tree, where it was found
+    four times in one evening by hand.
+
+    Restores the file so a run never leaves the tree dirty, and says so.
+    """
+    import hashlib
+
+    target = pathlib.Path(__file__).resolve().parent.parent / "kazma.yaml"
+    before = target.read_bytes() if target.is_file() else None
+    yield
+    if before is None or not target.is_file():
+        return
+    after = target.read_bytes()
+    if after != before:
+        target.write_bytes(before)
+        raise AssertionError(
+            "the test suite modified the checked-in kazma.yaml "
+            f"(sha {hashlib.sha256(before).hexdigest()[:12]} -> "
+            f"{hashlib.sha256(after).hexdigest()[:12]}). It has been restored, "
+            "but a test is writing to the live agent configuration -- find it "
+            "and give it an isolated path."
+        )
 
 
 @pytest.fixture(autouse=True)
