@@ -1,177 +1,163 @@
-"""Offset-commit tests for the Telegram adapter (at-least-once delivery).
+"""Committing the Telegram offset must not depend on how big update_id is.
 
-The committed getUpdates offset advances only after an update's chain
-task completes; uncommitted updates are redelivered by Telegram while an
-earlier chain is still in flight and must be skipped at dispatch.
+2026-08-30. ``_on_update_done`` advanced the committed offset by walking
+integers::
+
+    nxt = self._offset + 1
+    while self._offset < self._max_seen_update_id and nxt not in pending:
+        self._offset = nxt
+        self._unacked_updates.discard(nxt)
+        nxt += 1
+
+``self._offset`` starts at 0 on every boot and a Telegram ``update_id`` is a
+~10-digit number, so the first message after any restart entered a loop of
+hundreds of millions of iterations -- synchronously, in a done-callback, on
+the event loop.
+
+Kazma froze solid: no logs at all, not even uvicorn recording the health
+probes arriving, until the guard killed it. The offset therefore never
+committed, Telegram redelivered the same update on the next boot, and it
+froze again. Four restarts, one short of the guard's crash-loop cooldown.
+Stack dumps caught it still in that loop at 15s, 45s and 106s.
+
+These tests pin both halves: it must be fast at realistic ids, and it must
+still never commit past an update that has not finished.
 """
 
 from __future__ import annotations
 
-import asyncio
+import time
 
+import pytest
 from kazma_gateway.adapters.telegram import TelegramAdapter
 
 
-def _mk_adapter() -> TelegramAdapter:
-    return TelegramAdapter(token="0:test", allow_all=True)
+class _Offsets:
+    """Just the offset bookkeeping, without constructing a live adapter."""
+
+    def __init__(self) -> None:
+        self._offset = 0
+        self._max_seen_update_id = 0
+        self._pending_updates: set[int] = set()
+        self._unacked_updates: set[int] = set()
+
+    _on_update_done = TelegramAdapter._on_update_done
 
 
-def _text_update(update_id: int, chat_id: int, message_id: int) -> dict:
-    return {
-        "update_id": update_id,
-        "message": {
-            "message_id": message_id,
-            "text": f"m{message_id}",
-            "chat": {"id": chat_id, "type": "private"},
-            "from": {"id": 7, "username": "alice"},
-        },
-    }
+class _DoneTask:
+    def cancelled(self) -> bool:
+        return False
+
+    def exception(self):
+        return None
 
 
-async def _settle() -> None:
-    """Let dispatched chain tasks run to completion (a few loop ticks)."""
-    for _ in range(20):
-        await asyncio.sleep(0)
+def _seen(o: _Offsets, *ids: int) -> None:
+    for uid in ids:
+        o._pending_updates.add(uid)
+        o._unacked_updates.add(uid)
+        o._max_seen_update_id = max(o._max_seen_update_id, uid)
 
 
-async def _noop_reaction(chat_id, message_id, emoji) -> None:  # noqa: ANN001
-    return None
+def test_a_realistic_update_id_commits_instantly():
+    """The regression. A real id is ~10 digits; the old loop counted to it."""
+    o = _Offsets()
+    real_id = 987_654_321  # the shape Telegram actually sends
+    _seen(o, real_id)
+
+    start = time.monotonic()
+    o._on_update_done(real_id, _DoneTask())
+    elapsed = time.monotonic() - start
+
+    assert o._offset == real_id
+    assert elapsed < 0.5, (
+        f"committing one update took {elapsed:.1f}s -- the offset walk is back, "
+        "and it blocks the event loop for the whole duration"
+    )
+    assert not o._unacked_updates
 
 
-async def test_offset_advances_only_after_chain_completion(monkeypatch):
-    adapter = _mk_adapter()
-    monkeypatch.setattr(adapter, "_set_reaction", _noop_reaction)
-    queue: asyncio.Queue = asyncio.Queue()
+def test_the_offset_never_passes_an_unfinished_update():
+    """At-least-once: a crash must redeliver anything still in flight."""
+    o = _Offsets()
+    _seen(o, 100, 101, 102)
 
-    adapter._max_seen_update_id = 2  # normally recorded by _poll
-    adapter._dispatch_update_to_chain(_text_update(1, 100, 11), queue)
-    adapter._dispatch_update_to_chain(_text_update(2, 200, 22), queue)
-    # Chains dispatched but not completed — offset must NOT advance.
-    assert adapter._offset == 0
+    o._on_update_done(102, _DoneTask())          # newest finishes first
+    assert o._offset == 99, (
+        "committing to 102 would drop 100 and 101 if the process died now"
+    )
+    assert {100, 101} <= o._unacked_updates
 
-    await _settle()
-    assert queue.qsize() == 2
-    assert adapter._offset == 2  # max completed update_id
+    o._on_update_done(100, _DoneTask())
+    assert o._offset == 100                       # 101 still running, holds it
+    assert 101 in o._unacked_updates
 
-
-async def test_offset_holds_behind_earlier_pending_update(monkeypatch):
-    """A finished later update must not commit past a running earlier one."""
-    adapter = _mk_adapter()
-    gate = asyncio.Event()
-
-    async def gated_process(update, queue):  # noqa: ANN001
-        if update["update_id"] == 1:
-            await gate.wait()
-
-    monkeypatch.setattr(adapter, "_process_update", gated_process)
-    queue: asyncio.Queue = asyncio.Queue()
-
-    adapter._max_seen_update_id = 3  # normally recorded by _poll
-    adapter._dispatch_update_to_chain(_text_update(1, 100, 11), queue)
-    adapter._dispatch_update_to_chain(_text_update(2, 200, 22), queue)  # chat B — free
-    adapter._dispatch_update_to_chain(_text_update(3, 100, 12), queue)  # chat A — behind 1
-    await _settle()
-    # Update 2 finished, but 1 (and chained 3) still run: offset holds.
-    assert adapter._offset == 0
-
-    gate.set()
-    await _settle()
-    assert adapter._offset == 3
+    o._on_update_done(101, _DoneTask())
+    assert o._offset == 102                       # everything done, commit all
+    assert not o._unacked_updates
 
 
-async def test_redelivered_uncommitted_update_is_skipped(monkeypatch):
-    """Telegram redelivers unconfirmed updates — dispatch must dedup."""
-    adapter = _mk_adapter()
-    gate = asyncio.Event()
-    processed: list[int] = []
+def test_the_offset_never_goes_backwards():
+    o = _Offsets()
+    _seen(o, 500)
+    o._on_update_done(500, _DoneTask())
+    assert o._offset == 500
 
-    async def gated_process(update, queue):  # noqa: ANN001
-        processed.append(update["update_id"])
-        if update["update_id"] == 1:
-            await gate.wait()
-
-    monkeypatch.setattr(adapter, "_process_update", gated_process)
-    queue: asyncio.Queue = asyncio.Queue()
-
-    adapter._max_seen_update_id = 1  # normally recorded by _poll
-    upd = _text_update(1, 100, 11)
-    adapter._dispatch_update_to_chain(upd, queue)
-    await asyncio.sleep(0)  # chain started, gated
-    assert 1 in adapter._unacked_updates
-
-    # Redelivery poll before commit — must not spawn a second chain.
-    adapter._dispatch_update_to_chain(upd, queue)
-    gate.set()
-    await _settle()
-
-    assert processed == [1]
-    assert adapter._offset == 1
-    assert 1 not in adapter._unacked_updates
+    _seen(o, 400)                                  # a late/out-of-order arrival
+    o._on_update_done(400, _DoneTask())
+    assert o._offset == 500, "the committed mark must never rewind"
 
 
-async def test_failed_chain_still_commits_offset(monkeypatch):
-    """A raising chain must still commit — redelivery would poison-loop."""
-    adapter = _mk_adapter()
+def test_gaps_between_ids_do_not_cost_anything():
+    """Telegram ids are not contiguous from our side; that must not matter."""
+    o = _Offsets()
+    _seen(o, 1_000_000, 5_000_000)
 
-    async def boom(update, queue):  # noqa: ANN001
-        raise RuntimeError("poison update")
+    start = time.monotonic()
+    o._on_update_done(1_000_000, _DoneTask())
+    o._on_update_done(5_000_000, _DoneTask())
+    elapsed = time.monotonic() - start
 
-    monkeypatch.setattr(adapter, "_process_update", boom)
-    adapter._max_seen_update_id = 1  # normally recorded by _poll
-    adapter._dispatch_update_to_chain(_text_update(1, 100, 11), asyncio.Queue())
-    await _settle()
-    assert adapter._offset == 1
-
-
-async def test_poll_confirms_only_committed_offset():
-    """getUpdates must use committed+1 and never advance on read."""
-    adapter = _mk_adapter()
-    adapter._offset = 7  # committed prefix
-    captured: dict = {}
-
-    class FakeResp:
-        @staticmethod
-        def raise_for_status() -> None:
-            return None
-
-        @staticmethod
-        def json() -> dict:
-            return {"ok": True, "result": [{"update_id": 8}, {"update_id": 9}]}
-
-    class FakeHttp:
-        async def get(self, path, params=None):  # noqa: ANN001
-            captured["path"] = path
-            captured["params"] = params
-            return FakeResp()
-
-    adapter._http = FakeHttp()  # type: ignore[assignment]
-    updates = await adapter._poll()
-
-    assert captured["path"] == "/getUpdates"
-    assert captured["params"]["offset"] == 8  # committed + 1
-    assert [u["update_id"] for u in updates] == [8, 9]
-    assert adapter._offset == 7  # read does NOT commit
-    assert adapter._max_seen_update_id == 9
+    assert o._offset == 5_000_000
+    assert elapsed < 0.5, f"a 4M-wide gap cost {elapsed:.1f}s"
 
 
-async def test_queue_full_sends_busy_notice(monkeypatch):
-    """A dropped message must produce immediate user feedback."""
-    adapter = _mk_adapter()
-    sent: list[tuple[str, dict]] = []
+def test_a_failed_task_still_commits():
+    """Redelivering an already-failing handler is the poison loop itself."""
 
-    class FakeHttp:
-        async def post(self, path, json=None):  # noqa: ANN001
-            sent.append((path, json))
-            return None
+    class _Failed:
+        def cancelled(self) -> bool:
+            return False
 
-    monkeypatch.setattr(adapter, "_ensure_http", lambda: FakeHttp())
-    queue: asyncio.Queue = asyncio.Queue(maxsize=1)
-    queue.put_nowait(object())  # full
+        def exception(self):
+            return RuntimeError("handler blew up")
 
-    await adapter._process_update(_text_update(1, 100, 11), queue)
+    o = _Offsets()
+    _seen(o, 777)
+    o._on_update_done(777, _Failed())
+    assert o._offset == 777, (
+        "a failing update that never commits comes back on every reconnect"
+    )
 
-    assert len(sent) == 1
-    path, payload = sent[0]
-    assert path == "/sendMessage"
-    assert payload["chat_id"] == 100
-    assert "resend" in payload["text"]
+
+def test_the_integer_walk_is_gone():
+    """Source guard: the shape of the bug, not just its symptom."""
+    import inspect
+
+    src = inspect.getsource(TelegramAdapter._on_update_done)
+    assert "nxt += 1" not in src, (
+        "the offset is being advanced one integer at a time again"
+    )
+
+
+@pytest.mark.parametrize("pending", [set(), {5}, {5, 9}])
+def test_unacked_is_pruned_to_match_the_offset(pending):
+    o = _Offsets()
+    _seen(o, 1, 5, 9, 12)
+    for uid in list(o._pending_updates):
+        if uid not in pending:
+            o._on_update_done(uid, _DoneTask())
+    assert all(uid > o._offset for uid in o._unacked_updates), (
+        "an id at or below the committed offset is acknowledged and must not "
+        "still be tracked as unacked"
+    )

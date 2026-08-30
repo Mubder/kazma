@@ -444,11 +444,29 @@ class TelegramAdapter(BaseAdapter):
         """Commit the getUpdates offset past finished update tasks.
 
         Advances ``self._offset`` to the highest update_id with no
-        unfinished predecessor (contiguous completed prefix). A task that
-        RAISED still commits — redelivering an already-failing handler
-        would poison-loop — but is logged at warning. A still-running
-        earlier update holds the mark so a crash redelivers everything
-        uncommitted (at-least-once).
+        unfinished predecessor. A task that RAISED still commits —
+        redelivering an already-failing handler would poison-loop — but is
+        logged at warning. A still-running earlier update holds the mark so a
+        crash redelivers everything uncommitted (at-least-once).
+
+        This used to walk ``self._offset + 1`` upward one integer at a time
+        until it reached ``_max_seen_update_id``. ``self._offset`` starts at 0
+        on every boot and a Telegram ``update_id`` is a ~10-digit number, so
+        the FIRST message after any restart entered a tight loop of hundreds
+        of millions of iterations -- synchronously, inside a done-callback,
+        on the event loop.
+
+        On 2026-08-30 that froze Kazma completely: no logs, not even uvicorn
+        recording the health probes arriving, until the guard killed the
+        process. Which meant the offset never committed, so Telegram
+        redelivered the same update on the next boot, which froze it again.
+        Four restarts, one short of the guard's crash-loop cooldown. Stack
+        dumps caught it still inside this loop at 15s, 45s and 106s.
+
+        The ids we care about are the ones we have actually seen -- a handful
+        -- not every integer below them. So the mark moves by set arithmetic
+        instead, which is O(pending) and cannot depend on how large Telegram's
+        counter happens to be.
         """
         if not task.cancelled():
             exc = task.exception()
@@ -461,14 +479,18 @@ class TelegramAdapter(BaseAdapter):
                     str(exc)[:200],
                 )
         self._pending_updates.discard(update_id)
-        nxt = self._offset + 1
-        while (
-            self._offset < self._max_seen_update_id
-            and nxt not in self._pending_updates
-        ):
-            self._offset = nxt
-            self._unacked_updates.discard(nxt)
-            nxt += 1
+        # Everything strictly below the oldest still-running update is safe to
+        # commit; with nothing running, everything seen is safe.
+        limit = (
+            min(self._pending_updates) - 1
+            if self._pending_updates
+            else self._max_seen_update_id
+        )
+        if limit > self._offset:
+            self._offset = limit
+            self._unacked_updates = {
+                uid for uid in self._unacked_updates if uid > limit
+            }
 
     async def _process_update_chained(
         self,
