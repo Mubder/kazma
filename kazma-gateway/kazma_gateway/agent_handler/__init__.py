@@ -17,6 +17,8 @@ from .store import (
 from .hitl import (
     _check_graph_interrupt,
     _build_approval_prompt,
+    approval_card_suppressed,
+    clear_approval_throttle,
     _handle_hitl_resume,
 )
 from .swarm_dispatch import (
@@ -53,6 +55,8 @@ __all__ = [
     "_PLATFORM_KEYS",
     "_check_graph_interrupt",
     "_build_approval_prompt",
+    "approval_card_suppressed",
+    "clear_approval_throttle",
     "_handle_hitl_resume",
     "_extract_swarm_task",
     "_dispatch_auto_route",

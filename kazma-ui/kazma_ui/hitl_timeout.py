@@ -57,8 +57,16 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     _intr_payload = await read_pending_interrupt(graph, config)
     _resume_cmd = build_resume_command(
         _intr_payload, approved=False, scope="once",
-        reason=(f"HITL approval timed out after {int(timeout_s)}s "
-                "(auto-deny-on-timeout)"),
+        reason=(
+            f"HITL approval timed out after {int(timeout_s)}s. The operator "
+            "did not answer and is probably away from the device. "
+            "This is NOT a refusal of this approach. "
+            "Retrying the same action with different arguments, a different "
+            "tool, or a different path only sends another approval request "
+            "to someone who is not there. "
+            "Stop now, do not attempt a workaround, and reply saying what "
+            "you were about to do and what you need approved."
+        ),
         extra={"timed_out": True} if not (_intr_payload and _intr_payload.get("kind") in ("semantic_clarify", "semantic_confirm")) else None,
     )
     if _resume_cmd is None:

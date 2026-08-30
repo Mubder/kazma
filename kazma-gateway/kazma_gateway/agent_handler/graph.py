@@ -21,6 +21,7 @@ from .store import (
 from .hitl import (
     _check_graph_interrupt,
     _build_approval_prompt,
+    approval_card_suppressed,
     _handle_hitl_resume,
     apply_hitl_approval_markup,
 )
@@ -1431,6 +1432,25 @@ def create_graph_handler(
                     ctx = await _store.get(thread_id)
                     if not ctx:
                         ctx = msg.context_metadata
+                    # A 60s approval timeout that auto-denies makes a model
+                    # retry variants of the same intent, each raising a fresh
+                    # card. Nine arrived in three minutes on 2026-08-30. The
+                    # tool is still gated when a card is withheld -- this
+                    # suppresses the NOTIFICATION, never the approval.
+                    _suppressed = approval_card_suppressed(
+                        thread_id,
+                        str(hitl_payload.get("tool") or "unknown"),
+                        hitl_payload.get("args") or {},
+                    )
+                    if _suppressed:
+                        logger.warning(
+                            "[agent-handler] approval card withheld: thread=%s %s",
+                            thread_id, _suppressed,
+                        )
+                        # Same exit as a sent card: the graph is paused on the
+                        # interrupt either way and resumes on /hitl. Only the
+                        # notification is withheld, never the gate.
+                        return
                     prompt = _build_approval_prompt(
                         hitl_payload, thread_id, platform=msg.platform
                     )
