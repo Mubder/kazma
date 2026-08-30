@@ -54,6 +54,18 @@ def test_semantic_drift_detects_dissimilar_with_mock_embedder():
             return [self.encode(x) for x in texts]
 
     with patch("kazma_core.memory.embedder.get_embedder", return_value=_Emb()):
+        # S2-2: interrogatives are gated BEFORE the embedder — a question is
+        # categorically not a drift shift ("what going on?" incident class).
+        # Drift mechanics are therefore exercised with declarative text.
+        assert (
+            semantic_topic_drift(
+                "Kuwait weather forecast: sunny and humid all week long",
+                "Please clean up the memory graph entities for kazma and ShipX",
+                threshold=0.55,
+                enabled=True,
+            )
+            is True
+        )
         assert (
             semantic_topic_drift(
                 "What is the weather in Kuwait today please?",
@@ -61,7 +73,7 @@ def test_semantic_drift_detects_dissimilar_with_mock_embedder():
                 threshold=0.55,
                 enabled=True,
             )
-            is True
+            is False  # interrogative gate wins over a maximally distant embedder
         )
         assert (
             semantic_topic_drift(
@@ -100,11 +112,15 @@ def test_classify_uses_embedding_when_goal_set():
             task_goal_summary=goal,
             use_embedding_drift=True,
         )
-    assert mode == "shift"
+    # S2-1: embedding drift is shift_INFERRED — recall stays on, prose kept.
+    assert mode == "shift_inferred"
 
 
 def test_should_stub_prior_tools_matrix():
     assert should_stub_prior_tools(intent_mode="shift", prev_task_status="in_progress")
+    # S2-1 split: legacy "shift" is explicit; both shift kinds stub.
+    assert should_stub_prior_tools(intent_mode="shift_explicit", prev_task_status="in_progress")
+    assert should_stub_prior_tools(intent_mode="shift_inferred", prev_task_status="in_progress")
     assert should_stub_prior_tools(intent_mode="normal", prev_task_status="completed")
     assert should_stub_prior_tools(intent_mode="normal", prev_task_status="superseded")
     assert not should_stub_prior_tools(intent_mode="continue", prev_task_status="in_progress")

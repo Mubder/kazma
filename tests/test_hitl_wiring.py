@@ -861,7 +861,10 @@ class TestToolWorkerUnbackedGate:
         dones = _done_results(out)
         assert len(dones) == 1
         assert dones[0]["is_error"] is True
-        assert "DENIED" in dones[0]["content"]
+        # Context-integrity S1-3: x_post is now denied EARLIER by the
+        # commitment layer's proposal gate (no resolvable proposal_id) —
+        # still a hard deny, never executed, never interrupted.
+        assert "DENIED" in dones[0]["content"] or "requires a proposal_id" in dones[0]["content"]
 
     @pytest.mark.asyncio
     async def test_always_hitl_tool_denied_on_none_config(self):

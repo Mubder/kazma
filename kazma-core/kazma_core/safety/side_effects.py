@@ -190,6 +190,10 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
     "dispatch_notification": (EffectKind.OUTBOUND, SemanticTier.NONE, None, ()),
     "context_info": (EffectKind.READ, SemanticTier.NONE, None, ()),
     "update_scratchpad": (EffectKind.NONE, SemanticTier.NONE, None, ()),
+    # Durable draft persistence (context-integrity S1-3) — effect-free from
+    # the commitment layer's view: it only WRITES an artifact row. Its whole
+    # purpose is to make the outbound act VERIFIABLE, not to act.
+    "save_proposal": (EffectKind.NONE, SemanticTier.NONE, None, ()),
     # Internal task-state bookkeeping (mutates only the ledger DB, never the
     # world) — unregistered, the commitment layer denied it as a fail-closed
     # unregistered mutator (2026-08-27 live: the model's add_finding was

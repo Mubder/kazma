@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import logging
 import math
+import re
 from typing import Any
 
 __all__ = [
     "cosine_distance",
+    "is_interrogative_checkin",
     "semantic_topic_drift",
     "topic_drift_config",
     "stub_prior_tool_chains",
@@ -25,7 +27,66 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_THRESHOLD = 0.55
 _DEFAULT_ENABLED = True
-_MIN_CHARS = 12
+# S2-2: 12 let "what going on?" (15 chars) score as maximally distant from
+# the open goal and flip the whole recovery subsystem off. 25 + a content
+# word means short contentless text fails OPEN (not drifted) instead.
+_MIN_CHARS = 25
+
+# Interrogative check-ins (S2-2): a question about the immediate prior work
+# is categorically not a topic change. Hard allowlist, gated BEFORE the
+# embedder — raising the distance threshold would just trade one silent
+# misclassification for another. The product is Arabic-first, so the Gulf /
+# Levantine question heads are first-class, not an afterthought.
+_INTERROGATIVE_EN_RE = re.compile(
+    r"(?is)\A[\s'\u2019\u201c\u201d(\[]*"
+    r"(what|why|how|where|when|who|whose|which|wtf|wf|sup|status|progress|update)\b"
+    r"|what(?:'s| is|s)\s+going\s+on|what\s+going\s+on|what\s+happened|"
+    r"what\s+was\s+that|where\s+are\s+we|how\s+is\s+it\s+going"
+)
+_INTERROGATIVE_AR_RE = re.compile(
+    r"(?s)\A[\s<'\u2019\u201c\u201d(\[]*"
+    r"(شنو|وش|وشو|ايش|إيش|ليش|شفيه|شفيها|وين|متى|شلون|شصار|شسر|شو\s+صار|"
+    r"وش\s+الوضع|ليش\s+وقف|كيف\s+الحال|كم\s+الوقت)"
+)
+
+# Contentless short text fails OPEN — tokens that carry no topic at all.
+# Arabic question particles and chat filler are included so "وش؟" never
+# reaches the embedder either.
+_STOPWORDS = {
+    # EN
+    "what", "whats", "what's", "why", "how", "where", "when", "who", "whose",
+    "which", "wtf", "sup", "status", "progress", "update", "going", "on",
+    "happened", "is", "are", "was", "were", "the", "a", "an", "it", "this",
+    "that", "now", "please", "just", "with", "and", "or", "so", "ok", "okay",
+    # AR (bidi: particles, not content)
+    "شنو", "وش", "وشو", "ايش", "إيش", "ليش", "شفيه", "شفيها", "وين", "متى",
+    "شلون", "شصار", "شسر", "شو", "هذا", "هذي", "في", "من", "على", "عن",
+    "ايش", "هل", "لا", "نعم", "يلا", "زين", "كمّل", "اكمم", "مو", "شو",
+}
+
+
+def is_interrogative_checkin(text: str) -> bool:
+    """True when *text* is an interrogative check-in on prior work (EN/AR).
+
+    "what going on?", "status?", "شنو صار؟" — a contentless question about
+    the current work can never be classified as a topic shift.
+    """
+    t = (text or "").strip().lower()
+    if not t:
+        return False
+    if _INTERROGATIVE_EN_RE.search(t):
+        return True
+    return bool(_INTERROGATIVE_AR_RE.search((text or "").strip()))
+
+
+def _has_content_word(text: str) -> bool:
+    """≥1 alphabetic token outside the stopword list (EN + AR)."""
+    tokens = re.findall(r"[\w\u0600-\u06FF]+", (text or ""))
+    for tok in tokens:
+        t = tok.strip().strip("؟?!.،,")
+        if len(t) >= 2 and t.lower() not in _STOPWORDS and t not in _STOPWORDS:
+            return True
+    return False
 
 
 def topic_drift_config() -> dict[str, Any]:
@@ -110,6 +171,16 @@ def semantic_topic_drift(
     # Identical / near-identical text is never a shift
     if cur.lower() == ref.lower():
         return False
+    # S2-2 hard gates — BEFORE the embedder, so a mocked/maximum-distance
+    # embedder cannot classify a check-in as a pivot:
+    #   1. An interrogative check-in ("what going on?", "شنو صار؟") is
+    #      categorically not a topic change.
+    #   2. Short contentless text (no content word outside the stopword
+    #      list) fails OPEN — it cannot be scored as distant.
+    if is_interrogative_checkin(cur):
+        return False
+    if not _has_content_word(cur):
+        return False
 
     try:
         from kazma_core.memory.embedder import get_embedder
@@ -162,12 +233,18 @@ def should_stub_prior_tools(
     intent_mode: str = "",
     prev_task_status: str = "",
 ) -> bool:
-    """Whether completed/prior tool chains should be stubbed for this turn."""
+    """Whether completed/prior tool chains should be stubbed for this turn.
+
+    S2-1: both explicit AND inferred shifts stub (the point is attention
+    hygiene, not recall policy) — but on ``shift_inferred`` the caller passes
+    ``keep_assistant_prose=True`` so a misread pivot cannot erase the very
+    assistant prose the user is asking about.
+    """
     mode = (intent_mode or "").strip().lower()
     status = (prev_task_status or "").strip().lower()
     if mode == "continue":
         return False
-    if mode == "shift":
+    if mode in ("shift", "shift_explicit", "shift_inferred"):
         return True
     if status in ("completed", "superseded", "abandoned") and mode not in ("continue",):
         return True
@@ -178,6 +255,7 @@ def stub_prior_tool_chains(
     messages: list[dict[str, Any]] | None,
     *,
     keep_last_n_user_turns: int = 1,
+    keep_assistant_prose: bool = False,
 ) -> list[dict[str, Any]]:
     """Collapse tool chains that belong to *prior* user turns into short stubs.
 
@@ -185,6 +263,12 @@ def stub_prior_tool_chains(
     (needed if the newest turn already has partial tools — rare at turn entry).
     Earlier assistant ``tool_calls`` + matching ``tool`` results become a single
     plain assistant line: ``[Executed tools: name1, name2: success]``.
+
+    ``keep_assistant_prose=True`` (S2-1, ``shift_inferred``): assistant
+    message text is kept IN FULL — only the tool payloads collapse. The
+    2026-08-30 incident lost 8 tweet drafts because prior assistant prose was
+    reduced to a 200-char head on a misread pivot; a misread must not be able
+    to erase the thing being asked about.
 
     Always re-sanitizes chains so OpenAI tool-message pairing stays valid.
     """
@@ -255,7 +339,14 @@ def stub_prior_tool_chains(
             label = ", ".join(names) if names else "tools"
             status_bit = f"{ok} ok" + (f", {err} err" if err else "")
             prior_text = m.get("content")
-            if isinstance(prior_text, str) and prior_text.strip():
+            if keep_assistant_prose and isinstance(prior_text, str) and prior_text.strip():
+                # S2-1 inferred-shift path: keep the FULL assistant prose,
+                # only the tool payloads collapse.
+                content = (
+                    f"{prior_text.strip()}\n"
+                    f"[Earlier tool runs collapsed: {label} — {status_bit}]"
+                )
+            elif isinstance(prior_text, str) and prior_text.strip():
                 # Keep a short slice of assistant narrative if any
                 head = prior_text.strip()[:200]
                 content = f"{head}\n[Executed tools: {label} — {status_bit}]"

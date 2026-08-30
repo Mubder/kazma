@@ -1390,6 +1390,97 @@ control — "the kill-switch means no dump is written" — failed for a reason
 that had nothing to do with the kill-switch.
 
 
+### 29. Context Integrity (2026-08-30 incident hardening)
+
+Born from the @KazmaAI tweet-batch incident: 8 approved drafts vanished
+between proposal and approval because deterministic trim deleted them, the
+scratchpad built to prevent it was clobbered every turn, the summary net
+never fired (24K→160K dead band), and a misread `what going on?` disarmed
+recall. Plan + execution report:
+`docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md`; the duplicated-stream
+reproduction + fix: `docs/plans/S3_2_DUPLICATED_STREAM_INVESTIGATION.md`.
+Tests: `tests/test_context_integrity.py` (56),
+`tests/test_s32_stream_duplication.py` (3).
+
+**A. The scratchpad channel is a merge reducer — never re-introduce a
+replacing write path.** `SupervisorState.scratchpad` is
+`Annotated[dict[str, str], merge_scratchpad]` (24 keys × 4000 chars,
+oldest evicted, `SCRATCHPAD_CLEAR` sentinel for deliberate resets). The
+transports must NEVER contribute a `scratchpad` key:
+`build_turn_working_memory()` deliberately omits it, and the old
+`scratchpad: {}` transport payload is precisely what wiped the
+checkpointed value every user turn (LastValue replace). Adding any new
+write path that puts a full replacement dict into the graph input
+reopens the incident.
+
+**B. Durable artifacts live in `agent/artifacts.py`, not in graph state.**
+The SQLite store keyed `(tenant_id, thread_id, key)` is the source of
+truth for scratchpad findings and proposals; graph state is a read-through
+cache. House patterns are load-bearing: open through
+`apply_sqlite_pragmas()`, DB under `kazma-data/` (universal backup for
+free), GC rides the commitment-GC cadence (`worker_bootstrap.py` — no new
+sweeper loop). Drafts are a row; the model reads the row. Context loss can
+no longer destroy approvable content.
+
+**C. The proposal chokepoint is the commitment resolver — the supervisor
+nudge is NOT the guarantee.** `x_post` / `x_schedule_post` / `book_x_post`
+refuse without a resolvable `proposal_id`
+(`safety/commitment/authorize.py:_resolve_proposal_backed_post`, inside
+`_resolve_send_outbound_act`); a broken artifact store denies fail-closed.
+When the id resolves, the gate REWRITES `text` to the STORED text — the id
+wins over whatever the model holds in context. The iteration-0 nudge in
+`graph_supervisor.py` is advisory only and must never be the thing
+standing between a draft and the wire. A scheduled post
+(`x_schedule_post`) is the same incident with a delay — it is on the
+required list for exactly that reason. The HITL card (Web `renderHitlCard`
++ gateway `_build_approval_prompt`) renders the stored proposal text, so
+what the user approves is what publishes.
+
+**D. The summary net fires on EVERY trim that drops turns.** Never gate
+`inject_summary_of_dropped` on a percentage-of-window again — trim fires at
+`min(24K, window×0.6)` and the old 80% gate meant the net had effectively
+never protected a trim. The injected note NAMES what was dropped ("4
+assistant turns including 8 enumerated draft items"); under ~2K dropped
+tokens the heuristic summarizer runs (zero extra LLM cost). Trims are
+counted: `kazma_context_trims_total{summary=fired|missed}` +
+`kazma_context_trim_dropped_messages_total` — a growing `missed` is a bug
+report. Re-tuning the 24K budget is a SETTINGS change
+(`agent.trim.token_budget`, clamped to [4000, window×0.95]) decided after
+reading those counters for real traffic — the default is deliberately
+unchanged.
+
+**E. `shift` is split — recall is disarmed only by an explicit pivot.**
+`shift_explicit` (regex — the user verifiably said so; legacy `"shift"`
+from old checkpoints counts) suppresses recall and supersedes the task.
+`shift_inferred` (embedding drift) re-ranks only: recall stays ON and
+`stub_prior_tool_chains(..., keep_assistant_prose=True)` collapses tool
+payloads but keeps assistant prose IN FULL — a misread pivot must not
+erase the thing being asked about. Interrogative check-ins
+(`is_interrogative_checkin`, EN + Arabic شنو/وش/ليش/شفيه/وين/متى/شلون/شصار)
+are gated BEFORE the embedder and can never classify as drift;
+`_MIN_CHARS` is 25 plus a content-word requirement (length alone was never
+the right signal).
+
+**F. A recovery attempt never re-streams content (the duplicated-prefix
+invariant).** The SSE/WS bubble APPENDS token deltas; only `turn_complete`
+has replace semantics. Once any delta of a user-visible LLM call has been
+emitted, no recovery attempt of that same call may emit content deltas
+again — the authoritative text arrives via the final response +
+`turn_complete` backfill. Three sites enforce it: supervisor retries pass
+`emit_deltas=(attempt == 1)` to `invoke_llm_chat`, the failover chain
+passes `emit_deltas=False`, and `LLMProvider.chat_stream` tracks
+`_emitted_any` so its blocking fallbacks yield only the final
+`StreamDelta(response=…)`. Removing any one of these brings back the
+`The proposal turn is The proposal turn is` incident string (locked by
+`tests/test_s32_stream_duplication.py`).
+
+**G. Recovery spirals get an honest exit.** ≥3 turn-cumulative queries
+against session/checkpoint/audit stores hunting the assistant's own prior
+output force RESPOND with "what's missing + one concrete question"
+(`tool_loop_breaker.count_recovery_probes`); digging only grew the history
+that caused the trim.
+
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

@@ -12,6 +12,8 @@ from typing import Any
 
 __all__ = [
     "get_metrics_response",
+    "record_commitment_terminal",
+    "record_context_trim",
     "record_llm_call",
     "record_long_task",
     "record_memory_op",
@@ -103,6 +105,23 @@ if _PROMETHEUS_AVAILABLE:
         "Resume requests whose cursor predates retention (snapshot fallback)",
     )
 
+    # Context integrity — deterministic-trim frequency (the plan's deferred
+    # measurement, 2026-08-30). kazma_context_trims_total{summary} counts
+    # every trim that dropped messages; summary="fired"|"missed" tells you
+    # the dead band is closed in practice, not just in code. The dropped-
+    # messages counter sizes the loss per trim. These two counters ARE the
+    # "measure how often trim actually fires before re-tuning the 24K
+    # budget" step — read them for a week before touching the budget.
+    CONTEXT_TRIMS_TOTAL = Counter(
+        "kazma_context_trims_total",
+        "Deterministic context trims that dropped messages",
+        ["summary"],  # fired | missed
+    )
+    CONTEXT_TRIM_DROPPED_MESSAGES_TOTAL = Counter(
+        "kazma_context_trim_dropped_messages_total",
+        "Messages dropped by deterministic context trim",
+    )
+
     # Latency histograms
     LLM_LATENCY_SECONDS = Histogram(
         "kazma_llm_latency_seconds",
@@ -122,6 +141,8 @@ else:
     DELIVERY_DROPPED_TOTAL = None
     DELIVERY_REPLAYED_TOTAL = None
     DELIVERY_SEQ_GAPS_TOTAL = None
+    CONTEXT_TRIMS_TOTAL = None
+    CONTEXT_TRIM_DROPPED_MESSAGES_TOTAL = None
 
 
 # ── Metrics Endpoint ───────────────────────────────────────────────────
@@ -187,6 +208,20 @@ def record_commitment_terminal(decision: str) -> None:
         return
     label = (decision or "unknown")[:64]
     COMMITMENT_TERMINAL_TOTAL.labels(decision=label).inc()
+
+
+def record_context_trim(dropped_messages: int = 0, *, summary_fired: bool = False) -> None:
+    """Record one deterministic context trim (context-integrity deferred item).
+
+    No-op without prometheus-client. ``summary_fired`` labels whether the
+    S1-4 summary net injected a note for the drop — ``missed`` growing means
+    trims are still silently deleting turns somewhere.
+    """
+    if not _PROMETHEUS_AVAILABLE or CONTEXT_TRIMS_TOTAL is None:
+        return
+    CONTEXT_TRIMS_TOTAL.labels(summary="fired" if summary_fired else "missed").inc()
+    if dropped_messages > 0 and CONTEXT_TRIM_DROPPED_MESSAGES_TOTAL is not None:
+        CONTEXT_TRIM_DROPPED_MESSAGES_TOTAL.inc(dropped_messages)
 
 
 def record_memory_op(operation: str, layer: str = "unknown") -> None:

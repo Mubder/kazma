@@ -140,8 +140,9 @@ def decide(
     if not intent_engine_enabled():
         return RouteKind.LOOP, None, "engine_disabled", ""
 
-    # 2. Focus gates — never execute on continue/cleanup/shift
-    if focus in ("continue", "cleanup", "shift"):
+    # 2. Focus gates — never execute on continue/cleanup/shift (S2-1 split:
+    #    explicit and inferred pivots both loop — neither executes handlers)
+    if focus in ("continue", "cleanup", "shift", "shift_explicit", "shift_inferred"):
         return RouteKind.LOOP, None, f"focus_{focus}", ""
 
     # 3. Drop GENERAL acts; if none left → loop

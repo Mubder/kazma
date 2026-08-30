@@ -177,6 +177,7 @@ TOOL_TIERS: dict[str, str] = {
     #
     # Write — internal, reversible state changes. No approval required.
     "update_scratchpad": "write",
+    "save_proposal": "write",       # durable draft persistence (S1-3) — makes posting SAFE
     "task_ledger_update": "write",
     "memory_link_entities": "write",
     "knowledge_create_library": "write",

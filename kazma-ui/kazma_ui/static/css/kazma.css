@@ -5828,3 +5828,50 @@ html.kazma-soft-nav #main-content {
   font-size: 0.68rem;
   color: var(--text-tertiary);
 }
+
+/* ── Context-compacted chip (context-integrity S3-1) ─────────────────
+   Trim/stub events surface as a compact chip with a hover detail, so the
+   user learns the agent's context was compacted instead of wondering why
+   it forgot (2026-08-30 incident, failure link #8). */
+.context-compacted-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.35rem auto;
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  color: var(--text-secondary, #9aa4b2);
+  background: color-mix(in srgb, var(--accent, #6c8cff) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #6c8cff) 22%, transparent);
+  cursor: default;
+  user-select: none;
+}
+.context-compacted-chip-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+.context-compacted-chip-detail {
+  display: none;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(100% + 0.35rem);
+  z-index: 30;
+  max-width: min(34rem, 86vw);
+  padding: 0.45rem 0.7rem;
+  border-radius: 0.5rem;
+  background: var(--bg-elevated, #1b2230);
+  border: 1px solid var(--border, #2a3345);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--text-primary, #dbe4f0);
+  white-space: normal;
+  text-align: left;
+}
+.context-compacted-chip:hover .context-compacted-chip-detail,
+.context-compacted-chip:focus-within .context-compacted-chip-detail {
+  display: block;
+}

@@ -821,6 +821,19 @@ function registerAgentStore() {
       }
 
       switch (type) {
+        case 'context_compacted': {
+          // Context-integrity S3-1: same chip as the SSE path (streaming.js),
+          // mirrored here for WS telemetry frames.
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.showContextCompacted === 'function') {
+              window.KazmaChat.showContextCompacted(data || frame || {});
+            } else if (window.showToast) {
+              window.showToast('🗜️ ' + ((data && data.detail) || 'Earlier context was compacted'), 'info', 6000);
+            }
+          } catch (e) { /* ignore */ }
+          break;
+        }
+
         case 'memory_explain': {
           try {
             if (window.KazmaChat && typeof window.KazmaChat.applyMemoryExplain === 'function') {

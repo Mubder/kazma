@@ -295,6 +295,10 @@ async def supervisor_node(
     _store_focus = ""
     _recall_session_id = state.get("thread_id")
     _intent_mode = "normal"
+    # S3-1/S2-1: stub-segment count for the context_compacted chip. Bound
+    # BEFORE the intent try-block — an exception in classification must not
+    # leave it unbound for the trim block below.
+    _stubbed_segments = 0
     # Merged into every supervisor return after classification (focus lifecycle).
     intent_patch: dict[str, Any] = {}
     try:
@@ -319,7 +323,13 @@ async def supervisor_node(
         _multi_part = _intent_mode == "multi_part"
         _store_intent = _intent_mode in ("store", "multi_part")
         _is_continue = _intent_mode == "continue"
-        _is_shift = _intent_mode == "shift"
+        # S2-1: only an EXPLICIT shift (user verifiably said so; legacy
+        # "shift" from old checkpoints counts) disarms recall and supersedes
+        # the task. Inferred drift re-ranks/stubs but never disables recall —
+        # turning recall off the instant context is lost is backwards.
+        _is_shift = _intent_mode in ("shift", "shift_explicit")
+        _is_shift_explicit = _is_shift
+        _is_shift_inferred = _intent_mode == "shift_inferred"
 
         intent_patch["intent_mode"] = _intent_mode
 
@@ -414,6 +424,8 @@ async def supervisor_node(
 
         # Collapse prior multi-step tool payloads when focus is done/shifted
         # so attention is not dominated by stale tool chains (PR5).
+        # S2-1: inferred drift stubs tool PAYLOADS but keeps assistant prose;
+        # only an explicit shift collapses prose too.
         if iteration == 0:
             try:
                 from kazma_core.agent.topic_drift import (
@@ -425,9 +437,13 @@ async def supervisor_node(
                     intent_mode=_intent_mode,
                     prev_task_status=_prev_status,
                 ):
+                    _pre_stub_n = len(messages)
                     messages = stub_prior_tool_chains(
-                        messages, keep_last_n_user_turns=1
+                        messages,
+                        keep_last_n_user_turns=1,
+                        keep_assistant_prose=(_intent_mode == "shift_inferred"),
                     )
+                    _stubbed_segments = max(0, _pre_stub_n - len(messages))
             except Exception:
                 logger.debug("[Supervisor] tool stub skipped", exc_info=True)
 
@@ -502,7 +518,7 @@ async def supervisor_node(
                     1 if messages and messages[0].get("role") == "system" else 0,
                     {"role": "system", "content": _cont_note},
                 )
-        elif _is_shift:
+        elif _is_shift_explicit:
             # Soft-reset focus: do not session-boost old-thread episodes and
             # never expand recall to prior goals on a pivot.
             _recall_session_id = None
@@ -511,8 +527,18 @@ async def supervisor_node(
             intent_patch["auto_continue"] = False
             intent_patch["task_goal_summary"] = (last_user_content or "")[:240]
             logger.info(
-                "[Supervisor] intent_mode=shift — session_boost off, auto_continue cleared, "
+                "[Supervisor] intent_mode=shift_explicit — session_boost off, auto_continue cleared, "
                 "prior task superseded",
+            )
+        elif _is_shift_inferred:
+            # S2-1: embedding-drift pivot — RE-RANK, never disable. Session
+            # boost and the open task stay (a misread pivot must not erase the
+            # thing being asked about); prior tool payloads get stubbed above
+            # (keep_assistant_prose=True) so attention is not dominated by
+            # stale chains while assistant prose survives.
+            logger.info(
+                "[Supervisor] intent_mode=shift_inferred — recall stays ON, "
+                "task focus kept, prior tool payloads stubbed (prose kept)",
             )
         else:
             # normal chat — keep session boost; do not expand query
@@ -681,6 +707,21 @@ async def supervisor_node(
             _scratch.update(_delta)
     except Exception:
         pass
+    # S1-2 read-through: the durable artifact store survives restarts and
+    # corrupt checkpoints; state is the live cache. Store entries the state
+    # lost (process restart, old checkpoint) come back here. State wins on
+    # key collision — it holds this turn's freshest merges.
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+
+        _store_pad = get_artifact_store().list_scratchpad(
+            str(state.get("thread_id") or ""),
+            tenant_id=str(state.get("tenant_id") or "default"),
+        )
+        if _store_pad:
+            _scratch = {**_store_pad, **_scratch}
+    except Exception:
+        logger.debug("[Supervisor] artifact store read-through skipped", exc_info=True)
 
     working_memory_patch: dict[str, Any] = {}
     if iteration == 0:
@@ -701,6 +742,9 @@ async def supervisor_node(
             "active_attachments": _atts,
             "hard_constraints": _constraints,
             "scratchpad": _scratch,
+            # S2-3: recovery-probe counter is per-TURN — a new user turn
+            # must not inherit the previous turn's spiral count.
+            "recovery_probes": 0,
         }
         if _constraints:
             logger.info(
@@ -1156,6 +1200,13 @@ async def supervisor_node(
         working_memory_block=_wm_block,
     )
     messages = sanitize_tool_chains(messages)
+    # S3-1: surface compaction to the UI. Composed fresh each supervisor hop
+    # (stub segments at iteration 0 + dropped turns this hop) so a stale chip
+    # from a previous turn clears on the first hop of a new one.
+    _ctx_compact: dict[str, Any] = {}
+    if _stubbed_segments:
+        _ctx_compact["stubbed_segments"] = _stubbed_segments
+        _ctx_compact["detail"] = f"collapsed {_stubbed_segments} prior tool-chain segments"
     if len(messages) < _before_trim:
         breaker_reset = {
             **breaker_reset,
@@ -1169,18 +1220,48 @@ async def supervisor_node(
             len(messages),
             _trim_budget,
         )
-        # /compact or 80% budget: summarize what trim dropped (don't just forget).
-        _want_summary = bool(state.get("needs_compaction"))
+        # Capture BEFORE the summary note re-adds a message.
+        _dropped_by_trim = _before_trim - len(messages)
+        # S1-4 dead band: fire the summary net whenever trim actually DROPPED
+        # user/assistant turns — not only on /compact or 80%-of-window. The
+        # old gate left a 24K→160K band (for a 200K model) where turns were
+        # silently deleted with no summary; that band is the normal operating
+        # range, so the net had effectively never protected a trim.
+        _dropped_convo: list[dict[str, Any]] = []
         try:
-            if (
-                not _want_summary
-                and authority is not None
-                and hasattr(authority, "counter")
-                and authority.counter.should_compact(_before_trim_msgs)
-            ):
-                _want_summary = True
+            from kazma_core.agent.semantic_compact import (
+                describe_dropped,
+                dropped_conversation_turns,
+            )
+
+            _dropped_convo = dropped_conversation_turns(_before_trim_msgs, messages)
         except Exception:
-            pass
+            _dropped_convo = []
+        _want_summary = bool(_dropped_convo) or bool(state.get("needs_compaction"))
+        if not _want_summary:
+            try:
+                if (
+                    authority is not None
+                    and hasattr(authority, "counter")
+                    and authority.counter.should_compact(_before_trim_msgs)
+                ):
+                    _want_summary = True
+            except Exception:
+                pass
+        if _dropped_convo:
+            _ctx_compact["dropped_user"] = sum(
+                1 for m in _dropped_convo if m.get("role") == "user"
+            )
+            _ctx_compact["dropped_assistant"] = sum(
+                1 for m in _dropped_convo if m.get("role") == "assistant"
+            )
+            try:
+                _ctx_compact["detail"] = (
+                    f"{describe_dropped(_dropped_convo)} dropped by context trim"
+                    + (f"; {_ctx_compact['detail']}" if _ctx_compact.get("detail") else "")
+                )
+            except Exception:
+                pass
         if _want_summary:
             try:
                 from kazma_core.agent.semantic_compact import inject_summary_of_dropped
@@ -1194,6 +1275,19 @@ async def supervisor_node(
                     "[Supervisor] semantic compact of dropped turns failed",
                     exc_info=True,
                 )
+        # Deferred measurement (plan §Open question): count every trim that
+        # dropped messages, labelled by whether the summary net fired — the
+        # dial for the 24K-budget decision. Read for a week BEFORE re-tuning.
+        try:
+            from kazma_core.metrics import record_context_trim
+
+            record_context_trim(
+                _dropped_by_trim,
+                summary_fired=bool(_want_summary),
+            )
+        except Exception:
+            pass
+    breaker_reset = {**breaker_reset, "context_compacted": _ctx_compact}
 
     # Soft force-plan: on the first supervisor hop of a tool-capable turn,
     # remind the model to open with a ```plan fence so the UI workbench
@@ -1212,6 +1306,26 @@ async def supervisor_node(
             for m in messages
         ):
             messages.append({"role": "system", "content": _plan_nudge})
+
+    # S1-3 proposal nudge (BEST-EFFORT only — the enforced chokepoint is the
+    # commitment layer's outbound resolver, which refuses x_post/x_schedule_post
+    # without a resolvable proposal_id; see safety/commitment/authorize.py).
+    if iteration == 0:
+        try:
+            from kazma_core.agent.turn_input import proposal_nudge
+
+            _pn = proposal_nudge(
+                last_user_content or "",
+                active_goal=str(intent_patch.get("active_goal") or ""),
+            )
+            if _pn and not any(
+                m.get("role") == "system"
+                and "OUTBOUND DRAFTS" in str(m.get("content", ""))
+                for m in messages
+            ):
+                messages.append({"role": "system", "content": _pn})
+        except Exception:
+            logger.debug("[Supervisor] proposal nudge skipped", exc_info=True)
 
     # R4: soft-route deep research intent toward run_research_pipeline
     # §18 Phase 2: skip when the intent engine's constrain note already
@@ -1333,6 +1447,10 @@ async def supervisor_node(
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=routed_model,
                         max_tokens=_call_max_tokens,
+                        # S3-2: only the FIRST attempt streams live deltas —
+                        # a retry after partial deltas would re-emit from
+                        # token 0 and paint the duplicated-prefix incident.
+                        emit_deltas=(attempt == 1),
                     )
                 except retryable_exc as exc:
                     last_exc = exc
@@ -1459,6 +1577,10 @@ async def supervisor_node(
                         messages=_llm_messages,
                         tools=effective_tool_definitions if effective_tool_definitions else None,
                         model=fb_model,
+                        # S3-2: the primary attempt already streamed its
+                        # partial deltas; the failover must stay quiet — its
+                        # answer lands via turn_complete (replace semantics).
+                        emit_deltas=False,
                     )
                     logger.warning(
                         "[Failover] model '%s' answered after primary failure",
@@ -1625,7 +1747,7 @@ async def supervisor_node(
             # Prune context specifically for nudge call to prevent sending bloated prompt
             _nudge_tail = (
                 "Answer only the latest user request; do not resume a superseded or abandoned prior task."
-                if intent_patch.get("intent_mode") == "shift"
+                if intent_patch.get("intent_mode") in ("shift", "shift_explicit")
                 or intent_patch.get("task_status") in ("superseded", "abandoned")
                 else (
                     "Based on the conversation and tool results above, tell the "
@@ -1715,13 +1837,13 @@ async def supervisor_node(
         is_auto = bool(state.get("auto_continue", False))
         if "auto_continue" in intent_patch:
             is_auto = bool(intent_patch["auto_continue"])
-        if intent_patch.get("task_status") in ("superseded", "abandoned") or intent_patch.get("intent_mode") == "shift":
+        if intent_patch.get("task_status") in ("superseded", "abandoned") or intent_patch.get("intent_mode") in ("shift", "shift_explicit"):
             is_auto = False
         if not is_auto and content:
             _content_lower = content.lower()
             if any(marker in _content_lower for marker in ["now section", "proceeding to section", "next section", "proceeding with section"]):
                 # Only section-auto when not on a soft-reset pivot
-                if intent_patch.get("intent_mode") != "shift":
+                if intent_patch.get("intent_mode") not in ("shift", "shift_explicit"):
                     is_auto = True
 
         if is_auto and iteration + 1 < max_iter and content:
@@ -1762,7 +1884,7 @@ async def supervisor_node(
         # Pure text response → RESPOND. Mark completed when focus was open
         # and this turn is not mid multi-step tool work.
         _done_patch = dict(intent_patch)
-        if _done_patch.get("intent_mode") in ("normal", "shift") and _done_patch.get(
+        if _done_patch.get("intent_mode") in ("normal", "shift", "shift_explicit", "shift_inferred") and _done_patch.get(
             "task_status"
         ) not in ("superseded", "abandoned"):
             # Final answer with no tools — focus can rest as completed for

@@ -134,18 +134,26 @@ def _has_chat_stream(client: Any) -> bool:
     return inspect.isasyncgenfunction(fn)
 
 
-async def invoke_llm_chat(client: Any, *args: Any, **kwargs: Any) -> Any:
+async def invoke_llm_chat(
+    client: Any, *args: Any, emit_deltas: bool = True, **kwargs: Any
+) -> Any:
     """Call ``chat_stream`` when available, else ``chat()``.
 
     Token deltas are pushed onto the per-thread queue (if any). Used by the
     supervisor, nudge recovery, respond-node synthesis, and failover so every
     user-visible LLM call can stream.
+
+    ``emit_deltas=False`` (S3-2) is for RECOVERY attempts after an earlier
+    attempt of the same user-visible call already streamed partial deltas:
+    the consumer appends, so re-streaming from token 0 paints the incident's
+    duplicated prefix. A quiet attempt delivers its text via the final
+    response + turn_complete backfill (replace semantics).
     """
     if stream_enabled() and _has_chat_stream(client):
         response: Any = None
         try:
             async for delta in client.chat_stream(*args, **kwargs):
-                if getattr(delta, "content", None):
+                if getattr(delta, "content", None) and emit_deltas:
                     emit_token_delta(delta.content)
                 if getattr(delta, "response", None) is not None:
                     response = delta.response

@@ -501,6 +501,12 @@ async def _stream_langgraph_events(
                                         "iteration": output.get("snapshot_iteration", 0),
                                         "model": output.get("last_model", ""),
                                     }
+                                # Context-integrity S3-1: tell the user the
+                                # context was compacted instead of letting
+                                # them wonder why the agent forgot.
+                                _cc = output.get("context_compacted")
+                                if isinstance(_cc, dict) and _cc.get("detail"):
+                                    yield await emit_j("context_compacted", _cc)
                                 # Late explain if only present on terminal state
                                 if output.get("memory_explain"):
                                     yield await emit_j(
