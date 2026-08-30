@@ -42,7 +42,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DrillResult", "verify_backup", "run_drill"]
+__all__ = ["DrillResult", "verify_backup", "run_drill", "drill_scheduler",
+           "DRILL_INTERVAL_HOURS"]
 
 # pg_restore --list on a multi-GB archive reads only the TOC, but a busy or
 # containerised host can still be slow. Generous on purpose: a false failure
@@ -217,12 +218,29 @@ def verify_backup(
 
 
 def _latest_pg_dump() -> Path | None:
-    try:
-        from kazma_core.db.pg_backup import _dump_dir
+    """The newest Postgres dump, or None if there genuinely is not one.
 
-        dumps = sorted(Path(_dump_dir()).glob("pg_shared_*.dump"))
+    This imported ``_dump_dir``, which does not exist in ``pg_backup`` -- the
+    accessor is ``pg_backup_dir``. The bare ``except`` turned that
+    AttributeError into None, ``run_drill`` passed ``pg_dump=None``, and
+    ``_check_pg_dump`` was never called. So the drill verified 25 SQLite
+    databases and silently skipped the 1.67 GB main database, reporting
+    "29/29 checks passed" while never looking at it.
+
+    The failure is worth naming: a broad except around an import turns a code
+    defect into an absence, and an absence into a clean bill of health.
+    """
+    try:
+        from kazma_core.db.pg_backup import pg_backup_dir
+
+        dumps = sorted(
+            (f for f in Path(pg_backup_dir()).glob("pg_shared_*.dump") if f.is_file()),
+            key=lambda f: f.stat().st_mtime,
+        )
         return dumps[-1] if dumps else None
     except Exception:  # noqa: BLE001
+        logger.warning("[restore-drill] could not locate the Postgres dumps",
+                       exc_info=True)
         return None
 
 
@@ -237,7 +255,99 @@ def run_drill(backup_dir: str | Path | None = None) -> DrillResult:
             res.add("backup:exists", False, "no universal backups found")
             return res
         backup_dir = latest.get("path") or latest.get("dir") or ""
-    return verify_backup(backup_dir, pg_dump=_latest_pg_dump())
+        # list_universal_backups() reports "dir" as the directory NAME, not a
+        # path, so this resolved to a bare timestamp and every drill failed at
+        # its first check with "not a directory". Nothing caught it because
+        # nothing ever ran the drill -- it was referenced only by the
+        # resilience manifest, which documented it as a working mechanism.
+        if backup_dir and not Path(backup_dir).is_dir():
+            from kazma_core.backup.universal import _universal_dir
+
+            resolved = _universal_dir() / str(backup_dir)
+            if resolved.is_dir():
+                backup_dir = resolved
+
+    pg_dump = _latest_pg_dump()
+    res = verify_backup(backup_dir, pg_dump=pg_dump)
+
+    # A missing dump is only "nothing to check" on a SQLite install. Where
+    # Postgres IS the backend, no dump means the main database is in no
+    # backup at all -- which must fail loudly rather than pass by omission.
+    if pg_dump is None:
+        try:
+            from kazma_core.db.pg_backup import pg_backup_enabled
+
+            if pg_backup_enabled():
+                res.add(
+                    "postgres:dump", False,
+                    "Postgres is the backend but no dump was found -- the main "
+                    "database is not in this backup",
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("[restore-drill] pg_backup_enabled check failed",
+                         exc_info=True)
+    return res
+
+
+#: Weekly. Bit rot, an expired credential and a truncated dump are all slow
+#: failures -- checking daily would add noise without finding them sooner,
+#: and monthly leaves too long a window in which a restore silently stops
+#: being possible.
+DRILL_INTERVAL_HOURS = 168.0
+
+
+async def drill_scheduler() -> None:
+    """Run the drill once a week. Crash-isolated; sleeps first.
+
+    This module could verify a backup from the day it was written. Nothing
+    called it: its only non-test reference was the resilience manifest, which
+    listed it as a mechanism that protects the system. So the manifest
+    asserted a property that was never once measured -- the same shape as the
+    hardcoded ``{"ok": True}`` Postgres entry, and as the offsite remote that
+    reported healthy while refusing every write.
+
+    Sleeps first because a drill on every boot fires hardest during an
+    incident, when the operator needs another message least.
+    """
+    import asyncio
+
+    while True:
+        try:
+            await asyncio.sleep(DRILL_INTERVAL_HOURS * 3600)
+            res = await asyncio.to_thread(run_drill)
+            if res.ok:
+                # Logged on success on purpose: a mechanism that speaks only
+                # when it breaks cannot be told from one that never runs.
+                logger.info("[restore-drill] %s", res.summary())
+            else:
+                logger.error("[restore-drill] %s", res.summary())
+                _alert_failure(res)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 -- a failed drill must not
+            # kill the cadence; the next one still fires.
+            logger.warning("[restore-drill] scheduler iteration failed: %s", exc)
+            await asyncio.sleep(300)
+
+
+def _alert_failure(res: DrillResult) -> None:
+    """Tell the operator the backup cannot be read back. Never raises."""
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        failed = ", ".join(
+            f"{c['check']}" + (f" ({c['detail']})" if c["detail"] else "")
+            for c in res.failures[:4]
+        )
+        alert(
+            "backup.restore_drill_failed",
+            "A backup cannot be restored -- the drill failed.",
+            f"{res.summary()}. Failed: {failed}. The data is being written; "
+            "what is in doubt is whether it can be read back.",
+            severity="critical",
+        )
+    except Exception:  # noqa: BLE001
+        logger.debug("[restore-drill] could not raise the alert", exc_info=True)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -63,6 +63,8 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("restic snapshot",
               r"pg dump snapshotted to|restic \w+ snapshot ok"),
     Signature("restic maintenance", r"restic (forget|check|unlock)"),
+    Signature("restore drill", r"\[restore-drill\] (PASS|FAIL):",
+              "a backup was verified readable, not merely written"),
     Signature("repetition loop breaker", r"\[Supervisor\] Tool LOOP detected",
               "never observed in production as of 2026-08-29"),
     Signature("iteration budget divert", r"\[Supervisor\] Iteration \d+ == max_iterations"),

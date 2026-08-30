@@ -356,6 +356,7 @@ def start_memory_worker() -> None:
         _start_session_purge_scheduler()
         _start_daily_digest_scheduler()
         _start_firing_ledger_scheduler()
+        _start_restore_drill_scheduler()
     except Exception:
         logger.warning("[memory_worker] could not start worker", exc_info=True)
 
@@ -383,6 +384,42 @@ def _start_firing_ledger_scheduler() -> None:
         logger.info("[memory_worker] firing ledger scheduler started")
     except Exception:
         logger.warning("[memory_worker] firing ledger scheduler failed to start",
+                       exc_info=True)
+
+
+def _start_restore_drill_scheduler() -> None:
+    """Weekly proof that the newest backup can actually be read back.
+
+    Everything else in the backup path verifies that data was WRITTEN. Only
+    the drill verifies it can be read: SQLite integrity on a scratch copy,
+    the Postgres dump'''s table of contents, and that .env is present, without
+    which the backed-up vault cannot be opened.
+
+    It existed and was never scheduled -- referenced only by the resilience
+    manifest, which listed it as a mechanism that protects this system. It
+    also failed at its first check whenever it was run by hand, which is how
+    unscheduled code stays broken.
+
+    Held in ``_scheduler_tasks`` like the rest: an unreferenced task can be
+    garbage-collected mid-loop, and a silently-collected drill would be
+    exactly the failure this one exists to catch.
+    """
+    try:
+        import asyncio
+
+        from kazma_core.backup.restore_drill import drill_scheduler
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            logger.debug("[memory_worker] no loop - restore drill deferred")
+            return
+        task = asyncio.create_task(drill_scheduler())
+        _scheduler_tasks.add(task)
+        task.add_done_callback(_scheduler_tasks.discard)
+        logger.info("[memory_worker] restore drill scheduler started")
+    except Exception:
+        logger.warning("[memory_worker] restore drill scheduler failed to start",
                        exc_info=True)
 
 
