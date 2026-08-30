@@ -440,10 +440,21 @@ async def stop_memory_worker() -> None:
 
 
 _MACRO_SLEEP_INTERVAL_HOURS = 6
-# Backup + export cadence: once per day. Kept separate from the 6h
-# macro_sleep loop so decay still runs on its own cycle even if the
-# backup step stalls on a slow disk.
-_BACKUP_EXPORT_INTERVAL_HOURS = 24
+# Backup + export cadence: every 6 hours, so the recovery point objective is
+# 6 hours rather than a day. Kept separate from the 6h macro_sleep loop --
+# same period, deliberately its own timer -- so decay still runs on its own
+# cycle even if the backup step stalls on a slow disk.
+#
+# Frequency alone would have bought nothing: restic's KEEP_POLICY had no
+# --keep-hourly, so `forget --prune` collapsed every run to one snapshot per
+# day and the extra dumps disappeared at the next maintenance pass. The
+# policy gained --keep-hourly 24 in the same change. Do not raise this
+# frequency without checking that retention still keeps what it produces.
+#
+# The storage cost is small because restic deduplicates: measured on the live
+# repository, 43.1 GiB of logical content across 41 snapshots occupied
+# 1.87 GiB, since consecutive Postgres dumps differ only in what changed.
+_BACKUP_EXPORT_INTERVAL_HOURS = 6
 # Global reconsolidation: once per day, offset from backup so they don't
 # contend for the same disk I/O window.
 _RECONSOLIDATION_INTERVAL_HOURS = 24

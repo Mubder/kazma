@@ -59,13 +59,21 @@ __all__ = [
     "KEEP_POLICY",
 ]
 
-# Grandfather-father-son. A week of dailies covers "I broke it yesterday",
-# two months of weeklies covers "this has been wrong for a while", and a
-# year of monthlies covers the slow corruption nobody noticed. Retention by
-# COUNT -- what the current system does -- gives you none of those
-# guarantees: thirty backups is thirty days or thirty hours depending on
-# how often the loop happened to run.
+# Grandfather-father-son. A day of hourlies covers "I broke it an hour ago",
+# a week of dailies covers "I broke it yesterday", two months of weeklies
+# covers "this has been wrong for a while", and a year of monthlies covers
+# the slow corruption nobody noticed. Retention by COUNT -- what the system
+# did before this -- gives you none of those guarantees: thirty backups is
+# thirty days or thirty hours depending on how often the loop happened to run.
+#
+# --keep-hourly exists because the backup loop moved to 6-hourly. Without it
+# this policy keeps ONE snapshot per day, so every intra-day run would be
+# deleted by the next `forget --prune` and the extra frequency would buy
+# nothing that survived maintenance. Frequency and retention are one
+# decision; changing either alone is how you get a backup schedule that
+# quietly does not do what its interval says.
 KEEP_POLICY: tuple[str, ...] = (
+    "--keep-hourly", "24",
     "--keep-daily", "7",
     "--keep-weekly", "8",
     "--keep-monthly", "12",

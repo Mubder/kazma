@@ -72,7 +72,13 @@ KAZMA_PG_TABLES: list[str] = [
     "document_job_events",
 ]
 
-_DEFAULT_RETENTION = 7
+# How many raw .dump files stay on local disk. These are staging, not the
+# archive: restic snapshots each dump and keeps the real history under
+# KEEP_POLICY, deduplicated. At 1.67 GB apiece the old default of 7 held
+# ~11.7 GB of near-identical copies for no recovery benefit that restic was
+# not already providing -- and the dumps got more frequent when the backup
+# loop moved to 6-hourly, which would have made that worse.
+_DEFAULT_RETENTION = 3
 
 _DUMP_MAGIC = b"PGDMP"
 
