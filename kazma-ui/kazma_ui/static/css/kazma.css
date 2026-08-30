@@ -1570,7 +1570,18 @@ tbody tr:last-child td {
 .message-user .message-avatar { background: var(--accent); }
 .message-assistant .message-avatar { background: var(--bg-surface); }
 
-.message-content { flex: 1; min-width: 0; }
+.message-content {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  /* flex-wrap matters even though display is block: if any future rule or
+     inline style makes this a flex container, wrap plus the 100% basis on
+     .agent-progress / .hitl-approval-card puts each on its own line instead
+     of shrinking them side by side. Verified against an inline display:flex,
+     which a stylesheet cannot override -- without wrap the reasoning panel
+     still collapsed to 250px beside the card. */
+  flex-wrap: wrap;
+}
 .message-text {
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--radius);
@@ -2111,6 +2122,9 @@ tbody tr:last-child td {
 
 /* ── Agent turn workbench (Plan + Activity) ─────────────────────── */
 .agent-progress {
+  /* Same pinning as .hitl-approval-card: never a flex item sharing a line. */
+  width: 100%;
+  flex: 1 1 100%;
   margin: 0 0 var(--sp-2);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -4814,7 +4828,22 @@ canvas { display: block; border-radius: 4px; }
 .hitl-panel.has-pending {
   border-color: rgba(var(--accent-rgb), 0.3);
 }
+/* The reasoning panel and the approval card are stacked siblings, and both
+   must own the full width of the message. Measured against the live
+   stylesheet: when their container becomes a flex row the panel collapses to
+   51px -- "REAS...", the phase chips stacking vertically, the activity list
+   unreadable -- while the card takes 493px beside it. Whatever the container
+   turns out to be, these two are never flex items sharing a line. */
 .hitl-approval-card {
+  /* Full width, and a 100% basis so that if the container is ever a flex row
+     this takes the whole line rather than sharing it with the reasoning
+     panel. See .message-content flex-wrap. */
+  width: 100%;
+  flex: 1 1 100%;
+  /* margin was a separate rule in kazma.v5.css, which loads second and won.
+     Two files defining one selector is how this card ended up rendering as a
+     mixture of two designs. */
+  margin: 12px 16px;
   background: var(--tint, var(--bg-surface));
   /* Amber, not the neutral border this rule used to carry: the card is a
      request for authorisation sitting in a stream of reasoning output, and
@@ -4883,7 +4912,7 @@ canvas { display: block; border-radius: 4px; }
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   margin-top: 12px;
 }
 .btn-success {
