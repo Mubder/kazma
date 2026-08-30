@@ -67,7 +67,16 @@ class ChatSession:
     created_at: str = ""
     total_cost: float = 0.0
     total_tokens: int = 0
-    tenant_id: str = "default"
+    # None, not "default": ``put`` resolves this as
+    # ``session.tenant_id or get_current_tenant_id() or "default"`` while
+    # ``get`` resolves ``get_current_tenant_id() or "default"``. A truthy
+    # default made put ALWAYS win with "default" for any caller that did not
+    # pass a tenant, so with a tenant context active a session was written to
+    # ``default:<id>`` and read from ``<tenant>:<id>`` -- present in both the
+    # cache and the database, invisible to the very next lookup. None lets an
+    # unset tenant fall through to the context, which is what get uses.
+    # Callers that know the tenant still pass it and still win.
+    tenant_id: str | None = None
     thread_id: str = ""
     updated_at: str = ""
     title: str = ""

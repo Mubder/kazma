@@ -93,6 +93,60 @@ def _reset_shutdown_event():
     yield
 
 
+@_pytest.fixture(autouse=True)
+def _isolated_tenant_context():
+    """Restore the tenant ContextVar after every test.
+
+    ``safety.hitl._current_tenant_id`` is a ContextVar, and pytest runs tests
+    in one context, so a test that calls ``set_current_tenant_id`` without
+    resetting leaks its tenant into every test that follows. Three files did:
+    test_phase2_remaining.py, test_remaining_gaps.py and
+    test_memory_tenant_isolation.py (2, 8 and 8 sets, zero resets).
+
+    The damage is invisible where you would look for it. ``SessionManager.put``
+    keys rows as ``f"{tenant_id}:{session_id}"`` with ``tenant_id`` resolved
+    from this ContextVar, so a leaked tenant makes a write and a subsequent
+    read use different keys: the session is stored, and the very next lookup
+    reports "No seasons yet". That produced nine of the twelve known full-suite
+    failures -- across test_session_directory, test_session_store,
+    test_singleton_isolation and test_tui_session_load -- every one of which
+    passes on its own.
+
+    It also defeated the repo's own tests/order_flake_bisect.py, which swept
+    test_session_manager.py -> test_session_directory.py and found nothing:
+    the polluters sort BEFORE the victim, so the curated pairs had the
+    direction backwards.
+
+    Fixing the three files would work until the fourth. This makes the leak
+    structurally impossible instead.
+    """
+    # BOTH modules define a ContextVar named _current_tenant_id with an
+    # identically-named getter, and they are NOT the same variable:
+    # kazma_core.tenant_context (default None) is what SessionManager reads;
+    # kazma_core.safety.hitl (default "default") is what the memory tools read.
+    # Guarding only one leaves the other leaking, which is exactly the trap
+    # this fixture was first written into.
+    tokens = []
+    for module in ("kazma_core.tenant_context", "kazma_core.safety.hitl"):
+        try:
+            import importlib
+
+            mod = importlib.import_module(module)
+            var = mod._current_tenant_id
+            tokens.append((var, var.set(var.get())))
+        except Exception:  # noqa: BLE001 -- never block a run over the guard
+            pass
+
+    try:
+        yield
+    finally:
+        for var, token in reversed(tokens):
+            try:
+                var.reset(token)
+            except Exception:  # noqa: BLE001 -- set in another context
+                pass
+
+
 # ── Live kazma.yaml guard ───────────────────────────────────────────────────
 # persist_mcp_yaml historically re-dumped the WHOLE kazma.yaml (stripping
 # every comment); any test reaching it with the default path round-tripped
