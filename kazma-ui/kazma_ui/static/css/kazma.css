@@ -1783,32 +1783,12 @@ tbody tr:last-child td {
 }
 
 /* ── HITL approval card (in-chat danger-tool gate) ─────────────── */
-.hitl-approval-card {
-  margin-top: var(--sp-2);
-  padding: var(--sp-3);
-  background: var(--tint);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--warning);
-  font-size: 0.875rem;
-}
-.hitl-approval-header {
-  font-weight: 700;
-  color: var(--warning);
-  margin-bottom: var(--sp-2);
-}
 .hitl-approval-body p { margin: var(--sp-1) 0; word-break: break-word; }
 .hitl-approval-body code {
   background: var(--bg-elevated, rgba(0,0,0,0.05));
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.8rem;
-}
-.hitl-approval-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-top: var(--sp-3);
-  align-items: center;
 }
 .hitl-approval-actions .btn-warning {
   background: var(--warning, #f59e0b);
@@ -4835,11 +4815,17 @@ canvas { display: block; border-radius: 4px; }
   border-color: rgba(var(--accent-rgb), 0.3);
 }
 .hitl-approval-card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
+  background: var(--tint, var(--bg-surface));
+  /* Amber, not the neutral border this rule used to carry: the card is a
+     request for authorisation sitting in a stream of reasoning output, and
+     it has to be told apart from it at a glance. The .hitl-approved /
+     .hitl-denied / .hitl-error variants below override this once answered. */
+  border: 1px solid var(--warning);
   border-radius: 8px;
   padding: 14px 16px;
+  margin-top: 8px;
   margin-bottom: 12px;
+  font-size: 0.875rem;
   transition: border-color 0.15s;
 }
 .hitl-approval-card:last-child { margin-bottom: 0; }
@@ -4849,6 +4835,8 @@ canvas { display: block; border-radius: 4px; }
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+  font-weight: 700;
+  color: var(--warning);
 }
 .hitl-tool-name {
   font-weight: 500;
@@ -4875,6 +4863,13 @@ canvas { display: block; border-radius: 4px; }
   padding: 8px 12px;
   margin-bottom: 10px;
   overflow-x: auto;
+  /* The JSON is rendered in full, deliberately -- nobody can authorise a
+     command they cannot read. But a python_exec payload is hundreds of lines,
+     and unbounded it pushed Approve/Deny off-screen and ran into the
+     surrounding stream. Bounded and scrollable: all of it is reachable,
+     none of it displaces the buttons that act on it. */
+  max-height: 320px;
+  overflow-y: auto;
 }
 .hitl-approval-args pre {
   margin: 0;
@@ -4889,6 +4884,7 @@ canvas { display: block; border-radius: 4px; }
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  margin-top: 12px;
 }
 .btn-success {
   background: var(--success-subtle);

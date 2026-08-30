@@ -122,6 +122,128 @@ async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str
     return None
 
 
+#: Approval cards sent per thread, newest last: (sent_at, fingerprint).
+_recent_cards: dict[str, list[tuple[float, str]]] = {}
+
+#: An identical request inside this window is a duplicate, not a new decision.
+_DUPLICATE_WINDOW_S = 180.0
+
+#: More than this many cards in _BURST_WINDOW_S is a retry loop, not a
+#: conversation. On 2026-08-30 nine arrived in three minutes.
+_BURST_LIMIT = 3
+_BURST_WINDOW_S = 240.0
+
+
+def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None:
+    """Should this card be withheld? Returns why, or None to send it.
+
+    A 60s ``approval_timeout_seconds`` with ``auto_deny_on_timeout`` means an
+    operator who steps away gets each request auto-denied -- and a model reads
+    that denial as "that approach failed", so it tries another one, which
+    raises another card. On 2026-08-30 that produced nine approval prompts in
+    three minutes for the same underlying intent, at exactly the 60s cadence.
+
+    The reason text in ``hitl_timeout`` now tells the model to stop, but a
+    prompt is a request, not a guarantee. This is the mechanical half: after a
+    burst, cards for that thread are withheld until the operator says
+    something. Withheld, never auto-approved -- the tool still does not run.
+    """
+    import hashlib
+    import time
+
+    now = time.time()
+    try:
+        fingerprint = hashlib.sha256(
+            f"{tool}:{args!r}".encode("utf-8", "replace")
+        ).hexdigest()[:16]
+    except Exception:  # noqa: BLE001
+        fingerprint = str(tool)
+
+    history = [
+        (ts, fp) for ts, fp in _recent_cards.get(thread_id, [])
+        if now - ts < _BURST_WINDOW_S
+    ]
+
+    for ts, fp in history:
+        if fp == fingerprint and now - ts < _DUPLICATE_WINDOW_S:
+            _recent_cards[thread_id] = history
+            return (
+                f"identical {tool} approval already sent "
+                f"{int(now - ts)}s ago — not repeating it"
+            )
+
+    if len(history) >= _BURST_LIMIT:
+        _recent_cards[thread_id] = history
+        return (
+            f"{len(history)} approval requests already sent for this thread in "
+            f"the last {int(_BURST_WINDOW_S / 60)} minutes — muting further "
+            "cards until you reply. Nothing has been approved or run."
+        )
+
+    history.append((now, fingerprint))
+    _recent_cards[thread_id] = history
+    return None
+
+
+def clear_approval_throttle(thread_id: str) -> None:
+    """Forget a thread's card history — the operator engaged, so the mute lifts."""
+    _recent_cards.pop(thread_id, None)
+
+
+#: Tools where a hidden suffix is the difference between a copy and a wipe.
+#: ``cp a b && rm -rf c`` truncated after the ``cp`` reads as harmless.
+EXEC_TOOLS = frozenset({
+    "shell_exec", "python_exec", "code_exec", "computer_use", "browser_eval_js",
+})
+
+#: Telegram caps a message at 4096 characters. Leave room for the header, the
+#: reply instructions and the tool name.
+_ARGS_BUDGET = 3200
+_MULTI_BUDGET = 600
+
+
+def _format_args_for_approval(
+    tool: str, args: Any, *, budget: int = _ARGS_BUDGET
+) -> str:
+    """Render args for a card that a human is about to authorise.
+
+    This used to be ``str(args)[:300] + "…"``. On 2026-08-30 that produced a
+    card asking approval for::
+
+        shell_exec: 'cd ... && cp "a.jpg" "b.jpg" && cp "c.jpg" "d.jpg" && cp "phot…
+
+    -- a chained shell command whose tail was invisible. The dangerous half of
+    a command is usually at the end, so an approval prompt that elides it is
+    asking for consent to something unread.
+
+    Nothing is hidden silently now. Commands are shown whole when they fit,
+    and when they genuinely cannot fit the card SAYS SO, in the imperative,
+    rather than trailing off in an ellipsis that reads like formatting.
+    """
+    import json
+
+    try:
+        text = json.dumps(args, ensure_ascii=False, indent=2, default=str)
+    except Exception:  # noqa: BLE001
+        text = str(args)
+
+    if len(text) <= budget:
+        return text
+
+    hidden = len(text) - budget
+    warning = (
+        f"\n\n⚠️ {hidden} MORE CHARACTERS ARE NOT SHOWN."
+    )
+    if tool in EXEC_TOOLS:
+        warning += (
+            "\nDo NOT approve this from chat — you would be authorising a "
+            "command you cannot read. Open the web UI, which shows all of it."
+        )
+    else:
+        warning += "\nOpen the web UI to see the rest before approving."
+    return text[:budget] + warning
+
+
 def _build_approval_prompt(
     payload: dict[str, Any],
     thread_id: str,
@@ -153,9 +275,7 @@ def _build_approval_prompt(
             return [_redact(x) for x in obj]
         return obj
 
-    args_str = str(_redact(args))
-    if len(args_str) > 300:
-        args_str = args_str[:300] + "…"
+    args_str = _format_args_for_approval(tool, _redact(args))
     tools = payload.get("tools") or []
     if isinstance(tools, list) and len(tools) > 1:
         lines = [
@@ -168,9 +288,7 @@ def _build_approval_prompt(
                 continue
             tname = str(item.get("name") or item.get("tool") or "tool")
             targs = _redact(item.get("args") or item.get("arguments") or {})
-            tstr = str(targs)
-            if len(tstr) > 200:
-                tstr = tstr[:200] + "…"
+            tstr = _format_args_for_approval(tname, targs, budget=_MULTI_BUDGET)
             lines.append(f"{i}. {tname}: {tstr}")
         lines.extend(
             [
