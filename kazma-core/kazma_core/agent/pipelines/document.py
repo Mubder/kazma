@@ -30,6 +30,92 @@ __all__ = ["document_pipeline", "register"]
 logger = logging.getLogger(__name__)
 
 
+def _is_failure(result: Any) -> bool:
+    """Classify a tool result string as a failure.
+
+    Tool results are free text, so the test has to be anchored rather than a
+    substring scan: an Arabic-language failure message contains no ASCII
+    "Error" at all, and a perfectly good document titled "Error Budget Review"
+    contains one.
+    """
+    if result is None:
+        return True
+    text = str(result).strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    return (
+        lowered.startswith("error")
+        or lowered.startswith("failed")
+        or text.startswith("❌")
+        or text.startswith("⚠️")
+    )
+
+
+def _detect_language(params: dict[str, Any], state: dict[str, Any], text: str) -> str | None:
+    """Resolve the document language from the request, then the session, then text.
+
+    Kazma already knows what language a conversation is in, but the generator
+    calls never carried it, so direction depended entirely on content
+    heuristics. Explicit beats inferred, and a caller-supplied language now
+    pins the direction rather than merely nudging it.
+    """
+    for key in ("lang", "language"):
+        value = str(params.get(key) or "").strip()
+        if value:
+            return value
+    for key in ("language", "lang", "locale"):
+        value = str(state.get(key) or "").strip()
+        if value:
+            return value
+    try:
+        from kazma_core.documents.arabic import direction_of
+
+        return "ar" if direction_of(text or "") == "rtl" else "en"
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
+def _markdown_tables_to_sheets(markdown: str) -> list[dict[str, Any]]:
+    """Extract GFM pipe tables from *markdown* into XLSX sheet payloads.
+
+    The previous XLSX branch shipped ``structured_md[:500]`` into a single cell
+    and reported success, so a request for a spreadsheet returned the first 500
+    characters of the document and nothing else.
+    """
+    sheets: list[dict[str, Any]] = []
+    rows: list[list[str]] = []
+    heading = ""
+    pending_heading = ""
+
+    def _flush() -> None:
+        nonlocal rows, heading
+        if rows:
+            fallback = "Sheet" + str(len(sheets) + 1)
+            name = (heading or fallback).strip()[:31] or fallback
+            sheets.append({"name": name, "rows": rows})
+        rows = []
+
+    for line in (markdown or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            pending_heading = stripped.lstrip("#").strip()
+            continue
+        if stripped.startswith("|") and stripped.endswith("|") and len(stripped) > 2:
+            cells = [c.strip() for c in stripped.strip("|").split("|")]
+            if all(c and set(c) <= set("-: ") for c in cells):
+                continue  # the |---|---| separator row
+            if not rows:
+                heading = pending_heading
+            rows.append(cells)
+            continue
+        if rows:
+            _flush()
+    if rows:
+        _flush()
+    return sheets
+
+
 async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: Any) -> str:
     """Execute the document generation workflow.
 
@@ -166,7 +252,7 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
         write_result = await _aio.wait_for(
             file_write(md_filename, structured_md), timeout=30.0
         )
-        if "Error" in write_result:
+        if _is_failure(write_result):
             return _format_result("Error", steps_log, f"file_write failed: {write_result}")
         steps_log.append(f"✓ Wrote markdown: {md_filename}")
     except Exception as exc:
@@ -174,6 +260,7 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
 
     # ── Step 4: GENERATE the document ───────────────────────────────
     title = params.get("title") or _derive_title(source_content, output_format)
+    doc_lang = _detect_language(params, state, structured_md)
     try:
         import asyncio as _aio
 
@@ -181,26 +268,36 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
             from kazma_skills.native.document_generator.tools import generate_docx
 
             gen_result = await _aio.wait_for(
-                generate_docx(title, markdown_path=md_filename), timeout=120.0
+                generate_docx(title, markdown_path=md_filename, lang=doc_lang),
+                timeout=120.0,
             )
         elif output_format in ("xlsx", "excel", "spreadsheet"):
             from kazma_skills.native.document_generator.tools import generate_xlsx
 
+            sheets = _markdown_tables_to_sheets(structured_md)
+            if not sheets:
+                return _format_result(
+                    "Error",
+                    steps_log,
+                    "The source has no tabular content, so it cannot become a "
+                    "spreadsheet. Ask for PDF or DOCX, or supply the data as a "
+                    "markdown table.",
+                )
             gen_result = await _aio.wait_for(
-                generate_xlsx(
-                    [{"name": "Sheet1", "rows": [["Content"], [structured_md[:500]]]}],
-                    filename=title,
-                ),
-                timeout=120.0,
+                generate_xlsx(sheets, filename=title), timeout=120.0
             )
         else:
             from kazma_skills.native.document_generator.tools import generate_pdf
 
             gen_result = await _aio.wait_for(
-                generate_pdf(title, markdown_path=md_filename), timeout=120.0
+                generate_pdf(title, markdown_path=md_filename, lang=doc_lang),
+                timeout=120.0,
             )
 
-        if "Error" in gen_result:
+        # Generators report failure with a leading marker; a bare
+        # ``"Error" in result`` substring test both missed non-English failure
+        # text and misreported any document whose title contained the word.
+        if _is_failure(gen_result):
             return _format_result("Error", steps_log, f"Generation failed: {gen_result}")
         steps_log.append(f"✓ Generated {output_format.upper()}: {gen_result[:200]}")
     except ImportError:

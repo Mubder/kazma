@@ -1,5 +1,149 @@
 # CHANGELOG
 
+## Arabic hardening — Documents system (2026-08-30)
+
+Closes the S1/S2 findings of the Documents deep audit. Arabic was working on a
+Windows workstation with LibreOffice and system fonts installed, on
+Arabic-dominant documents without inline markup; every other combination
+degraded silently.
+
+### Fixed
+
+- **Arabic paragraphs with inline markdown rendered inside-out.**
+  `inline_markdown_to_reportlab` shaped each styled span separately, so the
+  bidi algorithm reordered every fragment on its own and the fragments were
+  emitted in logical order — the sentence read backwards and the spaces around
+  every bold/italic/code/link boundary were swallowed. Shaping is now one
+  paragraph-level pass (`documents/arabic.py:shape_spans`): embedding levels
+  are resolved over the whole paragraph, spans are split at level boundaries,
+  UBA rule L2 reorders the segments, and each is reshaped last. Verified byte-
+  identical to `get_display(reshape(text))` across mixed Arabic/Latin/numbers/
+  URLs, with the markup landing in the right visual place.
+- **Mixed-language documents could never reach the good PDF route.**
+  `PdfEngine.render` gated DOCX→LibreOffice on `profile.rtl` while shaping was
+  gated on `profile.shape_arabic`, so a Latin-dominant document containing
+  Arabic — precisely what the route exists for — always took the degraded path.
+  Both now use `shape_arabic`.
+- **The Docker image had no route to an Arabic PDF at all.** No fonts (ReportLab
+  fell back to Helvetica, zero Arabic glyphs), no LibreOffice, no Tesseract, no
+  `document-platform` extra. All four are now installed. `_setup_fonts` raises
+  `DocumentRenderError` on a complex-script job with no covering font instead
+  of emitting a blank PDF behind a warning string.
+- **Arabic lexical search was broken at the tokenizer.** SQLite `unicode61`
+  treats harakat as separators, so vocalized Arabic indexed as single letters;
+  nothing folded alef-hamza, taa-marbuta, alef-maqsura, tatweel, hamza carriers
+  or Arabic-Indic digits. `knowledge_chunks_fts` gains a `folded` column
+  (auto-rebuilt once per database) populated by `fold_for_search`, and queries
+  are folded with the same function. `احمد` now finds `أحمد`.
+- **Third-party parse egress was opt-out.** `try_remote_parse` uploaded raw
+  document bytes to LlamaParse/Reducto whenever an API key was in the
+  environment, outside ConfigStore, with no audit event and no tenant consent.
+  Now gated on `documents.security.remote_parse` (default off) and audited.
+- **One Arabic word flipped an English document to RTL.** `is_arabic_dominant`
+  carried an `or _AR_RE.search(text[:200])` clause that made the threshold dead
+  code; a 0.6%-Arabic English report was laid out RTL with reversed table
+  columns and Arabic chrome. Direction is now first-strong plus ratio, over
+  Unicode bidi classes.
+- **Presentation-form text was detected but never repaired.** `to_logical()`
+  (NFKC) now runs in the parser before quality assessment, recovering legacy
+  visual-dump PDFs without an OCR round trip.
+- **The XLSX pipeline branch discarded the document**, shipping
+  `structured_md[:500]` into a single cell and reporting success. It now
+  extracts real markdown tables into named sheets, and refuses the format when
+  the source has nothing tabular.
+- **Tool-result success was decided by `"Error" in result`** — a substring test
+  that read Arabic failure messages as success and any document titled
+  "Error Budget Review" as failure. Replaced with an anchored classifier.
+- **Wrapped RTL lines carried a stray leading space** (the trailing space of the
+  previous logical line landing at the visual start after reversal).
+
+### Added
+
+- `documents/arabic.py` — the single home for direction classification, search
+  folding, logical repair and paragraph shaping. Replaces four partial and
+  mutually inconsistent notions of "what Arabic is".
+- `documents/fonts.py` — font resolution ranked by verified Arabic
+  presentation-form cmap coverage, with a pinned bundle directory
+  (`documents/assets/fonts/`, or `KAZMA_DOCUMENT_FONT_DIR`) searched first so
+  output is reproducible across hosts.
+- `DocProfile.numerals` / `DocProfile.calendar`, `format_page_number` and
+  `format_document_date` — Arabic-Indic digits and Hijri dates in document
+  chrome. Kazma's Hijri engine existed in `cultural_context.py` and was wired
+  to chat but never to the document engines.
+- `documents.security.remote_parse` / `documents.security.local_salvage`.
+- `tests/test_document_layout.py` — 14 assertions on how a document is *set on
+  the page*: type scale, table geometry, margin symmetry, widow/orphan control
+  and page breaks. Measured against a rendered PDF with PyMuPDF, not grepped
+  from source, because every defect it covers was invisible in the code and
+  obvious on the page.
+- `tests/test_arabic_text.py` — 66 assertions, one per audit finding, cheap
+  enough to run on every CI chunk. Includes a round-trip that renders an
+  Arabic PDF, re-extracts it and asserts the platform's own output scores
+  above `SALVAGE_SCORE` after repair — the loop that used to close on itself.
+- `dir="auto"` on the Documents page bindings that render user-supplied text
+  (titles, uploaded filenames, error messages).
+
+- **Amiri 1.003 (SIL OFL) is vendored** in `documents/assets/fonts/`, so
+  complex-script PDF output is byte-identical across Windows, macOS and the
+  container instead of depending on whatever the host happens to have
+  installed. Font precedence is deliberately asymmetric — the bundle wins for
+  complex-script jobs, but Latin-only jobs still take the system font, because
+  Amiri is a Naskh design and letting it win everywhere would silently restyle
+  every English document.
+- **HTML exports inline the pinned font** as a data URI
+  (`documents.render.embed_html_fonts`, default on, ~850 KB per Arabic export;
+  English exports unaffected).
+- **The three overlapping document tools are disambiguated at selection time.**
+  `read_document`, `convert_document` and `pdf_redact` now open with
+  `TRANSIENT, PATH-BASED` and name their durable counterpart, and
+  `document-platform` declares itself the preferred surface. Nothing was
+  removed — the ambiguity was a model-routing problem, not a surplus of tools.
+
+- **The PDF engine ignored the complex-script type scale.** DOCX applies it
+  through `w:szCs` and HTML through `_css`, but the PDF path used the Latin
+  `body_size` for Arabic — so the same document was set at 11pt one way and
+  16pt the other, and the same content paginated to 6 pages versus 13. It now
+  applies `theme_cs_size()` and `line_height_ar` like everything else. English
+  output is untouched.
+- **PDF tables carried no font size at all**, falling through to ReportLab's
+  10pt default, so Arabic tables were set smaller than the ones HTML and DOCX
+  produce. Both engines now resolve the cell size through `theme_cs_size(10)`.
+- **RTL tables were not column-reversed in the PDF path**, so column 1 sat on
+  the left of an Arabic table while `w:bidiVisual` (DOCX) and `dir="rtl"`
+  (HTML) put it on the right — the same document, mirrored.
+- **The Arabic wrap safety margin was a 20pt fudge** left from measuring
+  logical rather than shaped text. `_visual_width` measures the real shaped
+  line now, so it drops to 4pt; the old value showed up as an ~83pt left margin
+  against a ~56pt right margin on every Arabic page.
+- **Paragraph widows and orphans were uncontrolled** in PDF and HTML
+  (`allowWidows=0`/`allowOrphans=0`, `orphans: 3`/`widows: 3`). Heading
+  keep-with-next already existed in both engines and is now covered by a test
+  that renders a multi-page document and checks no heading is the last thing
+  on a page.
+
+### Corrected
+
+- **The GC Postgres port was already done**; AGENTS.md §19D/§19F,
+  `document-intelligence.md` and `document-processing.md` still described the
+  pre-port world, which is why the audit reported an already-fixed defect.
+  `retention._mark` dispatches to `repository.gc_mark`, which both backends
+  implement. `TestDocsMatchCode` now fails if those docs drift from the code
+  again.
+
+### Changed
+
+- CI installs `libreoffice-writer`, Noto Naskh Arabic and Tesseract, so
+  `tests/test_docx_rtl_visual.py` — the pixel-measuring tests that "cannot
+  lie" — actually execute instead of skipping on every run.
+- `renderer_worker._font_paths` is a thin alias over `documents/fonts.py`.
+- The document pipeline threads the session language into `generate_pdf` /
+  `generate_docx` rather than relying on content heuristics.
+- `is_arabic_dominant("Hello مرحبا mixed")` is now `False` (33% of strong
+  characters, under the 35% threshold). The old `True` came from the removed
+  escape hatch; documents that merely contain Arabic are handled by
+  `shape_arabic`, not by flipping page direction.
+
+
 ## Unreleased — the write probe that skipped the destination it was for (2026-08-30)
 
 `remote_writable()` was added because a Google service account read fine and

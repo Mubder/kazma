@@ -74,7 +74,7 @@
         <template x-for="d in documents" :key="d.document_id">
           <div class="doc-row" :class="{ selected: selected && selected.document_id === d.document_id }" @click="openDocument(d.document_id)">
             <div style="min-width:0;flex:1;">
-              <div class="doc-title" x-text="d.title"></div>
+              <div class="doc-title" dir="auto" x-text="d.title"></div>
               <div class="doc-meta" x-text="d.document_id.slice(0,8)"></div>
             </div>
             <div class="doc-row-actions">
@@ -100,7 +100,7 @@
 
       <div class="card" style="padding:1rem;" x-show="selected" x-cloak>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.5rem;">
-          <strong x-text="selected ? selected.title : ''"></strong>
+          <strong dir="auto" x-text="selected ? selected.title : ''"></strong>
           <span class="state-badge" :class="stateClass(currentState)" x-text="currentState || ''"></span>
         </div>
         <div class="doc-meta" x-text="selected ? selected.document_id : ''" style="margin-bottom:.6rem;"></div>
@@ -179,7 +179,7 @@
           <summary style="cursor:pointer;font-size:.8rem;">Versions (<span x-text="versions.length"></span>)</summary>
           <template x-for="v in versions" :key="v.version_id">
             <div class="evt-row">
-              v<span x-text="v.version_number"></span> · <span x-text="v.original_filename"></span> · <span x-text="v.mime_type"></span>
+              v<span x-text="v.version_number"></span> · <span dir="auto" x-text="v.original_filename"></span> · <span x-text="v.mime_type"></span>
             </div>
           </template>
         </details>
@@ -194,7 +194,7 @@
                 <span class="state-badge" :class="stateClass(j.state)" x-text="j.state"></span>
               </div>
               <div class="doc-meta" x-show="j.error_code" x-cloak>
-                <span class="evt-err" x-text="j.error_code"></span>: <span x-text="j.error_message"></span>
+                <span class="evt-err" x-text="j.error_code"></span>: <span dir="auto" x-text="j.error_message"></span>
               </div>
               <div class="docs-actions" style="margin-top:.3rem;">
                 <button class="btn btn-sm" @click="showEvents(j.job_id)">Events</button>

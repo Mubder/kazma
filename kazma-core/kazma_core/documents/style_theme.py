@@ -7,10 +7,16 @@ inverted bars. Arabic uses a larger body size / leading.
 
 from __future__ import annotations
 
+import logging
+from datetime import date
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "THEME",
+    "format_page_number",
+    "format_document_date",
     "theme_colors_reportlab",
     "theme_fonts",
     "theme_cs_size",
@@ -104,8 +110,14 @@ def theme_colors_reportlab() -> dict[str, Any]:
     return out
 
 
-def localized_chrome(*, rtl: bool) -> dict[str, str]:
-    """Header/footer/page chrome strings for EN vs AR (same layout)."""
+def localized_chrome(*, rtl: bool, numerals: str = "latn") -> dict[str, str]:
+    """Header/footer/page chrome strings for EN vs AR (same layout).
+
+    ``numerals`` selects the digit set for page numbers and any other generated
+    figure: ``"latn"`` (ASCII 0-9) or ``"arab"`` (Arabic-Indic ٠-٩). The page
+    format string is a template, so the substitution happens at render time —
+    :func:`format_page_number` is the single place that applies the digit set.
+    """
     if rtl:
         return {
             "brand": "منظومة كاظمة للذكاء الاصطناعي",
@@ -114,6 +126,7 @@ def localized_chrome(*, rtl: bool) -> dict[str, str]:
             "page_fmt": "صفحة {n}",
             "lang": "ar",
             "dir": "rtl",
+            "numerals": numerals if numerals in ("latn", "arab") else "latn",
         }
     return {
         "brand": "Kazma AI Platform",
@@ -122,4 +135,45 @@ def localized_chrome(*, rtl: bool) -> dict[str, str]:
         "page_fmt": "Page {n}",
         "lang": "en",
         "dir": "ltr",
+        "numerals": "latn",
     }
+
+
+def format_page_number(value: int | str, *, numerals: str = "latn") -> str:
+    """Render a page number in the document's digit set."""
+    text = str(value)
+    if numerals == "arab":
+        from kazma_core.documents.arabic import to_arabic_numerals
+
+        return to_arabic_numerals(text)
+    return text
+
+
+def format_document_date(when: date | None = None, *, rtl: bool,
+                         calendar: str = "gregory",
+                         numerals: str = "latn") -> str:
+    """Format a document date in the profile's calendar and digit set.
+
+    Kazma already ships a Hijri converter and Arabic month names in
+    :mod:`kazma_core.cultural_context`; it was wired into chat and never into
+    the document engines, so every Arabic document carried a Gregorian date in
+    ASCII digits. This is the bridge. Falls back to the Gregorian rendering if
+    the cultural module is unavailable.
+    """
+    from datetime import date as _date
+
+    today = when or _date.today()
+    if calendar == "islamic-umalqura":
+        try:
+            from kazma_core.cultural_context import (
+                _gregorian_to_hijri_approx,
+                _hijri_month_name,
+            )
+
+            year, month, day = _gregorian_to_hijri_approx(today)
+            rendered = f"{day} {_hijri_month_name(month)} {year} هـ"
+            return format_page_number(rendered, numerals=numerals) if numerals == "arab" else rendered
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("[style_theme] Hijri conversion unavailable", exc_info=True)
+    iso = today.isoformat()
+    return format_page_number(iso, numerals=numerals) if numerals == "arab" else iso

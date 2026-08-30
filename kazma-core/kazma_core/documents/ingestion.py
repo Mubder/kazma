@@ -212,6 +212,38 @@ class DocumentIngestionService:
             config=self.config,
         )
         self._manager: DocumentWorkerManager | None = None
+        # Tenant of the stage currently executing, so out-of-band events
+        # raised deep inside a parse (salvage egress) can be attributed.
+        self._active_tenant: str | None = None
+        self._install_salvage_audit()
+
+    def _install_salvage_audit(self) -> None:
+        """Route third-party parse egress into the durable audit log.
+
+        The salvage tier can upload original document bytes to LlamaParse or
+        Reducto when ``documents.security.remote_parse`` is enabled. That is a
+        boundary crossing and every other boundary crossing in this subsystem
+        writes an audit row; this one used to write nothing at all.
+        """
+        from kazma_core.documents.extract_salvage import set_salvage_audit_hook
+
+        def _record(provider: str, path: Any, size: int) -> None:
+            try:
+                self.audit.record(
+                    tenant_id=self._active_tenant or "unknown",
+                    event_type="egress",
+                    action="remote_parse",
+                    outcome="success",
+                    actor_id="system",
+                    detail={"provider": provider, "bytes": int(size)},
+                )
+            except Exception:  # pragma: no cover - auditing must not break a parse
+                logger.warning(
+                    "[documents.ingestion] remote-parse egress audit failed "
+                    "(provider=%s)", provider, exc_info=True,
+                )
+
+        set_salvage_audit_hook(_record)
 
     # ── Worker lifecycle ────────────────────────────────────────────────
 
@@ -675,6 +707,13 @@ class DocumentIngestionService:
         return StageResult(DocumentJobState.READY, stage="ready")
 
     def _parse_to_manifest(self, job: DocumentJobRecord, *, force_ocr: bool) -> None:
+        self._active_tenant = job.tenant_id
+        try:
+            self._parse_to_manifest_impl(job, force_ocr=force_ocr)
+        finally:
+            self._active_tenant = None
+
+    def _parse_to_manifest_impl(self, job: DocumentJobRecord, *, force_ocr: bool) -> None:
         version = self.repository.get_version(
             tenant_id=job.tenant_id, version_id=job.version_id
         )

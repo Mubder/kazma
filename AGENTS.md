@@ -652,9 +652,12 @@ aliases.
 
 **D. Multi-replica honesty.**
 `jobs_pg.py` can claim jobs with `SELECT … FOR UPDATE SKIP LOCKED` when
-Postgres is configured. Document **metadata** (documents/versions/blobs) is
-still SQLite — readiness must report single-replica for metadata. Never claim
-full multi-replica document HA until metadata is ported.
+Postgres is configured. Document **metadata** (documents/versions/blobs)
+defaults to SQLite and moves to `repository_pg.py` when
+`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and the pool is up. Readiness
+must report single-replica for metadata **whenever the SQLite backend is
+active** — never claim multi-replica HA from the availability of the Postgres
+path alone, only from the backend actually in use.
 
 **E. Fence + security honesty.**
 LLM-visible document text goes through untrusted fences
@@ -667,16 +670,105 @@ Sandbox: scrubbed env + resource limits; not a full network namespace.
 
 **F. Multi-replica backends.**
 Jobs: `jobs_pg.py` when Postgres. Metadata: `repository_pg.py` when
-`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and pool is up. GC mark/sweep
-SQL remains SQLite-shaped — collector **skips** with
-`gc_postgres_metadata_sql_port_pending` when metadata is Postgres (no silent
-deletes). Audit works on both backends.
+`KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and pool is up. GC is
+backend-agnostic: `retention._mark` dispatches to `repository.gc_mark`, which
+both backends implement, so mark/sweep runs on Postgres metadata. The old
+`gc_postgres_metadata_sql_port_pending` skip is gone and
+`tests/test_leftovers_except_g.py` asserts it stays gone. Audit works on both
+backends.
 
 **G. Certification.**
 `scripts/certify_documents.py` + `tests/test_document_certification_phase10.py`
 + `hostile_corpus.py` / committed `tests/fixtures/documents/hostile_manifest.json`.
 Keep CLI gates and pytest groups honest (architecture/a11y/crash matrix are
 pytest; CLI has NOT RUN placeholders for soak/Postgres/external review).
+
+**H. Arabic / RTL — one module, one shaping pass, one fold.**
+`documents/arabic.py` is the ONLY home for Arabic text policy. Do not
+reintroduce a codepoint-block regex, a second shaping routine, or a
+call-site-local normalization.
+
+- **Direction** is decided by Unicode **bidi class** (`R`/`AL`), never by a
+  block regex — the regex missed Hebrew/Syriac/Thaana/N'Ko and Arabic
+  Extended-B, and counted harakat and Arabic-Indic digits as letters.
+  `is_rtl_dominant` has **no** "any RTL char near the start" escape hatch; that
+  clause made the threshold dead code and flipped English reports to RTL.
+- **`shape_arabic` vs `rtl` are different questions.** `rtl` is "lay the page
+  out right-to-left"; `shape_arabic` is "this contains complex script, a visual
+  engine must shape it". `PdfEngine.render` gates the DOCX→LibreOffice route on
+  **`shape_arabic`** — gating it on `rtl` stranded every mixed-language
+  document on the degraded reportlab path.
+- **Shape once per paragraph.** `arabic.shape_spans()` resolves bidi embedding
+  levels over the whole paragraph, splits styled spans at level boundaries,
+  applies UBA rule L2, and only then reshapes. Never call the shaper per
+  markdown span: that reorders each fragment internally, emits them in logical
+  order, and renders the sentence inside-out with the spaces eaten.
+- **Search folding is applied on BOTH sides.** `fold_for_search` feeds the
+  `folded` column of `knowledge_chunks_fts` at index time AND the query at
+  search time (`knowledge.py:fts_search`). A fold on one side only is worse
+  than none. SQLite's `unicode61` treats harakat (`Mn`) as separators, so
+  vocalized Arabic indexes as single letters without this.
+- **`to_logical()` runs in `parsers/common.IRBuilder.add_page`**, before limits,
+  quality assessment and chunking. It NFKC-folds Arabic presentation forms back
+  to base letters so a legacy visual-dump PDF is recovered without OCR. Pages
+  whose character *order* is also reversed still fail the quality gate and
+  still escalate — that is the correct remaining OCR case.
+- **Fonts are chosen by verified coverage** (`documents/fonts.py`), not by first
+  path that exists. An RTL job requires presentation-form cmap coverage
+  (`U+FB50-FDFF` / `U+FE70-FEFF`); base-block coverage renders tofu.
+  `_setup_fonts` raises `DocumentRenderError` rather than emitting a blank
+  Arabic PDF behind a warning string.
+- **Amiri (OFL) is vendored** in `documents/assets/fonts/`, so complex-script
+  PDF output is identical on Windows, macOS and the container.
+  `KAZMA_DOCUMENT_FONT_DIR` overrides it. Precedence is **deliberately
+  asymmetric**: the bundle wins for complex-script jobs, but a Latin-only job
+  takes the system font first and only falls back to the bundle when no system
+  font exists at all. Amiri is a Naskh design — letting it win for Latin would
+  silently restyle every English document. Do not "simplify" this to
+  bundle-always. The OFL text must keep travelling with the fonts.
+- **HTML exports inline the pinned font** as a data URI
+  (`documents.render.embed_html_fonts`, default on) so an Arabic export renders
+  the same wherever it is opened. That costs ~850 KB per Arabic file; the flag
+  exists for deployments that serve these over the wire. English exports are
+  never affected. DOCX does **not** embed: switching its Arabic typeface away
+  from Sakkal Majalla would invalidate the `body_size_ar` / `line_height_ar`
+  tuning, which is a design decision, not a packaging one.
+- **The image and CI carry the system deps.** `fonts-noto-naskh-arabic`,
+  `libreoffice-writer`, `tesseract-ocr(-ara)`. Removing them from either does
+  not fail a test — it silently returns the platform to blank Arabic PDFs, and
+  makes `tests/test_docx_rtl_visual.py` skip instead of run.
+
+**J. One type scale, enforced by measurement.**
+`theme_cs_size()` is the complex-script optical size and **every** engine must
+apply it: DOCX via `w:szCs`, HTML via `_css`, PDF via `_build_styles`. The PDF
+engine was the odd one out for a long time — it used the Latin `body_size` for
+Arabic, so the same document was set at 11pt one way and 16pt the other and
+paginated to 6 pages versus 13. Same rule for `line_height` vs `line_height_ar`
+and for table cells (`theme_cs_size(10)`).
+
+RTL tables must read right-to-left in every format: `w:bidiVisual` (DOCX),
+`dir="rtl"` (HTML), and an explicit column reversal in the PDF engine, which
+has no bidi table model of its own.
+
+Headings carry keep-with-next (`w:keepNext`/`w:keepLines`/`w:widowControl` in
+DOCX, `_keep_headings_with_body` → `KeepTogether` in PDF, `break-after: avoid`
+in HTML) so a heading is never the last thing on a page. Paragraph widows and
+orphans are off (`allowWidows=0`/`allowOrphans=0`, `orphans: 3`/`widows: 3`).
+
+`tests/test_document_layout.py` measures all of this against a rendered PDF
+with PyMuPDF rather than grepping the source — every defect it covers was
+invisible at the code level and obvious on the page. Do not weaken it to source
+assertions.
+
+**I. Third-party parse egress is opt-in and audited.**
+`extract_salvage.try_remote_parse` uploads the ORIGINAL document bytes to
+LlamaParse/Reducto. It requires `documents.security.remote_parse` (default
+**off**); an API key in the environment is not consent. Local Docling salvage
+is `documents.security.local_salvage` (default on). Every remote call records
+an `egress`/`remote_parse` audit row with provider and byte count via the hook
+`DocumentIngestionService._install_salvage_audit` installs. The legacy
+`KAZMA_REMOTE_PARSE=0` / `KAZMA_DOCLING=0` env switches remain as an additional
+veto only — they can turn a tier off, never on.
 
 ### 20. Commitment Layer (`kazma-core/kazma_core/safety/commitment/`)
 

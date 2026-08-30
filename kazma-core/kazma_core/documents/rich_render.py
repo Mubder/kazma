@@ -22,15 +22,27 @@ from __future__ import annotations
 import html
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 
 # Direction detection is the single home of :mod:`.profile`; re-export so the
 # PDF helpers below and historical `from ...rich_render import is_arabic_dominant`
 # callers keep working.
+from kazma_core.documents.arabic import (
+    direction_of,
+    has_rtl,
+    iter_style_runs,
+    shape_spans,
+)
 from kazma_core.documents.profile import (  # noqa: F401 (re-exported)
-    _AR_RE,
     arabic_ratio,
     is_arabic_dominant,
+)
+
+# Historic alias — a few tests and the quality heuristics still import it.
+_AR_RE = re.compile(
+    r"[؀-ۿݐ-ݿࡰ-࢟ࢠ-ࣿ"
+    r"ﭐ-﷿ﹰ-﻿]"
 )
 
 logger = logging.getLogger(__name__)
@@ -73,16 +85,20 @@ def shape_for_pdf(text: str) -> str:
         return text
 
 
-# Safety margin (in points) subtracted from the column width when wrapping
-# Arabic body lines so the paragraph flows at the full page/column width
-# (right-aligned lines ending at x1 ~ 535). A shaped visual line is slightly
-# wider than its logical measurement (Arabic final-form glyphs widen, plus the
-# body region has a ~6pt right gutter below the nominal col_width), so without
-# this margin ReportLab wordWrap="CJK" would re-split an overflowing line
-# mid-word. The margin absorbs both effects: every wrapped line is a
-# whole-word, right-aligned (x1 ~ 535) column-wrapped line with NO chopped
-# words. Only consulted when a paragraph actually overflows one line.
-_ARABIC_BODY_LINE_SAFETY_PT = 20.0
+# Safety margin (in points) subtracted from the column width when measuring a
+# wrapped line.
+#
+# This used to be 20pt because the old code measured the *logical* string and
+# then shaped it, so the prediction was systematically short and needed a large
+# fudge. ``_visual_width`` now measures the actual shaped line, so the only
+# residual error is the difference between the body font used for measurement
+# and a bold or monospace run inside the same line. 4pt covers that.
+#
+# The 20pt version was visible in the output: Arabic body text was ragged 20pt
+# short of the left margin on every line, so a right-aligned RTL page had a
+# left margin of ~83pt against a right margin of ~56pt. The asymmetry read as a
+# layout bug, because it was one.
+_ARABIC_BODY_LINE_SAFETY_PT = 4.0
 
 
 def shape_arabic_wrapped(
@@ -91,79 +107,141 @@ def shape_arabic_wrapped(
     font_name: str,
     font_size: float,
 ) -> str:
-    """Shape an Arabic paragraph into right-aligned, column-wrapped visual lines.
+    """Shape an unstyled Arabic paragraph into column-wrapped visual lines.
 
-    Unlike :func:`shape_for_pdf` (which shapes the *whole* paragraph as one
-    visual string and lets ReportLab re-wrap it left-to-right — the v9 bug that
-    scrambled RTL line order and collapsed the body to narrow left-aligned
-    lines), this packs the *logical* words greedily to the real column width
-    (measured with ``pdfmetrics.stringWidth`` in the body font), shapes each
-    resulting line independently via :func:`shape_for_pdf`, and joins them with
-    ``<br/>``.
+    Kept for callers that hand in plain text with no inline markup. Styled
+    paragraphs must go through :func:`inline_markdown_to_reportlab`, which
+    shapes the paragraph as one bidi paragraph and keeps the style attached to
+    the reordered segments.
 
-    Visual lines stay in logical (reading) order, so the paragraph start lands
-    on the **top** line and every line is right-aligned, ending at the column's
-    right edge (x1 ~ 535). A small safety margin keeps each shaped line
-    from slightly overflowing the body region (which would make ReportLab
-    re-split it mid-word). The result is HTML-escaped per line with raw
-    ``<br/>`` separators (so ReportLab's ``<br/>`` is preserved and HTML
-    entities never corrupt the bidi/joining stream).
-
-    Non-Arabic input is returned escaped as-is (no shaping).
+    Line breaking happens on the **logical** text and each resulting line is
+    reordered separately — which is exactly what the Unicode BiDi algorithm
+    specifies (reordering is a per-line operation applied after line breaking).
+    Lines are emitted in logical order so the paragraph reads top-to-bottom.
     """
     if not text:
         return ""
-    if not _AR_RE.search(text):
+    if not has_rtl(text):
         return html.escape(text)
+    rendered = _render_shaped_lines(
+        [(text, None)],
+        col_width=col_width,
+        font_name=font_name,
+        font_size=font_size,
+        wrap=lambda body, style: body,
+    )
+    return rendered
 
+
+def _measurer(font_name: str, font_size: float):
+    """Return a width function, or ``None`` when ReportLab is unavailable."""
     try:
         from reportlab.pdfbase import pdfmetrics as _pm
-
-        def _width(s: str) -> float:
-            return _pm.stringWidth(s, font_name, font_size)
     except Exception:  # pragma: no cover - reportlab is required for PDF output
-        return html.escape(shape_for_pdf(text))
+        return None
 
-    v = shape_for_pdf(text)
-    try:
-        full = float(col_width)
-    except (TypeError, ValueError):
-        full = 0.0
-    if full <= 0:
-        return html.escape(v)
-    # Fast path: the whole visual paragraph already fits on a single line.
-    try:
-        if _width(v) <= full:
-            return html.escape(v)
-    except Exception:
-        return html.escape(v)
-
-    # Greedy logical-word packing to the page-width column (minus a safety
-    # margin). We never reverse the visual line list: lines are emitted in
-    # logical order so the paragraph reads top-to-bottom beginning-first.
-    wrap = max(0.0, full - _ARABIC_BODY_LINE_SAFETY_PT)
-    words = text.split()
-    if not words:
-        return html.escape(v)
-    lines: list[str] = []
-    cur: list[str] = []
-    for wd in words:
-        if not cur:
-            cur = [wd]
-            continue
-        candidate = " ".join(cur + [wd])
+    def _width(value: str) -> float:
         try:
-            if _width(shape_for_pdf(candidate)) > wrap:
-                lines.append(shape_for_pdf(" ".join(cur)))
-                cur = [wd]
-            else:
-                cur.append(wd)
+            return _pm.stringWidth(value, font_name, font_size)
         except Exception:
-            # Fall back to appending the word if measurement fails.
-            cur.append(wd)
-    if cur:
-        lines.append(shape_for_pdf(" ".join(cur)))
-    return "<br/>".join(html.escape(ln) for ln in lines)
+            return 0.0
+
+    return _width
+
+
+def _split_span_words(spans: Sequence[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    """Split styled spans into whitespace-delimited word tokens.
+
+    Whitespace is kept as its own token so a line break can consume it and the
+    spacing around a style boundary survives (``**bold** text`` must not become
+    ``**bold**text``, which is what per-span shaping used to produce).
+    """
+    tokens: list[tuple[str, Any]] = []
+    for text, style in spans:
+        for piece in re.split(r"(\s+)", text):
+            if piece:
+                tokens.append((piece, style))
+    return tokens
+
+
+def _render_shaped_lines(
+    spans: Sequence[tuple[str, Any]],
+    *,
+    col_width: float | None,
+    font_name: str | None,
+    font_size: float | None,
+    wrap,
+) -> str:
+    """Shape *spans* as one bidi paragraph and emit ReportLab mini-HTML.
+
+    ``wrap(escaped_text, style)`` re-applies the caller's markup to one visual
+    segment. When a column width and font are supplied the paragraph is broken
+    into lines on the logical text first, then each line is reordered on its
+    own; otherwise the whole paragraph is shaped as a single line and ReportLab
+    does the wrapping (correct for short, single-line content such as titles,
+    headings, bullets and citations).
+    """
+    logical = "".join(t for t, _ in spans)
+    base_dir = direction_of(logical)
+
+    def _emit(line_spans: Sequence[tuple[str, Any]]) -> str:
+        # Trim edge whitespace tokens before shaping. A space left at the end of
+        # a logical line lands at the *start* of the visual line once the RTL
+        # run is reversed, which reads as a stray indent on every wrapped line.
+        trimmed = list(line_spans)
+        while trimmed and not trimmed[0][0].strip():
+            trimmed.pop(0)
+        while trimmed and not trimmed[-1][0].strip():
+            trimmed.pop()
+        if not trimmed:
+            return ""
+        segments = shape_spans(trimmed, base_dir=base_dir)
+        return "".join(
+            wrap(html.escape(text), style)
+            for text, style in iter_style_runs(segments)
+        )
+
+    measure = (
+        _measurer(font_name, font_size)
+        if col_width and font_name and font_size
+        else None
+    )
+    if measure is None:
+        return _emit(spans)
+
+    limit = max(0.0, float(col_width) - _ARABIC_BODY_LINE_SAFETY_PT)
+    if limit <= 0:
+        return _emit(spans)
+
+    def _visual_width(line_spans: Sequence[tuple[str, Any]]) -> float:
+        shaped = "".join(seg.text for seg in shape_spans(line_spans, base_dir=base_dir))
+        return measure(shaped)
+
+    tokens = _split_span_words(spans)
+    if not tokens:
+        return ""
+    if _visual_width(tokens) <= float(col_width):
+        return _emit(tokens)
+
+    out_lines: list[str] = []
+    current: list[tuple[str, Any]] = []
+    for token, style in tokens:
+        if not current and not token.strip():
+            continue  # never open a line with whitespace
+        candidate = current + [(token, style)]
+        if current and _visual_width(candidate) > limit:
+            rendered = _emit(current)
+            if rendered:
+                out_lines.append(rendered)
+            current = [] if not token.strip() else [(token, style)]
+        else:
+            current = candidate
+    if current:
+        rendered = _emit(current)
+        if rendered:
+            out_lines.append(rendered)
+    return "<br/>".join(out_lines)
+
 
 
 def _split_pipe_row(row: str) -> list[str]:
@@ -437,6 +515,74 @@ def parse_rich_blocks(body: str) -> list[dict[str, Any]]:
     return blocks
 
 
+_INLINE_RE = re.compile(
+    r"\*\*(.+?)\*\*|__(.+?)__|"
+    r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|"
+    r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)|"
+    r"`([^`]+)`|"
+    r"\[([^\]]+)\]\(([^)]+)\)"
+)
+
+
+def _inline_spans(text: str) -> list[tuple[str, Any]]:
+    """Parse inline markdown into ``(text, style)`` spans in LOGICAL order.
+
+    ``style`` is an opaque marker consumed by :func:`_wrap_span`. Parsing and
+    styling are deliberately separated from shaping: the whole paragraph must
+    reach the bidi algorithm as one string, or each styled fragment gets
+    reordered on its own and the sentence comes out inside-out.
+    """
+    from kazma_core.documents.math_text import latex_to_unicode, split_inline_math
+
+    spans: list[tuple[str, Any]] = []
+
+    def _chunk(chunk: str) -> None:
+        pos = 0
+        for m in _INLINE_RE.finditer(chunk):
+            if m.start() > pos:
+                spans.append((chunk[pos:m.start()], None))
+            if m.group(1) is not None or m.group(2) is not None:
+                spans.append((m.group(1) or m.group(2), "b"))
+            elif m.group(3) is not None or m.group(4) is not None:
+                spans.append((m.group(3) or m.group(4), "i"))
+            elif m.group(5) is not None:
+                spans.append((m.group(5), "code"))
+            elif m.group(6) is not None:
+                spans.append((m.group(6), ("link", m.group(7))))
+            pos = m.end()
+        if pos < len(chunk):
+            spans.append((chunk[pos:], None))
+
+    for kind, chunk in split_inline_math(text):
+        if kind == "math":
+            spans.append((latex_to_unicode(chunk), "math"))
+        elif kind == "money":
+            spans.append(("$" + chunk.strip(), "money"))
+        else:
+            _chunk(chunk)
+    return [(t, st) for t, st in spans if t]
+
+
+def _wrap_span(body: str, style: Any) -> str:
+    """Re-apply ReportLab mini-HTML markup to one already-escaped segment."""
+    if style is None:
+        return body
+    if style == "b":
+        return f"<b>{body}</b>"
+    if style == "i":
+        return f"<i>{body}</i>"
+    if style == "code":
+        return f'<font face="Courier" size="9" color="#0f172a">{body}</font>'
+    if style == "math":
+        return f'<font face="Courier" size="11">{body}</font>'
+    if style == "money":
+        return f'<font face="Courier">{body}</font>'
+    if isinstance(style, tuple) and style and style[0] == "link":
+        href = html.escape(str(style[1]), quote=True)
+        return f'<link href="{href}" color="#2563eb"><u>{body}</u></link>'
+    return body
+
+
 def inline_markdown_to_reportlab(
     text: str,
     *,
@@ -448,81 +594,35 @@ def inline_markdown_to_reportlab(
     """Convert a subset of inline markdown to ReportLab ``<para>`` mini-HTML.
 
     ReportLab Paragraph supports ``<b>``, ``<i>``, ``<u>``, ``<font>``,
-    ``<br/>``, ``<link>``. We escape everything else first, then re-inject tags.
+    ``<br/>`` and ``<link>``. Everything else is escaped.
+
+    The paragraph is shaped **once**, as a single bidi paragraph, and the
+    markdown styles ride along on the reordered segments. Shaping each styled
+    fragment separately — the previous behaviour — reordered every fragment
+    internally and then emitted the fragments in logical order, so an Arabic
+    sentence containing bold, italic, code or a link rendered inside-out with
+    the spaces around each style boundary swallowed. Shaping is skipped
+    entirely for text with no RTL content, and for engines (DOCX, HTML) that do
+    their own shaping.
     """
     if not text:
         return ""
 
-    from kazma_core.documents.math_text import latex_to_unicode, split_inline_math
+    spans = _inline_spans(text)
+    if not spans:
+        return ""
 
-    # Tokenize inline patterns on the *raw* string, escape segments
-    pattern = re.compile(
-        r"\*\*(.+?)\*\*|__(.+?)__|"
-        r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)|"
-        r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)|"
-        r"`([^`]+)`|"
-        r"\[([^\]]+)\]\(([^)]+)\)"
+    if not shape_arabic or not has_rtl(text):
+        return "".join(_wrap_span(html.escape(t), st) for t, st in spans)
+
+    return _render_shaped_lines(
+        spans,
+        col_width=col_width,
+        font_name=font_name,
+        font_size=font_size,
+        wrap=_wrap_span,
     )
 
-    def _esc_shape(s: str) -> str:
-        """Shape text for ReportLab's visual engine, then HTML-escape.
-
-        For body paragraphs (``col_width`` + font + size supplied) Arabic
-        segments are packed into right-aligned, column-wrapped visual lines via
-        :func:`shape_arabic_wrapped` so RTL reading order is preserved
-        top-to-bottom and lines end at the column right edge (v4 layout).
-        Short / non-body text (titles, TOC, citations, bullets) keeps the
-        whole-segment :func:`shape_for_pdf` path — those fit one line, so
-        ReportLab wraps them itself.
-        """
-        if col_width is not None and font_name is not None and font_size is not None:
-            # shape_arabic_wrapped already returns per-line HTML-escaped output
-            # with raw <br/> separators, so we must NOT escape again here.
-            if shape_arabic:
-                return shape_arabic_wrapped(s, col_width, font_name, font_size)
-            return html.escape(s)
-        s2 = shape_for_pdf(s) if shape_arabic else s
-        return html.escape(s2)
-
-    def _md_chunk(chunk: str) -> str:
-        parts: list[str] = []
-        pos = 0
-        for m in pattern.finditer(chunk):
-            if m.start() > pos:
-                parts.append(_esc_shape(chunk[pos : m.start()]))
-            if m.group(1) is not None or m.group(2) is not None:
-                inner = m.group(1) if m.group(1) is not None else m.group(2)
-                parts.append(f"<b>{_esc_shape(inner)}</b>")
-            elif m.group(3) is not None or m.group(4) is not None:
-                inner = m.group(3) if m.group(3) is not None else m.group(4)
-                parts.append(f"<i>{_esc_shape(inner)}</i>")
-            elif m.group(5) is not None:
-                parts.append(
-                    f'<font face="Courier" size="9" color="#0f172a">'
-                    f"{_esc_shape(m.group(5))}</font>"
-                )
-            elif m.group(6) is not None:
-                label = _esc_shape(m.group(6))
-                href = html.escape(m.group(7), quote=True)
-                parts.append(f'<link href="{href}" color="#2563eb"><u>{label}</u></link>')
-            pos = m.end()
-        if pos < len(chunk):
-            parts.append(_esc_shape(chunk[pos:]))
-        return "".join(parts) if parts else _esc_shape(chunk)
-
-    rendered: list[str] = []
-    for kind, chunk in split_inline_math(text):
-        if kind == "math":
-            rendered.append(
-                f'<font face="Courier" size="11">{html.escape(latex_to_unicode(chunk))}</font>'
-            )
-        elif kind == "money":
-            rendered.append(
-                f'<font face="Courier">${html.escape(chunk.strip())}</font>'
-            )
-        else:
-            rendered.append(_md_chunk(chunk))
-    return "".join(rendered)
 
 
 # ── Pygments code highlighting for reportlab PDF ──────────────────────
@@ -754,7 +854,7 @@ def pdf_flowables_from_body(
         elif btype == "code":
             raw = block.get("text") or ""
             try:
-                from reportlab.platypus import Preformatted, KeepTogether
+                from reportlab.platypus import KeepTogether, Preformatted
                 pre_style = styles.get("code", code_style)
                 flow.append(KeepTogether([Preformatted(raw, pre_style)]))
             except Exception:

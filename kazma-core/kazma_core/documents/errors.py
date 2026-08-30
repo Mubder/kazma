@@ -9,6 +9,7 @@ __all__ = [
     "DocumentOcrError",
     "DocumentOcrUnavailableError",
     "DocumentParseError",
+    "DocumentRenderError",
     "DocumentSandboxError",
     "DocumentSecurityError",
     "DocumentUnavailableError",
@@ -58,3 +59,15 @@ class DocumentLimitError(DocumentSecurityError):
 
 class DocumentSandboxError(DocumentParseError):
     code = "document_parser_failed"
+
+
+class DocumentRenderError(DocumentParseError):
+    """A render could not be produced honestly.
+
+    Raised in preference to emitting a document that *looks* successful but is
+    wrong — the canonical case being an Arabic PDF drawn with a font that has
+    no Arabic glyphs, which produces a blank page and a warning string nobody
+    reads.
+    """
+
+    code = "document_render_failed"

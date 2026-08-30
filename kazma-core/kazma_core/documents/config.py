@@ -60,6 +60,17 @@ class DocumentConfig:
     security_allow_encrypted_documents: bool = False
     security_allow_external_render_resources: bool = False
     security_fence_llm_content: bool = True
+    # Third-party parse egress. When a native extract scores poorly the salvage
+    # tier can send the ORIGINAL DOCUMENT BYTES to an external service. That is
+    # off unless a deployment turns it on here — an API key sitting in the
+    # environment is not consent, and it is not a per-tenant policy either.
+    security_remote_parse: bool = False
+    security_local_salvage: bool = True
+    # Inline the pinned font into HTML exports as a data URI so the file
+    # renders identically wherever it is opened. Costs roughly 850 KB per
+    # Arabic export (Amiri regular + bold, base64). Only ever applies to
+    # documents that actually contain complex script.
+    render_embed_html_fonts: bool = True
     ocr_enabled: bool = True
     ocr_languages: tuple[str, ...] = ("eng", "ara")
     ocr_dpi: int = 200
@@ -524,6 +535,24 @@ def get_document_config() -> DocumentConfig:
                 store,
                 "documents.security.fence_llm_content",
                 defaults.security_fence_llm_content,
+                _coerce_bool,
+            ),
+            security_remote_parse=_read(
+                store,
+                "documents.security.remote_parse",
+                defaults.security_remote_parse,
+                _coerce_bool,
+            ),
+            security_local_salvage=_read(
+                store,
+                "documents.security.local_salvage",
+                defaults.security_local_salvage,
+                _coerce_bool,
+            ),
+            render_embed_html_fonts=_read(
+                store,
+                "documents.render.embed_html_fonts",
+                defaults.render_embed_html_fonts,
                 _coerce_bool,
             ),
             ocr_enabled=_read(store, "documents.ocr.enabled", defaults.ocr_enabled, _ocr_enabled),

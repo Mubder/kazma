@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..arabic import to_logical
 from ..config import DocumentConfig
 from ..errors import DocumentLimitError
 from ..models import (
@@ -63,7 +64,16 @@ class IRBuilder:
             allowed = min(remaining_page, remaining_total)
             if allowed <= 0:
                 raise DocumentLimitError("Parsed document output exceeds the configured limit")
-            normalized = str(text)
+            # Repair the text layer BEFORE limits, quality assessment and
+            # chunking see it. A legacy PDF whose extractor dumped Arabic
+            # presentation forms (U+FB50-FDFF / U+FE70-FEFF) becomes logical
+            # base letters here, which is searchable, chunkable and
+            # re-renderable. Previously the presentation forms survived all the
+            # way to the quality gate, which flagged the page and escalated to
+            # OCR — slow, and unavailable in the shipped container. Pages whose
+            # character *order* is also reversed still fail the gate and still
+            # go to OCR, which is the correct remaining case.
+            normalized = to_logical(str(text))
             if len(normalized) > allowed:
                 normalized = normalized[:allowed]
                 self.warnings.append(

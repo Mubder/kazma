@@ -1,6 +1,11 @@
 name: document-platform
 version: 0.1.0
-description: Durable document ingestion, status, paged read, indexing, and search via the shared DocumentIngestionService.
+description: >
+  PREFERRED document surface. Durable ingestion, status, paged read, indexing,
+  conversion, redaction and search via the shared DocumentIngestionService —
+  opaque IDs, tenant ACL, versioning, audit and restart-safe jobs. Use this
+  whenever a document should outlive the current turn. The path-based tools in
+  document-processor are for one-off reads of a workspace file.
 author: Kazma Team
 license: MIT
 

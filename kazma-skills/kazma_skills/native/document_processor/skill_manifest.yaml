@@ -8,6 +8,10 @@ tools:
   read_document:
     arabic_name: "قراءة مستند"
     description: >
+      TRANSIENT, PATH-BASED. Reads a file at a workspace path and returns text
+      now; nothing is stored and no document_id exists afterwards. If the file
+      should persist, be versioned, searchable, or referenced later, use
+      document_import + document_read from the document-platform skill instead.
       Read runtime-ready PDF, DOCX, XLSX, PPTX, CSV/TSV, JSON, text/Markdown/log,
       HTML, or RTF with page/sheet/slide/block selectors and deterministic continuation.
       Legacy DOC/XLS/PPT are available only when a healthy headless LibreOffice is detected.
@@ -49,6 +53,10 @@ tools:
   convert_document:
     arabic_name: "تحويل المستندات"
     description: >
+      TRANSIENT, PATH-BASED. Converts a file at a workspace path. For a document
+      already in the platform, use document_convert (document-platform) — it
+      converts the immutable stored bytes and returns a downloadable
+      artifact_id under the tenant ACL.
       Convert runtime-supported formats in an isolated renderer. HTML/Markdown→PDF
       denies external resources and requires healthy WeasyPrint. Legacy Office
       conversion requires healthy headless LibreOffice.
@@ -66,6 +74,10 @@ tools:
   pdf_redact:
     arabic_name: "تنقيح PDF"
     description: >
+      TRANSIENT, PATH-BASED. Redacts a file at a workspace path. For a document
+      already in the platform, use document_redact (document-platform) — it
+      produces a new independently-verified immutable artifact and an audit
+      record. Redaction terms are never logged by either tool.
       Secure rasterize-redact-rebuild PDF redaction with text, byte, structure,
       and rendered-page verification. Requires healthy PyMuPDF and Pillow;
       otherwise refuses without producing an artifact.

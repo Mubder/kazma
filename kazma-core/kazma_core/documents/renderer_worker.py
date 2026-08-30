@@ -144,15 +144,34 @@ def _build_model_and_profile(
     from kazma_core.documents.profile import DocProfile
 
     sections = _sections(payload.get("sections"))
-    sample_parts = [str(payload.get("title", ""))]
+    # The direction sample must cover EVERY place text can appear. Sampling only
+    # titles, headings and body prose meant a document whose Arabic lived in a
+    # table (or a subtitle, header or footer) was classified as pure Latin and
+    # took the no-shaping path — the table then rendered as unshaped, unordered
+    # glyphs. Cheap to include; expensive to miss.
+    sample_parts = [
+        str(payload.get("title", "")),
+        str(payload.get("subtitle", "") or ""),
+        str(payload.get("header", "") or ""),
+        str(payload.get("footer", "") or ""),
+    ]
     for item in sections:
         sample_parts.append(item.get("heading", ""))
         sample_parts.append((item.get("body") or "")[:1500])
-    sample = "\n".join(sample_parts)
+    for table in payload.get("tables") or []:
+        if not isinstance(table, dict):
+            continue
+        sample_parts.extend(str(h) for h in (table.get("headers") or [])[:12])
+        for row in (table.get("rows") or [])[:12]:
+            if isinstance(row, list):
+                sample_parts.extend(str(cell) for cell in row[:12])
+    sample = "\n".join(part for part in sample_parts if part)
     profile = DocProfile.for_content(
         sample,
         language=payload.get("lang") or payload.get("language"),
         rtl=payload.get("rtl"),
+        numerals=payload.get("numerals"),
+        calendar=payload.get("calendar"),
     )
 
     fill_title = str(profile.theme["accent"]).lstrip("#")
@@ -323,36 +342,19 @@ def _safe_html(text: str) -> None:
         ) from exc
 
 
-def _font_paths() -> tuple[Path | None, Path | None]:
-    """Prefer fonts with solid Arabic coverage (glyphs + metrics)."""
-    candidates = (
-        # Windows — Calibri first for exact user preference
-        (Path("C:/Windows/Fonts/calibri.ttf"), Path("C:/Windows/Fonts/calibrib.ttf")),
-        (Path("C:/Windows/Fonts/arial.ttf"), Path("C:/Windows/Fonts/arialbd.ttf")),
-        (Path("C:/Windows/Fonts/tahoma.ttf"), Path("C:/Windows/Fonts/tahomabd.ttf")),
-        (Path("C:/Windows/Fonts/trado.ttf"), Path("C:/Windows/Fonts/trado.ttf")),
-        (
-            Path("C:/Windows/Fonts/NotoSansArabic-Regular.ttf"),
-            Path("C:/Windows/Fonts/NotoSansArabic-Bold.ttf"),
-        ),
-        (
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        ),
-        (
-            Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf"),
-            Path("/usr/share/fonts/truetype/noto/NotoSansArabic-Bold.ttf"),
-        ),
-        (
-            Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
-            Path("/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf"),
-        ),
-        (
-            Path("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"),
-            Path("/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"),
-        ),
-    )
-    return next(((regular, bold) for regular, bold in candidates if regular.is_file()), (None, None))
+def _font_paths(*, arabic: bool = False) -> tuple[Path | None, Path | None]:
+    """Resolve the render font pair.
+
+    Delegates to :mod:`kazma_core.documents.fonts`, which ranks candidates by
+    verified Arabic **presentation-form** cmap coverage and searches a pinned
+    bundle directory first. The previous implementation here took the first
+    path that happened to exist, which put DejaVu ahead of Noto Arabic on Linux
+    and left Liberation (no Arabic at all) in the running.
+    """
+    from kazma_core.documents.fonts import font_paths
+
+    return font_paths(arabic=arabic)
+
 
 
 def _generate_pdf(output: Path, payload: dict[str, Any], warnings: list[str],

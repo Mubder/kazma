@@ -339,7 +339,7 @@ See [Phase map](./document-phases.md) and the repo audit report
 | **Job claiming** | Postgres when pool is up (`jobs_pg.py`) | Yes — `SELECT … FOR UPDATE SKIP LOCKED` |
 | **Metadata** (documents/versions/blobs/artifacts/chunks) | SQLite default; Postgres when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` or `auto` with PG jobs (`repository_pg.py`) | Yes when Postgres metadata is active |
 | **Content blobs** | Content-addressed tree under `documents.storage_root` | Shared filesystem / volume required across replicas |
-| **GC mark/sweep** | SQLite SQL today | **Skipped** on Postgres metadata with honest error `gc_postgres_metadata_sql_port_pending` (no silent deletes) |
+| **GC mark/sweep** | Backend-agnostic — `retention._mark` dispatches to `repository.gc_mark`, implemented by both backends | Yes |
 
 Env:
 

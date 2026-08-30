@@ -91,7 +91,12 @@ class PdfEngine:
         unavailable or the conversion fails.
         """
         output = Path(output)
-        if self.profile.rtl and self._render_via_docx(model, output, assets_dir):
+        # Gate on ``shape_arabic``, not ``rtl``. Shaping is required whenever the
+        # document contains ANY complex script; gating the good route on RTL
+        # dominance meant a Latin-dominant document with Arabic passages — the
+        # exact case this route exists for — was always sent to the degraded
+        # reportlab path instead.
+        if self.profile.shape_arabic and self._render_via_docx(model, output, assets_dir):
             return
         self._render_reportlab(model, output, assets_dir)
 
@@ -169,6 +174,19 @@ class PdfEngine:
         title_size = _size("title_font_size", float(self.theme["title_size"]), 10, 36)
         heading_size = _size("heading_font_size", float(self.theme["h2_size"]), 8, 28)
         body_size = _size("body_font_size", float(self.theme["body_size"]), 6, 18)
+        # Complex script needs its own optical size — an Arabic face set at the
+        # Latin nominal point size reads noticeably smaller. DOCX (via
+        # ``_mark_run``/``w:szCs``) and HTML (via ``_css``) have always applied
+        # ``theme_cs_size``; the PDF path did not, so the same document came out
+        # at 11pt here and 16pt there. That is the single largest break in the
+        # "one design regardless of extension" promise, and it is why the same
+        # Arabic content paginated to 6 pages one way and 13 the other.
+        if self.profile.rtl:
+            from kazma_core.documents.style_theme import theme_cs_size
+
+            title_size = theme_cs_size(title_size)
+            heading_size = theme_cs_size(heading_size)
+            body_size = theme_cs_size(body_size)
         accent = th["accent"]
 
         rich_styles = self._build_styles(
@@ -255,17 +273,37 @@ class PdfEngine:
     # font setup
     # ================================================================== #
     def _setup_fonts(self, pdfmetrics: Any, TTFont: Any) -> tuple[str, str]:
-        # Lazy import to avoid a renderer_worker cycle (_font_paths lives there).
-        from kazma_core.documents.renderer_worker import _font_paths
+        """Register the render fonts, refusing to fake Arabic coverage.
 
-        regular, bold = _font_paths()
+        For a complex-script job the font must actually cover the Arabic
+        **presentation forms** the reshaper emits, not merely the base block.
+        Helvetica (ReportLab's built-in fallback) covers neither, so the old
+        behaviour — append a warning string and render anyway — produced a blank
+        Arabic PDF that looked like a successful render. A typed refusal is
+        strictly more useful than a silently empty document.
+        """
+        from kazma_core.documents.errors import DocumentRenderError
+        from kazma_core.documents.fonts import resolve_fonts
+
+        needs_arabic = bool(self.profile.shape_arabic)
+        choice = resolve_fonts(arabic=needs_arabic)
+
+        if needs_arabic and not choice.arabic_ready:
+            raise DocumentRenderError(
+                "No installed font covers shaped Arabic (presentation forms "
+                "U+FB50-FDFF / U+FE70-FEFF). Install an Arabic face such as "
+                "fonts-noto-naskh-arabic, or pin one via "
+                "KAZMA_DOCUMENT_FONT_DIR.",
+                code="arabic_font_unavailable",
+            )
+
         font = "Helvetica"
         bold_font = "Helvetica-Bold"
-        if regular:
-            pdfmetrics.registerFont(TTFont("KazmaUnicode", str(regular)))
+        if choice.regular is not None:
+            pdfmetrics.registerFont(TTFont("KazmaUnicode", str(choice.regular)))
             font = "KazmaUnicode"
-            if bold and bold.is_file():
-                pdfmetrics.registerFont(TTFont("KazmaUnicodeBold", str(bold)))
+            if choice.bold is not None and choice.bold.is_file():
+                pdfmetrics.registerFont(TTFont("KazmaUnicodeBold", str(choice.bold)))
                 bold_font = "KazmaUnicodeBold"
             else:
                 bold_font = font
@@ -314,10 +352,21 @@ class PdfEngine:
             leading=float(THEME["h3_size"]) * 1.4, spaceBefore=10, spaceAfter=4,
             textColor=th["heading"], alignment=align, wordWrap=wrap,
         )
+        # Arabic needs more leading than Latin at the same measure; the theme
+        # carries both figures and every other engine already picks between
+        # them.
+        line_height = float(
+            THEME["line_height_ar"] if rtl else THEME["line_height"]
+        )
         body_style = ParagraphStyle(
             "KazmaBody", fontName=font, fontSize=body_size,
-            leading=body_size * float(THEME["line_height"]), textColor=body_color,
+            leading=body_size * line_height, textColor=body_color,
             alignment=body_align, wordWrap=wrap, spaceAfter=8, firstLineIndent=0,
+            # Never strand a single line of a paragraph across a page break.
+            # ReportLab defaults to allowing widows; a lone trailing line at the
+            # top of a page is the most common "why does this look cheap"
+            # artifact in generated PDFs.
+            allowWidows=0, allowOrphans=0,
         )
         # Body paragraphs: ragged-right RTL for Arabic (v4 layout), full-column
         # justified for English. body_style (TA_JUSTIFY) stays parent/fallback.
@@ -381,7 +430,11 @@ class PdfEngine:
             canvas.drawString(document.leftMargin, A4[1] - 22, hdr)
             canvas.drawString(document.leftMargin, 22, ftr)
         if self._page_numbers:
-            label = self.profile.chrome["page_fmt"].format(n=document.page)
+            from kazma_core.documents.style_theme import format_page_number
+
+            label = self.profile.chrome["page_fmt"].format(
+                n=format_page_number(document.page, numerals=self.profile.numerals)
+            )
             if self.shape_ar:
                 label = shape_for_pdf(label)
             canvas.drawCentredString(A4[0] / 2, 22, label)
@@ -558,12 +611,31 @@ class PdfEngine:
             s = str(val)
             return shape_for_pdf(s) if self.shape_ar else s
 
-        data = [[_cell(c) for c in block.headers]]
-        data.extend([_cell(c) for c in row] for row in block.rows)
+        headers = [_cell(c) for c in block.headers]
+        rows = [[_cell(c) for c in row] for row in block.rows]
+        if self.profile.rtl:
+            # Columns must read right-to-left, matching ``w:bidiVisual`` in the
+            # DOCX engine and ``dir="rtl"`` in HTML. ReportLab has no bidi table
+            # model, so the reversal is done on the data. Without this the PDF
+            # fallback put column 1 on the LEFT of an Arabic table while every
+            # other engine put it on the right — the same document, mirrored.
+            headers = list(reversed(headers))
+            rows = [list(reversed(row)) for row in rows]
+
+        data = [headers]
+        data.extend(rows)
+        # Explicit complex-script size. The table carried no FONTSIZE at all and
+        # fell through to ReportLab's 10pt default, so Arabic tables were set
+        # two points smaller than the Arabic tables HTML and DOCX produce.
+        from kazma_core.documents.style_theme import theme_cs_size
+
+        cell_pt = theme_cs_size(10) if self.profile.rtl else 10.0
         table = Table(data, repeatRows=1, splitByRow=len(data) > 12)
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), font),
             ("FONTNAME", (0, 0), (-1, 0), bold_font),
+            ("FONTSIZE", (0, 0), (-1, -1), cell_pt),
+            ("LEADING", (0, 0), (-1, -1), cell_pt * 1.35),
             ("BACKGROUND", (0, 0), (-1, 0), th["table_header_bg"]),
             ("TEXTCOLOR", (0, 0), (-1, 0), th["table_header_fg"]),
             ("BACKGROUND", (0, 1), (-1, -1), th["table_row_bg"]),

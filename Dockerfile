@@ -5,18 +5,36 @@ WORKDIR /app
 # Install system deps for ChromaDB + sentence-transformers + healthchecks
 # git is required by the git_* tools (git_status/push/commit/...) — without it
 # every git tool fails with FileNotFoundError inside the container. (Audit D1.)
+#
+# Document Intelligence system deps: without a font, ReportLab falls back to
+# Helvetica (zero Arabic glyphs); without LibreOffice, the good DOCX->PDF
+# shaping route is never attempted. Together that meant every Arabic PDF this
+# image produced came out blank behind a warning string nobody reads.
+# Tesseract + the ara traineddata restores the OCR recovery tier; ClamAV
+# restores the quarantine scan.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
     libpq5 \
+    fonts-noto-naskh-arabic \
+    fonts-noto-core \
+    fonts-dejavu-core \
+    libreoffice-writer \
+    libreoffice-calc \
+    tesseract-ocr \
+    tesseract-ocr-ara \
+    tesseract-ocr-eng \
+    clamav \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy monorepo
 COPY . .
 
 # Install with RAG + Postgres extras (multi-replica ready)
-RUN pip install --no-cache-dir -e ".[rag,postgres]"
+# document-platform brings pymupdf + pypdfium2, without which convert and
+# redact return 503 in a container that otherwise reports healthy.
+RUN pip install --no-cache-dir -e ".[rag,postgres,document-platform]"
 
 # Create non-root user for security (least-privilege)
 RUN useradd -r -m -d /home/kazma -s /bin/bash kazma \

@@ -110,14 +110,35 @@ CREATE INDEX IF NOT EXISTS idx_kc_library ON knowledge_chunks(library_id);
 CREATE INDEX IF NOT EXISTS idx_kc_hash ON knowledge_chunks(content_hash);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_kc_lib_src_idx
     ON knowledge_chunks(library_id, source_url, chunk_index);
+"""
+
+# The FTS index is derived data and is rebuilt in place by
+# ``_migrate_fts_folded``; keeping its DDL in one constant means the migration
+# and the initial create can never drift apart.
+_FTS_SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS knowledge_chunks_fts USING fts5(
     content,
+    folded,
     library_id  UNINDEXED,
     source_url  UNINDEXED,
     chunk_id    UNINDEXED,
     tokenize = "unicode61 remove_diacritics 2"
 );
 """
+
+_SCHEMA += _FTS_SCHEMA
+
+
+def _fold(value: str) -> str:
+    """Search normal form for a chunk or query.
+
+    Lazily imported: ``kazma_core.documents.arabic`` lives under the documents
+    package, whose ``__init__`` imports modules that import *this* one. A
+    module-level import would close that cycle at first use.
+    """
+    from kazma_core.documents.arabic import fold_for_search
+
+    return fold_for_search(value)
 
 
 def _now_iso() -> str:
@@ -164,6 +185,48 @@ class KnowledgeStore:
             # column is missing. Mirrors the WorkspaceStore pattern.
             self._migrate_library_columns(conn)
             self._migrate_chunk_columns(conn)
+            self._migrate_fts_folded(conn)
+
+    @staticmethod
+    def _migrate_fts_folded(conn: sqlite3.Connection) -> None:
+        """Rebuild the FTS index once, adding the search-normalized column.
+
+        FTS5 virtual tables cannot be ALTERed, but the index is derived data —
+        ``knowledge_chunks`` is the source of truth — so a drop-and-repopulate
+        is safe and runs once per database.
+
+        The ``folded`` column carries :func:`fold_for_search` output. Without it
+        Arabic lexical search is broken at the tokenizer: ``unicode61`` treats
+        harakat (category ``Mn``) as separators, so a vocalized word indexes as
+        a run of single letters, and nothing collapses the alef-hamza,
+        taa-marbuta, alef-maqsura, tatweel and Arabic-Indic-digit variants that
+        Arabic queries depend on.
+        """
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks_fts)")}
+        except sqlite3.Error:
+            return
+        if "folded" in columns:
+            return
+        logger.info("[KnowledgeStore] Rebuilding FTS index with the folded column")
+        try:
+            conn.execute("DROP TABLE IF EXISTS knowledge_chunks_fts")
+            conn.executescript(_FTS_SCHEMA)
+            rows = conn.execute(
+                "SELECT content, library_id, source_url, id FROM knowledge_chunks "
+                "WHERE active = 1 AND tombstoned = 0"
+            ).fetchall()
+            conn.executemany(
+                "INSERT INTO knowledge_chunks_fts "
+                "(content, folded, library_id, source_url, chunk_id) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (r[0], _fold(r[0] or ""), r[1], r[2], r[3])
+                    for r in rows
+                ],
+            )
+            logger.info("[KnowledgeStore] FTS rebuild complete (%d chunks)", len(rows))
+        except sqlite3.Error:
+            logger.warning("[KnowledgeStore] FTS folded-column rebuild failed", exc_info=True)
 
     @staticmethod
     def _migrate_library_columns(conn: sqlite3.Connection) -> None:
@@ -672,9 +735,15 @@ class KnowledgeStore:
                     )
                     conn.execute(
                         """INSERT INTO knowledge_chunks_fts
-                           (content, library_id, source_url, chunk_id)
-                           VALUES (?, ?, ?, ?)""",
-                        (content, library_id, source_url, item["id"]),
+                           (content, folded, library_id, source_url, chunk_id)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            content,
+                            _fold(content),
+                            library_id,
+                            source_url,
+                            item["id"],
+                        ),
                     )
                 count_row = conn.execute(
                     """SELECT COUNT(*) AS c FROM knowledge_chunks
@@ -832,9 +901,10 @@ class KnowledgeStore:
                     ),
                 )
                 conn.execute(
-                    "INSERT INTO knowledge_chunks_fts (content, library_id, source_url, chunk_id) "
-                    "VALUES (?, ?, ?, ?)",
-                    (content, library_id, source_url, chunk_id),
+                    "INSERT INTO knowledge_chunks_fts "
+                    "(content, folded, library_id, source_url, chunk_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (content, _fold(content), library_id, source_url, chunk_id),
                 )
                 conn.execute("COMMIT")
             except Exception:
@@ -1022,19 +1092,28 @@ class KnowledgeStore:
         # Build an OR'd MATCH phrase from whitespace tokens so a multi-word
         # query matches docs containing any term (BM25 still ranks).
         # Strip FTS5 operators / punctuation that zero out the lexical layer.
-        raw_terms = [t for t in query.strip().split() if t]
-        terms: list[str] = []
-        for t in raw_terms:
-            cleaned = re.sub(r'[^\w\-]+', " ", t, flags=re.UNICODE).strip()
-            for part in cleaned.split():
-                if len(part) >= 2 and part.lower() not in {"or", "and", "not", "near"}:
-                    # Quote tokens so colons/hyphens inside don't break FTS5.
-                    safe = part.replace('"', "")
-                    if safe:
-                        terms.append(f'"{safe}"')
+        def _tokens(value: str) -> list[str]:
+            out: list[str] = []
+            for raw in value.strip().split():
+                cleaned = re.sub(r'[^\w\-]+', " ", raw, flags=re.UNICODE).strip()
+                for part in cleaned.split():
+                    if len(part) >= 2 and part.lower() not in {"or", "and", "not", "near"}:
+                        # Quote tokens so colons/hyphens inside don't break FTS5.
+                        safe = part.replace('"', "")
+                        if safe:
+                            out.append(safe)
+            return out
+
+        # Two halves, OR'd, both ranked by the same bm25 call: the raw terms
+        # against ``content`` so an exact match still scores, and the
+        # search-normalized terms against ``folded`` so Arabic orthographic
+        # variants match at all. The fold MUST be the same function used at
+        # index time — a fold applied to only one side is worse than no fold.
+        terms = [f'content : "{t}"' for t in _tokens(query)]
+        terms += [f'folded : "{t}"' for t in _tokens(_fold(query))]
         if not terms:
             return []
-        match_expr = " OR ".join(terms)
+        match_expr = " OR ".join(dict.fromkeys(terms))
         with self._lock:
             conn = self._get_conn()
             try:
