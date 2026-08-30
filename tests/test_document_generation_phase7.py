@@ -498,23 +498,49 @@ async def test_legacy_generator_delegates_without_heavy_imports(
     from kazma_skills.native.document_generator import tools
     from kazma_skills.native.document_processor import tools as processor_tools
 
+    heavy = {
+        "reportlab", "docx", "openpyxl", "pptx", "weasyprint", "pypdf", "fitz",
+    }
+
+    def _module_level_imports(tree: ast.Module) -> set[str]:
+        """Imports that run when the module is imported.
+
+        Deliberately NOT ``ast.walk``: that also finds imports inside function
+        bodies, which are the correct way to reach a heavy dependency -- they
+        cost nothing until the function is called. This gate exists so the
+        legacy shim stays cheap to IMPORT, and 10b241f5 rightly added a lazy
+        ``import fitz`` inside the PDF verification helper to stop generate_pdf
+        reporting success for a PDF that was missing 30 of its names. Flagging
+        that made the gate an obstacle to a correct fix rather than a check on
+        import cost.
+        """
+        found: set[str] = set()
+
+        def visit(nodes) -> None:
+            for node in nodes:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue  # its body runs on call, not on import
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        found.add(alias.name.split(".", 1)[0])
+                    if isinstance(node, ast.ImportFrom) and node.module:
+                        found.add(node.module.split(".", 1)[0])
+                # if/try/with at module level still execute on import
+                for attr in ("body", "orelse", "finalbody", "handlers"):
+                    child = getattr(node, attr, None)
+                    if isinstance(child, list):
+                        visit(child)
+
+        visit(tree.body)
+        return found
+
     for module in (tools, processor_tools):
         tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
-        imported = {
-            alias.name.split(".", 1)[0]
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-        }
-        assert not imported & {
-            "reportlab",
-            "docx",
-            "openpyxl",
-            "pptx",
-            "weasyprint",
-            "pypdf",
-            "fitz",
-        }
+        offenders = _module_level_imports(tree) & heavy
+        assert not offenders, (
+            f"{module.__name__} imports {sorted(offenders)} at module level, so "
+            "importing the legacy shim pays for the whole document stack"
+        )
     artifact = Mock(export_path=tmp_path / "result.pdf")
     service = Mock()
     service.generate = AsyncMock(

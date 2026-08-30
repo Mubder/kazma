@@ -172,8 +172,23 @@ class TestCronDeliveryTarget:
         assert delivered[0][0] == "telegram:12345", f"wrong target: {delivered[0][0]}"
         await store.close()
 
-    async def test_empty_delivery_target_falls_back(self, tmp_path, monkeypatch) -> None:
-        """Legacy jobs with empty delivery_target fall back to thread_id."""
+    async def test_empty_delivery_target_refuses_to_misdeliver(
+        self, tmp_path, monkeypatch, caplog
+    ) -> None:
+        """An unrepairable target is reported, never sent to a guessed address.
+
+        This used to assert that a job with no ``delivery_target`` fell back to
+        its ``thread_id``. Commit 93803f59 removed that on purpose: a gateway
+        thread id like ``gw-telegram-1`` is not an address, and
+        ``send_message`` rejects anything that is not ``platform:id`` -- so the
+        "fallback" could only ever fail downstream, and would misdeliver if it
+        ever stopped failing.
+
+        The repair chain (sibling target, then the session store) still runs
+        first. What is asserted here is the end of it: when nothing valid can
+        be recovered, the result is NOT sent, and the job is named at CRITICAL
+        so the operator can fix or re-create it.
+        """
         store = SQLiteCronStore(db_path=str(tmp_path / "cron.db"))
         await store.init()
 
@@ -202,16 +217,34 @@ class TestCronDeliveryTarget:
 
         await scheduler.start()
         try:
-            # _deliver runs AFTER update_status(DONE); poll for delivery.
-            for _ in range(100):
+            # Nothing should ever be delivered here, so this waits for the job
+            # to finish rather than for a delivery that must not arrive.
+            for _ in range(60):
+                jobs = [j for j in await store.list_all() if j.job_id == job_id]
+                if jobs and str(getattr(jobs[0], "status", "")).upper().endswith("DONE"):
+                    break
                 if delivered:
                     break
                 await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)  # let _deliver run past update_status
         finally:
             await scheduler.stop()
 
-        # Empty delivery_target → _deliver uses thread_id as the target.
-        assert delivered and delivered[0] == "gw-telegram-1"
+        assert not delivered, (
+            f"delivered to a guessed address {delivered!r}; a thread id is not "
+            "a delivery target and send_message would reject it anyway"
+        )
+        undeliverable = [
+            r for r in caplog.records
+            if r.levelname == "CRITICAL" and "UNDELIVERABLE" in r.getMessage()
+        ]
+        assert undeliverable, (
+            "the result was dropped without telling anyone -- the whole point "
+            "of 93803f59 was that these failures used to be silent"
+        )
+        assert job_id in undeliverable[0].getMessage(), (
+            "the alert must name the job so it can actually be fixed"
+        )
         await store.close()
 
     async def test_delivery_target_column_migration(self, tmp_path) -> None:
