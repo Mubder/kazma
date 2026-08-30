@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.documents.content_model import (
-    BodyBlock,
     Block,
+    BodyBlock,
     CitationBlock,
     ContentModel,
     HeadingBlock,
@@ -147,6 +147,7 @@ class PdfEngine:
                           assets_dir: Any = None) -> None:
         self._assets_dir = assets_dir
         from reportlab.lib import colors
+
         # Page size from the shared theme (single source) — keeps the reportlab
         # PDF geometry identical to the DOCX / DOCX-route PDF. ``A4`` stays a
         # (width, height) points tuple so the rest of this method is unchanged.
@@ -476,9 +477,10 @@ class PdfEngine:
         elif isinstance(block, HeadingBlock):
             if self._is_repeat_heading(block.text):
                 return
+            block_styles = self._styles_for(block.text, styles)
             bar = _bar(
                 inline_markdown_to_reportlab(block.text, shape_arabic=self.shape_ar),
-                styles["h1"] if block.level <= 1 else styles["h2"],
+                block_styles["h1"] if block.level <= 1 else block_styles["h2"],
             )
             bar._toc_entry = (block.level, block.text)  # for afterFlowable → TOC
             bar._is_heading = True
@@ -487,7 +489,8 @@ class PdfEngine:
             self._last_heading_text = block.text or ""
         elif isinstance(block, BodyBlock):
             story.extend(pdf_flowables_from_body(
-                block.text, styles=styles, shape_arabic=self.shape_ar,
+                block.text, styles=self._styles_for(block.text, styles),
+                shape_arabic=self.shape_ar,
                 Spacer=Spacer, Paragraph=Paragraph, colors=colors,
                 Table=Table, TableStyle=TableStyle,
                 font_name=font, bold_font_name=bold_font,
@@ -542,6 +545,48 @@ class PdfEngine:
 
         prev = getattr(self, "_last_heading_text", "") or ""
         return bool(text) and headings_equivalent(text, prev)
+
+    def _styles_for(self, text: str, styles: dict[str, Any]) -> dict[str, Any]:
+        """Styles aligned to *this block's* direction, not the document's.
+
+        A mixed document has English paragraphs and Arabic paragraphs. The
+        style set is built once for the document direction, so without this the
+        minority language is aligned to the wrong edge on every block — the
+        same defect the DOCX engine had before ``block_is_rtl``.
+
+        The mirrored set is built at most once per render and cached.
+        """
+        if self.profile.block_direction(text) == self.profile.direction:
+            return styles
+        mirrored = getattr(self, "_mirrored_styles", None)
+        if mirrored is None:
+            mirrored = self._mirror_styles(styles)
+            self._mirrored_styles = mirrored
+        return mirrored
+
+    @staticmethod
+    def _mirror_styles(styles: dict[str, Any]) -> dict[str, Any]:
+        """Copy a style set with its edge alignment flipped.
+
+        ``TA_JUSTIFY`` and ``TA_CENTER`` are edge-agnostic and stay put; only
+        left/right swap. ``wordWrap`` swaps with them because ReportLab uses
+        it to pick the line-breaking mode.
+        """
+        from reportlab.lib.enums import TA_LEFT, TA_RIGHT
+
+        out: dict[str, Any] = {}
+        for name, style in styles.items():
+            if not hasattr(style, "clone"):
+                out[name] = style
+                continue
+            copy = style.clone(name + "Mirrored")
+            if copy.alignment == TA_LEFT:
+                copy.alignment = TA_RIGHT
+            elif copy.alignment == TA_RIGHT:
+                copy.alignment = TA_LEFT
+            copy.wordWrap = "CJK" if style.wordWrap == "LTR" else "LTR"
+            out[name] = copy
+        return out
 
     @staticmethod
     def _keep_headings_with_body(story: list[Any]) -> list[Any]:

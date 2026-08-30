@@ -26,8 +26,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from kazma_core.documents.content_model import (
-    BodyBlock,
     Block,
+    BodyBlock,
     CitationBlock,
     ContentModel,
     HeadingBlock,
@@ -114,6 +114,7 @@ class DocxEngine:
             try:
                 from docx.oxml import OxmlElement
                 from docx.oxml.ns import qn
+
                 from kazma_core.documents.style_theme import theme_cs_size
 
                 r_pr = document.styles["Normal"].element.get_or_add_rPr()
@@ -281,20 +282,31 @@ class DocxEngine:
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
 
+        # Direction is resolved per PARAGRAPH, not per document. A mixed
+        # document (a bilingual archive, a report quoting Arabic sources) has
+        # English paragraphs and Arabic paragraphs, and each needs its own
+        # ``w:bidi``. Taking it from the document meant whichever language lost
+        # the ratio had every one of its paragraphs aligned backwards.
+        #
+        # The LTR branch stamps ``w:bidi val="0"`` explicitly rather than
+        # leaving the element out: in an RTL document the Normal style and the
+        # section both carry bidi, so an English paragraph that says nothing
+        # inherits RTL.
         p_pr = p._p.get_or_add_pPr()
-        if self.profile.rtl:
-            bidi = p_pr.find(qn("w:bidi"))
-            if bidi is None:
-                bidi = OxmlElement("w:bidi")
-                p_pr.append(bidi)
-            bidi.set(qn("w:val"), "1")
+        block_rtl = self.profile.block_is_rtl(p.text or "")
+        bidi = p_pr.find(qn("w:bidi"))
+        if bidi is None:
+            bidi = OxmlElement("w:bidi")
+            p_pr.append(bidi)
+        bidi.set(qn("w:val"), "1" if block_rtl else "0")
+
         jc_val = self.profile.docx_jc(intent)
         jc = p_pr.find(qn("w:jc"))
         if jc is None:
             jc = OxmlElement("w:jc")
             p_pr.append(jc)
         jc.set(qn("w:val"), jc_val)
-        if self.profile.rtl:
+        if block_rtl:
             for run in p.runs:
                 self._mark_run(run)
 

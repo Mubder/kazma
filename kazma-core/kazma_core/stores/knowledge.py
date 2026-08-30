@@ -202,16 +202,41 @@ class KnowledgeStore:
         taa-marbuta, alef-maqsura, tatweel and Arabic-Indic-digit variants that
         Arabic queries depend on.
         """
-        try:
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_chunks_fts)")}
-        except sqlite3.Error:
+        def _has_folded() -> bool:
+            try:
+                cols = {
+                    row[1]
+                    for row in conn.execute("PRAGMA table_info(knowledge_chunks_fts)")
+                }
+            except sqlite3.Error:
+                return True  # cannot inspect: leave the index alone
+            return "folded" in cols
+
+        if _has_folded():
             return
-        if "folded" in columns:
-            return
+
+        # The whole rebuild is one transaction. The connection runs in
+        # autocommit (``isolation_level=None``), so an unwrapped ``DROP TABLE``
+        # commits on the spot — and if the recreate or the repopulate then
+        # failed, the index would be *gone* and every search would silently
+        # return nothing until some later process happened to rebuild it.
+        # BEGIN IMMEDIATE also takes the write lock up front, so concurrent
+        # processes opening the same database serialize here instead of racing
+        # to drop a table out from under each other's queries.
         logger.info("[KnowledgeStore] Rebuilding FTS index with the folded column")
         try:
+            conn.execute("BEGIN IMMEDIATE")
+        except sqlite3.Error:
+            logger.debug("[KnowledgeStore] FTS rebuild deferred (database busy)")
+            return
+        try:
+            # Re-check under the lock: another process may have migrated while
+            # we waited for it, and rebuilding a second time is pure risk.
+            if _has_folded():
+                conn.execute("ROLLBACK")
+                return
             conn.execute("DROP TABLE IF EXISTS knowledge_chunks_fts")
-            conn.executescript(_FTS_SCHEMA)
+            conn.execute(_FTS_SCHEMA.strip().rstrip(';'))
             rows = conn.execute(
                 "SELECT content, library_id, source_url, id FROM knowledge_chunks "
                 "WHERE active = 1 AND tombstoned = 0"
@@ -219,14 +244,20 @@ class KnowledgeStore:
             conn.executemany(
                 "INSERT INTO knowledge_chunks_fts "
                 "(content, folded, library_id, source_url, chunk_id) VALUES (?, ?, ?, ?, ?)",
-                [
-                    (r[0], _fold(r[0] or ""), r[1], r[2], r[3])
-                    for r in rows
-                ],
+                [(r[0], _fold(r[0] or ""), r[1], r[2], r[3]) for r in rows],
             )
+            conn.execute("COMMIT")
             logger.info("[KnowledgeStore] FTS rebuild complete (%d chunks)", len(rows))
         except sqlite3.Error:
-            logger.warning("[KnowledgeStore] FTS folded-column rebuild failed", exc_info=True)
+            try:
+                conn.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            logger.warning(
+                "[KnowledgeStore] FTS folded-column rebuild failed; the existing "
+                "index is intact and the rebuild will be retried on next open",
+                exc_info=True,
+            )
 
     @staticmethod
     def _migrate_library_columns(conn: sqlite3.Connection) -> None:

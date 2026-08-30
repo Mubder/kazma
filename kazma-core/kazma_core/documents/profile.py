@@ -36,6 +36,7 @@ from typing import Any, Literal
 
 from kazma_core.documents.arabic import (
     direction_of,
+    first_strong,
     has_rtl,
     is_rtl_dominant,
     rtl_ratio,
@@ -215,6 +216,36 @@ class DocProfile:
     @property
     def html_dir(self) -> str:
         return "rtl" if self.rtl else "ltr"
+
+    # ------------------------------------------------------------------ #
+    # per-block direction
+    # ------------------------------------------------------------------ #
+    def block_direction(self, text: str) -> Direction:
+        """Direction for ONE block, which is not always the document's.
+
+        ``direction`` is a whole-document property — it drives margins, the
+        section, chrome and the gutter. But a document is not required to be
+        all one direction, and a mixed one (a bilingual archive, a report
+        quoting Arabic sources, minutes with Arabic and English speakers) has
+        blocks that each need their own.
+
+        Resolving direction only at document level meant a 50/50 document was
+        wrong either way: whichever side won, every block on the other side was
+        aligned backwards. A tweet archive that was 35% Arabic laid every
+        Arabic tweet out left-to-right; nudge the ratio and every English tweet
+        would have been laid out right-to-left instead.
+
+        Blocks with no strong directional character of their own — a divider, a
+        bare number, a date — inherit the document direction rather than
+        silently defaulting to LTR.
+        """
+        strong = first_strong(text)
+        if strong is None:
+            return self.direction
+        return direction_of(text)  # type: ignore[return-value]
+
+    def block_is_rtl(self, text: str) -> bool:
+        return self.block_direction(text) == "rtl"
 
     # ------------------------------------------------------------------ #
     # run-script policy

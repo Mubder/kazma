@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.documents.content_model import (
-    BodyBlock,
     Block,
+    BodyBlock,
     CitationBlock,
     ContentModel,
     HeadingBlock,
@@ -266,6 +266,25 @@ class HtmlEngine:
         return ""
 
     def _render_block(self, block: Block) -> str:
+        """Render one block, tagging it when its direction is not the page's."""
+        rendered = self._render_block_inner(block)
+        text = getattr(block, "text", "") or getattr(block, "heading", "") or ""
+        if not rendered.strip() or not text:
+            return rendered
+        direction = self.profile.block_direction(text)
+        if direction == self.profile.direction:
+            return rendered
+        # A mixed document has blocks that read the other way. The browser
+        # would inherit the page direction and lay them out backwards, so the
+        # exception is marked explicitly. Uniform documents emit no wrapper at
+        # all, which keeps their markup byte-identical to before.
+        align = "right" if direction == "rtl" else "left"
+        return (
+            f'    <div dir="{direction}" style="text-align:{align}">\n'
+            f"{rendered}\n    </div>"
+        )
+
+    def _render_block_inner(self, block: Block) -> str:
         from html import escape as esc
 
         if isinstance(block, TitleBlock):
