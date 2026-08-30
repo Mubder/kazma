@@ -60,8 +60,10 @@ def test_classify_shift_after_memory_work():
         },
         {"role": "assistant", "content": "I will list and merge entities."},
     ]
-    assert classify_turn_intent("What's the weather?", messages=history) == "shift"
-    assert classify_turn_intent("new topic — check my email", messages=history) == "shift"
+    # S2-1: regex/heuristic pivots are shift_EXPLICIT (legacy "shift" is
+    # treated as explicit by consumers).
+    assert classify_turn_intent("What's the weather?", messages=history) == "shift_explicit"
+    assert classify_turn_intent("new topic — check my email", messages=history) == "shift_explicit"
 
 
 def test_classify_normal_without_prior_task():

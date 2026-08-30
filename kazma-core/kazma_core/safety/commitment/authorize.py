@@ -806,10 +806,107 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
                           profile, audit)
 
 
+_PROPOSAL_REQUIRED_TOOLS = frozenset({
+    "x_post",            # immediate publish
+    "x_schedule_post",   # booking path — a scheduled unverifiable post is the
+                         # same incident with a delay attached
+    "book_x_post",       # alias of the booking path
+})
+
+
+def _resolve_proposal_backed_post(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):
+    """S1-3 chokepoint: an x_ publish REQUIRES a resolvable proposal_id.
+
+    ``allow`` rewrites ``text`` to the stored proposal text (the id wins over
+    whatever the model still holds in context — approval resolves an ID, not
+    a memory). Missing/unresolvable id → deny with the recovery instruction.
+    A broken artifact store also denies (fail-closed): an unverifiable post
+    is exactly what this gate exists to stop.
+    """
+    ref = str(args.get("proposal_id") or args.get("proposal_ref") or "").strip()
+    item_ids = args.get("proposal_item_ids") or args.get("item_ids")
+    if not ref and item_ids:
+        refs = [str(r) for r in item_ids if str(r).strip()]
+        ref = refs[0] if len(refs) == 1 else ""
+        if len(refs) > 1:
+            return EffectDecision(
+                "deny",
+                "post multiple drafts by calling the posting tool once per item, "
+                "each with a single proposal item id — one call must not fan out.",
+                profile, audit,
+            )
+    if not ref:
+        return EffectDecision(
+            "deny",
+            f"{tool_name} requires a proposal_id: the drafts must be persisted "
+            "with save_proposal(kind, items) FIRST (they survive context trim), "
+            "then this tool called with proposal_id=<id>. Refusing to post text "
+            "whose provenance cannot be verified against what the user approved.",
+            profile, audit,
+        )
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+
+        info = get_artifact_store().resolve_proposal(
+            ref, tenant_id=tenant_id or "default"
+        )
+    except Exception as exc:
+        logger.warning(
+            "[commitment] proposal store unavailable for %s — denying (fail-closed): %s",
+            tool_name, exc,
+        )
+        return EffectDecision(
+            "deny",
+            "proposal store unavailable — cannot verify the drafts against what "
+            "the user approved; refusing to post. Retry shortly.",
+            profile, audit,
+        )
+    if not info or not info.get("texts"):
+        return EffectDecision(
+            "deny",
+            f"proposal_id {ref!r} does not resolve. Re-save the drafts with "
+            "save_proposal(kind, items) and retry with the fresh id.",
+            profile, audit,
+        )
+    texts = list(info["texts"])
+    if len(texts) != 1:
+        return EffectDecision(
+            "deny",
+            f"proposal {info.get('proposal_id')} holds {len(texts)} items — pass a "
+            "single item id (proposal_id + item number, or one proposal_item_id) "
+            "per post call.",
+            profile, audit,
+        )
+    stored_text = texts[0]
+    rewritten = dict(args)
+    rewritten["text"] = stored_text
+    logger.info(
+        "[commitment] allow outbound %s via proposal %s (%d chars, stored text wins) source=%s",
+        tool_name, info.get("proposal_id"), len(stored_text), source,
+    )
+    return EffectDecision(
+        "allow",
+        f"outbound: text verified against stored proposal {info.get('proposal_id')}",
+        profile, audit, rewritten_args=rewritten,
+    )
+
+
 def _resolve_send_outbound_act(profile, tool_name, args, *, audit, thread_id, tenant_id, cfg, source):
-    """send_outbound resolver (target allowlist, plan §5 / WS5)."""
+    """send_outbound resolver (target allowlist, plan §5 / WS5).
+
+    Context-integrity S1-3 (2026-08-30 incident): content-posting tools in
+    the x_ publishing class REQUIRE a resolvable ``proposal_id`` — the
+    ENFORCED chokepoint (the supervisor nudge is best-effort only). A missing
+    or unresolvable id degrades to a safe refusal, never to data loss.
+    """
     from .store import Commitment, create_commitment
     from .config import get_commitment_config
+
+    if tool_name in _PROPOSAL_REQUIRED_TOOLS:
+        return _resolve_proposal_backed_post(
+            profile, tool_name, args, audit=audit, thread_id=thread_id,
+            tenant_id=tenant_id, cfg=cfg, source=source,
+        )
 
     target = str(args.get("to") or args.get("target") or args.get("recipient") or "")
     allowlist = (get_commitment_config().get("outbound_allowed_targets") or [])

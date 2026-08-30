@@ -236,11 +236,18 @@ def classify_turn_intent(
     """Classify this user turn for focus / recall policy.
 
     Returns one of:
-      ``continue`` | ``store`` | ``cleanup`` | ``multi_part`` | ``shift`` | ``normal``
+      ``continue`` | ``store`` | ``cleanup`` | ``multi_part`` |
+      ``shift_explicit`` | ``shift_inferred`` | ``normal``
 
     Priority (first match wins after mutual exclusions in helpers):
       cleanup > multi_part/store > continue > explicit/heuristic shift
       > embedding drift (optional) > normal
+
+    S2-1 split: regex/heuristic pivots return ``shift_explicit`` (recall may
+    be suppressed, task superseded); embedding drift returns
+    ``shift_inferred`` (recall stays ON — a misread pivot must not erase the
+    thing being asked about). Legacy callers may still see bare ``shift``
+    from old checkpoints; consumers treat it as explicit.
     """
     t = (text or "").strip()
     if not t:
@@ -282,7 +289,7 @@ def classify_turn_intent(
         return "continue"
 
     if is_explicit_topic_shift(t):
-        return "shift"
+        return "shift_explicit"
 
     # Heuristic: casual pivot after a substantive multi-step prior goal.
     priors = prior_substantive_user_texts(messages, exclude=t, min_chars=40, limit=2)
@@ -308,10 +315,12 @@ def classify_turn_intent(
         if any(m in prior_blob for m in multi_markers) or any(
             len(p) >= 120 for p in priors
         ):
-            return "shift"
+            return "shift_explicit"
 
     # Semantic embedding drift vs open goal / last substantive user ask.
     # Fail-open inside semantic_topic_drift — never forces shift on errors.
+    # S2-2: interrogative check-ins ("what going on?") never reach the
+    # embedder — a contentless question is categorically not a topic change.
     if use_embedding_drift:
         ref = (task_goal_summary or "").strip()
         if not ref and priors:
@@ -331,7 +340,7 @@ def classify_turn_intent(
                 from kazma_core.agent.topic_drift import semantic_topic_drift
 
                 if semantic_topic_drift(t, ref):
-                    return "shift"
+                    return "shift_inferred"
             except Exception:
                 logger.debug("[turn_input] embedding drift skipped", exc_info=True)
 
@@ -857,6 +866,33 @@ def format_working_memory_anchor(
     )
 
 
+_PROPOSAL_INTENT_RE = re.compile(
+    r"(?is)\b(post|send|publish|tweet|thread|announce)\b"
+)
+
+
+def proposal_nudge(user_text: str, *, active_goal: str = "") -> str | None:
+    """S1-3 best-effort nudge: remind the model to persist outbound drafts.
+
+    Fires when the turn's text/goal mentions the post/send/publish class.
+    This is *advisory only* — the enforced chokepoint is the commitment
+    layer's outbound resolver (``x_post``/``x_schedule_post`` refuse without
+    a resolvable ``proposal_id``); the nudge just improves the hit rate so
+    the common path is smooth instead of ending in the gate's refusal.
+    """
+    blob = f"{user_text or ''}\n{active_goal or ''}"
+    if not _PROPOSAL_INTENT_RE.search(blob):
+        return None
+    return (
+        "OUTBOUND DRAFTS: if this turn will propose or send an enumerated set of "
+        "outbound drafts (posts/tweets/messages), FIRST persist them with "
+        "save_proposal(kind, [draft, draft, …]) — then reference the returned "
+        "proposal_id when posting. Approval must never depend on the drafts "
+        "still being in conversation context: posting tools refuse without a "
+        "resolvable proposal_id."
+    )
+
+
 def build_turn_working_memory(
     user_text: str,
     *,
@@ -866,7 +902,13 @@ def build_turn_working_memory(
     """Build working-memory fields at transport accept (before graph runs).
 
     Returns keys suitable for ``SupervisorState``:
-    ``active_goal``, ``active_attachments``, ``hard_constraints``, ``scratchpad``.
+    ``active_goal``, ``active_attachments``, ``hard_constraints``.
+
+    Deliberately does NOT return ``scratchpad`` (S1-1): the transports merge
+    this dict straight into the graph input, and an unconditional empty dict
+    here wiped the checkpointed scratchpad at the start of every user turn
+    (2026-08-30 incident). The scratchpad channel is a merge reducer now;
+    the transport has nothing to contribute to it.
     """
     goal = (user_text or "").strip()[:4000]
     atts = extract_active_attachments(messages, user_text=goal)
@@ -895,7 +937,6 @@ def build_turn_working_memory(
         "active_goal": goal,
         "active_attachments": deduped,
         "hard_constraints": parse_hard_constraints(goal),
-        "scratchpad": {},
     }
 
 
@@ -937,11 +978,16 @@ def should_suppress_memory_recall(
     intent_mode: str = "",
     hard_constraints: list[str] | None = None,
 ) -> bool:
-    """True when V2 recall should be skipped for this turn (shift / audit)."""
+    """True when V2 recall should be skipped for this turn (shift / audit).
+
+    S2-1: only an EXPLICIT shift suppresses recall (legacy ``shift`` from old
+    checkpoints counts as explicit). ``shift_inferred`` keeps recall ON —
+    disabling recall the instant context is lost is precisely backwards.
+    """
     cons = {str(c).lower() for c in (hard_constraints or []) if c}
     if cons.intersection({"audit_only", "read_only"}):
         return True
-    if (intent_mode or "").strip().lower() == "shift":
+    if (intent_mode or "").strip().lower() in ("shift", "shift_explicit"):
         return True
     return False
 
@@ -985,7 +1031,12 @@ def reset_scratchpad_thread(token: Token) -> None:
 
 
 def apply_scratchpad_write(key: str, finding: str) -> str:
-    """Called by the update_scratchpad tool — buffers until tool_worker merges."""
+    """Called by the update_scratchpad tool — buffers until tool_worker merges.
+
+    S1-2: also writes through to the durable artifact store (same process
+    restart / corrupt-checkpoint survival as proposals). The store write is
+    best-effort — the in-process buffer remains the live merge path.
+    """
     tid = _scratchpad_thread_ctx.get() or "_default"
     key_s = str(key or "").strip()[:80]
     if not key_s:
@@ -995,7 +1046,17 @@ def apply_scratchpad_write(key: str, finding: str) -> str:
         _scratchpad_buffers.pop(next(iter(_scratchpad_buffers)), None)
     buf = _scratchpad_buffers.setdefault(tid, {})
     buf[key_s] = val
-    return f"Scratchpad saved: {key_s} ({len(val)} chars). Survives context trim."
+    _store_err = ""
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+        from kazma_core.safety.hitl import get_current_tenant_id
+
+        get_artifact_store().put_scratchpad(
+            get_current_tenant_id(), tid, key_s, val
+        )
+    except Exception as exc:  # store down must not break the live buffer
+        _store_err = f" (durable store write failed: {exc.__class__.__name__})"
+    return f"Scratchpad saved: {key_s} ({len(val)} chars). Survives context trim.{_store_err}"
 
 
 def drain_scratchpad_writes(thread_id: str) -> dict[str, str]:
@@ -1149,13 +1210,36 @@ def resolve_trim_token_budget(
     last_model: str | None = None,
     default: int = 24000,
 ) -> int:
-    """Token budget for deterministic mid-turn trimming (chars/4 estimate)."""
+    """Token budget for deterministic mid-turn trimming (chars/4 estimate).
+
+    Default: ``max(4000, min(24000, window × 0.6))`` — UNCHANGED by design.
+    The context-integrity plan (2026-08-30) defers any budget re-tuning
+    until ``kazma_context_trims_total`` has been read in production; raising
+    it now would mask whether the real fixes work.
+
+    Operator override (deferred-item enabler): ConfigStore key
+    ``agent.trim.token_budget`` — an absolute budget that replaces the 24K
+    cap (still clamped to [4000, window × 0.95] so a misconfiguration cannot
+    exceed the context window or trim to nothing). Live-read; unset → the
+    default behavior above.
+    """
     try:
         from kazma_core.token_counter import resolve_context_window
 
         window = resolve_context_window(None, last_model)
         # Keep headroom under 60% of window, capped at *default*.
-        return max(4000, min(int(default), int(window * 0.6)))
+        base = max(4000, min(int(default), int(window * 0.6)))
+        try:
+            from kazma_core.config_store import get_config_store
+
+            raw = get_config_store().get("agent.trim.token_budget", None)
+            if raw is not None and str(raw).strip():
+                configured = int(float(raw))
+                if configured > 0:
+                    base = max(4000, min(configured, int(window * 0.95)))
+        except Exception:
+            pass
+        return base
     except Exception:
         return default
 

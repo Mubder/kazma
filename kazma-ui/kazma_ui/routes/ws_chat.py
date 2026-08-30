@@ -445,6 +445,36 @@ def create_ws_chat_router(
             logger.warning("[WS-Chat] Failed scanning graph snapshot for interrupts: %s", exc)
         return False
 
+    async def _emit_context_compacted(
+        graph_inst: Any,
+        config: dict[str, Any],
+        websocket: WebSocket,
+        thread_id: str,
+    ) -> None:
+        """Context-integrity S3-1: surface trim/stub events on the WS path.
+
+        Reads ``context_compacted`` off the terminal graph state and sends one
+        ``context_compacted`` telemetry frame (the SSE path emits the same
+        event from _streaming.py). Never raises — the chip must not be able
+        to break turn delivery.
+        """
+        try:
+            snapshot = await graph_inst.aget_state(config)
+            if snapshot is None:
+                return
+            vals = getattr(snapshot, "values", None) or {}
+            cc = vals.get("context_compacted") if isinstance(vals, dict) else None
+            if isinstance(cc, dict) and cc.get("detail") and websocket.client_state == WebSocketState.CONNECTED:
+                await websocket.send_json(
+                    TelemetryEvent(
+                        type="context_compacted",
+                        data=cc,
+                        thread_id=thread_id,
+                    ).to_dict()
+                )
+        except Exception:
+            logger.debug("[WS-Chat] context_compacted emit skipped", exc_info=True)
+
     async def _extract_new_assistant_text(
         graph_inst: Any,
         config: dict[str, Any],
@@ -498,6 +528,7 @@ def create_ws_chat_router(
         (replace semantics) as the authoritative paint; *emit_delta* is only
         a progressive hint when nothing was streamed yet.
         """
+        await _emit_context_compacted(graph_inst, config, websocket, thread_id)
         text = await _extract_new_assistant_text(graph_inst, config, pre_msg_count)
         if not text:
             return ""

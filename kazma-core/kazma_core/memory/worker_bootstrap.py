@@ -731,6 +731,18 @@ def _start_commitment_gc_scheduler() -> None:
                     logger.info("[memory_worker] commitment GC: %s", summary)
             except Exception:
                 logger.debug("[memory_worker] commitment GC cycle failed", exc_info=True)
+            # S1-2: the durable turn-artifact store (scratchpad findings +
+            # proposals) rides the SAME cadence — per-thread cap + age-out,
+            # no new sweeper loop (AGENTS.md §15A: a scheduler nobody starts
+            # is how backups once went inert).
+            try:
+                from kazma_core.agent.artifacts import get_artifact_store
+
+                art = get_artifact_store().gc_sweep()
+                if art.get("evicted"):
+                    logger.info("[memory_worker] artifact GC: %s", art)
+            except Exception:
+                logger.debug("[memory_worker] artifact GC failed", exc_info=True)
             await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
 
     try:

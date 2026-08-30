@@ -1,5 +1,95 @@
 # CHANGELOG
 
+## Context Integrity Hardening (2026-08-30)
+
+Executes `docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md` end to end, closing
+the 2026-08-30 incident class (@KazmaAI tweet batch: 8 approved drafts vanished
+between proposal and approval; recovery burned two turns; a misread
+"what going on?" disarmed recall).
+
+### Fixed — data loss (S1)
+
+- **The typed scratchpad was wiped at the start of every user turn.** The
+  transports merged `build_turn_working_memory()`'s unconditional
+  `scratchpad: {}` into the graph input, and `SupervisorState.scratchpad` was
+  a bare LastValue channel — replace on every write. It is now a merge
+  reducer (`state.py:merge_scratchpad`, 24 keys × 4000 chars, `__clear__`
+  sentinel) and the transport no longer contributes the key at all. Verified
+  by a second turn through the real graph, with the old clobber shape in the
+  input on purpose.
+- **Durable turn-artifact store** (`agent/artifacts.py`, SQLite
+  `(tenant, thread, key)`, house pragmas, under `kazma-data/`, GC riding the
+  commitment-GC cadence): scratchpad writes go through it, the working-memory
+  anchor reads through it, and proposals live in it — so findings and drafts
+  survive trim, turn boundaries, process restarts, and a corrupt checkpoint.
+- **Proposals awaiting approval are now persisted and enforced.** New
+  `save_proposal(kind, items)` tool returns stable IDs; the commitment
+  layer's outbound resolver (`authorize.py:_resolve_proposal_backed_post`)
+  is the enforced chokepoint — `x_post`/`x_schedule_post` REFUSE without a
+  resolvable `proposal_id`, and on resolve the STORED text wins over
+  whatever the model still holds in context. The HITL approval card renders
+  the stored proposal text. The supervisor nudge is best-effort only.
+- **Summary dead band closed (24K → 160K).** The summary net now fires
+  whenever deterministic trim actually DROPS user/assistant turns — not only
+  at 80%-of-window, which for a 200K model had never once protected a trim.
+  Heuristic summarizer under ~2K dropped tokens (zero extra LLM cost) that
+  NAMES what was dropped ("4 assistant turns including 8 enumerated draft
+  items"); LLM summarization above.
+
+### Fixed — disabled recovery (S2)
+
+- **`shift` split into `shift_explicit` / `shift_inferred`.** Only an
+  explicit pivot (regex, incl. legacy `shift` from old checkpoints) disarms
+  memory recall and supersedes the task. Inferred drift re-ranks: recall
+  stays ON, prior tool payloads are stubbed but assistant prose is kept in
+  full — a misread pivot can no longer erase the thing being asked about.
+- **Interrogative check-ins are never topic changes** (hard allowlist before
+  the embedder, EN + Arabic `شنو/وش/ليش/شفيه/وين/متى/شلون/شصار`).
+  `what going on?` / `شنو صار؟` fail open instead of scoring as maximally
+  distant. `_MIN_CHARS` 12 → 25 plus a content-word requirement.
+- **Recovery-spiral breaker.** ≥3 turn-cumulative queries against
+  session/checkpoint/audit stores hunting the assistant's own prior output
+  force an honest RESPOND ("I can no longer see X — should I re-propose?"),
+  ending the dig-that-makes-it-worse loop.
+
+### Fixed — observability (S3-1) + investigated (S3-2)
+
+- **Context compaction is visible.** Trim drops and chain stubbing set
+  `context_compacted` state; SSE and WS emit it; the chat UI renders a
+  🗜️ chip whose hover lists exactly what went.
+- **The duplicated mid-sentence stream is root-caused, REPRODUCED, and
+  fixed.** Two tests written first failed against the then-current code with
+  the incident string verbatim
+  (`The proposal turn is The proposal turn is …`); the plan's
+  reproduce-before-fixing rule was satisfied, then the fix landed at all
+  three re-stream sites: supervisor primary retries
+  (`emit_deltas=(attempt == 1)`), the failover chain (`emit_deltas=False`),
+  and the provider's blocking fallback (no content re-yield after partial
+  deltas — final response + `turn_complete` replace semantics only).
+  Invariant: after any delta of a user-visible call was emitted, no recovery
+  attempt of that call streams content again. Live streaming on the healthy
+  path is unchanged. See
+  `docs/plans/S3_2_DUPLICATED_STREAM_INVESTIGATION.md` and
+  `tests/test_s32_stream_duplication.py`.
+
+### Deferred items (plan §Open question) — instrumented, not re-tuned
+
+- **Trim frequency is now measured**: `kazma_context_trims_total{summary=
+  fired|missed}` + `kazma_context_trim_dropped_messages_total` on
+  `/metrics`, recorded from the supervisor's trim block. A growing
+  `missed` label is a bug report, not a tuning input.
+- **The 24K budget is now a settings change**: ConfigStore
+  `agent.trim.token_budget` overrides the cap (clamped to
+  [4000, window × 0.95]); default behavior is byte-identical to the old
+  formula. The plan's rule stands: read the counters for a week of real
+  traffic before re-tuning.
+
+New coverage: `tests/test_context_integrity.py` (49 tests — reducer, bounds,
+through-the-graph survival, checkpoint back-compat via channel
+`from_checkpoint`, dead-band closure, EN/AR interrogative guards, shift
+split, recovery breaker, proposal round-trip, outbound enforcement, and the
+verbatim incident-chain regression with negative controls).
+
 ## Arabic hardening — Documents system (2026-08-30)
 
 Closes the S1/S2 findings of the Documents deep audit. Arabic was working on a

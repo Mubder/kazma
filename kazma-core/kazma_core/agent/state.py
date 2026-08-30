@@ -17,15 +17,19 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
 __all__ = [
     "NodeName",
     "PendingToolCall",
+    "SCRATCHPAD_CLEAR",
+    "SCRATCHPAD_MAX_KEYS",
+    "SCRATCHPAD_MAX_VALUE_CHARS",
     "SupervisorState",
     "TaskStatus",
     "ToolResult",
     "initial_supervisor_state",
+    "merge_scratchpad",
 ]
 
 # ── Node names (used in conditional routing) ────────────────────────────
@@ -87,6 +91,56 @@ class ToolResult(TypedDict, total=False):
     # marks a control-plane turn-ender (e.g. unresolved commitment clarify) —
     # not tool death; forces RESPOND and does not credit the hard-failure breaker.
     outcome: str
+
+
+# ── Scratchpad merge reducer (context-integrity S1-1) ───────────────────
+#
+# ``scratchpad`` used to be a bare ``dict[str, str]`` channel — LangGraph's
+# LastValue semantics replaced it on EVERY write, and the transports fed it
+# ``build_turn_working_memory()``'s unconditional ``scratchpad: {}``, wiping
+# the checkpointed value at the start of every user turn. That is how 8
+# approved tweet drafts ceased to exist between proposal and approval
+# (2026-08-30 incident, link #3 of the failure chain).
+#
+# The reducer makes the channel aggregate: node updates MERGE instead of
+# replace, so no write path — transport pin, node return, checkpoint resume —
+# can clobber it. Bounds mirror what the working-memory anchor renders so an
+# unbounded scratchpad cannot itself trigger a trim.
+
+SCRATCHPAD_CLEAR = "__clear__"
+"""Sentinel key: including ``{SCRATCHPAD_CLEAR: "1"}`` in an update resets the
+scratchpad to empty before applying the rest of the update — the only way to
+deliberately clear it through the merge reducer."""
+
+SCRATCHPAD_MAX_KEYS = 24
+SCRATCHPAD_MAX_VALUE_CHARS = 4000
+
+
+def merge_scratchpad(
+    current: dict[str, str] | None, incoming: dict[str, str] | None
+) -> dict[str, str]:
+    """LangGraph reducer for ``SupervisorState.scratchpad`` (merge, not replace).
+
+    - Existing keys keep their insertion position; updates overwrite in place.
+    - ``__clear__`` in *incoming* resets to empty first (deliberate reset).
+    - Values are clamped to ``SCRATCHPAD_MAX_VALUE_CHARS``, keys to 80 chars.
+    - Beyond ``SCRATCHPAD_MAX_KEYS`` the oldest-inserted entries are evicted.
+    """
+    base = dict(current or {})
+    if incoming is None:
+        incoming = {}
+    if SCRATCHPAD_CLEAR in incoming:
+        base = {}
+        incoming = {k: v for k, v in incoming.items() if k != SCRATCHPAD_CLEAR}
+    merged = base
+    for k, v in incoming.items():
+        key = str(k or "").strip()[:80]
+        if not key:
+            continue
+        merged[key] = str(v or "")[:SCRATCHPAD_MAX_VALUE_CHARS]
+    while len(merged) > SCRATCHPAD_MAX_KEYS:
+        merged.pop(next(iter(merged)))
+    return merged
 
 
 # ── Supervisor State ────────────────────────────────────────────────────
@@ -188,7 +242,13 @@ class SupervisorState(TypedDict, total=False):
     """Short summary of the open multi-step goal (for drift checks / logging)."""
 
     intent_mode: str
-    """Last classified turn intent: continue|store|cleanup|multi_part|shift|normal."""
+    """Last classified turn intent:
+    continue|store|cleanup|multi_part|shift_explicit|shift_inferred|normal.
+    ``shift_explicit`` = the user verifiably said so (regex: "never mind" /
+    "موضوع ثاني" / casual-pivot phrasing). ``shift_inferred`` = embedding
+    drift only — recall stays ON, prior tool payloads are stubbed but
+    assistant prose is kept (S2-1). Legacy checkpoints may hold ``shift``;
+    consumers treat it as ``shift_explicit``."""
 
     # ── Explicit Working Memory (immutable for the active turn) ─────
     active_goal: str
@@ -200,8 +260,12 @@ class SupervisorState(TypedDict, total=False):
     hard_constraints: list[str]
     """Structural turn constraints (e.g. audit_only, no_code_change, read_only)."""
 
-    scratchpad: dict[str, str]
-    """Typed findings scratchpad — survives deterministic trim; updated via update_scratchpad."""
+    scratchpad: Annotated[dict[str, str], merge_scratchpad]
+    """Typed findings scratchpad — survives deterministic trim; updated via
+    update_scratchpad. MERGE reducer (S1-1): node/transport updates merge
+    instead of replace, so the value survives turn boundaries and accidental
+    clobbers; use ``{SCRATCHPAD_CLEAR: "1"}`` to reset deliberately. Bounded
+    to 24 keys × 4000 chars (oldest evicted first)."""
 
     # ── Turn failure ────────────────────────────────────────────────
     turn_failed: bool
@@ -266,6 +330,19 @@ class SupervisorState(TypedDict, total=False):
 
     mission_hard_rounds: int
     """Mission safety wall (from long_task / env). 0 = not in mission."""
+
+    recovery_probes: int
+    """Count of this turn's tool calls that query session/checkpoint/audit
+    stores hunting for the assistant's own prior output (S2-3 recovery
+    spiral). At ≥3 the tool worker forces an honest RESPOND. Reset each turn."""
+
+    context_compacted: dict[str, Any]
+    """Set by the supervisor when deterministic trim dropped user/assistant
+    turns or stubbing collapsed a prior tool chain (S3-1). Shape:
+    ``{"detail": str, "dropped_user": int, "dropped_assistant": int,
+    "stubbed_segments": int}``. Read by the SSE/WS transports to emit a UI
+    chip so the user learns the context was compacted instead of wondering
+    why the agent forgot."""
 
 
 # ── Factory ─────────────────────────────────────────────────────────────
@@ -346,4 +423,6 @@ def initial_supervisor_state(
         turn_failed=False,
         mission_rounds_used=0,
         mission_hard_rounds=_mission_hard if _mode == "mission" else 0,
+        recovery_probes=0,
+        context_compacted={},
     )

@@ -1034,8 +1034,17 @@ class LLMProvider:
             )
             yield StreamDelta(response=assembled)
 
+        # S3-2 (2026-08-30 incident): if this stream dies AFTER deltas were
+        # already yielded downstream, a fallback must NOT re-yield content —
+        # the consumer appends, so a full-text re-yield paints the incident's
+        # duplicated prefix ("The proposal turn is The proposal turn is …").
+        # The authoritative full text reaches the client via the final
+        # response delta + turn_complete (replace semantics).
+        _emitted_any = False
         try:
             async for delta in _run_stream(payload):
+                if delta.content:
+                    _emitted_any = True
                 yield delta
             return
         except _StreamHttpError as e:
@@ -1075,7 +1084,7 @@ class LLMProvider:
                 resp = await self.chat(
                     messages, tools, max_tokens, temperature, model, response_format
                 )
-                if resp.content:
+                if resp.content and not _emitted_any:
                     yield StreamDelta(content=resp.content)
                 yield StreamDelta(response=resp)
                 return
@@ -1106,7 +1115,9 @@ class LLMProvider:
                         resp = await self.chat(
                             messages, tools, max_tokens, temperature, model, response_format
                         )
-                        if resp.content:
+                        # S3-2: never re-yield content on top of partials the
+                        # dead stream already emitted (duplicated-prefix bug).
+                        if resp.content and not _emitted_any:
                             yield StreamDelta(content=resp.content)
                         yield StreamDelta(response=resp)
                         return

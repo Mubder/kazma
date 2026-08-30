@@ -269,6 +269,51 @@ def register_external_tools(registry: Any) -> None:
         )
     except Exception as e:
         logger.error("Failed to register update_scratchpad: %s", e, exc_info=True)
+    # Durable outbound-draft proposals (context-integrity S1-3). Posting tools
+    # (x_post / x_schedule_post) REFUSE without a resolvable proposal_id —
+    # approval must never depend on the drafts still being in context.
+    try:
+        async def save_proposal(kind: str, items: list) -> str:
+            """Persist outbound drafts durably; returns stable proposal IDs."""
+            from kazma_core.agent.artifacts import get_artifact_store as _gas
+            from kazma_core.safety.hitl import (
+                get_current_tenant_id as _tenant,
+                get_current_thread_id as _thread,
+            )
+
+            try:
+                payload = _gas().save_proposal(
+                    _tenant() or "default",
+                    _thread() or "",
+                    kind,
+                    items,
+                )
+            except ValueError as ve:
+                return f"Error: {ve}"
+            lines = [f"Proposal saved: {payload['proposal_id']} ({payload['kind']}, {len(payload['items'])} items)."]
+            for i in payload["items"]:
+                lines.append(f"  - {i['id']}: {str(i['text'])[:80]}")
+            lines.append(
+                "IDs survive context trim, restarts, and thread switches. Reference "
+                "proposal_id when posting — posting tools refuse without it."
+            )
+            return "\n".join(lines)
+
+        registry.register_function(
+            "save_proposal",
+            save_proposal,
+            description=(
+                "Persist an enumerated set of outbound drafts (posts/tweets/"
+                "messages) as a durable proposal BEFORE asking for approval or "
+                "posting. Returns stable proposal/item IDs that survive context "
+                "trim, turn boundaries, and restarts. ALWAYS call this before "
+                "posting an enumerated draft set; then post with proposal_id=<id>. "
+                "Args: kind (e.g. 'tweets'), items (list of draft texts)."
+            ),
+            category="memory",
+        )
+    except Exception as e:
+        logger.error("Failed to register save_proposal: %s", e, exc_info=True)
     # Task Ledger — the durable task-state object the user's short
     # continuations ("proceed"/"next") resolve against. The deterministic
     # extractor maintains plan/next_action automatically; THIS tool lets the

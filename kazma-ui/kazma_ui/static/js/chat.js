@@ -5094,6 +5094,33 @@
     },
 
     refreshCapacity: refreshCapacity,
+    /**
+     * Context-integrity S3-1: a compact "earlier context compacted" chip in
+     * the transcript. The user should never have to ask why the agent
+     * forgot — trim/stub events now arrive as `context_compacted` SSE/WS
+     * events and land here. Payload: {detail, dropped_user,
+     * dropped_assistant, stubbed_segments}.
+     */
+    showContextCompacted: function(data) {
+      if (!messagesEl) return;
+      var detail = (data && data.detail) || 'earlier context was compacted';
+      var chip = document.createElement('div');
+      chip.className = 'context-compacted-chip';
+      chip.title = detail;
+      var icon = document.createElement('span');
+      icon.className = 'context-compacted-chip-icon';
+      icon.textContent = '🗜️';
+      var label = document.createElement('span');
+      label.textContent = 'Earlier context compacted';
+      chip.appendChild(icon);
+      chip.appendChild(label);
+      var hover = document.createElement('div');
+      hover.className = 'context-compacted-chip-detail';
+      hover.textContent = detail;
+      chip.appendChild(hover);
+      messagesEl.appendChild(chip);
+      try { messagesEl.scrollTop = messagesEl.scrollHeight; } catch (e) { /* ignore */ }
+    },
     paintCapacityReply: function(reply) {
       if (!reply || !messagesEl) return;
       var incoming = String(reply).trim();

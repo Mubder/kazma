@@ -19,15 +19,87 @@ __all__ = [
     "BreakerState",
     "classify_tool_result",
     "classify_mcp_error",
+    "count_recovery_probes",
     "detect_stagnation",
+    "recovery_honest_message",
     "tool_signature",
     "update_breaker",
     "HARD_FAILURE_THRESHOLD",
+    "RECOVERY_SPIRAL_THRESHOLD",
     "STAGNATION_REPEAT_THRESHOLD",
     "STAGNATION_WINDOW",
 ]
 
 HARD_FAILURE_THRESHOLD = 3
+
+# S2-3 recovery spiral: the model hunting its own prior output through
+# session/checkpoint/audit stores after a trim. Every query adds tool output
+# to the very history that caused the trim — two turns of this burned the
+# 2026-08-30 incident after the loss itself. At RECOVERY_SPIRAL_THRESHOLD
+# probes in one turn the tool worker forces an honest RESPOND instead.
+RECOVERY_SPIRAL_THRESHOLD = 3
+
+# Tools whose subject is conversation/session STATE (not the world).
+_RECOVERY_STORE_TOOL_RE = re.compile(
+    r"(session|checkpoint|snapshot|audit|journal|transcript|history|"
+    r"chat_log|messages?_search|recall|time.?travel|replay)",
+    re.IGNORECASE,
+)
+# Evident purpose: hunting the assistant's own earlier output.
+_RECOVERY_PURPOSE_RE = re.compile(
+    r"(proposal|draft|tweet|earlier|previous|prior|assistant|said|wrote|"
+    r"posted|last\s+(reply|answer|message|turn)|مسودة|منشور|تويت|السابق|ردك)",
+    re.IGNORECASE,
+)
+
+
+def count_recovery_probes(
+    tool_calls: list[dict[str, Any]],
+    results: list[dict[str, Any]] | None = None,
+) -> int:
+    """Count this batch's calls that look like prior-output recovery hunts.
+
+    A probe = a call to a session/checkpoint/audit-store tool whose serialized
+    arguments reference the assistant's own prior output (drafts, earlier
+    replies, what it said/wrote/posted). Result emptiness alone does not make
+    a probe — a legit session lookup that names no prior output is not a hunt.
+    """
+    out_by_id: dict[str, str] = {}
+    for r in results or []:
+        if isinstance(r, dict):
+            out_by_id[str(r.get("tool_call_id") or r.get("name") or "")] = str(
+                r.get("content") or ""
+            )
+    n = 0
+    for tc in tool_calls or []:
+        if not isinstance(tc, dict):
+            continue
+        name = str(tc.get("name") or "")
+        if not _RECOVERY_STORE_TOOL_RE.search(name):
+            continue
+        try:
+            import json as _json
+
+            args_blob = _json.dumps(tc.get("arguments") or {}, default=str)
+        except Exception:
+            args_blob = repr(tc.get("arguments") or {})
+        if _RECOVERY_PURPOSE_RE.search(args_blob):
+            n += 1
+    return n
+
+
+def recovery_honest_message(probes: int) -> str:
+    """The forced-RESPOND message for a tripped recovery spiral (S2-3)."""
+    return (
+        f"SYSTEM OVERRIDE: {probes} searches of session/checkpoint stores for your own "
+        "earlier output. Earlier context was likely trimmed — STOP searching; every "
+        "query grows the history that caused the trim. Respond honestly NOW: "
+        "(1) tell the user which earlier content you can no longer see (e.g. 'I can "
+        "no longer see the 8 tweet drafts'), (2) ask ONE concrete question to "
+        "recover it (e.g. 'should I re-propose the English ones?'), and (3) check "
+        "the scratchpad / saved proposals first — durable copies may exist there. "
+        "Never guess or fabricate the missing content."
+    )
 
 # Semantic stagnation: identical (tool, canonical-args) calls repeating without
 # an OK outcome. Catches loops the hard-failure breaker misses — e.g. the model

@@ -485,6 +485,7 @@ async def tool_worker_node(
     # the durable identity used when enabling YOLO/tool grants — without
     # this fallback, YOLO Session behaves like Approve once forever.
     from kazma_core.safety.hitl import (
+        get_current_tenant_id,
         get_current_thread_id,
         reset_current_thread_id,
         reset_current_tenant_id,
@@ -834,6 +835,30 @@ async def tool_worker_node(
                 primary_tool = f"{len(danger_tools)} tools"
                 primary_args = {"tools": [t["name"] for t in tools_payload]}
 
+            # S1-3: proposal-backed posts resolve the STORED text onto the
+            # card — approve resolves an ID against the durable artifact
+            # store, never the model's context memory (2026-08-30 incident).
+            try:
+                from kazma_core.agent.artifacts import get_artifact_store as _gas
+
+                _tenant = get_current_tenant_id() or "default"
+                for _tcd in tools_payload:
+                    _ref = str((_tcd.get("args") or {}).get("proposal_id") or "").strip()
+                    if not _ref:
+                        continue
+                    _p = _gas().resolve_proposal(_ref, tenant_id=_tenant)
+                    if _p:
+                        _tcd["proposal"] = {
+                            "proposal_id": _p.get("proposal_id"),
+                            "kind": _p.get("kind"),
+                            "items": [
+                                {"id": i.get("id"), "text": str(i.get("text") or "")[:600]}
+                                for i in (_p.get("items") or [])
+                            ],
+                        }
+            except Exception:
+                logger.debug("[ToolWorker] proposal card resolution skipped", exc_info=True)
+
             from kazma_core.safety.yolo import yolo_allowed as _yolo_allowed
             from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS as _ALWAYS_HITL
 
@@ -981,6 +1006,40 @@ async def tool_worker_node(
                 stamped_results.append(tr2)
             results = stamped_results
 
+        # ── Recovery-spiral breaker (S2-3) ─────────────────────────────
+        # N≥3 turn-cumulative queries against session/checkpoint/audit
+        # stores hunting the assistant's own prior output → force an honest
+        # RESPOND. Digging made the 2026-08-30 incident worse than the loss
+        # itself: every recovery query added tool output to the history whose
+        # size caused the trim.
+        from kazma_core.agent.tool_loop_breaker import (
+            RECOVERY_SPIRAL_THRESHOLD,
+            count_recovery_probes,
+            recovery_honest_message,
+        )
+
+        _probes = int(state.get("recovery_probes") or 0) + count_recovery_probes(
+            list(safe_tools) + list(danger_tools), list(results)
+        )
+        if _probes >= RECOVERY_SPIRAL_THRESHOLD and not breaker_tripped_now:
+            logger.warning(
+                "[ToolWorker] Recovery spiral detected (%d store probes hunting "
+                "prior output) — forcing honest RESPOND",
+                _probes,
+            )
+            breaker_tripped_now = True
+            _honest = recovery_honest_message(_probes)
+            stamped_results = []
+            for tr in results:
+                tr2 = dict(tr)
+                tr2["content"] = _honest
+                tr2["is_error"] = True
+                tr2["outcome"] = "hard"
+                stamped_results.append(tr2)
+            results = stamped_results
+            # The honest turn must not re-enter the tool loop.
+            _probes = 0
+
         # Build tool-role messages for the conversation
         messages = [_normalize_msg(m) for m in state.get("messages", [])]
         tool_messages: list[dict[str, Any]] = []
@@ -1039,6 +1098,7 @@ async def tool_worker_node(
             "consecutive_tool_failures": consecutive_failures,
             "circuit_breaker_tripped": breaker_tripped_now,
             "tool_signatures": sigs,
+            "recovery_probes": _probes,
             # If the breaker just tripped or max consecutive failures hit, force RESPOND
             "next_node": NodeName.RESPOND if (breaker_tripped_now or consecutive_failures >= 3 or _terminal_now) else NodeName.SUPERVISOR,
         }

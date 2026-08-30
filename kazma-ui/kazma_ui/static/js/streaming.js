@@ -118,6 +118,18 @@ var KazmaStream = (function() {
             if (callbacks.onMemoryExplain) callbacks.onMemoryExplain(data || {});
             else if (callbacks.onEvent) callbacks.onEvent(type, data);
             break;
+          case 'context_compacted':
+            // Context-integrity S3-1: earlier turns were trimmed/stubbed —
+            // surface a chip so the user knows why the agent forgot.
+            try {
+              if (window.KazmaChat && typeof window.KazmaChat.showContextCompacted === 'function') {
+                window.KazmaChat.showContextCompacted(data || {});
+              } else if (window.showToast) {
+                window.showToast('🗜️ ' + ((data && data.detail) || 'Earlier context was compacted'), 'info', 6000);
+              }
+            } catch (e) { /* never break the stream */ }
+            if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'status_update':
           case 'status':
             if (callbacks.onStatus) callbacks.onStatus(data || {});
