@@ -31,7 +31,19 @@ from kazma_gateway.agent_handler.hitl import (
     clear_approval_throttle,
 )
 
-CSS = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
+_CSS_DIR = (
+    Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "static" / "css"
+)
+#: base.html loads BOTH, kazma.v5.css second -- so a rule deduplicated in the
+#: first file can still be redefined by the second, and the browser applies
+#: the later one. Checking only kazma.css reported "one rule each" while the
+#: real page had three definitions of .hitl-approval-actions.
+CSS_FILES = (_CSS_DIR / "kazma.css", _CSS_DIR / "kazma.v5.css")
+CSS = _CSS_DIR / "kazma.css"
+
+
+def _all_css() -> str:
+    return "\n".join(f.read_text(encoding="utf-8") for f in CSS_FILES if f.is_file())
 
 
 # ── 1. nothing is hidden silently ──────────────────────────────────────────
@@ -168,12 +180,25 @@ def test_a_timeout_is_not_reported_as_a_refusal():
      ".hitl-approval-actions", ".hitl-approval-args"],
 )
 def test_each_hitl_rule_is_defined_once(selector):
-    """Two competing blocks rendered the card as a hybrid of two designs."""
-    css = CSS.read_text(encoding="utf-8")
-    count = len(re.findall(rf"^{re.escape(selector)} \{{", css, re.MULTILINE))
-    assert count == 1, (
-        f"{selector} is defined {count} times; the later one silently wins and "
-        "the card renders as a mixture of both"
+    """Two competing blocks rendered the card as a hybrid of two designs.
+
+    Counted across EVERY stylesheet base.html loads, not just the first one.
+    """
+    counts = {
+        f.name: len(
+            re.findall(
+                rf"^{re.escape(selector)} \{{",
+                f.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+        )
+        for f in CSS_FILES
+        if f.is_file()
+    }
+    total = sum(counts.values())
+    assert total == 1, (
+        f"{selector} is defined {total} times across {counts}; the last one "
+        "silently wins and the card renders as a mixture of them"
     )
 
 
@@ -195,4 +220,51 @@ def test_the_card_still_looks_like_a_warning():
     assert block
     assert "--warning" in block.group(1), (
         "the neutral border let an authorisation prompt read as ordinary content"
+    )
+
+
+def test_the_panel_and_card_cannot_share_a_row():
+    """The layout the operator actually reported, measured in a browser.
+
+    With the message container as a flex row, the reasoning panel collapsed to
+    51px -- "REAS...", phase chips stacked vertically, the activity list
+    unreadable -- while the card took 493px beside it. Pinning a 100% basis was
+    not enough on its own: without flex-wrap, two 100%-basis items simply
+    shrink and share the line, which an inline display:flex reproduced at
+    250px/270px.
+    """
+    css = _all_css()
+    block = re.search(r"^\.message-content \{(.*?)\}", css, re.MULTILINE | re.DOTALL)
+    assert block, ".message-content rule missing"
+    assert "flex-wrap" in block.group(1), (
+        "without flex-wrap a flex container shrinks both children onto one row"
+    )
+
+    for selector in (".agent-progress", ".hitl-approval-card"):
+        rule = re.search(
+            rf"^{re.escape(selector)} \{{(.*?)^\}}", css, re.MULTILINE | re.DOTALL
+        )
+        assert rule, f"{selector} rule missing"
+        body = rule.group(1)
+        assert "width: 100%" in body, f"{selector} is not pinned to full width"
+        assert "flex: 1 1 100%" in body, (
+            f"{selector} needs a 100% flex basis so a flex parent gives it a "
+            "whole line instead of shrinking it beside its sibling"
+        )
+
+
+def test_the_web_card_does_not_truncate_the_command():
+    """chat.js elided args at 300 chars — the Telegram fix missed this one."""
+    js = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+
+    assert "truncateStr(JSON.stringify(data.args" not in js, (
+        "the browser card is truncating the command again; an operator cannot "
+        "authorise what they cannot read"
+    )
+    assert "function formatApprovalArgs" in js
+    assert "MORE CHARACTERS ARE NOT SHOWN" in js, (
+        "if it must elide, it has to say so rather than trail off"
     )

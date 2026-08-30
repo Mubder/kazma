@@ -3794,7 +3794,7 @@
       '<div class="hitl-approval-body">' +
         '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
         (tools.length <= 1
-          ? '<p><strong>Args:</strong> <code>' + escapeHtml(truncateStr(JSON.stringify(data.args || {}), 300)) + '</code></p>'
+          ? '<p><strong>Args:</strong></p><div class="hitl-approval-args"><pre>' + escapeHtml(formatApprovalArgs(data.tool, data.args)) + '</pre></div>'
           : toolsHtml) +
         '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
@@ -4974,6 +4974,31 @@
     if (!str) return '';
     var map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
     return String(str).replace(/[&<>"']/g, function(c) { return map[c]; });
+  }
+
+  // Tools where a hidden suffix is the difference between a copy and a wipe.
+  var EXEC_TOOLS = ['shell_exec', 'python_exec', 'code_exec', 'computer_use',
+                    'browser_eval_js'];
+
+  // The card used to render escapeHtml(truncateStr(JSON.stringify(args), 300)),
+  // so an operator was asked to authorise a command whose tail was invisible --
+  // the same defect that was fixed on the Telegram side and missed here. The
+  // args block is scrollable (max-height in kazma.css), so the whole thing is
+  // reachable without the card swallowing the page.
+  function formatApprovalArgs(tool, args) {
+    var text;
+    try {
+      text = JSON.stringify(args || {}, null, 2);
+    } catch (e) {
+      text = String(args);
+    }
+    if (text.length <= 20000) return text;
+    var hidden = text.length - 20000;
+    var warn = '\n\n\u26A0 ' + hidden + ' MORE CHARACTERS ARE NOT SHOWN.';
+    if (EXEC_TOOLS.indexOf(tool) !== -1) {
+      warn += '\nDo NOT approve without reading all of it.';
+    }
+    return text.slice(0, 20000) + warn;
   }
 
   function truncateStr(str, max) {
