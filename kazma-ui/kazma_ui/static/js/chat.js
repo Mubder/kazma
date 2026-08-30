@@ -3784,6 +3784,40 @@
         }).join('') + '</ul>';
     }
 
+    // S1-3: proposal-backed posts — show the STORED drafts the approval
+    // will actually publish. Resolved server-side from the durable artifact
+    // store: the user approves the stored text, not the model's memory.
+    var proposalHtml = '';
+    try {
+      var _propItems = [];
+      var _propPid = '';
+      tools.forEach(function(t) {
+        if (t && t.proposal && Array.isArray(t.proposal.items)) {
+          _propPid = t.proposal.proposal_id || _propPid;
+          _propItems = _propItems.concat(t.proposal.items);
+        }
+      });
+      if (!_propItems.length && data.proposal && Array.isArray(data.proposal.items)) {
+        _propPid = data.proposal.proposal_id || '';
+        _propItems = data.proposal.items;
+      }
+      if (_propItems.length) {
+        proposalHtml =
+          '<div class="hitl-proposal" style="margin:8px 0;padding:8px 10px;border-radius:8px;' +
+          'background:color-mix(in srgb, var(--accent, #6c8cff) 7%, transparent);' +
+          'border:1px solid color-mix(in srgb, var(--accent, #6c8cff) 20%, transparent);">' +
+          '<p style="margin:0 0 6px 0;font-size:0.8rem;"><strong>Content to publish</strong>' +
+          (_propPid ? ' — stored proposal <code>' + escapeHtml(_propPid) + '</code>' : '') +
+          ' (verified against what you approved):</p>' +
+          '<ul class="hitl-proposal-items" style="margin:0;padding-left:18px;font-size:0.78rem;">' +
+          _propItems.map(function(i) {
+            return '<li style="margin:3px 0;"><code>' + escapeHtml(String(i.id || '')) +
+              '</code> ' + escapeHtml(truncateStr(String(i.text || ''), 240)) + '</li>';
+          }).join('') +
+          '</ul></div>';
+      }
+    } catch (e) { /* rendering must never block the card */ }
+
     var card = document.createElement('div');
     card.className = 'hitl-approval-card';
     // Server marks always-HITL batches (X ToU fail-safes) yolo_allowed=false —
@@ -3796,6 +3830,7 @@
         (tools.length <= 1
           ? '<p><strong>Args:</strong></p><div class="hitl-approval-args"><pre>' + escapeHtml(formatApprovalArgs(data.tool, data.args)) + '</pre></div>'
           : toolsHtml) +
+        proposalHtml +
         '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           (yoloOk

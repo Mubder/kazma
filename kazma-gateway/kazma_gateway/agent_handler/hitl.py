@@ -277,6 +277,36 @@ def _build_approval_prompt(
 
     args_str = _format_args_for_approval(tool, _redact(args))
     tools = payload.get("tools") or []
+    # S1-3: proposal-backed posts — show the STORED drafts this approval
+    # publishes, resolved server-side from the durable artifact store. The
+    # user approves the stored text, not the model's memory.
+    proposal_lines: list[str] = []
+    try:
+        _prop_sources: list[dict[str, Any]] = []
+        if isinstance(payload.get("proposal"), dict):
+            _prop_sources.append(payload["proposal"])
+        if isinstance(tools, list):
+            for _t in tools:
+                if isinstance(_t, dict) and isinstance(_t.get("proposal"), dict):
+                    _prop_sources.append(_t["proposal"])
+        for _p in _prop_sources:
+            _items = _p.get("items") or []
+            if not isinstance(_items, list) or not _items:
+                continue
+            proposal_lines.append(
+                f"📋 Content to publish — stored proposal "
+                f"{_p.get('proposal_id', '')} (verified against your approval):"
+            )
+            for _item in _items[:8]:
+                if isinstance(_item, dict):
+                    proposal_lines.append(
+                        f"  • {_item.get('id', '')}: "
+                        f"{str(_item.get('text') or '')[:240]}"
+                    )
+        if proposal_lines:
+            proposal_lines.append("")
+    except Exception:
+        proposal_lines = []
     if isinstance(tools, list) and len(tools) > 1:
         lines = [
             "⚠️ Approval required",
@@ -290,6 +320,7 @@ def _build_approval_prompt(
             targs = _redact(item.get("args") or item.get("arguments") or {})
             tstr = _format_args_for_approval(tname, targs, budget=_MULTI_BUDGET)
             lines.append(f"{i}. {tname}: {tstr}")
+        lines.extend(proposal_lines)
         lines.extend(
             [
                 "",
@@ -354,7 +385,8 @@ def _build_approval_prompt(
         f"⚠️ Approval required\n"
         f"Tool: {tool}\n"
         f"Args: {args_str}\n\n"
-        f"Reply: hitl approve {thread_id}\n"
+        + ("\n".join(proposal_lines) + "\n" if proposal_lines else "")
+        + f"Reply: hitl approve {thread_id}\n"
         f"   or: hitl deny {thread_id}"
     )
     markup = None

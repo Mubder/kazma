@@ -880,6 +880,137 @@ class TestTrimBudgetKnob:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Post-execution audit trail + approval-card visibility (items 1–2)
+# ═══════════════════════════════════════════════════════════════════
+
+
+class TestProposalMarking:
+    def _store_kind(self, artifact_db, pid: str) -> str | None:
+        with artifact_db._connect() as conn:
+            row = conn.execute(
+                "SELECT kind FROM agent_artifacts WHERE key = ?",
+                (f"proposal:{pid}",),
+            ).fetchone()
+        return row[0] if row else None
+
+    def test_successful_post_marks_proposal_consumed(self, artifact_db):
+        from kazma_core.agent.graph_tool_worker import mark_proposals_posted
+
+        payload = artifact_db.save_proposal(
+            "default", "t-mark", "tweets", ["draft one"]
+        )
+        pid = payload["proposal_id"]
+        assert self._store_kind(artifact_db, pid) == "proposal"
+
+        marked = mark_proposals_posted(
+            [{"id": "c1", "name": "x_post",
+              "arguments": {"text": "draft one", "proposal_id": pid}}],
+            [{"tool_call_id": "c1", "content": "posted", "is_error": False}],
+            "default",
+        )
+        assert marked == 1
+        assert self._store_kind(artifact_db, pid) == "proposal_posted"
+        # Provenance survives — the row still resolves for audit.
+        assert artifact_db.resolve_proposal(pid)["texts"] == ["draft one"]
+
+    def test_failed_post_leaves_proposal_resolvable(self, artifact_db):
+        """A failed post must NOT consume the proposal — the retry needs it."""
+        from kazma_core.agent.graph_tool_worker import mark_proposals_posted
+
+        payload = artifact_db.save_proposal(
+            "default", "t-mark2", "tweets", ["draft one"]
+        )
+        pid = payload["proposal_id"]
+        marked = mark_proposals_posted(
+            [{"id": "c1", "name": "x_post",
+              "arguments": {"text": "draft one", "proposal_id": pid}}],
+            [{"tool_call_id": "c1", "content": "API 429", "is_error": True}],
+            "default",
+        )
+        assert marked == 0
+        assert self._store_kind(artifact_db, pid) == "proposal"
+
+    def test_non_posting_tools_ignored(self, artifact_db):
+        from kazma_core.agent.graph_tool_worker import mark_proposals_posted
+
+        assert mark_proposals_posted(
+            [{"id": "c1", "name": "file_read",
+              "arguments": {"proposal_id": "prop_anything"}}],
+            [{"tool_call_id": "c1", "content": "ok", "is_error": False}],
+            "default",
+        ) == 0
+
+
+class TestApprovalCardShowsStoredProposal:
+    """The user approves the STORED text, so the card must show it."""
+
+    def _payload_with_proposal(self, artifact_db):
+        payload = artifact_db.save_proposal(
+            "default", "t-card", "tweets", ["Draft A: ship it", "Draft B: Arabic"]
+        )
+        return {
+            "type": "hitl_approval",
+            "kind": "security",
+            "tool": "x_post",
+            "args": {"text": "whatever", "proposal_id": payload["proposal_id"]},
+            "tools": [{
+                "id": "c1",
+                "name": "x_post",
+                "args": {"text": "whatever", "proposal_id": payload["proposal_id"]},
+                "proposal": {
+                    "proposal_id": payload["proposal_id"],
+                    "kind": "tweets",
+                    "items": payload["items"],
+                },
+            }],
+            "message": "Agent wants to run x_post",
+            "yolo_allowed": False,
+        }, payload
+
+    def test_gateway_card_renders_stored_drafts(self, artifact_db):
+        from kazma_gateway.agent_handler.hitl import _build_approval_prompt
+
+        payload, prop = self._payload_with_proposal(artifact_db)
+        out = _build_approval_prompt(payload, "thread-9", platform="telegram")
+        assert "Content to publish" in out["text"]
+        assert prop["proposal_id"] in out["text"]
+        assert "Draft A: ship it" in out["text"]
+        assert "Draft B: Arabic" in out["text"]
+        assert f"hitl approve thread-9" in out["text"]
+
+    def test_gateway_card_without_proposal_unchanged(self, artifact_db):
+        from kazma_gateway.agent_handler.hitl import _build_approval_prompt
+
+        payload = {
+            "type": "hitl_approval",
+            "kind": "security",
+            "tool": "shell_exec",
+            "args": {"command": "ls"},
+            "tools": [{"id": "c1", "name": "shell_exec", "args": {"command": "ls"}}],
+            "message": "Agent wants to run shell_exec",
+            "yolo_allowed": True,
+        }
+        out = _build_approval_prompt(payload, "thread-10", platform="telegram")
+        assert "Content to publish" not in out["text"]
+        assert "shell_exec" in out["text"]
+
+    def test_web_card_payload_shape_matches_store_resolve(self, artifact_db):
+        """The Web card enrichment (graph_tool_worker interrupt payload)
+        copies resolve_proposal()'s items — verify that shape carries ids +
+        text the JS renderer (chat.js renderHitlCard) consumes."""
+        payload = artifact_db.save_proposal(
+            "default", "t-card2", "tweets", ["Draft A: ship it", "Draft B: Arabic"]
+        )
+        resolved = artifact_db.resolve_proposal(payload["proposal_id"])
+        assert resolved is not None
+        for item in resolved["items"]:
+            assert set(item.keys()) >= {"id", "text"}
+        # The renderer keys off proposal_id + items[].id/text — all present.
+        assert resolved["proposal_id"] == payload["proposal_id"]
+        assert resolved["items"][0]["text"] == "Draft A: ship it"
+
+
+# ═══════════════════════════════════════════════════════════════════
 # End-to-end incident regression (component chain, verbatim)
 # ═══════════════════════════════════════════════════════════════════
 

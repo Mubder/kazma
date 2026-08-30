@@ -287,4 +287,6 @@ pending production data:**
 - **Decision rule (the plan's own):** read the counters for a week of real
   traffic BEFORE touching the budget. If trims are rare after the S1-1/S1-4
   fixes, the budget is fine as-is; a non-zero `summary="missed"` is a bug
-  report, not a tuning input.
+  report, not a tuning input. The rule is executable, not aspirational:
+  `python scripts/trim_budget_report.py [--turns N]` reads `/metrics` and
+  prints the verdict (exit 1 on a `missed` bug report).

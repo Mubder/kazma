@@ -90,6 +90,18 @@ through-the-graph survival, checkpoint back-compat via channel
 split, recovery breaker, proposal round-trip, outbound enforcement, and the
 verbatim incident-chain regression with negative controls).
 
+### Follow-ups (same day)
+
+- **Proposal audit trail wired**: successful `x_post` / `x_schedule_post`
+  executions mark their proposal `proposal_posted` (kept for audit, aged
+  out faster; a FAILED post leaves the proposal resolvable for a retry).
+- **Approval cards show the stored drafts** — the user approves what
+  publishes: the Web card renders the stored proposal items, and the
+  Telegram/Discord/Slack card text carries them too.
+- **AGENTS.md §29** documents the subsystem's load-bearing invariants
+  (merge reducer, artifact store, proposal chokepoint, dead-band gate,
+  shift split, no-re-stream invariant).
+
 ## Arabic hardening — Documents system (2026-08-30)
 
 Closes the S1/S2 findings of the Documents deep audit. Arabic was working on a
