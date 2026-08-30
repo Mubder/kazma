@@ -324,3 +324,170 @@ class TestPagination:
         ).read_text(encoding="utf-8")
         assert "w:keepNext" in docx_source and "w:widowControl" in docx_source
         assert "_keep_headings_with_body" in _PDF_SOURCE.read_text(encoding="utf-8")
+
+
+# ── bilingual documents ──────────────────────────────────────────────────
+
+EN_TWEETS = [
+    (
+        "Kazma's major features (EN)",
+        "Most AI runs in someone else's cloud, on someone else's data. Kazma "
+        "runs on your machine, under your control. #Privacy #LocalAI",
+    ),
+    (
+        "Local-first architecture (EN)",
+        "Your data never leaves the box. Swarm orchestration, document "
+        "intelligence and memory all run locally. #LocalFirst",
+    ),
+]
+AR_TWEETS = [
+    (
+        "معظم الذكاء الاصطناعي يعمل في سحابة غيرك (AR)",
+        "معظم الذكاء الاصطناعي يعمل في سحابة غيرك، على بيانات غيرك. كاظمة "
+        "تعمل على جهازك، تحت سيطرتك الكاملة. #الخصوصية",
+    ),
+    (
+        "بنية محلية أولاً (AR)",
+        "بياناتك لا تغادر جهازك أبداً. تنسيق الأسراب وذكاء المستندات والذاكرة "
+        "تعمل جميعها محلياً على جهازك. #محلي_أولاً",
+    ),
+]
+
+
+def _bilingual_doc():
+    """A tweet archive that is roughly half English and half Arabic.
+
+    Modelled on a real generated document in which every Arabic block came out
+    left-to-right. Its RTL ratio sits near the dominance threshold, which is
+    the point: whichever way a single document-level direction resolved, one
+    language was aligned backwards.
+    """
+    model = ContentModel()
+    model.add(
+        TitleBlock(text="Kazma (@KazmaAI) — Tweet Archive", level=0, fill="3b82f6")
+    )
+    sample = ["Kazma (@KazmaAI) — Tweet Archive"]
+    model.add(
+        BodyBlock(
+            text="Complete archive of all tweets posted through the Kazma X "
+            "connector. Account: @KazmaAI"
+        )
+    )
+    for index, (heading, body) in enumerate(EN_TWEETS + AR_TWEETS, start=1):
+        model.add(HeadingBlock(text=f"{index}. {heading}", level=1))
+        model.add(BodyBlock(text=body))
+        sample += [heading, body]
+    return model, DocProfile.for_content("\n".join(sample))
+
+
+class TestBilingualBlockDirection:
+    """Direction is per block, not per document.
+
+    A bilingual archive has English blocks and Arabic blocks. Resolving
+    direction once for the whole document meant the minority language was laid
+    out backwards on every one of its blocks — Arabic text left-aligned with no
+    ``w:bidi`` in a mostly-English document, and English text right-aligned had
+    the ratio tipped the other way.
+    """
+
+    def test_profile_resolves_each_block_separately(self):
+        _, profile = _bilingual_doc()
+        assert profile.block_direction(EN_TWEETS[0][1]) == "ltr"
+        assert profile.block_direction(AR_TWEETS[0][1]) == "rtl"
+
+    def test_blocks_without_strong_characters_inherit_the_document(self):
+        """A divider, a bare number or a date has no direction of its own."""
+        _, profile = _bilingual_doc()
+        for neutral in ("────────────────", "2026-08-28", "18", "   "):
+            assert profile.block_direction(neutral) == profile.direction
+
+    def test_docx_stamps_bidi_per_paragraph(self, tmp_path):
+        import re
+        import zipfile
+
+        from kazma_core.documents.engines.docx import DocxEngine
+
+        model, profile = _bilingual_doc()
+        out = tmp_path / "archive.docx"
+        DocxEngine(profile).render(model, out)
+        xml = zipfile.ZipFile(out).read("word/document.xml").decode("utf-8")
+
+        rtl = ltr = 0
+        mismatches = []
+        for para in re.findall(r"<w:p\b.*?</w:p>", xml, re.S):
+            text = "".join(re.findall(r"<w:t[^>]*>([^<]*)</w:t>", para))
+            if not text.strip() or arabic.first_strong(text) is None:
+                continue
+            found = re.search(r'<w:bidi w:val="(\d)"', para)
+            value = found.group(1) if found else None
+            wanted = "1" if arabic.direction_of(text) == "rtl" else "0"
+            rtl += value == "1"
+            ltr += value == "0"
+            if value != wanted:
+                mismatches.append((wanted, value, text[:40]))
+
+        assert not mismatches, f"paragraph direction mismatches: {mismatches}"
+        assert rtl >= 2 and ltr >= 2, (
+            f"expected both directions in one document, got {rtl} RTL / {ltr} LTR"
+        )
+
+    def test_ltr_paragraphs_are_stamped_not_left_to_inherit(self):
+        """In an RTL document an unmarked English paragraph inherits RTL.
+
+        The Normal style and the section both carry ``w:bidi``, so silence is
+        not neutral — the LTR branch has to say so explicitly.
+        """
+        source = pathlib.Path(
+            "kazma-core/kazma_core/documents/engines/docx.py"
+        ).read_text(encoding="utf-8")
+        assert 'bidi.set(qn("w:val"), "1" if block_rtl else "0")' in source
+
+    def test_pdf_puts_each_block_on_its_own_edge(self, tmp_path):
+        pymupdf = pytest.importorskip("pymupdf")
+
+        model, profile = _bilingual_doc()
+        path = _render_pdf(model, profile, tmp_path, force_reportlab=True)
+
+        doc = pymupdf.open(path)
+        try:
+            width = doc[0].rect.width
+            wrong = []
+            checked = 0
+            for page in doc:
+                for block in page.get_text("blocks"):
+                    text = arabic.to_logical(block[4] or "").strip()
+                    if len(text) < 25 or arabic.first_strong(text) is None:
+                        continue
+                    near_left = block[0] < 90
+                    near_right = (width - block[2]) < 90
+                    if near_left and near_right:
+                        continue  # spans the measure; edge tells us nothing
+                    got = "ltr" if near_left else "rtl"
+                    checked += 1
+                    if got != arabic.direction_of(text):
+                        wrong.append((arabic.direction_of(text), got, text[:40]))
+            assert checked >= 4, "not enough one-edge blocks to judge"
+            assert not wrong, f"blocks on the wrong edge: {wrong}"
+        finally:
+            doc.close()
+
+    def test_html_marks_only_the_blocks_that_differ(self):
+        from kazma_core.documents.engines.html import HtmlEngine
+
+        model, profile = _bilingual_doc()
+        html = HtmlEngine(profile).render(model)
+        opposite = "rtl" if profile.direction == "ltr" else "ltr"
+        assert f'dir="{opposite}"' in html, "minority-direction blocks are unmarked"
+
+    def test_uniform_documents_get_no_wrapper(self):
+        """A single-language document must emit exactly what it did before."""
+        from kazma_core.documents.engines.html import HtmlEngine
+
+        body = EN_SENTENCE * 4
+        model = ContentModel()
+        model.add(TitleBlock(text="Audit Report", level=0, fill="3b82f6"))
+        model.add(HeadingBlock(text="Summary", level=1))
+        model.add(BodyBlock(text=body))
+        profile = DocProfile.for_content("Audit Report\nSummary\n" + body)
+        html = HtmlEngine(profile).render(model)
+        assert 'dir="rtl"' not in html

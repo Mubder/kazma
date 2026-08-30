@@ -121,6 +121,19 @@ degraded silently.
   that renders a multi-page document and checks no heading is the last thing
   on a page.
 
+- **Direction was a document-level property, so bilingual documents were laid
+  out backwards on one side.** Reported from a real generated tweet archive:
+  35% Arabic, so the document resolved LTR and every Arabic block was
+  left-aligned with no `w:bidi` at all. Tipping the ratio the other way would
+  have inverted the same bug onto the English blocks — a single direction is
+  simply the wrong model for a document that is half and half.
+  `DocProfile.block_direction()` now resolves each block on its own, and all
+  three engines consume it: `w:bidi` per paragraph in DOCX (stamped `0`
+  explicitly for LTR blocks, since the Normal style and section both carry bidi
+  in an RTL document), per-block style alignment in PDF, and a `dir` wrapper on
+  the differing blocks in HTML. Blocks with no strong directional character — a
+  divider, a bare number, a date — inherit the document direction.
+
 ### Corrected
 
 - **The GC Postgres port was already done**; AGENTS.md §19D/§19F,

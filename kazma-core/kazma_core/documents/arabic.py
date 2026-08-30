@@ -54,6 +54,7 @@ __all__ = [
     "Direction",
     "ShapedSegment",
     "direction_of",
+    "first_strong",
     "has_rtl",
     "rtl_ratio",
     "is_rtl_dominant",
@@ -132,6 +133,21 @@ def _is_strong_ltr(char: str) -> bool:
 def has_rtl(text: str) -> bool:
     """True when *text* contains any strong right-to-left character."""
     return any(_is_strong_rtl(c) for c in text or "")
+
+
+def first_strong(text: str) -> Direction | None:
+    """Direction of the first strong character, or ``None`` if there is none.
+
+    ``None`` is the meaningful case: a divider rule, a bare number, a date or
+    an empty line has no direction of its own and must inherit the document's
+    rather than defaulting to LTR.
+    """
+    for char in text or "":
+        if _is_strong_rtl(char):
+            return "rtl"
+        if _is_strong_ltr(char):
+            return "ltr"
+    return None
 
 
 def rtl_ratio(text: str) -> float:

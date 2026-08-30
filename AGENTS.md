@@ -738,6 +738,26 @@ call-site-local normalization.
   not fail a test — it silently returns the platform to blank Arabic PDFs, and
   makes `tests/test_docx_rtl_visual.py` skip instead of run.
 
+**K. Direction is per BLOCK, not per document.**
+`DocProfile.direction` is the *document* base direction — margins, section,
+chrome, gutter. `DocProfile.block_direction(text)` resolves each block on its
+own, and every engine must use it for content: `w:bidi` per paragraph (DOCX),
+per-block style alignment (PDF `_styles_for`), a `dir` wrapper on the blocks
+that differ (HTML).
+
+A document is not required to be all one language. A bilingual archive, a
+report quoting Arabic sources, minutes with two languages — resolving direction
+once for the whole document means whichever language loses the ratio has every
+one of its blocks aligned backwards. This was reported from a real generated
+tweet archive: 35% Arabic, so the document resolved LTR and every Arabic tweet
+was left-aligned with no `w:bidi` at all. Nudging the ratio would simply have
+inverted the bug onto the English blocks.
+
+Blocks with no strong directional character — a divider rule, a bare number, a
+date — inherit the document direction rather than defaulting to LTR. The DOCX
+LTR branch must stamp `w:bidi val="0"` explicitly: in an RTL document the
+Normal style and the section both carry bidi, so silence is not neutral.
+
 **J. One type scale, enforced by measurement.**
 `theme_cs_size()` is the complex-script optical size and **every** engine must
 apply it: DOCX via `w:szCs`, HTML via `_css`, PDF via `_build_styles`. The PDF

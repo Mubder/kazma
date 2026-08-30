@@ -116,6 +116,26 @@ Verified unchanged: heading keep-with-next was already correct in both engines
 (0 stranded headings across EN and AR, both routes, on a 9–14 page document
 with staggered section lengths), and English type scale is untouched.
 
+## Round four — per-block direction
+
+Reported from real output: a generated `@KazmaAI` tweet archive in which every
+Arabic block was laid out left-to-right. Measured on the actual file: zero
+`w:bidi`, zero `w:rtl`, `w:jc` values of `start`/`both` — the profile had
+resolved the whole document to LTR.
+
+The document is 6,470 characters at an RTL ratio of 0.35, sitting exactly on
+the dominance threshold. Under the pre-hardening predicate it resolved RTL
+(0.36 by the old formula), which would have right-aligned every **English**
+tweet instead. Neither answer is correct, because the question was wrong:
+direction was being asked once for a document that is half and half.
+
+`DocProfile.block_direction(text)` resolves per block, falling back to the
+document direction for blocks with no strong character of their own. Verified
+on a reconstruction of the archive: DOCX 4 RTL / 6 LTR paragraphs with zero
+mismatches, PDF 7 blocks with none on the wrong edge, HTML 4 `dir="rtl"`
+wrappers inside an LTR page. Uniform single-language documents emit no wrapper
+and are byte-identical to before.
+
 ## Still open
 
 1. **DOCX font embedding** — blocked on the typeface decision above.
