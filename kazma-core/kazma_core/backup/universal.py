@@ -120,6 +120,67 @@ def _offsite_config() -> dict[str, Any]:
     return cfg
 
 
+#: A Postgres dump older than this counts as stale. The scheduled sweep runs
+#: every ``_BACKUP_EXPORT_INTERVAL_HOURS`` (24) hours, so anything past that
+#: plus a little slack means a run was missed rather than merely pending.
+_PG_DUMP_STALE_HOURS = 26.0
+
+
+def _pg_dump_state() -> dict[str, Any]:
+    """What the Postgres dump ACTUALLY looks like right now.
+
+    This used to be the literal ``{"ok": True, "note": "handled by
+    native_pg_backup task"}``. It was written when the redundant second
+    ``pg_dump`` was removed from this function, and it is true only in the
+    sense that some other task is responsible -- it says nothing about
+    whether that task has ever run, or when.
+
+    So every manifest reported the main database as healthy, including the
+    ones written while the newest dump was a day old. A backup manifest that
+    cannot report a missing Postgres dump is exactly the class of mechanism
+    this file's own history is full of: it speaks only when it succeeds.
+    """
+    state: dict[str, Any] = {"ok": False, "note": "handled by native_pg_backup task"}
+    try:
+        from kazma_core.db.pg_backup import pg_backup_enabled
+
+        if not pg_backup_enabled():
+            # SQLite installs have no Postgres to dump; that is not a failure.
+            return {"ok": True, "skipped": "postgres backend not in use"}
+    except Exception:  # noqa: BLE001
+        logger.debug("[universal-backup] pg_backup_enabled check failed", exc_info=True)
+
+    try:
+        pg_dir = _data_dir() / "backups" / "pg"
+        dumps = sorted(
+            (f for f in pg_dir.glob("pg_shared_*.dump") if f.is_file()),
+            key=lambda f: f.stat().st_mtime,
+        )
+        if not dumps:
+            state["error"] = "no Postgres dump exists yet"
+            return state
+
+        newest = dumps[-1]
+        stat = newest.stat()
+        age_h = max(0.0, (time.time() - stat.st_mtime) / 3600.0)
+        state.update({
+            "ok": age_h <= _PG_DUMP_STALE_HOURS,
+            "dump": newest.name,
+            "size": stat.st_size,
+            "age_hours": round(age_h, 2),
+            "generations": len(dumps),
+        })
+        if not state["ok"]:
+            state["error"] = (
+                f"newest Postgres dump is {age_h:.1f}h old (stale past "
+                f"{_PG_DUMP_STALE_HOURS:.0f}h) -- the main database is not "
+                "being dumped on schedule"
+            )
+    except Exception as exc:  # noqa: BLE001
+        state["error"] = f"could not inspect the Postgres dumps: {str(exc)[:200]}"
+    return state
+
+
 def _copy_root_artifacts(dest: Path) -> dict[str, Any]:
     """Copy the install-root .env + configured root work artifacts into *dest*.
 
@@ -753,7 +814,7 @@ def perform_universal_backup(
         graph_result = {"ok": False, "error": str(exc)[:300]}
 
     _set_progress("manifest", detail="Writing manifest…")
-    pg_result = {"ok": True, "note": "handled by native_pg_backup task"}
+    pg_result = _pg_dump_state()
 
     # 4. Offsite sync (backup-audit gap #2): the finished backup is zipped
     # into ONE archive and uploaded as a single file. Fail-open — the local

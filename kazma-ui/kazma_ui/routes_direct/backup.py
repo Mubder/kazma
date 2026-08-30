@@ -53,7 +53,29 @@ def register_backup_routes(self: Any) -> None:
                 _set_progress("error", detail=safe_error(exc), error=str(exc)[:300])
 
         spawn_background(_run(), name="memory-maintenance")
-        return {"ok": True, "message": "Backup started", "progress": get_backup_progress()}
+
+        # perform_universal_backup deliberately does NOT dump Postgres -- that
+        # belongs to the native_pg_backup task, which only the 24-hourly sweep
+        # was enqueueing. So this button backed up 25 SQLite databases, said
+        # "Done", and never touched the main database. Enqueue it here too,
+        # exactly as the scheduled sweep does, so "Backup Now" means it.
+        pg_queued = False
+        try:
+            from kazma_core.db.pg_backup import pg_backup_enabled
+            from kazma_core.memory.task_queue import enqueue_task
+
+            if pg_backup_enabled():
+                enqueue_task("native_pg_backup", {})
+                pg_queued = True
+        except Exception:  # noqa: BLE001 -- never block the button
+            logger.warning("[backup] could not enqueue the Postgres dump", exc_info=True)
+
+        return {
+            "ok": True,
+            "message": "Backup started" + (" (including Postgres)" if pg_queued else ""),
+            "postgres_queued": pg_queued,
+            "progress": get_backup_progress(),
+        }
     @self.app.get("/api/backup/status")
     async def _backup_status() -> Any:
         """Poll the current backup progress (phase + detail)."""
