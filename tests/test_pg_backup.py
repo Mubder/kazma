@@ -115,7 +115,10 @@ def test_get_pg_backup_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KAZMA_PG_BACKUP_ENABLED", raising=False)
     monkeypatch.delenv("KAZMA_PG_BACKUP_RETENTION", raising=False)
     cfg = pg_backup.get_pg_backup_config()
-    assert cfg == {"enabled": True, "retention": 7}
+    # 3, not 7: the local .dump files are staging at 1.67 GB apiece, and
+    # restic keeps the real history deduplicated under KEEP_POLICY. Lowered
+    # when the backup loop went 6-hourly (2026-08-30).
+    assert cfg == {"enabled": True, "retention": 3}
 
 
 def test_get_pg_backup_config_env_kill_switch(monkeypatch: pytest.MonkeyPatch) -> None:
