@@ -120,6 +120,17 @@ class TestBaseTemplate:
         assert "data-theme=" in base_html
         assert "theme()" in base_html
 
+    def test_brand_webfonts_are_ibm_plex(self, base_html):
+        """UI, docs, and generated documents share IBM Plex; Inter must not load."""
+        assert "IBM+Plex+Sans" in base_html
+        assert "IBM+Plex+Sans+Arabic" in base_html
+        assert "family=Inter" not in base_html
+
+    def test_brand_mark_is_favicon_and_apple_touch(self, base_html):
+        assert "/static/img/favicon.png" in base_html
+        assert 'rel="apple-touch-icon"' in base_html
+        assert "/static/img/kazma-icon.png" in base_html
+
 
 # ── 3. Sidebar Component ───────────────────────────────────────────
 
@@ -188,6 +199,10 @@ class TestSidebarComponent:
 
     def test_has_model_badge(self, sidebar_html):
         assert any(tag in sidebar_html for tag in ("model-badge", "kazma-icon", "avatar")), "No model/avatar badge found"
+
+    def test_brand_mark_is_logo_and_avatar(self, sidebar_html):
+        assert "/static/img/kazma-logo.png" in sidebar_html
+        assert "/static/img/kazma-icon.png" in sidebar_html
 
     def test_has_status_dot(self, sidebar_html):
         assert "status-dot" in sidebar_html
@@ -331,6 +346,8 @@ class TestCSSDesignSystem:
     def test_has_font_variables(self, css):
         assert "--font-sans" in css
         assert "--font-mono" in css
+        assert "IBM Plex Sans" in css
+        assert "IBM Plex Sans Arabic" in css
 
     # Layout
     def test_has_sidebar_width(self, css):

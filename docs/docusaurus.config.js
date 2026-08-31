@@ -16,10 +16,10 @@ const config = {
     defaultLocale: 'en',
     locales: ['en'],
   },
-  // Fonts match the web-app "ABYSS" design system (Inter + JetBrains Mono).
+  // Fonts match the web app and generated documents (IBM Plex + JetBrains Mono).
   // Loaded via <link> in <head>, not a render-blocking @import in custom.css.
   stylesheets: [
-    'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap',
+    'https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap',
   ],
   // Mermaid diagrams (architecture, swarm, HITL flows)
   markdown: {

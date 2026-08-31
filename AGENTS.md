@@ -718,21 +718,22 @@ call-site-local normalization.
   (`U+FB50-FDFF` / `U+FE70-FEFF`); base-block coverage renders tofu.
   `_setup_fonts` raises `DocumentRenderError` rather than emitting a blank
   Arabic PDF behind a warning string.
-- **Amiri (OFL) is vendored** in `documents/assets/fonts/`, so complex-script
-  PDF output is identical on Windows, macOS and the container.
-  `KAZMA_DOCUMENT_FONT_DIR` overrides it. Precedence is **deliberately
-  asymmetric**: the bundle wins for complex-script jobs, but a Latin-only job
-  takes the system font first and only falls back to the bundle when no system
-  font exists at all. Amiri is a Naskh design — letting it win for Latin would
-  silently restyle every English document. Do not "simplify" this to
-  bundle-always. The OFL text must keep travelling with the fonts.
+- **IBM Plex Sans Arabic (OFL) is vendored** in `documents/assets/fonts/`
+  (Regular + Bold + `OFL-IBM-Plex.txt`) so generated documents match the web
+  UI and the Docusaurus docs on Windows, macOS and the container. Amiri
+  remains a naskh fallback if Plex is removed. `KAZMA_DOCUMENT_FONT_DIR`
+  overrides the directory. Precedence: **Plex wins both directions** when
+  present; Amiri only for Arabic jobs if Plex is absent; system fonts last.
+  Do not revert to "bundle-for-Arabic, system-for-Latin" — that split
+  restyled English documents away from the product face. The OFL text must
+  keep travelling with the fonts.
 - **HTML exports inline the pinned font** as a data URI
   (`documents.render.embed_html_fonts`, default on) so an Arabic export renders
   the same wherever it is opened. That costs ~850 KB per Arabic file; the flag
   exists for deployments that serve these over the wire. English exports are
-  never affected. DOCX does **not** embed: switching its Arabic typeface away
-  from Sakkal Majalla would invalidate the `body_size_ar` / `line_height_ar`
-  tuning, which is a design decision, not a packaging one.
+  never affected. DOCX names `THEME["font_latin"]` / `THEME["font_arabic"]`
+  (both IBM Plex Sans Arabic); LibreOffice needs the family, or the PDF
+  route copies the TTFs into the soffice user profile.
 - **The image and CI carry the system deps.** `fonts-noto-naskh-arabic`,
   `libreoffice-writer`, `tesseract-ocr(-ara)`. Removing them from either does
   not fail a test — it silently returns the platform to blank Arabic PDFs, and

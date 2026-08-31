@@ -18,9 +18,10 @@
   </style>
   <title>Kazma — Login</title>
   <link rel="icon" href="/static/img/favicon.png">
+  <link rel="apple-touch-icon" href="/static/img/kazma-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
   <link rel="stylesheet" href="/static/css/kazma.v5.css?v={{ css_version() }}">
   <style>
@@ -79,7 +80,7 @@
     .login-error.show { display: block; }
     .login-error.info { background: rgba(234, 179, 8, 0.15); color: #facc15; }
     .login-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-    .login-brand img { height: 32px; width: 32px; border-radius: 6px; }
+    .login-brand img { height: 32px; width: 32px; border-radius: 6px; object-fit: contain; }
     .login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
     .login-tabs button {
       flex: 1; background: transparent; border: 1px solid var(--border-subtle);

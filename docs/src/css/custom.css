@@ -3,7 +3,7 @@
  * (kazma-ui/kazma_ui/static/css/kazma.css §1 + §23).
  *
  * BG: #0e1626 (dark) / #f0f4fa (light) · Accent: #3b82f6 royal ·
- * Secondary: #38bdf8 sky · Font: Inter, system-ui, sans-serif.
+ * Secondary: #38bdf8 sky · Font: IBM Plex Sans / IBM Plex Sans Arabic.
  *
  * Kazma tokens are defined first, then mapped onto Infima's --ifm-* vars
  * so every Docusaurus surface (navbar, sidebar, buttons, links, code) picks
@@ -64,8 +64,8 @@
   --ifm-link-hover-color: var(--kz-accent-light);
   --ifm-blockquote-color: var(--kz-text-secondary);
   --ifm-code-font-size: 95%;
-  --ifm-font-family-base: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
+  --ifm-font-family-base: 'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui,
+    -apple-system, 'Segoe UI', sans-serif;
   --ifm-font-family-monospace: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular',
     Consolas, 'Liberation Mono', Menlo, monospace;
   --ifm-tabs-color-active-border: var(--kz-accent);

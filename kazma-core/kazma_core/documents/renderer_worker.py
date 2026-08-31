@@ -178,7 +178,11 @@ def _build_model_and_profile(
     fill_h = str(profile.theme["heading_fill"]).lstrip("#")
 
     model = ContentModel()
-    model.header = str(payload.get("header") or profile.chrome["brand"])
+    model.header = str(
+        payload.get("header")
+        or profile.chrome.get("brand_short")
+        or profile.chrome["brand"]
+    )
     model.footer = str(payload.get("footer") or profile.chrome["brand"])
     model.page_numbers = bool(payload.get("page_numbers", True))
     model.images_present = bool(payload.get("images"))

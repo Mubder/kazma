@@ -28,16 +28,14 @@ html[data-theme="light"] { color-scheme: only light; }
 
 /* ── 1. Shell — sidebar ──────────────────────────────────────────── */
 
-/* Brand badge — the logo's dark tile is INTENTIONAL (app-icon look):
-   inset padding lets the artwork breathe; accent ring + top inner
-   highlight make it a crafted badge on both themes. */
+/* Brand mark — transparent K, no tile. object-fit:contain keeps the
+   portrait artwork from being cropped in the square slot. */
 .sidebar .logo-img {
   width: 38px;
   height: 38px;
   border-radius: 11px;
   flex-shrink: 0;
   object-fit: contain;
-  /* Transparent mark — no background tile, border, or shadow (logo floats). */
   transition: transform var(--transition-fast);
 }
 .sidebar .logo-img:hover {

@@ -305,10 +305,45 @@ def test_docx_toc_field_and_page_numbers(tmp_path: Path) -> None:
     # Section headings carry outline levels (indexable by the TOC field); the
     # TOC/References bars do NOT (so they don't self-list).
     assert doc_xml.count("<w:outlineLvl") == 2, "outline levels not on exactly the section headings"
-    # Footer carries a PAGE field.
+    # Footer carries a PAGE field wrapped in the English page_fmt.
     footer = [n for n in z.namelist() if n.startswith("word/footer") and n.endswith(".xml")][0]
     fxml = z.read(footer).decode()
     assert "PAGE" in fxml and 'fldCharType="begin"' in fxml, "footer missing PAGE field"
+    assert "Page" in fxml, "English footer must use page_fmt 'Page {n}', not a bare digit"
+
+
+def test_docx_ar_footer_uses_arabic_page_fmt(tmp_path: Path) -> None:
+    """Arabic DOCX footer says صفحة N, not a bare digit."""
+    import zipfile
+
+    from kazma_core.documents.renderer_worker import _generate_docx
+
+    docx = tmp_path / "ar.docx"
+    _generate_docx(docx, {
+        "title": "تقرير", "lang": "ar", "page_numbers": True,
+        "sections": [{"heading": "قسم", "body": "نص عربي كافٍ للاتجاه."}],
+    })
+    z = zipfile.ZipFile(docx)
+    footer = [n for n in z.namelist() if n.startswith("word/footer") and n.endswith(".xml")][0]
+    fxml = z.read(footer).decode()
+    assert "PAGE" in fxml
+    assert "صفحة" in fxml, "Arabic footer must use page_fmt 'صفحة {n}'"
+    assert "منظومة كاظمة" in fxml
+    assert "Page " not in fxml
+
+
+def test_localized_chrome_follows_direction() -> None:
+    """EN chrome is English; AR chrome is Arabic. brand_short is the header."""
+    from kazma_core.documents.style_theme import localized_chrome
+
+    en = localized_chrome(rtl=False)
+    ar = localized_chrome(rtl=True)
+    assert en["brand"] == "Kazma AI Platform"
+    assert en["brand_short"] == "Kazma"
+    assert en["page_fmt"] == "Page {n}"
+    assert ar["brand"].startswith("منظومة")
+    assert ar["brand_short"] == "كاظمه"
+    assert ar["page_fmt"] == "صفحة {n}"
 
 
 def test_roundtrip_verifier_is_rtl_aware() -> None:
