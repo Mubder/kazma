@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import time
 import traceback
 import uuid
@@ -38,6 +37,7 @@ from kazma_ui.active_turns import (
 )
 from kazma_ui.delivery import get_turn_broker, is_replayable
 from kazma_ui.reply_sink import record_instant_turn
+from kazma_ui.routes.ws_graph import ws_graph_enabled
 from kazma_ui.session_manager import get_session_manager
 
 logger = logging.getLogger(__name__)
@@ -61,19 +61,6 @@ def ti_(key: str, fallback: str, **kwargs) -> str:
 
 
 ws_chat_router = APIRouter(tags=["ws-chat"])
-
-def ws_graph_enabled() -> bool:
-    """WS is telemetry/cursor by default. Graph turns stay on SSE.
-
-    Set ``KAZMA_WS_GRAPH=1`` to restore ``send_prompt`` / ``approve_tool`` as a
-    second graph client (debug / emergency only).
-    """
-    return (os.environ.get("KAZMA_WS_GRAPH") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
 
 
 def _ws_recursion_limit(thread_id: str | None = None) -> int:

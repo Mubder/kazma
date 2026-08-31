@@ -33,6 +33,25 @@ def test_parse_text_update():
     assert msg.text == "hello"
     assert msg.context_metadata["chat_id"] == 99
     assert msg.context_metadata["update_id"] == 10
+    assert "message_thread_id" not in msg.context_metadata
+    assert "thread_hint" not in msg.context_metadata
+
+
+def test_parse_forum_topic_stamps_thread_hint():
+    update = {
+        "update_id": 12,
+        "message": {
+            "message_id": 6,
+            "message_thread_id": 77,
+            "text": "in topic",
+            "chat": {"id": 99, "type": "supergroup"},
+            "from": {"id": 7, "username": "alice"},
+        },
+    }
+    msg = parse_text_update(update)
+    assert msg is not None
+    assert msg.context_metadata["message_thread_id"] == 77
+    assert msg.context_metadata["thread_hint"] == "gw-telegram-7-topic-77"
 
 
 def test_parse_skips_empty():

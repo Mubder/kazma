@@ -122,5 +122,14 @@ def test_health_and_chat_composer(live_server: str) -> None:
             assert live.count() >= 0
             page.goto(live_server + "/settings", timeout=30000, wait_until="domcontentloaded")
             page.locator(".settings-group").first.wait_for(state="visible", timeout=15000)
+            page.goto(live_server + "/dashboard", timeout=30000, wait_until="domcontentloaded")
+            page.locator(".dashboard-container").first.wait_for(state="visible", timeout=15000)
+            page.goto(live_server + "/x", timeout=30000, wait_until="domcontentloaded")
+            page.locator(".xs-wrap").first.wait_for(state="visible", timeout=15000)
+            # Soft-nav: click the Settings sidebar link and stay on the SPA.
+            settings_link = page.locator("a[href='/settings']").first
+            if settings_link.count():
+                settings_link.click()
+                page.locator(".settings-group").first.wait_for(state="visible", timeout=15000)
         finally:
             browser.close()

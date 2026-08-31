@@ -79,18 +79,24 @@ def parse_message_event(event: dict[str, Any] | None) -> IncomingMessage | None:
         )
 
     msg_text = text or (f"[{attachments[0].kind}]" if attachments else "")
+    thread_ts = event.get("thread_ts")
+    meta: dict[str, Any] = {
+        "channel_id": channel_id,
+        "user_id": user_id,
+        "team_id": team_id,
+        "thread_ts": thread_ts,
+        "message_ts": ts,
+        "username": username,
+        "media": bool(attachments),
+    }
+    # Replies in a Slack thread carry thread_ts ≠ this message's ts.
+    if thread_ts and str(thread_ts) != str(ts or ""):
+        safe = str(thread_ts).replace(".", "-")
+        meta["thread_hint"] = f"gw-slack-{user_id}-thread-{safe}"
     return IncomingMessage(
         platform="slack",
         sender_id=f"slack:{user_id}",
         text=msg_text,
         attachments=attachments,
-        context_metadata={
-            "channel_id": channel_id,
-            "user_id": user_id,
-            "team_id": team_id,
-            "thread_ts": event.get("thread_ts"),
-            "message_ts": ts,
-            "username": username,
-            "media": bool(attachments),
-        },
+        context_metadata=meta,
     )

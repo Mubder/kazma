@@ -1529,6 +1529,7 @@ class TelegramAdapter(BaseAdapter):
         parse_mode = outbound.context_metadata.get("parse_mode", self._parse_mode)
         chunks = chunk_message(outbound.text, parse_mode=parse_mode)
         reply_markup = outbound.context_metadata.get("reply_markup")
+        topic_id = outbound.context_metadata.get("message_thread_id")
         all_sent = await send_chunks_with_retry(
             http=self._http,
             chat_id=chat_id,
@@ -1538,6 +1539,7 @@ class TelegramAdapter(BaseAdapter):
             rate_acquire=self._rate_limiter.acquire,
             max_retries=_SEND_MAX_RETRIES,
             base_delay=_SEND_BASE_DELAY,
+            message_thread_id=topic_id,
         )
 
         if all_sent:
@@ -1551,7 +1553,7 @@ class TelegramAdapter(BaseAdapter):
                 )
             # Send any media attachments (photos/documents/video) after text.
             for att in outbound.attachments:
-                await self._send_attachment(chat_id, att)
+                await self._send_attachment(chat_id, att, message_thread_id=topic_id)
             # Send TTS voice reply only when this turn was voice + Settings allow it
             try:
                 from kazma_gateway.adapters.voice_helpers import should_send_tts_reply
@@ -1572,7 +1574,12 @@ class TelegramAdapter(BaseAdapter):
                 )
             return False
 
-    async def _send_attachment(self, chat_id: int, att: Attachment) -> bool:
+    async def _send_attachment(
+        self,
+        chat_id: int,
+        att: Attachment,
+        message_thread_id: Any = None,
+    ) -> bool:
         """Deliver one media attachment via the matching Telegram API.
 
         Routes by ``att.kind``: image→``/sendPhoto``, video→``/sendVideo``,
@@ -1611,9 +1618,15 @@ class TelegramAdapter(BaseAdapter):
         safe_name = att.filename or f"kazma_{att.kind}"
         try:
             await self._rate_limiter.acquire()
+            params: dict[str, Any] = {"chat_id": chat_id}
+            if message_thread_id not in (None, "", 0, "0"):
+                try:
+                    params["message_thread_id"] = int(message_thread_id)
+                except (TypeError, ValueError):
+                    params["message_thread_id"] = message_thread_id
             resp = await self._http.post(
                 endpoint,
-                params={"chat_id": chat_id},
+                params=params,
                 files={field: (safe_name, data, att.mime or "application/octet-stream")},
             )
             resp.raise_for_status()

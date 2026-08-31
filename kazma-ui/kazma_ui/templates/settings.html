@@ -387,6 +387,14 @@
                     <label>{{ t('settings.guild_id') }}</label>
                     <input type="text" class="form-input" x-model="hubEditingConnector.extras.guild_id" placeholder="Guild ID">
                 </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'discord'" x-cloak>
+                    <label>{{ t('settings.allowed_user_ids') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="111, 222">
+                </div>
+                <div class="form-group" x-show="hubEditingConnector.name === 'slack'" x-cloak>
+                    <label>{{ t('settings.allowed_user_ids') }}</label>
+                    <input type="text" class="form-input" x-model="hubEditingConnector.extras.allowed_users" placeholder="U0123ABCD">
+                </div>
                 <div class="form-row" x-show="hubEditingConnector.name === 'email'" x-cloak>
                     <div class="form-group">
                         <label>{{ t('settings.smtp_host') }}</label>
@@ -654,6 +662,14 @@
                     </label>
                 </label>
                 <p style="font-size:0.8rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.soul_requires_confirm_hint') }}</p>
+            </div>
+            <div class="form-group" style="margin-top:12px">
+                <label>{{ t('settings.outbound_allowed_targets') }}</label>
+                <input type="text" class="form-input"
+                    :value="(safety.outbound_allowed_targets || []).join(', ')"
+                    @input="safety.outbound_allowed_targets = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+                    placeholder="admin@kazma.ai, #ops">
+                <p style="font-size:0.75rem;color:var(--text-muted);margin:4px 0 0 0;">{{ t('settings.outbound_allowed_targets_hint') }}</p>
             </div>
             <button class="btn btn-primary" @click="saveSafety()">{{ t('settings.save_safety') }}</button>
             <div class="form-group" style="margin-top:16px" x-show="(soulPending || []).length" x-cloak>

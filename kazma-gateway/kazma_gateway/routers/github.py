@@ -572,6 +572,11 @@ def _oauth_setup_page(request: Request) -> HTMLResponseType:
             if public
             else "https://YOUR_PUBLIC_HOST/api/github/oauth/callback"
         )
+    from urllib.parse import urlparse
+
+    _cb = urlparse(callback)
+    scheme = _cb.scheme or "https"
+    host = _cb.netloc or "YOUR_PUBLIC_HOST"
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>GitHub OAuth setup</title>
 <style>

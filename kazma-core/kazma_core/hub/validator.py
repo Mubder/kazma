@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 import yaml
+
+logger = logging.getLogger(__name__)
 
 from kazma_core.hub.manifest_schema import SkillManifest, ValidationResult
 

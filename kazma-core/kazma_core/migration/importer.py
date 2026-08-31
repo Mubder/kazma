@@ -26,7 +26,7 @@ import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from kazma_core.migration.bundle import KazmaBundle, parse_meta_env
 from kazma_core.migration.path_rewrite import PathMap, build_path_map, rewrite_paths_in_sqlite

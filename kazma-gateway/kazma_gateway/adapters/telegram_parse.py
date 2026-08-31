@@ -53,18 +53,25 @@ def parse_text_update(update: dict[str, Any]) -> IncomingMessage | None:
     )
     sender_id = f"telegram:{user_id}" if user_id else f"telegram:{chat_id}"
 
+    meta: dict[str, Any] = {
+        "chat_id": chat_id,
+        "user_id": user_id,
+        "username": username,
+        "message_id": message.get("message_id", 0),
+        "chat_type": message.get("chat", {}).get("type", "private"),
+        "update_id": update.get("update_id", 0),
+    }
+    topic_id = message.get("message_thread_id")
+    if topic_id not in (None, "", 0, "0"):
+        meta["message_thread_id"] = topic_id
+        sender = user_id or chat_id
+        meta["thread_hint"] = f"gw-telegram-{sender}-topic-{topic_id}"
+
     return IncomingMessage(
         platform="telegram",
         sender_id=sender_id,
         text=text,
-        context_metadata={
-            "chat_id": chat_id,
-            "user_id": user_id,
-            "username": username,
-            "message_id": message.get("message_id", 0),
-            "chat_type": message.get("chat", {}).get("type", "private"),
-            "update_id": update.get("update_id", 0),
-        },
+        context_metadata=meta,
     )
 
 

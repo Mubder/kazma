@@ -50,7 +50,7 @@
             long_task_default_preset: 'research',
         },
         personalities: [],
-        safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 300, auto_deny_on_timeout: true, soul_requires_confirm: false },
+        safety: { hitl_enabled: true, require_approval_for: [], approval_timeout: 300, auto_deny_on_timeout: true, soul_requires_confirm: false, outbound_allowed_targets: [] },
         soulPending: [],
         context: { max_context_tokens: 128000, context_strategy: 'sliding_window', summarization_threshold: 0.8 },
         nonstop: {

@@ -1,11 +1,13 @@
-# Multi-replica Kazma + Postgres (shared-state DEMO — not full HA)
+# Multi-replica Kazma + Postgres (shared-state) + shared kazma-data
 #
 #   docker compose -f docker-compose.ha.yml up -d --build --scale kazma=2
 #
-# This file shares Postgres for checkpoints / settings / chat sessions /
-# swarm tasks. It does NOT share kazma-data. Memory, cron, vault, documents,
-# workspaces, and the turn journal stay per-replica SQLite unless you add a
-# shared volume below and point every replica at it.
+# Postgres holds checkpoints / settings / chat sessions / swarm tasks /
+# document jobs. The kazma_data volume shares SQLite-backed memory, cron,
+# vault, documents, workspaces, and the turn journal across replicas.
+# SQLite WAL + busy_timeout=5000 is the concurrency story — this is not
+# full HA for those files (prefer a single writer, or don't scale past 2
+# without accepting WAL writer contention).
 #
 # External load balancer should:
 #   - health check GET /health/ready (expect 200)
@@ -52,11 +54,9 @@ services:
       KAZMA_OIDC_CLIENT_ID: ${KAZMA_OIDC_CLIENT_ID:-}
       KAZMA_OIDC_CLIENT_SECRET: ${KAZMA_OIDC_CLIENT_SECRET:-}
     volumes:
-      # Prefer empty volumes for true multi-replica (state in Postgres).
       # Local vector cache is per-replica (OK).
       - kazma_vectors:/home/kazma/.kazma/vector_memory
-      # Uncomment for SQLite-backed memory/cron/vault/docs/workspaces:
-      # - kazma_data:/home/kazma/.kazma/kazma-data
+      - kazma_data:/home/kazma/.kazma/kazma-data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 15s

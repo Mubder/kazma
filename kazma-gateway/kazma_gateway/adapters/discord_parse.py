@@ -82,18 +82,25 @@ def parse_message_create(data: dict[str, Any] | None) -> IncomingMessage | None:
             )
 
     text = content or (f"[{attachments[0].kind}]" if attachments else "")
+    thread_obj = data.get("thread") if isinstance(data.get("thread"), dict) else None
+    discord_thread_id = str((thread_obj or {}).get("id") or "") or None
+    meta: dict[str, Any] = {
+        "channel_id": channel_id,
+        "guild_id": str(guild_id) if guild_id else None,
+        "user_id": user_id,
+        "message_id": message_id,
+        "username": username,
+        "guild_name": data.get("guild_name"),
+        "media": bool(attachments),
+    }
+    if discord_thread_id:
+        meta["discord_thread_id"] = discord_thread_id
+        sender = user_id or channel_id
+        meta["thread_hint"] = f"gw-discord-{sender}-{discord_thread_id}"
     return IncomingMessage(
         platform="discord",
         sender_id=f"discord:{user_id}:{channel_id}" if user_id else f"discord:{channel_id}",
         text=text,
         attachments=attachments,
-        context_metadata={
-            "channel_id": channel_id,
-            "guild_id": str(guild_id) if guild_id else None,
-            "user_id": user_id,
-            "message_id": message_id,
-            "username": username,
-            "guild_name": data.get("guild_name"),
-            "media": bool(attachments),
-        },
+        context_metadata=meta,
     )

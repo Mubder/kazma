@@ -907,10 +907,11 @@ class KazmaAppBuilder:
 
                 slack_teams = _split_ids(self.config_store.get("connectors.slack.allowed_teams", ""))
                 slack_channels = _split_ids(self.config_store.get("connectors.slack.allowed_channels", ""))
-                if not _strict_allowlists and not (slack_teams or slack_channels):
+                slack_users = _split_ids(self.config_store.get("connectors.slack.allowed_users", ""))
+                if not _strict_allowlists and not (slack_teams or slack_channels or slack_users):
                     logger.warning(
                         "[Gateway] Slack allow_all forced (backward compat) with no "
-                        "allowed_teams/allowed_channels — set them or "
+                        "allowed_teams/allowed_channels/allowed_users — set them or "
                         "KAZMA_GATEWAY_STRICT_ALLOWLIST=1"
                     )
                 slack_adapter = SlackAdapter(
@@ -918,6 +919,7 @@ class KazmaAppBuilder:
                     app_token=slack_app_token or None,
                     allowed_teams=slack_teams or None,
                     allowed_channels=slack_channels or None,
+                    allowed_users=slack_users or None,
                     allow_all=not _strict_allowlists,  # backward compat unless strict mode
                 )
                 self.gateway.add_adapter(slack_adapter)

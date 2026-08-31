@@ -23,12 +23,15 @@ _PLATFORM_KEYS = frozenset(
         "message_id",
         "update_id",
         "chat_type",
+        "message_thread_id",
         # Discord / Slack
         "channel_id",
         "guild_id",
         "team_id",
         "thread_ts",
         "message_ts",
+        "discord_thread_id",
+        "thread_hint",
     }
 )
 
@@ -51,13 +54,60 @@ _EPHEMERAL_CTX_KEYS = frozenset(
 )
 
 
+def _sender_suffix(msg: IncomingMessage) -> str:
+    """Platform-local sender token (the part after the first colon)."""
+    if msg.sender_id and ":" in msg.sender_id:
+        return msg.sender_id.split(":", 1)[1]
+    return (msg.sender_id or "").strip()
+
+
+def _native_thread_id(msg: IncomingMessage) -> str | None:
+    """Map a platform-native topic/thread onto a Kazma thread_id.
+
+    Telegram forum topics, Slack reply threads, and Discord thread objects
+    stamp ``thread_hint`` at parse time. This is the Phase-1 intake selector:
+    native threading wins over the ``active_thread.{sender}`` mouth pointer.
+    Bare messages (no hint) fall through to the existing pointer.
+    """
+    ctx = msg.context_metadata or {}
+    hint = ctx.get("thread_hint")
+    if hint:
+        return str(hint)
+
+    if msg.platform == "telegram":
+        topic = ctx.get("message_thread_id")
+        if topic not in (None, "", 0, "0"):
+            sender = _sender_suffix(msg)
+            if sender:
+                return f"gw-telegram-{sender}-topic-{topic}"
+
+    if msg.platform == "slack":
+        thread_ts = ctx.get("thread_ts")
+        msg_ts = ctx.get("message_ts")
+        if thread_ts and str(thread_ts) != str(msg_ts or ""):
+            sender = _sender_suffix(msg)
+            if sender:
+                safe = str(thread_ts).replace(".", "-")
+                return f"gw-slack-{sender}-thread-{safe}"
+
+    if msg.platform == "discord":
+        did = ctx.get("discord_thread_id")
+        if did:
+            sender = _sender_suffix(msg) or str(ctx.get("user_id") or "")
+            if sender:
+                return f"gw-discord-{sender}-{did}"
+    return None
+
+
 def _resolve_thread(msg: IncomingMessage) -> str:
     """Resolve or generate a stable thread_id for a message.
 
     Resolution order:
         1. Existing thread_id in context_metadata (from session store)
-        2. Platform-prefixed deterministic ID from sender_id
-        3. Fresh UUID4 (last resort)
+        2. Platform-native topic / thread hint (Telegram forum, Slack thread)
+        3. Durable mouth pointer + existing sidebar season (never mint a twin)
+        4. Platform-prefixed deterministic ID from sender_id
+        5. Fresh UUID4 (last resort)
 
     Args:
         msg: The incoming message.
@@ -71,7 +121,13 @@ def _resolve_thread(msg: IncomingMessage) -> str:
     if ctx.get("thread_id"):
         return ctx["thread_id"]
 
-    # 2. Durable mouth pointer + existing sidebar season (never mint a twin)
+    # 2. Native topic / thread (intake selector). active_thread stays the
+    # default for bare messages with no platform-native hint.
+    native = _native_thread_id(msg)
+    if native:
+        return native
+
+    # 3. Durable mouth pointer + existing sidebar season (never mint a twin)
     if msg.sender_id:
         try:
             from kazma_core.sessions.directory import find_mouth_thread

@@ -33,7 +33,7 @@ Kazma supports **horizontal replicas** when all shared state lives in Postgres.
 | `KAZMA_SECRET` | **Yes** (or OIDC-only) |
 | `KAZMA_VAULT_KEY` | **Yes** |
 | `KAZMA_PUBLIC_URL` | Public HTTPS URL (for OIDC) |
-| Local `kazma-data` SQLite | **Do not share** across replicas |
+| Local `kazma-data` SQLite | HA compose demo **shares** the `kazma_data` volume (memory/cron/vault/docs). SQLite WAL + `busy_timeout=5000` is the concurrency story — not full HA. Prefer a single writer, or keep `--scale` at 2. |
 
 ## Local multi-replica demo
 

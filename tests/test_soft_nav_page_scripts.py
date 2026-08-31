@@ -130,3 +130,8 @@ def test_soft_nav_pauses_alpine_mutations_across_swap() -> None:
     assert pause_at < resume_at
     assert "rebindAlpineRoot(root)" in nav
     assert "HARD_RELOAD_ALWAYS" in nav
+    # Factory / loading timeouts must not throw → full reload.
+    assert "page factories not ready:" in nav
+    assert "page component init still loading" in nav
+    assert "page component init stuck (loading)" not in nav
+    assert "throw new Error('page factories not ready:" not in nav

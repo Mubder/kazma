@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## P1+P2+P3 remaining-work one-go (2026-08-31)
+
+Closes the remaining code-work list from the 2026-08-31 audit follow-through.
+
+### P1
+
+- Settings ops toasts go through `window.t` / `_t` (EN+AR catalog).
+- Soft-nav no longer full-reloads when Alpine is bound but a factory or
+  `loading` flag times out.
+- Telegram forum topics, Slack threads, and Discord thread objects map to
+  their own `gw-…` seasons; replies include `message_thread_id`.
+- Settings → Safety: outbound allowed targets
+  (`agent.commitment.outbound_allowed_targets`).
+
+### P2
+
+- Per-task MCP workspace: spawn an LRU-capped (4) scoped clone when roots
+  differ; fail-closed if spawn fails. Non-filesystem MCP skips the guard.
+- Gateway allowlists: Discord/Slack extras + live apply on connector save
+  and refresh-adapters; Slack `allowed_users` at boot.
+- WS graph flag quarantined in `kazma_ui/routes/ws_graph.py`.
+- Slash catalog extracted to `chat_slash.js`.
+- Playwright smoke also opens `/dashboard` and `/x`, then clicks Settings.
+
+### P3
+
+- CI Ruff `E9,F63,F7,F82` is a gate; full ruff stays advisory. Pre-existing
+  F821 (undefined names) that would have failed the gate are fixed, including
+  Settings catch-all DELETE using the live ConfigStore.
+- SSE `/long` `/plan` `/yolo` fast path extracted to `sse_chat/_capacity.py`.
+- HA compose mounts shared `kazma_data` (SQLite WAL story, not full HA).
+
 ## /unrestricted no longer duplicates You + Kazma bubbles (2026-08-31)
 
 Mobile `/unrestricted` (and `/yolo` / `/long`) journaled a `capacity` frame

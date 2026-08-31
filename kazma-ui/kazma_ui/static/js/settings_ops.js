@@ -1,12 +1,20 @@
 /** Settings mixin: ops — appearance, shortcuts, account, tools, system, packages, import, backup */
 (function (root) {
     "use strict";
-    function _t(key, fallback) {
+    function _t(key, fallback, vars) {
         if (typeof window.t === "function") {
-            var v = window.t(key);
+            var v = vars ? window.t(key, vars) : window.t(key);
             if (v && v !== key) return v;
         }
-        return fallback || key;
+        var text = fallback || key;
+        if (vars && typeof vars === "object") {
+            for (var k in vars) {
+                if (Object.prototype.hasOwnProperty.call(vars, k)) {
+                    text = String(text).split("{" + k + "}").join(vars[k]);
+                }
+            }
+        }
+        return text;
     }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.ops = function () {
@@ -142,7 +150,7 @@
                 body: JSON.stringify({ action, keys }),
             });
             this.shortcutConflicts = this.detectConflicts();
-            showToast(`Shortcut for "${action}" updated`, 'success');
+            showToast(_t('settings.shortcut_updated', 'Shortcut for "{action}" updated', {action: action}), 'success');
         },
 
         async resetShortcuts() {
@@ -155,7 +163,7 @@
             await fetch('/api/settings/shortcuts/reset', { method: 'POST' });
             this.shortcuts = await this._fetch('/api/settings/shortcuts') || {};
             this.shortcutConflicts = [];
-            showToast('Shortcuts reset', 'success');
+            showToast(_t('settings.shortcuts_reset', 'Shortcuts reset'), 'success');
         },
 
         detectConflicts() {
@@ -202,7 +210,7 @@
 
         async createPlatformUser() {
             if (!this.newUser.username || !this.newUser.password) {
-                showToast('Username and password required', 'error');
+                showToast(_t('settings.username_password_required', 'Username and password required'), 'error');
                 return;
             }
             try {
@@ -214,14 +222,14 @@
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showToast(data.error || 'Failed to create user', 'error');
+                    showToast(data.error || _t('settings.user_create_failed', 'Failed to create user'), 'error');
                     return;
                 }
-                showToast('User created', 'success');
+                showToast(_t('settings.user_created', 'User created'), 'success');
                 this.newUser = { username: '', password: '', role: 'operator' };
                 await this.loadSaasAdmin();
             } catch (e) {
-                showToast('Failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -235,13 +243,13 @@
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showToast(data.error || 'Update failed', 'error');
+                    showToast(data.error || _t('settings.update_failed', 'Update failed'), 'error');
                     return;
                 }
-                showToast('User updated', 'success');
+                showToast(_t('settings.user_updated', 'User updated'), 'success');
                 await this.loadSaasAdmin();
             } catch (e) {
-                showToast('Failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -254,19 +262,19 @@
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showToast(data.error || 'Delete failed', 'error');
+                    showToast(data.error || _t('settings.delete_failed', 'Delete failed'), 'error');
                     return;
                 }
-                showToast('User deleted', 'success');
+                showToast(_t('settings.user_deleted', 'User deleted'), 'success');
                 await this.loadSaasAdmin();
             } catch (e) {
-                showToast('Failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
         async createTenant() {
             if (!this.newTenant.id) {
-                showToast('Tenant id required', 'error');
+                showToast(_t('settings.tenant_id_required', 'Tenant id required'), 'error');
                 return;
             }
             try {
@@ -278,24 +286,24 @@
                 });
                 const data = await resp.json();
                 if (!resp.ok) {
-                    showToast(data.error || 'Failed', 'error');
+                    showToast(data.error || _t('settings.failed', 'Failed'), 'error');
                     return;
                 }
-                showToast('Tenant added', 'success');
+                showToast(_t('settings.tenant_added', 'Tenant added'), 'success');
                 this.newTenant = { id: '', name: '' };
                 await this.loadSaasAdmin();
             } catch (e) {
-                showToast('Failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
         async changePassword() {
             if (this.passwordForm.new_password !== this.passwordForm.confirm_password) {
-                showToast('Passwords do not match', 'error');
+                showToast(_t('settings.passwords_mismatch', 'Passwords do not match'), 'error');
                 return;
             }
             if (this.passwordForm.new_password.length < 8) {
-                showToast('Password must be at least 8 characters', 'error');
+                showToast(_t('settings.password_min', 'Password must be at least 8 characters'), 'error');
                 return;
             }
             try {
@@ -306,18 +314,18 @@
                 });
                 const data = await resp.json();
                 if (resp.ok) {
-                    showToast('Password changed', 'success');
+                    showToast(_t('settings.password_changed', 'Password changed'), 'success');
                     this.passwordForm = { old_password: '', new_password: '', confirm_password: '' };
                 } else {
-                    showToast(data.error || 'Failed', 'error');
+                    showToast(data.error || _t('settings.failed', 'Failed'), 'error');
                 }
             } catch (e) {
-                showToast('Failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
         async createToken() {
-            if (!this.tokenName) { showToast('Token name required', 'error'); return; }
+            if (!this.tokenName) { showToast(_t('settings.token_name_required', 'Token name required'), 'error'); return; }
             try {
                 const resp = await fetch('/api/settings/account/tokens', {
                     method: 'POST',
@@ -329,9 +337,9 @@
                 this.tokenName = '';
                 this.lastCreatedToken = tok;
                 await this.loadAccount();
-                showToast(tok ? 'Token created — copy it below (shown once)' : 'Token created', tok ? 'success' : 'error');
+                showToast(tok ? _t('settings.token_created_copy', 'Token created — copy it below (shown once)') : _t('settings.token_created', 'Token created'), tok ? 'success' : 'error');
             } catch (e) {
-                showToast('Failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -339,9 +347,9 @@
             if (!this.lastCreatedToken) return;
             try {
                 await navigator.clipboard.writeText(this.lastCreatedToken);
-                showToast('Token copied to clipboard', 'success');
+                showToast(_t('settings.token_copied', 'Token copied to clipboard'), 'success');
             } catch (e) {
-                showToast('Copy failed — select the token and copy manually', 'error');
+                showToast(_t('settings.copy_failed_manual', 'Copy failed — select the token and copy manually'), 'error');
             }
         },
 
@@ -353,15 +361,15 @@
                 origin + '/api/memory/v2/health';
             try {
                 await navigator.clipboard.writeText(cmd);
-                showToast('curl example copied', 'success');
+                showToast(_t('settings.curl_copied', 'curl example copied'), 'success');
             } catch (e) {
-                showToast('Copy failed', 'error');
+                showToast(_t('settings.copy_failed', 'Copy failed'), 'error');
             }
         },
 
         async revokeToken(tokenId) {
             if (!tokenId) {
-                showToast('Missing token id', 'error');
+                showToast(_t('settings.missing_token_id', 'Missing token id'), 'error');
                 return;
             }
             if (!(await window.kazmaConfirm({
@@ -388,7 +396,7 @@
                 if (!resp.ok) {
                     const err = await resp.json().catch(function() { return {}; });
                     const detail = err.detail || err.error || ('HTTP ' + resp.status);
-                    showToast('Revoke failed: ' + detail, 'error');
+                    showToast(_t('settings.revoke_failed', 'Revoke failed: {error}', {error: detail}), 'error');
                     await this.loadAccount();
                     return;
                 }
@@ -399,9 +407,9 @@
                 // Re-fetch with cache bust so a stale GET cannot resurrect the row.
                 const tokens = await this._fetch('/api/settings/account/tokens?_=' + Date.now());
                 this.apiTokens = Array.isArray(tokens) ? tokens.slice() : [];
-                showToast('Token revoked', 'success');
+                showToast(_t('settings.token_revoked', 'Token revoked'), 'success');
             } catch (e) {
-                showToast('Revoke failed: ' + e.message, 'error');
+                showToast(_t('settings.revoke_failed', 'Revoke failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -424,7 +432,7 @@
 
         async testTool(toolName) {
             let args = {};
-            try { args = JSON.parse(this.toolTestArgs); } catch { showToast('Invalid JSON arguments', 'error'); return; }
+            try { args = JSON.parse(this.toolTestArgs); } catch { showToast(_t('settings.invalid_json_args', 'Invalid JSON arguments'), 'error'); return; }
             this.toolTestResult = null;
             try {
                 const resp = await fetch(`/api/settings/tools/${encodeURIComponent(toolName)}/test`, {
@@ -637,9 +645,9 @@
                 a.download = `kazma-backup-${new Date().toISOString().split('T')[0]}.yaml`;
                 a.click();
                 URL.revokeObjectURL(url);
-                showToast('Backup downloaded', 'success');
+                showToast(_t('settings.backup_downloaded', 'Backup downloaded'), 'success');
             } catch (e) {
-                showToast('Backup failed: ' + e.message, 'error');
+                showToast(_t('settings.backup_failed_reason', 'Backup failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -658,10 +666,10 @@
             }))) return;
             try {
                 await fetch('/api/settings/reset', { method: 'POST' });
-                showToast('System reset complete. Reloading...', 'success');
+                showToast(_t('settings.system_reset_reloading', 'System reset complete. Reloading...'), 'success');
                 setTimeout(() => location.reload(), 1500);
             } catch (e) {
-                showToast('Reset failed: ' + e.message, 'error');
+                showToast(_t('settings.reset_failed', 'Reset failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -674,14 +682,14 @@
                 a.href = URL.createObjectURL(blob);
                 a.download = `kazma-config.${this.exportFormat}`;
                 a.click();
-                showToast('Configuration exported', 'success');
+                showToast(_t('settings.config_exported', 'Configuration exported'), 'success');
             } catch (e) {
-                showToast('Export failed: ' + e.message, 'error');
+                showToast(_t('settings.export_failed', 'Export failed: {error}', {error: e.message}), 'error');
             }
         },
 
         async importConfig() {
-            if (!this.importData.trim()) { showToast('Paste or upload config data', 'error'); return; }
+            if (!this.importData.trim()) { showToast(_t('settings.paste_or_upload', 'Paste or upload config data'), 'error'); return; }
             this.saving = true;
             try {
                 await fetch('/api/settings/import', {
@@ -694,10 +702,10 @@
                         sections: this.importSections,
                     }),
                 });
-                showToast('Configuration imported. Reloading...', 'success');
+                showToast(_t('settings.config_imported', 'Configuration imported. Reloading...'), 'success');
                 setTimeout(() => location.reload(), 1500);
             } catch (e) {
-                showToast('Import failed: ' + e.message, 'error');
+                showToast(_t('settings.import_failed', 'Import failed: {error}', {error: e.message}), 'error');
             }
             this.saving = false;
         },
@@ -722,10 +730,10 @@
             }))) return;
             try {
                 await fetch('/api/settings/reset', { method: 'POST' });
-                showToast('Settings reset. Reloading...', 'success');
+                showToast(_t('settings.settings_reset_reloading', 'Settings reset. Reloading...'), 'success');
                 setTimeout(() => location.reload(), 1500);
             } catch (e) {
-                showToast('Reset failed: ' + e.message, 'error');
+                showToast(_t('settings.reset_failed', 'Reset failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -804,12 +812,12 @@
                             if (pending === 'google_drive' && status.drive_ok === false) {
                                 // OAuth succeeded but Drive itself is blocked —
                                 // say exactly why instead of the green toast.
-                                showToast('Google connected, but Drive access failed: ' + (status.drive_error || 'run Test to diagnose') + '. Test the card for the fix steps.', 'error');
+                                showToast(_t('settings.google_drive_failed', 'Google connected, but Drive access failed: {error}. Test the card for the fix steps.', {error: (status.drive_error || 'run Test to diagnose')}), 'error');
                             } else {
-                                showToast('☁️ ' + (this.offsiteActiveProviderLabel || pending) + ' connected — offsite backup active', 'success');
+                                showToast(_t('settings.offsite_connected', '☁️ {provider} connected — offsite backup active', {provider: (this.offsiteActiveProviderLabel || pending)}), 'success');
                             }
                         } else {
-                            showToast('Cloud connect did not complete — open the provider card and try again', 'error');
+                            showToast(_t('settings.cloud_connect_incomplete', 'Cloud connect did not complete — open the provider card and try again'), 'error');
                         }
                     }
                 }
@@ -827,7 +835,7 @@
         async saveBackupRetention() {
             const n = Number(this.backupRetention);
             if (!n || n < 1) {
-                showToast('Backup retention must be at least 1', 'error');
+                showToast(_t('settings.retention_min', 'Backup retention must be at least 1'), 'error');
                 return;
             }
             try {
@@ -838,12 +846,12 @@
                 });
                 const data = await resp.json();
                 if (data.status === 'error') {
-                    showToast(data.error || 'Save failed', 'error');
+                    showToast(data.error || _t('settings.save_failed', 'Save failed'), 'error');
                 } else {
-                    showToast('Backup retention saved — keeping the newest ' + n + ' backups', 'success');
+                    showToast(_t('settings.retention_saved', 'Backup retention saved — keeping the newest {n} backups', {n: n}), 'success');
                 }
             } catch (e) {
-                showToast('Save failed: ' + e.message, 'error');
+                showToast(_t('settings.failed_with_reason', 'Failed: {error}', {error: e.message}), 'error');
             }
         },
 
@@ -972,7 +980,7 @@
                     this.backupRunning = false;
                     this.backupResult = data.result || { ok: true };
                     if (this.backupResult.ok) {
-                        showToast('Backup complete: ' + this.backupResult.databases_ok + ' DBs, ' + this.backupResult.total_size_mb + ' MB', 'success');
+                        showToast(_t('settings.backup_complete', 'Backup complete: {dbs} DBs, {mb} MB', {dbs: this.backupResult.databases_ok, mb: this.backupResult.total_size_mb}), 'success');
                     }
                     await this.loadBackupList();
                 } else if (data.phase === 'error') {
@@ -980,7 +988,7 @@
                     this._backupPollId = null;
                     this.backupRunning = false;
                     this.backupResult = { ok: false, error: data.error || data.detail };
-                    showToast('Backup failed: ' + (data.error || data.detail), 'error');
+                    showToast(_t('settings.backup_failed_reason', 'Backup failed: {error}', {error: (data.error || data.detail)}), 'error');
                 }
             } catch (e) { /* keep polling */ }
         },
@@ -1008,13 +1016,13 @@
                 const resp = await fetch('/api/backup/' + encodeURIComponent(dirName), { method: 'DELETE' });
                 const data = await resp.json();
                 if (data.ok) {
-                    showToast('Backup deleted', 'success');
+                    showToast(_t('settings.backup_deleted', 'Backup deleted'), 'success');
                     await this.loadBackupList();
                 } else {
-                    showToast('Delete failed: ' + (data.error || ''), 'error');
+                    showToast(_t('settings.delete_failed', 'Delete failed') + (data.error ? ': ' + data.error : ''), 'error');
                 }
             } catch (e) {
-                showToast('Delete failed: ' + e.message, 'error');
+                showToast(_t('settings.delete_failed', 'Delete failed') + ': ' + e.message, 'error');
             }
         },
 
@@ -1031,16 +1039,16 @@
                 const data = await resp.json();
                 if (data.ok) {
                     if (item) { item.archived = true; item.archiving = false; }
-                    showToast('Archived: ' + data.size_mb + ' MB. Click Download to save.', 'success');
+                    showToast(_t('settings.archived_mb', 'Archived: {mb} MB. Click Download to save.', {mb: data.size_mb}), 'success');
                     // Auto-trigger download.
                     window.open('/api/backup/' + encodeURIComponent(dirName) + '/download', '_blank');
                 } else {
                     if (item) item.archiving = false;
-                    showToast('Archive failed: ' + (data.error || ''), 'error');
+                    showToast(_t('settings.archive_failed', 'Archive failed: {error}', {error: (data.error || '')}), 'error');
                 }
             } catch (e) {
                 if (item) item.archiving = false;
-                showToast('Archive failed: ' + e.message, 'error');
+                showToast(_t('settings.archive_failed', 'Archive failed: {error}', {error: e.message}), 'error');
             }
         },
         };

@@ -343,8 +343,8 @@
         _defaultConnectorExtras(name) {
             const defaults = {
                 telegram: { allowed_users: '' },
-                discord: { guild_id: '' },
-                slack: { app_token: '', workspace: '' },
+                discord: { guild_id: '', allowed_users: '' },
+                slack: { app_token: '', workspace: '', allowed_users: '' },
                 email: { smtp_host: '', smtp_port: '', username: '', password: '', imap_host: '' },
                 webhook: { incoming_url: '', outgoing_url: '', secret: '' },
             };
