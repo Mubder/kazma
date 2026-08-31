@@ -151,18 +151,13 @@ Kazma's architecture reflects those foundational principles:
 
 ---
 
-## 📸 Interface Showcase *(Legacy Previews — Updating Soon)*
+## 📸 Interface Showcase
 
-> [!NOTE]
-> The screenshots below reflect earlier UI builds. Updated high-resolution previews for the IDE, Swarm Builder, and Skills consoles matching the latest V2 Control Plane design system are currently being refreshed.
+Observability Dashboard — dark control plane (English and Arabic).
 
-| Observability Dashboard | Integrated Web IDE | Real-Time Chat & HITL |
-|---|---|---|
-| ![Dashboard](https://kazma.ai/screenshots/Dashboard-en.png) | ![IDE](https://kazma.ai/screenshots/IDE-en.png) | ![Chat](https://kazma.ai/screenshots/Chat-en.png) |
-
-| Swarm Task Builder | Native Skills Manager | MCP Server Marketplace |
-|---|---|---|
-| ![Swarm](https://kazma.ai/screenshots/Swarm-Task-Builder-en.png) | ![Skills](https://kazma.ai/screenshots/Skills-en.png) | ![MCP](https://kazma.ai/screenshots/MCP-en.png) |
+| English | Arabic |
+|---|---|
+| ![Observability Dashboard (English)](docs/screenshots/dashboard-en-dark.png) | ![Observability Dashboard (Arabic)](docs/screenshots/dashboard-ar-dark.png) |
 
 ---
 
