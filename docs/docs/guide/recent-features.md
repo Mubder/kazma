@@ -12,10 +12,15 @@ research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
 
-**New in 2026-08-31:** `kazma_guard.py --reload` is the deploy path
-(cold start 3–5 min; do not hand-kill uvicorn). Filesystem tools no
-longer stall `/health/ready`. Plan hops stay in the Plan widget — they
-are not transcript answers. Windows Postgres checkpoints need the
+**New in 2026-08-31:** [X Studio](./x-publisher) (`/x`) is the compose and
+plan surface (Post now, Schedule, reschedule, threads, delete, saved
+drafts). IBM Plex Sans / IBM Plex Sans Arabic is the shared face across
+the web UI, Docusaurus, and generated documents; the letterhead K is the
+logo and favicon. `kazma_guard.py --reload` is the deploy path — it skips
+the crash backoff ladder so a fifth reload in one day is not a 300s wait
+(restart **KazmaAgent** once if an old guard is still climbing). Do not
+hand-kill uvicorn. Filesystem tools no longer stall `/health/ready`. Plan
+hops stay in the Plan widget. Windows Postgres checkpoints need the
 Selector event loop (`kazma serve` / the guard, not `python -m uvicorn`).
 
 **New in 2026-08-27:** [Task Ledger](./task-ledger) (durable intent
@@ -33,7 +38,9 @@ resolution + git-write blast radius), transcript recall fallback
 
 | Area | What you get | Where |
 |------|--------------|-------|
-| **Guard reload + stall fixes (2026-08-31)** | `--reload` stops the recorded child and port holder, waits the full boot budget, kicks `KazmaAgent` only if the watcher is dead. `file_search` off the event loop. File-tool results capped at 32k. Plan-only hops stay out of the chat transcript. | `python scripts/service/kazma_guard.py --reload`; [Deployment](./deployment) |
+| **X Studio (2026-08-31)** | First-class `/x` composer + X-only planner. Post now / Schedule / reschedule / thread hops / delete. Saved drafts stamp `proposal_id` (stored text wins). Chat `x_post` stays always-HITL. **All clocks** → `/scheduled` (mixed cron + X). | [X publisher](./x-publisher); sidebar → X Studio |
+| **Brand type + mark (2026-08-31)** | IBM Plex Sans / IBM Plex Sans Arabic across UI, docs, and generated documents (Amiri naskh fallback). Letterhead K is logo, favicon, avatar. PPTX/XLSX no longer hard-code Calibri. | [Arabic & cultural](./arabic-cultural-features); [Document rendering](./document-rendering) |
+| **Guard reload + stall fixes (2026-08-31)** | `--reload` stops the recorded child and port holder, skips crash backoff, waits the boot budget, kicks `KazmaAgent` only if the watcher is dead. `file_search` off the event loop. File-tool results capped at 32k. Plan-only hops stay out of the chat transcript. | `python scripts/service/kazma_guard.py --reload`; [Deployment](./deployment) |
 | **Chat as the product (2026-08-26)** | `/` is immersive (no Chat/Home/Chat header). Composer: attach + input + send; Long/YOLO/cost live under **⋯**. Sidebar stays the grouped Work / Activity / Settings list (More was reverted — it never collapsed). | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/CHAT_AS_PRODUCT_UI_GOAL.md); restart after pull |
 | **Sampling HITL + native CUA + CI smoke (2026-08-25)** | MCP sampling is a real Once card (`KAZMA_MCP_SAMPLING=1`). `computer_use` calls Anthropic CUA / Gemini function when that model is active. CI Playwright job: `/health/live` + `#chat-input`. | [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots); `KAZMA_CUA_PLANNER=0` |
 | **Post-industry leftovers (2026-08-25)** | MCP resources/prompts (fenced; sampling HITL). CUA planner adapters on `computer_use`. LiveKit TTS published into the room. 429 backoff on Anthropic. Router word-boundaries + `models.defaults`. Eval tool-trace. Bright Data/Oxylabs stubs. | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md); [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots) |
@@ -61,6 +68,8 @@ resolution + git-write blast radius), transcript recall fallback
 
 **Operator actions after `git pull`:** `kazma ask` / `kazma acp` work
 without a restart (CLI; tokens stream, TTY HITL). Restart the server to activate
+**X Studio** (`/x`), the IBM Plex / letterhead-K brand, the `--reload` backoff
+skip (restart **KazmaAgent** once so the *guard* is on the new code),
 **computer_use**, **Langfuse auto-on**, Docling/LlamaParse salvage,
 **IDE LSP** (hover/complete on `/ide`), **plan mode** (`/plan on` · Plan
 pill), **tool hooks** (`agent.hooks.*`;
@@ -80,6 +89,7 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 
 | Area | What you get | Where |
 |------|----------------|--------|
+| **X Studio** | Compose / schedule / reschedule / thread / delete on X (official API) | `/x`; [X publisher](./x-publisher) |
 | Deep research | Multi-source pipeline, live sessions, routing, rubric | `/research`, chat, `/research deep` |
 | **Document Intelligence** | Secure ingest, OCR, index, generate/convert/redact, ops (capacity/GC/audit), cert | `/documents`, `/api/documents/*`, `/documents` slash, `document_*` tools, TUI Documents |
 | Proxy Provider | Residential proxy for scrape/crawl/Playwright/SERP | Settings → System |
@@ -102,6 +112,16 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 
 The most recent tranche — beyond the items in the table above:
 
+- **X Studio (`/x`)** — compose, schedule, reschedule, thread hops, delete a
+  live tweet, load a saved draft. Chat `x_post` stays always-HITL; the Web
+  click is the approval. **All clocks** opens `/scheduled` (cron + X).
+  [X publisher](./x-publisher).
+- **Brand type + mark** — IBM Plex Sans / IBM Plex Sans Arabic (UI, docs,
+  generated documents). Letterhead K is logo/favicon. Amiri remains the naskh
+  fallback. [Arabic & cultural](./arabic-cultural-features).
+- **Guard `--reload` skips crash backoff** — a deploy kill is not a crash, so
+  the fifth reload of the day is not a 300s wait. Restart **KazmaAgent** once
+  if an old guard is still climbing. [Deployment](./deployment).
 - **Steer & Abort (`/steer`, `/steer!`, `/abort`)** — out-of-band signals to a
   *running* task. Soft steer folds text into the next step; hard steer pauses,
   injects a requirement, and resumes (demoting to soft if the task is

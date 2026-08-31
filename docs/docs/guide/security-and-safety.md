@@ -237,9 +237,9 @@ The three gates use **different** danger-tool lists. This is deliberate (each pa
 
 ### 5.1 Gate A (graph) — `kazma.yaml safety.hitl.require_approval_for`
 
-Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`, `x_post`, `x_delete_post`. Parity-tested.
+Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`, `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`. Parity-tested.
 
-**Always-HITL (X ToU):** `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`) require approval even when YOLO, standing grants, or HITL-disabled would skip other danger tools. Official API only — see [X publisher](x-publisher).
+**Always-HITL (X ToU):** `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`) require approval even when YOLO, standing grants, or HITL-disabled would skip other danger tools. That is the **chat/agent** path. On the Web, X Studio (`/x`) and `/api/scheduled/x` treat the operator click as the approval (they call `publish_x_post` / `book_x_post` / `delete_x_post` directly — they do not invoke the chat tools). Official API only — see [X publisher](x-publisher).
 
 **Git-write always-gate (2026-08):** `git commit`, `push`, `merge`,
 `rebase`, `reset`, `checkout --`, `restore`, `clean`, `rm` and friends

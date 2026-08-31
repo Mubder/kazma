@@ -229,8 +229,13 @@ cd <kazma-install>
 & '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
 ```
 
-Wait for `Kazma is up. build …` (cold start is typically 3–5 minutes,
-budget 900s). `--status` shows whether the watcher and `/health/ready`
+Wait for `Kazma is up. build …` (first boot can take a few minutes for
+imports / MCP / Postgres; budget 900s). `--reload` plants a flag **before**
+killing `serve.py`, so the long-lived guard does **not** treat that kill as
+a crash and climb the backoff ladder (5s → 300s). If `--reload` still sits
+on `WinError 10061` for minutes, the **guard process** is still running old
+code — restart `KazmaAgent` once (`schtasks /End` then `/Run KazmaAgent`
+on Windows). `--status` shows whether the watcher and `/health/ready`
 agree. `--install` registers the OS task (`install_service.py`).
 
 On Windows, start via `kazma serve` or the guard — not `python -m uvicorn`.

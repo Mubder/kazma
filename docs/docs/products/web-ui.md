@@ -31,6 +31,8 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 | Research | `/research` | **Start deep research** (live SSE sessions), results list, archive, compare, export |
 | Documents | `/documents` | Document Intelligence: upload, library, content preview, convert/redact, **ops panel** (capacity, readiness, audit, GC dry-run + confirm) |
 | IDE | `/ide` | Monaco editor, workspace files, apply-patch, run, git, AI-assisted edit |
+| **X Studio** | `/x` | Compose, schedule, reschedule, thread hops, delete a live tweet, load saved drafts. Operator click is the approval. **All clocks** opens `/scheduled`. |
+| Scheduled | `/scheduled` | Mixed clock: cron jobs **and** X posts |
 | Login | `/login` | Secret / local user / OIDC |
 
 ### Documents page (product path)
@@ -164,6 +166,7 @@ in `kazma.v5.css`. The same tokens are mirrored onto the docs site
 | **Dark palette** | Deep blue-black slate — bg `#0e1626`, panel `#16223a`, text `#eef3fb`. Layered depth (panel → surface → elevated). |
 | **Light palette** | Ice-blue paper — bg `#f0f4fa`, panel `#ffffff`, ink `#0c1526`. Muted text kept dark for P0 contrast. |
 | **Accents** | Royal blue `#3b82f6` (dark) / `#2563eb` (light) + sky `#38bdf8`. Brand gradient `azure → royal → sky`. |
+| **Type + mark** | IBM Plex Sans / IBM Plex Sans Arabic (`--font-sans` / `--font-arabic`) + JetBrains Mono. Letterhead K is logo, favicon, and avatar. Same pairing as generated documents and Docusaurus. |
 | **Single token table** | One source of truth per theme — the old v4 cyan palette and the "Abyss" set were **folded into one table** so they no longer fight (design-token unification, P1). |
 | **Server-authoritative theme** | Theme is resolved **server-side**, not just client-side, so your choice **persists across devices and browsers** (a switch on one machine holds on another). |
 | **Real dark canvas** | `<html>` carries `color-scheme: only <theme>` and is painted with the theme background, so iOS Safari can no longer paint its dark system canvas over Kazma Light. |

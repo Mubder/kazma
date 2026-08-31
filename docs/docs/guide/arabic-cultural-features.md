@@ -39,27 +39,27 @@ Stop words include **Kuwaiti dialect** terms (`يلا`, `شلون`, `عشان`, 
 
 ### 3.1 The i18n system
 
-`kazma-ui/kazma_ui/i18n.py` (1187 lines) is a **custom, lightweight** i18n system — **not** Babel/gettext.
+`kazma-ui/kazma_ui/i18n.py` is a **custom, lightweight** i18n system — **not** Babel/gettext. The strings live as one module per UI section under `kazma_ui/i18n/catalog/` (including `x_studio.py`) and merge into `TRANSLATIONS` at import.
 
-- **No separate `ar.json`/`en.json` files.** All translations are inlined in a single Python dict `TRANSLATIONS` (`i18n.py:33`), keyed by dotted string with `\{"en": ..., "ar": ...\}` values.
-- Only `en` and `ar` are shipped by default (module docstring lines 1-8).
-- Every key **must** have an `en` entry; `ar` falls back to English if missing (`i18n.py:1116-1119`).
+- **No separate `ar.json`/`en.json` files.** Keys are dotted strings with `{"en": ..., "ar": ...}` values.
+- Only `en` and `ar` are shipped by default.
+- Every key **must** have an `en` entry; `ar` falls back to English if missing.
 
 API:
 
 | Function | Purpose |
 |---|---|
-| `t(key, lang, **kwargs)` (`i18n.py:1106`) | Translate with `str.format` interpolation. |
-| `make_translator(lang)` (`i18n.py:1128`) | Closure bound to a language, for Jinja2. |
-| `SUPPORTED_LANGUAGES` (`i18n.py:1138`) | Computed dynamically from the dict. |
+| `t(key, lang, **kwargs)` | Translate with `str.format` interpolation. |
+| `make_translator(lang)` | Closure bound to a language, for Jinja2. |
+| `SUPPORTED_LANGUAGES` | Computed dynamically from the dict. |
 
-**Jinja2 patching:** `_patch_jinja2_templates()` (`i18n.py:1156`) monkey-patches `Jinja2Templates.__init__` to always inject default i18n globals (`t`, `lang="en"`, `dir="ltr"`) so templates never raise `UndefinedError`. Called at module load (line 1186).
+**Jinja2 patching:** `_patch_jinja2_templates()` monkey-patches `Jinja2Templates.__init__` to always inject default i18n globals (`t`, `lang="en"`, `dir="ltr"`) so templates never raise `UndefinedError`. Called at module load.
 
 **Server-side wiring** (`app.py:222-248`): the builder injects `t`, `lang`, `dir`, and `translations_json` (full dict as JSON for client-side Alpine.js) into Jinja2 globals. A `language_middleware` reads the `kazma-lang` cookie and sets `lang`/`dir` per request.
 
 ### 3.2 Coverage
 
-The translation dict is extensive — keys span nav, header, chat, dashboard, settings (all 13 tabs), swarm (workers, tasks, patterns, aggregation, results, routing, output routing), agents, skills, MCP, and workspace (including GitHub telemetry). Examples: `swarm.arabic_dialect` (`i18n.py:976`), `swarm.dialect_msa` ("Modern Standard Arabic" / "العربية الفصحى", line 977).
+The translation dict is extensive — keys span nav, header, chat, dashboard, settings, swarm, agents, skills, MCP, workspace, **X Studio** (`i18n/catalog/x_studio.py`), and scheduled. The 1,979-entry literal now lives as one module per UI section under `kazma_ui/i18n/catalog/` and is merged at import so `TRANSLATIONS` keeps its previous shape. Examples: `swarm.arabic_dialect`, `swarm.dialect_msa` ("Modern Standard Arabic" / "العربية الفصحى").
 
 ### 3.3 RTL handling
 
@@ -67,30 +67,31 @@ The translation dict is extensive — keys span nav, header, chat, dashboard, se
 - **`dir` global** set in `app.py:235`: `"rtl" if _startup_lang == "ar" else "ltr"`, updated per-request by the middleware.
 - **Client-side:** `base.html:71` injects `window.KAZMA_LANG`; lines 76-77 expose a client-side `t()` lookup.
 
-### 3.4 Arabic font policy (Calibri + 16px base)
+### 3.4 Arabic font policy (IBM Plex + 16px RTL base)
 
-`kazma-ui/kazma_ui/static/css/kazma.css` — matches recent commits (`7890e97`, `d689ac8`, `981af5c`):
+`kazma-ui/kazma_ui/static/css/kazma.css` — IBM Plex Sans / IBM Plex Sans Arabic
+is the shared face with generated documents (`style_theme.THEME`) and the
+Docusaurus docs. Amiri stays as a naskh fallback when Plex is absent. The
+letterhead K is the product logo, favicon, and avatar.
 
 ```css
-/* Font stacks (kazma.css:95-96) */
+/* Font stacks (kazma.css :root) */
 :root {
-  --font-sans: 'Calibri', 'Inter', 'Cairo', -apple-system, ...;
-  --font-arabic: 'Calibri', 'Cairo', 'Inter', -apple-system, ...;
+  --font-sans: 'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, ...;
+  --font-arabic: 'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, ...;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 }
 
-/* 16px base for RTL (kazma.css:114-118) */
 html { font-size: 14px; }
 /* Arabic glyphs need larger rendering for readability.
    16px base makes 0.7rem ≈ 11.2px (readable). */
 html[dir="rtl"] { font-size: 16px; }
 
-/* Minimum readable font-size floor (kazma.css:119-133) */
 html[dir="rtl"] .badge,
 html[dir="rtl"] .metric-label,
 html[dir="rtl"] .text-muted,
 html[dir="rtl"] .text-xs { font-size: 0.82rem !important; }
 
-/* RTL font-family enforcement (kazma.css:163-169) */
 [dir="rtl"] body,
 [dir="rtl"] input,
 [dir="rtl"] textarea,
@@ -98,7 +99,8 @@ html[dir="rtl"] .text-xs { font-size: 0.82rem !important; }
 [dir="rtl"] select { font-family: var(--font-arabic); }
 ```
 
-Calibri is the primary font for **both** Latin and Arabic; Cairo is the Arabic-capable fallback.
+Plex is the primary font for **both** Latin and Arabic. Tabular numerals
+(`tnum`) apply on LTR only — never force Latin OpenType features on Arabic.
 
 ---
 
