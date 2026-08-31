@@ -132,8 +132,10 @@ class PptxEngine:
                 Inches(0.4), slide_h - Inches(0.45), slide_w - Inches(0.8), Inches(0.3),
             )
             chrome = self.profile.chrome
+            page_fmt = str(chrome.get("page_fmt") or "{n}")
             self._shape_text(
-                footer, f'{chrome["brand"]}    ·    {page_num}',
+                footer,
+                f'{chrome["brand"]}    ·    {page_fmt.format(n=page_num)}',
                 color_hex=colors["muted"], size=10, align=None,
             )
             # Optional speaker notes for this slide.

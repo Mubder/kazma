@@ -632,7 +632,9 @@ class DocxEngine:
                 for r in hp.runs:
                     r.font.size = Pt(8)
                 self._set_paragraph(hp, "start")
-            # Footer: brand + an auto-updating PAGE field (page numbers).
+            # Footer: brand + localized page label wrapping a PAGE field
+            # ("صفحة {n}" / "Page {n}"). A bare digit in an Arabic footer
+            # reads as leftover English chrome.
             fp = section.footer.paragraphs[0]
             fp.text = ""
             brand = model.footer or self.profile.chrome["brand"]
@@ -641,7 +643,15 @@ class DocxEngine:
             if model.page_numbers:
                 sep = fp.add_run("    —    ")
                 sep.font.size = Pt(8)
+                page_fmt = str(self.profile.chrome.get("page_fmt") or "{n}")
+                prefix, _marker, suffix = page_fmt.partition("{n}")
+                if prefix:
+                    pre = fp.add_run(prefix)
+                    pre.font.size = Pt(8)
                 self._append_field(fp, "PAGE", "1")  # updated by Word/LibreOffice
+                if suffix:
+                    post = fp.add_run(suffix)
+                    post.font.size = Pt(8)
             for r in fp.runs:
                 if r.font.size is None:
                     r.font.size = Pt(8)

@@ -113,6 +113,12 @@ def theme_colors_reportlab() -> dict[str, Any]:
 def localized_chrome(*, rtl: bool, numerals: str = "latn") -> dict[str, str]:
     """Header/footer/page chrome strings for EN vs AR (same layout).
 
+    Picked by :meth:`DocProfile.for_content` from the document language
+    (``lang=en`` / ``lang=ar`` / auto-detect). Header uses ``brand_short``;
+    footer uses ``brand``. Callers can still override ``header`` / ``footer``
+    on the generate payload. ``page_fmt`` wraps the live page number
+    (``Page {n}`` / ``صفحة {n}``).
+
     ``numerals`` selects the digit set for page numbers and any other generated
     figure: ``"latn"`` (ASCII 0-9) or ``"arab"`` (Arabic-Indic ٠-٩). The page
     format string is a template, so the substitution happens at render time —
@@ -121,6 +127,7 @@ def localized_chrome(*, rtl: bool, numerals: str = "latn") -> dict[str, str]:
     if rtl:
         return {
             "brand": "منظومة كاظمة للذكاء الاصطناعي",
+            "brand_short": "كاظمه",
             "toc": "المحتويات",
             "references": "المراجع",
             "page_fmt": "صفحة {n}",
@@ -130,6 +137,7 @@ def localized_chrome(*, rtl: bool, numerals: str = "latn") -> dict[str, str]:
         }
     return {
         "brand": "Kazma AI Platform",
+        "brand_short": "Kazma",
         "toc": "Contents",
         "references": "References",
         "page_fmt": "Page {n}",
