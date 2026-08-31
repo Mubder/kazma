@@ -330,6 +330,27 @@ CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 
 _MISSING = object()
 
+# YAML flattens to ``safety.hitl.approval_timeout_seconds``; Settings and
+# ``get_hitl_config`` read the flat ``safety.approval_timeout``. The Aug 13
+# YAML seed left nested rows (timeout=60) that nobody reads — but they lie
+# in settings.db. Map nested → flat, never promote the old 60s default.
+_HITL_NESTED_TO_FLAT: dict[str, str] = {
+    "safety.hitl.enabled": "safety.hitl_enabled",
+    "safety.hitl.approval_timeout_seconds": "safety.approval_timeout",
+    "safety.hitl.auto_deny_on_timeout": "safety.auto_deny_on_timeout",
+    "safety.hitl.require_approval_for": "safety.require_approval_for",
+}
+
+
+def _is_hitl_timeout_fossil(flat_key: str, value: Any) -> bool:
+    """True for the old YAML default (60s) that must not pin ConfigStore."""
+    if flat_key != "safety.approval_timeout":
+        return False
+    try:
+        return int(value) == 60
+    except (TypeError, ValueError):
+        return False
+
 
 # ─── Migration Framework ────────────────────────────────────────────────
 
@@ -1207,9 +1228,15 @@ class ConfigStore:
                 full_key = f"{prefix}.{k}" if prefix else k
                 if isinstance(v, dict):
                     _flatten(v, full_key)
-                else:
-                    cat = prefix.split(".")[0] if prefix else "general"
-                    yaml_items.append((full_key, v, cat))
+                    continue
+                dest = _HITL_NESTED_TO_FLAT.get(full_key, full_key)
+                if _is_hitl_timeout_fossil(dest, v):
+                    continue
+                cat = (
+                    "safety" if dest.startswith("safety.")
+                    else (prefix.split(".")[0] if prefix else "general")
+                )
+                yaml_items.append((dest, v, cat))
 
         _flatten(data)
 
@@ -1234,15 +1261,68 @@ class ConfigStore:
             if key not in existing_keys
         ]
 
-        if not new_items:
-            return 0
+        seeded = 0
+        if new_items:
+            logger.info(
+                "[ConfigStore] Reconciling %d new keys from kazma.yaml into %s",
+                len(new_items),
+                backend_label,
+            )
+            seeded = self.batch_set(new_items)
+        self.scrub_nested_hitl_fossils()
+        return seeded
 
-        logger.info(
-            "[ConfigStore] Reconciling %d new keys from kazma.yaml into %s",
-            len(new_items),
-            backend_label,
-        )
-        return self.batch_set(new_items)
+    def _db_get_raw(self, key: str) -> Any:
+        """Value stored in the DB only — no YAML fallback. ``_MISSING`` if absent."""
+        with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    return _MISSING
+                row = pool.execute_one(
+                    "SELECT value FROM kazma_settings WHERE key = %s",
+                    (key,),
+                )
+                if row is None:
+                    return _MISSING
+                raw = row["value"]
+                return json.loads(raw) if isinstance(raw, str) else raw
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            if row is None:
+                return _MISSING
+            return json.loads(row["value"])
+
+    def scrub_nested_hitl_fossils(self) -> int:
+        """Drop YAML-shaped HITL keys that Settings / ``get_hitl_config`` never read.
+
+        Nested ``safety.hitl.approval_timeout_seconds=60`` was seeded from the
+        old YAML default. Runtime reads flat ``safety.approval_timeout``
+        (absent → YAML 300). A leftover 60 is inert but lies in settings.db.
+
+        Timeout==60 is never promoted. Other nested values promote to the
+        flat key when the flat key is missing, then the nested row is deleted.
+        """
+        dropped = 0
+        for nested, flat in _HITL_NESTED_TO_FLAT.items():
+            raw = self._db_get_raw(nested)
+            if raw is _MISSING:
+                continue
+            if _is_hitl_timeout_fossil(flat, raw):
+                if self.delete(nested):
+                    dropped += 1
+                continue
+            if self._db_get_raw(flat) is _MISSING:
+                self.set(flat, raw, category="safety")
+            if self.delete(nested):
+                dropped += 1
+        if dropped:
+            logger.info(
+                "[ConfigStore] scrubbed %d nested HITL fossil key(s)", dropped
+            )
+        return dropped
 
     def reset_all(self) -> int:
         """Delete all DB settings (reverts to YAML defaults). Returns count deleted."""

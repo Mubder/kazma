@@ -119,7 +119,7 @@ def test_nginx_ha_has_websocket_and_sticky():
 
 def test_ha_compose_is_labelled_demo_not_full_ha():
     text = (_ROOT / "docker-compose.ha.yml").read_text(encoding="utf-8")
-    assert "not full HA" in text.lower() or "DEMO" in text
+    assert "not full ha" in text.lower()
     assert "kazma_data" in text
 
 

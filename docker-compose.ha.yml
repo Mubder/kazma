@@ -5,8 +5,8 @@
 # Postgres holds checkpoints / settings / chat sessions / swarm tasks /
 # document jobs. The kazma_data volume shares SQLite-backed memory, cron,
 # vault, documents, workspaces, and the turn journal across replicas.
-# SQLite WAL + busy_timeout=5000 is the concurrency story — this is not
-# full HA for those files (prefer a single writer, or don't scale past 2
+# SQLite WAL + busy_timeout=5000 is the concurrency story — not full HA
+# for those files (prefer a single writer, or don't scale past 2
 # without accepting WAL writer contention).
 #
 # External load balancer should:

@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Nested HITL fossils scrubbed from ConfigStore (2026-09-01)
+
+`settings.db` still held Aug-13 YAML-seed rows (`safety.hitl.approval_timeout_seconds=60`
+and siblings). Runtime never read them — `get_hitl_config` uses YAML 300 plus
+flat `safety.approval_timeout` — but a raw DB query still showed 60.
+Boot reconcile now writes HITL under the flat Settings keys, drops the
+nested rows, and never promotes a leftover 60.
+
 ## X Studio: distinct posts are not a 3-card mute (2026-08-31)
 
 Gateway HITL burst mute (`3` cards / `4` minutes) treated eight different

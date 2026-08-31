@@ -369,10 +369,15 @@ class TestReconcileFromYaml:
         )
         try:
             count = store.reconcile_from_yaml()
-            assert count == 3  # llm.model, llm.temperature, safety.hitl.enabled
+            assert count == 3  # llm.model, llm.temperature, safety.hitl_enabled
             assert store.get("llm.model") == "gpt-4o"
             assert store.get("llm.temperature") == 0.7
-            assert store.get("safety.hitl.enabled") is True
+            assert store.get("safety.hitl_enabled") is True
+            # Nested YAML shape is not stored — Settings / get_hitl_config
+            # read the flat key.
+            from kazma_core.config_store import _MISSING
+
+            assert store._db_get_raw("safety.hitl.enabled") is _MISSING
         finally:
             store.close()
 
@@ -442,5 +447,46 @@ class TestReconcileFromYaml:
             second = store.reconcile_from_yaml()
             assert first == 1
             assert second == 0  # already seeded
+        finally:
+            store.close()
+
+
+    def test_nested_hitl_timeout_60_is_not_promoted(self, tmp_path):
+        """Old YAML seed (60s) must not pin safety.approval_timeout."""
+        from kazma_core.config_store import _MISSING
+
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text("llm:\n  model: gpt-4o\n", encoding="utf-8")
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(yaml_path),
+        )
+        try:
+            store.set("safety.hitl.approval_timeout_seconds", 60, category="safety")
+            store.set("safety.hitl.enabled", True, category="safety")
+            n = store.scrub_nested_hitl_fossils()
+            assert n == 2
+            assert store._db_get_raw("safety.hitl.approval_timeout_seconds") is _MISSING
+            assert store._db_get_raw("safety.approval_timeout") is _MISSING
+            assert store._db_get_raw("safety.hitl.enabled") is _MISSING
+            assert store._db_get_raw("safety.hitl_enabled") is True
+        finally:
+            store.close()
+
+    def test_nested_hitl_real_timeout_is_promoted(self, tmp_path):
+        """A non-60 nested timeout is an operator override — keep it, flat."""
+        yaml_path = tmp_path / "kazma.yaml"
+        yaml_path.write_text("llm:\n  model: gpt-4o\n", encoding="utf-8")
+        store = ConfigStore(
+            db_path=str(tmp_path / "settings.db"),
+            yaml_path=str(yaml_path),
+        )
+        try:
+            store.set("safety.hitl.approval_timeout_seconds", 120, category="safety")
+            store.scrub_nested_hitl_fossils()
+            assert store.get("safety.approval_timeout") == 120
+            from kazma_core.config_store import _MISSING
+
+            assert store._db_get_raw("safety.hitl.approval_timeout_seconds") is _MISSING
         finally:
             store.close()
