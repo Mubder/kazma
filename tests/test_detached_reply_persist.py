@@ -369,3 +369,18 @@ async def test_backfill_replaces_short_closed_interim(monkeypatch):
     assert out[-1]["content"].startswith(interim)
     assert len(out[-1]["content"]) > len(interim) + 400
     assert len(out) == 2
+
+
+def test_record_instant_turn_does_not_stack_duplicate_slash(monkeypatch):
+    """A retried /unrestricted POST must not append a second You + Kazma pair."""
+    session = SimpleNamespace(session_id="s-cap", messages=[])
+    store = _FakeStore(session)
+    monkeypatch.setattr(reply_sink, "_store", lambda: store)
+    reply = "MISSION ON — run until done.\nYOLO ON"
+    reply_sink.record_instant_turn("s-cap", "t-cap", "/unrestricted", reply, kind="capacity")
+    reply_sink.record_instant_turn("s-cap", "t-cap", "/unrestricted", reply, kind="capacity")
+    roles = [(m.get("role"), (m.get("content") or "").strip()) for m in session.messages]
+    users = [c for r, c in roles if r == "user"]
+    assts = [c for r, c in roles if r == "assistant"]
+    assert users == ["/unrestricted"]
+    assert assts == [reply]

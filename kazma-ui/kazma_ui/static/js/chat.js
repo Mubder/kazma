@@ -457,6 +457,13 @@
    *   the "no response until refresh" class and are gone.
    */
 
+  /** /long /mission /unrestricted /yolo /plan — server answers without the graph. */
+  function _isInstantCapacitySlash(text) {
+    var h = String(text || '').trim().split(/\s+/)[0].toLowerCase();
+    return h === '/long' || h === '/mission' || h === '/unrestricted'
+      || h === '/yolo' || h === '/plan';
+  }
+
   /** Render markdown to plain text for transcript dedupe on load. */
   function _plainFromMarkdown(md) {
     var s = String(md || '').trim();
@@ -1787,7 +1794,10 @@
     currentMsgEl = null;
     tokenAccum = '';
     _turnPainted = false;
-    disableInput(); // → beginTurn → progress panel on new assistant bubble
+    var _instantSlash = _isInstantCapacitySlash(content);
+    if (!_instantSlash) {
+      disableInput(); // → beginTurn → progress panel on new assistant bubble
+    }
 
     // Reset attachment state (chips above the box, not placeholder text)
     clearPendingAttachments();
@@ -4657,6 +4667,7 @@
         }
 
         var prevAssistantContent = null;
+        var prevUserContent = null;
         messages.forEach(function(msg) {
           // Only human-visible roles. System injects (self-improvement Soul,
           // knowledge fences, CONTINUITY notes) must never render as "You".
@@ -4667,6 +4678,20 @@
           if (content.indexOf('[SelfImprovement]') >= 0 && content.indexOf('BEGIN OBSERVATION') >= 0) return;
           var role = rawRole === 'assistant' ? 'assistant' : (rawRole === 'user' ? 'user' : null);
           if (!role) return;
+          // Drop blank assistant rows (open-turn placeholders that never
+          // got text). They split consecutive identical replies so the
+          // collapse below could not merge them.
+          if (role === 'assistant' && !(content || '').trim() && !msg.pending) return;
+          // Collapse identical consecutive user rows (SSE persist + a
+          // retried mobile POST of the same slash command).
+          if (role === 'user') {
+            var _uTrim = (content || '').trim();
+            // Slash commands persist once per send; a retried mobile POST
+            // stacks a second identical user row after the confirmation.
+            // Do not collapse ordinary repeated chat ("hello" twice).
+            if (_uTrim && prevUserContent === _uTrim && _uTrim.charAt(0) === '/') return;
+            prevUserContent = _uTrim || null;
+          }
           // Collapse identical consecutive assistant rows left by older
           // double-persist bugs (same answer twice after YOLO/refresh).
           // Also collapse when source markdown differs only by whitespace /
@@ -4682,8 +4707,6 @@
           }
           if (role === 'assistant') {
             prevAssistantContent = (content || '').trim() || null;
-          } else {
-            prevAssistantContent = null;
           }
           // If the last assistant message is marked pending (client refreshed
           // mid-turn while the LLM was still processing), show a processing
@@ -5206,21 +5229,26 @@
       if (!reply || !messagesEl) return;
       var incoming = String(reply).trim();
       if (!incoming) return;
-      var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
-      var lastAsst = null;
-      for (var i = 0; i < msgs.length; i++) {
-        if (msgs[i].classList.contains('message-user')) lastAsst = null;
-        else lastAsst = msgs[i];
-      }
-      if (lastAsst) {
-        var te = lastAsst.querySelector('.message-text');
-        // Exact-match only — no fuzzy "did it render" heuristics (V2).
-        if (te && (te.textContent || '').replace(/\s+/g, ' ').trim() === incoming.replace(/\s+/g, ' ').trim()) return;
-      }
+      var incomingPlain = _plainFromMarkdown(incoming);
+      var open = _assistantBubbleForOpenTurn();
+      var te = open ? open.querySelector('.message-text') : null;
+      var shown = te
+        ? _plainFromMarkdown(te.getAttribute('data-md') || te.textContent || '')
+        : '';
+      // Same confirmation already on the open-turn bubble (SSE painted,
+      // then WS live-fanout of the journaled capacity frame — mobile
+      // /unrestricted then desktop load, 2026-08-31).
+      if (shown && incomingPlain && shown === incomingPlain) return;
       var prev = currentMsgEl;
-      currentMsgEl = createAssistantMessage();
+      // One assistant under the last user row: fill the thinking
+      // placeholder instead of opening a second bubble.
+      currentMsgEl = open || createAssistantMessage();
       if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
         window.KazmaChat.applyFinalAssistantText(incoming, '', {});
+      }
+      var stamped = currentMsgEl && currentMsgEl.querySelector('.message-text');
+      if (stamped) {
+        try { stamped.setAttribute('data-md', incoming); } catch (e) { /* ignore */ }
       }
       currentMsgEl = prev;
     },

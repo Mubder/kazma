@@ -110,8 +110,11 @@ class TestV2ArchitecturePresent:
         chat_src = _CHAT_JS.read_text(encoding="utf-8")
         store_src = _STORE_JS.read_text(encoding="utf-8")
         assert "hasLiveSSE: function()" in chat_src
-        # token/done painting still gated on the live SSE
-        assert store_src.count("hasLiveSSE()") >= 2
+        # token/done/capacity painting still gated on the live SSE
+        assert store_src.count("hasLiveSSE()") >= 3
+        assert "case 'capacity'" in store_src
+        assert "_plainFromMarkdown" in chat_src
+        assert "function _isInstantCapacitySlash" in chat_src
         # card dedupe is at the render site, not the transport
         assert "if (hasInlineApprovalCard()) return;" in chat_src
 
@@ -120,6 +123,13 @@ class TestV2ArchitecturePresent:
         from /api/pending-approvals (server truth), one best-effort shot."""
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function recoverMissedApproval(" in src
+
+
+    def test_capacity_slash_does_not_open_thinking_turn(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "function _isInstantCapacitySlash" in src
+        assert "if (!_instantSlash)" in src
+        assert "prevUserContent" in src
         assert "'/api/pending-approvals'" in src
         assert "setTimeout(recoverMissedApproval, 1200)" in src
 
