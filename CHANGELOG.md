@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Turn ledger P1+P2: parts + CoT projector (2026-09-01)
+
+A turn is no longer one string. Session rows carry `parts` (`reasoning` /
+`tool` / `status` / `hitl` / `text`). A short final hop moves the previous
+text into `reasoning` instead of erasing it. GET `/messages` returns parts
+and derives `activity` so reload restores the CoT accordion. `beginTurn`
+no longer strips another turn's panel; a new message opens a new bubble.
+`turn_document.js` is the client projector. Stream wipe + missing CoT on
+retype/reload are the class this closes.
+
 ## Turn ledger P0: headless graph finishes write the transcript (2026-09-01)
 
 HITL watchdog auto-deny (and the other UI/gateway `graph.ainvoke` sites)

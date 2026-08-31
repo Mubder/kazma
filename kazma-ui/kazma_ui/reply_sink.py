@@ -263,10 +263,11 @@ def upsert_reply(
     open_turn: bool = False,
     pending: bool = False,
     activity: list[dict[str, Any]] | None = None,
+    parts: list[dict[str, Any]] | None = None,
     model: str | None = None,
     tokens: int | None = None,
     cost: float | None = None,
-    allow_shrink: bool = True,
+    allow_shrink: bool = False,
 ) -> bool:
     """Idempotently write the reply for *turn_id* into *session_id*.
 
@@ -279,9 +280,14 @@ def upsert_reply(
     ``open_turn`` keeps the durable in-flight marker on the row (see
     :func:`resolve_reply_turn`). ``pending`` marks a bubble with no text yet
     so a reload shows a processing indicator rather than a blank gap.
-    ``allow_shrink=False`` refuses to replace longer stored text with
-    shorter text — used by best-effort writers (disconnect/error flushes)
-    that must never trade a complete answer for a fragment.
+    ``allow_shrink=False`` (the default) refuses to replace longer stored
+    text with shorter text unless *parts* carries a new ``text`` part —
+    working notes belong in ``reasoning``, not in a clobbered ``content``.
+    Best-effort disconnect flushes pass ``False`` explicitly.
+
+    ``parts`` is the TurnDocument (reasoning / tool / status / hitl / text).
+    Merge never deletes earlier reasoning or tools. ``content`` and
+    ``activity`` are derived from parts for older clients.
 
     Returns True when the store was updated.
     """
@@ -311,15 +317,37 @@ def upsert_reply(
                 rows.append(row)
                 sess.messages = rows
             else:
-                if text.strip():
+                if text.strip() and parts is None:
                     if allow_shrink or len(text.strip()) >= len(
                         str(row.get("content") or "").strip()
                     ):
                         row["content"] = text
 
+            if parts is not None:
+                from kazma_ui.turn_document import activity_of, merge_parts, text_of
+
+                existing_parts = (
+                    row.get("parts") if isinstance(row.get("parts"), list) else []
+                )
+                if not existing_parts and str(row.get("content") or "").strip():
+                    existing_parts = [
+                        {"type": "text", "text": str(row.get("content") or "")}
+                    ]
+                merged = merge_parts(
+                    existing_parts,
+                    parts,
+                )
+                row["parts"] = merged
+                derived = text_of(merged)
+                if derived:
+                    row["content"] = derived
+                derived_act = activity_of(merged)
+                if derived_act:
+                    row["activity"] = derived_act
+
             if pending:
                 row["pending"] = True
-            elif text.strip():
+            elif str(row.get("content") or "").strip():
                 row.pop("pending", None)
 
             if open_turn:
@@ -327,7 +355,7 @@ def upsert_reply(
             else:
                 row.pop(_OPEN, None)
 
-            if activity:
+            if activity and not row.get("activity"):
                 row["activity"] = list(activity)
             if model:
                 row["model"] = str(model)

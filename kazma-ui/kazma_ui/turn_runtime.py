@@ -80,22 +80,36 @@ def persist_reply(
     tokens: int | None = None,
     cost: float | None = None,
     activity: list[dict[str, Any]] | None = None,
+    parts: list[dict[str, Any]] | None = None,
+    streamed_text: str = "",
     allow_shrink: bool | None = None,
 ) -> bool:
     """Write this turn's reply through the sink. Never raises."""
     if not session_id or not reply_turn_id:
         return False
     if allow_shrink is None:
-        allow_shrink = not interrupted
+        # Content-only writes must not clobber a longer hop. When *parts*
+        # carries a text part, upsert derives content from that part.
+        allow_shrink = False
     try:
         from kazma_ui.reply_sink import close_reply_turn, upsert_reply
+        from kazma_ui.turn_document import activity_of, parts_from_stream
+
+        if parts is None:
+            parts = parts_from_stream(
+                streamed=streamed_text,
+                final=content,
+                activity=activity,
+            )
+        derived_act = activity_of(parts) or activity
 
         ok = upsert_reply(
             session_id,
             reply_turn_id,
             content,
             open_turn=interrupted,
-            activity=activity,
+            activity=derived_act,
+            parts=parts,
             model=model or None,
             tokens=tokens,
             cost=cost,
@@ -178,7 +192,12 @@ async def close_turn(
 
         if not turn_id:
             turn_id = resolve_reply_turn(thread_id, session_id)
-        text = resolve_reply_text(asst, streamed_text)
+        # An interrupted/cancelled turn's checkpoint often still holds the
+        # PREVIOUS assistant message. Streamed narration is this turn's row.
+        if interrupted and str(streamed_text or "").strip():
+            text = str(streamed_text).strip()
+        else:
+            text = resolve_reply_text(asst, streamed_text)
         if not text and not interrupted:
             text = (
                 "⚠️ Your previous turn finished without producing a reply "
@@ -191,6 +210,15 @@ async def close_turn(
                 (thread_id or "")[:12],
             )
             return False
+        from kazma_ui.turn_document import parts_from_stream
+
+        # The visible row is always ``text``. Distinct streamed notes that
+        # lost the resolve (a short final hop) become ``reasoning``.
+        parts = parts_from_stream(
+            streamed=streamed_text,
+            final=text,
+            activity=activity,
+        )
         return persist_reply(
             session_id,
             turn_id,
@@ -198,6 +226,8 @@ async def close_turn(
             interrupted=bool(interrupted),
             thread_id=thread_id,
             activity=activity,
+            parts=parts,
+            streamed_text=streamed_text,
         )
     except Exception:
         logger.warning(

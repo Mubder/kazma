@@ -935,7 +935,7 @@ def create_sse_chat_router(
                 except Exception:
                     logger.debug("[SSE] activity capture failed", exc_info=True)
 
-            def _persist_now() -> None:
+            def _persist_now(*, final: str | None = None, open_turn: bool = True) -> None:
                 """Flush in-progress text into this turn's reply row.
 
                 Turn-keyed upsert: repeated calls update the same row, so it
@@ -946,13 +946,24 @@ def create_sse_chat_router(
                 backfilled chunk skipped it entirely and let two other
                 writers each append their own row (2026-08-28 duplicates).
                 """
+                from kazma_ui.turn_document import activity_of, parts_from_stream, text_of
+
+                streamed = str(content_acc or "")
+                hop = final if final is not None else ""
+                parts = parts_from_stream(
+                    streamed=streamed,
+                    final=hop or streamed,
+                    activity=activity_log or None,
+                )
+                body = text_of(parts) or hop or streamed
                 _upsert_reply(
                     session_id,
                     _reply_turn,
-                    temp_assistant_msg["content"],
-                    open_turn=True,
-                    pending=not temp_assistant_msg["content"].strip(),
-                    activity=activity_log or None,
+                    body,
+                    open_turn=open_turn,
+                    pending=not str(body or "").strip(),
+                    activity=activity_of(parts) or activity_log or None,
+                    parts=parts,
                     model=_turn_model or None,
                 )
 
@@ -1003,26 +1014,35 @@ def create_sse_chat_router(
                         # find it after a restart.
                         if data.get("interrupted"):
                             turn_usage["interrupted"] = True
-                        # Terminal frame is SoT — replace glued token concat
-                        # with the un-glued checkpoint/normalized payload.
+                        # Terminal frame is SoT for the *text* part. Keep the
+                        # token buffer as streamed working notes so a shorter
+                        # final hop cannot erase them.
                         done_text = str(data.get("content") or "")
                         if done_text.strip():
-                            content_acc = done_text.strip()
-                            temp_assistant_msg["content"] = content_acc
+                            temp_assistant_msg["content"] = done_text.strip()
 
                     yield frame
 
                 # The streamer already wrote the reply before emitting `done`.
-                # This upsert stamps what only the caller knows — the CoT
-                # activity log, the per-turn usage, the pinned model — onto
-                # the SAME row. It cannot duplicate: same turn id, same row.
-                if content_acc:
+                # This upsert stamps parts + CoT activity + usage onto the
+                # SAME row. Streamed notes stay in ``reasoning``; the hop
+                # in ``text``.
+                done_body = str(temp_assistant_msg.get("content") or "") or content_acc
+                if done_body or activity_log:
+                    from kazma_ui.turn_document import activity_of, parts_from_stream, text_of
+
+                    parts = parts_from_stream(
+                        streamed=content_acc,
+                        final=done_body,
+                        activity=activity_log or None,
+                    )
                     _upsert_reply(
                         session_id,
                         _reply_turn,
-                        content_acc,
+                        text_of(parts) or done_body,
                         open_turn=bool(turn_usage.get("interrupted")),
-                        activity=activity_log or None,
+                        activity=activity_of(parts) or activity_log or None,
+                        parts=parts,
                         model=_turn_model or None,
                         tokens=turn_usage.get("tokens"),
                         cost=turn_usage.get("cost"),
@@ -1040,28 +1060,12 @@ def create_sse_chat_router(
                 # that had not yet written a row of its own, that target was
                 # the PREVIOUS turn's answer, silently replacing good history
                 # with a fragment.
-                _upsert_reply(
-                    session_id,
-                    _reply_turn,
-                    _user_facing_reply(content_acc) or content_acc,
-                    open_turn=True,
-                    pending=not content_acc,
-                    activity=activity_log or None,
-                    model=_turn_model or None,
-                    allow_shrink=False,
-                )
+                _persist_now(open_turn=True)
                 yield _sse_frame("error", {"content": "Connection closed"})
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
-                _upsert_reply(
-                    session_id,
-                    _reply_turn,
-                    content_acc,
-                    activity=activity_log or None,
-                    model=_turn_model or None,
-                    allow_shrink=False,
-                )
+                _persist_now(open_turn=False)
                 yield _sse_frame("error", {"content": sanitize_error(exc)})
 
         async def _guarded_events() -> AsyncGenerator[str, None]:
@@ -1300,11 +1304,30 @@ def create_sse_chat_router(
                             return False
                         return True
 
-                    ui = [
-                        {"role": m.get("role"), "content": str(m.get("content") or "").strip()}
-                        for m in prior
-                        if _ui_ok(m)
-                    ]
+                    _extras: dict[str, dict[str, Any]] = {}
+                    for m in messages:
+                        if not isinstance(m, dict) or (m.get("role") or "").lower() != "assistant":
+                            continue
+                        key = str(m.get("content") or "").strip()
+                        extra = {
+                            k: m[k]
+                            for k in ("turn_id", "parts", "activity", "open", "pending", "model", "ts")
+                            if m.get(k) is not None
+                        }
+                        if key and extra:
+                            _extras[key] = extra
+                    ui = []
+                    for m in prior:
+                        if not _ui_ok(m):
+                            continue
+                        item: dict[str, Any] = {
+                            "role": m.get("role"),
+                            "content": str(m.get("content") or "").strip(),
+                        }
+                        extra = _extras.get(item["content"])
+                        if extra:
+                            item.update(extra)
+                        ui.append(item)
                     if ui:
                         # An in-flight turn's row lives only here — the
                         # checkpoint has no reply for it yet — and carries the
@@ -1358,23 +1381,35 @@ def create_sse_chat_router(
                 return False
             return True
 
-        payload: list[dict[str, Any]] = [
-            {
+        payload: list[dict[str, Any]] = []
+        for msg in messages:
+            if not _visible(msg):
+                continue
+            item: dict[str, Any] = {
                 "role": msg.get("role", "user"),
                 "content": msg.get("content", ""),
-                **({"pending": True} if msg.get("pending") else {}),
-                **({"open": True} if msg.get("open") else {}),
-                **({"ts": msg["ts"]} if msg.get("ts") else {}),
-                **({"model": msg["model"]} if msg.get("model") else {}),
-                **(
-                    {"activity": msg["activity"]}
-                    if isinstance(msg.get("activity"), list) and msg["activity"]
-                    else {}
-                ),
             }
-            for msg in messages
-            if _visible(msg)
-        ]
+            if msg.get("pending"):
+                item["pending"] = True
+            if msg.get("open"):
+                item["open"] = True
+            if msg.get("ts"):
+                item["ts"] = msg["ts"]
+            if msg.get("model"):
+                item["model"] = msg["model"]
+            if msg.get("turn_id"):
+                item["turn_id"] = msg["turn_id"]
+            parts = msg.get("parts") if isinstance(msg.get("parts"), list) else None
+            if parts:
+                item["parts"] = parts
+            activity = msg.get("activity")
+            if not (isinstance(activity, list) and activity) and parts:
+                from kazma_ui.turn_document import activity_of
+
+                activity = activity_of(parts)
+            if isinstance(activity, list) and activity:
+                item["activity"] = activity
+            payload.append(item)
         if stats:
             return {
                 "session_id": session.session_id or session_id,

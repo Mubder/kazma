@@ -138,6 +138,9 @@ def test_headless_auto_deny_persists_final_into_the_open_stub(store: _Store) -> 
     assert len(rows) == 1, f"must not grow a second bubble: {rows}"
     assert FINAL in rows[0]["content"]
     assert "open" not in rows[0]
+    kinds = [p.get("type") for p in (rows[0].get("parts") or [])]
+    assert "text" in kinds
+    assert "reasoning" in kinds, "HITL stub must survive as reasoning, not vanish"
 
 
 def test_close_turn_never_raises_without_a_session() -> None:

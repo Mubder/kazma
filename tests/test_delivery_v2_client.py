@@ -511,6 +511,14 @@ class TestUIAuditPhase3Fixes:
         assert store_idx != -1
         assert cursor_idx < store_idx, "cursor module must load before agentStore"
 
+    def test_turn_document_module_loaded_before_chat(self):
+        html = _CHAT_HTML.read_text(encoding="utf-8")
+        doc_idx = html.find('src="/static/js/modules/turn_document.js')
+        chat_idx = html.find('src="/static/js/chat.js')
+        assert doc_idx != -1, "turn_document.js not included in chat.html"
+        assert chat_idx != -1
+        assert doc_idx < chat_idx, "turn_document must load before chat.js"
+
     def test_apply_final_paints_unconditionally(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "Server truth \u2192 DOM. ALWAYS." in src
@@ -800,6 +808,19 @@ class TestPlanFencePresentation:
         assert proc.returncode == 0, proc.stdout + proc.stderr
         assert "FAIL" not in proc.stdout
 
+    def test_turn_document_harness_under_node(self):
+        if shutil.which("node") is None:
+            import pytest
+
+            pytest.skip("node not available")
+        proc = subprocess.run(
+            ["node", str(_ROOT / "tests" / "js" / "test_turn_document.js")],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(_ROOT),
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "FAIL" not in proc.stdout
+
 
 class TestWorkbenchCollapseTiming:
     """When the CoT panel collapses — and when it must NOT.
@@ -848,11 +869,12 @@ class TestHitlResumeKeepsWorkbench:
         assert "function beginTurn(opts)" in src
         begin = src.split("function beginTurn(opts)", 1)[1].split("\n  function ", 1)[0]
         assert "var resume = !!(opts && opts.resume);" in begin
-        # The panel wipe + counter reset must be inside the non-resume branch.
+        # A new user message must not strip another turn's CoT panel.
+        # Detach currentMsgEl so logProgress opens a new bubble; the
+        # previous accordion stays on the previous assistant message.
         assert "if (!resume) {" in begin
-        wipe_at = begin.index("oldProg.remove()")
-        guard_at = begin.index("if (!resume) {")
-        assert guard_at < wipe_at, "the workbench wipe must be guarded by !resume"
+        assert "oldProg.remove()" not in begin
+        assert "currentMsgEl = null;" in begin
 
     def test_approval_paths_resume_instead_of_restarting(self):
         src = _CHAT_JS.read_text(encoding="utf-8")

@@ -901,14 +901,13 @@
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     _armTurnWatchdog();
-    // Fresh progress log for this turn (don't reuse previous bubble's panel).
-    // Skipped on resume: the panel in this bubble IS this turn's workbench,
-    // and its steps are the reason the approval card exists.
+    // Fresh progress log for this turn. Previous bubbles keep their CoT
+    // accordion — never strip another turn's panel. A resume keeps the
+    // open bubble (HITL). A new user message detaches currentMsgEl so
+    // logProgress opens a new assistant bubble.
     if (!resume) {
-      if (currentMsgEl) {
-        var oldProg = currentMsgEl.querySelector('.agent-progress');
-        if (oldProg) oldProg.remove();
-      }
+      currentMsgEl = null;
+      tokenAccum = '';
       _progressEl = null;
       _progressStepCount = 0;
       _progressToolCount = 0;
@@ -3447,10 +3446,15 @@
       try { KazmaBidi.apply(msgTextEl, content || ''); } catch (e) { /* ignore */ }
     }
 
-    // Restore the persisted CoT workbench (activity log) for assistant
-    // messages when returning to a session after refresh / tab switch.
-    if (role === 'assistant' && opts && opts.activity && opts.activity.length) {
-      var cotPanel = _buildRestoredWorkbench(opts.activity);
+    // Restore the persisted CoT workbench (activity log / TurnDocument
+    // parts) for assistant messages when returning to a session.
+    var restoredActivity = (opts && opts.activity) || [];
+    if ((!restoredActivity || !restoredActivity.length) && opts && opts.parts
+        && window.KazmaTurnDocument && KazmaTurnDocument.activityOf) {
+      restoredActivity = KazmaTurnDocument.activityOf(opts.parts);
+    }
+    if (role === 'assistant' && restoredActivity && restoredActivity.length) {
+      var cotPanel = _buildRestoredWorkbench(restoredActivity);
       if (cotPanel) {
         var textWrap = wrapper.querySelector('.message-text');
         if (textWrap) textWrap.parentNode.insertBefore(cotPanel, textWrap);
@@ -4701,7 +4705,10 @@
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
           } else {
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
-              activity: msg.activity,
+              activity: (window.KazmaTurnDocument && KazmaTurnDocument.activityForMessage)
+                ? KazmaTurnDocument.activityForMessage(msg)
+                : msg.activity,
+              parts: msg.parts,
               model: msg.model || '',
             });
           }
@@ -5294,6 +5301,14 @@
             && display.indexOf(workingProse.slice(0, Math.min(80, workingProse.length))) !== 0
             && workingProse.indexOf(display.slice(0, Math.min(80, display.length))) !== 0
           ) {
+            try {
+              logProgress({
+                kind: 'thought',
+                title: ti('working_notes', 'Working notes'),
+                detail: workingProse,
+                state: 'done',
+              });
+            } catch (eCot) { /* workbench optional */ }
             html = '<details class="kazma-working"><summary>'
               + escapeHtml(ti('working_notes', 'Working notes'))
               + '</summary>'

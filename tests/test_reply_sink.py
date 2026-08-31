@@ -140,12 +140,13 @@ def test_writer_never_touches_another_turns_row(store):
     t2 = open_reply_turn("thread-a")
     upsert_reply("s1", t2, "second answer")
 
-    # Straggler from turn 1 arrives late.
+    # Straggler from turn 1 arrives late. Default allow_shrink=False
+    # refuses to trade the long answer for a fragment on the SAME row.
     upsert_reply("s1", t1, "interim fragment")
 
     rows = _assistants(store)
     assert len(rows) == 2
-    assert rows[0]["content"] == "interim fragment"  # own row only
+    assert rows[0]["content"] == "the good long answer from the first turn"
     assert rows[1]["content"] == "second answer"  # untouched
 
 
@@ -169,12 +170,20 @@ def test_resume_adopts_in_memory_turn_so_pause_and_answer_share_a_row(store):
     resumed = resolve_reply_turn("thread-a", "s1")
     assert resumed == tid
 
-    upsert_reply("s1", resumed, "Posted all 4 Arabic tweets.")
+    upsert_reply(
+        "s1",
+        resumed,
+        "Posted all 4 Arabic tweets.",
+        parts=[{"type": "text", "text": "Posted all 4 Arabic tweets."}],
+    )
     close_reply_turn("thread-a", "s1", resumed)
 
     rows = _assistants(store)
     assert len(rows) == 1
     assert rows[0]["content"] == "Posted all 4 Arabic tweets."
+    kinds = [p.get("type") for p in (rows[0].get("parts") or [])]
+    assert "reasoning" in kinds
+    assert "text" in kinds
 
 
 def test_resume_adopts_open_row_after_process_restart(store):

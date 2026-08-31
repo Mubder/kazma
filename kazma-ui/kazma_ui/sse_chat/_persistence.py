@@ -66,6 +66,8 @@ def _persist_turn_reply(
     tokens: int | None = None,
     cost: float | None = None,
     activity: list[dict[str, Any]] | None = None,
+    parts: list[dict[str, Any]] | None = None,
+    streamed_text: str = "",
     allow_shrink: bool | None = None,
 ) -> bool:
     """Write this turn's reply through the sink. Never raises.
@@ -85,6 +87,8 @@ def _persist_turn_reply(
         tokens=tokens,
         cost=cost,
         activity=activity,
+        parts=parts,
+        streamed_text=streamed_text,
         allow_shrink=allow_shrink,
     )
 
