@@ -175,14 +175,14 @@
 /* ── 2. Reset ───────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { font-size: 14px; -webkit-font-smoothing: antialiased; }
-/* Arabic mode: bump the base font-size up — Arabic glyphs need larger
-   rendering for readability. 16px base makes 0.7rem ≈ 11.2px (readable)
-   vs 9.8px at the 14px default. */
-html[dir="rtl"] { font-size: 16px; }
+/* EN and AR share the same 14px root. IBM Plex Sans Arabic matches the
+   Latin optical size, so an RTL-only base bump made the whole UI ~15%
+   larger. Tiny labels still get a readability floor below. */
 /* Arabic mode: enforce a minimum readable font-size on the elements
    that commonly use tiny inline 0.6–0.7rem values (badges, hints,
    metric labels/sub-text, breadcrumbs, page-specific spans). Arabic
-   script is illegible below ~11px. Code blocks/terminals are excluded. */
+   script is illegible below ~11px. Code blocks/terminals are excluded.
+   At the shared 14px root, 0.82rem ≈ 11.5px. */
 html[dir="rtl"] .badge,
 html[dir="rtl"] .metric-label,
 html[dir="rtl"] .metric-sub,
@@ -641,10 +641,22 @@ button { cursor: pointer; font-family: inherit; }
   font-weight: 700;
   letter-spacing: -0.02em;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   background: linear-gradient(110deg, var(--text-primary), var(--accent-light));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+/* Icons inside the title must not inherit the gradient text clip
+   (transparent fill would hide them). */
+.header-title svg,
+.header-title .ki {
+  background: none;
+  -webkit-text-fill-color: var(--accent-light);
+  color: var(--accent-light);
+  flex-shrink: 0;
 }
 .breadcrumbs {
   display: flex;

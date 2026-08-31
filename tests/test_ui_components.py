@@ -135,6 +135,43 @@ class TestBaseTemplate:
         assert 'rel="apple-touch-icon"' in base_html
         assert "/static/img/kazma-icon.png" in base_html
 
+    def test_page_title_block_is_captured_for_the_header(self, base_html):
+        """Child `{% block page_title %}` must be captured in base.html
+        (includes cannot see it). Otherwise the header falls back to the
+        English route slug."""
+        assert "{% set _page_title %}" in base_html
+        assert "{% block page_title %}" in base_html
+        assert "{% include \"components/header.html\" %}" in base_html
+        # Capture happens BEFORE the include.
+        assert base_html.find("{% set _page_title %}") < base_html.find(
+            "{% include \"components/header.html\" %}"
+        )
+
+
+class TestEnArDefaultFontSize:
+    """EN and AR share the 14px root. An RTL-only bump is a regression."""
+
+    def test_html_root_is_14px_for_both_directions(self):
+        css = (_CSS_DIR / "kazma.css").read_text(encoding="utf-8")
+        assert "html { font-size: 14px;" in css
+        # Negative control: the old 16px RTL override must not return.
+        rtl_bump = 'html[dir="rtl"] { font-size: 16px; }'
+        assert rtl_bump not in css
+        poisoned = css + "\n" + rtl_bump + "\n"
+        assert rtl_bump in poisoned
+
+    def test_effective_font_size_does_not_scale_arabic(self):
+        js = (_JS_DIR / "modules" / "components.js").read_text(encoding="utf-8")
+        assert "effectiveFontSize()" in js
+        # Negative control: the 1.15× Arabic multiplier must not return.
+        multiplier = "base * 1.15"
+        assert multiplier not in js
+        poisoned = js.replace(
+            "return this.fontSize || 14;",
+            "return this.lang === 'ar' ? Math.round(base * 1.15) : base;",
+        )
+        assert multiplier in poisoned
+
 
 # ── 3. Sidebar Component ───────────────────────────────────────────
 
@@ -226,17 +263,52 @@ class TestSidebarComponent:
 # ── 4. Header Component ────────────────────────────────────────────
 
 class TestHeaderComponent:
-    """header.html must have title, breadcrumbs, actions."""
+    """header.html must have title and actions."""
 
     @pytest.fixture
     def header_html(self):
         return (_COMPONENTS_DIR / "header.html").read_text(encoding="utf-8")
 
     def test_has_page_title(self, header_html):
-        assert "page_title" in header_html or "header-title" in header_html
+        assert "header-title" in header_html
+        assert "_page_title" in header_html
 
-    def test_has_breadcrumbs(self, header_html):
-        assert "breadcrumbs" in header_html
+    def test_no_duplicate_breadcrumb_page_name(self, header_html):
+        """The h1 is the page name. Repeating it as a crumb doubled the
+        word and left the English slug ('Chat') in Arabic UI."""
+        assert "breadcrumb-current" not in header_html
+        h1 = [ln for ln in header_html.splitlines() if 'class="header-title"' in ln]
+        assert h1 and "_page_title" in h1[0]
+        assert "active_page" not in h1[0]
+        # Negative control: the old English-slug fallback must not return.
+        poisoned = h1[0].replace("_page_title | trim", "active_page|title")
+        assert "active_page|title" in poisoned
+
+    def test_soft_nav_copies_title_html(self):
+        nav = (_JS_DIR / "modules" / "nav.js").read_text(encoding="utf-8")
+        assert "oldTitle.innerHTML = newTitle.innerHTML" in nav
+        assert "oldTitle.textContent = newTitle.textContent" not in nav
+
+    def test_page_title_blocks_are_translated(self):
+        """Every product page's header title must go through t() so AR
+        is not an English slug. error.html is the one English exception."""
+        missing = []
+        for path in _TEMPLATES_DIR.glob("*.html"):
+            if path.name in {"base.html", "error.html", "login.html"}:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "{% block page_title %}" not in text:
+                missing.append(path.name)
+                continue
+            start = text.find("{% block page_title %}")
+            end = text.find("{% endblock %}", start)
+            body = text[start:end]
+            if "t(" not in body:
+                missing.append(path.name)
+        assert not missing, (
+            "page_title block must call t() so the header is translated: "
+            + ", ".join(missing)
+        )
 
     def test_has_new_chat_button(self, header_html):
         assert "New Chat" in header_html

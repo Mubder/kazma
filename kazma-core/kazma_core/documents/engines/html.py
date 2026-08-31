@@ -109,7 +109,7 @@ class HtmlEngine:
         )
 
     def _css(self) -> str:
-        """Themed stylesheet. EN/AR differ by direction + typeface + measure."""
+        """Themed stylesheet. EN/AR differ by direction + typeface."""
         from kazma_core.documents.fonts import embedded_font_face_css
         from kazma_core.documents.style_theme import theme_cs_size, theme_fonts
 

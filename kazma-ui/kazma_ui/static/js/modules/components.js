@@ -44,10 +44,11 @@ export function kazmaApp() {
         mobileChatSidebarOpen: false,
         fontSize: 14,
 
-        // Arabic needs ~15% larger base font for readability.
+        // Same default for EN and AR. The Settings slider is the
+        // operator's size control — do not re-introduce a language
+        // multiplier here (it used to scale Arabic by 1.15×).
         effectiveFontSize() {
-            var base = this.fontSize || 14;
-            return this.lang === 'ar' ? Math.round(base * 1.15) : base;
+            return this.fontSize || 14;
         },
 
         init() {

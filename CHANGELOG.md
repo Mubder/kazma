@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Header title: one translated word, not an English slug (2026-08-31)
+
+The top bar rendered the route slug (`Chat`, `Dashboard`, `X_Studio`) as a
+standalone `<h1>` next to the already-translated breadcrumb
+(`الرئيسية / المحادثة`). `{% block page_title %}` never reached the include.
+The block is now captured in `base.html` and is the only page name in the
+header (EN and AR). The duplicate crumb is gone.
+
+## Equal EN/AR default font size (2026-08-31)
+
+IBM Plex Sans Arabic matches the Latin optical size, so the old Arabic-only
+bumps (UI 14px→16px plus a 1.15× `effectiveFontSize` multiplier; documents
+11pt→12pt) made Arabic look larger than English. Both languages now default
+to 14px in the UI and 11pt in generated documents. Tiny RTL labels keep a
+~11px readability floor. Operators can still raise size via Settings or
+`THEME.body_size_ar`.
+
 ## /x forced LTR on Arabic UI (2026-08-31)
 
 The operator UI is `dir=rtl`. `textDir("")` returned `ltr` and

@@ -2,7 +2,7 @@
 
 Print projection of the Web brand: royal ``#3b82f6``, sky ``#38bdf8``,
 deep navy ink. No gold. Editorial headings (type + accent rule), not
-inverted bars. Arabic body is 12pt vs Latin 11pt; leading is 1.65 both ways.
+inverted bars. Latin and Arabic body share 11pt; leading is 1.65 both ways.
 """
 
 from __future__ import annotations
@@ -47,9 +47,9 @@ THEME: dict[str, Any] = {
     "h2_size": 15,
     "h3_size": 13,
     "body_size": 11,
-    # IBM Plex Sans Arabic is the brand face (UI + generated docs). It does
-    # not need Sakkal's +5pt optical compensation; keep a 1pt CS bump.
-    "body_size_ar": 12,
+    # IBM Plex Sans Arabic matches the Latin optical size. Default is 1:1
+    # with ``body_size``; raise this token if an operator wants a CS bump.
+    "body_size_ar": 11,
     "line_height": 1.65,
     "line_height_ar": 1.65,
     "page_margin": 56,
@@ -62,22 +62,26 @@ THEME: dict[str, Any] = {
 def theme_cs_size(latin_pt: float | None = None) -> float:
     """Point size for complex-script (Arabic) given a Latin size.
 
-    IBM Plex Sans Arabic is close to the Latin optical size, so Arabic body
-    is ``body_size_ar`` (12pt) while Latin stays ``body_size`` (11pt).
-    Headings keep the same delta. Chrome (≤9.5pt headers/footers/captions)
-    gets a modest +2pt so it does not jump to body size.
+    IBM Plex Sans Arabic matches the Latin optical size, so the default
+    type scale is 1:1 (``body_size_ar`` == ``body_size``). Operators can
+    still raise ``body_size_ar``; headings inherit the same delta and
+    chrome (≤9.5pt headers/footers/captions) gets a modest +2pt only
+    when the bodies differ.
     """
     body = float(THEME.get("body_size") or 11)
-    body_ar = float(THEME.get("body_size_ar") or 12)
+    body_ar = float(THEME.get("body_size_ar") or body)
     if latin_pt is None:
         return body_ar
     try:
         pt = float(latin_pt)
     except (TypeError, ValueError):
         return body_ar
+    delta = body_ar - body
+    if delta <= 0:
+        return pt
     if pt <= 9.5:
         return pt + 2.0
-    return pt + (body_ar - body)
+    return pt + delta
 
 
 def theme_fonts(*, rtl: bool) -> dict[str, str]:

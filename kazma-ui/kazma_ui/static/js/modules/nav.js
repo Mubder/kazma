@@ -108,13 +108,8 @@ export function initSoftNav() {
         const newTitle = doc.querySelector('.header-title');
         const oldTitle = document.querySelector('.header-title');
         if (newTitle && oldTitle) {
-            oldTitle.textContent = newTitle.textContent;
-        }
-
-        const newCrumbs = doc.querySelector('.breadcrumbs');
-        const oldCrumbs = document.querySelector('.breadcrumbs');
-        if (newCrumbs && oldCrumbs) {
-            oldCrumbs.innerHTML = newCrumbs.innerHTML;
+            // innerHTML: some page titles carry an icon span/svg.
+            oldTitle.innerHTML = newTitle.innerHTML;
         }
 
         // Sync the shell class (e.g. `is-chat`): it is stamped server-side

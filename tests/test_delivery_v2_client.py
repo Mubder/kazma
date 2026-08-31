@@ -434,10 +434,17 @@ class TestUIAuditPhase3Fixes:
 
     def test_header_title_from_context(self):
         header = (_UI / "templates" / "components" / "header.html").read_text(encoding="utf-8")
-        assert "page_title|default(active_page" in header
-        # the inert block is gone from the rendered title element
-        title_line = [ln for ln in header.split("\n") if "header-title" in ln]
+        base = (_UI / "templates" / "base.html").read_text(encoding="utf-8")
+        assert "_page_title" in header
+        title_line = [ln for ln in header.split("\n") if 'class="header-title"' in ln]
         assert title_line and "{% block" not in title_line[0]
+        assert "active_page" not in title_line[0]
+        assert "page_title|default" not in title_line[0]
+        # The block is captured in base.html so the include can render it.
+        assert "{% block page_title %}" in base
+        assert "{% set _page_title %}" in base
+        # Duplicate "Home / <page>" crumb next to the h1 must stay gone.
+        assert "breadcrumb-current" not in header
 
     def test_has_live_sse_contract_documented(self):
         src = _CHAT_JS.read_text(encoding="utf-8")

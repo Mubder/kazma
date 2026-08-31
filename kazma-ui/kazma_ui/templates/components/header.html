@@ -1,6 +1,7 @@
 {# ─── Kazma Header Component ───
-   Page title, breadcrumbs, action buttons, user menu.
-   Requires Alpine.js x-data from base.html.
+   Translated page title, action buttons, user menu.
+   Requires Alpine.js x-data from base.html. Title HTML is captured
+   from `{% block page_title %}` into `_page_title` in base.html.
    ─────────────────────────────────────────────── #}
 
 <header class="page-header">
@@ -16,19 +17,10 @@
                 <line x1="3" y1="18" x2="21" y2="18"/>
             </svg>
         </button>
-        {# Titles come from the route context (`page_title`) — the old
-   {% block page_title %} was inert: Jinja blocks do not cross
-   {% include %} boundaries (UI audit P2). #}
-        <h1 class="header-title">{{ page_title|default(active_page|default('Kazma')|title) }}</h1>
-        {% block breadcrumbs %}
-        <nav class="breadcrumbs" aria-label="Breadcrumb">
-            <a href="/" class="breadcrumb-link">{{ t('header.home') }}</a>
-            {% if active_page and active_page != 'workspace' %}
-            <span class="breadcrumb-sep">/</span>
-            <span class="breadcrumb-current">{{ t('nav.' ~ active_page) }}</span>
-            {% endif %}
-        </nav>
-        {% endblock %}
+        {# Translated page title from `{% block page_title %}` (captured
+           in base.html). Never use the English route-slug fallback —
+           that duplicated the page name and stayed English in Arabic. #}
+        <h1 class="header-title">{{ _page_title | trim }}</h1>
     </div>
 
     <div class="header-right">
