@@ -852,7 +852,18 @@ class AsyncMCPManager:
                         "is_error": True,
                     }
         except Exception:
-            logger.debug("[MCP] scope guard check failed — allowing call", exc_info=True)
+            logger.warning(
+                "[MCP] scope guard check failed — denying call (fail-closed)",
+                exc_info=True,
+            )
+            return {
+                "content": (
+                    "MCP workspace scope guard failed closed: could not verify "
+                    "this task's workspace against the bound MCP root. Bind the "
+                    "active workspace, retry, or set KAZMA_MCP_SCOPE_GUARD=0."
+                ),
+                "is_error": True,
+            }
 
         # Strip the mcp__<server>__ namespace prefix if present — the LLM
         # emits the namespaced form (to avoid collisions), but the server

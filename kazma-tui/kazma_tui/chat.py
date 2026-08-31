@@ -1280,16 +1280,12 @@ class ChatPanel(Vertical):
                         "  Or just say: swarm <task>")
                     return
 
-            try:
-                from kazma_core.swarm import get_swarm_engine
-            except Exception:
-                self.write("error", "Swarm engine not available.")
-                return
-
-            engine = get_swarm_engine()
-            if engine is None:
-                self.write("error", "Swarm engine not initialized.")
-                return
+            status = await self._api("GET", "/api/swarm/status") or {}
+            worker_names = [
+                str(w.get("name") or "").lower()
+                for w in (status.get("workers") or [])
+                if w.get("name")
+            ]
 
             # sub and task_body are already set above (in the is_slash / else block)
 
@@ -1300,15 +1296,15 @@ class ChatPanel(Vertical):
                     if not task_body:
                         self.write("error", "Usage: /swarm broadcast <task>")
                         return
-                    await self._dispatch_swarm(task_body, engine, broadcast=True)
+                    await self._dispatch_swarm(task_body, broadcast=True)
                     return
 
                 # /swarm <worker> <task>
-                if sub in [n.lower() for n in engine.worker_names]:
+                if sub in worker_names:
                     if not task_body:
                         self.write("error", f"Usage: /swarm {sub} <task>")
                         return
-                    await self._dispatch_swarm(task_body, engine, worker_name=sub)
+                    await self._dispatch_swarm(task_body, worker_name=sub)
                     return
 
                 # /swarm <task> — auto-route
@@ -1316,11 +1312,11 @@ class ChatPanel(Vertical):
                 if not task:
                     self.write("error", "Usage: /swarm <task>")
                     return
-                await self._dispatch_swarm(task, engine)
+                await self._dispatch_swarm(task)
                 return
 
             # Bare mention: dispatch the extracted task body
-            await self._dispatch_swarm(task_body, engine)
+            await self._dispatch_swarm(task_body)
         finally:
             self._busy = False
             try:
@@ -1331,82 +1327,42 @@ class ChatPanel(Vertical):
     async def _dispatch_swarm(
         self,
         task: str,
-        engine: Any,
         worker_name: str = "",
         broadcast: bool = False,
     ) -> None:
-        """Dispatch a task to the swarm engine and show the result."""
-        from kazma_core.swarm.task import SwarmTask, TaskType
-
-        self.write("system", f"Dispatching to swarm...")
+        """Dispatch a task via the live server API (same mouth as the Web UI)."""
+        self.write("system", "Dispatching to swarm...")
         try:
-            from kazma_core.swarm import NoCapableWorkersError
-
+            payload: dict[str, Any] = {"task": task}
             if broadcast:
-                swarm_task = SwarmTask(
-                    id=f"tui-swarm-{task[:20]}",
-                    type=TaskType.BROADCAST,
-                    prompt=task,
-                    workers=[],
-                )
+                payload["type"] = "broadcast"
+                payload["workers"] = ["all"]
             elif worker_name:
-                swarm_task = SwarmTask(
-                    id=f"tui-swarm-{task[:20]}",
-                    type=TaskType.DISPATCH,
-                    prompt=task,
-                    workers=[worker_name],
-                )
+                payload["type"] = "dispatch"
+                payload["workers"] = [worker_name]
             else:
-                # Auto-route: let the engine pick the best worker.
-                # Must use ["auto"] not [] — the engine checks for
-                # ["auto"] to trigger CapabilityRouter.
-                swarm_task = SwarmTask(
-                    id=f"tui-swarm-{task[:20]}",
-                    type=TaskType.DISPATCH,
-                    prompt=task,
-                    workers=["auto"],
-                )
+                payload["type"] = "dispatch"
+                payload["workers"] = ["auto"]
 
-            try:
-                result = await engine.dispatch(swarm_task)
-            except NoCapableWorkersError:
-                # No worker's capabilities matched the task keywords.
-                # Fall back to the first available worker.
-                names = engine.worker_names
-                if not names:
-                    self.write("error", "No workers registered. Add workers via the Web UI Swarm panel.")
-                    return
-                self.write("system", f"No keyword match — falling back to '{names[0]}'.")
-                swarm_task.workers = [names[0]]
-                result = await engine.dispatch(swarm_task)
-
-            # The engine catches NoCapableWorkersError internally and returns
-            # a TaskResult with status="failed" and error="No capable workers..."
-            # So also check the result for that error and retry with first worker.
-            if (not broadcast and not worker_name
-                    and getattr(result, "status", "") == "failed"
-                    and "No capable workers" in (getattr(result, "error", "") or "")):
-                names = engine.worker_names
-                if names:
-                    self.write("system", f"No keyword match — falling back to '{names[0]}'.")
-                    swarm_task.workers = [names[0]]
-                    result = await engine.dispatch(swarm_task)
-
-            # TaskResult uses aggregated_output/synthesized_output, not output
+            data = await self._api("POST", "/api/swarm/dispatch", payload) or {}
+            status = str(data.get("status") or "")
             output = (
-                getattr(result, "aggregated_output", None)
-                or getattr(result, "synthesized_output", None)
+                data.get("aggregated_output")
+                or data.get("synthesized_output")
                 or ""
             )
-            if not output and result and getattr(result, "worker_results", None):
-                # Fall back to first worker's output
-                output = getattr(result.worker_results[0], "output", "") or ""
-
+            if not output:
+                for result in data.get("results") or []:
+                    if isinstance(result, dict) and result.get("output"):
+                        output = result["output"]
+                        break
             if output:
-                self._last_response = output
-                self.write("assistant", output)
-            elif result and getattr(result, "error", None):
-                self.write("error", f"Swarm error: {result.error}")
+                self._last_response = str(output)
+                self.write("assistant", str(output))
+            elif status in ("ok", "warning") and data.get("message"):
+                self.write("system", str(data["message"]))
+            elif data.get("error") or data.get("message"):
+                self.write("error", f"Swarm error: {data.get('error') or data.get('message')}")
             else:
                 self.write("system", "Swarm task completed (no output).")
         except Exception as exc:

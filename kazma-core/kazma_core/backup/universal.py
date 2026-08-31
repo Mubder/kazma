@@ -1,9 +1,11 @@
-"""Universal backup — back up EVERYTHING in kazma-data + Postgres.
+"""Universal backup — back up EVERYTHING in kazma-data.
 
 The one-shot backup that "never leaves anything behind": every SQLite DB
-(WAL-safe via the Online Backup API), every asset/file/dir, and a Postgres
-dump when configured. Triggered by the 24h auto loop (via the
-``native_backup`` handler) and manually from the Backup UI / API.
+(WAL-safe via the Online Backup API) and every asset/file/dir. Postgres
+shared-state dumps are **not** inlined here — they run as the separate
+``native_pg_backup`` handler (same 24h loop / Backup UI). The manifest
+records PG as handled-by-native_pg_backup. Triggered by the 24h auto
+loop (``native_backup``) and manually from the Backup UI / API.
 """
 
 from __future__ import annotations

@@ -115,7 +115,7 @@ async def _watchdog_loop(
             cfg = get_hitl_config()
             if not cfg.get("enabled"):
                 continue
-            timeout_s = float(cfg.get("approval_timeout_seconds", 60) or 0)
+            timeout_s = float(cfg.get("approval_timeout_seconds", 300) or 0)
             auto_deny = bool(cfg.get("auto_deny_on_timeout", True))
             if timeout_s <= 0:
                 continue  # timeout disabled

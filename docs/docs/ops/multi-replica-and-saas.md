@@ -38,7 +38,7 @@ as elevated.
 | Job claim/lease | **Yes** on Postgres (`documents/jobs_pg.py`) when `KAZMA_DATABASE_URL` is set |
 | Metadata CRUD | **Yes** when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres` or `auto` with PG (`repository_pg.py`) |
 | Content blobs | Shared filesystem/volume on `documents.storage_root` required |
-| GC | Still SQLite SQL — **skipped** on PG metadata (honest error, no silent deletes) |
+| GC | Backend-agnostic — `retention._mark` dispatches to `repository.gc_mark` on both SQLite and Postgres |
 
 Always check `GET /api/documents/ops/readiness`. See [Document processing ops](./document-processing) and [Document Intelligence](../guide/document-intelligence#multi-replica).
 

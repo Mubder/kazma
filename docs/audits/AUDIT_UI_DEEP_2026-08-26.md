@@ -83,6 +83,12 @@ Secondary chains (conditional):
 
 ---
 
+**Remediation status (2026-08-31):** Phase 1 P0s, Phase 2, and Phase 3
+landed in code (`TestUIAuditP0Fixes` / `TestUIAuditPhase2/3Fixes`, CHANGELOG
+2026-08-26). This document is the original diagnosis — do not re-open the
+P0s as live defects. Remaining: real iPhone Light/Dark sign-off (process),
+and opportunistic `chat.js` splits when touching that file.
+
 ## P0 — user-visible breakage (fix first)
 
 | # | Defect | Evidence | Fix direction |

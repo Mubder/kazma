@@ -26,6 +26,8 @@ def test_tui_leftover_mouths_use_live_api():
     assert "async def _cmd_config" in chat
     assert "async def _cmd_export" in chat
     assert "async def _cmd_context" in chat
+    assert "/api/swarm/dispatch" in chat
+    assert "get_swarm_engine" not in chat
 
 
 def test_tui_settings_and_traces_are_honest():

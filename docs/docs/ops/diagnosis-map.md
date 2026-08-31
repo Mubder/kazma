@@ -212,7 +212,7 @@ After graph Approve, ContextVars prevent a second bus prompt. Breaking this = ha
 |---------|------|-------------------------|
 | HITL on/off | `safety.hitl.enabled` | `safety.hitl_enabled` |
 | Approval list | `safety.hitl.require_approval_for` | `safety.require_approval_for` |
-| Timeout | `safety.hitl.approval_timeout_seconds` | `safety.approval_timeout` |
+| Timeout | `safety.hitl.approval_timeout_seconds` (default 300) | `safety.approval_timeout` |
 | SearXNG | (env `KAZMA_SEARXNG_URL`) | `search.searxng_url` |
 
 **Consumer:** `get_hitl_config()` merges YAML **then** ConfigStore (and YOLO can force off).

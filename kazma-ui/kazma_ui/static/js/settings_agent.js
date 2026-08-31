@@ -12,9 +12,9 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.agent),
                 });
-                showToast('Agent settings saved', 'success');
+                showToast(window.t ? window.t('settings.agent_saved') : 'Agent settings saved', 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(window.t ? window.t('settings.save_failed') : 'Save failed', 'error');
             }
             this.saving = false;
         },
@@ -33,11 +33,60 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.safety),
                 });
-                showToast('Safety settings saved', 'success');
+                showToast(window.t ? window.t('settings.safety_saved') : 'Safety settings saved', 'success');
+                await this.loadSoulPending();
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(window.t ? window.t('settings.save_failed') : 'Save failed', 'error');
             }
             this.saving = false;
+        },
+
+        async loadSoulPending() {
+            try {
+                const resp = await fetch('/api/commitment/soul/pending', {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                this.soulPending = (data && data.pending) || [];
+            } catch (e) {
+                this.soulPending = [];
+            }
+        },
+
+        async confirmSoul(cid) {
+            try {
+                const resp = await fetch('/api/commitment/soul/' + encodeURIComponent(cid) + '/confirm', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (resp.ok && data.confirmed) {
+                    showToast(window.t ? window.t('settings.soul_confirmed') : 'Soul delta confirmed', 'success');
+                } else {
+                    showToast(data.error || (window.t ? window.t('settings.save_failed') : 'Save failed'), 'error');
+                }
+                await this.loadSoulPending();
+            } catch (e) {
+                showToast(window.t ? window.t('settings.save_failed') : 'Save failed', 'error');
+            }
+        },
+
+        async rejectSoul(cid) {
+            try {
+                const resp = await fetch('/api/commitment/soul/' + encodeURIComponent(cid) + '/reject', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (resp.ok && data.rejected) {
+                    showToast(window.t ? window.t('settings.soul_rejected') : 'Soul delta rejected', 'success');
+                } else {
+                    showToast(data.error || (window.t ? window.t('settings.save_failed') : 'Save failed'), 'error');
+                }
+                await this.loadSoulPending();
+            } catch (e) {
+                showToast(window.t ? window.t('settings.save_failed') : 'Save failed', 'error');
+            }
         },
 
         async saveContext() {
@@ -48,9 +97,9 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.context),
                 });
-                showToast('Context settings saved', 'success');
+                showToast(window.t ? window.t('settings.context_saved') : 'Context settings saved', 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(window.t ? window.t('settings.save_failed') : 'Save failed', 'error');
             }
             this.saving = false;
         },

@@ -137,7 +137,7 @@ _BURST_WINDOW_S = 240.0
 def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None:
     """Should this card be withheld? Returns why, or None to send it.
 
-    A 60s ``approval_timeout_seconds`` with ``auto_deny_on_timeout`` means an
+    A short ``approval_timeout_seconds`` with ``auto_deny_on_timeout`` means an
     operator who steps away gets each request auto-denied -- and a model reads
     that denial as "that approach failed", so it tries another one, which
     raises another card. On 2026-08-30 that produced nine approval prompts in
@@ -509,9 +509,13 @@ async def _handle_hitl_resume(
         target_thread = parts[2] if len(parts) >= 3 else thread_id
     resume_config = {"configurable": {"thread_id": target_thread, "checkpoint_ns": ""}}
 
-    ctx = await store.get(thread_id)
-    if not ctx:
-        ctx = msg.context_metadata
+    # Delivery MUST come from the inbound message. SessionStore TTL is 5 min
+    # (AGENTS.md §16 / sessions.ttl) — a paused HITL card outlives that row.
+    ctx = dict(msg.context_metadata or {})
+    stored = await store.get(thread_id)
+    if stored:
+        for _k, _v in stored.items():
+            ctx.setdefault(_k, _v)
 
     # Authorization: verify that the requester is the same user who
     # initiated the paused task. Look up the target thread's context
@@ -520,8 +524,14 @@ async def _handle_hitl_resume(
     # Fail-closed: if the target session is missing, deny cross-thread
     # approvals rather than skipping the check.
     if target_thread != thread_id:
+        from kazma_core.sessions.ttl import refuse_session_lookup_for_durable_job
+
         target_ctx = await store.get(target_thread)
         if not target_ctx:
+            refuse_session_lookup_for_durable_job(
+                job_kind="hitl_cross_thread",
+                thread_id=str(target_thread),
+            )
             logger.warning(
                 "[HITL] Authz denied: cross-thread approve for missing session %s by %s",
                 target_thread, msg.sender_id,
@@ -529,7 +539,11 @@ async def _handle_hitl_resume(
             await manager.send(
                 OutboundMessage(
                     target_id=_build_target_id(msg.platform, ctx),
-                    text="⚠️ Cannot approve: target session not found.",
+                    text=(
+                        "⚠️ Cannot approve: target session expired "
+                        "(SessionStore TTL is 5 minutes). Approve from the "
+                        "original chat, or send a new request."
+                    ),
                     context_metadata=ctx,
                 )
             )

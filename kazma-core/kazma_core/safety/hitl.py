@@ -7,7 +7,7 @@ LangGraph's HITL mechanism. Config-driven via kazma.yaml:
       hitl:
         enabled: true
         require_approval_for: ["file_write", "file_delete", "shell_exec"]
-        approval_timeout_seconds: 60
+        approval_timeout_seconds: 300
         auto_deny_on_timeout: true
 """
 
@@ -22,6 +22,7 @@ from typing import Any
 __all__ = [
     "ALWAYS_HITL_TOOLS",
     "CANONICAL_DANGER_TOOLS",
+    "DEFAULT_APPROVAL_TIMEOUT_SECONDS",
     "DEFAULT_DANGER_TOOLS",
     "TOOL_TIERS",
     "get_hitl_config",
@@ -36,6 +37,11 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+# Default auto-deny window. 60s minted a deny-retry card storm when the
+# operator stepped away (gateway hitl.py burst suppressor). 5 minutes is
+# still fail-closed; Settings clamps 10–600.
+DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300
 
 # HITL/CANONICAL drift warning cooldown: the warning repeats at this cadence
 # so a narrowed danger list keeps nagging the log instead of scrolling away
@@ -384,7 +390,9 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     require_approval_for = set(
         hitl.get("require_approval_for", DEFAULT_DANGER_TOOLS)
     )
-    approval_timeout_seconds = hitl.get("approval_timeout_seconds", 60)
+    approval_timeout_seconds = hitl.get(
+        "approval_timeout_seconds", DEFAULT_APPROVAL_TIMEOUT_SECONDS
+    )
     auto_deny_on_timeout = hitl.get("auto_deny_on_timeout", True)
 
     # Check YOLO mode for thread ID override
@@ -441,9 +449,17 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     # because it puts the tools in the *effective list* itself, which is what
     # the graph interrupt and swarm bus read directly.
     try:
-        if os.environ.get("KAZMA_HITL_CANONICAL_FLOOR", "").strip().lower() in (
-            "1", "true", "yes", "on",
-        ):
+        _floor_raw = os.environ.get("KAZMA_HITL_CANONICAL_FLOOR", "").strip().lower()
+        _floor_on = _floor_raw in ("1", "true", "yes", "on")
+        _floor_off = _floor_raw in ("0", "false", "no", "off")
+        if not _floor_on and not _floor_off:
+            try:
+                from kazma_core.tenant_isolation import multi_user_or_production
+
+                _floor_on = bool(multi_user_or_production())
+            except Exception:
+                _floor_on = False
+        if _floor_on:
             require_approval_for = set(require_approval_for or []) | set(
                 CANONICAL_DANGER_TOOLS
             )

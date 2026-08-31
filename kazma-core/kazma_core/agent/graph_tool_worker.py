@@ -117,12 +117,22 @@ def _commitment_resolve_gate(
                     _tc for _tc in pending
                     if not _is_semantic(str(_tc.get("name") or ""))
                 ]
+                _enforce_unknown = True
+                try:
+                    from kazma_core.safety.commitment.config import get_commitment_config
+
+                    _enforce_unknown = bool(
+                        get_commitment_config().get("enforce_unknown_mutators")
+                    )
+                except Exception:
+                    _enforce_unknown = True
                 for _tc in _sem:
                     try:
                         _dec = _authz(
                             _tc["name"], _tc.get("arguments") or {},
                             user_text=_user_text, request_at=_req_at, memory_beliefs=_beliefs,
                             thread_id=state.get("thread_id"), tenant_id=_tenant,
+                            enforce_unknown_mutators=_enforce_unknown,
                             context={"source": "graph"},
                         )
                     except Exception:

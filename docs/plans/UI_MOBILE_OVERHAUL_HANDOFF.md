@@ -1,6 +1,6 @@
 # Handoff — Kazma Web UI overhaul (mobile + desktop)
 
-**Status date:** 2026-08-12 (full P1–P4 + defects sweep shipped; awaiting phone verify)
+**Status date:** 2026-08-31 (full P1–P4 + defects sweep shipped; **code complete**. Real iPhone Light/Dark canvas sign-off is still an operator check — desktop DevTools cannot close that class.)
 **Keep this file current.** Update the “Now / Next / Log” sections after every slice so another agent can pick up without rereading the chat.
 
 **Do not** start a React / Vue / Svelte / native rewrite. Stack stays FastAPI + Jinja + Alpine + `kazma.css` / `kazma.v5.css`.
@@ -75,7 +75,7 @@ After Phase 0 shipped and the user pulled: **chat canvas is much better**. New r
 
 ---
 
-## 4. Now — full P1–P4 + defects sweep shipped; awaiting phone verify
+## 4. Now — full P1–P4 + defects sweep shipped; phone verify still operator
 
 All six planned slices (P1, P2a, P2b, P2c, P3, P4) **plus** the "Other known
 defects" sweep are committed (see §3). Each slice is its own commit so a

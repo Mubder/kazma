@@ -120,5 +120,7 @@ def test_health_and_chat_composer(live_server: str) -> None:
             page.locator("#chat-input").wait_for(state="visible", timeout=15000)
             live = page.locator("#voice-live-btn")
             assert live.count() >= 0
+            page.goto(live_server + "/settings", timeout=30000, wait_until="domcontentloaded")
+            page.locator(".settings-group").first.wait_for(state="visible", timeout=15000)
         finally:
             browser.close()

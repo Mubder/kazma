@@ -376,30 +376,30 @@ class MetricsDashboard(Widget):
             except Exception:
                 logger.debug("MetricsCollector unavailable", exc_info=True)
 
-        # ── Active Agents ───────────────────────────────────────────
+        # ── Active Agents (live server first; this TUI process is fallback) ──
         agent_names: list[str] = []
         try:
-            engine = self._get_swarm_engine()
+            from kazma_core.runtime.local_api import request_json
+
+            data = request_json("GET", "/api/swarm/status")
+            agent_names = sorted(
+                str(w.get("name"))
+                for w in (data.get("workers") or [])
+                if w.get("name")
+            )
         except Exception:
-            logger.debug("SwarmEngine init failed", exc_info=True)
-            engine = None
-        if engine is not None:
-            try:
-                agent_names = self._get_agent_names(engine)
-            except Exception:
-                logger.debug("SwarmEngine unavailable", exc_info=True)
+            logger.debug("live swarm status unavailable", exc_info=True)
         if not agent_names:
             try:
-                from kazma_core.runtime.local_api import request_json
-
-                data = request_json("GET", "/api/swarm/status")
-                agent_names = sorted(
-                    str(w.get("name"))
-                    for w in (data.get("workers") or [])
-                    if w.get("name")
-                )
+                engine = self._get_swarm_engine()
             except Exception:
-                logger.debug("live swarm status unavailable", exc_info=True)
+                logger.debug("SwarmEngine init failed", exc_info=True)
+                engine = None
+            if engine is not None:
+                try:
+                    agent_names = self._get_agent_names(engine)
+                except Exception:
+                    logger.debug("SwarmEngine unavailable", exc_info=True)
 
         # ── Update MetricCard widgets ───────────────────────────────
         try:

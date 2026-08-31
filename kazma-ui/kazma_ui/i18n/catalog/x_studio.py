@@ -75,6 +75,26 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "تم النشر",
         "en": "Posted",
     },
+    "x_studio.post_failed": {
+        "ar": "فشل النشر",
+        "en": "Post failed",
+    },
+    "x_studio.schedule_failed": {
+        "ar": "فشلت الجدولة",
+        "en": "Schedule failed",
+    },
+    "x_studio.reschedule_failed": {
+        "ar": "فشلت إعادة الجدولة",
+        "en": "Reschedule failed",
+    },
+    "x_studio.delete_failed": {
+        "ar": "فشل الحذف",
+        "en": "Delete failed",
+    },
+    "x_studio.cancel_failed": {
+        "ar": "فشل الإلغاء",
+        "en": "Cancel failed",
+    },
     "x_studio.quota": {
         "ar": "اليوم",
         "en": "today",

@@ -378,6 +378,13 @@ def register_tasks_routes(
             )
 
         engine = _current_engine()
+        if engine is not None:
+            all_names = list(getattr(engine, "worker_names", None) or [])
+            want_all = any(str(n).lower() in ("all", "*") for n in worker_names)
+            if want_all or (
+                task_type == getattr(TaskType, "BROADCAST", None) and not worker_names
+            ):
+                worker_names = all_names
         svc = get_swarm_service()
         if not svc.has_swarm_core() or engine is None:
             return JSONResponse(
@@ -395,6 +402,11 @@ def register_tasks_routes(
 
         dispatched = [name for name in worker_names if engine.get_worker(name) is not None]
         missing = [name for name in worker_names if name not in dispatched]
+        # workers=["auto"] is a first-class engine route (CapabilityRouter +
+        # autoscaler). It is not a registered worker name — pass it through.
+        if not dispatched and any(str(n).lower() == "auto" for n in worker_names):
+            dispatched = ["auto"]
+            missing = [n for n in worker_names if str(n).lower() != "auto"]
         if not dispatched:
             # All named workers were missing. Surface the missing list as a
             # non-error warning (HTTP 200) so callers can read `missing` without

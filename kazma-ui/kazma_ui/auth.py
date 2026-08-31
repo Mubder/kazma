@@ -6,8 +6,10 @@ endpoints (``/api/settings``, ``/api/swarm``, ``/api/mcp``, ``/api/skills``,
 whose value matches the env var.  Comparison uses :func:`secrets.compare_digest`
 for timing safety.
 
-When ``KAZMA_SECRET`` is **not** set, every endpoint remains open (backward
-compatible).
+When ``KAZMA_SECRET`` is **not** set, ``get_kazma_secret()`` auto-generates
+and persists one (non-pytest). Empty secret + non-loopback bind still
+hard-exits. ``KAZMA_AUTH_DISABLED`` / ``KAZMA_DEMO_MODE`` are the only
+full-open kill-switches (blocked together with ``KAZMA_PRODUCTION``).
 
 Read-only endpoints (``GET /api/status``, ``GET /api/telemetry``,
 ``GET /health``, ``/`` page routes, static assets) are **always** open

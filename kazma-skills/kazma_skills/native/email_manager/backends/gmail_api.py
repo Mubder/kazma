@@ -180,14 +180,24 @@ class GmailApiBackend:
             q_parts.append("is:unread")
         if query.query:
             q_parts.append(query.query.strip())
-        params: dict[str, Any] = {"maxResults": limit}
-        if q_parts:
-            params["q"] = " ".join(q_parts)
-        # offset via pageToken not implemented simply — skip for v1
-        data = await self._request("GET", "/users/me/messages", params=params)
-        ids = [m["id"] for m in (data.get("messages") or []) if m.get("id")]
-        # apply offset client-side on first page only
         offset = max(0, int(query.offset or 0))
+        needed = offset + limit
+        ids: list[str] = []
+        page_token = ""
+        while len(ids) < needed:
+            params: dict[str, Any] = {"maxResults": min(50, needed - len(ids))}
+            if q_parts:
+                params["q"] = " ".join(q_parts)
+            if page_token:
+                params["pageToken"] = page_token
+            data = await self._request("GET", "/users/me/messages", params=params)
+            batch = [m["id"] for m in (data.get("messages") or []) if m.get("id")]
+            if not batch:
+                break
+            ids.extend(batch)
+            page_token = str(data.get("nextPageToken") or "")
+            if not page_token:
+                break
         ids = ids[offset : offset + limit]
         out: list[EmailMessage] = []
         for mid in ids:

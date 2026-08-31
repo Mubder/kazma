@@ -633,6 +633,7 @@
                 <div class="form-group">
                     <label>{{ t('settings.approval_timeout_seconds') }}</label>
                     <input type="number" class="form-input" x-model.number="safety.approval_timeout" min="10" max="600">
+                    <p style="font-size:0.75rem;color:var(--text-muted);margin:4px 0 0 0;">{{ t('settings.approval_timeout_hint') }}</p>
                 </div>
                 <div class="form-group">
                     <label style="display:flex;align-items:center;gap:8px">
@@ -644,7 +645,32 @@
                     </label>
                 </div>
             </div>
+            <div class="form-group" style="margin-top:12px">
+                <label style="display:flex;align-items:center;gap:8px">
+                    <span>{{ t('settings.soul_requires_confirm') }}</span>
+                    <label class="toggle">
+                        <input type="checkbox" x-model="safety.soul_requires_confirm">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </label>
+                <p style="font-size:0.8rem;color:var(--text-muted);margin:6px 0 0 0;">{{ t('settings.soul_requires_confirm_hint') }}</p>
+            </div>
             <button class="btn btn-primary" @click="saveSafety()">{{ t('settings.save_safety') }}</button>
+            <div class="form-group" style="margin-top:16px" x-show="(soulPending || []).length" x-cloak>
+                <label>{{ t('settings.soul_pending') }}</label>
+                <template x-for="row in soulPending" :key="row.commitment_id">
+                    <div class="card" style="padding:10px 12px;margin:8px 0;display:flex;gap:8px;align-items:flex-start;justify-content:space-between">
+                        <div style="min-width:0">
+                            <div style="font-size:0.8rem;color:var(--text-muted)" x-text="row.agent_id || row.worker_name || row.commitment_id"></div>
+                            <div style="font-size:0.85rem;white-space:pre-wrap" x-text="row.delta_preview || row.goal_text || ''"></div>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-shrink:0">
+                            <button type="button" class="btn btn-sm btn-primary" @click="confirmSoul(row.commitment_id)">{{ t('settings.soul_confirm') }}</button>
+                            <button type="button" class="btn btn-sm btn-danger" @click="rejectSoul(row.commitment_id)">{{ t('settings.soul_reject') }}</button>
+                        </div>
+                    </div>
+                </template>
+            </div>
         </div>
 
         <!-- Context Window -->

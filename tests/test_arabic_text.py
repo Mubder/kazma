@@ -573,6 +573,8 @@ class TestDocsMatchCode:
             "AGENTS.md",
             "docs/docs/guide/document-intelligence.md",
             "docs/docs/ops/document-processing.md",
+            "docs/docs/ops/multi-replica-and-saas.md",
+            "docs/docs/reference/environment-variables.md",
         ):
             text = re.sub(r"\s+", " ", pathlib.Path(doc).read_text(encoding="utf-8"))
             stale = [

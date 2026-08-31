@@ -232,7 +232,7 @@ safety:
       - spawn_agents
       - schedule_task
       - cancel_scheduled
-    approval_timeout_seconds: 60
+    approval_timeout_seconds: 300
     auto_deny_on_timeout: true
 ```
 
