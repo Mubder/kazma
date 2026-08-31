@@ -61,6 +61,8 @@ def _persist_turn_reply(
     content: str,
     *,
     interrupted: bool = False,
+    pending: bool = False,
+    open_turn: bool | None = None,
     thread_id: str = "",
     model: str = "",
     tokens: int | None = None,
@@ -82,6 +84,8 @@ def _persist_turn_reply(
         reply_turn_id,
         content,
         interrupted=interrupted,
+        pending=pending,
+        open_turn=open_turn,
         thread_id=thread_id,
         model=model,
         tokens=tokens,
@@ -280,7 +284,8 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
         # Heal through the sink so the recovered answer lands in the STRANDED
         # row when there is one (replacing the interim narration the user was
         # left staring at) instead of stacking a second bubble under it.
-        from kazma_ui.reply_sink import open_reply_turn, upsert_reply
+        from kazma_ui.reply_sink import open_reply_turn
+        from kazma_ui.turn_runtime import persist_reply
 
         _heal_turn = ""
         if (_stranded or _prefix_stale) and last.get("turn_id"):
@@ -299,7 +304,7 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
             messages = messages + [
                 {"role": "assistant", "content": asst, "turn_id": _heal_turn}
             ]
-        if upsert_reply(session.session_id, _heal_turn, asst):
+        if persist_reply(session.session_id, _heal_turn, asst, thread_id=tid):
             logger.info(
                 "[SSE] Backfilled unanswered turn from checkpoint for "
                 "session=%s (%d chars)",

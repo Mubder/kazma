@@ -159,3 +159,81 @@ def test_resume_paths_resolve_rather_than_mint_a_turn():
                 f"{path.name} builds a resume command but never resolves the "
                 "turn it is continuing"
             )
+
+
+# ── 4. One persist entry (Turn Ledger P3) ─────────────────────────────
+
+
+def _upsert_call_linenos(tree: ast.AST) -> list[int]:
+    hits: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+        if name == "upsert_reply":
+            hits.append(int(node.lineno))
+    return hits
+
+
+def test_upsert_reply_only_lives_in_the_sink_and_the_runner() -> None:
+    """Production UI code must not call upsert_reply except via persist_reply.
+
+    A new transport that writes the session by hand is how approve-resume
+    shipped answers it never saved (2026-08-28) and how HITL auto-deny
+    left last night's report in the checkpoint only.
+    """
+    allowed = {
+        "kazma-ui/kazma_ui/reply_sink.py",
+        "kazma-ui/kazma_ui/turn_runtime.py",
+    }
+    repo = Path(__file__).resolve().parents[1]
+    offenders: list[str] = []
+    for path in (_UI).rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        rel = path.relative_to(repo).as_posix()
+        if rel in allowed:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for lineno in _upsert_call_linenos(tree):
+            offenders.append(f"{rel}:{lineno}")
+    assert not offenders, (
+        "upsert_reply is private to reply_sink + turn_runtime.persist_reply. "
+        "Offenders:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_upsert_gate_fails_on_synthetic_violation() -> None:
+    """Negative control: a planted upsert_reply in a transport must be seen."""
+    tree = ast.parse(
+        "def _persist_final(session_id, turn_id, text):\n"
+        "    upsert_reply(session_id, turn_id, text)\n"
+    )
+    assert _upsert_call_linenos(tree), "the gate must fail on a synthetic upsert"
+
+
+def test_no_ws_positional_incremental_persist() -> None:
+    """The `% 50 == 0` coin-flip + last-row overwrite is the duplicate-bubble class."""
+    src = _src(_UI / "routes" / "ws_chat.py")
+    assert "len(assistant_content_acc) % 50" not in src
+    assert 'add_message("assistant"' not in src
+    assert 'add_message(\n                                    "assistant"' not in src
+
+
+def test_no_80_char_working_notes_floor() -> None:
+    """Working notes belong in CoT parts, not behind a length heuristic."""
+    chat = (
+        Path(__file__).resolve().parents[1]
+        / "kazma-ui"
+        / "kazma_ui"
+        / "static"
+        / "js"
+        / "chat.js"
+    ).read_text(encoding="utf-8")
+    assert "workingProse.length > 80" not in chat
+    assert "logProgress({" in chat
+    assert "working_notes" in chat

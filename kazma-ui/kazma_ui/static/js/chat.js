@@ -5297,7 +5297,6 @@
           if (
             workingProse
             && display
-            && workingProse.length > 80
             && display.indexOf(workingProse.slice(0, Math.min(80, workingProse.length))) !== 0
             && workingProse.indexOf(display.slice(0, Math.min(80, display.length))) !== 0
           ) {

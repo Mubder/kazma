@@ -836,7 +836,7 @@ def create_sse_chat_router(
         # final answer — across a HITL pause and its separate approve
         # request. Every writer for this turn upserts on it.
         from kazma_ui.reply_sink import open_reply_turn as _open_reply_turn
-        from kazma_ui.reply_sink import upsert_reply as _upsert_reply
+        from kazma_ui.turn_runtime import persist_reply as _persist_reply
 
         _reply_turn = _open_reply_turn(thread_id)
 
@@ -956,15 +956,17 @@ def create_sse_chat_router(
                     activity=activity_log or None,
                 )
                 body = text_of(parts) or hop or streamed
-                _upsert_reply(
+                _persist_reply(
                     session_id,
                     _reply_turn,
                     body,
-                    open_turn=open_turn,
+                    interrupted=open_turn,
                     pending=not str(body or "").strip(),
                     activity=activity_of(parts) or activity_log or None,
                     parts=parts,
+                    streamed_text=streamed,
                     model=_turn_model or None,
+                    thread_id=thread_id,
                 )
 
             # Per-turn usage captured from the done/turn_complete frame so the
@@ -1036,16 +1038,18 @@ def create_sse_chat_router(
                         final=done_body,
                         activity=activity_log or None,
                     )
-                    _upsert_reply(
+                    _persist_reply(
                         session_id,
                         _reply_turn,
                         text_of(parts) or done_body,
-                        open_turn=bool(turn_usage.get("interrupted")),
+                        interrupted=bool(turn_usage.get("interrupted")),
                         activity=activity_of(parts) or activity_log or None,
                         parts=parts,
+                        streamed_text=content_acc,
                         model=_turn_model or None,
                         tokens=turn_usage.get("tokens"),
                         cost=turn_usage.get("cost"),
+                        thread_id=thread_id,
                     )
 
             except asyncio.CancelledError:

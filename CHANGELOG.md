@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Turn ledger P3: one persist path, fences for the rest (2026-09-01)
+
+SSE incremental persist, WS final/incremental persist, pending bubbles,
+and checkpoint backfill all go through `turn_runtime.persist_reply`. The
+WS `% 50` last-row overwrite and `add_message("assistant")` are gone.
+The 80-character working-notes floor is gone (notes still land in CoT).
+CI: `upsert_reply` may exist only in `reply_sink` + `turn_runtime`; a
+planted call fails the gate.
+
 ## Turn ledger P1+P2: parts + CoT projector (2026-09-01)
 
 A turn is no longer one string. Session rows carry `parts` (`reasoning` /

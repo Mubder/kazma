@@ -75,6 +75,8 @@ def persist_reply(
     content: str,
     *,
     interrupted: bool = False,
+    pending: bool = False,
+    open_turn: bool | None = None,
     thread_id: str = "",
     model: str = "",
     tokens: int | None = None,
@@ -87,6 +89,8 @@ def persist_reply(
     """Write this turn's reply through the sink. Never raises."""
     if not session_id or not reply_turn_id:
         return False
+    if open_turn is None:
+        open_turn = interrupted
     if allow_shrink is None:
         # Content-only writes must not clobber a longer hop. When *parts*
         # carries a text part, upsert derives content from that part.
@@ -107,7 +111,8 @@ def persist_reply(
             session_id,
             reply_turn_id,
             content,
-            open_turn=interrupted,
+            open_turn=open_turn,
+            pending=pending,
             activity=derived_act,
             parts=parts,
             model=model or None,
@@ -115,7 +120,7 @@ def persist_reply(
             cost=cost,
             allow_shrink=allow_shrink,
         )
-        if not interrupted:
+        if not open_turn:
             if ok:
                 close_reply_turn(thread_id)
             else:
