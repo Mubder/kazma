@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Install path matches pyproject + Settings Packages (2026-08-31)
+
+`setup.ps1` / `setup.sh` / `run.sh` requested a `[cli]` extra that does not
+exist (`kazma-cli` is in the wheel). They now `uv sync --extra rag --extra
+dev --extra tui`, copy `.env.example`, and print `kazma serve` / `kazma-tui`.
+README, Quickstart, Development, and Deployment match that. Settings →
+Packages lists every `pyproject.toml` direct dependency and extra
+(`pre-commit`, `pytest-timeout`, `pygments`, `tzdata`, document libs).
+
 ## Header title: one translated word, not an English slug (2026-08-31)
 
 The top bar rendered the route slug (`Chat`, `Dashboard`, `X_Studio`) as a

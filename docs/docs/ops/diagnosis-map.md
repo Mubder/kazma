@@ -382,7 +382,7 @@ Adding a **fourth** site without the fence is a security regression.
 | `kazma-tui` | Textual UI over core APIs | Separate agent brain |
 | `kazma-cli` | `kazma` commands | Long-running gateway |
 | `kazma-skills` | Native skill packages | Runtime HITL policy |
-| `kazma-memory` | Tokenizer / search helpers | Full RAG policy |
+| `kazma-core` memory | V2 beliefs / FTS / `MSATokenizer` | Full RAG policy |
 
 ---
 

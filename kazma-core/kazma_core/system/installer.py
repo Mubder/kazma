@@ -44,6 +44,11 @@ ALLOWED_PACKAGES: frozenset[str] = frozenset({
     "pytesseract",
     "weasyprint",
     "pymupdf",
+    "pypdfium2",
+    "pdf2image",
+    "pillow",
+    "tree-sitter-python",
+    "tree-sitter-javascript",
 })
 
 
@@ -207,7 +212,7 @@ def _record_installed_extra(extra: str | None, package_name: str | None) -> None
     if extra:
         name = extra.strip().lower()
         if name == "all":
-            to_add = ["rag", "dev", "test", "tui", "observability", "web"]
+            to_add = sorted(e for e in ALLOWED_EXTRAS if e != "all")
         elif name:
             to_add = [name]
     elif package_name in (

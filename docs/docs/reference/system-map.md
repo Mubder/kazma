@@ -23,7 +23,6 @@ That file is the engineering single source of truth for *how packages wire toget
 | `kazma-tui` | Textual dashboard / editor / **Documents tab** |
 | `kazma-cli` | `kazma` CLI entrypoints (incl. migrate with document store) |
 | `kazma-skills` | Skill manifests + native skills (`document-platform`, `document-generator`, …) |
-| `kazma-memory` | Arabic tokenizer / search helpers |
 
 ## Decomposed modules
 

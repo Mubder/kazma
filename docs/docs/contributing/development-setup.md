@@ -13,7 +13,7 @@ sidebar_position: 1
 ## Clone and install
 
 ```bash
-git clone https://github.com/kazma-ai/kazma.git
+git clone https://github.com/Mubder/kazma.git
 cd kazma
 
 # Create virtual environment
@@ -38,8 +38,10 @@ source .venv/bin/activate
 ```
 
 ```bash
-# Install with dev dependencies
-pip install -e ".[dev,cli]"
+# Same extras as setup.sh / setup.ps1 (rag + tests + TUI).
+# There is no [cli] extra — kazma-cli is in the wheel.
+pip install -e ".[rag,dev,tui]"
+# or: uv sync --extra rag --extra dev --extra tui
 ```
 
 ## Activate the git hooks
@@ -80,15 +82,14 @@ export KAZMA_GATE_PYTHON=/path/to/python
 
 ```
 kazma/
-  kazma-core/          Core framework
-  kazma-skills/        Built-in skills
-  kazma-connectors/    External connectors
-  kazma-providers/     LLM providers
-  kazma-ui/            Dashboard
-  kazma-cli/           CLI entry point
-  kazma-memory/        Memory subsystem
-  docs/                Documentation site
-  tests/               Test suite
+  kazma-core/          Agent, LLM providers, swarm, V2 memory, IDE
+  kazma-gateway/       Telegram / Discord / Slack
+  kazma-ui/            FastAPI dashboard + Settings
+  kazma-tui/           Textual dashboard
+  kazma-cli/           `kazma` CLI
+  kazma-skills/        Native skills
+  docs/                Docusaurus site
+  tests/               Cross-cutting tests
 ```
 
 ## Run tests

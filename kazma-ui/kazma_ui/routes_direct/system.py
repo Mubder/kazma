@@ -440,9 +440,9 @@ def register_system_routes(self: Any) -> None:
                 "priority": 10,
                 "description": _i18n(
                     "packages.extra.dev.desc",
-                    "Development tools — pytest, ruff, mypy, locust.",
+                    "Development tools — pytest, ruff, mypy, locust, pre-commit.",
                 ),
-                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust"],
+                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "ruff", "mypy", "locust", "pre-commit"],
                 "install_cmd": 'uv pip install -e ".[dev]"   # additive — won\'t remove other extras',
             },
             "test": {
@@ -450,9 +450,9 @@ def register_system_routes(self: Any) -> None:
                 "priority": 11,
                 "description": _i18n(
                     "packages.extra.test.desc",
-                    "Test-specific dependencies (lighter than dev).",
+                    "Test-specific dependencies (lighter than dev; includes pytest-timeout).",
                 ),
-                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "fakeredis", "httpx"],
+                "packages": ["pytest", "pytest-asyncio", "pytest-cov", "pytest-mock", "pytest-timeout", "fakeredis", "httpx"],
                 "install_cmd": 'uv pip install -e ".[test]"   # additive — won\'t remove other extras',
             },
             "tui": {
@@ -586,6 +586,8 @@ def register_system_routes(self: Any) -> None:
             "pymongo": "MongoDB driver for database_client skill",
             "fakeredis": "In-memory Redis stub for tests",
             "httpx": "HTTP client (also listed in test extra for completeness)",
+            "pre-commit": "Git hooks for import + static gates",
+            "pytest-timeout": "Per-test timeout for CI",
             "tree-sitter": "Parser runtime for the codebase index",
             "tree-sitter-python": "Python grammar for codebase_search",
             "tree-sitter-javascript": "JavaScript grammar for codebase_search",
@@ -608,12 +610,15 @@ def register_system_routes(self: Any) -> None:
         CORE_PACKAGES = [
             "fastapi", "uvicorn", "langgraph", "langgraph-checkpoint-sqlite",
             "aiosqlite", "langfuse", "pyyaml", "httpx", "cryptography",
-            "PyJWT", "jinja2", "python-multipart", "psutil",
+            "PyJWT", "jinja2", "python-multipart", "textual", "psutil",
             "aiogram", "websockets", "duckduckgo-search", "trafilatura",
-            "markdown", "tenacity", "networkx", "click", "rich",
-            "google-cloud-aiplatform", "python-dotenv",
-            # Workspace packages (editable install)
-            "kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli",
+            "markdown", "pygments", "tzdata", "tenacity", "networkx",
+            "click", "rich", "google-cloud-aiplatform", "python-dotenv",
+            "arabic-reshaper", "python-bidi", "reportlab", "python-docx",
+            "openpyxl", "pypdf", "pdfplumber", "python-pptx",
+            # Workspace packages (editable hatch install is one dist: kazma)
+            "kazma", "kazma-core", "kazma-ui", "kazma-gateway", "kazma-cli",
+            "kazma-tui", "kazma-skills",
         ]
 
         CORE_DESCRIPTIONS = {
@@ -641,10 +646,24 @@ def register_system_routes(self: Any) -> None:
             "rich": "Beautiful terminal output (colors, tables, progress bars)",
             "google-cloud-aiplatform": "Google Vertex AI provider integration",
             "python-dotenv": ".env file loading for local development",
+            "textual": "TUI framework (also listed under the tui extra)",
+            "pygments": "Syntax highlighting for Markdown / code blocks",
+            "tzdata": "IANA timezone database (Windows / slim containers)",
+            "arabic-reshaper": "Arabic text shaping for generated PDF/DOCX",
+            "python-bidi": "Bidirectional text for Arabic UI / documents",
+            "reportlab": "PDF generation (core document path)",
+            "python-docx": "Word document generation",
+            "openpyxl": "Excel generation",
+            "pypdf": "PDF read/write",
+            "pdfplumber": "PDF table/text extract",
+            "python-pptx": "PowerPoint generation",
+            "kazma": "Monorepo wheel (core + UI + gateway + CLI + TUI + skills)",
             "kazma-core": "Agent brain, LLM providers, swarm, V2 memory, IDE",
             "kazma-ui": "FastAPI web app + Settings + Dashboard",
             "kazma-gateway": "Telegram / Discord / Slack adapters",
             "kazma-cli": "`kazma` CLI entrypoints",
+            "kazma-tui": "Textual dashboard (`kazma-tui`)",
+            "kazma-skills": "Native skills + manifests",
         }
 
         # Surface neo4j driver if installed (not a pyproject extra — pip install neo4j)

@@ -4,7 +4,7 @@ title: Quickstart
 sidebar_label: Quickstart
 description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 ---
-> Get Kazma running and answering messages in under 10 minutes. This guide covers the three install paths and the shortest path to a working chat.
+> Get Kazma running and answering messages in under 10 minutes. This guide is the install source of truth — keep it in lockstep with `pyproject.toml`, `setup.ps1` / `setup.sh`, and Settings → Packages.
 
 ---
 
@@ -12,25 +12,48 @@ description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 
 | Requirement | Detail |
 |---|---|
-| **Python** | `>=3.11, &lt;3.14` (declared in `pyproject.toml`). |
+| **Python** | `>=3.11, &lt;3.15` (declared in `pyproject.toml`). 3.12 or 3.13 recommended. |
 | **Git** | For cloning / operator upgrades via [`kazma update`](../ops/kazma-update) (git install path). |
 | **An LLM provider key** | At least one of: OpenAI, Anthropic, Google (ADC), DeepSeek, xAI, OpenRouter, NVIDIA NIM, Mistral, Together, Cohere, Fireworks, Perplexity, AI21 — or a local server (Ollama / LM Studio). Azure OpenAI and AWS Bedrock are also supported natively. |
 | **Node.js** (optional) | Only if you want to build/serve the Docusaurus docs site (`docs/`). Not required to run Kazma itself. |
 
-> **Note on extras:** Core `pip install -e .` installs everything needed to run the agent, Web UI, TUI, gateways, and swarm. The `rag` extra (`chromadb`, `sentence-transformers`) is required **only** for vector memory / RAG — see [Memory & RAG](memory-and-rag).
+> **Note on extras:** A bare `pip install -e .` already includes the agent, Web UI, TUI (`textual` is a core dep), gateways, swarm, and the document-generation libraries. The **`rag` extra** (`chromadb`, `sentence-transformers`, `sqlite-vec`) is what you add for vector memory / dense recall — see [Memory & RAG](memory-and-rag). There is **no `[cli]` extra**; `kazma-cli` ships in the wheel.
 
 ---
 
 ## 2. Install
 
-Choose one path. All three produce the same console scripts: `kazma`, `kazma-tui`, `kazma-web`.
+Choose one path. All of them produce the same console scripts: `kazma`, `kazma-tui`, `kazma-web`.
 
-> **Repo README** also has a short Windows-friendly Quick Start (ports, `ERR_CONNECTION_RESET`). Prefer this guide for depth.
+> **Repo README** has a short Windows-friendly Quick Start (ports, `ERR_CONNECTION_RESET`). Prefer this guide for depth.
 
-### Path A — Editable install (recommended for development)
+### Path A — Bootstrap script (recommended)
 
 ```bash
-git clone <your-repo-url> kazma
+git clone https://github.com/Mubder/kazma.git
+cd kazma
+```
+
+```powershell
+# Windows (PowerShell) — never chain with && / ||; use ; and $LASTEXITCODE
+.\setup.ps1
+```
+
+```bash
+# Linux / macOS / WSL
+chmod +x setup.sh
+./setup.sh
+```
+
+The script: requires Python 3.11+, installs `uv` if missing, runs
+`uv sync --extra rag --extra dev --extra tui`, copies `.env.example` → `.env`
+when needed, and import-checks LangGraph / aiosqlite / textual. It does **not**
+install `[all]` (that pulls torch, Playwright, WeasyPrint, Temporal, E2B).
+
+### Path B — Editable install (manual)
+
+```bash
+git clone https://github.com/Mubder/kazma.git kazma
 cd kazma
 python -m venv .venv
 ```
@@ -53,50 +76,52 @@ source .venv/bin/activate
 ```
 
 ```bash
-pip install -e ".[rag,dev]"
-# or install everything at once:
-pip install -e ".[all]"
-# or: uv sync --all-extras
+# Same extras as the bootstrap scripts:
+uv sync --extra rag --extra dev --extra tui
+# or:
+pip install -e ".[rag,dev,tui]"
+# Everything:
+# uv sync --all-extras
+# pip install -e ".[all]"
 ```
 
-Optional extras (only install the ones you need):
+Optional extras (only install the ones you need; Settings → Packages can add them later):
 
 | Extra | Packages | Enables |
 |---|---|---|
-| `[rag]` | `chromadb>=0.5.0`, `sentence-transformers>=3.0.0`, `sqlite-vec>=0.1.6` | Vector memory / RAG (4-layer UnifiedMemoryAdapter) |
-| `[dev]` | `pytest`, `pytest-asyncio`, `ruff`, `mypy`, `locust`, … | Tests + linting |
-| `[tui]` | `textual>=8.0.0`, `python-bidi>=0.4.0` | Terminal dashboard (`kazma-tui`) |
-| `[observability]` | `prometheus-client>=0.20.0` | `/metrics` scrape endpoint |
-| `[web]` | `playwright>=1.40` | Browser-automation skill (run `playwright install chromium` after) |
-| `[document]` | `reportlab`, `python-docx`, `openpyxl`, `pypdf`, … | Legacy **document-generator** skill (simple PDF/DOCX/XLSX files) |
-| `[ocr]` | `pytesseract`, `pdf2image`, `pillow` | OCR helpers for Document Intelligence (needs system Tesseract) |
-| `[convert]` | `weasyprint` | HTML→PDF style conversion engines |
-| `[document-platform]` | `document` + `ocr` + `convert` + `pymupdf` + `pypdfium2` | **Full Document Intelligence** engines (parse bake-off, redaction/raster/render) |
-| `[database]` | `psycopg[binary]>=3.1.0`, `pymysql>=1.1.0`, `pymongo>=4.7.0` | Postgres/MySQL/Mongo in the database-client skill |
-| `[postgres]` | `psycopg[binary,pool]>=3.1.0`, `langgraph-checkpoint-postgres>=2.0.0` | Multi-replica SaaS shared state (also document jobs/metadata when configured) |
-| `[all]` | meta — installs every extra above | Convenience |
+| `[rag]` | `chromadb`, `sentence-transformers`, `sqlite-vec` | Vector memory / dense recall |
+| `[dev]` | `pytest`, `pytest-asyncio`, `pytest-cov`, `pytest-mock`, `ruff`, `mypy`, `locust`, `pre-commit` | Tests + lint + git hooks |
+| `[test]` | pytest stack + `pytest-timeout` + `fakeredis` | CI-lighter than `dev` |
+| `[tui]` | `textual`, `python-bidi` | Terminal dashboard (`kazma-tui`; `textual` is also core) |
+| `[observability]` | `prometheus-client` | `/metrics` scrape endpoint |
+| `[web]` | `playwright` | Browser-automation skill (then `playwright install chromium`) |
+| `[push]` | `pywebpush` | Web Push for turn-complete (self-disables if missing) |
+| `[document]` | `reportlab`, `python-docx`, `openpyxl`, `pypdf`, … | Same libs as core; extra kept for explicit installs |
+| `[ocr]` | `pytesseract`, `pdf2image`, `pillow` | OCR (needs system Tesseract) |
+| `[convert]` | `weasyprint` | HTML→PDF (needs OS fonts / GTK on some hosts) |
+| `[document-platform]` | `document` + `ocr` + `convert` + `pymupdf` + `pypdfium2` | Full Document Intelligence engines |
+| `[docling]` | `docling` | Local hard-PDF salvage after PyMuPDF |
+| `[index]` | `tree-sitter`, `tree-sitter-python`, `tree-sitter-javascript` | Codebase index (regex fallback always works) |
+| `[sandbox]` | `e2b-code-interpreter` | Firecracker `python_exec` (`E2B_API_KEY`) |
+| `[durable]` | `temporalio` | Temporal-wrapped swarm (`KAZMA_TEMPORAL_HOST`) |
+| `[database]` | `psycopg`, `pymysql`, `pymongo` | Extra drivers for the database-client skill |
+| `[postgres]` | `psycopg[binary,pool]`, `langgraph-checkpoint-postgres` | Multi-replica shared state |
+| `[all]` | meta — every extra above | Convenience; heavy |
 
-> The native skills (browser, calendar, document-generator, **document-platform**, database) **always load** — their tools are registered even when the optional package is absent; calling a tool whose backend isn't installed returns a friendly install-hint string instead of failing. Install the extra to activate that backend.
+> Native skills (browser, calendar, document-generator, **document-platform**, database) **always load**. Calling a tool whose backend isn't installed returns an install-hint instead of crashing. Install the extra to activate that backend.
 
 **Document Intelligence first use:** open `/documents` after start (core text parsers work without extras). For convert/redact engines: `pip install -e ".[document-platform]"`. Optional system packages: Tesseract (OCR), ClamAV (malware scan), LibreOffice (some conversions). Guide: [Document Intelligence](document-intelligence).
 
-### Path B — Production Docker Compose
+### Path C — Production Docker Compose
 
 ```bash
 cp .env.example .env      # then edit .env (see step 3)
 docker compose up -d --build
 ```
 
-The container runs `uvicorn kazma_ui.app:create_app --factory --host 0.0.0.0 --port 9090` as the non-root `kazma` user. Health check hits `/api/gateway/status` every 30 s. See [Deployment](deployment).
+The image installs `.[rag,postgres,document-platform]`, listens on **container port 8000**, and compose maps **host 9090 → 8000** (`HOST_PORT` to override). Health check hits `/health/ready` every 30 s (300 s start period). See [Deployment](deployment).
 
-### Path C — Windows native (`setup.ps1`)
-
-```powershell
-# From a PowerShell prompt in the repo root:
-.\setup.ps1
-```
-
-`setup.ps1` creates the venv, installs editable with extras, and bootstraps data directories. Never chain PowerShell commands with `&&` or `||` — use `;` and check `$LASTEXITCODE`.
+Do **not** start with raw `python -m uvicorn` on Windows — that forces a Proactor loop and silently drops Postgres checkpoints. Use `kazma serve` / the guard.
 
 ---
 
@@ -180,8 +205,12 @@ The complete key-by-key reference is in [Configuration](configuration).
 ```bash
 kazma serve              # default host 127.0.0.1, port 9090
 kazma serve 9091         # if 9090 is taken (common on Windows + WSL/Docker)
-# or:
-python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9091
+```
+
+On a watched host (Scheduled Task / systemd / launchd), pick up a `git pull` with the guard — do not kill `python`/`uvicorn` by hand:
+
+```powershell
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
 ```
 
 Open the URL printed in the terminal (e.g. `http://127.0.0.1:9090` or `:9091`). Use **http**, not https. Navigate to **Chat** and send a message.

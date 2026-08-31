@@ -12,26 +12,25 @@ description: Kazma Development — code-audited reference (unified docs, v0.9+)
 
 ```
 kazma/
-├── kazma-core/          # Agent runner, LLM provider, swarm, ConfigStore, safety, memory, skills, MCP, hub
-├── kazma-gateway/       # Telegram/Discord/Slack adapters, agent_handler package, slash commands
+├── kazma-core/          # Agent runner, LLM provider, swarm, ConfigStore, safety, V2 memory, skills, MCP
+├── kazma-gateway/       # Telegram/Discord/Slack adapters, agent_handler, slash commands
 ├── kazma-ui/            # FastAPI app, SSE chat, swarm panel, settings, i18n, static assets
 ├── kazma-tui/           # Textual TUI dashboard
-├── kazma-memory/        # Arabic tokenizer + SQLite/FTS5 search backend
 ├── kazma-skills/        # Native skills + manifests
 ├── kazma-cli/           # The `kazma` command surface
-├── docs/                # Docusaurus site — single SoT (content under docs/docs/); archived audits under docs/audits/archive/
+├── docs/                # Docusaurus site — single SoT (content under docs/docs/)
 ├── tests/               # Cross-cutting tests
-├── examples/            # Example skills (e.g. almuhalab_custom_skills)
-├── scripts/             # Ops: migrate, smoke, tools-catalog regen, …
-├── kubernetes/          # Sample K8s manifests (verify ports vs compose)
+├── examples/            # Example skills
+├── scripts/             # Ops: migrate, smoke, guard, tools-catalog regen, …
+├── kubernetes/          # Sample K8s manifests (Hub service, not the main agent)
 ├── kazma.yaml           # Main config
 ├── kazma-permissions.yaml
 ├── kazma-security.yaml
-├── services.yaml
-├── pyproject.toml       # Single hatchling build for all 7 packages
+├── pyproject.toml       # Single hatchling build (6 packages in the wheel)
 ├── Dockerfile           # Main agent image
-├── docker-compose.yml   # Main agent compose
-├── setup.ps1            # Windows bootstrap
+├── docker-compose.yml   # Host 9090 → container 8000
+├── setup.ps1            # Windows bootstrap (uv sync rag+dev+tui)
+├── setup.sh             # Linux / macOS / WSL bootstrap
 └── run.sh               # Minimal E2E reproduction
 ```
 
@@ -64,29 +63,25 @@ source .venv/bin/activate
 ```
 
 ```bash
-pip install -e ".[rag,dev]"
+# Same extras as setup.sh / setup.ps1:
+pip install -e ".[rag,dev,tui]"
+# or: uv sync --extra rag --extra dev --extra tui
 ```
 
-Extras (`pyproject.toml:37-71`):
-
-| Extra | Contents |
-|---|---|
-| `rag` | `chromadb>=0.5.0`, `sentence-transformers>=3.0.0` |
-| `dev` | `pytest`, `pytest-asyncio`, `pytest-cov`, `pytest-mock`, `ruff`, `mypy`, `locust` |
-| `test` | pytest stack + `fakeredis` |
-| `tracing` | `opentelemetry-*` exporters/instrumentors |
-| `tui` | `textual>=8.0.0`, `python-bidi` |
+There is **no `[cli]` extra** and no `[tracing]` extra. Full extra table: [Quickstart §2](quickstart#path-b--editable-install-manual).
 
 ### 2.2 Windows
 
 ```powershell
-.\setup.ps1            # validates env, syncs venv, runs import check
+.\setup.ps1            # Python 3.11+, uv, uv sync rag+dev+tui, import check
 ```
 
-### 2.3 uv (used by `run.sh`)
+### 2.3 uv (used by `setup.sh` / `run.sh`)
 
 ```bash
-uv sync --extra dev --extra cli --extra tui --extra rag
+uv sync --extra rag --extra dev --extra tui
+# Full optional set (heavy):
+# uv sync --all-extras
 ```
 
 ---
@@ -114,10 +109,9 @@ From AGENTS.md:
 # JS syntax check
 node --check "kazma-ui/kazma_ui/static/js/chat.js"
 
-# Run tests
-python -m pytest kazma-core/tests/ -v
-python -m pytest tests/ -v                 # cross-cutting
-python -m pytest -k majlis -v              # specific
+# Run tests — prefer the crash-tolerant chunked runner (full suite ~5 min)
+python scripts/fast_test.py
+python -m pytest tests/test_system_install_allowlist.py -v   # one file
 
 # Lint
 python -m ruff check kazma-core/kazma_core/

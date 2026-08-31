@@ -12,7 +12,7 @@ description: Kazma Arabic & Cultural Features — code-audited reference (unifie
 
 | Component | Package | Role |
 |---|---|---|
-| **Arabic tokenizer** | `kazma-memory` | Text normalization + FTS5 indexing for Arabic search. |
+| **Arabic tokenizer** | `kazma-core` (`msa_tokenizer.py`) | MSA normalization for Arabic search. |
 | **i18n + RTL UI** | `kazma-ui` | UI string translation, per-request `dir`/`lang`, font policy. |
 | **Majlis Protocol** | `kazma-core` | Gulf cultural conversational flow (4-phase). |
 
@@ -22,7 +22,7 @@ These are **independent** layers. The tokenizer does not depend on the i18n syst
 
 ## 2. The Arabic tokenizer
 
-`kazma-memory/kazma_memory/arabic_tokenizer.py` (292 lines). Detailed in [Memory & RAG → Arabic tokenizer](memory-and-rag#5-the-arabic-tokenizer). Summary of the normalization pipeline (`normalize`, lines 132-165):
+`kazma-core/kazma_core/msa_tokenizer.py` (`MSATokenizer`). The retired `kazma-memory` package is gone. Detailed in [Memory & RAG → Arabic tokenizer](memory-and-rag#5-the-arabic-tokenizer). Normalization pipeline:
 
 1. Diacritics removal — regex `[\u064B-\u065F\u0670]`.
 2. Alef normalization — `أ`, `إ`, `آ` → `ا`.

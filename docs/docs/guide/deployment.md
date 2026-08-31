@@ -26,76 +26,25 @@ description: Kazma Deployment — code-audited reference (unified docs, v0.9+)
 
 ### 2.1 The Dockerfile
 
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
+The live file is `Dockerfile` at the repo root — do not copy-paste a snapshot here (it drifted before: missing git, Arabic fonts, LibreOffice, Tesseract, ClamAV, and `document-platform`). What it actually does:
 
-# System deps for ChromaDB + sentence-transformers
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl \
-    && rm -rf /var/lib/apt/lists/*
+- Base: `python:3.11-slim`.
+- System deps: git, libpq, Noto Arabic fonts, LibreOffice, Tesseract (`eng`+`ara`), ClamAV, build-essential, curl.
+- Python: `pip install -e ".[rag,postgres,document-platform]"`.
+- Runs as non-root **`kazma`**. Listens on **container port 8000**.
+- Entrypoint: `scripts/docker-entrypoint.sh`.
 
-COPY . .
-
-# RAG extras (chromadb + sentence-transformers)
-RUN pip install --no-cache-dir -e ".[rag]"
-
-# Non-root user (least-privilege)
-RUN useradd -r -m -d /home/kazma -s /bin/bash kazma \
-    && mkdir -p /app/kazma-data /home/kazma/.kazma/vector_memory \
-    && chown -R kazma:kazma /app /home/kazma
-USER kazma
-
-EXPOSE 8000
-
-# host=0.0.0.0 is required inside Docker so the port mapping reaches the service.
-# Docker's network isolation provides the security boundary.
-CMD ["python", "-m", "uvicorn", "kazma_ui.app:create_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8000", "--timeout-graceful-shutdown", "15"]
-```
-
-Key points:
-
-- Installs `.[rag]` (ChromaDB + sentence-transformers) — needed for vector memory.
-- Runs as the non-root **`kazma`** user (least-privilege).
-- `--host 0.0.0.0` is **required inside the container** so the published port reaches the service. Docker's network isolation is the security boundary (the comment in the Dockerfile explains this).
-- `--timeout-graceful-shutdown 15` gives in-flight requests 15 s to drain.
+`--host 0.0.0.0` is **required inside the container** so the published port reaches the service. Docker's network isolation is the security boundary.
 
 ### 2.2 docker-compose.yml
 
-```yaml
-version: "3.8"
-services:
-  kazma:
-    build: .
-    container_name: kazma
-    ports:
-      - "8000:8000"
-    volumes:
-      - kazma_data:/app/kazma-data
-      - kazma_vectors:/root/.kazma/vector_memory
-    env_file:
-      - .env
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/gateway/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 15s
+Live file: `docker-compose.yml`. Accurate facts (do not restore the old `8000:8000` / `/root/.kazma` snapshot):
 
-volumes:
-  kazma_data:
-    driver: local
-  kazma_vectors:
-    driver: local
-```
-
-- Two named volumes persist the SQLite stores and the ChromaDB vectors.
-- Health check hits `/api/gateway/status` every 30 s.
-- `restart: unless-stopped` survives host reboots.
-
-> **⚠ Volume path caveat:** the `kazma_vectors` volume mounts `/root/.kazma/vector_memory`, but the container runs as user `kazma` (home `/home/kazma`). If you rely on the default `KAZMA_VECTOR_PATH` (`~/.kazma/vector_memory`), confirm the `~` resolves to `/home/kazma` for the `kazma` user, or set `KAZMA_VECTOR_PATH=/app/kazma-data/vector_memory` explicitly to align with the data volume.
+- Host port **9090** → container **8000** (`HOST_PORT` to override) so bookmarks match `kazma serve`.
+- Volumes: `kazma_data` → `/app/kazma-data`; `kazma_vectors` → `/home/kazma/.kazma/vector_memory` (the `kazma` user home, not `/root`).
+- `KAZMA_VECTOR_PATH=/home/kazma/.kazma/vector_memory` is set in compose.
+- Health check: `curl -f http://localhost:8000/health/ready` every 30 s, **300 s** start period (cold start loads embeddings + MCP).
+- `restart: unless-stopped` survives host reboots (it does **not** restart on unhealthy).
 
 ### 2.3 Deploy steps
 
@@ -112,7 +61,7 @@ docker compose logs -f kazma
 Verify:
 
 ```bash
-curl -s http://localhost:8000/health/live
+curl -s http://localhost:9090/health/ready
 ```
 
 ### 2.4 `.dockerignore`
@@ -124,11 +73,9 @@ Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`,
 ## 3. Bare uvicorn (without Docker)
 
 ```bash
-# Development / single-host
-pip install -e ".[rag]"
-kazma serve                 # 127.0.0.1:8000
-# or explicit:
-python -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 8000 --ws-ping-interval 20 --ws-ping-timeout 20
+# Development / single-host — use kazma serve (not raw uvicorn on Windows)
+pip install -e ".[rag,dev,tui]"
+kazma serve                 # 127.0.0.1:9090
 ```
 
 For a public-facing host behind a reverse proxy:
