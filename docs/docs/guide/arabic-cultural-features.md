@@ -67,12 +67,18 @@ The translation dict is extensive — keys span nav, header, chat, dashboard, se
 - **`dir` global** set in `app.py:235`: `"rtl" if _startup_lang == "ar" else "ltr"`, updated per-request by the middleware.
 - **Client-side:** `base.html:71` injects `window.KAZMA_LANG`; lines 76-77 expose a client-side `t()` lookup.
 
-### 3.4 Arabic font policy (IBM Plex + 16px RTL base)
+### 3.4 Arabic font policy (IBM Plex, equal EN/AR size)
 
 `kazma-ui/kazma_ui/static/css/kazma.css` — IBM Plex Sans / IBM Plex Sans Arabic
 is the shared face with generated documents (`style_theme.THEME`) and the
 Docusaurus docs. Amiri stays as a naskh fallback when Plex is absent. The
 letterhead K is the product logo, favicon, and avatar.
+
+EN and AR share the **same 14px root**. Plex Arabic matches the Latin optical
+size, so an RTL-only base bump (the old 16px / 1.15× multiplier) made the
+whole UI larger. Tiny labels still have a readability floor (~11px) because
+0.6–0.7rem Arabic is illegible. The Settings font-size slider is the operator
+size control and applies equally to both languages.
 
 ```css
 /* Font stacks (kazma.css :root) */
@@ -83,9 +89,6 @@ letterhead K is the product logo, favicon, and avatar.
 }
 
 html { font-size: 14px; }
-/* Arabic glyphs need larger rendering for readability.
-   16px base makes 0.7rem ≈ 11.2px (readable). */
-html[dir="rtl"] { font-size: 16px; }
 
 html[dir="rtl"] .badge,
 html[dir="rtl"] .metric-label,

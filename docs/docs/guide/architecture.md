@@ -305,7 +305,7 @@ Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.
 Kazma is Arabic-native by default (`agent.language: ar`, `agent.rtl: true`). Three components implement this:
 
 1. **Arabic tokenizer** (`kazma-memory/kazma_memory/arabic_tokenizer.py`) — diacritics removal, Alef/Yeh/Teh-Marbuta normalization, Tatweel stripping, Kuwaiti-dialect stop words, basic stemmer. Feeds the FTS5 `content_arabic` column.
-2. **i18n + RTL UI** (`kazma-ui/kazma_ui/i18n.py` + `i18n/catalog/`, `static/css/kazma.css`) — merged `TRANSLATIONS` dict (EN/AR), per-request `dir`/`lang`, IBM Plex Sans / IBM Plex Sans Arabic, 16px RTL base, readability floor on small classes.
+2. **i18n + RTL UI** (`kazma-ui/kazma_ui/i18n.py` + `i18n/catalog/`, `static/css/kazma.css`) — merged `TRANSLATIONS` dict (EN/AR), per-request `dir`/`lang`, IBM Plex Sans / IBM Plex Sans Arabic, shared 14px root, readability floor on small classes.
 3. **Majlis Protocol** (`kazma-core/kazma_core/majlis.py`) — a 4-phase Gulf cultural conversational flow (GREETING → SOCIAL → TRANSACTION → FAREWELL) with Kuwaiti-dialect defaults and cultural modifiers (Ramadan, Eid, National Day).
 
 See [Arabic & Cultural Features](arabic-cultural-features).

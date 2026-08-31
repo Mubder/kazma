@@ -36,15 +36,30 @@ def test_latex_to_unicode_common_forms() -> None:
     assert any(b.get("type") == "math" for b in blocks)
 
 
-def test_theme_cs_size_splits_latin_and_arabic() -> None:
-    """Arabic body is larger than Latin; chrome gets a modest bump only."""
-    assert THEME["body_size_ar"] > THEME["body_size"]
-    assert theme_cs_size() == THEME["body_size_ar"]
-    assert theme_cs_size(THEME["body_size"]) == THEME["body_size_ar"]
-    assert theme_cs_size(8) == 10.0
-    assert theme_cs_size(THEME["h2_size"]) == THEME["h2_size"] + (
-        THEME["body_size_ar"] - THEME["body_size"]
-    )
+def test_theme_cs_size_equal_by_default() -> None:
+    """EN and AR share one type scale; Plex does not need a CS bump."""
+    assert THEME["body_size_ar"] == THEME["body_size"]
+    assert theme_cs_size() == THEME["body_size"]
+    assert theme_cs_size(THEME["body_size"]) == THEME["body_size"]
+    assert theme_cs_size(8) == 8.0
+    assert theme_cs_size(THEME["h2_size"]) == THEME["h2_size"]
+
+
+def test_theme_cs_size_honours_a_raised_arabic_body() -> None:
+    """Negative control: raising body_size_ar must restore the CS delta.
+
+    The default is 1:1; this is the only way an operator opts into a bump,
+    and chrome (≤9.5pt) still gets +2pt rather than jumping to body size.
+    """
+    original = THEME["body_size_ar"]
+    THEME["body_size_ar"] = float(THEME["body_size"]) + 5
+    try:
+        assert theme_cs_size() == THEME["body_size_ar"]
+        assert theme_cs_size(THEME["body_size"]) == THEME["body_size_ar"]
+        assert theme_cs_size(8) == 10.0
+        assert theme_cs_size(THEME["h2_size"]) == THEME["h2_size"] + 5
+    finally:
+        THEME["body_size_ar"] = original
 
 
 def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
@@ -463,11 +478,15 @@ def test_subtitle_and_ar_citations_rtl(tmp_path: Path) -> None:
     def lines(pdf):
         doc = pymupdf.open(str(pdf))
         out = []
+        # Subtitle is h3 (13pt); body/citations sit at theme_cs_size.
+        # The old window (theme_cs_size()+1.5) only reached 13pt while
+        # body_size_ar was 12. Exclude h2+ heading bars (15pt+).
+        size_hi = max(float(THEME["h3_size"]), theme_cs_size()) + 1.5
         for page in doc:
             for block in page.get_text("dict").get("blocks", []):
                 for ln in block.get("lines", []):
                     spans = ln.get("spans", [])
-                    if spans and 8.0 <= spans[0]["size"] <= theme_cs_size() + 1.5:
+                    if spans and 8.0 <= spans[0]["size"] <= size_hi:
                         text = "".join(s.get("text", "") for s in spans)
                         if len(text.strip()) > 2:
                             bb = ln["bbox"]
@@ -589,7 +608,7 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     assert int(THEME["h3_size"] * 2) in sz       # h3    -> 25
     # Body paragraph size on the Normal style (styles.xml) synced too
     assert ('w:val="%d"' % int(THEME["body_size"] * 2)) in styles, "EN DOCX body size not synced"
-    # AR body Arabic is independently larger via w:szCs (not a copy of Latin sz)
+    # AR body Arabic is independently sized via w:szCs (not a copy of Latin sz)
     from kazma_core.documents.style_theme import theme_cs_size
     ar_styles = zipfile.ZipFile(tmp_path / "ar.docx").read("word/styles.xml").decode("utf-8")
     assert ('w:szCs w:val="%d"' % int(round(theme_cs_size() * 2))) in ar_styles, (

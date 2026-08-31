@@ -172,7 +172,8 @@ class TestUnifiedTypeScale:
         html_source = _HTML_SOURCE.read_text(encoding="utf-8")
         assert "theme_cs_size(10)" in pdf_source
         assert "theme_cs_size(10)" in html_source
-        assert theme_cs_size(10) > 10
+        # Default type scale is 1:1 (Plex needs no CS bump).
+        assert theme_cs_size(10) == 10
 
     def test_pdf_tables_set_an_explicit_size(self):
         """Falling through to ReportLab's 10pt default is not a design choice."""

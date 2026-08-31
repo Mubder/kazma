@@ -257,12 +257,14 @@ def test_arabic_docx_runs_carry_complex_script_size_and_bold(tmp_path: Path) -> 
         )
 
 
-def test_arabic_body_szcs_is_larger_than_latin(tmp_path: Path) -> None:
+def test_arabic_body_szcs_tracks_theme(tmp_path: Path) -> None:
     """Arabic body uses body_size_ar via w:szCs; Latin stays at body_size.
 
     Regression: Normal.font.size was set to body_size_ar (pumping English)
     and _mark_run copied w:sz→w:szCs, so mixed Latin looked large while
-    the Arabic face stayed optically small.
+    the Arabic face stayed optically small. Default body_size_ar equals
+    body_size (Plex needs no bump); szCs must still be written independently
+    and must follow theme_cs_size of the Latin size on that run.
     """
     import re
     import zipfile
@@ -281,7 +283,7 @@ def test_arabic_body_szcs_is_larger_than_latin(tmp_path: Path) -> None:
 
     latin_half = int(THEME["body_size"] * 2)
     ar_half = int(round(theme_cs_size() * 2))
-    assert ar_half > latin_half
+    assert ar_half == latin_half
 
     # Normal style: Latin size is body_size, Cs size is body_size_ar.
     assert f'w:sz w:val="{latin_half}"' in styles, (
@@ -301,8 +303,11 @@ def test_arabic_body_szcs_is_larger_than_latin(tmp_path: Path) -> None:
         cs_m = re.search(r'w:szCs w:val="(\d+)"', r)
         sz_m = re.search(r'w:sz w:val="(\d+)"', r)
         if cs_m and sz_m:
-            assert int(cs_m.group(1)) > int(sz_m.group(1)), (
-                f"szCs must exceed latin sz on Arabic runs: {r[:160]!r}"
+            latin_pt = int(sz_m.group(1)) / 2.0
+            expected_cs = int(round(theme_cs_size(latin_pt) * 2))
+            assert int(cs_m.group(1)) == expected_cs, (
+                f"szCs must follow theme_cs_size of latin sz on Arabic runs: "
+                f"{r[:160]!r}"
             )
 
 

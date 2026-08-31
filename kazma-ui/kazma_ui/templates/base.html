@@ -51,7 +51,12 @@
 
         {# Main Content Area #}
         <div class="main-content" id="main-content" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
-            {# Header #}
+            {# Capture `{% block page_title %}` here so the include can
+               render it. Jinja blocks do not cross `{% include %}`
+               boundaries — writing the block inside header.html left
+               every page falling back to the English route slug
+               ("Chat" next to "الرئيسية / المحادثة"). #}
+            {% set _page_title %}{% block page_title %}{% if active_page %}{{ t('nav.' ~ active_page) }}{% else %}Kazma{% endif %}{% endblock %}{% endset %}
             {% include "components/header.html" %}
 
             {# Global System Alerts Banner — x-cloak + x-show gate it; the
