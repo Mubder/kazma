@@ -32,8 +32,7 @@
   .sched-summary { max-width: 520px; }
   .sched-summary .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 2px; }
   .sched-summary .txt { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
-                        overflow: hidden; word-break: break-word; unicode-bidi: plaintext; text-align: start; }
-  .sched-summary .txt[dir="rtl"] { font-family: var(--font-arabic); }
+                        overflow: hidden; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .sched-summary .why { color: var(--danger, #ef4444); font-size: .72rem; margin-top: 4px;
                         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .sched-summary .outcome { color: var(--text-muted); font-size: .72rem; margin-top: 4px;
@@ -59,14 +58,12 @@
   /* ── X activity ── */
   .audit-text { max-width: 420px; }
   .audit-text .txt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-                     overflow: hidden; word-break: break-word; unicode-bidi: plaintext; text-align: start; }
-  .audit-text .txt[dir="rtl"] { font-family: var(--font-arabic); }
+                     overflow: hidden; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .audit-detail { border-top: 1px solid var(--border-subtle); background: var(--bg-surface);
                   padding: 12px 14px; }
   .audit-detail .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 6px; }
-  .audit-detail .txt { unicode-bidi: plaintext; text-align: start; word-break: break-word;
+  .audit-detail .txt { unicode-bidi: isolate; text-align: start; word-break: break-word;
                        white-space: pre-wrap; font-size: .9rem; line-height: 1.5; }
-  .audit-detail .txt[dir="rtl"] { font-family: var(--font-arabic); }
   .audit-detail .why { color: var(--danger, #ef4444); font-size: .78rem; margin-top: 8px; }
   .audit-open .txt { -webkit-line-clamp: unset; overflow: visible; white-space: pre-wrap; }
   .mono { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }

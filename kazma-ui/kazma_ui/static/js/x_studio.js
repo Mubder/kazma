@@ -31,7 +31,9 @@ function xStudioPage() {
     textDir(raw) {
       const bidi = window.KazmaBidi;
       if (bidi && bidi.textDir) return bidi.textDir(raw);
-      return 'auto';
+      const s = String(raw || '');
+      if (/[\u0600-\u06FF]/.test(s)) return 'rtl';
+      return 'ltr';
     },
 
     async init() {

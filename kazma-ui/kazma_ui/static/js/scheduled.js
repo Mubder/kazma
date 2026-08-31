@@ -160,7 +160,9 @@ function scheduledPage() {
             if (task && task.dir) return task.dir;
             const bidi = window.KazmaBidi;
             if (bidi && bidi.textDir) return bidi.textDir(this.cleanSummary(task));
-            return 'auto';
+            const s = this.cleanSummary(task);
+            if (/[\u0600-\u06FF]/.test(s)) return 'rtl';
+            return 'ltr';
         },
 
         /* Real failures only. last_result is the agent's wrap-up essay and

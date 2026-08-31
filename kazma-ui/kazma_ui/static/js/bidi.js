@@ -235,8 +235,11 @@
   }
 
   function textDir(text) {
-    if (isArabicDominant(text)) return 'rtl';
-    if (hasArabic(text)) return 'auto';
+    // Tweets on /x and /scheduled: any Arabic → rtl. dir=auto uses the
+    // first strong character, so an English wrapper or a URL prefix paints
+    // the whole block LTR even when the body is Arabic.
+    var sample = extractPostBody(text) || String(text || '');
+    if (hasArabic(sample) || hasArabic(text)) return 'rtl';
     return 'ltr';
   }
 

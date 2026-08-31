@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## /x Arabic RTL (2026-08-31)
+
+Tweet bodies on `/x` (composer, drafts, posted, planner) pin `dir=rtl`
+when they contain Arabic. `dir=auto` + `unicode-bidi: plaintext` used
+the first strong character of an English wrapper or URL, and
+`-webkit-box` line-clamp painted the block LTR. The pin lives in
+`kazma.css` so a soft-nav swap does not drop it.
+
 ## Loop stall, install-local state, readable X activity (2026-08-31)
 
 - **`/health/ready` Postgres ping** runs in a worker thread with a 3s

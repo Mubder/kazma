@@ -49,6 +49,16 @@ def test_english_tweet_stays_ltr() -> None:
     assert extract_post_body("hello from kazma") == "hello from kazma"
 
 
+def test_arabic_with_english_prefix_is_rtl_not_auto() -> None:
+    """dir=auto first-strong of 'See https://…' painted the tweet LTR on /x."""
+    mixed = (
+        "See https://example.com/a/very/long/article-path and more English "
+        "words about the launch: مرحبا بالعالم"
+    )
+    assert not is_arabic_dominant(mixed)
+    assert text_dir(mixed) == "rtl"
+
+
 def test_kicker_names_the_batch() -> None:
     assert display_kicker(_WRAP) == "Batch 2/8"
 

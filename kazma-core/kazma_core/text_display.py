@@ -42,11 +42,14 @@ def is_arabic_dominant(text: str) -> bool:
 
 
 def text_dir(text: str) -> str:
-    """CSS ``dir`` for a block of user content."""
-    if is_arabic_dominant(text):
+    """CSS ``dir`` for a tweet/prompt body.
+
+    Any Arabic → ``rtl``. ``auto`` (first-strong) is what made English
+    wrappers and Latin prefixes paint the whole block LTR on ``/x``.
+    """
+    sample = extract_post_body(text) or str(text or "")
+    if _arabic_count(sample) or _arabic_count(text):
         return "rtl"
-    if _arabic_count(text):
-        return "auto"
     return "ltr"
 
 

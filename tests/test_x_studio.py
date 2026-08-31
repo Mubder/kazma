@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -227,3 +228,19 @@ def test_studio_page_and_sidebar_are_wired() -> None:
     assert ":dir=" in html
     assert "displayBody" in js
     assert "textDir" in js
+    assert "unicode-bidi: plaintext" not in html
+    css = (root / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css").read_text(
+        encoding="utf-8"
+    )
+    assert ".xs-row .txt[dir=\"rtl\"]" in css
+    assert "direction: rtl" in css.split(".xs-row .txt[dir=\"rtl\"]")[1][:400]
+
+
+def test_bidi_js_pins_arabic_tweets_rtl() -> None:
+    script = (
+        Path(__file__).resolve().parents[1] / "tests" / "js" / "test_bidi_post_dir.js"
+    )
+    out = subprocess.run(
+        ["node", str(script)], capture_output=True, text=True, timeout=20
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
