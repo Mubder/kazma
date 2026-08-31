@@ -699,9 +699,13 @@ async def _handle_hitl_resume(
                     {"type": "hitl_approval", "kind": "security"},
                     approved=approved, scope="task" if is_task_grant else "once", reason=action,
                 )
-            result_state = await graph.ainvoke(
+            from kazma_ui.turn_runtime import invoke_turn as _invoke_hitl
+
+            result_state = await _invoke_hitl(
+                graph,
                 _resume_cmd,
                 resume_config,
+                thread_id=target_thread,
             )
 
             # Re-surface a chained interrupt (a second danger tool paused in

@@ -211,6 +211,14 @@ def test_scroll_is_pin_to_bottom_not_forced() -> None:
     assert js.count("scrollToBottomForce();") >= 2  # send + session load
 
 
+def test_thinking_strip_uses_class_not_x_show() -> None:
+    """x-show display:none jumped the composer; is-on is opacity/height."""
+    html = _CHAT.read_text(encoding="utf-8")
+    assert "thinking-indicator" in html
+    assert "is-on" in html
+    assert 'x-show="$store.agent && $store.agent.isThinking"' not in html
+
+
 def test_status_strip_never_toggles_per_token() -> None:
     """#thinking-indicator sits IN-FLOW between transcript and composer: every
     hide/show shifts the composer ~33px and makes the streaming text bounce.

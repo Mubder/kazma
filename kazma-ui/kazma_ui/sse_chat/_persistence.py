@@ -61,78 +61,40 @@ def _persist_turn_reply(
     content: str,
     *,
     interrupted: bool = False,
+    pending: bool = False,
+    open_turn: bool | None = None,
     thread_id: str = "",
     model: str = "",
     tokens: int | None = None,
     cost: float | None = None,
     activity: list[dict[str, Any]] | None = None,
+    parts: list[dict[str, Any]] | None = None,
+    streamed_text: str = "",
     allow_shrink: bool | None = None,
 ) -> bool:
     """Write this turn's reply through the sink. Never raises.
 
-    ``allow_shrink`` defaults to "this write is authoritative iff the turn
-    finished": a FINAL answer may legitimately be shorter than the narration
-    it replaces ("Posted all 4 Arabic tweets." after a paragraph of
-    reasoning), while an INTERIM write must never trade accumulated text for
-    a fragment. Callers doing best-effort flushes (disconnect, crash) pass
-    ``False`` explicitly.
-
-    An INTERRUPTED turn (HITL pause) is not finished: its text is stored so
-    a reload mid-pause shows the narration, but the row stays ``open`` so
-    the approval resume writes the final answer into the SAME row instead of
-    adding a second bubble for one question.
-
-    This replaces the ``interrupted`` guard added in 4d646e2b, which never
-    fired in production: the flag it read is set in the post-stream block at
-    line ~912, while the detached done-callback that read it runs the moment
-    the pump task completes. The live log caught the race at 8 ms —
-    ``persisted (125 chars)`` at 00:00:21.405, ``HITL interrupt`` at .413.
-    Turn-keyed writes make the ordering irrelevant rather than re-fixing it.
+    Delegates to ``turn_runtime.persist_reply`` so HTTP generators and
+    headless finishers (HITL auto-deny) share one writer.
     """
-    if not session_id or not reply_turn_id:
-        return False
-    if allow_shrink is None:
-        allow_shrink = not interrupted
-    try:
-        from kazma_ui.reply_sink import close_reply_turn, upsert_reply
+    from kazma_ui.turn_runtime import persist_reply
 
-        ok = upsert_reply(
-            session_id,
-            reply_turn_id,
-            content,
-            open_turn=interrupted,
-            activity=activity,
-            model=model or None,
-            tokens=tokens,
-            cost=cost,
-            allow_shrink=allow_shrink,
-        )
-        if not interrupted:
-            # The upsert already cleared the row's ``open`` marker, so the
-            # close only has to drop the in-memory identity — passing the
-            # session here would cost a second store write per turn. If the
-            # upsert failed, do the marker cleanup the slow way.
-            if ok:
-                close_reply_turn(thread_id)
-            else:
-                close_reply_turn(thread_id, session_id, reply_turn_id)
-        logger.info(
-            "[SSE] Reply persisted thread=%s turn=%s chars=%d interrupted=%s",
-            (thread_id or "")[:12],
-            reply_turn_id[:12],
-            len(str(content or "")),
-            interrupted,
-        )
-        return ok
-    except Exception:
-        logger.warning(
-            "[SSE] Reply persist FAILED thread=%s turn=%s (the reply is still "
-            "in the checkpoint; the session was NOT updated)",
-            (thread_id or "")[:12],
-            reply_turn_id[:12],
-            exc_info=True,
-        )
-        return False
+    return persist_reply(
+        session_id,
+        reply_turn_id,
+        content,
+        interrupted=interrupted,
+        pending=pending,
+        open_turn=open_turn,
+        thread_id=thread_id,
+        model=model,
+        tokens=tokens,
+        cost=cost,
+        activity=activity,
+        parts=parts,
+        streamed_text=streamed_text,
+        allow_shrink=allow_shrink,
+    )
 
 def _snapshot_paused(snap: Any) -> bool:
     """True when the graph snapshot is parked on a pending interrupt.
@@ -173,42 +135,18 @@ async def _persist_detached_reply(
     construction rather than by ordering luck.
     """
     try:
-        asst = ""
-        snap = None
-        try:
-            snap = await graph.aget_state(config)
-            if snap and snap.values:
-                msgs = snap.values.get("messages") or []
-                asst = _last_assistant_text(msgs)
-        except Exception:
-            logger.debug("[SSE] detached persist: aget_state failed", exc_info=True)
-        # Trust the checkpoint over the caller's flag: a turn that paused on
-        # a (possibly chained) approval must keep its row open so the resume
-        # writes the final answer into it.
-        interrupted = bool(interrupted) or _snapshot_paused(snap)
-        from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
+        from kazma_ui.turn_runtime import close_turn
 
-        # A caller that forgot the id still gets a correct write: resolve the
-        # thread's open turn (or start one). This function is the last line
-        # of defence for a detached turn — it must never silently no-op.
-        if not reply_turn_id:
-            reply_turn_id = resolve_reply_turn(thread_id, session_id)
-
-        text = resolve_reply_text(asst, streamed_text)
-        if not text and not interrupted:
-            # The turn completed WITHOUT producing any assistant text. Never
-            # leave the user with a silent gap or a stuck spinner.
-            text = (
-                "⚠️ Your previous turn finished without producing a reply "
-                "(the model may have failed silently). Please try again."
-            )
-        _persist_turn_reply(
-            session_id,
-            reply_turn_id,
-            text,
-            interrupted=interrupted,
+        await close_turn(
+            graph,
+            config,
+            session_id=session_id,
             thread_id=thread_id,
+            turn_id=reply_turn_id,
+            streamed_text=streamed_text,
+            interrupted=interrupted,
         )
+        return
     except Exception:
         logger.warning(
             "[SSE] Detached turn persist FAILED for thread=%s session=%s "
@@ -346,7 +284,8 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
         # Heal through the sink so the recovered answer lands in the STRANDED
         # row when there is one (replacing the interim narration the user was
         # left staring at) instead of stacking a second bubble under it.
-        from kazma_ui.reply_sink import open_reply_turn, upsert_reply
+        from kazma_ui.reply_sink import open_reply_turn
+        from kazma_ui.turn_runtime import persist_reply
 
         _heal_turn = ""
         if (_stranded or _prefix_stale) and last.get("turn_id"):
@@ -365,7 +304,7 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
             messages = messages + [
                 {"role": "assistant", "content": asst, "turn_id": _heal_turn}
             ]
-        if upsert_reply(session.session_id, _heal_turn, asst):
+        if persist_reply(session.session_id, _heal_turn, asst, thread_id=tid):
             logger.info(
                 "[SSE] Backfilled unanswered turn from checkpoint for "
                 "session=%s (%d chars)",

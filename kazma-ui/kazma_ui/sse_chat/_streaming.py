@@ -232,24 +232,24 @@ async def _stream_langgraph_events(
                 # cancelled the graph mid-tool — an approved action could be
                 # half-executed and its answer lost. Now the graph owns its
                 # own task: a disconnect cancels only the delivery, and the
-                # done-callback persists the result for the next page load.
-                _resume_loop = asyncio.get_running_loop()
-                _resume_task = asyncio.create_task(graph.ainvoke(input_state, config))
+                # closer persists the result for the next page load.
+                from kazma_ui.turn_runtime import invoke_turn
+
+                _resume_task = asyncio.create_task(
+                    invoke_turn(
+                        graph,
+                        input_state,
+                        config,
+                        session_id=session_id,
+                        thread_id=thread_id,
+                        turn_id=reply_turn_id,
+                        streamed_text=content_acc,
+                    )
+                )
                 register_turn(thread_id, _resume_task)
 
                 def _on_resume_done(t: asyncio.Task) -> None:
                     unregister_turn(thread_id, t)
-                    if not session_id or not reply_turn_id:
-                        return
-                    _resume_loop.call_soon_threadsafe(
-                        lambda: _resume_loop.create_task(
-                            _persist_detached_reply(
-                                graph, config, session_id, thread_id,
-                                streamed_text=content_acc,
-                                reply_turn_id=reply_turn_id,
-                            )
-                        )
-                    )
 
                 _resume_task.add_done_callback(_on_resume_done)
                 # shield: cancelling this generator (client left) must not
@@ -279,7 +279,9 @@ async def _stream_langgraph_events(
                 async def _pump_events():
                     nonlocal _stream_done
                     try:
-                        async for ev in graph.astream_events(input_state, config=config, version="v2"):
+                        from kazma_ui.turn_runtime import astream_events as _astream_turn
+
+                        async for ev in _astream_turn(graph, input_state, config):
                             # Bounded queue: drop advisory stream events when
                             # the consumer is gone/slow rather than grow the
                             # queue unbounded for up to DETACHED_TTL_S. The
