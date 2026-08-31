@@ -1153,6 +1153,12 @@ function registerAgentStore() {
 
         case 'capacity': {
           try {
+            // Same WS/SSE fan-out as tokens/done: SSE already painted the
+            // confirmation. A second paintCapacityReply created extra
+            // assistant bubbles (/unrestricted on mobile, 2026-08-31).
+            if (typeof window.KazmaChat.hasLiveSSE === 'function' && window.KazmaChat.hasLiveSSE()) {
+              break;
+            }
             const reply = (data && data.reply) || frame.reply || '';
             if (reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
               window.KazmaChat.paintCapacityReply(reply);

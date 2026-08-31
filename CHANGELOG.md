@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## /unrestricted no longer duplicates You + Kazma bubbles (2026-08-31)
+
+Mobile `/unrestricted` (and `/yolo` / `/long`) journaled a `capacity` frame
+that **SSE and WS both painted**. `paintCapacityReply` compared rendered
+plain text to markdown, missed, and opened a new assistant bubble — then
+`beginTurn` had already left an empty thinking row. A retried POST stacked
+a second user row in the store, so the other device showed:
+
+`You /unrestricted` → empty Kazma → confirmation ×2–3.
+
+WS now skips capacity paint while SSE owns the turn; `paintCapacityReply`
+reuses the open-turn bubble and compares folded markdown; instant slashes
+skip the thinking turn; `record_instant_turn` and `loadSession` collapse
+the same user/assistant pair. Existing duplicated seasons heal on reload.
+
 ## Remaining-work audit one-shot (2026-08-31)
 
 Closes the 2026-08-31 remaining-work list (safety holes, product gaps,

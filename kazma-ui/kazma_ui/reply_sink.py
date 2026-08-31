@@ -381,10 +381,37 @@ def record_instant_turn(
     """
     turn_id = ""
     try:
+        user_text = str(user_text or "")
+        reply_text = str(reply_text or "")
         with _store().transact(session_id) as sess:
-            sess.messages.append(
-                {"role": "user", "content": user_text, "ts": _now()}
+            rows = sess.messages if isinstance(sess.messages, list) else []
+            last = rows[-1] if rows else None
+            prev = rows[-2] if len(rows) >= 2 else None
+            same_user = (
+                isinstance(last, dict)
+                and (last.get("role") or "") == "user"
+                and str(last.get("content") or "").strip() == user_text.strip()
             )
+            already = (
+                isinstance(last, dict)
+                and (last.get("role") or "") == "assistant"
+                and str(last.get("content") or "").strip() == reply_text.strip()
+                and isinstance(prev, dict)
+                and (prev.get("role") or "") == "user"
+                and str(prev.get("content") or "").strip() == user_text.strip()
+            )
+            if already:
+                existing = str(last.get("turn_id") or "")
+                if kind and not last.get("kind"):
+                    last["kind"] = kind
+                return existing
+            if not same_user:
+                rows.append({"role": "user", "content": user_text, "ts": _now()})
+                sess.messages = rows
+            elif isinstance(last, dict) and last.get("turn_id"):
+                # User row already stored for this command (retried POST);
+                # reuse its reply turn if one exists on the next row.
+                pass
         turn_id = open_reply_turn(thread_id)
         upsert_reply(session_id, turn_id, reply_text)
         if kind:
