@@ -519,6 +519,17 @@ class TestResyncFragmentationFixes:
     with its own "Writing reply…" row.
     """
 
+    def test_idle_resync_paints_pending_assistant_content(self):
+        """Detached persist can leave pending=true with the full answer.
+        Idle resync must still applyFinal (the old !pending gate hid it)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "leftover `pending` flag" in src or "leftover pending" in src
+        idle = src.split("// Idle: paint durable assistant text", 1)[1].split(
+            "Idle with nothing to deliver", 1
+        )[0]
+        assert "applyFinalAssistantText" in idle
+        assert "!lastMsg.pending" not in idle
+
     def test_resync_never_aborts_a_live_stream(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
         generating = src.split("if (generating) {", 1)[1].split("return;\n      }", 1)[0]

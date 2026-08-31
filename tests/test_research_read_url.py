@@ -39,6 +39,29 @@ def test_truncate_short_unchanged() -> None:
     assert truncate_tool_result("hello", tool_name="read_url") == "hello"
 
 
+def test_file_search_does_not_inherit_research_cap() -> None:
+    """Substring `"file" in name` used to give file_search the 200k research
+    cap, which re-inflated a just-trimmed prompt to ~50k tokens mid-turn."""
+    from kazma_core.agent.graph_helpers import TOOL_RESULT_FILE_MAX_CHARS
+
+    big = "Z" * 80_000
+    cut = truncate_tool_result(big, tool_name="file_search")
+    assert "[truncated" in cut
+    assert len(cut) <= TOOL_RESULT_FILE_MAX_CHARS + 80
+    # Negative control: research tools still pass 150k unchanged.
+    research = truncate_tool_result("Z" * 150_000, tool_name="read_url")
+    assert "[truncated" not in research
+
+
+def test_file_read_uses_file_cap_not_research() -> None:
+    from kazma_core.agent.graph_helpers import TOOL_RESULT_FILE_MAX_CHARS
+
+    big = "Y" * 80_000
+    cut = truncate_tool_result(big, tool_name="file_read")
+    assert "[truncated" in cut
+    assert len(cut) <= TOOL_RESULT_FILE_MAX_CHARS + 80
+
+
 @pytest.mark.asyncio
 async def test_read_url_paging_uses_cache(tmp_path: Path, monkeypatch) -> None:
     ru.clear_url_cache()

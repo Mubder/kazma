@@ -35,6 +35,10 @@ Usage
     python scripts/service/kazma_guard.py                 # supervise
     python scripts/service/kazma_guard.py --once          # no restarts (debug)
     python scripts/service/kazma_guard.py --dry-run       # print config, exit
+    python scripts/service/kazma_guard.py --reload        # pick up code changes
+    python scripts/service/kazma_guard.py --status
+    python scripts/service/kazma_guard.py --pause --stop --reason "…"
+    python scripts/service/kazma_guard.py --resume
 
 Configuration (all optional, env vars):
     KAZMA_GUARD_CMD             command to run       (default: serve.py)
@@ -563,6 +567,14 @@ def _port_from_url(url: str) -> int:
         return 0
 
 
+def _local_port_of(addr: str) -> str:
+    """Return the port field of a netstat local-address token."""
+    # 127.0.0.1:9090  |  [::]:9090  |  [::1]:9090
+    if addr.startswith("["):
+        return addr.rsplit("]", 1)[-1].lstrip(":")
+    return addr.rsplit(":", 1)[-1]
+
+
 def _port_holder_pid(port: int) -> int:
     """PID listening on *port*, or 0. Standard library / OS tools only."""
     if not port:
@@ -572,10 +584,12 @@ def _port_holder_pid(port: int) -> int:
             out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
                                  capture_output=True, text=True, encoding="utf-8", errors="replace",
                                  timeout=20, check=False).stdout
+            want = str(port)
             for line in out.splitlines():
                 parts = line.split()
-                if len(parts) >= 5 and parts[0].upper() == "TCP"                         and parts[3].upper() == "LISTENING"                         and parts[1].endswith(f":{port}"):
-                    return int(parts[4])
+                if len(parts) >= 5 and parts[0].upper() == "TCP" and parts[3].upper() == "LISTENING":
+                    if _local_port_of(parts[1]) == want:
+                        return int(parts[4])
             return 0
         out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
                              capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -583,6 +597,63 @@ def _port_holder_pid(port: int) -> int:
         return int(out.splitlines()[0]) if out else 0
     except Exception:
         return 0
+
+
+def parse_tasklist_image(stdout: str) -> str:
+    """Image name from ``tasklist /FO CSV /NH`` (or table) output.
+
+    ``tasklist /NH`` on a miss prints ``INFO: No tasks are running…`` —
+    taking ``split()[0]`` produced the name ``info:`` and --reload refused
+    to kill the real uvicorn grandchild holding 9090 (live, 2026-08-31).
+    """
+    raw = (stdout or "").strip()
+    if not raw:
+        return ""
+    line = raw.splitlines()[0].strip()
+    if not line or line.upper().startswith("INFO:") or line.upper().startswith("ERROR:"):
+        return ""
+    if line.startswith('"'):
+        # CSV: "python.exe","95052","Console",...
+        try:
+            import csv
+            from io import StringIO
+
+            row = next(csv.reader(StringIO(line)))
+            return (row[0] if row else "").strip()
+        except Exception:
+            return ""
+    return line.split()[0]
+
+
+def _windows_image_name(pid: int) -> str:
+    """Best-effort process image for *pid* on Windows. Empty if unknown."""
+    if pid <= 0:
+        return ""
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=15, check=False,
+        ).stdout
+        name = parse_tasklist_image(out)
+        if name:
+            return name
+    except Exception:
+        pass
+    try:
+        out = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                f"(Get-CimInstance Win32_Process -Filter 'ProcessId={int(pid)}').Name",
+            ],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=20, check=False,
+        ).stdout.strip()
+        if out and "error" not in out.lower():
+            return out.splitlines()[0].strip()
+    except Exception:
+        pass
+    return ""
 
 
 def reap_port_holder(url: str, log: GuardLog) -> bool:
@@ -605,20 +676,26 @@ def reap_port_holder(url: str, log: GuardLog) -> bool:
     name = ""
     try:
         if os.name == "nt":
-            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
-                                 capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                 timeout=15, check=False).stdout
-            name = out.split()[0].lower() if out.split() else ""
+            name = _windows_image_name(pid)
         else:
             name = subprocess.run(["ps", "-p", str(pid), "-o", "comm="],
                                   capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                  timeout=15, check=False).stdout.strip().lower()
+                                  timeout=15, check=False).stdout.strip()
     except Exception:
         name = ""
-    if "python" not in name:
-        log("error", "port.holder_not_ours", pid=pid, port=port, name=name,
+    name_l = name.lower()
+    # If THIS health URL is answering, the listener is Kazma even when
+    # tasklist cannot see the image (Scheduled Task / other session →
+    # "INFO: No tasks are running", parsed as name "info:").
+    health_ok, _ = probe(url, 5.0)
+    ours = "python" in name_l or health_ok
+    if not ours:
+        log("error", "port.holder_not_ours", pid=pid, port=port, name=name or "unknown",
             note="refusing to kill a non-python process")
         return False
+    if "python" not in name_l and health_ok:
+        log("warn", "port.holder_name_unknown_but_health_answers",
+            pid=pid, port=port, name=name or "unknown")
     log("warn", "port.reaping_holder", pid=pid, port=port, name=name)
     try:
         if os.name == "nt":
@@ -1092,6 +1169,112 @@ def _cmd_resume() -> int:
     return 0
 
 
+def _stop_recorded_child(log: GuardLog) -> int:
+    """Kill the guard's recorded child tree. Returns the pid stopped, or 0."""
+    try:
+        state = json.loads(_state_path().read_text(encoding="utf-8"))
+        pid = int(state.get("child_pid") or 0)
+    except Exception:
+        pid = 0
+    if pid and _pid_alive(pid):
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True, timeout=30, check=False,
+                )
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            log("info", "reload.child_stopped", pid=pid)
+            return pid
+        except Exception as exc:
+            log("error", "reload.child_stop_failed", pid=pid, error=str(exc)[:200])
+    return 0
+
+
+def _live_commit(health_url: str) -> str:
+    live = health_url.rstrip("/").rsplit("/", 1)[0] + "/live"
+    if not live.endswith("/health/live"):
+        live = "http://127.0.0.1:9090/health/live"
+    try:
+        with urllib.request.urlopen(live, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        build = data.get("build") if isinstance(data, dict) else None
+        if isinstance(build, dict):
+            return str(build.get("commit") or "")
+        return str((data or {}).get("commit") or "")
+    except Exception:
+        return ""
+
+
+def _cmd_reload() -> int:
+    """Operator deploy: stop the running server so the supervisor boots new code.
+
+    Killing python / uvicorn by hand fights the guard: it either respawns the
+    OLD process that still holds the port, or refuses to start because a
+    squatter is healthy. This command is the one path that (1) lifts a
+    leftover pause, (2) kills the recorded child AND the port holder, and
+    (3) waits until /health/live reports a new boot.
+    """
+    log = GuardLog(_default_log_path())
+    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    before = _live_commit(health)
+    if clear_pause():
+        print("Cleared leftover pause so the supervisor can respawn.")
+        log("info", "reload.cleared_pause")
+    stopped = _stop_recorded_child(log)
+    if stopped:
+        print(f"Stopped recorded server pid {stopped}.")
+    else:
+        print("No recorded child; clearing whoever holds the port.")
+    reap_port_holder(health, log)
+
+    # Wait until the old process is actually gone (port free / health down).
+    deadline = time.monotonic() + 45.0
+    while time.monotonic() < deadline:
+        ok, _ = probe(health, 3.0)
+        if not ok:
+            break
+        time.sleep(0.5)
+    else:
+        print("WARNING: something is still answering /health/ready after kill.")
+        print("  python scripts/service/kazma_guard.py --status")
+        return 1
+
+    print("Waiting for the supervisor to boot the new process…")
+    print("(If KazmaAgent is not installed, start: python scripts/service/kazma_guard.py)")
+    boot_deadline = time.monotonic() + min(START_TIMEOUT_S, 180.0)
+    while time.monotonic() < boot_deadline:
+        ok, detail = probe(health, 5.0)
+        if ok:
+            after = _live_commit(health)
+            print(f"Kazma is up. build {after or '?'} (was {before or '?'})")
+            if before and after and before == after:
+                print(
+                    "NOTE: commit hash unchanged — the process restarted but "
+                    "git HEAD is the same. Code edits still need this reload."
+                )
+            log("info", "reload.ready", commit=after, previous=before)
+            return 0
+        time.sleep(2.0)
+
+    print("Server did not become ready. The supervisor may not be running.")
+    print("  python scripts/service/install_service.py --install")
+    print("  python scripts/service/install_service.py --status")
+    print("  python scripts/service/kazma_guard.py --status")
+    print("  python scripts/service/kazma_guard.py          # start supervision in this terminal")
+    return 2
+
+
+def _cmd_install() -> int:
+    """Operator typed --install on the guard; the installer is a sibling script."""
+    script = Path(__file__).resolve().parent / "install_service.py"
+    cmd = [sys.executable, str(script), "--install"]
+    print("The OS supervisor installer is install_service.py, not kazma_guard.")
+    print("Running: " + " ".join(cmd))
+    return int(subprocess.call(cmd))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Health-gated supervisor for Kazma.",
@@ -1112,6 +1295,10 @@ def main() -> int:
                     help="lift a pause and let the guard restart Kazma")
     ap.add_argument("--status", action="store_true",
                     help="show whether supervision is active or paused")
+    ap.add_argument("--reload", action="store_true",
+                    help="stop the running server so the supervisor boots new code")
+    ap.add_argument("--install", action="store_true",
+                    help="install the OS supervisor (runs install_service.py --install)")
     ap.add_argument("--stop", action="store_true",
                     help="with --pause: also stop the running server now")
     ap.add_argument("--reason", default="", help="why (recorded and alerted)")
@@ -1122,6 +1309,10 @@ def main() -> int:
 
     if args.status:
         return _cmd_status()
+    if args.install:
+        return _cmd_install()
+    if args.reload:
+        return _cmd_reload()
     if args.pause:
         return _cmd_pause(args.reason, args.ttl, stop_now=args.stop)
     if args.resume:

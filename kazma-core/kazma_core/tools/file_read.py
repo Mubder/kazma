@@ -215,29 +215,31 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
                 f"{capability.reason or 'runtime health probe failed'}"
             )
 
+        import asyncio
+
         limit_n = max(int(limit or 500), 1)
         offset_n = int(offset or 0)
         budget = _max_read_budget()
 
-        if p.stat().st_size <= budget:
-            # H16: the old `p.read_text()` loaded the ENTIRE file before
-            # the MAX_CHARS cap — an OOM vector on multi-GB files. Only
-            # files that fit under the byte budget take this path, and the
-            # decode is lenient (invalid UTF-8 → U+FFFD instead of raising).
-            text = p.read_bytes().decode("utf-8", errors="replace")
-            all_lines = text.splitlines()
-            start = max(offset_n, 1) - 1  # convert to 0-indexed
-            selected = all_lines[start : start + limit_n]
-            if not selected:
+        def _read_sync() -> tuple[list[str], bool] | str:
+            if p.stat().st_size <= budget:
+                # H16: the old `p.read_text()` loaded the ENTIRE file before
+                # the MAX_CHARS cap — an OOM vector on multi-GB files. Only
+                # files that fit under the byte budget take this path, and the
+                # decode is lenient (invalid UTF-8 → U+FFFD instead of raising).
+                text = p.read_bytes().decode("utf-8", errors="replace")
+                all_lines = text.splitlines()
+                start = max(offset_n, 1) - 1  # convert to 0-indexed
+                selected = all_lines[start : start + limit_n]
+                if not selected:
+                    return (
+                        f"Error: offset {offset} exceeds file length "
+                        f"({len(all_lines)} lines)."
+                    )
                 return (
-                    f"Error: offset {offset} exceeds file length "
-                    f"({len(all_lines)} lines)."
+                    [f"{i}|{line}" for i, line in enumerate(selected, start=start + 1)],
+                    False,
                 )
-            output_lines: list[str] = [
-                f"{i}|{line}" for i, line in enumerate(selected, start=start + 1)
-            ]
-            truncated_read = False
-        else:
             selected, reached_eof, seen_lines = _stream_window(
                 p, offset_n, limit_n, budget
             )
@@ -252,11 +254,18 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
                     f"per-read budget before line {offset}. Use file_search "
                     "/ shell tools for bulk inspection."
                 )
-            output_lines = [
-                f"{i}|{line}"
-                for i, line in enumerate(selected, start=max(offset_n, 1))
-            ]
-            truncated_read = not reached_eof
+            return (
+                [
+                    f"{i}|{line}"
+                    for i, line in enumerate(selected, start=max(offset_n, 1))
+                ],
+                not reached_eof,
+            )
+
+        synced = await asyncio.to_thread(_read_sync)
+        if isinstance(synced, str):
+            return synced
+        output_lines, truncated_read = synced
     except FileNotFoundError:
         return _friendly_error(FileNotFoundError(), path)
     except PermissionError:

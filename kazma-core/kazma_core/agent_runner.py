@@ -956,13 +956,29 @@ class KazmaAgent:
                     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
                     from psycopg_pool import AsyncConnectionPool  # type: ignore
 
-                    pool = AsyncConnectionPool(conninfo=dsn, min_size=1, max_size=8, open=False)
+                    from psycopg.rows import dict_row  # type: ignore
+
+                    pool = AsyncConnectionPool(
+                        conninfo=dsn,
+                        min_size=1,
+                        max_size=8,
+                        kwargs={
+                            "autocommit": True,
+                            "prepare_threshold": 0,
+                            "row_factory": dict_row,
+                        },
+                        open=False,
+                    )
                     await pool.open()
                     self._checkpointer = AsyncPostgresSaver(conn=pool)  # type: ignore[arg-type]
                     await self._checkpointer.setup()
                     logger.info("KazmaAgent checkpointer: AsyncPostgresSaver")
             except Exception as exc:
-                logger.debug("Postgres checkpointer unavailable (%s) — SQLite", exc)
+                logger.warning(
+                    "Postgres checkpointer unavailable (%s) — SQLite fallback",
+                    exc,
+                    exc_info=True,
+                )
 
             if self._checkpointer is None:
                 Path(db_path).parent.mkdir(parents=True, exist_ok=True)

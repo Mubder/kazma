@@ -1513,12 +1513,12 @@ that caused the trim.
 
 
 ```powershell
-# Kill existing server
-Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } | ForEach-Object { Stop-Process -Id $_.Id -Force }
-
-# Start server (background) — ws-ping flags are the Turn Delivery V2
-# server-side death certificate for black-holed sockets (KD-7); keep them.
-cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090 --ws-ping-interval 20 --ws-ping-timeout 20
+# Pick up code changes (the only restart that cooperates with kazma_guard).
+# Do NOT kill python/uvicorn by hand — the guard respawns the old port holder
+# or refuses to start because 9090 is still served.
+cd 'G:\GitHubRepos\kazma'
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
 ```
 
 ## Testing & Validation

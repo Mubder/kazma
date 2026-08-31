@@ -5,12 +5,7 @@ from __future__ import annotations
 
 import os
 import secrets
-import subprocess
 import sys
-import time
-
-# Use the same Python that's running this script
-python_exe = sys.executable
 
 # Can override the app factory via environment variable
 app_factory = "kazma_ui.app:create_app"
@@ -73,67 +68,48 @@ def _proxy_args() -> list[str]:
 host = _bootstrap_bind_and_secret()
 
 try:
-    # Start the server
-    proc = subprocess.Popen(
-        [
-            python_exe,
-            "-m",
-            "uvicorn",
-            app_factory,
-            "--factory",
-            "--host",
-            host,
-            "--port",
-            "9090",
-            *_proxy_args(),
-        ],
-        # stdout/stderr are INHERITED, never piped.
-        #
-        # This used to capture both into pipes that nothing ever read, and
-        # then call proc.wait(). Once uvicorn wrote more than the OS pipe
-        # buffer (~4-64 KB) it blocked forever on write, freezing the whole
-        # server -- alive, listening on nothing, logging nothing.
-        #
-        # Interactively you might never reach the buffer limit. Under a
-        # service manager you do, which is why this only surfaced when
-        # Kazma was first run under supervision (2026-08-28): the process
-        # stayed up, the app log stopped mid-startup, and there was nothing
-        # to diagnose from.
-        #
-        # Inheriting means output goes to the console when run by hand and
-        # to the supervisor's stream otherwise. Kazma's real logs go to
-        # .kazma/kazma.log either way.
-    )
+    # In-process uvicorn so Windows gets SelectorEventLoop via
+    # uvicorn_loop_factory. `python -m uvicorn` (the old subprocess path)
+    # hardcodes ProactorEventLoop on Windows in 0.36+, which makes
+    # AsyncPostgresSaver fail and silently fall back to SQLite.
+    from kazma_core.eventloop import set_windows_selector_policy, uvicorn_loop_factory
 
-    print(f"Server started with PID {proc.pid}")
+    set_windows_selector_policy()
+
+    import uvicorn
+
+    proxy = _proxy_args()
+    forwarded = None
+    proxy_headers = "--proxy-headers" in proxy
+    if proxy_headers:
+        for i, arg in enumerate(proxy):
+            if arg == "--forwarded-allow-ips" and i + 1 < len(proxy):
+                forwarded = proxy[i + 1]
+                break
+
+    loop_factory = uvicorn_loop_factory()
+    config_kwargs: dict = {
+        "app": app_factory,
+        "factory": True,
+        "host": host,
+        "port": 9090,
+        "proxy_headers": proxy_headers,
+        "ws_ping_interval": 20.0,
+        "ws_ping_timeout": 20.0,
+        "timeout_graceful_shutdown": 15,
+    }
+    if forwarded:
+        config_kwargs["forwarded_allow_ips"] = forwarded
+    if loop_factory is not None:
+        config_kwargs["loop"] = loop_factory
+
     print(f"Open http://127.0.0.1:9090 in your browser (bound host={host})")
     print("Press Ctrl+C to stop\n")
+    uvicorn.run(**config_kwargs)
 
-    # Wait for server to start
-    time.sleep(2)
-
-    # Check if process is still running. With stdio inherited, uvicorn's
-    # own error output has already reached the console/supervisor, so there
-    # is nothing to drain here -- just report and fail loudly.
-    if proc.poll() is not None:
-        print(
-            f"Server failed to start (uvicorn exited {proc.returncode}). "
-            "See the output above and .kazma/kazma.log."
-        )
-        sys.exit(1)
-
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        print("\nShutting down server...")
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        print("Server stopped")
-
-except FileNotFoundError:
+except KeyboardInterrupt:
+    print("\nShutting down server...")
+except ImportError:
     print("❌ Error: uvicorn not found")
     print("Install with: pip install uvicorn[standard]")
     sys.exit(1)

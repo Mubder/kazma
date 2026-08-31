@@ -102,23 +102,29 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def file_append(path: str, content: str, encoding: str = "utf-8") -> str:
+        import asyncio
+
         p = Path(path).expanduser().resolve()
         scope_err = _workspace_scope_error(p, path, "writes")
         if scope_err:
             return scope_err
-        try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            with open(p, "a", encoding=encoding) as f:
-                f.write(content)
-            try:
-                from kazma_core.code_index.indexer import notify_file_changed
 
-                notify_file_changed(p)
-            except Exception:
-                pass
-            return f"Appended {len(content)} chars to: {path}"
-        except Exception as exc:
-            return f"Error appending to {path}: {exc}"
+        def _run() -> str:
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                with open(p, "a", encoding=encoding) as f:
+                    f.write(content)
+                try:
+                    from kazma_core.code_index.indexer import notify_file_changed
+
+                    notify_file_changed(p)
+                except Exception:
+                    pass
+                return f"Appended {len(content)} chars to: {path}"
+            except Exception as exc:
+                return f"Error appending to {path}: {exc}"
+
+        return await asyncio.to_thread(_run)
     @registry.register(
         description=(
             "Delete a file or directory. Directories are removed recursively. "
@@ -127,6 +133,7 @@ def register_filesystem_tools(registry: Any) -> None:
         category="filesystem",
     )
     async def file_delete(path: str) -> str:
+        import asyncio
         import shutil as _shutil
 
         p = Path(path).expanduser().resolve()
@@ -135,25 +142,31 @@ def register_filesystem_tools(registry: Any) -> None:
             return scope_err
         if not p.exists():
             return f"Error: Path not found: {path}"
-        try:
-            if p.is_dir():
-                _shutil.rmtree(p)
-            else:
-                p.unlink()
-            try:
-                from kazma_core.code_index.indexer import notify_file_changed
 
-                notify_file_changed(p, deleted=True)
-            except Exception:
-                pass
-            return f"Deleted: {path}"
-        except Exception as exc:
-            return f"Error deleting {path}: {exc}"
+        def _run() -> str:
+            try:
+                if p.is_dir():
+                    _shutil.rmtree(p)
+                else:
+                    p.unlink()
+                try:
+                    from kazma_core.code_index.indexer import notify_file_changed
+
+                    notify_file_changed(p, deleted=True)
+                except Exception:
+                    pass
+                return f"Deleted: {path}"
+            except Exception as exc:
+                return f"Error deleting {path}: {exc}"
+
+        return await asyncio.to_thread(_run)
     @registry.register(
         description="List files and directories at a path. Returns names sorted alphabetically.",
         category="filesystem",
     )
     async def file_list(path: str = ".", pattern: str = "*") -> str:
+        import asyncio
+
         p = Path(path).expanduser().resolve()
         # Workspace scoping — block listing outside workspace (fail-closed)
         scope_err = _workspace_scope_error(p, path, "listings")
@@ -163,10 +176,14 @@ def register_filesystem_tools(registry: Any) -> None:
             return f"Error: Path not found: {path}"
         if not p.is_dir():
             return f"Error: Not a directory: {path}"
-        entries = sorted(str(child.name) for child in p.glob(pattern))
-        if not entries:
-            return f"No files matching '{pattern}' in {path}"
-        return "\n".join(entries[:200])  # cap at 200 entries
+
+        def _run() -> str:
+            entries = sorted(str(child.name) for child in p.glob(pattern))
+            if not entries:
+                return f"No files matching '{pattern}' in {path}"
+            return "\n".join(entries[:200])  # cap at 200 entries
+
+        return await asyncio.to_thread(_run)
     @registry.register(
         description=(
             "Request permission to read or write a path OUTSIDE the active "
@@ -264,6 +281,7 @@ def register_filesystem_tools(registry: Any) -> None:
         glob: str = "*.py",
         limit: int = 20,
     ) -> str:
+        import asyncio
         import re
 
         # Topic-shift / audit quarantine: block broad documents/ gold corpus
@@ -299,35 +317,51 @@ def register_filesystem_tools(registry: Any) -> None:
             """True if any path component is in the skip set."""
             return any(part in _SKIP_DIRS for part in p.parts)
 
-        regex = re.compile(pattern)
-        results: list[str] = []
-        files_scanned = 0
-        _MAX_FILES = 5000  # hard cap so a huge tree can't run for minutes
+        def _run() -> str:
+            regex = re.compile(pattern)
+            results: list[str] = []
+            files_scanned = 0
+            _MAX_FILES = 5000  # hard cap so a huge tree can't run for minutes
 
-        for file_path in root.rglob(glob):
-            if _should_skip(file_path):
-                continue
-            if not file_path.is_file():
-                continue
-            if files_scanned >= _MAX_FILES:
-                results.append(
-                    f"... (search stopped after scanning {_MAX_FILES} files; "
-                    f"narrow the path or glob to find more matches)"
-                )
-                break
-            files_scanned += 1
-            if file_path.stat().st_size < 500_000:
-                try:
-                    for i, line in enumerate(file_path.read_text(errors="replace").splitlines(), 1):
-                        if regex.search(line):
-                            results.append(f"{file_path}:{i}: {line.strip()}")
-                            if len(results) >= limit:
-                                return "\n".join(results)
-                except Exception as exc:
-                    logger.debug("[ToolRegistry] Failed to read %s in search: %s", file_path, exc)
+            for file_path in root.rglob(glob):
+                if _should_skip(file_path):
                     continue
+                if not file_path.is_file():
+                    continue
+                if files_scanned >= _MAX_FILES:
+                    results.append(
+                        f"... (search stopped after scanning {_MAX_FILES} files; "
+                        f"narrow the path or glob to find more matches)"
+                    )
+                    break
+                files_scanned += 1
+                if file_path.stat().st_size < 500_000:
+                    try:
+                        for i, line in enumerate(
+                            file_path.read_text(errors="replace").splitlines(), 1
+                        ):
+                            if regex.search(line):
+                                results.append(f"{file_path}:{i}: {line.strip()}")
+                                if len(results) >= limit:
+                                    return "\n".join(results)
+                    except Exception as exc:
+                        logger.debug(
+                            "[ToolRegistry] Failed to read %s in search: %s",
+                            file_path,
+                            exc,
+                        )
+                        continue
 
-        return "\n".join(results) if results else f"No matches for '{pattern}' in {path}/{glob}"
+            return (
+                "\n".join(results)
+                if results
+                else f"No matches for '{pattern}' in {path}/{glob}"
+            )
+
+        # Path.rglob + stat + read_text must not run on the asyncio selector
+        # loop — a large tree freezes SSE/WS/health for tens of seconds.
+        # codebase_search already offloads; keep the two siblings aligned.
+        return await asyncio.to_thread(_run)
     @registry.register(
         description=(
             "Search the workspace codebase by symbol name and/or text. "

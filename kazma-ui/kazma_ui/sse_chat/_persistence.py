@@ -283,8 +283,15 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
     # is: on 2026-08-28 the 1,781-char answer sat in the checkpoint while this
     # returned early because a 125-char narration row was in the way.
     _stranded = _role == "assistant" and bool(last.get("open") or last.get("pending"))
+    _last_text = str(last.get("content") or "")
     if _role != "user" and not _stranded:
-        return messages
+        # Closed short assistant vs a much longer checkpoint reply: the
+        # cancelled-SSE flush wrote an interim, persist later wrote the
+        # real answer into the checkpoint only (2660-char "no answers" class).
+        # We still have to load the checkpoint to compare — fall through
+        # when last is assistant and we'll decide after `asst` is known.
+        if _role != "assistant":
+            return messages
     try:
         # Resolved through the module object, not a from-import binding, so
         # the seam stays patchable at its single definition site
@@ -314,6 +321,20 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
             cp_last_role = (cp_last.get("role") or cp_last.get("type") or "").lower()
         if not asst or cp_last_role not in ("assistant", "ai"):
             return messages
+        _prefix_stale = (
+            _role == "assistant"
+            and not _stranded
+            and len(asst) > len(_last_text) + 400
+            and (
+                _last_text.strip() in asst
+                or (
+                    len(_last_text.strip()) >= 40
+                    and asst.startswith(_last_text.strip()[:120])
+                )
+            )
+        )
+        if _role != "user" and not _stranded and not _prefix_stale:
+            return messages
         # Already present? (idempotent heal)
         if any(
             isinstance(m, dict)
@@ -328,8 +349,14 @@ async def _checkpoint_backfill_unanswered(session: Any) -> list[dict]:
         from kazma_ui.reply_sink import open_reply_turn, upsert_reply
 
         _heal_turn = ""
-        if _stranded and last.get("turn_id"):
+        if (_stranded or _prefix_stale) and last.get("turn_id"):
             _heal_turn = str(last["turn_id"])
+            messages = [
+                dict(m, content=asst, pending=False) if m is last else m
+                for m in messages
+            ]
+        elif _prefix_stale:
+            _heal_turn = open_reply_turn(tid)
             messages = [
                 dict(m, content=asst) if m is last else m for m in messages
             ]

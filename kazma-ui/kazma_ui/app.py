@@ -1532,8 +1532,20 @@ class KazmaAppBuilder:
 
             from kazma_gateway.stores.checkpoint import create_checkpointer
 
+            try:
+                from kazma_core.db.backend import is_postgres as _is_pg
+                from kazma_core.eventloop import log_running_loop
+
+                log_running_loop(postgres_intended=_is_pg())
+            except Exception:
+                logger.debug("[eventloop] loop identity probe skipped", exc_info=True)
+
             self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
-            logger.info("[Checkpoint] SQLite checkpointer initialized")
+            _saver = getattr(self._checkpointer, "_saver", self._checkpointer)
+            logger.info(
+                "[Checkpoint] checkpointer initialized: %s",
+                type(_saver).__name__,
+            )
 
             # ── Postgres schema assurance ─────────────────────────────
             # A second app was once pointed at the shared `kazma` DB and its
