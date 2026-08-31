@@ -1,9 +1,12 @@
-"""Shared booking logic for scheduled X posts.
+"""Shared booking + publish logic for X posts.
 
-Used by BOTH the chat tool (``x_schedule_post``) and the Web Scheduled page
-(``/api/scheduled/x``) so the ToU policy is applied identically no matter where
-a post is booked. HITL approval happens on the chat/agent path; the human
-authoring a draft in the Web UI is the approval for that path.
+``book_x_post`` is used by BOTH the chat tool (``x_schedule_post``) and the
+Web Scheduled page / X Studio so the ToU policy is applied identically no
+matter where a post is booked. HITL approval happens on the chat/agent path;
+the human authoring a draft in the Web UI is the approval for that path.
+
+``publish_x_post`` is the single immediate-post choke (chat ``x_post`` and
+X Studio Post now). Policy first, then one ``POST /2/tweets``, then ledger.
 
 Policy applied at booking:
   * connector enabled + configured (``can_post``) and scheduling not killed
@@ -24,7 +27,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["book_x_post"]
+__all__ = ["book_x_post", "publish_x_post"]
 
 
 # The shared timing parser accepts one RECURRING form ("daily at 9am") and
@@ -163,4 +166,48 @@ def book_x_post(
         "fire_at": fire_iso,
         "tz": tz_name,
         "reply_to_id": reply_to_id or "",
+    }
+
+
+async def publish_x_post(
+    *,
+    text: str,
+    reply_to_id: str = "",
+) -> tuple[bool, dict[str, Any]]:
+    """Validate + POST /2/tweets once. Returns ``(ok, payload)``.
+
+    Writes are never retried (a dropped 201 plus a retry would double-post).
+    The caller is responsible for HITL on the agent path; the Web studio
+    treats the operator click as the approval, matching ``book_x_post``.
+    """
+    from kazma_core.x_api.client import XApiError, XClient
+    from kazma_core.x_api.config import get_x_config
+    from kazma_core.x_api.ledger import get_ledger
+    from kazma_core.x_api.policy import evaluate_post
+
+    cfg = get_x_config()
+    body = (text or "").strip()
+    decision = evaluate_post(body, cfg=cfg, reply_to_id=reply_to_id or "")
+    if not decision.allow:
+        return False, {"posted": False, "error": decision.reason}
+    try:
+        tweet = await XClient(cfg.credentials).create_tweet(
+            body, reply_to_id=reply_to_id or ""
+        )
+    except XApiError as exc:
+        logger.warning("publish_x_post API error: %s", exc)
+        return False, {"posted": False, "error": str(exc)}
+    except Exception as exc:
+        logger.exception("publish_x_post failed")
+        return False, {"posted": False, "error": str(exc)}
+    tweet_id = str(tweet.get("id") or "")
+    if tweet_id:
+        get_ledger().record(tweet_id=tweet_id, text=body, handle=cfg.handle)
+    url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else ""
+    return True, {
+        "posted": True,
+        "tweet_id": tweet_id,
+        "url": url,
+        "text": body,
+        "policy": decision.reason,
     }

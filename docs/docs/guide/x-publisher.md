@@ -25,7 +25,7 @@ Do **not** paste keys in chat. `vault_store` would put them in history. Settings
 2. User authentication settings → **Read and write**.
 3. Keys and tokens → API Key, API Key Secret, Access Token, Access Token Secret.
 4. Kazma **Settings → X** → paste the four values + your `@handle` → Save → Test (`GET /2/users/me`).
-5. Enable posting. Ask Kazma in chat to draft; you approve the HITL card; then it posts.
+5. Enable posting. **X Studio** (`/x`) is the Web composer and planner — write, Post now, or Schedule. Chat still drafts via `save_proposal` then `x_post` (always HITL). The **Scheduled** page remains the mixed clock (cron + X).
 
 Optional env (overrides ConfigStore when set): `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`. Kill-switch: **`KAZMA_X_POST=0`**.
 
@@ -73,7 +73,7 @@ X has **no native scheduled-post API** — the `/2/broadcasts/scheduled` endpoin
 
 **Honest limitation:** a scheduled post fires only while the Kazma server is running. If the server is down at fire time, the post is caught up on the next boot. X cannot hold the schedule for you.
 
-Manage scheduled posts (and all other scheduled tasks) in the **Scheduled** page, or via chat — both stay in sync.
+Manage a content calendar in **X Studio** (`/x`). Cron jobs and the mixed clock stay on the **Scheduled** page. Chat tools stay in sync with both.
 
 ## Audit log (2026-08)
 

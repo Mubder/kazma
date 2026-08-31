@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## X Studio (2026-08-31)
+
+Compose, schedule, and review X posts as a first-class Kazma page (`/x`)
+instead of burying them in Settings + a mixed Scheduled table.
+
+- **Composer** with live ToU preview (280 / @ / # / $) from `evaluate_post`.
+- **Post now** and **Schedule** share `publish_x_post` / `book_x_post` (official
+  API only; operator click is the Web approval). Chat `x_post` stays always-HITL
+  + `proposal_id`.
+- **Planner** of upcoming X posts and **saved drafts** from `save_proposal`.
+- Scheduled page is unchanged as the mixed cron + X clock.
+
 ## Guard --reload no longer waits out crash backoff (2026-08-31)
 
 `--reload` kills `serve.py` so the long-lived guard can boot new code. The

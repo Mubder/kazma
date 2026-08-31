@@ -216,6 +216,16 @@ def register_misc_routes(self: Any) -> None:
                 "active_page": "documents",
             },
         )
+    @self.app.get("/x", response_class=HTMLResponse)
+    async def x_studio_page(request: Request) -> HTMLResponse:
+        return self.templates.TemplateResponse(
+            request,
+            "x_studio.html",
+            {
+                "config": self.agent.config,
+                "active_page": "x_studio",
+            },
+        )
     @self.app.post("/api/gateway/refresh-adapters")
     async def refresh_gateway_adapters() -> dict[str, Any]:
         if self.gateway is None:

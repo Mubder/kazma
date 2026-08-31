@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 
+from kazma_core.x_api.booking import publish_x_post
 from kazma_core.x_api.client import XApiError, XClient
 from kazma_core.x_api.config import get_x_config
 from kazma_core.x_api.ledger import get_ledger
-from kazma_core.x_api.policy import evaluate_delete, evaluate_post
+from kazma_core.x_api.policy import evaluate_delete
 from kazma_core.x_api.schedule import get_x_scheduled_store
 
 logger = logging.getLogger(__name__)
@@ -71,33 +72,9 @@ async def x_status() -> str:
 
 async def x_post(text: str, reply_to_id: str = "") -> str:
     """Post one tweet via official X API v2. HITL is mandatory outside this function."""
-    try:
-        cfg = get_x_config()
-        decision = evaluate_post(text, cfg=cfg, reply_to_id=reply_to_id or "")
-        if not decision.allow:
-            return _json({"ok": False, "posted": False, "error": decision.reason})
-        client = XClient(cfg.credentials)
-        tweet = await client.create_tweet(text.strip(), reply_to_id=reply_to_id or "")
-        tweet_id = str(tweet.get("id") or "")
-        if tweet_id:
-            get_ledger().record(tweet_id=tweet_id, text=text.strip(), handle=cfg.handle)
-        url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else ""
-        return _json(
-            {
-                "ok": True,
-                "posted": True,
-                "tweet_id": tweet_id,
-                "url": url,
-                "text": text.strip(),
-                "policy": decision.reason,
-            }
-        )
-    except XApiError as exc:
-        logger.warning("x_post API error: %s", exc)
-        return _json({"ok": False, "posted": False, "error": str(exc)})
-    except Exception as exc:
-        logger.exception("x_post failed")
-        return _json({"ok": False, "posted": False, "error": str(exc)})
+    ok, payload = await publish_x_post(text=text, reply_to_id=reply_to_id or "")
+    payload["ok"] = ok
+    return _json(payload)
 
 
 async def x_delete_post(tweet_id: str) -> str:

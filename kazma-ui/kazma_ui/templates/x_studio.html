@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% set active_page = "x_studio" %}
+{% block title %}Kazma — {{ t('x_studio.title') }}{% endblock %}
+{% block page_title %}{{ t('x_studio.title') }}{% endblock %}
+
+{% block head %}
+<style>
+  [x-cloak] { display: none !important; }
+  .xs-wrap { max-width: 1100px; margin: 0 auto; padding: 0 1rem; box-sizing: border-box; }
+  .xs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .xs-meta { font-size: .78rem; color: var(--text-muted); }
+  .xs-pill { font-size: .68rem; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border-subtle); margin-inline-end: 4px; }
+  .xs-pill.bad { color: var(--danger); border-color: rgba(239,68,68,.4); }
+  .xs-card { background: var(--bg-panel); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 1rem 1.1rem; }
+  .xs-card h2 { margin: 0 0 .75rem; font-size: .95rem; }
+  .xs-compose textarea { width: 100%; min-height: 140px; box-sizing: border-box; resize: vertical; padding: .75rem; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); font: inherit; line-height: 1.45; }
+  .xs-counts { display: flex; gap: .6rem; flex-wrap: wrap; font-size: .72rem; color: var(--text-muted); margin: .5rem 0 .75rem; font-variant-numeric: tabular-nums; }
+  .xs-counts .over { color: var(--danger); font-weight: 600; }
+  .xs-actions { display: flex; gap: .5rem; flex-wrap: wrap; align-items: end; }
+  .xs-actions .when { flex: 1; min-width: 180px; }
+  .xs-actions label { display: block; font-size: .72rem; color: var(--text-muted); margin-bottom: 4px; }
+  .xs-actions input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
+  .xs-reason { font-size: .78rem; color: var(--danger); margin-top: .5rem; }
+  .xs-row { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--border-subtle); font-size: .82rem; }
+  .xs-row:first-of-type { border-top: 0; }
+  .xs-row .txt { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .xs-row .when { font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
+  .xs-week { display: flex; gap: 4px; margin-bottom: .75rem; }
+  .xs-day { flex: 1; text-align: center; font-size: .68rem; padding: 6px 2px; border-radius: 6px; background: var(--bg-elevated); color: var(--text-muted); }
+  .xs-day.has { color: var(--accent-light); background: var(--accent-subtle); }
+  .xs-empty { color: var(--text-muted); font-size: .82rem; padding: .5rem 0; }
+  .xs-warn { padding: .75rem 1rem; border: 1px solid rgba(250,204,21,.35); background: var(--warning-subtle); border-radius: var(--radius); margin-bottom: 1rem; font-size: .84rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="xs-wrap" x-data="xStudioPage()" x-init="init()" role="main" aria-label="{{ t('x_studio.title') }}">
+
+  <div class="xs-head">
+    <div class="xs-meta">
+      <span x-text="status.handle || 'X'"></span>
+      <span class="xs-pill" x-text="(status.caps.posts_today || 0) + '/' + (status.caps.max_posts_per_day || 8) + ' ' + t('x_studio.quota')"></span>
+    </div>
+    <a class="btn btn-secondary btn-sm" href="/scheduled">{{ t('x_studio.all_clocks') }}</a>
+  </div>
+
+  <div class="xs-warn" x-show="!status.can_post" x-cloak>
+    {{ t('x_studio.connector_off') }}
+    <a href="/settings?tab=x" style="color:var(--accent);margin-inline-start:.5rem;">{{ t('x_studio.open_settings') }}</a>
+  </div>
+
+  <div class="two-col-grid">
+    <div class="xs-card xs-compose">
+      <h2>{{ t('x_studio.composer') }}</h2>
+      <textarea x-model="text" @input="onInput()" maxlength="2000"
+                :disabled="!status.can_post" placeholder="{{ t('x_studio.placeholder') }}"></textarea>
+      <div class="xs-counts">
+        <span :class="preview.chars > preview.max_chars ? 'over' : ''"
+              x-text="(preview.chars || 0) + '/' + (preview.max_chars || 280)"></span>
+        <span x-text="'@' + (preview.mentions ? preview.mentions.length : 0)"></span>
+        <span x-text="'#' + (preview.hashtags ? preview.hashtags.length : 0)"></span>
+        <span x-text="'$' + (preview.cashtags ? preview.cashtags.length : 0)"></span>
+      </div>
+      <div class="xs-actions">
+        <button class="btn btn-primary" :disabled="busy || !status.can_post" @click="postNow()">{{ t('x_studio.post_now') }}</button>
+        <div class="when">
+          <label for="xs-when">{{ t('x_studio.when') }}</label>
+          <input id="xs-when" type="datetime-local" x-model="when">
+        </div>
+        <button class="btn btn-secondary" :disabled="busy || !status.can_post" @click="schedule()">{{ t('x_studio.schedule') }}</button>
+      </div>
+      <div class="xs-reason" x-show="preview.allow === false && text.trim()" x-cloak x-text="preview.reason"></div>
+    </div>
+
+    <div class="xs-card">
+      <h2>{{ t('x_studio.planner') }}</h2>
+      <div class="xs-week">
+        <template x-for="d in week" :key="d.key">
+          <div class="xs-day" :class="d.count ? 'has' : ''">
+            <div x-text="d.label"></div>
+            <div x-text="d.count || '·'"></div>
+          </div>
+        </template>
+      </div>
+      <div class="xs-empty" x-show="!queue.length" x-cloak>{{ t('x_studio.empty_queue') }}</div>
+      <template x-for="item in queue" :key="item.id">
+        <div class="xs-row">
+          <div>
+            <div class="txt" x-text="item.summary"></div>
+            <div class="when" x-text="fmtWhen(item.when)"></div>
+          </div>
+          <button class="btn btn-danger btn-sm" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="two-col-grid" style="margin-top:1rem;">
+    <div class="xs-card">
+      <h2>{{ t('x_studio.drafts') }}</h2>
+      <div class="xs-empty" x-show="!drafts.length" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
+      <template x-for="d in drafts" :key="d.id">
+        <div class="xs-row">
+          <div class="txt" x-text="d.text"></div>
+          <button class="btn btn-secondary btn-sm" @click="useDraft(d)">{{ t('x_studio.use') }}</button>
+        </div>
+      </template>
+    </div>
+    <div class="xs-card">
+      <h2>{{ t('x_studio.posted') }}</h2>
+      <div class="xs-empty" x-show="!audit.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
+      <template x-for="e in audit" :key="e.id || (e.ts + e.action)">
+        <div class="xs-row">
+          <div class="txt" x-text="auditText(e)"></div>
+          <div class="when" x-text="e.action"></div>
+        </div>
+      </template>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/x_studio.js?v={{ js_version() }}"></script>
+{% endblock %}

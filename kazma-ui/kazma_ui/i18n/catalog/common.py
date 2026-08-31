@@ -424,6 +424,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الأدوات",
         "en": "Tools",
     },
+    "nav.x_studio": {
+        "ar": "استوديو إكس",
+        "en": "X Studio",
+    },
     "nav.workspace": {
         "ar": "مساحة العمل",
         "en": "Workspace",

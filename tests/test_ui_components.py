@@ -43,6 +43,10 @@ class TestTemplateExistence:
     def test_kazma_css_exists(self):
         assert (_CSS_DIR / "kazma.css").is_file()
 
+    def test_x_studio_template_exists(self):
+        assert (_TEMPLATES_DIR / "x_studio.html").is_file()
+        assert (_JS_DIR / "x_studio.js").is_file()
+
     def test_app_js_exists(self):
         assert (_JS_DIR / "app.js").is_file()
 
@@ -178,6 +182,17 @@ class TestSidebarComponent:
 
     def test_has_swarm_link(self, sidebar_html):
         assert 'href="/swarm"' in sidebar_html
+
+    def test_has_x_studio_link(self, sidebar_html):
+        assert 'href="/x"' in sidebar_html
+        activity = sidebar_html.find("nav.activity")
+        x_link = sidebar_html.find('href="/x"')
+        scheduled = sidebar_html.find('href="/scheduled"')
+        settings = sidebar_html.find("nav.configuration")
+        assert activity != -1 and x_link != -1 and scheduled != -1
+        assert activity < x_link < scheduled < settings, (
+            "X Studio belongs in Activity, before Scheduled"
+        )
 
     def test_has_settings_link(self, sidebar_html):
         assert 'href="/settings"' in sidebar_html

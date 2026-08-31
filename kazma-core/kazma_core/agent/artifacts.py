@@ -248,6 +248,56 @@ class ArtifactStore:
             "texts": [str(i.get("text") or "") for i in items],
         }
 
+    def list_proposals(
+        self,
+        *,
+        tenant_id: str = "default",
+        limit: int = 50,
+        include_posted: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Newest outbound drafts, flattened to one row per item.
+
+        X Studio lists these so a saved proposal survives trim and is still
+        approvable from the composer. Posted rows stay out unless asked.
+        """
+        kinds = ("proposal", "proposal_posted") if include_posted else ("proposal",)
+        placeholders = ",".join("?" * len(kinds))
+        bounded = max(1, min(int(limit or 50), 200))
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT value, kind, thread_id, updated_at
+                FROM agent_artifacts
+                WHERE tenant_id = ? AND kind IN ({placeholders})
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (tenant_id or "default", *kinds, bounded),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for value, kind, thread_id, updated_at in rows:
+            try:
+                payload = json.loads(str(value))
+            except Exception:
+                continue
+            created = payload.get("created_at") or updated_at
+            for item in payload.get("items") or []:
+                text = str(item.get("text") or "").strip()
+                if not text:
+                    continue
+                out.append(
+                    {
+                        "id": str(item.get("id") or ""),
+                        "proposal_id": str(payload.get("proposal_id") or ""),
+                        "text": text,
+                        "kind": str(payload.get("kind") or kind),
+                        "thread_id": str(thread_id or ""),
+                        "created_at": float(created or 0),
+                        "posted": kind == "proposal_posted",
+                    }
+                )
+        return out[:bounded]
+
     def proposal_posted(self, ref: str, *, tenant_id: str = "default") -> None:
         """Mark a proposal consumed (posted/sent) — kept for audit, not deleted."""
         info = self.resolve_proposal(ref, tenant_id=tenant_id)
