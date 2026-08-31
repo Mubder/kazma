@@ -18,6 +18,22 @@ function xStudioPage() {
 
     t(key) { return (window.t && window.t(key)) || key; },
 
+    displayBody(raw) {
+      const bidi = window.KazmaBidi;
+      if (bidi && bidi.extractPostBody) return bidi.extractPostBody(raw) || '';
+      return String(raw || '').replace(/\s+/g, ' ').trim();
+    },
+    displayKicker(raw) {
+      const bidi = window.KazmaBidi;
+      if (bidi && bidi.displayKicker) return bidi.displayKicker(raw) || '';
+      return '';
+    },
+    textDir(raw) {
+      const bidi = window.KazmaBidi;
+      if (bidi && bidi.textDir) return bidi.textDir(raw);
+      return 'auto';
+    },
+
     async init() {
       this.when = this._defaultWhen();
       await Promise.all([this.loadStatus(), this.loadQueue(), this.loadDrafts(), this.loadAudit()]);

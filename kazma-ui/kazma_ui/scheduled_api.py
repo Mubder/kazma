@@ -128,19 +128,32 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         # Cron jobs (tenant-scoped like CronScheduler.list_jobs).
         try:
             from kazma_core.cron.scheduler import get_cron_scheduler
+            from kazma_core.text_display import (
+                display_kicker,
+                extract_post_body,
+                shorten_outcome,
+                text_dir,
+            )
 
             sched = get_cron_scheduler()
             if sched is not None:
                 for job in await sched.list_jobs():
+                    prompt = str(job.get("prompt") or "")
+                    body = extract_post_body(prompt)
+                    last = str(job.get("last_result") or "")
+                    shown = body or prompt
                     items.append({
                         "source": "cron",
                         "id": job.get("job_id", ""),
                         "kind": "task",
-                        "summary": job.get("prompt", "")[:300],
+                        "summary": shown[:500],
+                        "kicker": display_kicker(prompt, body),
                         "when": job.get("next_run", ""),
                         "timing": job.get("timing", ""),
                         "status": job.get("status", ""),
-                        "last_result": job.get("last_result") or "",
+                        "last_result": last[:500],
+                        "outcome": shorten_outcome(last),
+                        "dir": text_dir(shown),
                         "platform": job.get("platform", ""),
                     })
         except Exception as exc:  # noqa: BLE001
@@ -152,17 +165,23 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
 
             store = get_x_scheduled_store()
             tenant = _tenant_filter()
+            from kazma_core.text_display import extract_post_body, text_dir
+
             for p in store.list_all(tenant_id=tenant, limit=200):
+                body = extract_post_body(p.text or "")
                 items.append({
                     "source": "x",
                     "id": p.id,
                     "kind": "post",
-                    "summary": p.text[:300],
+                    "summary": (body or p.text)[:500],
+                    "kicker": "",
                     "when": _iso(p.fire_at),
                     "timing": "",
                     "status": p.status,
                     "tweet_id": p.tweet_id,
                     "error": p.error,
+                    "outcome": "",
+                    "dir": text_dir(body or p.text or ""),
                     "reply_to_id": p.reply_to_id,
                 })
         except Exception as exc:  # noqa: BLE001

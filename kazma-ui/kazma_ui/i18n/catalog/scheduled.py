@@ -80,6 +80,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "منشور إكس جديد",
         "en": "New X post",
     },
+    "scheduled.outcome": {
+        "ar": "آخر تشغيل",
+        "en": "Last run",
+    },
     "scheduled.overdue": {
         "ar": "متأخرة",
         "en": "Overdue",

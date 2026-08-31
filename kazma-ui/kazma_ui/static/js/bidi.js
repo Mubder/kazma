@@ -181,12 +181,75 @@
     } catch (e) { /* ignore */ }
   }
 
+  /**
+   * Cron/HITL wrappers bury the tweet the operator wants to read:
+   *   Call x_post with EXACTLY this text: "كاظمه…"
+   * First-strong-char dir=auto stays LTR because the wrapper is English.
+   */
+  function extractPostBody(text) {
+    var raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    var candidates = [];
+    var re = /["“]([^"”]{4,})["”]/g;
+    var m;
+    while ((m = re.exec(raw))) candidates.push(m[1].trim());
+    m = raw.match(/:\s*["“]([^"”]{4,})\s*$/);
+    if (m) candidates.push(m[1].trim());
+    m = raw.match(/>\s*(.+)$/);
+    if (m) candidates.push(m[1].replace(/^["“]|["”]$/g, '').trim());
+    var arabic = [];
+    for (var i = 0; i < candidates.length; i++) {
+      if (hasArabic(candidates[i])) arabic.push(candidates[i]);
+    }
+    var pool = arabic.length ? arabic : candidates;
+    if (!pool.length) return raw;
+    var best = pool[0];
+    for (var j = 1; j < pool.length; j++) {
+      if (pool[j].length > best.length) best = pool[j];
+    }
+    return best;
+  }
+
+  function displayKicker(text, body) {
+    var raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    var batch = raw.match(/batch\s+job\s+(\d+\s*\/\s*\d+)/i);
+    if (batch) return 'Batch ' + batch[1].replace(/\s+/g, '');
+    body = body != null ? String(body) : extractPostBody(raw);
+    if (!body || body === raw) return '';
+    var kicker = raw.split(body).join(' ').replace(/["“”]/g, '');
+    kicker = kicker.replace(/\s+/g, ' ').trim().replace(/^[\s—\-:;]+|[\s—\-:;]+$/g, '');
+    if (kicker.indexOf(' — ') !== -1) kicker = kicker.split(' — ')[0];
+    else if (kicker.indexOf('. ') !== -1) kicker = kicker.split('. ')[0];
+    return kicker.slice(0, 80);
+  }
+
+  function shortenOutcome(text) {
+    var raw = String(text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    var bold = raw.match(/\*\*([^*]+)\*\*/);
+    if (bold) return bold[1].trim().slice(0, 120);
+    var head = raw.split(/[:：]\s*["“>]/)[0];
+    head = head.replace(/^\s*Status for\s+/i, '').replace(/^[\s—\-]+|[\s—\-]+$/g, '');
+    return head.slice(0, 120);
+  }
+
+  function textDir(text) {
+    if (isArabicDominant(text)) return 'rtl';
+    if (hasArabic(text)) return 'auto';
+    return 'ltr';
+  }
+
   window.KazmaBidi = {
     hasArabic: hasArabic,
     isArabicDominant: isArabicDominant,
     apply: apply,
     applyAll: applyAll,
     isolateRuns: isolateRuns,
+    extractPostBody: extractPostBody,
+    displayKicker: displayKicker,
+    shortenOutcome: shortenOutcome,
+    textDir: textDir,
   };
 
   if (document.readyState === 'loading') {

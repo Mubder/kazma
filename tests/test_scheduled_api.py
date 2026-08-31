@@ -93,6 +93,31 @@ def client(cron_scheduler, x_store):
         yield c
 
 
+def test_list_tasks_extracts_wrapped_arabic_tweet(client, cron_scheduler) -> None:
+    import asyncio
+
+    prompt = (
+        "Rescheduled batch job 2/8 — POST ONE TWEET ONLY. Call x_post with "
+        'EXACTLY this text: "كاظمه لا تجيب فقط — بل تنفّذ وفق جدول."'
+    )
+    asyncio.run(cron_scheduler.schedule(timing="1h", prompt=prompt))
+    cron_scheduler.jobs["cron-0001"]["last_result"] = (
+        "Status for batch job 2/8: 1. **x_post attempted** with the exact "
+        'locked text: > كاظمه لا تجيب فقط — بل تنفّذ وفق جدول.'
+    )
+    cron_scheduler.jobs["cron-0001"]["status"] = "done"
+
+    resp = client.get("/api/scheduled/tasks")
+    assert resp.status_code == 200
+    task = resp.json()["tasks"][0]
+    assert task["summary"].startswith("كاظمه")
+    assert "POST ONE TWEET" not in task["summary"]
+    assert task["kicker"] == "Batch 2/8"
+    assert task["dir"] == "rtl"
+    assert task["outcome"] == "x_post attempted"
+    assert not task.get("error")
+
+
 def test_list_tasks_aggregates_cron_and_x(client, cron_scheduler, x_store) -> None:
     import asyncio
 
@@ -119,6 +144,21 @@ def test_cron_create_edit_delete(client) -> None:
     deleted = client.delete(f"/api/scheduled/cron/{job_id}", headers=_CSRF)
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "cancelled"
+
+
+def test_scheduled_page_shows_error_not_last_result_as_red() -> None:
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "kazma-ui" / "kazma_ui" / "templates" / "scheduled.html").read_text(
+        encoding="utf-8"
+    )
+    js = (root / "kazma-ui" / "kazma_ui" / "static" / "js" / "scheduled.js").read_text(
+        encoding="utf-8"
+    )
+    assert "errorText(task)" in html
+    assert "outcomeText(task)" in html
+    assert 'x-text="reason(task)"' not in html
+    assert "extractPostBody" in js
+    assert ":dir=" in html
 
 
 def test_csrf_blocks_mutation_without_header(client) -> None:
