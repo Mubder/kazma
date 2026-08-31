@@ -1241,9 +1241,15 @@ def _cmd_reload() -> int:
         print("  python scripts/service/kazma_guard.py --status")
         return 1
 
-    print("Waiting for the supervisor to boot the new process…")
-    print("(If KazmaAgent is not installed, start: python scripts/service/kazma_guard.py)")
-    boot_deadline = time.monotonic() + min(START_TIMEOUT_S, 180.0)
+    print("Waiting for KazmaAgent to boot the new process…")
+    print(
+        f"(Cold start is typically 3–5 minutes; budget {int(START_TIMEOUT_S)}s. "
+        "Do not Ctrl+C unless you intend to abort.)"
+    )
+    kicked = False
+    started_wait = time.monotonic()
+    boot_deadline = started_wait + START_TIMEOUT_S
+    next_progress = started_wait + 30.0
     while time.monotonic() < boot_deadline:
         ok, detail = probe(health, 5.0)
         if ok:
@@ -1256,14 +1262,62 @@ def _cmd_reload() -> int:
                 )
             log("info", "reload.ready", commit=after, previous=before)
             return 0
+        now = time.monotonic()
+        # If the watcher PID is gone, taskkill /T took it with the child.
+        # Kick KazmaAgent once. Do NOT kick while a live guard is still
+        # booting — cold start is minutes, and a second guard fights for 9090.
+        if not kicked and now - started_wait >= 45.0 and not _guard_pid_alive():
+            kicked = True
+            if _kick_os_supervisor(log):
+                print("Watcher process was gone; kicked the KazmaAgent scheduled task.")
+        if now >= next_progress:
+            print(
+                f"  still starting… {int(now - started_wait)}s "
+                f"(last: {detail})"
+            )
+            next_progress += 30.0
         time.sleep(2.0)
 
-    print("Server did not become ready. The supervisor may not be running.")
-    print("  python scripts/service/install_service.py --install")
+    print("Server did not become ready within the start budget.")
     print("  python scripts/service/install_service.py --status")
     print("  python scripts/service/kazma_guard.py --status")
+    print("  python scripts/service/kazma_guard.py --install")
     print("  python scripts/service/kazma_guard.py          # start supervision in this terminal")
     return 2
+
+
+def _guard_pid_alive() -> bool:
+    """True if the last recorded kazma_guard process is still running."""
+    try:
+        data = json.loads(_state_path().read_text(encoding="utf-8") or "{}")
+        gpid = int(data.get("guard_pid") or 0)
+    except Exception:
+        return False
+    return bool(gpid) and _pid_alive(gpid)
+
+
+def _kick_os_supervisor(log: GuardLog) -> bool:
+    """Ask the OS supervisor to run the guard now. No-op if none is installed."""
+    try:
+        if os.name == "nt":
+            r = subprocess.run(
+                ["schtasks", "/Run", "/TN", "KazmaAgent"],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                timeout=30, check=False,
+            )
+            ok = r.returncode == 0
+            log("info" if ok else "warn", "reload.kick_task",
+                ok=ok, code=r.returncode, err=(r.stderr or "")[:200])
+            return ok
+        # systemd user unit (install_service.py name)
+        r = subprocess.run(
+            ["systemctl", "--user", "restart", "kazma"],
+            capture_output=True, timeout=30, check=False,
+        )
+        return r.returncode == 0
+    except Exception as exc:
+        log("debug", "reload.kick_failed", error=str(exc)[:200])
+        return False
 
 
 def _cmd_install() -> int:

@@ -34,6 +34,10 @@ def test_reload_clears_pause_and_reaps_port() -> None:
     assert "reap_port_holder" in body
     assert "_stop_recorded_child" in body
     assert "/health" in body or "_live_commit" in body
+    assert "START_TIMEOUT_S" in body
+    assert "_kick_os_supervisor" in body
+    # Must not give up at 180s — cold start is 3–5 minutes.
+    assert "min(START_TIMEOUT_S, 180" not in body
 
 
 def test_tasklist_info_line_is_not_a_process_name() -> None:
