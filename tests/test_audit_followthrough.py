@@ -43,9 +43,28 @@ def test_github_token_not_written_to_dotenv(tmp_path, monkeypatch):
     assert os.environ.get("GITHUB_TOKEN") == "ghp_should_not_land_on_disk"
 
 
-def test_tui_theme_overrides_hatch_with_percentage():
-    assert "hatch: right 12%" in KAZMA_THEME
-    assert "Screen.-maximized-view" in KAZMA_THEME
+def test_tui_theme_does_not_override_hatch_with_bare_percentage():
+    """hatch second token must be a color. A bare percentage crashes launch."""
+    import re
+
+    from textual.css.stylesheet import Stylesheet, StylesheetParseError
+
+    ss = Stylesheet()
+    ss.add_source(KAZMA_THEME)
+    ss.parse()
+
+    # Ignore comments; the live rule must not be `hatch: right 12%`.
+    live = re.sub(r"/\*.*?\*/", "", KAZMA_THEME, flags=re.S)
+    assert "hatch: right 12%" not in live
+
+    bad = Stylesheet()
+    bad.add_source("Screen { hatch: right 12%; }")
+    try:
+        bad.parse()
+    except StylesheetParseError:
+        pass
+    else:
+        raise AssertionError("bare hatch percentage must fail CSS parse")
 
 
 def test_session_list_prefers_short_id():

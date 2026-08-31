@@ -404,6 +404,13 @@ class KazmaTUI(App[None]):
                     self.query_one("#chat-input").focus()
                 except Exception:
                     pass
+            else:
+                # ChatPanel's Input keeps focus after a tab change; Textual
+                # then snaps TabbedContent back to Chat on the next refresh.
+                try:
+                    self.query_one(f"#nav-{tab_id}").focus()
+                except Exception:
+                    pass
         except Exception:
             logger.debug("goto_tab failed for %s", tab_id, exc_info=True)
 
@@ -435,13 +442,14 @@ class KazmaTUI(App[None]):
             tabs = self.query_one("#main-tabs", TabbedContent)
             current = tabs.active
             help_messages = {
-                "dashboard": "Dashboard: metrics + compact memory health. Keys 1–7 / left rail.",
+                "dashboard": "Dashboard: metrics + compact memory health. Keys 1–8 / left rail.",
                 "memory": "Memory: full stack health, L2 graph stats, component table. Press r via settings to save flags.",
                 "chat": "Chat: Type message, Enter send, / for commands, Ctrl+P palette",
                 "files": "Files: Browse workspace, e = open editor",
                 "traces": "Traces: Filter audit trail, select row for details",
                 "swarm": "Swarm: Workers, active tasks, history, topology + live sparklines",
                 "settings": "Settings: Feature toggles (memory, consolidator, HITL), themes",
+                "documents": "Documents: library list + processing state + preview (refresh to reload)",
             }
             msg = help_messages.get(current, "Press Ctrl+P for command palette")
             self.push_screen(Toast(msg, "info", duration=3.0))
@@ -594,19 +602,23 @@ class KazmaTUI(App[None]):
             labels = {
                 "en": {
                     "dashboard": "Dashboard",
+                    "memory": "Memory",
                     "chat": "Chat",
                     "files": "Files",
                     "traces": "Traces",
                     "swarm": "Swarm",
-                    "settings": "Settings"
+                    "settings": "Settings",
+                    "documents": "Documents",
                 },
                 "ar": {
                     "dashboard": "\u0644\u0648\u062d\u0629 \u0627\u0644\u0642\u064a\u0627\u062f\u0629",
+                    "memory": "\u0627\u0644\u0630\u0627\u0643\u0631\u0629",
                     "chat": "\u0627\u0644\u0645\u062d\u0627\u062f\u062b\u0629",
                     "files": "\u0627\u0644\u0645\u0644\u0641\u0627\u062a",
                     "traces": "\u0627\u0644\u062a\u062a\u0628\u0639\u0627\u062a",
                     "swarm": "\u0627\u0644\u0633\u0631\u0628",
-                    "settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a"
+                    "settings": "\u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a",
+                    "documents": "\u0627\u0644\u0645\u0633\u062a\u0646\u062f\u0627\u062a",
                 }
             }
             for tab_id, label in labels[lang].items():

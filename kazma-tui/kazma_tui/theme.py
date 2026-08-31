@@ -42,11 +42,10 @@ Screen {
     color: $text;
 }
 
-/* Textual 8.2 `hatch: right $panel` expects a percentage. Our $panel is a
-   hex color, so pushing EditorScreen (maximized-view CSS) crashed parse. */
-Screen.-maximized-view {
-    hatch: right 12%;
-}
+/* Do not set hatch here. Textual's default is `hatch: right $panel` (character
+   + color). `hatch: right 12%` is invalid (percentage is not a color) and
+   crashes launch. `hatch: right $panel 12%` also fails after variable
+   substitution (too many tokens). */
 
 Header {
     background: $panel;
