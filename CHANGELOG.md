@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Chat: CoT stays up; thinking/Stop no longer blink (2026-09-01)
+
+WS journaled `idle` / `stream_end` / `done` called `_endTurn` while SSE
+still owned the turn. That wiped the CoT workbench mid-stream, then the
+next tokens opened a bare bubble and the thinking strip / Stop button
+flapped. While SSE is live, WS no longer drives turn lifecycle (HITL
+cards still pass). The thinking strip uses opacity/height instead of
+`x-show`; Stop no longer pulses; dots fade instead of bouncing to
+`scale(0)`.
+
 ## Nested HITL fossils scrubbed from ConfigStore (2026-09-01)
 
 `settings.db` still held Aug-13 YAML-seed rows (`safety.hitl.approval_timeout_seconds=60`

@@ -112,6 +112,10 @@ class TestV2ArchitecturePresent:
         assert "hasLiveSSE: function()" in chat_src
         # token/done/capacity painting still gated on the live SSE
         assert store_src.count("hasLiveSSE()") >= 3
+        # idle/stream_end/done must not call _endTurn while SSE owns the turn
+        # (CoT vanished + thinking/Stop blinked mid-stream, 2026-09-01).
+        assert "_sseOwnsLiveTurn" in store_src
+        assert "sseOwned[type]" in store_src
         assert "case 'capacity'" in store_src
         assert "_plainFromMarkdown" in chat_src
         assert "function _isInstantCapacitySlash" in chat_src

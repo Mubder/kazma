@@ -2120,9 +2120,8 @@ tbody tr:last-child td {
 }
 .send-btn:hover { background: var(--accent-hover); }
 .send-btn:disabled { background: var(--bg-surface); cursor: not-allowed; }
-.send-btn.stop-mode { background: var(--error, #ef4444); animation: pulse-stop 1.5s ease-in-out infinite; }
+.send-btn.stop-mode { background: var(--error, #ef4444); }
 .send-btn.stop-mode:hover { background: #dc2626; }
-@keyframes pulse-stop { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
 
 /* .input-footer / .chat-input-footer-hint removed: that row existed only to
    carry the composer char count and an "Enter to send" hint, and it cost a
@@ -2135,24 +2134,41 @@ tbody tr:last-child td {
   color: inherit;
 }
 
-/* Thinking indicator */
+/* Thinking indicator — height/opacity, never display:none (that jumped the
+   composer). Dots fade; they do not bounce to scale(0) (that blinked). */
 .thinking-indicator {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: var(--sp-2) var(--sp-4);
+  padding: 0 var(--sp-4);
+  max-height: 0;
+  overflow: hidden;
   color: var(--text-tertiary);
   font-size: 0.875rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease, max-height 180ms ease, padding 180ms ease;
+}
+.thinking-indicator.is-on {
+  opacity: 1;
+  max-height: 2.5rem;
+  padding: var(--sp-2) var(--sp-4);
 }
 .thinking-indicator .dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--text-muted);
-  animation: bounce 1.4s infinite ease-in-out;
+  opacity: 0.4;
+  animation: thinking-dot 1.8s ease-in-out infinite;
 }
-.thinking-indicator .dot:nth-child(1) { animation-delay: -0.32s; }
-.thinking-indicator .dot:nth-child(2) { animation-delay: -0.16s; }
+.thinking-indicator .dot:nth-child(1) { animation-delay: 0s; }
+.thinking-indicator .dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-indicator .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking-dot {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
 .thinking-indicator .thinking-text {
   color: var(--text-secondary);
   font-weight: 500;
@@ -2715,11 +2731,11 @@ details.kazma-working > summary {
 /* Animated thinking-row icon (running status rows). Killed globally by
    the prefers-reduced-motion block (§a11y). */
 @keyframes stepIconPulse {
-  0%, 100% { opacity: 0.85; }
-  50% { opacity: 0.3; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.65; }
 }
 .agent-progress-step.state-running .step-icon.is-animated {
-  animation: stepIconPulse 1.2s ease-in-out infinite;
+  animation: stepIconPulse 2s ease-in-out infinite;
 }
 /* Reserve height while the panel is active so appended rows don't make
    the transcript jump (streaming polish). */

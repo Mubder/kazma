@@ -82,7 +82,7 @@
 
     <!-- Live status strip (detailed steps live in the message progress panel) -->
     <div id="thinking-indicator" class="thinking-indicator" x-data x-cloak
-         x-show="$store.agent && $store.agent.isThinking">
+         :class="{ 'is-on': $store.agent && $store.agent.isThinking }">
       <span class="dot"></span><span class="dot"></span><span class="dot"></span>
       <span class="thinking-text"
             x-text="($store.agent && $store.agent.statusMessage) || '{{ t('chat.thinking') }}'"></span>

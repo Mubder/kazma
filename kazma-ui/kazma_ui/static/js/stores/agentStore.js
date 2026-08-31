@@ -141,6 +141,16 @@ function registerAgentStore() {
     _chat() {
       return window.KazmaChat || null;
     },
+    /** SSE owns the live graph turn. WS must not begin/end/paint it. */
+    _sseOwnsLiveTurn() {
+      try {
+        return !!(window.KazmaChat
+          && typeof window.KazmaChat.hasLiveSSE === 'function'
+          && window.KazmaChat.hasLiveSSE());
+      } catch (e) {
+        return false;
+      }
+    },
     _progress(step) {
       const chat = this._chat();
       if (chat && typeof chat.logProgress === 'function') chat.logProgress(step);
@@ -779,6 +789,24 @@ function registerAgentStore() {
           }
         }
       } catch (e) { /* visibility UX is best-effort */ }
+
+      // Live SSE owns tokens, CoT, thinking strip, and endTurn. Journaled
+      // idle/stream_end/done on this socket used to call _endTurn mid-stream:
+      // CoT vanished, Stop/thinking blinked, the next tokens opened a bare
+      // bubble. HITL cards still flow (renderHitlCard is idempotent).
+      if (this._sseOwnsLiveTurn()) {
+        const sseOwned = {
+          token: 1, llm_delta: 1, done: 1, turn_complete: 1, stream_end: 1,
+          tool_start: 1, tool_lifecycle: 1, capacity: 1,
+          error: 1, graph_error: 1, approval_complete: 1,
+          approval_started: 1, approval_progress: 1, approval_resuming: 1,
+        };
+        if (sseOwned[type]) return;
+        if (type === 'status' || type === 'status_update') {
+          const st = frame.status || data.status;
+          if (st !== 'paused_for_approval') return;
+        }
+      }
 
       // Structured resume handshake (V2) — replaces the old prose frame +
       // regex matching ("Reconnected — previous turn still running…").
