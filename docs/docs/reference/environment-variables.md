@@ -57,7 +57,7 @@ and `kazma_core.documents.config.DocumentConfig`. Optional cert soak size:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `KAZMA_DOCUMENTS_JOBS_BACKEND` | auto | Force `sqlite` for job queue (else follow Postgres when configured) |
-| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs backend). Postgres metadata enables multi-replica CRUD; GC SQL still SQLite-only (skipped on PG with honest error) |
+| `KAZMA_DOCUMENTS_METADATA_BACKEND` | `auto` | `sqlite` / `postgres` / `auto` (auto follows jobs backend). Postgres metadata enables multi-replica CRUD; GC mark/sweep is backend-agnostic (`repository.gc_mark`) |
 | `KAZMA_DOCUMENT_SOAK_ITERATIONS` | `100` | Soak iteration count for `certify_documents.py --soak` |
 
 ---

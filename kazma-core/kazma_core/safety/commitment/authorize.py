@@ -140,7 +140,11 @@ def authorize_effect(
         # Fail-open: never let the kill-switch check itself block tool exec.
         logger.debug("[commitment] kill-switch check failed; continuing enabled")
 
-    # Phase 1 enforcement: fail-closed unregistered mutators (opt-in only).
+    # Phase 1 enforcement: fail-closed unregistered mutators.
+    # Config default is ON (get_commitment_config); callers must pass the
+    # live flag. The function default stays False only so a forgotten
+    # keyword does not surprise a unit test that constructs authorize_effect
+    # with no config.
     if (enforce_unknown_mutators
             and not profile.registered
             and profile.security_tier == SecurityTier.UNSAFE):

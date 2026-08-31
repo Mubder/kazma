@@ -167,38 +167,27 @@ class TestSwarmLogsEndpoint:
 # ── VAL-UX-008: Cost breaker sends error type ───────────────────────
 
 class TestCostBreakerType:
-    """chat.py cost breaker must send type 'error', not 'done'."""
+    """Supervisor cost breaker must halt to RESPOND with a warning, not a fake answer."""
 
     @pytest.fixture
-    def chat_py(self):
-        return (_UI_DIR / "chat.py").read_text(encoding="utf-8")
+    def supervisor_py(self):
+        root = Path(__file__).resolve().parent.parent
+        return (
+            root / "kazma-core" / "kazma_core" / "agent" / "graph_supervisor.py"
+        ).read_text(encoding="utf-8")
 
-    @pytest.mark.xfail(reason="source-anchored grep for the pre-refactor implementation (chat.js overhaul + server-side cost breaker move); the behavior now lives elsewhere (e.g. sse_chat.py budget handling) — rewrite against the current contract", strict=False)
-    def test_cost_breaker_sends_error_type(self, chat_py):
-        """The cost breaker message must use type 'error', not 'done'."""
-        # Find the should_halt block
-        halt_match = re.search(
-            r'should_halt\(\).*?send_json\(\s*\{[^}]*"type":\s*"(\w+)"',
-            chat_py,
-            re.DOTALL,
-        )
-        assert halt_match, "Could not find should_halt() cost breaker block"
-        event_type = halt_match.group(1)
-        assert event_type == "error", (
-            f"Cost breaker sends type '{event_type}', expected 'error'"
-        )
+    def test_cost_breaker_forces_respond(self, supervisor_py):
+        halt_idx = supervisor_py.find("cost_breaker.should_halt()")
+        assert halt_idx > 0
+        body = supervisor_py[halt_idx:halt_idx + 800]
+        assert "NodeName.RESPOND" in body
+        assert "⚠️" in body
 
-    @pytest.mark.xfail(reason="source-anchored grep for the pre-refactor implementation (chat.js overhaul + server-side cost breaker move); the behavior now lives elsewhere (e.g. sse_chat.py budget handling) — rewrite against the current contract", strict=False)
-    def test_budget_message_not_sent_as_done(self, chat_py):
-        """The 'Budget exceeded' message must NOT be sent with type 'done'."""
-        # Find the budget exceeded context
-        budget_idx = chat_py.find("Budget exceeded")
-        assert budget_idx > 0, "Budget exceeded message not found in chat.py"
-        # Look backwards from that position for the type field
-        context = chat_py[max(0, budget_idx - 200):budget_idx]
-        assert '"type": "error"' in context or '"type":"error"' in context, (
-            "Budget exceeded message is not preceded by type 'error'"
-        )
+    def test_budget_halt_is_not_a_tool_loop(self, supervisor_py):
+        halt_idx = supervisor_py.find("Cost breaker tripped")
+        assert halt_idx > 0
+        body = supervisor_py[halt_idx:halt_idx + 500]
+        assert "TOOL_WORKER" not in body
 
 
 # ── VAL-UX-009: Init failures surfaced to UI ────────────────────────
@@ -216,13 +205,13 @@ class TestInitErrorsSurfaced:
             "app.py must define _init_errors list to track init failures"
         )
 
-    @pytest.mark.xfail(reason="source-anchored grep for the pre-refactor implementation (chat.js overhaul + server-side cost breaker move); the behavior now lives elsewhere (e.g. sse_chat.py budget handling) — rewrite against the current contract", strict=False)
     def test_sse_init_error_captured(self, app_py):
         """SSE router init failure appends to _init_errors."""
-        # Find the SSE except block
-        sse_except_idx = app_py.find("SSE chat router failed to initialize")
+        sse_except_idx = app_py.find("SSE/WS chat router failed to initialize")
+        if sse_except_idx < 0:
+            sse_except_idx = app_py.find("SSE chat router failed to initialize")
         assert sse_except_idx > 0
-        context = app_py[sse_except_idx:sse_except_idx + 200]
+        context = app_py[sse_except_idx:sse_except_idx + 250]
         assert "_init_errors.append" in context, (
             "SSE init failure must append to _init_errors"
         )
@@ -236,32 +225,23 @@ class TestInitErrorsSurfaced:
             "Telemetry init failure must append to _init_errors"
         )
 
-    @pytest.mark.xfail(reason="source-anchored grep for the pre-refactor implementation (chat.js overhaul + server-side cost breaker move); the behavior now lives elsewhere (e.g. sse_chat.py budget handling) — rewrite against the current contract", strict=False)
     def test_gateway_init_error_captured(self, app_py):
         """Gateway init failure appends to _init_errors."""
         gateway_except_idx = app_py.find("Gateway failed to initialize")
         assert gateway_except_idx > 0
-        context = app_py[gateway_except_idx:gateway_except_idx + 200]
+        context = app_py[gateway_except_idx:gateway_except_idx + 400]
         assert "_init_errors.append" in context, (
             "Gateway init failure must append to _init_errors"
         )
 
-    @pytest.mark.xfail(reason="source-anchored grep for the pre-refactor implementation (chat.js overhaul + server-side cost breaker move); the behavior now lives elsewhere (e.g. sse_chat.py budget handling) — rewrite against the current contract", strict=False)
     def test_api_status_endpoint_exists(self, app_py):
-        """GET /api/status endpoint exists and returns init_errors."""
-        assert "/api/status" in app_py, (
-            "app.py must define a /api/status endpoint"
-        )
-        assert "init_errors" in app_py
+        """GET /api/status returns init_errors (routes_direct/misc.py)."""
+        misc = (_UI_DIR / "routes_direct" / "misc.py").read_text(encoding="utf-8")
+        assert "/api/status" in misc or "/api/status" in app_py
+        assert "init_errors" in misc
 
-    @pytest.mark.xfail(reason="source-anchored grep for the pre-refactor implementation (chat.js overhaul + server-side cost breaker move); the behavior now lives elsewhere (e.g. sse_chat.py budget handling) — rewrite against the current contract", strict=False)
     def test_health_includes_init_errors(self, app_py):
-        """GET /health response includes init_errors field."""
-        # Find health_check function
-        health_idx = app_py.find("async def health_check")
-        assert health_idx > 0
-        # Get a generous function body
-        health_body = app_py[health_idx:health_idx + 1500]
-        assert "init_errors" in health_body, (
-            "/health endpoint must include init_errors in its response"
-        )
+        """Init errors are on /api/status (stripped /health payloads)."""
+        misc = (_UI_DIR / "routes_direct" / "misc.py").read_text(encoding="utf-8")
+        assert "init_errors" in misc
+        assert "_init_errors" in app_py

@@ -109,6 +109,23 @@ jobs:
         env:
           KAZMA_DB_BACKEND: sqlite
 
+  windows-selector-loop:
+    name: Windows selector-loop subset
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install test deps
+        run: pip install -e ".[test]"
+      - name: Compile-check + selector-loop regressions
+        run: |
+          python -c "import py_compile, pathlib; [py_compile.compile(str(p), doraise=True) for p in pathlib.Path('kazma-core/kazma_core').rglob('*.py')]"
+          python -m pytest tests/test_audit_2026_08_31_strengthen.py tests/test_audit_deep_structure_fixes.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+
   js-check:
     name: JS Syntax Check
     runs-on: ubuntu-latest

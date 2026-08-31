@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Remaining-work audit one-shot (2026-08-31)
+
+Closes the 2026-08-31 remaining-work list (safety holes, product gaps,
+docs honesty, CI). No leftovers except recorded process items (real iPhone
+sign-off; `chat.js` stays a god file with a section map).
+
+### Safety
+
+- HITL auto-deny default **300s** (was 60s) — the deny-retry card storm.
+- Graph commitment gate live-reads `enforce_unknown_mutators` (same as the
+  registry/IDE path).
+- MCP per-task workspace guard **fails closed** on exception.
+- Gateway HITL delivery uses the inbound message; cross-thread SessionStore
+  misses call `refuse_session_lookup_for_durable_job` with a TTL message.
+- `KAZMA_HITL_CANONICAL_FLOOR` auto-on in production / multi-user (env `0`
+  still wins).
+
+### Product
+
+- Settings → Safety: Soul-confirm toggle + pending confirm/reject panel.
+- Gmail list walks `pageToken` for offsets past the first page.
+- Bedrock `converse_stream` yields token deltas (falls back to one-chunk
+  `chat()` if the stream API is missing).
+- TUI `/swarm` dispatch POSTs `/api/swarm/dispatch`; API accepts
+  `workers=["auto"]` and `["all"]` / broadcast.
+- X Studio error toasts go through i18n.
+
+### Honesty / ops
+
+- Troubleshooting 429 / Anthropic / cost-breaker text matches code.
+- Document GC-on-Postgres docs no longer claim a skip.
+- Production checklist commitment defaults match code (`enforce_unknown_mutators`
+  ON; soul confirm auto-on in prod).
+- HA compose labelled a Postgres shared-state demo; nginx gets `ip_hash` +
+  WebSocket Upgrade. BrightData/Oxylabs module docs no longer say "stub".
+
+### Tests / CI
+
+- `tests/test_audit_2026_08_31_strengthen.py`; MCP fail-closed; ux003 xfails
+  rewritten against `graph_supervisor` / `/api/status`.
+- Windows selector-loop CI job; Playwright smoke also opens `/settings`.
+
 ## Install path matches pyproject + Settings Packages (2026-08-31)
 
 `setup.ps1` / `setup.sh` / `run.sh` requested a `[cli]` extra that does not

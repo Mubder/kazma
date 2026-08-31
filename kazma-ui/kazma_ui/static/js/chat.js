@@ -1,6 +1,13 @@
 /* ═══════════════════════════════════════════════════════
    Kazma Chat — Full-featured chat interface
    Uses SSE streaming for real-time responses
+
+   Section map (do not rewrite this file in one shot):
+     sessions / sidebar  — loadSession, session list, search
+     send / turn machine — sendMessage, abort, recovery
+     SSE paint           — token deltas, turn_complete, HITL card
+     composer / capacity — input, attach, voice, capacity bar
+   Navigation shortcuts live ONLY in modules/nav.js.
    ═══════════════════════════════════════════════════════ */
 
 (function() {

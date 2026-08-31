@@ -1,6 +1,13 @@
 /** Settings mixin: ops — appearance, shortcuts, account, tools, system, packages, import, backup */
 (function (root) {
     "use strict";
+    function _t(key, fallback) {
+        if (typeof window.t === "function") {
+            var v = window.t(key);
+            if (v && v !== key) return v;
+        }
+        return fallback || key;
+    }
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.ops = function () {
         return {
@@ -28,9 +35,9 @@
                     }
                 }
                 this._applyAccentColor(this.appearance.accent_color);
-                showToast('Appearance saved', 'success');
+                showToast(_t('settings.appearance_saved', 'Appearance saved'), 'success');
             } catch (e) {
-                showToast('Save failed', 'error');
+                showToast(_t('settings.save_failed', 'Save failed'), 'error');
             }
             this.saving = false;
         },

@@ -1,7 +1,8 @@
-"""Bright Data (formerly Luminati) residential proxy stub.
+"""Bright Data (formerly Luminati) residential proxy.
 
 Same ``ProxyProvider`` interface as anyip. Unconfigured → ``get_proxy_url()``
-is ``None`` (direct). No account required for tests.
+is ``None`` (direct). No account required for tests. When username+password
+are set, this is a real proxy URL builder (not a no-op stub).
 """
 
 from __future__ import annotations

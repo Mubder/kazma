@@ -173,18 +173,9 @@ class BedrockProvider(LLMProvider):
                     transient=False,
                 )
             start = time.monotonic()
-            request: dict[str, Any] = {
-                "modelId": model_id,
-                "messages": convo,
-                "inferenceConfig": {
-                    "maxTokens": max_tokens or self.config.max_tokens,
-                    "temperature": temperature if temperature is not None else self.config.temperature,
-                },
-            }
-            if system:
-                request["system"] = system
-            if tools:
-                request["toolConfig"] = {"tools": self._convert_tools(tools)}
+            request = self._converse_request(
+                model_id, system, convo, tools, max_tokens, temperature
+            )
             try:
                 resp = client.converse(**request)
             except Exception as exc:  # noqa: BLE001
@@ -230,6 +221,29 @@ class BedrockProvider(LLMProvider):
             return self._parse(resp, model_id, start)
 
         return await asyncio.to_thread(_run)
+
+    def _converse_request(
+        self,
+        model_id: str,
+        system: list[dict[str, Any]],
+        convo: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        max_tokens: int | None,
+        temperature: float | None,
+    ) -> dict[str, Any]:
+        request: dict[str, Any] = {
+            "modelId": model_id,
+            "messages": convo,
+            "inferenceConfig": {
+                "maxTokens": max_tokens or self.config.max_tokens,
+                "temperature": temperature if temperature is not None else self.config.temperature,
+            },
+        }
+        if system:
+            request["system"] = system
+        if tools:
+            request["toolConfig"] = {"tools": self._convert_tools(tools)}
+        return request
 
     def _parse(self, resp: dict[str, Any], model_id: str, start: float) -> LLMResponse:
         """Map a Converse response onto :class:`LLMResponse`."""
@@ -283,17 +297,148 @@ class BedrockProvider(LLMProvider):
         model: str | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> Any:
-        """Bedrock ConverseStream is not wired yet — one-chunk fallback.
+        """Bedrock ConverseStream — token deltas, then a final LLMResponse.
 
         Must override the parent OpenAI SSE path: Bedrock is SigV4, not
-        ``/chat/completions``.
+        ``/chat/completions``. Falls back to one-chunk ``chat()`` if the
+        stream API is unavailable.
         """
-        resp = await self.chat(
-            messages, tools, max_tokens, temperature, model, response_format
-        )
-        if resp.content:
-            yield StreamDelta(content=resp.content)
-        yield StreamDelta(response=resp)
+        import asyncio
+
+        _ = response_format
+        model_id = model or self.config.model
+        system, convo = self._build_messages(messages)
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+
+        def _run() -> None:
+            client = self._get_client()
+            if client is None:
+                loop.call_soon_threadsafe(
+                    queue.put_nowait,
+                    LLMError("Bedrock unavailable: boto3 is not installed", transient=False),
+                )
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+                return
+            start = time.monotonic()
+            request = self._converse_request(
+                model_id, system, convo, tools, max_tokens, temperature
+            )
+            try:
+                stream_fn = getattr(client, "converse_stream", None)
+                if stream_fn is None:
+                    raise RuntimeError("converse_stream unavailable")
+                resp = stream_fn(**request)
+            except Exception as exc:  # noqa: BLE001
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+                return
+            text_parts: list[str] = []
+            tool_calls: list[ToolCall] = []
+            usage_in = 0
+            usage_out = 0
+            stop_reason = ""
+            current_tool: dict[str, Any] | None = None
+            try:
+                for event in resp.get("stream") or []:
+                    if not isinstance(event, dict):
+                        continue
+                    start_blk = (event.get("contentBlockStart") or {}).get("start") or {}
+                    if "toolUse" in start_blk:
+                        tu = start_blk["toolUse"] or {}
+                        current_tool = {
+                            "id": tu.get("toolUseId", ""),
+                            "name": tu.get("name", ""),
+                            "input": "",
+                        }
+                    delta = (event.get("contentBlockDelta") or {}).get("delta") or {}
+                    if "text" in delta:
+                        chunk = str(delta.get("text") or "")
+                        if chunk:
+                            text_parts.append(chunk)
+                            loop.call_soon_threadsafe(
+                                queue.put_nowait, StreamDelta(content=chunk)
+                            )
+                    if "toolUse" in delta and current_tool is not None:
+                        current_tool["input"] += str(
+                            (delta.get("toolUse") or {}).get("input") or ""
+                        )
+                    if "contentBlockStop" in event and current_tool is not None:
+                        raw_in = current_tool.get("input") or "{}"
+                        parsed = _safe_json(raw_in) if isinstance(raw_in, str) else (raw_in or {})
+                        tool_calls.append(ToolCall(
+                            id=str(current_tool.get("id") or ""),
+                            name=str(current_tool.get("name") or ""),
+                            arguments=parsed if isinstance(parsed, dict) else {},
+                        ))
+                        current_tool = None
+                    if "messageStop" in event:
+                        stop_reason = str(
+                            (event.get("messageStop") or {}).get("stopReason") or ""
+                        )
+                    meta = event.get("metadata") or {}
+                    usage = meta.get("usage") or {}
+                    if usage:
+                        usage_in = int(usage.get("inputTokens") or usage_in or 0)
+                        usage_out = int(usage.get("outputTokens") or usage_out or 0)
+            except Exception as exc:  # noqa: BLE001
+                loop.call_soon_threadsafe(queue.put_nowait, exc)
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+                return
+            fake = {
+                "output": {
+                    "message": {
+                        "content": (
+                            ([{"text": "".join(text_parts)}] if text_parts else [])
+                            + [
+                                {
+                                    "toolUse": {
+                                        "toolUseId": tc.id,
+                                        "name": tc.name,
+                                        "input": tc.arguments,
+                                    }
+                                }
+                                for tc in tool_calls
+                            ]
+                        )
+                    }
+                },
+                "stopReason": stop_reason,
+                "usage": {"inputTokens": usage_in, "outputTokens": usage_out},
+            }
+            parsed_resp = self._parse(fake, model_id, start)
+            loop.call_soon_threadsafe(
+                queue.put_nowait, StreamDelta(response=parsed_resp)
+            )
+            loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        worker = asyncio.create_task(asyncio.to_thread(_run))
+        emitted_any = False
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                if isinstance(item, Exception):
+                    # Stream API missing / failed — one-chunk fallback.
+                    logger.warning("[Bedrock] converse_stream failed: %s", item)
+                    resp = await self.chat(
+                        messages, tools, max_tokens, temperature, model, response_format
+                    )
+                    if resp.content and not emitted_any:
+                        yield StreamDelta(content=resp.content)
+                    yield StreamDelta(response=resp)
+                    return
+                if isinstance(item, StreamDelta) and item.content:
+                    emitted_any = True
+                yield item
+        finally:
+            if not worker.done():
+                worker.cancel()
+            try:
+                await worker
+            except (asyncio.CancelledError, Exception):
+                pass
 
     async def close(self) -> None:
         # boto3 clients hold no asyncio resources.

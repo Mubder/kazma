@@ -296,8 +296,10 @@ def test_hitl_canonical_floor_caps_narrowing(monkeypatch):
         }
     }
 
-    # Without the flag: narrowing is honored (backward compat).
+    # Without the flag, on a lab (non-prod) install: narrowing is honored.
     monkeypatch.delenv("KAZMA_HITL_CANONICAL_FLOOR", raising=False)
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    monkeypatch.delenv("KAZMA_MULTI_USER", raising=False)
     effective = get_hitl_config(narrowed)["require_approval_for"]
     assert set(effective) == {"file_write"}
 
@@ -381,6 +383,26 @@ async def test_mcp_scope_guard_blocks_cross_workspace_calls(monkeypatch, tmp_pat
     monkeypatch.setenv("KAZMA_MCP_SCOPE_GUARD", "0")
     out = await mgr.execute_mcp_tool("fs", "list_tools", {})
     assert "different workspace" not in out["content"]
+
+
+@pytest.mark.asyncio
+async def test_mcp_scope_guard_fails_closed_on_exception(monkeypatch, tmp_path):
+    from kazma_core.mcp.manager import AsyncMCPManager, MCPServerHandle
+
+    mgr = AsyncMCPManager()
+    mgr._servers["fs"] = MCPServerHandle(name="fs", transport="stdio", connected=True)
+
+    import kazma_core.ide.workspace_scope as ws_scope
+
+    def _boom() -> None:
+        raise RuntimeError("scope probe exploded")
+
+    monkeypatch.setattr(ws_scope, "resolve_workspace_root", _boom)
+    monkeypatch.delenv("KAZMA_MCP_SCOPE_GUARD", raising=False)
+
+    out = await mgr.execute_mcp_tool("fs", "list_tools", {})
+    assert out["is_error"] is True
+    assert "failed closed" in out["content"]
 
 
 # ── Patch 5 — finding #15c: Telegram update chains ──────────────────────

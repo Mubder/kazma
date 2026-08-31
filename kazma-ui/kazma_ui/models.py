@@ -264,7 +264,7 @@ class SafetySettingsUpdate(BaseModel):
 
     hitl_enabled: bool = True
     require_approval_for: list[str] = Field(default_factory=list)
-    approval_timeout: int = 60
+    approval_timeout: int = 300
     auto_deny_on_timeout: bool = True
 
 

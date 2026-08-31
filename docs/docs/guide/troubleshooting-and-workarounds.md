@@ -61,23 +61,23 @@ description: Kazma Troubleshooting — code-audited reference (unified docs, v0.
 kazma status          # shows active provider/model
 ```
 
-### 1.3 Anthropic auth header mismatch
+### 1.3 Anthropic native path
 
-**Cause:** The Anthropic preset declares `auth_header: x-api-key`, but `LLMProvider.chat()` always sends `Authorization: Bearer` (`llm_provider.py:171-172`). The preset header only takes effect during `discover_models()`.
+**Cause (historical):** the generic OpenAI-compatible client always sent `Authorization: Bearer`.
 
-**Fix:** Route Anthropic through an OpenAI-compatible proxy, or extend `LLMProvider` to honor the preset `auth_header` for chat.
+**Now:** Anthropic traffic goes through `AnthropicProvider` (`/messages`, `x-api-key`). Do not send Anthropic-native models through the generic `LLMProvider` — `get_client()` / `find_provider_for_model()` must keep provider and model paired (AGENTS.md §1).
 
-### 1.4 No rate-limit (429) handling
+### 1.4 Rate-limit (429) handling
 
-Kazma has **no 429 backoff**. The retry layer (`retry.py:107-109`) explicitly does not retry 4xx. If you hit rate limits, either:
+Kazma **does** retry 429 with exponential backoff + `Retry-After` in `LLMProvider.chat()` and native Anthropic `/messages`. Exhausted 429 is `LLMError(transient=True, kind=rate_limit_exhausted)` — the supervisor retry loop honors `transient`. If you still burn the budget:
 - Lower concurrency (`BoundedConcurrency`, default 5), or
 - Put a rate-limiting proxy in front of the provider.
 
 ### 1.5 Cost breaker not halting runaway spend
 
-**Cause:** `CostCircuitBreaker` (default $0.50, 5-min silence) is a standalone dataclass — **not auto-wired** into `chat()`. The agent layer must call `record_cost` / `record_user_interaction` / `should_halt`.
+**Cause (historical):** `CostCircuitBreaker` existed as a dataclass and was not on the live loop.
 
-**Fix:** Wire the breaker in your agent loop, or set `KAZMA_MAX_COST` / `KAZMA_SILENCE_WINDOW` and drive it explicitly.
+**Now:** it is instantiated per-agent (`agent_runner.py`) and driven on the supervisor: `record_user_interaction()` on each inbound turn, `should_halt()` before the LLM call, `record_cost()` after (`graph_supervisor.py`). Halt forces RESPOND with a ⚠️ budget message — it does **not** synthesize a fake answer. Tune `KAZMA_MAX_COST` / `KAZMA_SILENCE_WINDOW` or Settings → cost.
 
 ### 1.6 ModelRegistry "not initialized" (`RuntimeError`)
 

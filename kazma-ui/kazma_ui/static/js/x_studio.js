@@ -257,10 +257,10 @@ function xStudioPage() {
           this._resetComposer(data.tweet_id || '');
           await Promise.all([this.loadStatus(), this.loadAudit(), this.loadDrafts()]);
         } else {
-          window.showToast(data.error || data.reason || 'Post failed', 'error');
+          window.showToast(data.error || data.reason || this.t('x_studio.post_failed'), 'error');
         }
       } catch (e) {
-        window.showToast('Post failed: ' + e.message, 'error');
+        window.showToast(this.t('x_studio.post_failed') + ': ' + e.message, 'error');
       } finally {
         this.busy = false;
       }
@@ -288,10 +288,10 @@ function xStudioPage() {
           this._resetComposer(this.parseTweetId(this.replyToId));
           await Promise.all([this.loadQueue(), this.loadDrafts()]);
         } else {
-          window.showToast(data.error || 'Schedule failed', 'error');
+          window.showToast(data.error || this.t('x_studio.schedule_failed'), 'error');
         }
       } catch (e) {
-        window.showToast('Schedule failed: ' + e.message, 'error');
+        window.showToast(this.t('x_studio.schedule_failed') + ': ' + e.message, 'error');
       } finally {
         this.busy = false;
       }
@@ -310,10 +310,10 @@ function xStudioPage() {
           window.showToast(this.t('x_studio.rescheduled'), 'success');
           await this.loadQueue();
         } else {
-          window.showToast(data.error || 'Reschedule failed', 'error');
+          window.showToast(data.error || this.t('x_studio.reschedule_failed'), 'error');
         }
       } catch (e) {
-        window.showToast('Reschedule failed: ' + e.message, 'error');
+        window.showToast(this.t('x_studio.reschedule_failed') + ': ' + e.message, 'error');
       }
     },
 
@@ -342,10 +342,10 @@ function xStudioPage() {
           if (this.replyToId === tid) this.replyToId = '';
           await this.loadAudit();
         } else {
-          window.showToast(data.error || 'Delete failed', 'error');
+          window.showToast(data.error || this.t('x_studio.delete_failed'), 'error');
         }
       } catch (e) {
-        window.showToast('Delete failed: ' + e.message, 'error');
+        window.showToast(this.t('x_studio.delete_failed') + ': ' + e.message, 'error');
       }
     },
 
@@ -363,10 +363,10 @@ function xStudioPage() {
         if (resp.ok && data.ok) {
           await this.loadQueue();
         } else {
-          window.showToast(data.error || 'Cancel failed', 'error');
+          window.showToast(data.error || this.t('x_studio.cancel_failed'), 'error');
         }
       } catch (e) {
-        window.showToast('Cancel failed: ' + e.message, 'error');
+        window.showToast(this.t('x_studio.cancel_failed') + ': ' + e.message, 'error');
       }
     },
   };

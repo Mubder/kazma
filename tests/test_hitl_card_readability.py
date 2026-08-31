@@ -12,7 +12,7 @@ Three separate defects produced that screen:
 
 * ``str(args)[:300] + "…"`` in the card builder -- silent elision, and the
   ellipsis reads as formatting rather than as a warning;
-* a 60s ``approval_timeout_seconds`` with ``auto_deny_on_timeout``, whose
+* a short ``approval_timeout_seconds`` with ``auto_deny_on_timeout``, whose
   denial the model read as "that approach failed" and retried with a variant,
   raising a fresh card each time;
 * nothing throttling repeated cards for one thread.

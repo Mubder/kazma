@@ -410,18 +410,34 @@ class SettingsManager:
             _default_danger = list(CANONICAL_DANGER_TOOLS)
         except Exception:
             _default_danger = ["file_write", "file_delete", "shell_exec", "code_exec", "python_exec"]
+        soul_flag = False
+        try:
+            from kazma_core.safety.commitment.config import get_commitment_config
+
+            soul_flag = bool(get_commitment_config().get("soul_requires_confirm"))
+        except Exception:
+            soul_flag = bool(self._cs.get("agent.commitment.soul_requires_confirm", False))
         return {
             "hitl_enabled": self._cs.get("safety.hitl_enabled", True),
             "require_approval_for": self._cs.get(
                 "safety.require_approval_for", _default_danger
             ),
-            "approval_timeout": self._cs.get("safety.approval_timeout", 60),
+            "approval_timeout": self._cs.get("safety.approval_timeout", 300),
             "auto_deny_on_timeout": self._cs.get("safety.auto_deny_on_timeout", True),
+            "soul_requires_confirm": soul_flag,
         }
 
     def save_safety_settings(self, data: dict[str, Any]) -> None:
         """Update HITL safety settings."""
-        for key, value in data.items():
+        payload = dict(data or {})
+        if "soul_requires_confirm" in payload:
+            soul = payload.pop("soul_requires_confirm")
+            self._cs.set(
+                "agent.commitment.soul_requires_confirm",
+                bool(soul),
+                category="agent",
+            )
+        for key, value in payload.items():
             self._cs.set(f"safety.{key}", value, category="safety")
 
     # ══════════════════════════════════════════════════════════════════

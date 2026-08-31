@@ -76,6 +76,58 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مهلة الموافقة (ثانية)",
         "en": "Approval Timeout (seconds)",
     },
+    "settings.approval_timeout_hint": {
+        "ar": "الافتراضي 300 ثانية. أقل من دقيقة يولّد بطاقات رفض متتالية إذا ابتعدت.",
+        "en": "Default 300 seconds. Under a minute mints a deny-retry card storm if you step away.",
+    },
+    "settings.soul_requires_confirm": {
+        "ar": "تأكيد دلتا الروح قبل التطبيق",
+        "en": "Confirm Soul deltas before apply",
+    },
+    "settings.soul_requires_confirm_hint": {
+        "ar": "عند التفعيل تُحفظ تحسينات الموجّه حتى تؤكدها أو ترفضها هنا. يُفعَّل تلقائياً في وضع الإنتاج / متعدد المستخدمين.",
+        "en": "When on, supervisor Soul refinements wait here until you confirm or reject. Auto-on in production / multi-user.",
+    },
+    "settings.soul_pending": {
+        "ar": "دلتا الروح بانتظار التأكيد",
+        "en": "Pending Soul deltas",
+    },
+    "settings.soul_confirm": {
+        "ar": "تأكيد",
+        "en": "Confirm",
+    },
+    "settings.soul_reject": {
+        "ar": "رفض",
+        "en": "Reject",
+    },
+    "settings.soul_confirmed": {
+        "ar": "تم تأكيد دلتا الروح.",
+        "en": "Soul delta confirmed.",
+    },
+    "settings.soul_rejected": {
+        "ar": "رُفضت دلتا الروح.",
+        "en": "Soul delta rejected.",
+    },
+    "settings.safety_saved": {
+        "ar": "حُفظت إعدادات السلامة",
+        "en": "Safety settings saved",
+    },
+    "settings.save_failed": {
+        "ar": "فشل الحفظ",
+        "en": "Save failed",
+    },
+    "settings.appearance_saved": {
+        "ar": "حُفظ المظهر",
+        "en": "Appearance saved",
+    },
+    "settings.agent_saved": {
+        "ar": "حُفظت إعدادات الوكيل",
+        "en": "Agent settings saved",
+    },
+    "settings.context_saved": {
+        "ar": "حُفظت إعدادات السياق",
+        "en": "Context settings saved",
+    },
     "settings.arabic": {
         "ar": "العربية",
         "en": "Arabic",

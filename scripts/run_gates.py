@@ -71,6 +71,12 @@ def main(argv: list[str]) -> int:
 
     python = _find_interpreter()
     cmd = [python, "-m", "pytest", *argv, "-q", "--no-header", "-p", "no:cacheprovider"]
+    # Windows: pytest numbered-dir cleanup hits WinError 5 on the
+    # %TEMP%\pytest-current junction, so a green gate still exits 1.
+    # Keep basetemp in-repo (.gitignore already has .pytest-tmp*).
+    basetemp = REPO_ROOT / ".pytest-tmp" / "gates"
+    basetemp.mkdir(parents=True, exist_ok=True)
+    cmd.extend(["--basetemp", str(basetemp)])
 
     try:
         return subprocess.call(cmd, cwd=str(REPO_ROOT))

@@ -97,6 +97,6 @@ Also run document rows in the [Smoke matrix](./smoke-matrix).
 
 - [ ] **Kill-switch verified**: `KAZMA_COMMITMENT_ENABLED=0` disables the gate (fail-open)
 - [ ] **GC cadence running**: `_start_commitment_gc_scheduler` every 15 min (check logs for `commitment GC:` summary)
-- [ ] **Flags**: `swarm_scope_enforce` defaults **ON** (workers capped at HIGH since 2026-08-15); `soul_requires_confirm`, `enforce_unknown_mutators` default OFF — operators toggle via ConfigStore / env
+- [ ] **Flags**: `swarm_scope_enforce` defaults **ON** (workers capped at HIGH since 2026-08-15); `enforce_unknown_mutators` defaults **ON**; `soul_requires_confirm` defaults OFF on a lab and auto-ON in production / multi-user — operators toggle via ConfigStore / env
 - [ ] **Metrics endpoint**: `GET /metrics` shows `kazma_commitment_decisions_total{decision=...}` + `kazma_commitment_pending`
 - [ ] **Soul confirm queue**: `GET /api/commitment/soul/pending` lists held deltas; `POST /api/commitment/soul/{cid}/confirm` approves
