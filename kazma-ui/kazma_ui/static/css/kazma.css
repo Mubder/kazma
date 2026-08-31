@@ -2179,6 +2179,25 @@ tbody tr:last-child td {
 .agent-progress.is-done:not(.kazma-cot-restored) .agent-progress-count {
   display: none;
 }
+.kz-planning {
+  margin: 0;
+  font-style: italic;
+  opacity: 0.7;
+  color: var(--text-secondary);
+}
+details.kazma-working {
+  margin: 0 0 0.75rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-surface, var(--bg-2)) 70%, transparent);
+}
+details.kazma-working > summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  user-select: none;
+}
 /* One row, not two. The kicker ("REASONING") sat stacked ABOVE the title, so
    the header was always two lines tall before any content wrapped. Inline
    them: the kicker is a 0.62rem uppercase label and costs no extra height

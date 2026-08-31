@@ -3566,8 +3566,12 @@
       if (_paintHTML(textEl, transformRenderedForPlan(KS.markdown(liveParts.prose)))) {
         if (window.KazmaBidi) KazmaBidi.apply(textEl, liveParts.prose);
       }
-    } else if (textEl.textContent !== '\u00a0') {
-      textEl.textContent = '\u00a0';
+    } else {
+      // Plan-only / CoT hop: keep a visible "Planning…" line instead of
+      // blanking the bubble (nbsp). Blanking is what made the stream look
+      // like thoughts that vanish, then a different final answer appears.
+      var planHint = '<p class="kz-planning">' + escapeHtml(ti('planning', 'Planning\u2026')) + '</p>';
+      _paintHTML(textEl, planHint);
     }
     textEl.setAttribute('dir', 'auto');
   }
@@ -5221,17 +5225,33 @@
       // dedupe belongs to the seq-journaled transports, painting twice is
       // idempotent, and a skipped paint was the "no response until refresh"
       // root cause.
+      var prevWorking = (tokenAccum || '').trim();
       tokenAccum = incoming;
       _turnPainted = true;
       tryIngestPlanFromText(tokenAccum);
       var display = _scrubDsml(stripPlanFenceForDisplay(tokenAccum));
       if (textEl) {
         try {
-          // Idempotent: when server truth renders to what the stream already
-          // painted — the normal case — this is a no-op instead of a full
-          // subtree rebuild, which is what made every reply blink as it
-          // finished. Server truth still ALWAYS wins when it differs.
-          _paintHTML(textEl, _renderReplyHTML(tokenAccum));
+          var html = _renderReplyHTML(tokenAccum);
+          // Supervisor hops stream working notes; respond_node then sends a
+          // different user-facing final. Replacing the bubble made the
+          // stream "disappear". Keep the earlier notes collapsed when they
+          // are not a prefix of the final answer.
+          var workingProse = _scrubDsml(stripPlanFenceForDisplay(prevWorking));
+          if (
+            workingProse
+            && display
+            && workingProse.length > 80
+            && display.indexOf(workingProse.slice(0, Math.min(80, workingProse.length))) !== 0
+            && workingProse.indexOf(display.slice(0, Math.min(80, display.length))) !== 0
+          ) {
+            html = '<details class="kazma-working"><summary>'
+              + escapeHtml(ti('working_notes', 'Working notes'))
+              + '</summary>'
+              + transformRenderedForPlan(KS.markdown(workingProse))
+              + '</details>' + html;
+          }
+          _paintHTML(textEl, html);
         } catch (mdErr) {
           if (textEl.textContent !== display) textEl.textContent = display;
         }

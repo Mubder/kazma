@@ -177,7 +177,8 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     assert "function _scheduleLiveTextPaint(textEl)" in js
     assert js.count("_scheduleLiveTextPaint(textEl);") >= 2  # main + approve-resume
     assert "transformRenderedForPlan(KS.markdown(liveParts.prose))" in js
-    assert "textEl.textContent = '\\u00a0';" in js  # plan-only phase holder
+    assert "kz-planning" in js  # plan-only hop stays visible, not a blank nbsp
+    assert "class=\"kazma-working\"" in js or "kazma-working" in js
     assert "function _flushLiveTextPaint()" in js
     assert "_paintLiveTextNow(_liveRenderEl, true)" in js
 

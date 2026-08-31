@@ -35,6 +35,10 @@ Usage
     python scripts/service/kazma_guard.py                 # supervise
     python scripts/service/kazma_guard.py --once          # no restarts (debug)
     python scripts/service/kazma_guard.py --dry-run       # print config, exit
+    python scripts/service/kazma_guard.py --reload        # pick up code changes
+    python scripts/service/kazma_guard.py --status
+    python scripts/service/kazma_guard.py --pause --stop --reason "…"
+    python scripts/service/kazma_guard.py --resume
 
 Configuration (all optional, env vars):
     KAZMA_GUARD_CMD             command to run       (default: serve.py)
@@ -1092,6 +1096,102 @@ def _cmd_resume() -> int:
     return 0
 
 
+def _stop_recorded_child(log: GuardLog) -> int:
+    """Kill the guard's recorded child tree. Returns the pid stopped, or 0."""
+    try:
+        state = json.loads(_state_path().read_text(encoding="utf-8"))
+        pid = int(state.get("child_pid") or 0)
+    except Exception:
+        pid = 0
+    if pid and _pid_alive(pid):
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/T", "/F"],
+                    capture_output=True, timeout=30, check=False,
+                )
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            log("info", "reload.child_stopped", pid=pid)
+            return pid
+        except Exception as exc:
+            log("error", "reload.child_stop_failed", pid=pid, error=str(exc)[:200])
+    return 0
+
+
+def _live_commit(health_url: str) -> str:
+    live = health_url.rstrip("/").rsplit("/", 1)[0] + "/live"
+    if not live.endswith("/health/live"):
+        live = "http://127.0.0.1:9090/health/live"
+    try:
+        with urllib.request.urlopen(live, timeout=5) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        build = data.get("build") if isinstance(data, dict) else None
+        if isinstance(build, dict):
+            return str(build.get("commit") or "")
+        return str((data or {}).get("commit") or "")
+    except Exception:
+        return ""
+
+
+def _cmd_reload() -> int:
+    """Operator deploy: stop the running server so the supervisor boots new code.
+
+    Killing python / uvicorn by hand fights the guard: it either respawns the
+    OLD process that still holds the port, or refuses to start because a
+    squatter is healthy. This command is the one path that (1) lifts a
+    leftover pause, (2) kills the recorded child AND the port holder, and
+    (3) waits until /health/live reports a new boot.
+    """
+    log = GuardLog(_default_log_path())
+    health = os.environ.get("KAZMA_GUARD_HEALTH_URL", DEFAULT_HEALTH_URL)
+    before = _live_commit(health)
+    if clear_pause():
+        print("Cleared leftover pause so the supervisor can respawn.")
+        log("info", "reload.cleared_pause")
+    stopped = _stop_recorded_child(log)
+    if stopped:
+        print(f"Stopped recorded server pid {stopped}.")
+    else:
+        print("No recorded child; clearing whoever holds the port.")
+    reap_port_holder(health, log)
+
+    # Wait until the old process is actually gone (port free / health down).
+    deadline = time.monotonic() + 45.0
+    while time.monotonic() < deadline:
+        ok, _ = probe(health, 3.0)
+        if not ok:
+            break
+        time.sleep(0.5)
+    else:
+        print("WARNING: something is still answering /health/ready after kill.")
+        print("  python scripts/service/kazma_guard.py --status")
+        return 1
+
+    print("Waiting for the supervisor to boot the new process…")
+    print("(If KazmaAgent is not installed, start: python scripts/service/kazma_guard.py)")
+    boot_deadline = time.monotonic() + min(START_TIMEOUT_S, 180.0)
+    while time.monotonic() < boot_deadline:
+        ok, detail = probe(health, 5.0)
+        if ok:
+            after = _live_commit(health)
+            print(f"Kazma is up. build {after or '?'} (was {before or '?'})")
+            if before and after and before == after:
+                print(
+                    "NOTE: commit hash unchanged — the process restarted but "
+                    "git HEAD is the same. Code edits still need this reload."
+                )
+            log("info", "reload.ready", commit=after, previous=before)
+            return 0
+        time.sleep(2.0)
+
+    print("Server did not become ready. The supervisor may not be running.")
+    print("  python scripts/service/install_service.py --status")
+    print("  python scripts/service/kazma_guard.py --status")
+    print("  python scripts/service/kazma_guard.py          # start supervision")
+    return 2
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Health-gated supervisor for Kazma.",
@@ -1112,6 +1212,8 @@ def main() -> int:
                     help="lift a pause and let the guard restart Kazma")
     ap.add_argument("--status", action="store_true",
                     help="show whether supervision is active or paused")
+    ap.add_argument("--reload", action="store_true",
+                    help="stop the running server so the supervisor boots new code")
     ap.add_argument("--stop", action="store_true",
                     help="with --pause: also stop the running server now")
     ap.add_argument("--reason", default="", help="why (recorded and alerted)")
@@ -1122,6 +1224,8 @@ def main() -> int:
 
     if args.status:
         return _cmd_status()
+    if args.reload:
+        return _cmd_reload()
     if args.pause:
         return _cmd_pause(args.reason, args.ttl, stop_now=args.stop)
     if args.resume:
