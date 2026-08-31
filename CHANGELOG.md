@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## X Studio RTL + Scheduled readable rows (2026-08-31)
+
+Arabic drafts and posted tweets on `/x` set `dir=rtl` from the tweet body
+(not the English wrapper). Batch-job prompts on `/scheduled` show the tweet
+plus a short kicker (`Batch 2/8`); agent wrap-ups are a muted "Last run"
+line, not a red error blob.
+
 ## Docs: X Studio, brand type, guard reload (2026-08-31)
 
 Product docs now match the shipped surfaces:

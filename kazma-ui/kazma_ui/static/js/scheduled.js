@@ -10,6 +10,8 @@ function scheduledPage() {
         tasks: [],
         loading: false,
 
+        t(key) { return (window.t && window.t(key)) || key; },
+
         // Upcoming by default. The page previously showed everything at
         // once, so a single pending task sat under forty finished ones and
         // the thing you came to check was the hardest thing to find.
@@ -135,15 +137,57 @@ function scheduledPage() {
 
         /* Prompts are stored with the indentation they were written with,
          * and the cell rendered it verbatim -- pages of leading whitespace
-         * inside a table. */
+         * inside a table. Batch-job wrappers also bury the tweet in English
+         * instructions; show the body the operator can actually read. */
         cleanSummary(task) {
-            return String((task && task.summary) || '').replace(/\s+/g, ' ').trim() || '—';
+            const raw = String((task && task.summary) || '').replace(/\s+/g, ' ').trim();
+            if (!raw) return '—';
+            const bidi = window.KazmaBidi;
+            if (bidi && bidi.extractPostBody) return bidi.extractPostBody(raw) || raw;
+            return raw;
         },
 
-        /* Cron failures carry their reason in last_result, which the page
-         * never showed: a row said "failed" and nothing else. */
+        summaryKicker(task) {
+            if (task && task.kicker) return String(task.kicker);
+            const bidi = window.KazmaBidi;
+            if (bidi && bidi.displayKicker) {
+                return bidi.displayKicker((task && task.summary) || '');
+            }
+            return '';
+        },
+
+        summaryDir(task) {
+            if (task && task.dir) return task.dir;
+            const bidi = window.KazmaBidi;
+            if (bidi && bidi.textDir) return bidi.textDir(this.cleanSummary(task));
+            return 'auto';
+        },
+
+        /* Real failures only. last_result is the agent's wrap-up essay and
+         * used to paint the whole cell red even on a successful post. */
+        errorText(task) {
+            const err = String((task && task.error) || '').replace(/\s+/g, ' ').trim();
+            if (err) return err;
+            if ((task && task.status) === 'failed') {
+                const last = String((task.last_result || '')).replace(/\s+/g, ' ').trim();
+                return last.slice(0, 160);
+            }
+            return '';
+        },
+
+        outcomeText(task) {
+            if (this.errorText(task)) return '';
+            if (task && task.outcome) return String(task.outcome);
+            const bidi = window.KazmaBidi;
+            const raw = String((task && task.last_result) || '');
+            if (bidi && bidi.shortenOutcome) return bidi.shortenOutcome(raw);
+            return '';
+        },
+
+        /* @deprecated kept so older tests/templates that call reason() still
+         * see a string; the template now uses errorText / outcomeText. */
         reason(task) {
-            return String((task && (task.error || task.last_result)) || '').replace(/\s+/g, ' ').trim();
+            return this.errorText(task);
         },
 
         statusLabel(task) {

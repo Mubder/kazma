@@ -30,10 +30,14 @@
   /* Prompts are stored with their authored indentation; clamp rather than
      let a paragraph set the row height. */
   .sched-summary { max-width: 520px; }
-  .sched-summary .txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-                        overflow: hidden; word-break: break-word; }
-  .sched-summary .why { color: var(--danger, #ef4444); font-size: .72rem; margin-top: 3px;
+  .sched-summary .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 2px; }
+  .sched-summary .txt { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+                        overflow: hidden; word-break: break-word; unicode-bidi: plaintext; text-align: start; }
+  .sched-summary .txt[dir="rtl"] { font-family: var(--font-arabic); }
+  .sched-summary .why { color: var(--danger, #ef4444); font-size: .72rem; margin-top: 4px;
                         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sched-summary .outcome { color: var(--text-muted); font-size: .72rem; margin-top: 4px;
+                            display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 
   .type-badge, .st-badge { font-size: 0.68rem; padding: 2px 8px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
   .type-cron { background: rgba(59,130,246,.15); color: #3b82f6; }
@@ -54,8 +58,9 @@
 
   /* ── X activity ── */
   .audit-text { max-width: 420px; }
-  .audit-text .txt { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-                     overflow: hidden; word-break: break-word; }
+  .audit-text .txt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+                     overflow: hidden; word-break: break-word; unicode-bidi: plaintext; text-align: start; }
+  .audit-text .txt[dir="rtl"] { font-family: var(--font-arabic); }
   .audit-open .txt { -webkit-line-clamp: unset; overflow: visible; white-space: pre-wrap; }
   .mono { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
   .ok-text { color: var(--success, #22c55e); }
@@ -154,8 +159,15 @@
               <td><span class="type-badge" :class="task.source === 'x' ? 'type-x' : 'type-cron'"
                         x-text="task.source === 'x' ? t('scheduled.kind_x') : t('scheduled.kind_task')"></span></td>
               <td class="sched-summary">
-                <div class="txt" x-text="cleanSummary(task)" :title="cleanSummary(task)"></div>
-                <div class="why" x-show="reason(task)" x-cloak x-text="reason(task)" :title="reason(task)"></div>
+                <div class="kicker" x-show="summaryKicker(task)" x-cloak
+                     x-text="summaryKicker(task)"></div>
+                <div class="txt" :dir="summaryDir(task)"
+                     x-text="cleanSummary(task)" :title="cleanSummary(task)"></div>
+                <div class="why" x-show="errorText(task)" x-cloak
+                     x-text="errorText(task)" :title="errorText(task)"></div>
+                <div class="outcome" x-show="outcomeText(task)" x-cloak
+                     x-text="t('scheduled.outcome') + ': ' + outcomeText(task)"
+                     :title="outcomeText(task)"></div>
               </td>
               <td><span class="st-badge" :class="'st-' + (task.status || 'pending')" x-text="statusLabel(task)"></span></td>
               <td>
@@ -207,7 +219,8 @@
               <td class="when-abs mono" x-text="fmtAuditWhen(e)"></td>
               <td x-text="e.action"></td>
               <td class="audit-text" :class="audit.open === i ? 'audit-open' : ''">
-                <div class="txt" x-text="e.text || '—'"></div>
+                <div class="txt" :dir="summaryDir({ summary: e.text })"
+                     x-text="cleanSummary({ summary: e.text })"></div>
                 <div class="why" x-show="audit.open === i && e.error" x-cloak x-text="e.error"></div>
               </td>
               <td><span :class="e.status === 'success' ? 'ok-text' : 'bad-text'" x-text="e.status"></span></td>

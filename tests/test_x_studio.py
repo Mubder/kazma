@@ -224,3 +224,6 @@ def test_studio_page_and_sidebar_are_wired() -> None:
     assert "proposal_id" in js
     assert "reschedule" in js
     assert "/api/x/delete" in js
+    assert ":dir=" in html
+    assert "displayBody" in js
+    assert "textDir" in js
