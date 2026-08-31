@@ -452,18 +452,28 @@ class TestSearchIndexMigration:
 
 
 class TestPinnedFonts:
-    """The vendored Amiri pair — present, verified, and scoped to Arabic."""
+    """The vendored IBM Plex pair — present, verified, brand face for EN+AR."""
 
-    def test_amiri_is_vendored_and_arabic_ready(self):
+    def test_plex_is_vendored_and_arabic_ready(self):
         from kazma_core.documents.fonts import bundled_font_dir, has_arabic_coverage
 
         directory = bundled_font_dir()
         assert directory is not None, "no pinned font directory found"
+        regular = directory / "IBMPlexSansArabic-Regular.ttf"
+        bold = directory / "IBMPlexSansArabic-Bold.ttf"
+        assert regular.is_file() and bold.is_file()
+        assert has_arabic_coverage(str(regular))
+        assert has_arabic_coverage(str(bold))
+
+    def test_amiri_fallback_still_ships(self):
+        from kazma_core.documents.fonts import bundled_font_dir, has_arabic_coverage
+
+        directory = bundled_font_dir()
+        assert directory is not None
         regular = directory / "Amiri-Regular.ttf"
         bold = directory / "Amiri-Bold.ttf"
         assert regular.is_file() and bold.is_file()
         assert has_arabic_coverage(str(regular))
-        assert has_arabic_coverage(str(bold))
 
     def test_licence_ships_with_the_fonts(self):
         """OFL 1.1 requires the licence to travel with the font."""
@@ -473,6 +483,10 @@ class TestPinnedFonts:
         assert directory is not None
         licence = (directory / "OFL.txt").read_text(encoding="utf-8", errors="replace")
         assert "SIL OPEN FONT LICENSE" in licence.upper()
+        plex_licence = (directory / "OFL-IBM-Plex.txt").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        assert "SIL OPEN FONT LICENSE" in plex_licence.upper()
 
     def test_arabic_job_uses_the_pinned_font(self):
         from kazma_core.documents.fonts import resolve_fonts
@@ -480,25 +494,20 @@ class TestPinnedFonts:
         choice = resolve_fonts(arabic=True)
         assert choice.source == "bundled"
         assert choice.arabic_ready is True
-        assert "Amiri" in choice.regular.name
+        assert "Plex" in choice.regular.name
 
-    def test_latin_job_is_not_restyled_by_the_arabic_bundle(self):
-        """Pinning Arabic typography must not change Latin typography.
+    def test_latin_job_uses_brand_plex_not_naskh(self):
+        """Brand Plex is the generated-doc face in both directions.
 
-        Amiri is a Naskh design. If the bundle won for Latin-only jobs too,
-        every English document that renders in Calibri today would silently
-        change typeface.
+        Amiri must not restyle English documents; Plex is the shared sans.
         """
-        from kazma_core.documents.fonts import _CANDIDATES, resolve_fonts
+        from kazma_core.documents.fonts import resolve_fonts
 
-        system_available = any(pathlib.Path(r).is_file() for r, _ in _CANDIDATES)
         choice = resolve_fonts(arabic=False)
-        if system_available:
-            assert choice.source == "system"
-            assert "Amiri" not in (choice.regular.name if choice.regular else "")
-        else:
-            # No system font at all: the bundle still beats Helvetica.
-            assert choice.source == "bundled"
+        assert choice.regular is not None
+        assert "Amiri" not in choice.regular.name
+        assert "Plex" in choice.regular.name
+        assert choice.source == "bundled"
 
 
 class TestToolSurfaceBoundary:

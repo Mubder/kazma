@@ -5,10 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Kazma Font Preview</title>
 
-<!-- Load all four candidates + the current setup so you see them rendered live. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Roboto:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
 <style>
   /* Mirror the Kazma dark theme so the preview matches what you'd ship. */
@@ -25,7 +24,7 @@
     color: var(--text);
     margin: 0;
     padding: 32px 20px 80px;
-    font-family: 'Inter', sans-serif;  /* fallback for the page chrome */
+    font-family: 'IBM Plex Sans', 'IBM Plex Sans Arabic', sans-serif;
   }
   .wrap { max-width: 880px; margin: 0 auto; }
   h1 { font-size: 1.6rem; margin: 0 0 8px; }
@@ -78,12 +77,10 @@
   }
   .demo pre { padding: 10px 12px; overflow: auto; }
 
-  /* ── Apply each candidate to its card ── */
-  .f-current  { font-family: 'Calibri', 'Inter', sans-serif; }  /* what's shipping now */
-  .f-inter    { font-family: 'Inter', sans-serif; }
-  .f-geist    { font-family: 'Geist', sans-serif; }
+  /* Shipping face — IBM Plex Sans / IBM Plex Sans Arabic. */
+  .f-current  { font-family: 'IBM Plex Sans', 'IBM Plex Sans Arabic', sans-serif; }
   .f-plex     { font-family: 'IBM Plex Sans', sans-serif; }
-  .f-roboto   { font-family: 'Roboto', sans-serif; }
+  .f-plex-ar  { font-family: 'IBM Plex Sans Arabic', sans-serif; }
 
   .pick {
     margin-top: 14px;
@@ -96,82 +93,24 @@
 <body>
 <div class="wrap">
 
-  <h1>Kazma — English font preview</h1>
+  <h1>Kazma — brand type</h1>
   <p class="lede">
-    Four candidates + the current setup, rendered in the actual Kazma dark theme.
-    Look at small sizes (the numbers, the code block, the muted text) — that's where
-    the "glitchy" rendering shows up most. Pick the one that looks crispest to you
-    and tell me which; I'll wire it into <code>kazma.css</code>.
+    IBM Plex Sans (LTR) and IBM Plex Sans Arabic (RTL) are the shared face
+    for the web UI, the Docusaurus docs, and generated documents.
   </p>
 
-  <!-- CURRENT -->
   <div class="font-card current f-current">
-    <div class="font-name">Current setup <span class="badge">shipping today</span></div>
-    <div class="font-headline">Calibri, Inter, sans-serif</div>
+    <div class="font-name">Shipping <span class="badge">web + docs + PDF/DOCX</span></div>
+    <div class="font-headline">IBM Plex Sans / IBM Plex Sans Arabic</div>
     <div class="demo">
       <p>Point Kazma at a documentation site and it ingests the whole tree once. The agent then reasons over the corpus and cites sources.</p>
       <p class="muted">discovered=42 · fetched=38 · ingested=312 · failed=4 · <span class="num">0.0328</span></p>
+      <p dir="rtl" class="f-plex-ar">كاظمة تجمع البحث والتنفيذ في واجهة واحدة، بالعربي والإنجليزي.</p>
       <pre><code>POST /v18.0/{phone_number_id}/messages
 Authorization: Bearer &lt;token&gt;
 Content-Type: application/json</code></pre>
     </div>
-    <div class="pick">If this looks bad on your machine (likely on WSL/Linux — Calibri isn't installed), the fallback chain is what you're seeing.</div>
-  </div>
-
-  <!-- INTER -->
-  <div class="font-card f-inter">
-    <div class="font-name">Option 1</div>
-    <div class="font-headline">Inter</div>
-    <div class="demo">
-      <p>Point Kazma at a documentation site and it ingests the whole tree once. The agent then reasons over the corpus and cites sources.</p>
-      <p class="muted">discovered=42 · fetched=38 · ingested=312 · failed=4 · <span class="num">0.0328</span></p>
-      <pre><code>POST /v18.0/{phone_number_id}/messages
-Authorization: Bearer &lt;token&gt;
-Content-Type: application/json</code></pre>
-    </div>
-    <div class="pick">GitHub, Linear, Vercel. The safe modern default. Recommended.</div>
-  </div>
-
-  <!-- GEIST -->
-  <div class="font-card f-geist">
-    <div class="font-name">Option 2</div>
-    <div class="font-headline">Geist</div>
-    <div class="demo">
-      <p>Point Kazma at a documentation site and it ingests the whole tree once. The agent then reasons over the corpus and cites sources.</p>
-      <p class="muted">discovered=42 · fetched=38 · ingested=312 · failed=4 · <span class="num">0.0328</span></p>
-      <pre><code>POST /v18.0/{phone_number_id}/messages
-Authorization: Bearer &lt;token&gt;
-Content-Type: application/json</code></pre>
-    </div>
-    <div class="pick">Vercel's geometric sans. More distinctive; pairs well with code.</div>
-  </div>
-
-  <!-- IBM PLEX -->
-  <div class="font-card f-plex">
-    <div class="font-name">Option 3</div>
-    <div class="font-headline">IBM Plex Sans</div>
-    <div class="demo">
-      <p>Point Kazma at a documentation site and it ingests the whole tree once. The agent then reasons over the corpus and cites sources.</p>
-      <p class="muted">discovered=42 · fetched=38 · ingested=312 · failed=4 · <span class="num">0.0328</span></p>
-      <pre><code>POST /v18.0/{phone_number_id}/messages
-Authorization: Bearer &lt;token&gt;
-Content-Type: application/json</code></pre>
-    </div>
-    <div class="pick">Highest legibility for dense UI/data. Slightly condensed.</div>
-  </div>
-
-  <!-- ROBOTO -->
-  <div class="font-card f-roboto">
-    <div class="font-name">Option 4</div>
-    <div class="font-headline">Roboto</div>
-    <div class="demo">
-      <p>Point Kazma at a documentation site and it ingests the whole tree once. The agent then reasons over the corpus and cites sources.</p>
-      <p class="muted">discovered=42 · fetched=38 · ingested=312 · failed=4 · <span class="num">0.0328</span></p>
-      <pre><code>POST /v18.0/{phone_number_id}/messages
-Authorization: Bearer &lt;token&gt;
-Content-Type: application/json</code></pre>
-    </div>
-    <div class="pick">Timeless + neutral. Renders consistently everywhere.</div>
+    <div class="pick">Wired in <code>kazma.css</code>, <code>docusaurus.config.js</code>, and <code>THEME.font_latin</code> / <code>font_arabic</code>.</div>
   </div>
 
 </div>

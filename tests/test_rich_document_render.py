@@ -545,7 +545,7 @@ def test_toc_items_align_per_language(tmp_path: Path) -> None:
     assert en_toc, "EN TOC entry not left-aligned"
 
 def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
-    """DOCX must mirror the PDF/THEME styling: Calibri Latin + Arabic cs font,
+    """DOCX must mirror the PDF/THEME styling: IBM Plex Latin + Arabic cs font,
     heading point sizes synced to THEME, and Arabic runs carry w:rtl + the
     paragraph w:bidi so Word opens RTL (regression: 'AR is LTR + no font set'
     and 'EN bigger font size not synced')."""
@@ -575,9 +575,9 @@ def test_docx_font_size_and_rtl_synced(tmp_path: Path) -> None:
     # No Arial leakage in either document
     assert 'w:ascii="Arial"' not in ar_xml, "Arial leaked into AR DOCX run font"
     assert 'w:ascii="Arial"' not in en_xml, "Arial leaked into EN DOCX run font"
-    assert 'w:ascii="Calibri"' in en_xml, "EN DOCX missing Calibri run font"
+    assert 'w:ascii="IBM Plex Sans Arabic"' in en_xml, "EN DOCX missing brand face"
     # AR complex-script runs use the theme Arabic face + rtl + paragraph bidi
-    ar_cs = THEME.get("font_arabic") or "Sakkal Majalla"
+    ar_cs = THEME.get("font_arabic") or "IBM Plex Sans Arabic"
     assert f'w:cs="{ar_cs}"' in ar_xml, "AR DOCX runs missing Arabic complex-script font"
     assert "w:rtl" in ar_xml, "AR DOCX runs missing w:rtl"
     assert "w:bidi" in ar_xml, "AR DOCX paragraphs missing w:bidi"

@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Brand type + mark (2026-08-31)
+
+IBM Plex Sans / IBM Plex Sans Arabic is the shared face across the web UI,
+Docusaurus docs, and generated documents. The letterhead K is the product
+logo, favicon, and avatar.
+
+- **Web + docs:** `--font-sans` / `--ifm-font-family-base` load IBM Plex Sans
+  + IBM Plex Sans Arabic + JetBrains Mono (no Inter). Canvas chart labels
+  and the login/apple-touch icons follow.
+- **Generated documents:** `THEME.font_latin` / `font_arabic` are IBM Plex
+  Sans Arabic; Plex is vendored (`IBMPlexSansArabic-Regular/Bold.ttf` +
+  `OFL-IBM-Plex.txt`). Amiri stays as a naskh fallback. PPTX/XLSX no longer
+  hard-code Calibri.
+- **Logo:** `kazma-logo.png` / `kazma-icon.png` / `favicon.png` / `favicon.ico`
+  are the same letterhead K used in the docs navbar.
+
 ## Runtime stability & operator reload (2026-08-31)
 
 Closes the live stall/checkpointer/reload class from the 2026-08-31

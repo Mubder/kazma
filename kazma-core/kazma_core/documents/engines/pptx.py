@@ -209,6 +209,8 @@ class PptxEngine:
         from pptx.dml.color import RGBColor
         from pptx.util import Pt
 
+        from kazma_core.documents.style_theme import theme_fonts
+
         if text is not None:
             paragraph.text = text
         pPr = paragraph._p.get_or_add_pPr()
@@ -219,6 +221,6 @@ class PptxEngine:
         if paragraph.runs:
             run = paragraph.runs[0]
             run.font.size = Pt(size)
-            run.font.name = "Calibri"
+            run.font.name = theme_fonts(rtl=self.profile.rtl)["cs"]
             run.font.bold = bold
             run.font.color.rgb = RGBColor.from_string(color_hex)

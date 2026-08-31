@@ -68,8 +68,8 @@ class DocumentConfig:
     security_local_salvage: bool = True
     # Inline the pinned font into HTML exports as a data URI so the file
     # renders identically wherever it is opened. Costs roughly 850 KB per
-    # Arabic export (Amiri regular + bold, base64). Only ever applies to
-    # documents that actually contain complex script.
+    # Arabic export (IBM Plex Sans Arabic regular + bold, base64). Only
+    # ever applies to documents that actually contain complex script.
     render_embed_html_fonts: bool = True
     ocr_enabled: bool = True
     ocr_languages: tuple[str, ...] = ("eng", "ara")

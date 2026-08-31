@@ -39,9 +39,11 @@ class XlsxEngine:
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
         from openpyxl.worksheet.properties import PageSetupProperties
 
+        from kazma_core.documents.style_theme import theme_fonts
+
         t = self.theme
         rtl = self.profile.rtl
-        font_name = "Calibri"
+        font_name = theme_fonts(rtl=rtl)["cs"]
         accent_hex = str(t["accent"]).lstrip("#")
         header_hex = str(t["heading_fill"]).lstrip("#")
         body_color_hex = str(t["body"]).lstrip("#")

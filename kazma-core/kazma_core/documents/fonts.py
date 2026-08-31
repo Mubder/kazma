@@ -20,8 +20,8 @@ pin its typography and get byte-reproducible output.
 
 To pin fonts, drop TTF files into ``kazma_core/documents/assets/fonts/`` (or
 point ``KAZMA_DOCUMENT_FONT_DIR`` at a directory). Regular/Bold pairs are
-matched by filename. Amiri and Noto Naskh Arabic (both SIL OFL) are the
-recommended pair for Arabic print work.
+matched by filename. IBM Plex Sans Arabic is the brand face (UI + generated
+docs). Amiri remains a naskh fallback when Plex is absent.
 """
 
 from __future__ import annotations
@@ -146,6 +146,8 @@ def _bundled_pair(*, arabic: bool) -> tuple[Path, Path | None] | None:
     faces = sorted(directory.glob("*.ttf")) + sorted(directory.glob("*.otf"))
     regulars = [f for f in faces if not any(h in f.name.lower() for h in _BOLD_HINTS)]
     bolds = [f for f in faces if any(h in f.name.lower() for h in _BOLD_HINTS)]
+    # Brand face first (IBM Plex); Amiri remains a naskh fallback.
+    regulars.sort(key=lambda p: (0 if "plex" in p.name.lower() else 1, p.name.lower()))
     for regular in regulars or faces:
         if arabic and not has_arabic_coverage(str(regular)):
             continue
@@ -171,26 +173,23 @@ def _bundled_choice(*, arabic: bool) -> FontChoice | None:
 def resolve_fonts(*, arabic: bool) -> FontChoice:
     """Resolve the regular/bold pair for a render job.
 
-    Precedence depends on what the job needs, which is not the same question in
-    both directions:
+    IBM Plex Sans Arabic is the brand face (same as the web UI). When the
+    bundle contains it, it wins in both directions so generated documents
+    match the product. Amiri remains a naskh fallback for Arabic-only jobs
+    when Plex is absent.
 
-    * **Complex script** — the pinned bundle wins. It is verified for shaped
-      Arabic and it is the only way to get identical output on Windows, macOS
-      and the container. When *arabic* is True, only faces with verified
-      presentation-form coverage are eligible and the caller must treat
-      ``arabic_ready=False`` as a hard failure rather than draw blank glyphs.
-    * **Latin only** — the system font wins, and the bundle is a last resort.
-      The bundled face is an Arabic face (Amiri is a Naskh design); letting it
-      take precedence would silently restyle every English document that used
-      to render in Calibri. Pinning Arabic typography must not change Latin
-      typography.
-
-    The bundle still rescues the Latin case when no system font exists at all —
-    a bare pip install with no fonts, where the alternative is ReportLab's
-    Helvetica.
+    When *arabic* is True, only faces with verified presentation-form coverage
+    are eligible and the caller must treat ``arabic_ready=False`` as a hard
+    failure rather than draw blank glyphs. With no brand bundle, Latin jobs
+    still take a system face first (then the bundle, then Helvetica).
     """
+    bundled = _bundled_choice(arabic=arabic)
+    # IBM Plex is the brand face for both directions (UI + generated docs).
+    if bundled is not None and bundled.regular is not None:
+        is_plex = "plex" in bundled.regular.name.lower()
+        if is_plex and (not arabic or bundled.arabic_ready):
+            return bundled
     if arabic:
-        bundled = _bundled_choice(arabic=True)
         if bundled is not None:
             return bundled
 

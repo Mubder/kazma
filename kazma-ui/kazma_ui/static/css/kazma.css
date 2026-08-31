@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════
    Kazma Design System — "ABYSS" (token + layout + components)
    BG: #0e1626 (dark) / #f0f4fa (light) | Accent: #3b82f6 royal
-   Secondary: #38bdf8 sky | Font: Inter, system-ui, sans-serif
+   Secondary: #38bdf8 sky | Font: IBM Plex Sans / IBM Plex Sans Arabic
    The dark/light token tables live in §1 and §23; kazma.v5.css adds
    shell polish on top. See docs/plans/UI_MOBILE_OVERHAUL_HANDOFF.md.
 
@@ -125,21 +125,13 @@
 
   /* Typography
      ─────────
-     English (LTR): Inter primary — razor-sharp at small sizes, tabular
-     numerals so metrics don't jitter.  Calibri removed from the English
-     chain (Microsoft Office font, missing on Linux/WSL — the silent
-     fall-through caused the "glitchy" rendering).
-
-     Arabic (RTL): Rubik primary, Cairo/Calibri in the chain.
-     Arabic text uses NORMAL feature shaping — Inter's OpenType features
-     (cv01/ss03) break Arabic ligature shaping, so they are scoped to LTR
-     only via [dir="ltr"] below, NOT applied globally on body. */
-  --font-sans: 'Inter', 'IBM Plex Sans Arabic', 'Rubik', 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-arabic: 'IBM Plex Sans Arabic', 'Tajawal', 'Cairo', 'Rubik', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+     Brand face: IBM Plex Sans (LTR) + IBM Plex Sans Arabic (RTL) — the
+     same pairing as generated documents and the Docusaurus docs. */
+  --font-sans: 'IBM Plex Sans', 'IBM Plex Sans Arabic', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-arabic: 'IBM Plex Sans Arabic', 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
-  /* Inter-only OpenType features.  Applied to LTR text ONLY (see body
-     override below) — forcing these on Arabic breaks ligature shaping. */
-  --font-features: 'cv01', 'ss03', 'tnum';
+  /* Tabular numerals on LTR only — never force Latin OT features on Arabic. */
+  --font-features: 'tnum';
 
   /* Shadows */
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
@@ -317,9 +309,7 @@ button { cursor: pointer; font-family: inherit; }
   font-feature-settings: var(--font-features);
 }
 
-/* Inter's OpenType features (cv01/ss03/tnum) are scoped to LTR only.
-   Forcing them on Arabic breaks ligature shaping (disconnected letters,
-   wrong joining) — Arabic must use the font's natural shaping. */
+/* Tabular numerals on LTR only. Arabic must use natural shaping. */
 [dir="ltr"] body,
 [dir="ltr"] input,
 [dir="ltr"] textarea,
@@ -1564,7 +1554,7 @@ tbody tr:last-child td {
 .message-avatar-img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
   display: block;
 }
 .message-user .message-avatar { background: var(--accent); }
@@ -1613,8 +1603,8 @@ tbody tr:last-child td {
   direction: rtl;
   text-align: start;
   unicode-bidi: isolate;
-  /* English UI still inherits Inter + OpenType features from body; those
-     break Arabic joining. Switch face + clear features for Arabic blocks. */
+  /* English UI still inherits LTR feature-settings from body; those
+     must not run on Arabic joining. Switch face + clear features. */
   font-family: var(--font-arabic);
   font-feature-settings: normal;
   letter-spacing: normal;
@@ -2046,7 +2036,7 @@ tbody tr:last-child td {
   -webkit-text-fill-color: var(--text-muted);
   opacity: 1;
 }
-/* Arabic typed into English UI: Arabic-capable face + no Inter OT features
+/* Arabic typed into English UI: Arabic-capable face + no Latin OT features
    that break Arabic joining. dir=rtl / .ar-input set by syncInputBidi(). */
 .chat-input.ar-input,
 .chat-input[dir="rtl"],
@@ -5103,7 +5093,7 @@ canvas { display: block; border-radius: 4px; }
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  object-fit: cover;
+  object-fit: contain;
   flex-shrink: 0;
   border: 1px solid var(--border-subtle);
 }

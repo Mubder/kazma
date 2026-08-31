@@ -149,11 +149,11 @@ def _css(*, rtl: bool, brand: str) -> str:
     *, *::before, *::after {{ box-sizing: border-box; }}
 
     body {{
-      font-family: 'IBM Plex Sans Arabic', 'Sakkal Majalla', 'IBM Plex Sans', -apple-system, sans-serif;
+      font-family: 'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif;
       direction: {direction};
       text-align: justify;
       text-align-last: {text_align_last};
-      line-height: {t.get("line_height_ar", 1.85) if rtl else t.get("line_height", 1.65)};
+      line-height: {t.get("line_height_ar", 1.65) if rtl else t.get("line_height", 1.65)};
       color: {t["body"]};
       font-size: {body_pt}pt;
     }}

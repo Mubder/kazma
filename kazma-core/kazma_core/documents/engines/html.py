@@ -137,7 +137,7 @@ class HtmlEngine:
             title_pt = t.get("title_size", 22)
             h1_pt = t.get("h2_size", 15)
             table_pt = 10
-        leading = t.get("line_height_ar", 1.85) if self.profile.rtl else t.get("line_height", 1.65)
+        leading = t.get("line_height_ar", 1.65) if self.profile.rtl else t.get("line_height", 1.65)
         rule = t.get("accent", "#3b82f6")
         return f"""
     {face_css}

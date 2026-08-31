@@ -262,7 +262,7 @@ def test_arabic_body_szcs_is_larger_than_latin(tmp_path: Path) -> None:
 
     Regression: Normal.font.size was set to body_size_ar (pumping English)
     and _mark_run copied w:sz→w:szCs, so mixed Latin looked large while
-    Sakkal body stayed optically small.
+    the Arabic face stayed optically small.
     """
     import re
     import zipfile

@@ -131,7 +131,7 @@ class DocxEngine:
             normal.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
             normal.paragraph_format.space_after = Pt(8)
             leading = (
-                float(self.theme.get("line_height_ar", 1.85))
+                float(self.theme.get("line_height_ar", 1.65))
                 if self.profile.rtl
                 else float(self.theme["line_height"])
             )

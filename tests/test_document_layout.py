@@ -135,7 +135,7 @@ class TestUnifiedTypeScale:
         path = _render_pdf(model, profile, tmp_path, force_reportlab=True)
         sizes = sorted({size for _, size, _ in _spans(path)})
         expected = theme_cs_size(float(THEME["body_size"]))
-        assert expected == pytest.approx(16.0)
+        assert expected == pytest.approx(float(THEME["body_size_ar"]))
         assert expected in sizes, (
             f"Arabic PDF body must be set at {expected}pt, as DOCX and HTML do; "
             f"sizes present: {sizes}"
@@ -155,9 +155,13 @@ class TestUnifiedTypeScale:
         sizes = sorted({size for _, size, _ in _spans(path)})
         assert float(THEME["body_size"]) in sizes, f"sizes present: {sizes}"
 
-    def test_arabic_leading_differs_from_latin(self):
-        """Arabic needs more leading at the same measure; the theme carries both."""
-        assert float(THEME["line_height_ar"]) > float(THEME["line_height"])
+    def test_arabic_leading_is_carried_on_the_theme(self):
+        """Both leadings live on THEME; the PDF engine picks between them.
+
+        IBM Plex Sans Arabic is optically close to the Latin cut, so the
+        chosen stationery uses the same 1.65 leading in both directions.
+        """
+        assert float(THEME["line_height_ar"]) >= float(THEME["line_height"])
         source = _PDF_SOURCE.read_text(encoding="utf-8")
         assert "line_height_ar" in source, (
             "the PDF engine must pick between the two leadings like the others"

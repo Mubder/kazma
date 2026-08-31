@@ -2,7 +2,7 @@
 
 Print projection of the Web brand: royal ``#3b82f6``, sky ``#38bdf8``,
 deep navy ink. No gold. Editorial headings (type + accent rule), not
-inverted bars. Arabic uses a larger body size / leading.
+inverted bars. Arabic body is 12pt vs Latin 11pt; leading is 1.65 both ways.
 """
 
 from __future__ import annotations
@@ -47,14 +47,14 @@ THEME: dict[str, Any] = {
     "h2_size": 15,
     "h3_size": 13,
     "body_size": 11,
-    # Sakkal Majalla reads smaller than Calibri at the same nominal pt.
-    # This is the complex-script size (w:szCs); Latin stays at body_size.
-    "body_size_ar": 16,
+    # IBM Plex Sans Arabic is the brand face (UI + generated docs). It does
+    # not need Sakkal's +5pt optical compensation; keep a 1pt CS bump.
+    "body_size_ar": 12,
     "line_height": 1.65,
-    "line_height_ar": 2.0,
+    "line_height_ar": 1.65,
     "page_margin": 56,
-    "font_latin": "Calibri",
-    "font_arabic": "Sakkal Majalla",
+    "font_latin": "IBM Plex Sans Arabic",
+    "font_arabic": "IBM Plex Sans Arabic",
     "page_size_mm": (210.0, 297.0),
 }
 
@@ -62,13 +62,13 @@ THEME: dict[str, Any] = {
 def theme_cs_size(latin_pt: float | None = None) -> float:
     """Point size for complex-script (Arabic) given a Latin size.
 
-    Sakkal Majalla reads smaller than Calibri at the same nominal pt, so
-    Arabic body is ``body_size_ar`` while Latin stays ``body_size``.
+    IBM Plex Sans Arabic is close to the Latin optical size, so Arabic body
+    is ``body_size_ar`` (12pt) while Latin stays ``body_size`` (11pt).
     Headings keep the same delta. Chrome (≤9.5pt headers/footers/captions)
     gets a modest +2pt so it does not jump to body size.
     """
     body = float(THEME.get("body_size") or 11)
-    body_ar = float(THEME.get("body_size_ar") or 16)
+    body_ar = float(THEME.get("body_size_ar") or 12)
     if latin_pt is None:
         return body_ar
     try:
@@ -82,17 +82,16 @@ def theme_cs_size(latin_pt: float | None = None) -> float:
 
 def theme_fonts(*, rtl: bool) -> dict[str, str]:
     """Latin vs complex-script font names for the active direction."""
-    latin = str(THEME.get("font_latin") or "Calibri")
-    arabic = str(THEME.get("font_arabic") or "Sakkal Majalla")
+    latin = str(THEME.get("font_latin") or "IBM Plex Sans Arabic")
+    arabic = str(THEME.get("font_arabic") or "IBM Plex Sans Arabic")
     return {
         "latin": latin,
         "arabic": arabic,
         "cs": arabic if rtl else latin,
         "html": (
-            "'IBM Plex Sans Arabic', 'Sakkal Majalla', 'Traditional Arabic', "
-            "'Segoe UI', 'Calibri', sans-serif"
+            "'IBM Plex Sans Arabic', 'IBM Plex Sans', sans-serif"
             if rtl
-            else "'Calibri', 'Segoe UI', 'IBM Plex Sans', sans-serif"
+            else "'IBM Plex Sans', 'IBM Plex Sans Arabic', sans-serif"
         ),
     }
 

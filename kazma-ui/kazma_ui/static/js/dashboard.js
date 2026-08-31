@@ -358,7 +358,7 @@
 
     // Label — canvas can't resolve CSS vars; read the computed token
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
-    ctx.font = '10px Inter, sans-serif';
+    ctx.font = '10px "IBM Plex Sans", sans-serif';
     ctx.fillText(KS.formatTokens(max) + ' tokens max', 12, 12);
   }
 
@@ -408,7 +408,7 @@
     });
 
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b9bb8';
-    ctx.font = '10px Inter, sans-serif';
+    ctx.font = '10px "IBM Plex Sans", sans-serif';
     ctx.fillText('$' + max.toFixed(4) + ' max', 18, 12);
   }
 

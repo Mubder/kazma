@@ -26,15 +26,13 @@
     <title>{% block title %}Kazma{% endblock %}</title>
     <link rel="icon" type="image/png" href="/static/img/favicon.png">
     <link rel="shortcut icon" href="/favicon.ico">
-    {# Web fonts — loaded with preconnect for performance. Inter is the
-       primary English face (sharp at small sizes, tabular numerals);
-       Rubik is the Arabic face (shaping-correct, matches Latin Rubik
-       metrics for sync); Calibri + Cairo are fallbacks. All declared in
-       <head> so they load in parallel rather than waiting for the
-       kazma.css @import waterfall. #}
+    <link rel="apple-touch-icon" href="/static/img/kazma-icon.png">
+    {# Web fonts — IBM Plex Sans (LTR) + IBM Plex Sans Arabic (RTL), same
+       pairing as generated documents and the Docusaurus docs. JetBrains
+       Mono for code. Declared in <head> so they load in parallel. #}
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Tajawal:wght@400;500;700&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Cairo:wght@300;400;500;600;700&family=Rubik:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
     {# DS v5 "Abyss" — token remap + shell polish, loaded last so it wins.
        Rollback = delete this one line. #}
