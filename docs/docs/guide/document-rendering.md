@@ -36,8 +36,10 @@ The single source of truth for a document's **direction + design + chrome**.
 - `direction` (`ltr`/`rtl`), auto-detected from content via `is_arabic_dominant`
   (full Unicode Arabic blocks), honouring explicit `lang`/`rtl` overrides.
 - `theme` — colours, fonts, sizes, page size (A4), shared from `style_theme.THEME`.
-  Brand colours (royal `#3b82f6`, navy ink `#16223a`). Arabic uses
-  `font_arabic` (Sakkal Majalla) and a larger body size / leading.
+  Brand colours (royal `#3b82f6`, navy ink `#16223a`). Latin and Arabic both
+  use IBM Plex Sans Arabic (`font_latin` / `font_arabic`); body is 11pt Latin /
+  12pt Arabic (`theme_cs_size`), leading 1.65 both, ~1.8 cm margins. Amiri is
+  a naskh fallback when Plex is absent. PPTX/XLSX do not hard-code Calibri.
 - `chrome` — localized labels (`المحتويات` / `Contents`, brand string) via `localized_chrome`.
 - **alignment policy** — the critical piece. `docx_jc(intent)` / `pdf_align(intent)` /
   `html_text_align(intent)` map an *intent* (`start` / `justify` / `end`) to each
@@ -77,10 +79,12 @@ These are the non-obvious facts each engine encodes once:
   (`w:bCs`/`w:szCs`); python-docx's `run.bold`/`run.font.size` only write the
   Latin `w:b`/`w:sz`, so Arabic silently falls back to the default size with
   faux bold — the heading-bar "junk letters" symptom. `DocxEngine._mark_run`
-  writes them. **Do not copy `w:sz` onto `w:szCs`:** Sakkal Majalla reads
-  smaller than Calibri at the same nominal pt, and body runs often have no
-  per-run `w:sz` (they inherit Normal). Latin stays at `body_size`; Arabic
-  uses `theme_cs_size()` → `body_size_ar` on `w:szCs` (style + every RTL run).
+  writes them. **Do not copy `w:sz` onto `w:szCs`:** an older Arabic face
+  (Sakkal Majalla) read smaller than Calibri at the same nominal pt, and body
+  runs often have no per-run `w:sz` (they inherit Normal). IBM Plex Sans
+  Arabic is close to Latin optical size (`body_size_ar` 12pt vs Latin 11pt).
+  Latin stays at `body_size`; Arabic uses `theme_cs_size()` → `body_size_ar`
+  on `w:szCs` (style + every RTL run).
 - **PDF (Arabic)** — reportlab is a visual LTR engine and cannot correctly shape
   mixed Arabic+Latin+inline-Markdown (tokens jam, Latin splits across lines).
   `PdfEngine` routes RTL content through the DOCX engine (correct bidi) then

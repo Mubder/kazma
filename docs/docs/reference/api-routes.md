@@ -184,12 +184,33 @@ Agent mail ops use tools (`email_list`, …), not these HTTP routes. Guide: [Ema
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
+| GET | `/x` | Session | **X Studio** page (composer + X-only planner). |
 | GET | `/api/x/status` | Session | Configured?, handle, caps. Never returns secrets. |
+| POST | `/api/x/preview` | Session | Dry-run ToU policy (`evaluate_post`). No network, no ledger. |
+| GET | `/api/x/drafts` | Session | Flattened `save_proposal` items for the Studio inbox. |
+| GET | `/api/x/audit` | Session | Recent `x_audit.db` rows (`?action=&limit=`). |
+| POST | `/api/x/post` | Session + CSRF | Immediate post (`publish_x_post`). Operator click is the approval. Optional `reply_to_id`, `proposal_id` (stored text wins). |
+| POST | `/api/x/delete` | Session + CSRF | Delete a live tweet (`delete_x_post`). Operator click is the approval. |
 | POST | `/api/x/credentials` | Session + CSRF | Save four OAuth 1.0a keys (vaulted) + handle + caps. |
 | POST | `/api/x/test` | Session + CSRF | `GET /2/users/me` with stored keys. |
 | POST | `/api/x/disconnect` | Session + CSRF | Delete keys, disable posting. |
 
-Tweets themselves go through `x_post` (always HITL). Guide: [X publisher](../guide/x-publisher).
+Chat tweets still go through `x_post` (always HITL + `proposal_id`). Guide: [X publisher](../guide/x-publisher).
+
+## Scheduled (cron + X)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/scheduled` | Session | Mixed clock page (cron jobs **and** X posts). |
+| GET | `/api/scheduled/tasks` | Session | Combined upcoming list. |
+| POST | `/api/scheduled/cron` | Session + CSRF | Create a cron job. |
+| PUT | `/api/scheduled/cron/{job_id}` | Session + CSRF | Reschedule a cron job. |
+| DELETE | `/api/scheduled/cron/{job_id}` | Session + CSRF | Cancel a cron job. |
+| POST | `/api/scheduled/x` | Session + CSRF | Book an X post (`book_x_post`). Optional `reply_to_id`, `proposal_id`. |
+| PUT | `/api/scheduled/x/{post_id}` | Session + CSRF | Reschedule a pending X post. |
+| DELETE | `/api/scheduled/x/{post_id}` | Session + CSRF | Cancel a pending X post (releases reserved quota). |
+
+X Studio's **All clocks** link is this page. The Studio planner itself is X-only.
 
 ## Gateways & platforms
 
@@ -204,7 +225,7 @@ Tweets themselves go through `x_post` (always HITL). Guide: [X publisher](../gui
 |--------|------|------|-------------|
 | WS | Voice routes | Session | `routes_voice_ws.py` |
 | * | Chaos routes | `KAZMA_CHAOS_ENABLED` | **Dev only** |
-| Static | `/`, `/chat`, `/settings`, … | Cookie/session | HTML pages |
+| Static | `/`, `/chat`, `/settings`, `/x`, `/scheduled`, … | Cookie/session | HTML pages |
 
 Exact route lists evolve with routers mounted in `app.py`. For extension points see [API & Extension Points](../guide/api-and-extension-points).
 

@@ -290,11 +290,12 @@ HITL: `email_send`, `email_delete`, `email_categorize`. Guide: [Email integratio
 
 ## X publisher (official API)
 
-Native skill `x-publisher`. Credentials live in Settings → X (vaulted ConfigStore keys) or env. Guide: [X publisher](../guide/x-publisher).
+Native skill `x-publisher`. Credentials live in Settings → X (vaulted ConfigStore keys) or env. Compose and plan on **X Studio** (`/x`). Guide: [X publisher](../guide/x-publisher).
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KAZMA_X_POST` | unset (on if Settings enabled) | `0` hard-disables posting. |
+| `KAZMA_X_POST` | unset (on if Settings enabled) | `0` hard-disables posting (Studio, chat, and scheduled fire). |
+| `KAZMA_X_SCHEDULE` | unset (on) | `0` disables scheduling only (`book_x_post` / Studio Schedule). |
 | `X_API_KEY` | unset | OAuth 1.0a consumer key (else `connectors.x.api_key`). |
 | `X_API_KEY_SECRET` | unset | Consumer secret. |
 | `X_ACCESS_TOKEN` | unset | User access token. |

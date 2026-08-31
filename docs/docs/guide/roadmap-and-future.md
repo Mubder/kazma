@@ -103,7 +103,8 @@ Items are marked:
 | Web UI (SSE) | ✅ | `/api/chat/stream`. |
 | WebSocket chat | ✅ | `/ws/chat/{session_id}` is telemetry / cursor resume; SSE `/api/chat/stream` is the graph transport (`KAZMA_WS_GRAPH=1` restores WS graph). |
 | TUI | ✅ | Textual, read-mostly. |
-| EN/AR i18n + RTL | ✅ | Inline dict, Calibri + 16px base. |
+| EN/AR i18n + RTL | ✅ | Catalog-merged dict, IBM Plex Sans / IBM Plex Sans Arabic + 16px RTL base. |
+| X Studio (`/x`) | ✅ | Composer + X-only planner (Post now, Schedule, reschedule, threads, delete). Chat `x_post` stays always-HITL. Official API only. |
 | Majlis protocol | ✅ | `majlis.py` (core), not a UI toggle. |
 | Voice on Discord/Slack/Web | ✅ | STT + TTS wired into all platforms via `voice_helpers.py` (was Telegram-only). |
 | Media / attachments (photo/doc/video) | ✅ | `Attachment` contract on `IncomingMessage`/`OutboundMessage`; inbound+outbound on all platforms + Web `/api/chat/upload`. |

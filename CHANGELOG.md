@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Docs: X Studio, brand type, guard reload (2026-08-31)
+
+Product docs now match the shipped surfaces:
+
+- [X publisher](docs/docs/guide/x-publisher.md) — X Studio (`/x`) vs
+  Scheduled (`/scheduled` / **All clocks**), chat always-HITL vs Web click
+  as approval, reschedule / threads / delete / `proposal_id`.
+- API routes, tools catalog, FAQ, Web UI main pages, recent-features,
+  deployment (`--reload` skips crash backoff), Arabic font policy (IBM Plex,
+  not Calibri), document-rendering THEME fonts.
+
 ## X Studio (2026-08-31)
 
 Compose, schedule, and review X posts as a first-class Kazma page (`/x`)
