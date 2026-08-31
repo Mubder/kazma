@@ -29,11 +29,19 @@ def audit_db(tmp_path: Path) -> Path:
 
 class _FakeResp:
     def __init__(self, status_code: int, payload: dict | None = None, text: str = "") -> None:
+        import json as _json
+
         self.status_code = status_code
         self._payload = payload
-        self.text = text
-        self.content = b"x" if payload is not None else b""
+        if payload is not None:
+            encoded = _json.dumps(payload).encode("utf-8")
+            self.content = encoded
+            self.text = text or encoded.decode("utf-8")
+        else:
+            self.text = text
+            self.content = text.encode("utf-8") if text else b""
         self.headers = {}
+        self.encoding = "utf-8"
 
     def json(self) -> dict:
         if self._payload is None:
@@ -151,6 +159,18 @@ async def test_reply_and_delete_labels(audit_db: Path, fake_http) -> None:
     await _client().delete_tweet("1770000000000000002")
     rows = query_x_audit(action="delete")
     assert rows and rows[0]["tweet_id"] == "1770000000000000002"
+
+
+async def test_error_body_read_is_bounded(audit_db: Path, fake_http) -> None:
+    huge = "x" * 50_000
+    _FakeAsyncClient.resp = _FakeResp(500, text=huge)
+    with pytest.raises(XApiError):
+        await _client().create_tweet("too big")
+    rows = query_x_audit(status="error")
+    assert rows
+    body = rows[0]["response_body"]
+    assert len(body) < 12_000
+    assert "truncated" in body
 
 
 async def test_http_error_audited(audit_db: Path, fake_http) -> None:

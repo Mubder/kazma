@@ -180,6 +180,33 @@ def test_a_burst_of_variants_is_muted():
     assert muted and "muting" in muted
 
 
+def test_distinct_x_posts_are_not_burst_muted():
+    """Eight different tweets are eight decisions, not one retry loop."""
+    tid = "thread-x-batch"
+    clear_approval_throttle(tid)
+    sent = 0
+    for i in range(8):
+        if approval_card_suppressed(tid, "x_post", {"text": f"draft {i}"}) is None:
+            sent += 1
+    assert sent == 8
+    # Identical retry of the same text still collapses.
+    again = approval_card_suppressed(tid, "x_post", {"text": "draft 0"})
+    assert again and "already sent" in again
+
+
+def test_proposal_backed_cards_skip_exec_burst_bucket():
+    tid = "thread-proposals"
+    clear_approval_throttle(tid)
+    for i in range(5):
+        approval_card_suppressed(tid, "shell_exec", {"command": f"x{i}"})
+    # Exec storm is muted…
+    assert approval_card_suppressed(tid, "shell_exec", {"command": "final"}) is not None
+    # …but a proposal-backed post still notifies.
+    assert approval_card_suppressed(
+        tid, "x_post", {"text": "hello", "proposal_id": "p-1"}
+    ) is None
+
+
 def test_muting_never_implies_approval():
     """Withholding a notification must not withhold the gate."""
     tid = "thread-safety"
