@@ -149,7 +149,7 @@ if [[ "$UV_INSTALLED" == "false" ]]; then
         log_info "  # or: curl -LsSf https://astral.sh/uv/install.sh | sh"
         log_info ""
         log_info "Or skip uv entirely:"
-        log_info "  $PYTHON_CMD -m pip install -e '.[dev,cli]'"
+        log_info "  $PYTHON_CMD -m pip install -e '.[rag,dev,tui]'"
         exit 1
     fi
 fi
@@ -175,8 +175,11 @@ fi
 
 log_header "2. Sync Handshake (uv sync)"
 
-if uv sync --extra dev --extra cli --extra tui 2>&1 | tail -5; then
-    log_ok "Environment synced from pyproject.toml (with dev + cli + tui extras)"
+# rag = vector memory; dev = tests/lint; tui = kazma-tui.
+# There is no [cli] extra — kazma-cli is a first-class package in the wheel.
+# Full set: uv sync --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
+if uv sync --extra rag --extra dev --extra tui 2>&1 | tail -5; then
+    log_ok "Environment synced from pyproject.toml (rag + dev + tui extras)"
 else
     SYNC_EXIT=$?
     log_fail "uv sync failed (exit code $SYNC_EXIT)"
@@ -207,7 +210,7 @@ else
 
     echo ""
     log_info "Fallback — install without uv:"
-    log_info "  $PYTHON_CMD -m pip install -e '.[dev,cli,tui]'"
+    log_info "  $PYTHON_CMD -m pip install -e '.[rag,dev,tui]'"
     exit 1
 fi
 
@@ -261,14 +264,20 @@ fi
 log_header "4. Setup Complete"
 
 echo ""
+if [[ ! -f .env && -f .env.example ]]; then
+    cp .env.example .env
+    log_ok ".env created from .env.example — add a provider API key"
+fi
+
 log_ok "Kazma is ready"
 echo ""
-log_info "Run tests:      .venv/bin/python -m pytest tests/ -q"
-log_info "Run agent:      .venv/bin/python -m kazma_core.agent"
-log_info "Run TUI:        .venv/bin/python -m kazma_tui.tui"
-log_info "Run Web UI:     .venv/bin/python serve.py"
-log_info "Configuration:  kazma.yaml"
-log_info "Documentation:  https://github.com/Mubder/kazma"
+log_info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
+log_info "Run Web UI:     .venv/bin/kazma serve          # http://127.0.0.1:9090"
+log_info "Run TUI:        .venv/bin/kazma-tui"
+log_info "Run tests:      .venv/bin/python scripts/fast_test.py"
+log_info "Watch/reload:   .venv/bin/python scripts/service/kazma_guard.py --install"
+log_info "Everything:     uv sync --all-extras"
+log_info "Docs:           https://github.com/Mubder/kazma"
 echo ""
 echo -e "${GREEN}🇰🇼 كاظمه — Built to remember. Built to last.${NC}"
 echo ""

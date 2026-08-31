@@ -57,8 +57,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Extra DB drivers",
     },
     "packages.extra.dev.desc": {
-        "ar": "أدوات التطوير — اختبار (pytest) وفحص (ruff) وأنواع (mypy) وتحميل (locust).",
-        "en": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust).",
+        "ar": "أدوات التطوير — اختبار (pytest) وفحص (ruff) وأنواع (mypy) وتحميل (locust) وخطافات Git (pre-commit).",
+        "en": "Development tools — testing (pytest), linting (ruff), type checking (mypy), load testing (locust), git hooks (pre-commit).",
     },
     "packages.extra.dev.title": {
         "ar": "التطوير",

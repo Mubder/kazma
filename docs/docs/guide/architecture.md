@@ -24,19 +24,18 @@ This yields three properties the rest of the system relies on:
 
 ## 2. Package topology
 
-Kazma is a monorepo of seven installable packages (declared in `pyproject.toml` `[tool.hatch.build.targets.wheel]`):
+Kazma is a monorepo of **six** packages in one hatchling wheel (declared in `pyproject.toml` `[tool.hatch.build.targets.wheel]`). There is no separate `kazma-memory` package — V2 memory lives in `kazma_core.memory`.
 
 | Package | Path | Responsibility |
 |---|---|---|
-| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, model registry, swarm engine, ConfigStore, safety, memory, **document intelligence** (`documents/`), skills, MCP, hub, compaction, Majlis (delegation = library/archive only — SwarmEngine is the live multi-worker path) |
+| `kazma-core` | `kazma-core/kazma_core/` | Agent runner, LLM provider, model registry, swarm engine, ConfigStore, safety, V2 memory, **document intelligence** (`documents/`), skills, MCP, hub, compaction, Majlis |
 | `kazma-gateway` | `kazma-gateway/kazma_gateway/` | Telegram/Discord/Slack adapters, agent handler (graph bridge), slash commands, session store |
 | `kazma-ui` | `kazma-ui/kazma_ui/` | FastAPI app factory, SSE chat, swarm panel, settings, dashboard, i18n, static assets |
 | `kazma-tui` | `kazma-tui/kazma_tui/` | Textual TUI dashboard (read-mostly consumer of core singletons) |
-| `kazma-memory` | `kazma-memory/kazma_memory/` | Arabic tokenizer + SQLite/FTS5 search backend |
-| `kazma-skills` | `kazma-skills/kazma_skills/` | Skill manifests (data) |
+| `kazma-skills` | `kazma-skills/kazma_skills/` | Native skill manifests |
 | `kazma-cli` | `kazma-cli/kazma_cli/` | The `kazma` command surface |
 
-Console scripts (`pyproject.toml:73-76`):
+Console scripts (`pyproject.toml` `[project.scripts]`):
 
 ```
 kazma     = "kazma_cli.main:main"
@@ -304,7 +303,7 @@ Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.
 
 Kazma is Arabic-native by default (`agent.language: ar`, `agent.rtl: true`). Three components implement this:
 
-1. **Arabic tokenizer** (`kazma-memory/kazma_memory/arabic_tokenizer.py`) — diacritics removal, Alef/Yeh/Teh-Marbuta normalization, Tatweel stripping, Kuwaiti-dialect stop words, basic stemmer. Feeds the FTS5 `content_arabic` column.
+1. **Arabic tokenizer** (`kazma_core/msa_tokenizer.py`) — MSA normalization (alef variants, diacritics). The old `kazma-memory` package was retired.
 2. **i18n + RTL UI** (`kazma-ui/kazma_ui/i18n.py` + `i18n/catalog/`, `static/css/kazma.css`) — merged `TRANSLATIONS` dict (EN/AR), per-request `dir`/`lang`, IBM Plex Sans / IBM Plex Sans Arabic, shared 14px root, readability floor on small classes.
 3. **Majlis Protocol** (`kazma-core/kazma_core/majlis.py`) — a 4-phase Gulf cultural conversational flow (GREETING → SOCIAL → TRANSACTION → FAREWELL) with Kuwaiti-dialect defaults and cultural modifiers (Ramadan, Eid, National Day).
 

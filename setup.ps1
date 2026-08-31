@@ -131,7 +131,7 @@ if (Test-UvWorks) {
         Log-Info "  # or: irm https://astral.sh/uv/install.ps1 | iex"
         Log-Info ""
         Log-Info "Or skip uv entirely:"
-        Log-Info "  $PythonCmd -m pip install -e `".[dev,cli]`""
+        Log-Info "  $PythonCmd -m pip install -e `".[rag,dev,tui]`""
         exit 1
     }
 }
@@ -157,9 +157,12 @@ if (Test-Path "pyproject.toml" -PathType Leaf) {
 
 Log-Header "2. Sync Handshake (uv sync)"
 
-& uv sync --extra dev --extra cli --extra tui 2>&1 | ForEach-Object { Write-Verbose $_ }
+# rag = vector memory; dev = tests/lint; tui = kazma-tui.
+# There is no [cli] extra — kazma-cli is a first-class package in the wheel.
+# Full set: uv sync --all-extras (heavy: torch, Playwright, WeasyPrint, Temporal).
+& uv sync --extra rag --extra dev --extra tui 2>&1 | ForEach-Object { Write-Verbose $_ }
 if ($LASTEXITCODE -eq 0) {
-    Log-Ok "Environment synced from pyproject.toml (with dev + cli + tui extras)"
+    Log-Ok "Environment synced from pyproject.toml (rag + dev + tui extras)"
 } else {
     $syncExit = $LASTEXITCODE
     Log-Fail "uv sync failed (exit code $syncExit)"
@@ -202,7 +205,7 @@ if ($LASTEXITCODE -eq 0) {
 
     Write-Host ""
     Log-Info "Fallback — install without uv:"
-    Log-Info "  $PythonCmd -m pip install -e `".[dev,cli,tui]`""
+    Log-Info "  $PythonCmd -m pip install -e `".[rag,dev,tui]`""
     exit 1
 }
 
@@ -261,14 +264,21 @@ if ($testLine -match '(\d+)') {
 Log-Header "4. Setup Complete"
 
 Write-Host ""
+if (-not (Test-Path ".env") -and (Test-Path ".env.example")) {
+    Copy-Item ".env.example" ".env"
+    Log-Ok ".env created from .env.example — add a provider API key"
+}
+
 Log-Ok "Kazma is ready"
 Write-Host ""
-Log-Info "Run tests:      $VenvPython -m pytest tests/ -q"
-Log-Info "Run agent:      $VenvPython -m kazma_core.agent"
-Log-Info "Run TUI:        $VenvPython -m kazma_tui.tui"
-Log-Info "Run Web UI:     $VenvPython serve.py"
-Log-Info "Configuration:  kazma.yaml"
-Log-Info "Documentation:  https://github.com/Mubder/kazma"
+$ScriptsDir = Split-Path $VenvPython
+Log-Info "Configure:      edit .env (OPENAI_API_KEY or another provider)"
+Log-Info "Run Web UI:     & '$(Join-Path $ScriptsDir 'kazma.exe')' serve     # http://127.0.0.1:9090"
+Log-Info "Run TUI:        & '$(Join-Path $ScriptsDir 'kazma-tui.exe')'"
+Log-Info "Run tests:      $VenvPython scripts\fast_test.py"
+Log-Info "Watch/reload:   $VenvPython scripts\service\kazma_guard.py --install"
+Log-Info "Everything:     uv sync --all-extras"
+Log-Info "Docs:           https://github.com/Mubder/kazma"
 Write-Host ""
 Write-Host "🇰🇼 كاظمه — Built to remember. Built to last." -ForegroundColor Green
 Write-Host ""

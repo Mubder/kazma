@@ -163,7 +163,9 @@ Observability Dashboard — dark control plane (English and Arabic).
 
 ## 🚀 Quick Start
 
-> **Prerequisites:** Python 3.11+ (Python 3.12 or 3.13 recommended).
+> **Prerequisites:** Python 3.11–3.14 (3.12 or 3.13 recommended). `uv` is installed for you if missing.
+
+The install SoT is [Quickstart](docs/docs/guide/quickstart.md). Bootstrap scripts (`setup.ps1` / `setup.sh`) sync **rag + dev + tui**. There is no `[cli]` extra — `kazma-cli` is part of the wheel. Full optional extras: `uv sync --all-extras`.
 
 ### 1. Installation
 
@@ -172,23 +174,40 @@ git clone https://github.com/Mubder/kazma.git
 cd kazma
 ```
 
-**Recommended: `uv` (Fast & Reproducible)**
-```bash
-uv venv --python 3.13
-uv sync --all-extras
+**One command (recommended)**
+
+```powershell
+# Windows
+.\setup.ps1
 ```
 
-**Alternative: `pip` + `venv`**
+```bash
+# Linux / macOS / WSL
+chmod +x setup.sh
+./setup.sh
+```
+
+Creates `.venv`, installs `uv` if needed, syncs `rag` + `dev` + `tui`, copies `.env.example` → `.env` when missing, and checks core imports.
+
+**Manual: `uv`**
+```bash
+uv venv --python 3.13
+uv sync --extra rag --extra dev --extra tui
+# Everything (torch, Playwright, WeasyPrint, Temporal, …):
+# uv sync --all-extras
+```
+
+**Manual: `pip` + `venv`**
 ```bash
 # Linux / macOS / WSL
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e ".[all]"
+pip install -e ".[rag,dev,tui]"
 
 # Windows (PowerShell)
 py -3.13 -m venv .venv
 .venv\Scripts\Activate.ps1
-pip install -e ".[all]"
+pip install -e ".[rag,dev,tui]"
 ```
 
 ### 2. Environment Configuration
@@ -201,9 +220,10 @@ Copy-Item .env.example .env  # Windows PowerShell
 
 Edit `.env` to configure your preferred LLM provider key:
 ```dotenv
-# OpenAI, DeepSeek, Anthropic, Gemini, Groq, or Local Ollama
+# OpenAI-compatible (also used as the generic env fallback):
 OPENAI_API_KEY=sk-...
-# Optional: DEEPSEEK_API_KEY=... | ANTHROPIC_API_KEY=... | GEMINI_API_KEY=...
+# Other providers (Anthropic, Gemini, DeepSeek, …) are keyed in
+# Settings → Providers / kazma.yaml — see docs/docs/guide/configuration.md
 ```
 
 ### 3. Launch Kazma

@@ -13,10 +13,10 @@ EVAL="EVAL.md"
 
 echo "=== Kazma minimal E2E reproduction ==="
 
-# --- 1. Install: framework + dev/cli/tui + rag extras (chromadb, sentence-transformers) ---
-#     The default sync omits the rag extra (chromadb, sentence-transformers),
-#     which the memory subsystem and the RAG tests require; install it.
-uv sync --extra dev --extra cli --extra tui --extra rag 2>&1 | tail -5
+# --- 1. Install: framework + rag/dev/tui extras ---
+#     There is no [cli] extra (kazma-cli is in the wheel). rag is required
+#     for vector memory / RAG tests.
+uv sync --extra rag --extra dev --extra tui 2>&1 | tail -5
 
 PY=".venv/bin/python"
 
