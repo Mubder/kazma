@@ -368,16 +368,6 @@ def migrate_legacy_user_home() -> bool:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         legacy.rename(target)
-        # Drop a marker at the old location so the user knows where it went.
-        try:
-            legacy.parent.mkdir(parents=True, exist_ok=True)
-            (legacy.with_suffix(".kazma.migrated.txt")).write_text(
-                f"Your ~/.kazma was migrated to {target} on first boot of the "
-                "project-local layout. This file is a marker; safe to delete.\n",
-                encoding="utf-8",
-            )
-        except Exception:
-            pass
         return True
     except OSError:
         # Cross-device rename can fail; fall back to copy. We avoid shutil

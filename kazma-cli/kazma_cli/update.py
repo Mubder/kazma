@@ -458,11 +458,11 @@ def _extras_file() -> Path:
 
         return installed_extras_path()
     except Exception:
-        return Path.home() / ".kazma" / "installed_extras.json"
+        return Path.cwd() / ".kazma" / "installed_extras.json"
 
 
 def load_persisted_extras() -> list[str]:
-    """Load previously recorded optional extras (ConfigStore + ~/.kazma)."""
+    """Load previously recorded optional extras (ConfigStore + project home)."""
     found: list[str] = []
     try:
         from kazma_core.config_store import get_config_store

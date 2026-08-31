@@ -145,6 +145,7 @@ curl -s https://your.domain/api/auth/status
 | `KAZMA_PG_POOL_RETRY_DELAY` | `1.0` | Optional | Seconds between pool-creation retries. |
 | `KAZMA_PG_POOL_MIN` | `1` | Optional | Minimum connections in the psycopg pool. |
 | `KAZMA_PG_POOL_MAX` | `10` | Optional | Maximum connections in the psycopg pool. |
+| `KAZMA_PG_POOL_TIMEOUT` | `5` | Optional | Seconds a caller waits for a free pool connection. A hang here used to freeze `/health/ready` on the event loop. |
 
 ---
 

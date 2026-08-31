@@ -61,6 +61,13 @@
   .audit-text .txt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
                      overflow: hidden; word-break: break-word; unicode-bidi: plaintext; text-align: start; }
   .audit-text .txt[dir="rtl"] { font-family: var(--font-arabic); }
+  .audit-detail { border-top: 1px solid var(--border-subtle); background: var(--bg-surface);
+                  padding: 12px 14px; }
+  .audit-detail .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 6px; }
+  .audit-detail .txt { unicode-bidi: plaintext; text-align: start; word-break: break-word;
+                       white-space: pre-wrap; font-size: .9rem; line-height: 1.5; }
+  .audit-detail .txt[dir="rtl"] { font-family: var(--font-arabic); }
+  .audit-detail .why { color: var(--danger, #ef4444); font-size: .78rem; margin-top: 8px; }
   .audit-open .txt { -webkit-line-clamp: unset; overflow: visible; white-space: pre-wrap; }
   .mono { font-family: var(--font-mono, monospace); font-variant-numeric: tabular-nums; }
   .ok-text { color: var(--success, #22c55e); }
@@ -236,12 +243,19 @@
         </tbody>
       </table>
     </div>
-    {# Full request/response for the selected call — the part that actually
-       diagnoses a failure, rather than just naming it. #}
+    {# Human detail for the selected call — tweet body, not raw JSON. #}
     <div x-show="audit.open != null && audit.entries[audit.open]" x-cloak
-         style="border-top:1px solid var(--border-subtle);background:var(--bg-surface);padding:12px 14px;">
-      <pre style="margin:0;white-space:pre-wrap;word-break:break-word;font-size:.72rem;color:var(--text-muted);max-height:300px;overflow:auto;"
-           x-text="auditDetail()"></pre>
+         class="audit-detail">
+      <div class="kicker" x-text="auditDetailMeta()"></div>
+      <div class="txt" :dir="summaryDir({ summary: auditDetailText() })"
+           x-text="auditDetailText() || '—'"></div>
+      <div class="why" x-show="auditDetailError()" x-cloak
+           x-text="auditDetailError()"></div>
+      <a x-show="auditDetailUrl()" x-cloak :href="auditDetailUrl()"
+         target="_blank" rel="noopener noreferrer"
+         @click.stop style="display:inline-block;margin-top:8px;color:var(--accent);font-size:.78rem;">
+        {{ t('settings.x_audit_tweet') }}
+      </a>
     </div>
     <div class="sched-empty" x-show="!audit.loading && !audit.entries.length" x-cloak>{{ t('scheduled.x_activity_empty') }}</div>
     <div class="sched-empty" x-show="audit.loading" x-cloak>…</div>

@@ -53,13 +53,13 @@ _REDUMP_EVERY_S = 30.0
 
 
 def stall_dump_dir() -> Path:
-    """Where stall dumps are written. Beside the logs, not inside the data dir."""
+    """Where stall dumps are written. Always inside the Kazma install."""
     try:
         from kazma_core.paths import user_home
 
         d = Path(user_home())
     except Exception:  # noqa: BLE001
-        d = Path.home() / ".kazma"
+        d = Path.cwd() / ".kazma"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

@@ -124,6 +124,9 @@ def test_a_normal_install_still_migrates(tmp_path, monkeypatch):
     assert migrate_legacy_user_home() is True
     assert (project / ".kazma" / "themes").is_dir()
     assert not legacy.exists()
+    # A marker next to the old dir was itself a write outside the install
+    # (live: C:\Users\balfa\.kazma.migrated.txt).
+    assert not legacy.with_suffix(".kazma.migrated.txt").exists()
 
 
 @pytest.mark.parametrize("var", ["TEMP", "TMP", "TMPDIR"])

@@ -118,7 +118,7 @@ def _preferences_paths() -> tuple[Path, Path]:
         prefs = preferences_path()
         return prefs.parent, prefs
     except Exception:
-        d = Path.home() / ".kazma"
+        d = Path.cwd() / ".kazma"
         return d, d / "preferences.json"
 
 

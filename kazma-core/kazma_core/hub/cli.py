@@ -126,7 +126,7 @@ def hub(ctx, registry_path: str | None, hub_url: str | None) -> None:
 
             registry_path = hub_registry_db()
         except Exception:
-            registry_path = str(Path.home() / ".kazma" / "hub" / "registry.db")
+            registry_path = str(Path.cwd() / ".kazma" / "hub" / "registry.db")
     ctx.obj["registry_path"] = registry_path
     ctx.obj["hub_url"] = hub_url or "https://hub.kazma.ai"
 

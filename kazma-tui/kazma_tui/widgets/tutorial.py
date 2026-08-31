@@ -282,7 +282,7 @@ class TutorialScreen(ModalScreen[bool]):
                 prefs_file = preferences_path()
                 config_dir = user_home()
             except Exception:
-                config_dir = Path.home() / ".kazma"
+                config_dir = Path.cwd() / ".kazma"
                 prefs_file = config_dir / "preferences.json"
             config_dir.mkdir(parents=True, exist_ok=True)
 

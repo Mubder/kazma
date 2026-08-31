@@ -274,18 +274,61 @@ function scheduledPage() {
             return this.fmtAbs({ when: entry && entry.ts });
         },
 
-        /* The exact bytes sent and returned. Naming a failure is not the
-         * same as diagnosing one, and this is the only place the payload
-         * is visible. */
-        auditDetail() {
-            const e = (this.audit.open != null && this.audit.entries[this.audit.open]) || null;
+        _auditOpen() {
+            return (this.audit.open != null && this.audit.entries[this.audit.open]) || null;
+        },
+
+        _tweetFromEntry(e) {
             if (!e) return '';
-            const parts = [
-                'REQUEST', e.request_body || '(none)',
-                '', 'RESPONSE', e.response_body || '(none)',
-            ];
-            if (e.error_detail) parts.push('', 'ERROR', e.error_detail);
-            return parts.join(String.fromCharCode(10));
+            let raw = e.text || '';
+            if (!raw && e.request_body) {
+                try {
+                    const body = typeof e.request_body === 'string'
+                        ? JSON.parse(e.request_body) : e.request_body;
+                    if (body && typeof body.text === 'string') raw = body.text;
+                    else if (body && body.data && typeof body.data.text === 'string') {
+                        raw = body.data.text;
+                    }
+                } catch (_err) { /* keep empty rather than dump JSON */ }
+            }
+            return this.cleanSummary({ summary: raw });
+        },
+
+        auditDetailText() {
+            return this._tweetFromEntry(this._auditOpen());
+        },
+
+        auditDetailError() {
+            const e = this._auditOpen();
+            if (!e) return '';
+            const msg = String(e.error_detail || e.error || '').trim();
+            if (!msg) return '';
+            if (msg.charAt(0) === '{' || msg.charAt(0) === '[') {
+                try {
+                    const obj = JSON.parse(msg);
+                    if (obj && typeof obj.detail === 'string') return obj.detail;
+                    if (obj && typeof obj.error === 'string') return obj.error;
+                    if (obj && typeof obj.title === 'string') return obj.title;
+                } catch (_err) { /* fall through */ }
+            }
+            return msg;
+        },
+
+        auditDetailMeta() {
+            const e = this._auditOpen();
+            if (!e) return '';
+            const bits = [e.action || 'call'];
+            if (e.status && e.status !== 'success') bits.push(e.status);
+            if (e.http_status != null) bits.push('HTTP ' + e.http_status);
+            if (e.tweet_id) bits.push('#' + e.tweet_id);
+            if (e.duration_ms != null) bits.push(e.duration_ms + ' ms');
+            if (e.reply_to) bits.push('reply-to ' + e.reply_to);
+            return bits.join(' · ');
+        },
+
+        auditDetailUrl() {
+            const e = this._auditOpen();
+            return (e && e.post_url) || '';
         },
 
         async load() {

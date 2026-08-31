@@ -67,14 +67,15 @@ def register_system_routes(self: Any) -> None:
                 "knowledge_graph": str(data_dir() / "knowledge_graph.db"),
             }
         except Exception:
+            _fallback = _os_sys.path.join(_os_sys.getcwd(), ".kazma")
             paths = {
-                "kazma_home": str(_os_sys.path.expanduser("~/.kazma")),
-                "config_db": str(_os_sys.path.expanduser("~/.kazma/config.db")),
+                "kazma_home": _fallback,
+                "config_db": _os_sys.path.join(_fallback, "config.db"),
                 "config_yaml": next(
-                    iter(_glob_sys.glob(_os_sys.path.expanduser("~/.kazma/*.yaml"))), ""
+                    iter(_glob_sys.glob(_os_sys.path.join(_fallback, "*.yaml"))), ""
                 ),
-                "pending_evolution": str(
-                    _os_sys.path.expanduser("~/.kazma/pending_evolution.json")
+                "pending_evolution": _os_sys.path.join(
+                    _fallback, "pending_evolution.json"
                 ),
                 "knowledge_graph": str(
                     _os_sys.path.expanduser("kazma-data/knowledge_graph.json")
@@ -117,7 +118,7 @@ def register_system_routes(self: Any) -> None:
             snap = snapshots_db()
             pending = str(user_home() / "pending_evolution.json")
         except Exception:
-            home = _osp.path.expanduser("~/.kazma")
+            home = _osp.path.join(_osp.getcwd(), ".kazma")
             cfg = _osp.path.join(home, "config.db")
             kg = _osp.path.expanduser("kazma-data/knowledge_graph.json")
             snap = _osp.path.expanduser("kazma-data/snapshots.db")

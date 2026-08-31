@@ -6,6 +6,7 @@ liveness/readiness probes.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import subprocess
 import time
@@ -352,9 +353,22 @@ async def readiness():
     """
     checks = {}
     
-    # Run all health checks
+    # Cheap in-memory / SQLite-WAL checks. The Postgres ping is NOT one of
+    # them: live stall-20260831-181156.txt shows ``async def readiness``
+    # blocked in ``pool.execute_one`` → ``psycopg_pool.getconn`` on the
+    # event loop, so SSE / Telegram acks / the stall heartbeat all froze
+    # and the guard killed the child. Offload + 3s cap.
     checks["config_store"] = check_config_store()
-    checks["database"] = check_database()
+    try:
+        checks["database"] = await asyncio.wait_for(
+            asyncio.to_thread(check_database), timeout=3.0
+        )
+    except asyncio.TimeoutError:
+        checks["database"] = {
+            "status": "failed",
+            "component": "database",
+            "error": "ping timed out (3s)",
+        }
     checks["swarm_engine"] = check_swarm_engine()
     checks["model_registry"] = check_model_registry()
     checks["agent_runner"] = check_agent_runner()

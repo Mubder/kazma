@@ -34,17 +34,27 @@ class PostgresPool:
             ) from exc
 
         self._dict_row = dict_row
+        # timeout = seconds a caller waits for a free connection. Default 30
+        # let /health/ready pin the event loop while pool workers sat in
+        # wait_conn (live 2026-08-31). Fail the ping instead of hanging.
+        try:
+            checkout_s = float(os_env("KAZMA_PG_POOL_TIMEOUT", "5"))
+        except ValueError:
+            checkout_s = 5.0
+        checkout_s = max(1.0, min(checkout_s, 30.0))
         self._pool = ConnectionPool(
             conninfo=dsn,
             min_size=min_size,
             max_size=max_size,
+            timeout=checkout_s,
             kwargs={"row_factory": dict_row, "autocommit": False},
             open=True,
         )
         logger.info(
-            "[PostgresPool] opened min=%s max=%s",
+            "[PostgresPool] opened min=%s max=%s timeout=%s",
             min_size,
             max_size,
+            checkout_s,
         )
 
     @contextmanager

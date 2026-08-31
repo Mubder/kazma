@@ -22,8 +22,8 @@ class WizardContext:
             self.registry_path: str = hub_registry_db()
             self.skills_dir: Path = installed_skills_dir()
         except Exception:
-            self.registry_path = str(Path.home() / ".kazma" / "hub" / "registry.db")
-            self.skills_dir = Path.home() / ".kazma" / "skills"
+            self.registry_path = str(Path.cwd() / ".kazma" / "hub" / "registry.db")
+            self.skills_dir = Path.cwd() / ".kazma" / "skills"
 
 
 class SkillInstallationWizard:

@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Loop stall, install-local state, readable X activity (2026-08-31)
+
+- **`/health/ready` Postgres ping** runs in a worker thread with a 3s
+  cap. The live stall dump (2026-08-31 18:11) showed the event loop
+  blocked in `pool.execute_one` → `getconn` while pool workers sat in
+  `wait_conn`; the guard then killed the child. Pool checkout timeout is
+  5s (`KAZMA_PG_POOL_TIMEOUT`).
+- **No writes under `~/.kazma`.** Guard state, stall dumps, TUI
+  preferences fallbacks, launchd logs, and digest log paths stay in
+  `<install>/.kazma`. A one-time copy from the legacy home is allowed;
+  the marker file is no longer written in the user profile.
+- **Scheduled X activity** click shows the tweet + a one-line meta
+  (action · HTTP · id), not the raw JSON request/response. `/api/x/audit`
+  no longer sends `request_body` / `response_body` to the browser.
+
 ## X Studio RTL + Scheduled readable rows (2026-08-31)
 
 Arabic drafts and posted tweets on `/x` set `dir=rtl` from the tweet body

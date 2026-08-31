@@ -66,14 +66,26 @@ def digest_enabled() -> bool:
 
 def _guard_log_path() -> Path:
     env = os.environ.get("KAZMA_GUARD_LOG")
-    return Path(env) if env else Path.home() / ".kazma" / "guard.log"
+    if env:
+        return Path(env)
+    try:
+        from kazma_core.paths import user_home
+
+        return Path(user_home()) / "guard.log"
+    except Exception:  # noqa: BLE001
+        return Path.cwd() / ".kazma" / "guard.log"
 
 
 def _app_log_path() -> Path:
     env = os.environ.get("KAZMA_LOG_FILE")
     if env:
         return Path(env)
-    return Path.home() / "kazma" / ".kazma" / "kazma.log"
+    try:
+        from kazma_core.paths import log_file
+
+        return log_file()
+    except Exception:  # noqa: BLE001
+        return Path.cwd() / ".kazma" / "kazma.log"
 
 
 def _scan_guard_log(since: float) -> Counter:

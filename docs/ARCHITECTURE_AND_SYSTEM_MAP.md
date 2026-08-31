@@ -456,6 +456,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `KAZMA_DATABASE_URL` | unset | Multi-replica | Postgres shared state |
 | `KAZMA_DB_BACKEND` | auto | Optional force | `postgres` / `sqlite` |
 | `KAZMA_PG_POOL_MIN/MAX` | 1 / 10 | No | Pool sizing |
+| `KAZMA_PG_POOL_TIMEOUT` | 5 | No | Seconds to wait for a free pool connection |
 | `KAZMA_PUBLIC_URL` | unset | OAuth/OIDC | Fixed public base URL |
 | `KAZMA_JWT_SECRET` | unset | Multi-tenant JWT | Verified tenant claims |
 | `KAZMA_CORS_ORIGINS` | localhost list | Prod: your origin | CORS allowlist |
