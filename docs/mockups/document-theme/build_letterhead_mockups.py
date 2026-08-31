@@ -37,7 +37,6 @@ HERE = Path(__file__).resolve().parent
 COPY = Path(r"C:\Users\balfa\Desktop\TestingMocks.txt")
 LOGO_SRC = Path(r"C:\Users\balfa\Downloads\Kazma New Logos\KazmaLogoDarkShadow.png")
 FONT_SRC = HERE / "_fonts"
-PLEX_DIR = HERE / "_fonts" / "plex"
 ASSETS = HERE / "_assets"
 FACE = "IBM Plex Sans Arabic"
 
@@ -80,15 +79,10 @@ def _copy_paras() -> list[str]:
 
 
 def _stage_plex() -> Path:
-    PLEX_DIR.mkdir(parents=True, exist_ok=True)
     for name in ("IBMPlexSansArabic-Regular.ttf", "IBMPlexSansArabic-Bold.ttf"):
-        src = FONT_SRC / name
-        if not src.is_file():
-            raise FileNotFoundError(src)
-        dest = PLEX_DIR / name
-        if not dest.exists() or dest.stat().st_size != src.stat().st_size:
-            shutil.copy2(src, dest)
-    return PLEX_DIR
+        if not (FONT_SRC / name).is_file():
+            raise FileNotFoundError(FONT_SRC / name)
+    return FONT_SRC
 
 
 def _install_user_fonts(font_dir: Path) -> None:
