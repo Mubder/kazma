@@ -330,3 +330,42 @@ async def test_interrupted_turn_never_corrupts_another_turns_reply(monkeypatch):
     assert len(session.messages) == 3
     assert session.messages[-1]["content"] == "Posted all 4 Arabic tweets."
     assert "open" not in session.messages[-1]
+
+
+@pytest.mark.asyncio
+async def test_backfill_replaces_short_closed_interim(monkeypatch):
+    """Cancelled SSE flushed a short closed assistant row; the real 2660-char
+    answer lives only in the checkpoint. Backfill must replace, not no-op."""
+    from kazma_ui import sse_chat
+
+    interim = "Working on it — scanning the tree…"
+    final = interim + "\n\n" + ("The full answer. " * 80)
+    assert len(final) > len(interim) + 400
+    session = SimpleNamespace(
+        session_id="s1",
+        thread_id="t1",
+        messages=[
+            {"role": "user", "content": "what happened?"},
+            {
+                "role": "assistant",
+                "content": interim,
+                "turn_id": "turn-1",
+            },
+        ],
+    )
+    store = _FakeStore(session)
+    graph = _fake_graph(
+        [
+            {"role": "user", "content": "what happened?"},
+            {"role": "assistant", "content": final},
+        ]
+    )
+    _install(monkeypatch, store)
+    monkeypatch.setattr(_sse_helpers, "_module_graph", lambda: graph)
+
+    out = await sse_chat._checkpoint_backfill_unanswered(session)
+    # _user_facing_reply may strip trailing whitespace; the heal must still
+    # replace the short interim with the long checkpoint answer.
+    assert out[-1]["content"].startswith(interim)
+    assert len(out[-1]["content"]) > len(interim) + 400
+    assert len(out) == 2

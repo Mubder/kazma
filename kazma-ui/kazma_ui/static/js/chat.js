@@ -412,7 +412,10 @@
       // (2026-08-27). The paused bubble + approval card are already correct.
       if (hasInlineApprovalCard() || _awaitingApproval) return;
 
-      if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim() && !lastMsg.pending) {
+      // Idle: paint durable assistant text even if the row still carries a
+      // leftover `pending` flag (detached persist wrote the answer, then
+      // the client refreshed before close_reply_turn cleared the marker).
+      if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim()) {
         if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
           window.KazmaChat.applyFinalAssistantText(lastMsg.content, lastMsg.model || '', { source: 'resync' });
         }

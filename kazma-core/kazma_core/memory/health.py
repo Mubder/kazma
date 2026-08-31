@@ -642,15 +642,45 @@ def build_memory_health() -> dict[str, Any]:
     try:
         from kazma_core.db.backend import is_postgres
 
-        if is_postgres() and _has_mod("langgraph.checkpoint.postgres"):
+        live_name = ""
+        try:
+            from kazma_ui import dashboard as _dash
+
+            cm = getattr(_dash, "_checkpoint_manager", None)
+            saver = getattr(cm, "_saver", cm) if cm is not None else None
+            live_name = type(saver).__name__ if saver is not None else ""
+        except Exception:
+            live_name = ""
+
+        if live_name and "Postgres" in live_name:
             backend_meta["checkpoints"] = "postgres"
             components.append(_comp(
                 "store_checkpoints",
                 "LangGraph checkpoints",
                 ok=True,
                 status="ok",
-                detail="Postgres checkpointer available (AsyncPostgresSaver). HITL pause/resume can share state across replicas.",
-                meta={"backend": "postgres"},
+                detail=(
+                    f"Live checkpointer is {live_name}. "
+                    "HITL pause/resume can share state across replicas."
+                ),
+                meta={"backend": "postgres", "saver": live_name},
+            ))
+        elif is_postgres() and _has_mod("langgraph.checkpoint.postgres"):
+            # Package is present but the live saver is SQLite (or unknown) —
+            # typical Windows Proactor boot via `python -m uvicorn`.
+            backend_meta["checkpoints"] = "sqlite_fallback"
+            components.append(_comp(
+                "store_checkpoints",
+                "LangGraph checkpoints",
+                ok=False,
+                status="warn",
+                detail=(
+                    f"Postgres is configured but the live saver is "
+                    f"{live_name or 'not yet initialized'} (expected "
+                    "AsyncPostgresSaver). On Windows start via `kazma serve`, "
+                    "not `python -m uvicorn`."
+                ),
+                meta={"backend": "sqlite_fallback", "saver": live_name},
             ))
         elif is_postgres():
             backend_meta["checkpoints"] = "sqlite_fallback"

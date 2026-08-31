@@ -1518,7 +1518,7 @@ Get-Process -Name python -ErrorAction SilentlyContinue | Where-Object { (Get-Cim
 
 # Start server (background) — ws-ping flags are the Turn Delivery V2
 # server-side death certificate for black-holed sockets (KD-7); keep them.
-cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090 --ws-ping-interval 20 --ws-ping-timeout 20
+cd 'G:\GitHubRepos\kazma'; & '.venv\Scripts\python.exe' -m kazma_cli.main serve 9090
 ```
 
 ## Testing & Validation

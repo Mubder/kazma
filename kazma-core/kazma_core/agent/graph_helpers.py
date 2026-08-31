@@ -25,9 +25,32 @@ TOOL_RESULT_MAX_CHARS = int(
     os.environ.get("KAZMA_TOOL_RESULT_MAX_CHARS", "100000") or "100000"
 )
 
-# Higher cap for research, file-read, and MCP tools so long files reach the model.
+# Higher cap for research / crawl tools so long pages reach the model.
 TOOL_RESULT_RESEARCH_MAX_CHARS = int(
     os.environ.get("KAZMA_TOOL_RESULT_RESEARCH_MAX_CHARS", "200000") or "200000"
+)
+
+# Workspace file tools used to inherit the research 200k cap via a
+# `"file" in name` substring test — file_search/file_read then re-inflated
+# a just-trimmed prompt to 45–51k tokens mid-turn. Keep a tighter dedicated
+# cap; operators can raise KAZMA_TOOL_RESULT_FILE_MAX_CHARS.
+TOOL_RESULT_FILE_MAX_CHARS = int(
+    os.environ.get("KAZMA_TOOL_RESULT_FILE_MAX_CHARS", "32000") or "32000"
+)
+_FILE_TOOL_NAMES = frozenset(
+    {
+        "file_read",
+        "file_search",
+        "file_list",
+        "file_view",
+        "read_file_part",
+        "codebase_search",
+        "mcp__filesystem__read_text_file",
+        "mcp__filesystem__read_multiple_files",
+        "mcp__filesystem__read_file",
+        "mcp__filesystem__directory_tree",
+        "mcp__filesystem__list_directory",
+    }
 )
 _RESEARCH_TOOL_NAMES = frozenset(
     {
@@ -43,20 +66,10 @@ _RESEARCH_TOOL_NAMES = frozenset(
         "run_research_pipeline",
         "web_search",
         "web_search_duckduckgo",
-        # File & code tools
-        "file_read",
-        "file_view",
-        "read_file_part",
         "shell_exec",
         "python_exec",
         "run",
         "run_file",
-        # MCP filesystem tools
-        "mcp__filesystem__read_text_file",
-        "mcp__filesystem__read_multiple_files",
-        "mcp__filesystem__read_file",
-        "mcp__filesystem__directory_tree",
-        "mcp__filesystem__list_directory",
     }
 )
 
@@ -92,19 +105,19 @@ def truncate_tool_result(
 ) -> str:
     """Truncate tool result content with a truncation marker.
 
-    File and research tools use a higher default cap (200,000 chars)
-    so full files and long pages reach the model. Set env variable
-    KAZMA_TOOL_RESULT_MAX_CHARS=0 or <= 0 for unlimited output.
+    Research/crawl tools use a higher default cap (200,000 chars) so long
+    pages reach the model. Workspace file tools use a tighter cap (32,000)
+    so a just-trimmed prompt cannot be re-inflated by file_read/file_search.
+    Set env variable KAZMA_TOOL_RESULT_MAX_CHARS=0 or <= 0 for unlimited.
     """
     if TOOL_RESULT_MAX_CHARS <= 0 or os.environ.get("KAZMA_NO_TRUNCATE") == "1":
         return content
 
     if max_chars is None:
-        if tool_name and (
-            tool_name in _RESEARCH_TOOL_NAMES
-            or "file" in tool_name.lower()
-            or "read" in tool_name.lower()
-        ):
+        name = (tool_name or "").strip()
+        if name in _FILE_TOOL_NAMES:
+            max_chars = max(1000, TOOL_RESULT_FILE_MAX_CHARS)
+        elif name in _RESEARCH_TOOL_NAMES:
             max_chars = max(1000, TOOL_RESULT_RESEARCH_MAX_CHARS)
         else:
             max_chars = max(500, TOOL_RESULT_MAX_CHARS)

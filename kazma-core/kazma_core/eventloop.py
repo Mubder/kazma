@@ -37,7 +37,12 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["set_windows_selector_policy", "uvicorn_loop_factory"]
+__all__ = [
+    "is_proactor_loop",
+    "log_running_loop",
+    "set_windows_selector_policy",
+    "uvicorn_loop_factory",
+]
 
 
 def set_windows_selector_policy() -> None:
@@ -83,4 +88,50 @@ def uvicorn_loop_factory() -> Callable[..., Any] | None:
 
     logger.debug("[eventloop] Windows: uvicorn loop_factory → SelectorEventLoop")
     return _factory
+
+
+def is_proactor_loop(loop: Any | None = None) -> bool:
+    """True when the given (or running) loop is Windows ProactorEventLoop."""
+    import asyncio
+
+    try:
+        current = loop if loop is not None else asyncio.get_running_loop()
+    except RuntimeError:
+        try:
+            current = asyncio.get_event_loop()
+        except Exception:
+            return False
+    name = type(current).__name__
+    return "Proactor" in name
+
+
+def log_running_loop(*, postgres_intended: bool = False) -> str:
+    """Log which asyncio loop is running. CRITICAL on Windows Proactor.
+
+    Returns the loop class name for health probes. Never raises.
+    """
+    import asyncio
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        logger.info("[eventloop] no running loop yet")
+        return "no-running-loop"
+    name = type(loop).__name__
+    logger.info("[eventloop] running loop=%s", name)
+    if sys.platform == "win32" and "Proactor" in name:
+        logger.critical(
+            "[eventloop] Windows ProactorEventLoop is active. "
+            "psycopg async (AsyncPostgresSaver) cannot connect on this loop, "
+            "so LangGraph checkpoints fall back to SQLite. "
+            "Start via `kazma serve` or `python -m kazma_ui` — not "
+            "`python -m uvicorn` (uvicorn 0.36+ hardcodes Proactor on Windows)."
+        )
+        if postgres_intended:
+            logger.critical(
+                "[eventloop] KAZMA_DATABASE_URL is set; checkpoint durability "
+                "is NOT the Postgres backend your config claims until the "
+                "process is started with uvicorn_loop_factory."
+            )
+    return name
 

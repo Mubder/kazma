@@ -1183,13 +1183,14 @@ async def supervisor_node(
     messages = sanitize_tool_chains(messages)
     messages = prune_messages_if_exceeding_cap(messages)
     from kazma_core.summarizer import prune_tool_outputs
-    messages = prune_tool_outputs(messages, max_tokens=24000)
 
-    # Deterministic trim (PATH B replacement): never LLM-summarize mid-loop.
     _lm_for_trim = state.get("last_model") or routed_model
     _trim_budget = resolve_trim_token_budget(
         last_model=_lm_for_trim if isinstance(_lm_for_trim, str) else None
     )
+    messages = prune_tool_outputs(messages, max_tokens=_trim_budget)
+
+    # Deterministic trim (PATH B replacement): never LLM-summarize mid-loop.
     _before_trim_msgs = list(messages)
     _before_trim = len(messages)
     messages = trim_messages_deterministic(
