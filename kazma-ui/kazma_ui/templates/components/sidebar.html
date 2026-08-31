@@ -152,6 +152,16 @@
             <span class="nav-label">{{ t('nav.replay') }}</span>
         </a>
 
+        <a href="/x" class="nav-link {{ 'active' if active_page == 'x_studio' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <path d="M4 4l11.733 16h4.267l-11.733 -16z"/>
+                    <path d="M4 20l6.768 -6.768m2.46 -2.46l6.772 -6.772"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.x_studio') }}</span>
+        </a>
+
         <a href="/scheduled" class="nav-link {{ 'active' if active_page == 'scheduled' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">

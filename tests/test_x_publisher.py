@@ -181,7 +181,7 @@ def test_native_manifest_and_loader() -> None:
 async def test_x_post_blocked_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     from kazma_skills.native.x_publisher import tools as t
 
-    monkeypatch.setattr(t, "get_x_config", lambda: _cfg(enabled=False))
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _cfg(enabled=False))
     out = await t.x_post("hello world from kazma")
     assert '"ok": false' in out
     assert '"posted": false' in out

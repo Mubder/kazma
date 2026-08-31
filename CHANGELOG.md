@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## X Studio (2026-08-31)
+
+Compose, schedule, and review X posts as a first-class Kazma page (`/x`)
+instead of burying them in Settings + a mixed Scheduled table.
+
+- **Composer** with live ToU preview (280 / @ / # / $) from `evaluate_post`.
+- **Post now** and **Schedule** share `publish_x_post` / `book_x_post` (official
+  API only; operator click is the Web approval). Chat `x_post` stays always-HITL
+  + `proposal_id`.
+- **Planner** of upcoming X posts and **saved drafts** from `save_proposal`.
+- **Reschedule** and **cancel** on the queue; **thread hops** (`reply_to_id` or
+  an x.com URL); **delete** a live tweet from Posted (`delete_x_post`).
+- Loading a saved draft stamps `proposal_id`; the stored text wins on post or
+  schedule, then the proposal is marked posted.
+- Scheduled page is unchanged as the mixed cron + X clock.
+
+## Guard --reload no longer waits out crash backoff (2026-08-31)
+
+`--reload` kills `serve.py` so the long-lived guard can boot new code. The
+guard treated that kill as ``process exited (code 1)`` and climbed the
+crash ladder. After a handful of deploys in one day the fifth one sat on
+WinError 10061 for **300 seconds** before spawning — the operator message
+called it a 3–5 minute cold start, but the process had not even started.
+`--reload` now plants a flag *before* the kill; the guard respawns
+immediately and does not page Telegram as if Kazma died.
+
 ## Brand type + mark (2026-08-31)
 
 IBM Plex Sans / IBM Plex Sans Arabic is the shared face across the web UI,

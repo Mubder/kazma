@@ -32,6 +32,21 @@ class XCredentialsBody(BaseModel):
     max_posts_per_month: int | None = Field(default=None)
 
 
+class XPreviewBody(BaseModel):
+    text: str = Field(default="")
+    reply_to_id: str = Field(default="")
+
+
+class XPostBody(BaseModel):
+    text: str = Field(..., min_length=1)
+    reply_to_id: str = Field(default="")
+    proposal_id: str = Field(default="")
+
+
+class XDeleteBody(BaseModel):
+    tweet_id: str = Field(..., min_length=1)
+
+
 def _is_production() -> bool:
     return (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
         "1", "true", "on", "yes",
@@ -65,6 +80,40 @@ async def _verify_same_origin(request: Request) -> None:
             origin_host = ""
         if own_host and origin_host and origin_host != own_host:
             raise HTTPException(status_code=403, detail="cross-origin request denied")
+
+
+def _tenant_id() -> str:
+    try:
+        from kazma_core.tenant_isolation import require_tenant_id
+
+        return require_tenant_id() or "default"
+    except Exception:
+        return "default"
+
+
+def _bind_proposal(text: str, proposal_id: str) -> tuple[str, str]:
+    """If *proposal_id* is set, the stored draft wins. Raises ValueError."""
+    ref = (proposal_id or "").strip()
+    body = (text or "").strip()
+    if not ref:
+        return body, ""
+    from kazma_core.agent.artifacts import get_artifact_store
+
+    stored = get_artifact_store().stored_text_for(ref, tenant_id=_tenant_id())
+    if not stored:
+        raise ValueError("proposal_id did not resolve")
+    return stored, ref
+
+
+def _mark_proposal_posted(ref: str) -> None:
+    if not ref:
+        return
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+
+        get_artifact_store().proposal_posted(ref, tenant_id=_tenant_id())
+    except Exception:
+        logger.debug("[x_api] proposal_posted failed for %s", ref, exc_info=True)
 
 
 def _placeholder(value: str) -> bool:
@@ -116,6 +165,55 @@ async def x_status() -> JSONResponse:
         return _safe_error(exc)
 
 
+@router.post("/preview")
+async def x_preview(body: XPreviewBody) -> JSONResponse:
+    """Dry-run ToU policy for the composer. No network, no ledger write."""
+    try:
+        from kazma_core.x_api.config import get_x_config
+        from kazma_core.x_api.policy import evaluate_post
+
+        cfg = get_x_config()
+        text = body.text or ""
+        decision = evaluate_post(text, cfg=cfg, reply_to_id=body.reply_to_id or "")
+        return JSONResponse(
+            {
+                "ok": True,
+                "allow": decision.allow,
+                "reason": decision.reason,
+                "chars": len(text.strip()),
+                "max_chars": cfg.max_chars,
+                "mentions": list(decision.mentions),
+                "hashtags": list(decision.hashtags),
+                "cashtags": list(decision.cashtags),
+                "can_post": cfg.can_post(),
+                "handle": cfg.handle,
+            }
+        )
+    except Exception as exc:
+        return _safe_error(exc)
+
+
+@router.get("/drafts")
+async def x_drafts(limit: int = 50) -> JSONResponse:
+    """Flattened save_proposal items for the X Studio inbox."""
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+
+        tenant_id = "default"
+        try:
+            from kazma_core.tenant_isolation import require_tenant_id
+
+            tenant_id = require_tenant_id() or "default"
+        except Exception:
+            pass
+        items = get_artifact_store().list_proposals(
+            tenant_id=tenant_id, limit=max(1, min(int(limit or 50), 200))
+        )
+        return JSONResponse({"ok": True, "count": len(items), "drafts": items})
+    except Exception as exc:
+        return _safe_error(exc)
+
+
 @router.get("/audit")
 async def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
     """Recent X-integration audit entries (append-only x_audit.db).
@@ -130,6 +228,46 @@ async def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
         bounded = max(1, min(int(limit or 50), 500))
         entries = query_x_audit(limit=bounded, action=(action or None))
         return JSONResponse({"ok": True, "count": len(entries), "entries": entries})
+    except Exception as exc:
+        return _safe_error(exc)
+
+
+@protected_router.post("/post", dependencies=[Depends(_verify_same_origin)])
+async def x_post_now(body: XPostBody) -> JSONResponse:
+    """Immediate post from X Studio. Operator click is the approval."""
+    try:
+        from kazma_core.x_api.booking import publish_x_post
+
+        try:
+            text, proposal_ref = _bind_proposal(body.text, body.proposal_id)
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "posted": False, "error": str(exc)},
+                status_code=400,
+            )
+        ok, payload = await publish_x_post(
+            text=text, reply_to_id=body.reply_to_id or ""
+        )
+        payload["ok"] = ok
+        if ok:
+            _mark_proposal_posted(proposal_ref)
+            if proposal_ref:
+                payload["proposal_id"] = proposal_ref
+        status = 200 if ok else 400
+        return JSONResponse(payload, status_code=status)
+    except Exception as exc:
+        return _safe_error(exc)
+
+
+@protected_router.post("/delete", dependencies=[Depends(_verify_same_origin)])
+async def x_delete_now(body: XDeleteBody) -> JSONResponse:
+    """Delete a live tweet from X Studio. Operator click is the approval."""
+    try:
+        from kazma_core.x_api.booking import delete_x_post
+
+        ok, payload = await delete_x_post(tweet_id=body.tweet_id)
+        payload["ok"] = ok
+        return JSONResponse(payload, status_code=200 if ok else 400)
     except Exception as exc:
         return _safe_error(exc)
 

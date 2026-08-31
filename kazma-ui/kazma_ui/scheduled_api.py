@@ -47,6 +47,7 @@ class XScheduleBody(BaseModel):
     text: str = Field(..., min_length=1)
     when: str = Field(..., min_length=1)
     reply_to_id: str = ""
+    proposal_id: str = ""
 
 
 class XRescheduleBody(BaseModel):
@@ -238,14 +239,39 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         from kazma_core.x_api.booking import book_x_post
 
         tenant = _tenant_id()
+        text = body.text
+        proposal_ref = (body.proposal_id or "").strip()
+        if proposal_ref:
+            try:
+                from kazma_core.agent.artifacts import get_artifact_store
+
+                stored = get_artifact_store().stored_text_for(
+                    proposal_ref, tenant_id=tenant
+                )
+            except Exception:
+                stored = None
+            if not stored:
+                return JSONResponse(
+                    {"ok": False, "error": "proposal_id did not resolve"},
+                    status_code=400,
+                )
+            text = stored
         ok, payload = book_x_post(
-            text=body.text,
+            text=text,
             when=body.when,
             reply_to_id=body.reply_to_id or "",
             tenant_id=tenant,
             thread_id="",
             delivery_target="",
         )
+        if ok and proposal_ref:
+            try:
+                from kazma_core.agent.artifacts import get_artifact_store
+
+                get_artifact_store().proposal_posted(proposal_ref, tenant_id=tenant)
+            except Exception:
+                logger.debug("[scheduled] proposal_posted failed", exc_info=True)
+            payload["proposal_id"] = proposal_ref
         return JSONResponse({"ok": ok, **payload}, status_code=200 if ok else 400)
 
     @protected.put("/api/scheduled/x/{post_id}", dependencies=[Depends(_verify_same_origin)])
