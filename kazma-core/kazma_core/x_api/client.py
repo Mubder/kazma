@@ -7,6 +7,7 @@ Writes are **not** retried (a retry after a dropped 201 would double-post).
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -22,6 +23,30 @@ logger = logging.getLogger(__name__)
 __all__ = ["XApiError", "XClient", "user_agent"]
 
 API_HOST = "https://api.x.com"
+
+#: Cap what we *read* from X before parse/audit. Tweet JSON is tiny; this
+#: stops a runaway HTML/error dump from filling x_audit.db or RAM. Request
+#: bodies we send are already small (tweet text).
+_MAX_RESPONSE_BYTES = 8192
+
+
+def _bounded_response(resp: httpx.Response, limit: int = _MAX_RESPONSE_BYTES) -> tuple[Any, str, bool]:
+    """Return ``(parsed_json_or_none, text, truncated)`` from a capped read."""
+    raw = bytes(getattr(resp, "content", b"") or b"")
+    truncated = len(raw) > limit
+    chunk = raw[:limit]
+    encoding = getattr(resp, "encoding", None) or "utf-8"
+    try:
+        text = chunk.decode(encoding, errors="replace")
+    except Exception:
+        text = chunk.decode("utf-8", errors="replace")
+    payload: Any = None
+    if text:
+        try:
+            payload = json.loads(text)
+        except Exception:
+            payload = None
+    return payload, text, truncated
 
 
 def _default_audit_action(method: str, path: str) -> str:
@@ -113,41 +138,47 @@ class XClient:
 
         duration_ms = int((time.monotonic() - started) * 1000)
 
+        parsed, body_text, truncated = _bounded_response(resp)
+
         if resp.status_code in (200, 201):
-            try:
-                payload = resp.json() if resp.content else {}
-            except Exception as exc:
+            if not isinstance(parsed, dict):
                 log_x_event(
                     action=action, method=method, endpoint=path, status="error",
                     http_status=resp.status_code, request_body=json_body,
-                    response_body={"error": "non-JSON success body", "raw": resp.text},
+                    response_body={
+                        "error": "non-JSON success body",
+                        "raw": body_text[:2000],
+                        "truncated": truncated,
+                    },
                     duration_ms=duration_ms,
                 )
-                raise XApiError("X API returned a non-JSON success body.") from exc
-            data = payload.get("data") or {}
+                raise XApiError("X API returned a non-JSON success body.")
+            data = parsed.get("data") or {}
             log_x_event(
                 action=action, method=method, endpoint=path, status="success",
                 http_status=resp.status_code,
                 tweet_id=str(data.get("id") or "") or audit_tweet_id,
-                request_body=json_body, response_body=payload,
+                request_body=json_body, response_body=parsed,
                 duration_ms=duration_ms,
             )
-            return payload
+            return parsed
 
         detail = ""
-        try:
-            payload = resp.json()
-            err = payload.get("detail") or payload.get("title") or payload.get("errors")
-            detail = str(err)[:400] if err else resp.text[:400]
-        except Exception:
-            payload = {}
-            detail = (resp.text or "")[:400]
+        if isinstance(parsed, dict):
+            err = parsed.get("detail") or parsed.get("title") or parsed.get("errors")
+            detail = str(err)[:400] if err else body_text[:400]
+        else:
+            detail = body_text[:400]
 
         log_x_event(
             action=action, method=method, endpoint=path, status="error",
             http_status=resp.status_code, tweet_id=audit_tweet_id,
             request_body=json_body,
-            response_body={"detail": detail, "body": (resp.text or "")[:2000]},
+            response_body={
+                "detail": detail,
+                "body": body_text[:2000],
+                "truncated": truncated,
+            },
             duration_ms=duration_ms,
         )
 

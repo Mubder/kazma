@@ -122,16 +122,39 @@ async def _check_graph_interrupt(graph: Any, config: dict[str, Any]) -> dict[str
     return None
 
 
-#: Approval cards sent per thread, newest last: (sent_at, fingerprint).
-_recent_cards: dict[str, list[tuple[float, str]]] = {}
+#: Approval cards sent per thread, newest last:
+#: (sent_at, fingerprint, counts_toward_burst).
+_recent_cards: dict[str, list[tuple[float, str, bool]]] = {}
 
 #: An identical request inside this window is a duplicate, not a new decision.
 _DUPLICATE_WINDOW_S = 180.0
 
-#: More than this many cards in _BURST_WINDOW_S is a retry loop, not a
-#: conversation. On 2026-08-30 nine arrived in three minutes.
+#: More than this many *retry-loop* cards in _BURST_WINDOW_S is a storm, not
+#: a conversation. On 2026-08-30 nine shell_exec variants arrived in three
+#: minutes after auto-deny. Distinct X posts / proposal_id cards are
+#: separate human decisions and must not share that bucket.
 _BURST_LIMIT = 3
 _BURST_WINDOW_S = 240.0
+
+#: Official X writes + any proposal-backed outbound. Each distinct text /
+#: proposal_id is its own card; the 180s identical-fingerprint check still
+#: covers true retry loops.
+_BURST_EXEMPT_TOOLS = frozenset({
+    "x_post",
+    "x_delete_post",
+    "x_schedule_post",
+    "x_cancel_scheduled_post",
+    "book_x_post",
+})
+
+
+def _counts_toward_burst(tool: str, args: Any) -> bool:
+    """True for exec-style retry loops; False for distinct operator decisions."""
+    if str(tool or "") in _BURST_EXEMPT_TOOLS:
+        return False
+    if isinstance(args, dict) and str(args.get("proposal_id") or "").strip():
+        return False
+    return True
 
 
 def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None:
@@ -145,8 +168,11 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
 
     The reason text in ``hitl_timeout`` now tells the model to stop, but a
     prompt is a request, not a guarantee. This is the mechanical half: after a
-    burst, cards for that thread are withheld until the operator says
-    something. Withheld, never auto-approved -- the tool still does not run.
+    burst of *retry-loop* cards (exec variants), further exec cards for that
+    thread are withheld until the operator says something. Distinct X posts
+    and proposal-backed cards always notify (identical fingerprints still
+    collapse inside ``_DUPLICATE_WINDOW_S``). Withheld, never auto-approved
+    -- the tool still does not run.
     """
     import hashlib
     import time
@@ -159,12 +185,16 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
     except Exception:  # noqa: BLE001
         fingerprint = str(tool)
 
-    history = [
-        (ts, fp) for ts, fp in _recent_cards.get(thread_id, [])
-        if now - ts < _BURST_WINDOW_S
-    ]
+    counts = _counts_toward_burst(tool, args)
+    history: list[tuple[float, str, bool]] = []
+    for row in _recent_cards.get(thread_id, []):
+        ts = float(row[0])
+        fp = str(row[1])
+        c = True if len(row) < 3 else bool(row[2])
+        if now - ts < _BURST_WINDOW_S:
+            history.append((ts, fp, c))
 
-    for ts, fp in history:
+    for ts, fp, _c in history:
         if fp == fingerprint and now - ts < _DUPLICATE_WINDOW_S:
             _recent_cards[thread_id] = history
             return (
@@ -172,15 +202,17 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
                 f"{int(now - ts)}s ago — not repeating it"
             )
 
-    if len(history) >= _BURST_LIMIT:
-        _recent_cards[thread_id] = history
-        return (
-            f"{len(history)} approval requests already sent for this thread in "
-            f"the last {int(_BURST_WINDOW_S / 60)} minutes — muting further "
-            "cards until you reply. Nothing has been approved or run."
-        )
+    if counts:
+        storm = sum(1 for _ts, _fp, c in history if c)
+        if storm >= _BURST_LIMIT:
+            _recent_cards[thread_id] = history
+            return (
+                f"{storm} approval requests already sent for this thread in "
+                f"the last {int(_BURST_WINDOW_S / 60)} minutes — muting further "
+                "cards until you reply. Nothing has been approved or run."
+            )
 
-    history.append((now, fingerprint))
+    history.append((now, fingerprint, counts))
     _recent_cards[thread_id] = history
     return None
 

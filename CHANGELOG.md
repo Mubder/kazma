@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## X Studio: distinct posts are not a 3-card mute (2026-08-31)
+
+Gateway HITL burst mute (`3` cards / `4` minutes) treated eight different
+`x_post` drafts as one retry storm and withheld cards 4–8. The mute now
+applies only to exec-style variant loops (`shell_exec` and friends). Distinct
+X writes and `proposal_id` cards always notify; identical fingerprints still
+collapse inside 180s. Generic `publish_x_post` / `delete_x_post` failures
+return a sanitized line (full exception stays in the log). X API error
+bodies are capped on **read** (8 KiB) before parse/audit.
+
 ## P1+P2+P3 remaining-work one-go (2026-08-31)
 
 Closes the remaining code-work list from the 2026-08-31 audit follow-through.

@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 __all__ = ["book_x_post", "delete_x_post", "publish_x_post"]
 
 
+def _public_x_error(exc: BaseException) -> str:
+    """Chat/UI-safe failure text. Full exception stays in the log."""
+    from kazma_core.x_api.client import XApiError
+
+    if isinstance(exc, XApiError):
+        return str(exc)
+    return "X request failed. Details are in the server log."
+
+
 # The shared timing parser accepts one RECURRING form ("daily at 9am") and
 # collapses it to the next single occurrence. That is correct for cron,
 # which reschedules itself after each run, and wrong for scheduled X posts,
@@ -196,10 +205,10 @@ async def publish_x_post(
         )
     except XApiError as exc:
         logger.warning("publish_x_post API error: %s", exc)
-        return False, {"posted": False, "error": str(exc)}
+        return False, {"posted": False, "error": _public_x_error(exc)}
     except Exception as exc:
         logger.exception("publish_x_post failed")
-        return False, {"posted": False, "error": str(exc)}
+        return False, {"posted": False, "error": _public_x_error(exc)}
     tweet_id = str(tweet.get("id") or "")
     if tweet_id:
         get_ledger().record(tweet_id=tweet_id, text=body, handle=cfg.handle)
@@ -235,9 +244,9 @@ async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
         data = await XClient(cfg.credentials).delete_tweet(tid)
     except XApiError as exc:
         logger.warning("delete_x_post API error: %s", exc)
-        return False, {"deleted": False, "error": str(exc), "tweet_id": tid}
+        return False, {"deleted": False, "error": _public_x_error(exc), "tweet_id": tid}
     except Exception as exc:
         logger.exception("delete_x_post failed")
-        return False, {"deleted": False, "error": str(exc), "tweet_id": tid}
+        return False, {"deleted": False, "error": _public_x_error(exc), "tweet_id": tid}
     get_ledger().mark_deleted(tid)
     return True, {"deleted": True, "tweet_id": tid, "api": data}

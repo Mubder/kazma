@@ -116,6 +116,25 @@ async def test_publish_records_ledger_on_success(studio_env, monkeypatch: pytest
     assert studio_env["ledger"].count_since(0) == 1
 
 
+@pytest.mark.asyncio
+async def test_publish_generic_exception_is_sanitized(
+    studio_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kazma_core.x_api.booking import publish_x_post
+
+    class _Boom:
+        async def create_tweet(self, *a, **k):
+            raise RuntimeError("oauth_token=SECRET library traceback")
+
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", lambda *a, **k: _Boom())
+    ok, payload = await publish_x_post(text="unique sanitize probe")
+    assert ok is False
+    err = str(payload.get("error") or "")
+    assert "SECRET" not in err
+    assert "traceback" not in err.lower()
+    assert "X request failed" in err
+
+
 def test_post_now_csrf_required(client) -> None:
     resp = client.post("/api/x/post", json={"text": "hello"})
     assert resp.status_code == 403
