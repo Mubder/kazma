@@ -162,26 +162,28 @@ function scheduledPage() {
             if (bidi && bidi.textDir) return bidi.textDir(this.cleanSummary(task));
             const s = this.cleanSummary(task);
             if (/[\u0600-\u06FF]/.test(s)) return 'rtl';
+            if (!s || s === '—') {
+                return (document.documentElement.getAttribute('dir') || 'ltr').toLowerCase();
+            }
             return 'ltr';
         },
 
         stampAr(el, raw) {
             if (!el) return;
-            const rtl = this.summaryDir({ summary: raw }) === 'rtl';
-            el.setAttribute('dir', rtl ? 'rtl' : 'ltr');
+            const dir = this.summaryDir({ summary: raw });
+            const rtl = dir === 'rtl';
+            el.setAttribute('dir', dir);
             el.classList.toggle('is-ar', rtl);
             if (rtl) {
                 el.style.direction = 'rtl';
                 el.style.textAlign = 'right';
                 el.style.unicodeBidi = 'isolate';
                 el.style.fontFamily = 'var(--font-arabic)';
-                el.style.display = 'block';
             } else {
                 el.style.direction = '';
                 el.style.textAlign = '';
                 el.style.unicodeBidi = '';
                 el.style.fontFamily = '';
-                el.style.display = '';
             }
         },
 
