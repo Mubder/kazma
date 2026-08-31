@@ -83,7 +83,7 @@ class EditorScreen(Screen[None]):
     EditorScreen .editor-header {
         height: auto;
         padding: 0 1;
-        background: $primary-darken-1;
+        background: $boost;
         color: $text;
     }
     EditorScreen TextArea { height: 1fr; border: solid $border; }

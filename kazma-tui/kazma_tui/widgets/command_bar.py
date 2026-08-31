@@ -20,7 +20,7 @@ class CommandConsole(ModalScreen[None]):
 
     DEFAULT_CSS = """
     CommandConsole {
-        align: bottom center;
+        align: center bottom;
         background: transparent;
     }
 
