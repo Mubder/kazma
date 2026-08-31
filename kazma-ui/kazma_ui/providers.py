@@ -454,6 +454,19 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         for key, value in req.extras.items():
             config_store.set(f"connectors.{name}.{key}", value, category="connectors")
 
+        # Live-apply allowlists onto running adapters (token changes still
+        # need refresh-adapters; ids do not).
+        try:
+            from kazma_core.service_container import get_container
+            from kazma_gateway.allowlists import apply_gateway_allowlists
+            from kazma_gateway.gateway import GatewayManager
+
+            container = get_container()
+            if container.has(GatewayManager):
+                apply_gateway_allowlists(container.get(GatewayManager), config_store)
+        except Exception:
+            logger.debug("[connectors] live allowlist apply skipped", exc_info=True)
+
         updated = _load_connector_config(config_store, name)
         return _mask_connector_entry(name, updated)
 

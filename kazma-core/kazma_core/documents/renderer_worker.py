@@ -11,7 +11,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from kazma_core.documents.content_model import ContentModel
+    from kazma_core.documents.profile import DocProfile
 
 from .resources import validate_restricted_render_resources
 
@@ -119,7 +123,7 @@ def _sections(value: object) -> list[dict[str, str]]:
 
 def _build_model_and_profile(
     payload: dict[str, Any],
-) -> tuple["ContentModel", "DocProfile"]:
+) -> tuple[ContentModel, DocProfile]:
     """Build a format-agnostic ContentModel + DocProfile from a render payload.
 
     This is the single payload→content translation shared by EVERY format

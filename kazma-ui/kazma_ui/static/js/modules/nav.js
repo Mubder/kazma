@@ -280,7 +280,7 @@ export function initSoftNav() {
 
     /**
      * After Alpine binds, wait for page components that expose `loading`
-     * (e.g. settingsApp) to finish init. If still stuck, throw → full reload.
+     * (e.g. settingsApp) to finish init. Timeout is a warning, not a reload.
      */
     async function waitForPageReady(pageBody, timeoutMs = 3000) {
         const start = Date.now();
@@ -334,7 +334,10 @@ export function initSoftNav() {
         const factories = extractFactoryNames(pageBody);
         const ready = await waitForFactories(factories);
         if (!ready) {
-            throw new Error('page factories not ready: ' + factories.join(', '));
+            // Factories may live on a shell script that is not in .page-body.
+            // Throwing here full-reloaded Settings/Chat and wiped in-flight
+            // Alpine state. Bind what we have; only unbound roots hard-fail.
+            console.warn('[soft-nav] page factories not ready:', factories.join(', '));
         }
         if (gen !== softNavGeneration) return;
 
@@ -371,10 +374,12 @@ export function initSoftNav() {
             throw new Error('Alpine did not bind page roots: ' + exprs);
         }
 
-        // Wait for async x-init (settings loading flag) or hard-fail
+        // Wait for async x-init (settings loading flag). A stuck loading
+        // flag used to throw → location.href reload, which looked like a
+        // crash and lost the soft-nav URL. Alpine is bound; continue.
         const pageReady = await waitForPageReady(pageBody, 8000);
         if (!pageReady) {
-            throw new Error('page component init stuck (loading)');
+            console.warn('[soft-nav] page component init still loading — continuing');
         }
     }
 

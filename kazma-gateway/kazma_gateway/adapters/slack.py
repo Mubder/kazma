@@ -104,6 +104,18 @@ class SlackAdapter(BaseAdapter):
         self._last_ts: dict[str, str] = {}  # channel_id → last seen ts
         self._seen_events: dict[tuple[str, str], None] = {}  # (channel_id, ts) — insertion-ordered dedup of app_mention+message
 
+    def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
+        """Replace the per-user allowlist at runtime (Settings live apply)."""
+        self._allowed_users = {str(uid) for uid in user_ids}
+
+    def set_allowed_teams(self, team_ids: list[str] | set[str]) -> None:
+        """Replace the team allowlist at runtime."""
+        self._allowed_teams = {str(tid) for tid in team_ids}
+
+    def set_allowed_channels(self, channel_ids: list[str] | set[str]) -> None:
+        """Replace the channel allowlist at runtime."""
+        self._allowed_channels = {str(cid) for cid in channel_ids}
+
     # ── Helpers ─────────────────────────────────────────────────────
 
     def _headers(self) -> dict[str, str]:

@@ -168,6 +168,7 @@ async def send_chunks_with_retry(
     rate_acquire: Callable[[], Awaitable[None]],
     max_retries: int = SEND_MAX_RETRIES,
     base_delay: float = SEND_BASE_DELAY,
+    message_thread_id: Any = None,
 ) -> bool:
     """POST sendMessage for each chunk with 429 backoff and Markdown fallback.
 
@@ -181,6 +182,11 @@ async def send_chunks_with_retry(
             payload["parse_mode"] = parse_mode
         if is_last and reply_markup:
             payload["reply_markup"] = reply_markup
+        if message_thread_id not in (None, "", 0, "0"):
+            try:
+                payload["message_thread_id"] = int(message_thread_id)
+            except (TypeError, ValueError):
+                payload["message_thread_id"] = message_thread_id
 
         parse_mode_fallback_done = False
         chunk_sent = False

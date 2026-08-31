@@ -394,152 +394,19 @@ def create_sse_chat_router(
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
 
-        from kazma_core.agent.capacity_commands import (
-            apply_capacity_command,
-            is_capacity_command,
+        from kazma_ui.sse_chat._capacity import intercept_capacity_fast_path
+
+        _cap_resp, _cap_rewrite = intercept_capacity_fast_path(
+            session=session,
+            thread_id=thread_id,
+            session_id=session_id,
+            raw_msg=raw_msg,
         )
-
-        if is_capacity_command(raw_msg, require_slash=True):
-            _cap = apply_capacity_command(
-                thread_id, raw_msg, actor=f"web:{session_id[:12]}",
-            )
-            _persist_instant_turn(
-                session, thread_id, raw_msg, _cap.reply, kind="capacity"
-            )
-
-            async def _long_generator() -> AsyncGenerator[str, None]:
-                yield await _journal_fast_path(thread_id, "capacity", {
-                    "long_active": _cap.long_active,
-                    "yolo_active": _cap.yolo_active,
-                    "action": _cap.action,
-                    "reply": _cap.reply,
-                })
-                yield await _journal_fast_path(thread_id, "done", {
-                    "tokens": 1, "cost": 0.0, "duration_ms": 100,
-                })
-
-            return StreamingResponse(
-                _long_generator(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
-
-        from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command
-
-        if is_plan_command(raw_msg, require_slash=True):
-            _pl = apply_plan_command(
-                thread_id, raw_msg, actor=f"web:{session_id[:12]}",
-            )
-            if _pl.rewrite_user_text:
-                raw_msg = _pl.rewrite_user_text
-                user_message = _pl.rewrite_user_text
-            elif _pl.handled:
-                _persist_instant_turn(
-                    session, thread_id, raw_msg, _pl.reply, kind="capacity"
-                )
-
-                async def _plan_generator() -> AsyncGenerator[str, None]:
-                    yield await _journal_fast_path(thread_id, "capacity", {
-                        "plan_active": _pl.plan_active,
-                        "action": _pl.action,
-                        "reply": _pl.reply,
-                    })
-                    yield await _journal_fast_path(thread_id, "done", {
-                        "tokens": 1, "cost": 0.0, "duration_ms": 50,
-                    })
-
-                return StreamingResponse(
-                    _plan_generator(),
-                    media_type="text/event-stream",
-                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-                )
-
-        if raw_msg.lower() in ("/yolo", "/yolo on", "/yolo off", "/yolo status"):
-            from kazma_core.safety.yolo import (
-                YoloDisabledError,
-                disable_yolo,
-                enable_yolo,
-                yolo_allowed,
-                yolo_status,
-            )
-
-            cmd = raw_msg.lower().strip()
-            if cmd == "/yolo status":
-                st = yolo_status(thread_id)
-                grant_note = ""
-                try:
-                    from kazma_core.safety.hitl_grants import list_grants
-
-                    grants = list_grants(thread_id)
-                    if grants:
-                        names = ", ".join(g["tool"] for g in grants)
-                        grant_note = f"\nPer-tool grants active: `{names}`"
-                except Exception:
-                    pass
-                if st.get("active"):
-                    rem = st.get("remaining_seconds")
-                    ttl_note = (
-                        f"Expires in ~{rem // 60}m." if rem is not None
-                        else "No auto-expiry."
-                    )
-                    confirmation = (
-                        f"🚀 YOLO is **ON** for this session. {ttl_note}\n"
-                        f"Disable: `/yolo off`{grant_note}"
-                    )
-                else:
-                    prod_note = ""
-                    if not yolo_allowed():
-                        prod_note = (
-                            "\nProduction mode blocks YOLO "
-                            "(set `KAZMA_ALLOW_YOLO=1` to opt in)."
-                        )
-                    confirmation = (
-                        "🛡️ YOLO is **OFF**. HITL approvals are required for danger tools."
-                        f"{grant_note}{prod_note}\n"
-                        "Tip: on an approval card use **Allow tool (session)** to stop "
-                        "repeat prompts for one tool without full YOLO."
-                    )
-            elif cmd == "/yolo off":
-                disable_yolo(thread_id, actor=f"web:{session_id[:12]}")
-                confirmation = (
-                    "🛡️ YOLO deactivated. Safety gates and tool grants are cleared."
-                )
-            else:
-                try:
-                    st = enable_yolo(thread_id, actor=f"web:{session_id[:12]}")
-                    rem = st.get("remaining_seconds")
-                    ttl_note = (
-                        f"Auto-expires in ~{rem // 60} minutes "
-                        f"(set KAZMA_YOLO_TTL_SECONDS to change; 0 = no expiry)."
-                        if rem is not None
-                        else "No auto-expiry (KAZMA_YOLO_TTL_SECONDS=0)."
-                    )
-                    confirmation = (
-                        "🚀 **YOLO ON** for this session only.\n"
-                        "All danger tools run **without** approval until you `/yolo off` "
-                        f"or TTL ends.\n{ttl_note}\n"
-                        "⚠️ Use only when you fully trust this session."
-                    )
-                except YoloDisabledError as yde:
-                    confirmation = f"🛡️ {yde}"
-
-            _persist_instant_turn(
-                session, thread_id, raw_msg, confirmation, kind="capacity"
-            )
-
-            async def _yolo_generator() -> AsyncGenerator[str, None]:
-                yield await _journal_fast_path(thread_id, "capacity", {"action": "yolo", "reply": confirmation})
-                yield await _journal_fast_path(thread_id, "done", {
-                    "tokens": 1,
-                    "cost": 0.0,
-                    "duration_ms": 100,
-                })
-
-            return StreamingResponse(
-                _yolo_generator(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
+        if _cap_resp is not None:
+            return _cap_resp
+        if _cap_rewrite:
+            raw_msg = _cap_rewrite
+            user_message = _cap_rewrite
 
         # ── Intercept RESET command ────────────────────────────────
         if raw_msg.lower() == "/reset":

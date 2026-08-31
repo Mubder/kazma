@@ -47,7 +47,9 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install ruff
-      - name: Run Ruff
+      - name: Run Ruff (syntax/undefined names — GATE)
+        run: ruff check kazma-core/kazma_core/ kazma-gateway/kazma_gateway/ kazma-ui/kazma_ui/ --select E9,F63,F7,F82
+      - name: Run Ruff (full — advisory)
         run: ruff check kazma-core/kazma_core/ kazma-gateway/kazma_gateway/ kazma-ui/kazma_ui/ --exit-zero
 
   tests:

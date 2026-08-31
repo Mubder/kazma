@@ -211,6 +211,7 @@ class TestSettingsManager:
         assert "hitl_enabled" in safety
         assert "require_approval_for" in safety
         assert "approval_timeout" in safety
+        assert "outbound_allowed_targets" in safety
 
     def test_save_safety_settings(self, sm):
         """Saving safety settings persists."""
@@ -218,6 +219,14 @@ class TestSettingsManager:
         safety = sm.get_safety_settings()
         assert safety["hitl_enabled"] is False
         assert safety["approval_timeout"] == 120
+
+    def test_save_outbound_allowed_targets(self, sm):
+        sm.save_safety_settings({
+            "outbound_allowed_targets": "admin@kazma.ai, #ops",
+        })
+        safety = sm.get_safety_settings()
+        assert "admin@kazma.ai" in safety["outbound_allowed_targets"]
+        assert "#ops" in safety["outbound_allowed_targets"]
 
     # ── Context ──
 

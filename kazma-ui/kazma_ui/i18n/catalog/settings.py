@@ -2308,4 +2308,196 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "إكس (واجهة رسمية)",
         "en": "X (official API)",
     },
+    "settings.outbound_allowed_targets": {
+        "ar": "أهداف الإرسال المسموحة",
+        "en": "Outbound allowed targets",
+    },
+    "settings.outbound_allowed_targets_hint": {
+        "ar": "فارغ = مسموح (HITL يتولى الأمر). قائمة مفصولة بفواصل تقيّد البريد والقنوات قبل الإرسال.",
+        "en": "Empty = permissive (HITL still applies). A comma-separated list restricts email/channel targets before send.",
+    },
+    "settings.shortcut_updated": {
+        "ar": "حُدّث اختصار \"{action}\"",
+        "en": "Shortcut for \"{action}\" updated",
+    },
+    "settings.shortcuts_reset": {
+        "ar": "أُعيدت الاختصارات",
+        "en": "Shortcuts reset",
+    },
+    "settings.username_password_required": {
+        "ar": "اسم المستخدم وكلمة المرور مطلوبان",
+        "en": "Username and password required",
+    },
+    "settings.user_create_failed": {
+        "ar": "فشل إنشاء المستخدم",
+        "en": "Failed to create user",
+    },
+    "settings.user_created": {
+        "ar": "أُنشئ المستخدم",
+        "en": "User created",
+    },
+    "settings.failed_with_reason": {
+        "ar": "فشل: {error}",
+        "en": "Failed: {error}",
+    },
+    "settings.update_failed": {
+        "ar": "فشل التحديث",
+        "en": "Update failed",
+    },
+    "settings.user_updated": {
+        "ar": "حُدّث المستخدم",
+        "en": "User updated",
+    },
+    "settings.delete_failed": {
+        "ar": "فشل الحذف",
+        "en": "Delete failed",
+    },
+    "settings.user_deleted": {
+        "ar": "حُذف المستخدم",
+        "en": "User deleted",
+    },
+    "settings.tenant_id_required": {
+        "ar": "معرّف المستأجر مطلوب",
+        "en": "Tenant id required",
+    },
+    "settings.failed": {
+        "ar": "فشل",
+        "en": "Failed",
+    },
+    "settings.tenant_added": {
+        "ar": "أُضيف المستأجر",
+        "en": "Tenant added",
+    },
+    "settings.passwords_mismatch": {
+        "ar": "كلمتا المرور غير متطابقتين",
+        "en": "Passwords do not match",
+    },
+    "settings.password_min": {
+        "ar": "يجب ألا تقل كلمة المرور عن 8 أحرف",
+        "en": "Password must be at least 8 characters",
+    },
+    "settings.password_changed": {
+        "ar": "غُيّرت كلمة المرور",
+        "en": "Password changed",
+    },
+    "settings.token_name_required": {
+        "ar": "اسم الرمز مطلوب",
+        "en": "Token name required",
+    },
+    "settings.token_created_copy": {
+        "ar": "أُنشئ الرمز — انسخه أدناه (يُعرض مرة واحدة)",
+        "en": "Token created — copy it below (shown once)",
+    },
+    "settings.token_created": {
+        "ar": "أُنشئ الرمز",
+        "en": "Token created",
+    },
+    "settings.token_copied": {
+        "ar": "نُسخ الرمز إلى الحافظة",
+        "en": "Token copied to clipboard",
+    },
+    "settings.copy_failed_manual": {
+        "ar": "فشل النسخ — حدّد الرمز وانسخه يدوياً",
+        "en": "Copy failed — select the token and copy manually",
+    },
+    "settings.curl_copied": {
+        "ar": "نُسخ مثال curl",
+        "en": "curl example copied",
+    },
+    "settings.copy_failed": {
+        "ar": "فشل النسخ",
+        "en": "Copy failed",
+    },
+    "settings.missing_token_id": {
+        "ar": "معرّف الرمز مفقود",
+        "en": "Missing token id",
+    },
+    "settings.revoke_failed": {
+        "ar": "فشل الإلغاء: {error}",
+        "en": "Revoke failed: {error}",
+    },
+    "settings.token_revoked": {
+        "ar": "أُلغي الرمز",
+        "en": "Token revoked",
+    },
+    "settings.invalid_json_args": {
+        "ar": "وسائط JSON غير صالحة",
+        "en": "Invalid JSON arguments",
+    },
+    "settings.backup_downloaded": {
+        "ar": "حُمّل النسخ الاحتياطي",
+        "en": "Backup downloaded",
+    },
+    "settings.backup_failed_reason": {
+        "ar": "فشل النسخ الاحتياطي: {error}",
+        "en": "Backup failed: {error}",
+    },
+    "settings.system_reset_reloading": {
+        "ar": "أُعيد ضبط النظام. جارٍ إعادة التحميل...",
+        "en": "System reset complete. Reloading...",
+    },
+    "settings.reset_failed": {
+        "ar": "فشل إعادة الضبط: {error}",
+        "en": "Reset failed: {error}",
+    },
+    "settings.config_exported": {
+        "ar": "صُدّر الإعداد",
+        "en": "Configuration exported",
+    },
+    "settings.export_failed": {
+        "ar": "فشل التصدير: {error}",
+        "en": "Export failed: {error}",
+    },
+    "settings.paste_or_upload": {
+        "ar": "الصق أو ارفع بيانات الإعداد",
+        "en": "Paste or upload config data",
+    },
+    "settings.config_imported": {
+        "ar": "استُورد الإعداد. جارٍ إعادة التحميل...",
+        "en": "Configuration imported. Reloading...",
+    },
+    "settings.import_failed": {
+        "ar": "فشل الاستيراد: {error}",
+        "en": "Import failed: {error}",
+    },
+    "settings.settings_reset_reloading": {
+        "ar": "أُعيدت الإعدادات. جارٍ إعادة التحميل...",
+        "en": "Settings reset. Reloading...",
+    },
+    "settings.google_drive_failed": {
+        "ar": "اتصلت جوجل، لكن دريف فشل: {error}. اختبر البطاقة لخطوات الإصلاح.",
+        "en": "Google connected, but Drive access failed: {error}. Test the card for the fix steps.",
+    },
+    "settings.offsite_connected": {
+        "ar": "☁️ {provider} متصل — النسخ الخارجي نشط",
+        "en": "☁️ {provider} connected — offsite backup active",
+    },
+    "settings.cloud_connect_incomplete": {
+        "ar": "لم يكتمل الاتصال السحابي — افتح بطاقة المزود وحاول مجدداً",
+        "en": "Cloud connect did not complete — open the provider card and try again",
+    },
+    "settings.retention_min": {
+        "ar": "يجب أن يكون الاحتفاظ بنسخة واحدة على الأقل",
+        "en": "Backup retention must be at least 1",
+    },
+    "settings.retention_saved": {
+        "ar": "حُفظ الاحتفاظ — الإبقاء على أحدث {n} نسخ",
+        "en": "Backup retention saved — keeping the newest {n} backups",
+    },
+    "settings.backup_complete": {
+        "ar": "اكتمل النسخ: {dbs} قواعد، {mb} م.ب",
+        "en": "Backup complete: {dbs} DBs, {mb} MB",
+    },
+    "settings.backup_deleted": {
+        "ar": "حُذف النسخ الاحتياطي",
+        "en": "Backup deleted",
+    },
+    "settings.archived_mb": {
+        "ar": "أُرشف: {mb} م.ب. اضغط تحميل للحفظ.",
+        "en": "Archived: {mb} MB. Click Download to save.",
+    },
+    "settings.archive_failed": {
+        "ar": "فشل الأرشفة: {error}",
+        "en": "Archive failed: {error}",
+    },
 }

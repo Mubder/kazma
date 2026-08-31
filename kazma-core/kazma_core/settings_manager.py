@@ -411,12 +411,24 @@ class SettingsManager:
         except Exception:
             _default_danger = ["file_write", "file_delete", "shell_exec", "code_exec", "python_exec"]
         soul_flag = False
+        outbound: list[str] = []
         try:
             from kazma_core.safety.commitment.config import get_commitment_config
 
-            soul_flag = bool(get_commitment_config().get("soul_requires_confirm"))
+            _cc = get_commitment_config()
+            soul_flag = bool(_cc.get("soul_requires_confirm"))
+            raw_oat = _cc.get("outbound_allowed_targets") or []
+            if isinstance(raw_oat, str):
+                outbound = [t.strip() for t in raw_oat.split(",") if t.strip()]
+            elif isinstance(raw_oat, (list, tuple)):
+                outbound = [str(t).strip() for t in raw_oat if str(t).strip()]
         except Exception:
             soul_flag = bool(self._cs.get("agent.commitment.soul_requires_confirm", False))
+            raw_oat = self._cs.get("agent.commitment.outbound_allowed_targets", [])
+            if isinstance(raw_oat, str):
+                outbound = [t.strip() for t in raw_oat.split(",") if t.strip()]
+            elif isinstance(raw_oat, (list, tuple)):
+                outbound = [str(t).strip() for t in raw_oat if str(t).strip()]
         return {
             "hitl_enabled": self._cs.get("safety.hitl_enabled", True),
             "require_approval_for": self._cs.get(
@@ -425,6 +437,7 @@ class SettingsManager:
             "approval_timeout": self._cs.get("safety.approval_timeout", 300),
             "auto_deny_on_timeout": self._cs.get("safety.auto_deny_on_timeout", True),
             "soul_requires_confirm": soul_flag,
+            "outbound_allowed_targets": outbound,
         }
 
     def save_safety_settings(self, data: dict[str, Any]) -> None:
@@ -435,6 +448,19 @@ class SettingsManager:
             self._cs.set(
                 "agent.commitment.soul_requires_confirm",
                 bool(soul),
+                category="agent",
+            )
+        if "outbound_allowed_targets" in payload:
+            oat = payload.pop("outbound_allowed_targets")
+            if isinstance(oat, str):
+                oat_list = [t.strip() for t in oat.split(",") if t.strip()]
+            elif isinstance(oat, (list, tuple)):
+                oat_list = [str(t).strip() for t in oat if str(t).strip()]
+            else:
+                oat_list = []
+            self._cs.set(
+                "agent.commitment.outbound_allowed_targets",
+                oat_list,
                 category="agent",
             )
         for key, value in payload.items():
@@ -797,8 +823,15 @@ class SettingsManager:
         """Get the config keys for a connector platform."""
         key_map = {
             "telegram": ["token", "allowed_users", "webhook_url"],
-            "discord": ["token", "guild_id"],
-            "slack": ["token", "app_token", "workspace"],
+            "discord": ["token", "guild_id", "allowed_users"],
+            "slack": [
+                "token",
+                "app_token",
+                "workspace",
+                "allowed_users",
+                "allowed_teams",
+                "allowed_channels",
+            ],
             "email": ["smtp_host", "smtp_port", "username", "password", "imap_host"],
             "webhook": ["incoming_url", "outgoing_url", "secret"],
         }

@@ -86,6 +86,23 @@ def test_slack_parse_message() -> None:
     assert msg.platform == "slack"
     assert msg.sender_id == "slack:U1"
     assert msg.text == "hello slack"
+    assert "thread_hint" not in msg.context_metadata
+
+
+def test_slack_parse_thread_reply_stamps_hint() -> None:
+    msg = parse_message_event(
+        {
+            "type": "message",
+            "channel": "C1",
+            "user": "U1",
+            "text": "reply",
+            "ts": "2.0",
+            "thread_ts": "1.0",
+            "team": "T1",
+        }
+    )
+    assert msg is not None
+    assert msg.context_metadata["thread_hint"] == "gw-slack-U1-thread-1-0"
 
 
 def test_adapter_static_keyboards() -> None:

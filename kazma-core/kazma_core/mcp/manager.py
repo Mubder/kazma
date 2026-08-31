@@ -36,6 +36,7 @@ Config format (from kazma.yaml ``mcp.servers``):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import itertools
 import json
 import logging
@@ -44,7 +45,9 @@ import re
 import subprocess
 import sys
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -403,6 +406,8 @@ class AsyncMCPManager:
         await manager.shutdown()
     """
 
+    _MAX_SCOPED = 4
+
     def __init__(self) -> None:
         self._servers: dict[str, MCPServerHandle] = {}
         # Connection setup deliberately remains best-effort for application
@@ -413,6 +418,12 @@ class AsyncMCPManager:
         # handshake failures, keyed by server name. The UI reads these to
         # offer an OAuth login button.
         self._oauth_challenges: dict[str, str] = {}
+        # Original configs (pre-scoped) so a per-task workspace can spawn
+        # a clone instead of fail-closing on a root mismatch.
+        self._server_templates: dict[str, dict[str, Any]] = {}
+        # LRU of (server_name, resolved_root) → handle. Not listed in
+        # list_servers(); execute_mcp_tool routes to them internally.
+        self._scoped: OrderedDict[tuple[str, str], MCPServerHandle] = OrderedDict()
 
     def oauth_challenge(self, name: str) -> str | None:
         """Return the captured OAuth challenge header for *name*, if any."""
@@ -450,6 +461,8 @@ class AsyncMCPManager:
                 continue
 
             name = str(cfg.get("name") or "unnamed")
+            if "__scoped_" not in name:
+                self._server_templates[name] = dict(cfg)
             transport = cfg.get("transport", "stdio")
             try:
                 # A repeated startup/start request must not orphan the prior
@@ -518,6 +531,12 @@ class AsyncMCPManager:
         """Disconnect all servers and clean up processes."""
         for name in list(self._servers):
             await self.disconnect_server(name)
+        for key, handle in list(self._scoped.items()):
+            try:
+                await self._close_handle(handle)
+            except Exception:
+                logger.debug("[MCP] scoped shutdown %s failed", key, exc_info=True)
+        self._scoped.clear()
 
     async def disconnect_server(self, name: str) -> bool:
         """Disconnect one server, safely handling an already-dead transport."""
@@ -783,7 +802,145 @@ class AsyncMCPManager:
         )
         return jsonrpc_reply(data.get("id"), result=result, error=error)
 
-    # ── Tool execution ──────────────────────────────────────────────
+    # ── Per-task workspace MCP instances ────────────────────────────
+
+    async def _route_workspace_scope(
+        self,
+        server_name: str,
+        handle: MCPServerHandle,
+    ) -> tuple[MCPServerHandle, dict[str, Any] | None]:
+        """Route a call onto a scoped clone when the task root differs.
+
+        Kill-switch: ``KAZMA_MCP_SCOPE_GUARD=0``. Non-workspace-bound
+        servers skip. Spawn failure (or missing template) fail-closes.
+        """
+        try:
+            if os.environ.get("KAZMA_MCP_SCOPE_GUARD", "1").strip().lower() in (
+                "0", "false", "no", "off",
+            ):
+                return handle, None
+
+            from kazma_core.ide.workspace_scope import resolve_workspace_root
+            from kazma_core.workspace.binding import get_bound_mcp_root
+
+            scoped_root = resolve_workspace_root()
+            bound_root = get_bound_mcp_root()
+            if scoped_root is None or bound_root is None:
+                return handle, None
+            if Path(bound_root).resolve() == Path(scoped_root).resolve():
+                return handle, None
+
+            template = self._server_templates.get(server_name)
+            if template is not None:
+                from kazma_core.workspace.mcp_rebind import is_workspace_bound_server
+
+                if not is_workspace_bound_server(template):
+                    return handle, None
+
+            scoped = await self._get_or_spawn_scoped(server_name, Path(scoped_root))
+            if scoped is not None and scoped.connected:
+                return scoped, None
+
+            return handle, {
+                "content": (
+                    f"MCP server '{server_name}' is bound to the active "
+                    f"workspace ({bound_root}) but this task targets a "
+                    f"different workspace ({scoped_root}). Per-workspace "
+                    "MCP instance could not be started — switch the "
+                    "active workspace, or dispatch without a per-task "
+                    "workspace_id. (KAZMA_MCP_SCOPE_GUARD=0 disables "
+                    "this guard.)"
+                ),
+                "is_error": True,
+            }
+        except Exception:
+            logger.warning(
+                "[MCP] scope guard check failed — denying call (fail-closed)",
+                exc_info=True,
+            )
+            return handle, {
+                "content": (
+                    "MCP workspace scope guard failed closed: could not verify "
+                    "this task's workspace against the bound MCP root. Bind the "
+                    "active workspace, retry, or set KAZMA_MCP_SCOPE_GUARD=0."
+                ),
+                "is_error": True,
+            }
+
+    async def _get_or_spawn_scoped(
+        self,
+        server_name: str,
+        scoped_root: Path,
+    ) -> MCPServerHandle | None:
+        """Spawn (or reuse) an LRU-capped clone rooted at *scoped_root*."""
+        try:
+            root_key = str(Path(scoped_root).resolve())
+        except Exception:
+            root_key = str(scoped_root)
+        cache_key = (server_name, root_key)
+        existing = self._scoped.get(cache_key)
+        if existing is not None and existing.connected:
+            self._scoped.move_to_end(cache_key)
+            return existing
+        if existing is not None:
+            try:
+                await self._close_handle(existing)
+            except Exception:
+                logger.debug("[MCP] close stale scoped handle failed", exc_info=True)
+            self._scoped.pop(cache_key, None)
+
+        template = self._server_templates.get(server_name)
+        if not template:
+            return None
+        try:
+            from kazma_core.workspace.mcp_rebind import (
+                apply_workspace_to_server_config,
+                is_workspace_bound_server,
+            )
+        except Exception:
+            return None
+        if not is_workspace_bound_server(template):
+            return None
+
+        digest = hashlib.sha256(root_key.encode("utf-8", errors="replace")).hexdigest()[:8]
+        alias = f"{server_name}__scoped_{digest}"
+        cfg = apply_workspace_to_server_config(dict(template), root=Path(scoped_root))
+        cfg["name"] = alias
+        transport = cfg.get("transport", "stdio")
+        try:
+            if transport == "stdio":
+                await self._connect_stdio(alias, cfg)
+            elif transport == "sse":
+                await self._connect_sse(alias, cfg)
+            elif transport in ("streamable_http", "streamable-http", "http"):
+                await self._connect_streamable_http(alias, cfg)
+            else:
+                return None
+        except Exception:
+            logger.warning(
+                "[MCP] scoped spawn failed server=%s root=%s",
+                server_name,
+                root_key,
+                exc_info=True,
+            )
+            return None
+        spawned = self._servers.pop(alias, None)
+        if spawned is None or not spawned.connected:
+            return None
+        while len(self._scoped) >= self._MAX_SCOPED:
+            _old_key, old_handle = self._scoped.popitem(last=False)
+            try:
+                await self._close_handle(old_handle)
+            except Exception:
+                logger.debug("[MCP] LRU evict scoped handle failed", exc_info=True)
+        self._scoped[cache_key] = spawned
+        logger.info(
+            "[MCP] scoped instance server=%s root=%s alias=%s",
+            server_name,
+            root_key,
+            alias,
+        )
+        return spawned
 
     async def execute_mcp_tool(
         self,
@@ -812,58 +969,10 @@ class AsyncMCPManager:
                 "is_error": True,
             }
 
-        # ── Per-task workspace scope guard (deep-audit 2026-08-19, #11) ──
-        # Workspace-bound MCP servers are rebound to the PROCESS-ACTIVE
-        # workspace only, but a dispatched swarm task may target a different
-        # workspace via workspace_scope. Executing against the process-bound
-        # root would silently operate on the WRONG repo's files — fail
-        # closed with an actionable error instead. Only fires when a
-        # per-task scope is active AND the roots actually differ (the
-        # common single-workspace case is unaffected).
-        # Kill-switch: KAZMA_MCP_SCOPE_GUARD=0.
-        try:
-            import os as _os
-
-            if _os.environ.get("KAZMA_MCP_SCOPE_GUARD", "1").strip().lower() not in (
-                "0", "false", "no", "off",
-            ):
-                from pathlib import Path as _Path
-
-                from kazma_core.ide.workspace_scope import resolve_workspace_root
-                from kazma_core.workspace.binding import get_bound_mcp_root
-
-                scoped_root = resolve_workspace_root()
-                bound_root = get_bound_mcp_root()
-                if (
-                    scoped_root is not None
-                    and bound_root is not None
-                    and _Path(bound_root).resolve() != _Path(scoped_root).resolve()
-                ):
-                    return {
-                        "content": (
-                            f"MCP server '{server_name}' is bound to the active "
-                            f"workspace ({bound_root}) but this task targets a "
-                            f"different workspace ({scoped_root}). Per-workspace "
-                            "MCP instances are not supported yet — switch the "
-                            "active workspace, or dispatch without a per-task "
-                            "workspace_id. (KAZMA_MCP_SCOPE_GUARD=0 disables "
-                            "this guard.)"
-                        ),
-                        "is_error": True,
-                    }
-        except Exception:
-            logger.warning(
-                "[MCP] scope guard check failed — denying call (fail-closed)",
-                exc_info=True,
-            )
-            return {
-                "content": (
-                    "MCP workspace scope guard failed closed: could not verify "
-                    "this task's workspace against the bound MCP root. Bind the "
-                    "active workspace, retry, or set KAZMA_MCP_SCOPE_GUARD=0."
-                ),
-                "is_error": True,
-            }
+        routed, scope_err = await self._route_workspace_scope(server_name, handle)
+        if scope_err is not None:
+            return scope_err
+        handle = routed
 
         # Strip the mcp__<server>__ namespace prefix if present — the LLM
         # emits the namespaced form (to avoid collisions), but the server

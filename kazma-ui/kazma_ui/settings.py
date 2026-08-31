@@ -1671,6 +1671,7 @@ class SettingsRouterBuilder:
     def _build_mcp_routes(self) -> None:
         router = self.mcp_router
         _get_sm = self._get_sm
+        config_store = self.config_store
 
         @router.get("/api/settings/mcp")
         async def api_get_mcp() -> list[dict[str, Any]]:

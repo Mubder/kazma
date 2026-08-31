@@ -261,21 +261,19 @@ def register_misc_routes(self: Any) -> None:
                 tts_output_format=voice_cfg.get("tts_output_format", "mp3"),
                 stt_language=voice_cfg.get("stt_language", "auto"),
             )
-            allowed = self.config_store.get("connectors.telegram.allowed_users", "")
-            if allowed:
-                try:
-                    allowed_ids = [int(uid.strip()) for uid in allowed.split(",") if uid.strip()]
-                    tg_adapter.set_allowed_users(allowed_ids)
-                except ValueError:
-                    logger.warning("[Gateway] Invalid allowed_users format: %s", allowed)
+            from kazma_gateway.allowlists import apply_adapter_allowlists
+
+            apply_adapter_allowlists(tg_adapter, self.config_store)
             self.gateway.add_adapter(tg_adapter)
             logger.info("[Gateway] Telegram adapter re-registered via refresh")
 
         discord_token = self.config_store.get("connectors.discord.token", "") or os.environ.get("DISCORD_BOT_TOKEN", "")
         if discord_token:
             from kazma_gateway.adapters.discord import DiscordAdapter
+            from kazma_gateway.allowlists import apply_adapter_allowlists
 
             discord_adapter = DiscordAdapter(token=discord_token)
+            apply_adapter_allowlists(discord_adapter, self.config_store)
             self.gateway.add_adapter(discord_adapter)
             logger.info("[Gateway] Discord adapter re-registered via refresh")
 
@@ -285,8 +283,22 @@ def register_misc_routes(self: Any) -> None:
         slack_app_token = (_cs_slack_app2 if _cs_slack_app2.startswith("xapp-") else "") or os.environ.get("SLACK_APP_TOKEN", "")
         if slack_bot_token:
             from kazma_gateway.adapters.slack import SlackAdapter
+            from kazma_gateway.allowlists import apply_adapter_allowlists, split_ids
 
-            slack_adapter = SlackAdapter(bot_token=slack_bot_token, app_token=slack_app_token or None)
+            slack_adapter = SlackAdapter(
+                bot_token=slack_bot_token,
+                app_token=slack_app_token or None,
+                allowed_users=split_ids(
+                    self.config_store.get("connectors.slack.allowed_users", "")
+                ) or None,
+                allowed_teams=split_ids(
+                    self.config_store.get("connectors.slack.allowed_teams", "")
+                ) or None,
+                allowed_channels=split_ids(
+                    self.config_store.get("connectors.slack.allowed_channels", "")
+                ) or None,
+            )
+            apply_adapter_allowlists(slack_adapter, self.config_store)
             self.gateway.add_adapter(slack_adapter)
             logger.info("[Gateway] Slack adapter re-registered via refresh")
 
