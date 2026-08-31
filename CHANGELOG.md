@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## /x Arabic still LTR after cache disable (2026-08-31)
+
+Chromium `-webkit-box` line-clamp painted tweet rows LTR even with
+`dir=rtl`. Rows no longer use that display; `stampAr` writes
+`direction:rtl;text-align:right` on the node (composer, drafts, posted).
+
 ## /x Arabic RTL (2026-08-31)
 
 Tweet bodies on `/x` (composer, drafts, posted, planner) pin `dir=rtl`

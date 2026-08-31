@@ -157,12 +157,32 @@ function scheduledPage() {
         },
 
         summaryDir(task) {
-            if (task && task.dir) return task.dir;
+            if (task && task.dir && task.dir !== 'auto') return task.dir;
             const bidi = window.KazmaBidi;
             if (bidi && bidi.textDir) return bidi.textDir(this.cleanSummary(task));
             const s = this.cleanSummary(task);
             if (/[\u0600-\u06FF]/.test(s)) return 'rtl';
             return 'ltr';
+        },
+
+        stampAr(el, raw) {
+            if (!el) return;
+            const rtl = this.summaryDir({ summary: raw }) === 'rtl';
+            el.setAttribute('dir', rtl ? 'rtl' : 'ltr');
+            el.classList.toggle('is-ar', rtl);
+            if (rtl) {
+                el.style.direction = 'rtl';
+                el.style.textAlign = 'right';
+                el.style.unicodeBidi = 'isolate';
+                el.style.fontFamily = 'var(--font-arabic)';
+                el.style.display = 'block';
+            } else {
+                el.style.direction = '';
+                el.style.textAlign = '';
+                el.style.unicodeBidi = '';
+                el.style.fontFamily = '';
+                el.style.display = '';
+            }
         },
 
         /* Real failures only. last_result is the agent's wrap-up essay and

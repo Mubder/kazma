@@ -31,8 +31,7 @@
      let a paragraph set the row height. */
   .sched-summary { max-width: 520px; }
   .sched-summary .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 2px; }
-  .sched-summary .txt { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
-                        overflow: hidden; word-break: break-word; unicode-bidi: isolate; text-align: start; }
+  .sched-summary .txt { overflow: hidden; max-height: 6em; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .sched-summary .why { color: var(--danger, #ef4444); font-size: .72rem; margin-top: 4px;
                         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .sched-summary .outcome { color: var(--text-muted); font-size: .72rem; margin-top: 4px;
@@ -57,8 +56,7 @@
 
   /* ── X activity ── */
   .audit-text { max-width: 420px; }
-  .audit-text .txt { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
-                     overflow: hidden; word-break: break-word; unicode-bidi: isolate; text-align: start; }
+  .audit-text .txt { overflow: hidden; max-height: 4.6em; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .audit-detail { border-top: 1px solid var(--border-subtle); background: var(--bg-surface);
                   padding: 12px 14px; }
   .audit-detail .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 6px; }
@@ -166,6 +164,7 @@
                 <div class="kicker" x-show="summaryKicker(task)" x-cloak
                      x-text="summaryKicker(task)"></div>
                 <div class="txt" :dir="summaryDir(task)"
+                     x-effect="stampAr($el, cleanSummary(task))"
                      x-text="cleanSummary(task)" :title="cleanSummary(task)"></div>
                 <div class="why" x-show="errorText(task)" x-cloak
                      x-text="errorText(task)" :title="errorText(task)"></div>
@@ -224,6 +223,7 @@
               <td x-text="e.action"></td>
               <td class="audit-text" :class="audit.open === i ? 'audit-open' : ''">
                 <div class="txt" :dir="summaryDir({ summary: e.text })"
+                     x-effect="stampAr($el, cleanSummary({ summary: e.text }))"
                      x-text="cleanSummary({ summary: e.text })"></div>
                 <div class="why" x-show="audit.open === i && e.error" x-cloak x-text="e.error"></div>
               </td>
@@ -245,6 +245,7 @@
          class="audit-detail">
       <div class="kicker" x-text="auditDetailMeta()"></div>
       <div class="txt" :dir="summaryDir({ summary: auditDetailText() })"
+           x-effect="stampAr($el, auditDetailText())"
            x-text="auditDetailText() || '—'"></div>
       <div class="why" x-show="auditDetailError()" x-cloak
            x-text="auditDetailError()"></div>
