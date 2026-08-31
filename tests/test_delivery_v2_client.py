@@ -100,27 +100,25 @@ class TestV2ArchitecturePresent:
         assert "_resyncDelivery('sse-truncated')" in src
 
     def test_ws_sse_dedupe_guard(self):
-        """Every journaled frame fans out to WS too — the store must not
-        double-paint tokens/final reply while the SSE stream owns the live
-        turn (the duplicated-bubble incident class). The approval card is
-        NOT suppressed in the store anymore: dedupe moved to renderHitlCard
-        (idempotent on a live card) because suppressing the WS render while
-        betting on a late SSE frame left interrupted turns silently paused
-        with no card at all (2026-08-26)."""
+        """Every journaled frame fans out to WS too. Dual-paint is prevented
+        by seq-dedup on the TurnDocument, not a live-SSE skip list (that
+        skip list swallowed HITL cards when SSE lagged, 2026-08-26)."""
         chat_src = _CHAT_JS.read_text(encoding="utf-8")
         store_src = _STORE_JS.read_text(encoding="utf-8")
-        assert "hasLiveSSE: function()" in chat_src
-        # token/done/capacity painting still gated on the live SSE
-        assert store_src.count("hasLiveSSE()") >= 3
-        # idle/stream_end/done must not call _endTurn while SSE owns the turn
-        # (CoT vanished + thinking/Stop blinked mid-stream, 2026-09-01).
-        assert "_sseOwnsLiveTurn" in store_src
-        assert "sseOwned[type]" in store_src
+        assert "hasLiveSSE" not in chat_src
+        assert "hasLiveSSE" not in store_src
+        assert "_sseOwnsLiveTurn" not in store_src
+        assert "sseOwned[type]" not in store_src
+        assert "applyTurnEvent" in chat_src
+        assert store_src.count("_applyTurnEvent") >= 3
         assert "case 'capacity'" in store_src
         assert "_plainFromMarkdown" in chat_src
         assert "function _isInstantCapacitySlash" in chat_src
         # card dedupe is at the render site, not the transport
         assert "if (hasInlineApprovalCard()) return;" in chat_src
+        # idle/stream_end must not finalize a still-streaming document
+        assert "stIdle !== 'streaming'" in store_src
+        assert "stEnd !== 'streaming'" in store_src
 
     def test_missed_approval_card_recovery(self):
         """An interrupted turn whose card never rendered must recover it
@@ -164,9 +162,9 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         # epoch bump before the approve-resume dispatch
         assert "_sseEpoch++;" in src
-        # token paint marks the turn painted
-        at = src.index("tokenAccum += tokenData.content;")
-        assert "_turnPainted = true;" in src[at:at + 200]
+        # approve-resume tokens go through the same TurnDocument projector
+        approve = src.split("onToken: function(tokenData)", 1)[1].split("onToolCall:", 1)[0]
+        assert "applyTurnEvent" in approve
         # both empty-notice branches are guarded
         assert src.count("!_turnPainted)") >= 2
         # no eager blank bubble on the next-approval timeout
@@ -462,7 +460,9 @@ class TestUIAuditPhase3Fixes:
 
     def test_has_live_sse_contract_documented(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        assert "CONTRACT: `activeStream` is assigned ONLY by the two turn-owning" in src
+        assert "function applyTurnEvent(ev)" in src
+        assert "function renderTurn(doc, meta)" in src
+        assert "hasLiveSSE" not in src
 
     def test_fragile_root_selector_gone(self):
         comp = (_UI / "static" / "js" / "modules" / "components.js").read_text(encoding="utf-8")
@@ -521,7 +521,10 @@ class TestUIAuditPhase3Fixes:
 
     def test_apply_final_paints_unconditionally(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        assert "Server truth \u2192 DOM. ALWAYS." in src
+        assert "applyFinalAssistantText" not in src
+        render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
+        assert "_paintHTML(textEl, _renderReplyHTML(text))" in render_fn
+        assert "_turnPainted = true" in render_fn
 
 
 class TestHiddenTabUX:
@@ -556,7 +559,8 @@ class TestResyncFragmentationFixes:
         idle = src.split("// Idle: paint durable assistant text", 1)[1].split(
             "Idle with nothing to deliver", 1
         )[0]
-        assert "applyFinalAssistantText" in idle
+        assert "applyTurnEvent" in idle
+        assert "hydrate" in idle
         assert "!lastMsg.pending" not in idle
 
     def test_resync_never_aborts_a_live_stream(self):
@@ -571,8 +575,9 @@ class TestResyncFragmentationFixes:
 
     def test_resync_paint_not_terminal_while_stream_live(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        final_fn = src.split("applyFinalAssistantText: function", 1)[1]
-        assert "(opts.replay || opts.source === 'resync') && !activeStream" in final_fn
+        render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
+        assert "meta.source === 'resync'" in render_fn
+        assert "&& !activeStream" in render_fn
 
 
 class TestServerSidePingPin:
@@ -762,7 +767,7 @@ class TestPlanFencePresentation:
             "transformRenderedForPlan(\n      KS.markdown(_scrubDsml(stripPlanFenceForDisplay(text)))\n    )"
             in src
         )
-        assert src.count("_renderReplyHTML(tokenAccum)") >= 4
+        assert src.count("_renderReplyHTML(") >= 3
 
         # Paints go through the idempotent helper, never a bare assignment.
         assert "function _paintHTML(textEl, html)" in src
@@ -777,10 +782,10 @@ class TestPlanFencePresentation:
         ), "raw unconditional paint reintroduced — this is the end-of-reply flash"
 
         # Server truth still always wins when it actually differs.
-        final_fn = src.split("applyFinalAssistantText: function", 1)[1]
-        assert "_paintHTML(textEl, _renderReplyHTML(tokenAccum));" in final_fn
+        render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
+        assert "_paintHTML(textEl, _renderReplyHTML(text));" in render_fn
         # textContent fallback still uses the raw stripped text.
-        assert "textEl.textContent = display;" in final_fn
+        assert "textEl.textContent = display;" in render_fn
 
     def test_fence_splitter_tolerates_space_variant(self):
         """'``` plan' (space between fence and tag) defeated BOTH the text

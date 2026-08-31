@@ -493,26 +493,37 @@ async def _invoke_supervisor(
     try:
         hitl_rounds = 0
         while True:
+            from kazma_core.agent.turn import run_agent_turn
+
             try:
-                result = await graph.ainvoke(payload, config)
+                _turn = await run_agent_turn(
+                    graph=graph,
+                    thread_id=thread_id,
+                    state=payload,
+                    config=config,
+                )
             except Exception as exc:
                 # Some LangGraph versions raise GraphInterrupt instead of
                 # returning a paused state. aget_state still has the payload.
                 if type(exc).__name__ not in ("GraphInterrupt", "NodeInterrupt"):
                     raise
+                _turn = None
+            if _turn is not None:
+                if _turn.text:
+                    last_text = _turn.text
+                hitl_payload = _turn.interrupt_payload
+                result = _turn.state
+            else:
                 result = {}
-            messages = (result or {}).get("messages") or []
-            for msg in reversed(messages):
-                if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("content"):
-                    last_text = str(msg["content"])
-                    break
-            snap = None
-            if checkpointer is not None:
-                try:
-                    snap = await graph.aget_state(config)
-                except Exception:
-                    snap = None
-            hitl_payload = extract_hitl_interrupt(snap)
+                hitl_payload = None
+            if not hitl_payload:
+                snap = None
+                if checkpointer is not None:
+                    try:
+                        snap = await graph.aget_state(config)
+                    except Exception:
+                        snap = None
+                hitl_payload = extract_hitl_interrupt(snap)
             if not hitl_payload:
                 hitl_payload = extract_hitl_interrupt(result)
             if not hitl_payload:

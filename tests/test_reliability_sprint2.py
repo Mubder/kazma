@@ -36,7 +36,7 @@ class TestSourceContractsSprint2:
     def test_ws_persist_stamps_model(self):
         src = _WS.read_text(encoding="utf-8")
         assert 'sess.messages[-1]["model"]' in src or "model_id" in src
-        assert "model=" in src  # _persist_final_assistant_message(..., model=)
+        assert "model=" in src  # _ws_project_reply(..., model=)
 
     def test_sse_stamps_model_on_assistant(self):
         src = module_source(_SSE)

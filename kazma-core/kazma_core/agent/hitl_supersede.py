@@ -93,20 +93,24 @@ async def cancel_pending_hitl(
                 )
             return _cmd
 
-        await graph.ainvoke(await _deny_resume_cmd(), config)
+        from kazma_core.agent.turn import run_agent_turn
+
+        _tid = str((config.get("configurable") or {}).get("thread_id") or "")
+        await run_agent_turn(
+            graph=graph,
+            thread_id=_tid,
+            state=await _deny_resume_cmd(),
+            config=config,
+        )
         # Chained danger tools may re-interrupt — deny those too (cap 5).
         for _ in range(5):
             if not await has_pending_hitl(graph, config):
                 break
-            await graph.ainvoke(await _deny_resume_cmd(), config)
-        try:
-            from kazma_ui.turn_runtime import close_turn
-
-            await close_turn(graph, config)
-        except Exception:
-            logger.debug(
-                "[hitl_supersede] close_turn skipped",
-                exc_info=True,
+            await run_agent_turn(
+                graph=graph,
+                thread_id=_tid,
+                state=await _deny_resume_cmd(),
+                config=config,
             )
         return True
     except Exception:

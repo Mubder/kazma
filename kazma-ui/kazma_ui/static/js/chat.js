@@ -17,6 +17,8 @@
   var chatSessionId = null;
   var currentMsgEl = null;
   var tokenAccum = '';
+  var _liveTurnId = '';
+  var _docs = {};
   var activeStream = null;
   /** Live typing-indicator element for the current turn (cleared on abort). */
   var activeTypingEl = null;
@@ -429,9 +431,17 @@
         return;
       }
       if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim()) {
-        if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-          window.KazmaChat.applyFinalAssistantText(lastMsg.content, lastMsg.model || '', { source: 'resync' });
-        }
+        applyTurnEvent({
+          type: 'hydrate',
+          source: 'resync',
+          turn_id: lastMsg.turn_id || _liveTurnId,
+          content: lastMsg.content,
+          parts: lastMsg.parts,
+          activity: lastMsg.activity,
+          model: lastMsg.model || '',
+          open: lastMsg.open,
+          pending: lastMsg.pending,
+        });
         return;
       }
 
@@ -908,6 +918,7 @@
     if (!resume) {
       currentMsgEl = null;
       tokenAccum = '';
+      _liveTurnId = '';
       _progressEl = null;
       _progressStepCount = 0;
       _progressToolCount = 0;
@@ -1892,17 +1903,17 @@
         // stays steady ("Writing reply…"); terminal paths (done/error/
         // endTurn) are the only ones allowed to hide it.
         activeTypingEl = null;
-        if (!currentMsgEl) {
-          currentMsgEl = createAssistantMessage();
-        }
         if (!tokenAccum) {
           logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
         }
-        tokenAccum += data.content;
-        tryIngestPlanFromText(tokenAccum);
-        var textEl = currentMsgEl.querySelector('.message-text');
-        _scheduleLiveTextPaint(textEl);
-        scrollToBottom();
+        applyTurnEvent({
+          type: 'token',
+          content: data.content,
+          seq: data.seq,
+          turn_id: data.turn_id || _liveTurnId,
+          full: !!data.full,
+          source: 'sse',
+        });
       },
 
       onToolCall: function(data) {
@@ -2013,7 +2024,15 @@
         // tokens already arrived (glued ```plan + answer used to be skipped
         // because tokenAccum was nonempty).
         if (data && data.content) {
-          window.KazmaChat.applyFinalAssistantText(data.content, data.model || '', { source: 'done' });
+          applyTurnEvent({
+            type: 'done',
+            content: data.content,
+            seq: data.seq,
+            turn_id: data.turn_id || _liveTurnId,
+            model: data.model || '',
+            interrupted: !!(data && data.interrupted),
+            source: 'done',
+          });
         }
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
         // _turnPainted: a late stale terminal must NEVER print this after a
@@ -3426,6 +3445,9 @@
         '</div>';
 
     var modelBit = (opts && opts.model) ? (' \u00B7 ' + escapeHtml(String(opts.model))) : '';
+    if (role === 'assistant' && opts && opts.turn_id) {
+      wrapper.setAttribute('data-turn-id', String(opts.turn_id));
+    }
     wrapper.innerHTML =
       avatarHtml +
       '<div class="message-content">' +
@@ -3983,13 +4005,14 @@
         onToken: function(tokenData) {
           KS.hideTyping(approvalTypingEl);
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-          tokenAccum += tokenData.content;
-          _turnPainted = true;
-          tryIngestPlanFromText(tokenAccum);
-          var textEl = currentMsgEl.querySelector('.message-text');
-          _scheduleLiveTextPaint(textEl);
-          scrollToBottom();
+          applyTurnEvent({
+            type: 'token',
+            content: tokenData.content,
+            seq: tokenData.seq,
+            turn_id: tokenData.turn_id || _liveTurnId,
+            full: !!tokenData.full,
+            source: 'sse',
+          });
         },
         // Tool activity goes into the WORKBENCH, exactly as the main stream
         // does it (see the main onToolCall). This path used to append raw
@@ -4710,7 +4733,11 @@
                 : msg.activity,
               parts: msg.parts,
               model: msg.model || '',
+              turn_id: msg.turn_id || '',
             });
+            if (role === 'assistant' && msg.turn_id && window.KazmaTurnDocument && KazmaTurnDocument.fromMessage) {
+              _docs[String(msg.turn_id)] = KazmaTurnDocument.fromMessage(msg);
+            }
           }
         });
 
@@ -5118,6 +5145,100 @@
     init();
   }
 
+  function _cssEscapeAttr(s) {
+    if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(s);
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  }
+
+  /**
+   * Law 3: the only DOM writer for the live assistant bubble + restored CoT.
+   * Transports mutate the in-memory TurnDocument; this paints it.
+   */
+  function renderTurn(doc, meta) {
+    if (!doc || !messagesEl) return;
+    meta = meta || {};
+    var TD = window.KazmaTurnDocument;
+    if (!TD) return;
+    var turnId = String(doc.turnId || '');
+    var el = null;
+    if (turnId) {
+      try {
+        el = messagesEl.querySelector('.message-assistant[data-turn-id="' + _cssEscapeAttr(turnId) + '"]');
+      } catch (eSel) { el = null; }
+    }
+    if (!el) el = currentMsgEl || _assistantBubbleForOpenTurn();
+    if (!el) el = createAssistantMessage();
+    currentMsgEl = el;
+    if (turnId) {
+      try { el.setAttribute('data-turn-id', turnId); } catch (eAttr) { /* ignore */ }
+    }
+    var text = TD.textOf(doc.parts) || doc.stream || '';
+    if (text) tokenAccum = text;
+    var textEl = el.querySelector('.message-text');
+    if (textEl && text) {
+      tryIngestPlanFromText(text);
+      var display = _scrubDsml(stripPlanFenceForDisplay(text));
+      try {
+        if (doc.status === 'streaming') {
+          _scheduleLiveTextPaint(textEl);
+        } else {
+          _paintHTML(textEl, _renderReplyHTML(text));
+        }
+      } catch (mdErr) {
+        if (textEl.textContent !== display) textEl.textContent = display;
+      }
+      try { textEl.setAttribute('data-md', text); } catch (eMd) { /* ignore */ }
+      try { textEl.setAttribute('data-final-len', String(display.length)); } catch (eLen) { /* ignore */ }
+      _turnPainted = true;
+    }
+    if (doc.model) {
+      var metaEl = el.querySelector('.message-meta');
+      if (metaEl && String(metaEl.textContent || '').indexOf(doc.model) < 0) {
+        metaEl.textContent = (metaEl.textContent ? metaEl.textContent + ' · ' : '') + doc.model;
+      }
+    }
+    var activity = TD.activityOf(doc.parts);
+    var terminal = doc.status === 'done' || doc.status === 'paused'
+      || meta.source === 'hydrate' || meta.source === 'resync';
+    if (terminal && activity && activity.length) {
+      var existingCot = el.querySelector('.agent-progress');
+      var liveActive = existingCot && existingCot.classList.contains('is-active')
+        && !existingCot.classList.contains('kazma-cot-restored');
+      if (!liveActive) {
+        var cot = _buildRestoredWorkbench(activity);
+        if (cot) {
+          if (existingCot) existingCot.replaceWith(cot);
+          else {
+            var tw = el.querySelector('.message-text');
+            if (tw && tw.parentNode) tw.parentNode.insertBefore(cot, tw);
+          }
+        }
+      }
+    }
+    if (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done') {
+      _awaitingReply = false;
+    }
+    if ((meta.source === 'resync' || meta.source === 'hydrate') && !activeStream) {
+      currentMsgEl = null;
+    }
+    scrollToBottom();
+  }
+
+  function applyTurnEvent(ev) {
+    ev = ev || {};
+    var TD = window.KazmaTurnDocument;
+    if (!TD || typeof TD.applyEvent !== 'function') return false;
+    var turnId = String(ev.turn_id || ev.turnId || _liveTurnId || '');
+    if (!turnId) turnId = 'live';
+    _liveTurnId = turnId;
+    var prev = _docs[turnId] || TD.empty(turnId);
+    var next = TD.applyEvent(prev, ev);
+    if (next === prev) return false;
+    _docs[turnId] = next;
+    renderTurn(next, { source: ev.source || ev.type || '' });
+    return true;
+  }
+
   function destroyChatMouth() {
     try { if (activeStream) activeStream.abort(); } catch (e) {}
     activeStream = null;
@@ -5164,18 +5285,12 @@
     /** Dump the turn-lifecycle trace (dispatch/terminal sequence) — the
      *  "what actually happened" for fast-dead turns. */
     diagnostics: dumpDiagnostics,
-    /**
-     * True while an SSE stream owns the live turn. The telemetry WS checks
-     * this to avoid double-painting the same reply over both transports
-     * (the duplicated-bubble incident class, 2026-08-26).
-     *
-     * CONTRACT: `activeStream` is assigned ONLY by the two turn-owning
-     * dispatches — the /api/chat/stream send/attach (_dispatchSse) and the
-     * /api/approve resume (submitApproval). Never point it at any other
-     * fetch/stream, or the WS dedupe would suppress painting for unrelated
-     * traffic (audit P2).
-     */
-    hasLiveSSE: function() { return !!activeStream; },
+    applyTurnEvent: applyTurnEvent,
+    renderTurn: renderTurn,
+    turnStatus: function() {
+      var doc = _docs[_liveTurnId];
+      return doc ? String(doc.status || '') : '';
+    },
     refreshSessions: loadSessions,
     refreshSessionsSoon: refreshSessionsSoon,
     getOrCreateSessionId: function() {
@@ -5218,28 +5333,12 @@
       if (!reply || !messagesEl) return;
       var incoming = String(reply).trim();
       if (!incoming) return;
-      var incomingPlain = _plainFromMarkdown(incoming);
-      var open = _assistantBubbleForOpenTurn();
-      var te = open ? open.querySelector('.message-text') : null;
-      var shown = te
-        ? _plainFromMarkdown(te.getAttribute('data-md') || te.textContent || '')
-        : '';
-      // Same confirmation already on the open-turn bubble (SSE painted,
-      // then WS live-fanout of the journaled capacity frame — mobile
-      // /unrestricted then desktop load, 2026-08-31).
-      if (shown && incomingPlain && shown === incomingPlain) return;
-      var prev = currentMsgEl;
-      // One assistant under the last user row: fill the thinking
-      // placeholder instead of opening a second bubble.
-      currentMsgEl = open || createAssistantMessage();
-      if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-        window.KazmaChat.applyFinalAssistantText(incoming, '', {});
-      }
-      var stamped = currentMsgEl && currentMsgEl.querySelector('.message-text');
-      if (stamped) {
-        try { stamped.setAttribute('data-md', incoming); } catch (e) { /* ignore */ }
-      }
-      currentMsgEl = prev;
+      applyTurnEvent({
+        type: 'capacity',
+        reply: incoming,
+        turn_id: _liveTurnId,
+        source: 'capacity',
+      });
     },
     // Telemetry WS hooks — called by agentStore
     logProgress: logProgress,
@@ -5255,122 +5354,22 @@
     preparePostApprovalTurn: function() {
       tokenAccum = '';
       noteTurnActivity();
-      // Keep currentMsgEl so applyFinal paints into the same turn bubble.
-    },
-    applyFinalAssistantText: function(content, model, opts) {
-      _clearStatusStrip();
-      activeTypingEl = null;
-      if (!content) return;
-      var incoming = String(content).trim();
-      if (!incoming) return;
-      opts = opts || {};
-
-      // Always bind to the open-turn assistant (after last user). Never open a
-      // second bubble for the same turn — that was the refresh/tab duplicate.
-      if (!currentMsgEl) {
-        currentMsgEl = _assistantBubbleForOpenTurn();
-      }
-      var textEl = currentMsgEl ? currentMsgEl.querySelector('.message-text') : null;
-      if (!textEl && currentMsgEl) {
-        // Defensive: bubble without .message-text — open a clean one.
-        currentMsgEl = createAssistantMessage();
-        textEl = currentMsgEl.querySelector('.message-text');
-      }
-
-      // Server truth → DOM. ALWAYS. No "already shows it?" text matching:
-      // dedupe belongs to the seq-journaled transports, painting twice is
-      // idempotent, and a skipped paint was the "no response until refresh"
-      // root cause.
-      var prevWorking = (tokenAccum || '').trim();
-      tokenAccum = incoming;
-      _turnPainted = true;
-      tryIngestPlanFromText(tokenAccum);
-      var display = _scrubDsml(stripPlanFenceForDisplay(tokenAccum));
-      if (textEl) {
-        try {
-          var html = _renderReplyHTML(tokenAccum);
-          // Supervisor hops stream working notes; respond_node then sends a
-          // different user-facing final. Replacing the bubble made the
-          // stream "disappear". Keep the earlier notes collapsed when they
-          // are not a prefix of the final answer.
-          var workingProse = _scrubDsml(stripPlanFenceForDisplay(prevWorking));
-          if (
-            workingProse
-            && display
-            && display.indexOf(workingProse.slice(0, Math.min(80, workingProse.length))) !== 0
-            && workingProse.indexOf(display.slice(0, Math.min(80, display.length))) !== 0
-          ) {
-            try {
-              logProgress({
-                kind: 'thought',
-                title: ti('working_notes', 'Working notes'),
-                detail: workingProse,
-                state: 'done',
-              });
-            } catch (eCot) { /* workbench optional */ }
-            html = '<details class="kazma-working"><summary>'
-              + escapeHtml(ti('working_notes', 'Working notes'))
-              + '</summary>'
-              + transformRenderedForPlan(KS.markdown(workingProse))
-              + '</details>' + html;
-          }
-          _paintHTML(textEl, html);
-        } catch (mdErr) {
-          if (textEl.textContent !== display) textEl.textContent = display;
-        }
-        textEl.setAttribute('data-final-len', String(display.length));
-      }
-      if (model && currentMsgEl) {
-        var meta = currentMsgEl.querySelector('.message-meta');
-        if (meta && meta.textContent.indexOf(model) < 0) {
-          meta.textContent = (meta.textContent ? meta.textContent + ' · ' : '') + model;
-        }
-      }
-      // Release wait only after paint — server content is on screen (or tried).
-      _awaitingReply = false;
-      if ((opts.replay || opts.source === 'resync') && !activeStream) {
-        // Replay/resync paints are terminal for this turn — close the bubble
-        // so the next message opens a fresh one. But NOT while a live stream
-        // owns the turn: closing mid-stream makes the next token open a NEW
-        // bubble + its own "Writing reply…" row, fragmenting one reply into
-        // pieces (2026-08-27 post-restart).
-        currentMsgEl = null;
-        tokenAccum = '';
-      }
-      scrollToBottom();
+      // Keep currentMsgEl so renderTurn paints into the same turn bubble.
     },
     appendLiveToken: function(content, opts) {
       noteTurnActivity();
       _clearStatusStrip();
       activeTypingEl = null;
       if (!content) return;
-      // Full-message backfill: replace, never append (post-HITL duplicate fix).
-      if (opts && opts.full && window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-        window.KazmaChat.applyFinalAssistantText(content, (opts && opts.model) || '');
-        return;
-      }
-      // If server re-sends a full answer that already starts with what we have,
-      // treat as replace (guards older servers without full=true).
-      if (tokenAccum && content && content.length > tokenAccum.length + 20
-          && content.indexOf(tokenAccum.slice(0, Math.min(60, tokenAccum.length))) === 0) {
-        if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-          window.KazmaChat.applyFinalAssistantText(content, '');
-          return;
-        }
-      }
-      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-      if (!tokenAccum) {
-        logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
-      }
-      tokenAccum += content;
-      tryIngestPlanFromText(tokenAccum);
-      var textEl = currentMsgEl.querySelector('.message-text');
-      // Funnels through the shared render + idempotent paint: these two
-      // sites skipped _scrubDsml, so scaffolding showed while streaming
-      // and vanished on the terminal paint - a guaranteed end-of-reply
-      // flash.
-      if (textEl) _paintHTML(textEl, _renderReplyHTML(tokenAccum));
-      scrollToBottom();
+      applyTurnEvent({
+        type: 'token',
+        content: content,
+        full: !!(opts && opts.full),
+        turn_id: (opts && opts.turn_id) || _liveTurnId,
+        model: (opts && opts.model) || '',
+        seq: opts && opts.seq,
+        source: 'ws',
+      });
     },
     setPlan: setPlan,
     appendErrorMessage: function(errMsg) {

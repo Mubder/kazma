@@ -175,10 +175,11 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     js = _CHAT_JS.read_text(encoding="utf-8")
     assert "_LIVE_RENDER_MIN_MS = 150" in js
     assert "function _scheduleLiveTextPaint(textEl)" in js
-    assert js.count("_scheduleLiveTextPaint(textEl);") >= 2  # main + approve-resume
+    assert "_scheduleLiveTextPaint(textEl)" in js
+    assert "function applyTurnEvent(ev)" in js
     assert "transformRenderedForPlan(KS.markdown(liveParts.prose))" in js
     assert "kz-planning" in js  # plan-only hop stays visible, not a blank nbsp
-    assert "class=\"kazma-working\"" in js or "kazma-working" in js
+    assert "kazma-cot-restored" in js
     assert "function isPlanOnlyMessage(text)" in js
     assert "isPlanOnlyMessage(content)" in js
     assert "tryIngestPlanFromText(content)" in js

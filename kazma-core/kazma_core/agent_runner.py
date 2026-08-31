@@ -1099,42 +1099,22 @@ class KazmaAgent:
             except Exception:
                 _ns_cfg = None
 
-            if _ns_cfg is not None and _ns_cfg.enabled:
-                from kazma_core.agent.supervisor_watchdog import (
-                    reset_heartbeat,
-                    supervised_invoke,
-                )
+            from kazma_core.agent.turn import run_agent_turn
 
-                try:
-                    result = await supervised_invoke(
-                        graph,
-                        graph_state,
-                        config,
-                        nonstop_config=_ns_cfg,
-                        turn_timeout=turn_timeout,
-                    )
-                finally:
-                    reset_heartbeat(self._thread_id)
-            elif turn_timeout <= 0:
-                result = await graph.ainvoke(graph_state, config)
-            else:
-                import asyncio as _asyncio
-
-                try:
-                    result = await _asyncio.wait_for(
-                        graph.ainvoke(graph_state, config),
-                        timeout=turn_timeout,
-                    )
-                except _asyncio.TimeoutError:
-                    logger.error(
-                        "Graph turn timed out after %.0fs (thread=%s)",
-                        turn_timeout,
-                        self._thread_id,
-                    )
-                    return (
-                        f"⚠️ Turn timed out after {int(turn_timeout)}s. "
-                        "Try a shorter request or raise KAZMA_TURN_TIMEOUT_SECONDS."
-                    )
+            _turn = await run_agent_turn(
+                graph=graph,
+                thread_id=self._thread_id,
+                state=graph_state,
+                config=config,
+                timeout=turn_timeout,
+                nonstop_config=_ns_cfg,
+            )
+            if _turn.text:
+                return _turn.text
+            if _turn.error:
+                return _turn.error
+            logger.warning("Graph produced no assistant response")
+            return ""
         except Exception as e:
             logger.error("Graph invocation failed: %s", e, exc_info=True)
             # Classified, actionable message (same helper the graph path
@@ -1148,15 +1128,6 @@ class KazmaAgent:
         finally:
             reset_current_thread_id(token)
             reset_turn_id(_turn_token)
-
-        # Extract the final assistant message text.
-        final_messages = result.get("messages", [])
-        for msg in reversed(final_messages):
-            if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("content"):
-                return str(msg["content"])
-
-        logger.warning("Graph produced no assistant response")
-        return ""
 
     def set_on_model_change_callback(self, cb: Callable[[], None]) -> None:
         """Register a callback to run when the active model is synced/switched."""

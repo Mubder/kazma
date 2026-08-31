@@ -49,7 +49,6 @@ from kazma_ui.sse_chat._persistence import (  # noqa: F401
     _checkpoint_backfill_unanswered,
     _persist_detached_reply,
     _persist_instant_turn,
-    _persist_turn_reply,
     _snapshot_paused,
 )
 from kazma_ui.sse_chat._streaming import (  # noqa: F401

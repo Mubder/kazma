@@ -593,7 +593,7 @@ def create_ws_chat_router(
         except Exception:
             return ""
 
-    async def _persist_final_assistant_message(
+    async def _ws_project_reply(
         graph_inst: Any,
         config: dict[str, Any],
         session_id: str,
@@ -1823,7 +1823,7 @@ def create_ws_chat_router(
                                 sess_tokens, sess_cost = _session_usage_totals(session_id)
 
                             _active_model = _resolve_active_model()
-                            final_text = await _persist_final_assistant_message(
+                            final_text = await _ws_project_reply(
                                 graph_inst,
                                 config,
                                 session_id,
@@ -1865,7 +1865,7 @@ def create_ws_chat_router(
                                             thread_id=thread_id,
                                         ).to_dict()
                                     )
-                                await _persist_final_assistant_message(
+                                await _ws_project_reply(
                                     graph_inst,
                                     config,
                                     session_id,
@@ -1925,7 +1925,7 @@ def create_ws_chat_router(
                             # Always clear pending bubble — empty cancel must not
                             # leave "still processing in the background" on reload.
                             try:
-                                await _persist_final_assistant_message(
+                                await _ws_project_reply(
                                     graph_inst,
                                     config,
                                     session_id,
@@ -1950,7 +1950,7 @@ def create_ws_chat_router(
                             # error, but SessionStore still had pending=True empty
                             # content, so refresh showed "still processing…".
                             try:
-                                await _persist_final_assistant_message(
+                                await _ws_project_reply(
                                     graph_inst,
                                     config,
                                     session_id,
@@ -2436,7 +2436,7 @@ def create_ws_chat_router(
                                 emit_delta=False,
                                 already_streamed=False,
                             )
-                            final_text = await _persist_final_assistant_message(
+                            final_text = await _ws_project_reply(
                                 graph_inst,
                                 approve_config,
                                 session_id,
@@ -2454,7 +2454,7 @@ def create_ws_chat_router(
                                     "Ask me to summarize what I found, or retry with "
                                     "a narrower question."
                                 )
-                                final_text = await _persist_final_assistant_message(
+                                final_text = await _ws_project_reply(
                                     graph_inst,
                                     approve_config,
                                     session_id,
@@ -2554,7 +2554,7 @@ def create_ws_chat_router(
                             )
                             if assistant_content_acc:
                                 try:
-                                    await _persist_final_assistant_message(
+                                    await _ws_project_reply(
                                         graph_inst,
                                         approve_config,
                                         session_id,
@@ -2571,7 +2571,7 @@ def create_ws_chat_router(
                             logger.exception("[WS-Chat] Error in approve stream: %s", exc)
                             if assistant_content_acc:
                                 try:
-                                    await _persist_final_assistant_message(
+                                    await _ws_project_reply(
                                         graph_inst,
                                         approve_config,
                                         session_id,

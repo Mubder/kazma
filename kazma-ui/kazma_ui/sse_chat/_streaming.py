@@ -39,8 +39,8 @@ from kazma_ui.sse_chat._helpers import (
 )
 from kazma_ui.sse_chat._persistence import (
     _persist_detached_reply,
-    _persist_turn_reply,
 )
+from kazma_ui.turn_runtime import persist_reply
 
 __all__: list[str] = []
 
@@ -753,7 +753,7 @@ async def _stream_langgraph_events(
             # paints must find it in the store. Emitting `done` first left a
             # window where the browser reloaded into a transcript that did
             # not yet contain the reply it had just rendered.
-            _persist_turn_reply(
+            persist_reply(
                 session_id,
                 reply_turn_id,
                 content_acc,
@@ -805,7 +805,7 @@ async def _stream_langgraph_events(
                 )
             # A crashed turn still owes the user a durable record of whatever
             # it managed to say; without this the transcript reloads blank.
-            _persist_turn_reply(
+            persist_reply(
                 session_id,
                 reply_turn_id,
                 content_acc,

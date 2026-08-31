@@ -604,18 +604,22 @@ def register_misc_routes(self: Any) -> None:
             from kazma_ui.session_manager import get_session_manager as _gsm_resume
             from kazma_ui.sse_chat import _sse_frame, _stream_langgraph_events
 
+            from kazma_ui.turn_runtime import ensure_session_for_thread
+
             _resume_session_id = ""
             try:
                 _owner = _gsm_resume().get_by_thread_id(thread_id)
                 if _owner is not None:
-                    _resume_session_id = _owner.session_id
+                    _resume_session_id = str(_owner.session_id or "")
             except Exception:
                 logger.debug("[HITL] could not resolve session for resume", exc_info=True)
+            if not _resume_session_id:
+                _resume_session_id = ensure_session_for_thread(thread_id)
             _resume_turn = resolve_reply_turn(thread_id, _resume_session_id)
             if not _resume_session_id:
                 logger.warning(
-                    "[HITL] Resume has no session for thread=%s — the answer "
-                    "will stream but cannot be persisted",
+                    "[HITL] Resume mint failed for thread=%s — persist_reply "
+                    "will refuse the write",
                     thread_id,
                 )
 

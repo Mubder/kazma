@@ -141,15 +141,13 @@ function registerAgentStore() {
     _chat() {
       return window.KazmaChat || null;
     },
-    /** SSE owns the live graph turn. WS must not begin/end/paint it. */
-    _sseOwnsLiveTurn() {
+    _applyTurnEvent(ev) {
       try {
-        return !!(window.KazmaChat
-          && typeof window.KazmaChat.hasLiveSSE === 'function'
-          && window.KazmaChat.hasLiveSSE());
-      } catch (e) {
-        return false;
-      }
+        if (window.KazmaChat && typeof window.KazmaChat.applyTurnEvent === 'function') {
+          return window.KazmaChat.applyTurnEvent(ev);
+        }
+      } catch (e) { /* projector optional */ }
+      return false;
     },
     _progress(step) {
       const chat = this._chat();
@@ -790,23 +788,9 @@ function registerAgentStore() {
         }
       } catch (e) { /* visibility UX is best-effort */ }
 
-      // Live SSE owns tokens, CoT, thinking strip, and endTurn. Journaled
-      // idle/stream_end/done on this socket used to call _endTurn mid-stream:
-      // CoT vanished, Stop/thinking blinked, the next tokens opened a bare
-      // bubble. HITL cards still flow (renderHitlCard is idempotent).
-      if (this._sseOwnsLiveTurn()) {
-        const sseOwned = {
-          token: 1, llm_delta: 1, done: 1, turn_complete: 1, stream_end: 1,
-          tool_start: 1, tool_lifecycle: 1, capacity: 1,
-          error: 1, graph_error: 1, approval_complete: 1,
-          approval_started: 1, approval_progress: 1, approval_resuming: 1,
-        };
-        if (sseOwned[type]) return;
-        if (type === 'status' || type === 'status_update') {
-          const st = frame.status || data.status;
-          if (st !== 'paused_for_approval') return;
-        }
-      }
+      // Both SSE and WS mutate the same in-memory TurnDocument. Seq-dedup
+      // in applyEvent is the dual-paint guard (Law 3). Do not skip frames
+      // based on a live-SSE flag — a missed WS-only HITL card is worse.
 
       // Structured resume handshake (V2) — replaces the old prose frame +
       // regex matching ("Reconnected — previous turn still running…").
@@ -946,8 +930,13 @@ function registerAgentStore() {
                 : (data.yolo_allowed !== undefined ? data.yolo_allowed : undefined),
             });
           } else if (statusVal === 'idle') {
-            // End of turn — MUST release chat.js Stop / Enter lock.
-            this._endTurn();
+            // Do not finalize a still-streaming turn: journaled idle fans
+            // out while SSE tokens are still flowing. done/turn_complete
+            // is the terminal.
+            var stIdle = window.KazmaChat && typeof window.KazmaChat.turnStatus === 'function'
+              ? window.KazmaChat.turnStatus()
+              : '';
+            if (stIdle !== 'streaming') this._endTurn();
           }
           break;
         }
@@ -1096,26 +1085,18 @@ function registerAgentStore() {
 
         case 'done':
         case 'turn_complete': {
-          // Authoritative terminal: REPLACE paint (never append — that doubled
-          // post-HITL answers when backfill re-sent the full text).
           const finalText = data.content || frame.content || '';
-          // reconnect catch-up sets replay:true — chat.js must not open a
-          // second bubble when loadSession already painted the same answer.
           const isReplay = !!(data && data.replay) || !!(frame && frame.replay);
-          // WS/SSE dedupe: while the SSE stream owns the live turn, IT paints
-          // the final reply — the WS painting on top duplicated bubbles
-          // (every journaled frame fans out to both transports).
-          const sseOwnsTurn = !!(window.KazmaChat &&
-            typeof window.KazmaChat.hasLiveSSE === 'function' &&
-            window.KazmaChat.hasLiveSSE());
-          if (finalText && window.KazmaChat && !sseOwnsTurn) {
-            if (typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-              window.KazmaChat.applyFinalAssistantText(finalText, data.model || '', {
-                replay: isReplay,
-              });
-            } else if (typeof window.KazmaChat.appendLiveToken === 'function') {
-              window.KazmaChat.appendLiveToken(finalText, { full: true });
-            }
+          if (finalText) {
+            this._applyTurnEvent({
+              type: 'done',
+              content: finalText,
+              seq: data.seq || frame.seq,
+              turn_id: data.turn_id || frame.turn_id,
+              model: data.model || '',
+              interrupted: !!(data.interrupted || frame.interrupted),
+              source: isReplay ? 'resync' : 'done',
+            });
           }
           // Usage stats (tokens/cost + cumulative session totals) → badges +
           // workbench summary bar. Runs BEFORE _endTurn so finalizeProgress
@@ -1146,26 +1127,27 @@ function registerAgentStore() {
           this.isThinking = true;
           this._turnActive = true;
           const text = frame.content || data.content;
-          if (!text || !window.KazmaChat) break;
-          // WS/SSE dedupe: the live SSE stream paints streamed tokens; the
-          // WS painting the same frames duplicated text into tokenAccum.
-          if (typeof window.KazmaChat.hasLiveSSE === 'function' && window.KazmaChat.hasLiveSSE()) {
-            break;
-          }
-          // full=true backfill / recovery: replace, don't concatenate
+          if (!text) break;
           const isFull = !!(data && data.full) || !!(frame && frame.full);
-          if (isFull && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
-            window.KazmaChat.applyFinalAssistantText(text, data.model || '');
-          } else if (typeof window.KazmaChat.appendLiveToken === 'function') {
-            window.KazmaChat.appendLiveToken(text, { full: isFull });
-          }
+          this._applyTurnEvent({
+            type: type === 'llm_delta' ? 'llm_delta' : 'token',
+            content: text,
+            full: isFull,
+            seq: data.seq || frame.seq,
+            turn_id: data.turn_id || frame.turn_id,
+            model: data.model || '',
+            source: 'ws',
+          });
           break;
         }
 
-        case 'stream_end':
-          // Same as idle — _endTurn keeps approval lock if pendingApproval set.
-          this._endTurn();
+        case 'stream_end': {
+          var stEnd = window.KazmaChat && typeof window.KazmaChat.turnStatus === 'function'
+            ? window.KazmaChat.turnStatus()
+            : '';
+          if (stEnd !== 'streaming') this._endTurn();
           break;
+        }
 
         case 'error':
         case 'graph_error':
@@ -1181,15 +1163,15 @@ function registerAgentStore() {
 
         case 'capacity': {
           try {
-            // Same WS/SSE fan-out as tokens/done: SSE already painted the
-            // confirmation. A second paintCapacityReply created extra
-            // assistant bubbles (/unrestricted on mobile, 2026-08-31).
-            if (typeof window.KazmaChat.hasLiveSSE === 'function' && window.KazmaChat.hasLiveSSE()) {
-              break;
-            }
             const reply = (data && data.reply) || frame.reply || '';
-            if (reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
-              window.KazmaChat.paintCapacityReply(reply);
+            if (reply) {
+              this._applyTurnEvent({
+                type: 'capacity',
+                reply: reply,
+                seq: data.seq || frame.seq,
+                turn_id: data.turn_id || frame.turn_id,
+                source: 'capacity',
+              });
             }
             if (window.KazmaChat && typeof window.KazmaChat.refreshCapacity === 'function') {
               window.KazmaChat.refreshCapacity();

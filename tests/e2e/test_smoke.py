@@ -103,6 +103,61 @@ def live_server():
                 os.environ["KAZMA_SECRET"] = orig_secret
 
 
+def test_reload_restores_answer_and_cot(live_server: str) -> None:
+    """Closer write → reload shows answer + CoT (abort-SSE equivalent)."""
+    import uuid
+
+    from kazma_ui.reply_sink import open_reply_turn
+    from kazma_ui.session_manager import get_session_manager
+    from kazma_ui.turn_runtime import persist_reply
+    from playwright.sync_api import sync_playwright
+
+    sid = "e2e-cot-" + uuid.uuid4().hex[:12]
+    sm = get_session_manager()
+    sess = sm.get_or_create(sid)
+    sess.thread_id = sid
+    sess.title = "E2E CoT"
+    sess.messages = [{"role": "user", "content": "check the timeout"}]
+    sm.put(sess)
+    turn = open_reply_turn(sid)
+    persist_reply(
+        sid,
+        turn,
+        "The timeout is 300 seconds.",
+        thread_id=sid,
+        parts=[
+            {
+                "type": "reasoning",
+                "text": "There's a live API endpoint GET /api/settings/agent/safety",
+            },
+            {
+                "type": "tool",
+                "name": "file_read",
+                "result": "hitl.py",
+                "state": "done",
+            },
+            {"type": "text", "text": "The timeout is 300 seconds."},
+        ],
+    )
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            page = browser.new_page()
+            page.goto(live_server, timeout=30000, wait_until="domcontentloaded")
+            page.evaluate(
+                "localStorage.setItem('kazma.chatSessionId', arguments[0])", sid
+            )
+            page.reload(wait_until="domcontentloaded")
+            page.locator("#chat-input").wait_for(state="visible", timeout=15000)
+            page.locator(".message-assistant").first.wait_for(timeout=15000)
+            body = page.locator(".message-assistant").first.inner_text()
+            assert "300 seconds" in body
+            assert page.locator(".kazma-cot-restored, .agent-progress").count() >= 1
+        finally:
+            browser.close()
+
+
 def test_health_and_chat_composer(live_server: str) -> None:
     """Page boots; composer ``#chat-input`` is visible."""
     r = httpx.get(f"{live_server}/health/live", timeout=5.0)
