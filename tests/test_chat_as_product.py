@@ -179,6 +179,9 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     assert "transformRenderedForPlan(KS.markdown(liveParts.prose))" in js
     assert "kz-planning" in js  # plan-only hop stays visible, not a blank nbsp
     assert "class=\"kazma-working\"" in js or "kazma-working" in js
+    assert "function isPlanOnlyMessage(text)" in js
+    assert "isPlanOnlyMessage(content)" in js
+    assert "tryIngestPlanFromText(content)" in js
     assert "function _flushLiveTextPaint()" in js
     assert "_paintLiveTextNow(_liveRenderEl, true)" in js
 

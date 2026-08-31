@@ -12,6 +12,12 @@ research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
 
+**New in 2026-08-31:** `kazma_guard.py --reload` is the deploy path
+(cold start 3–5 min; do not hand-kill uvicorn). Filesystem tools no
+longer stall `/health/ready`. Plan hops stay in the Plan widget — they
+are not transcript answers. Windows Postgres checkpoints need the
+Selector event loop (`kazma serve` / the guard, not `python -m uvicorn`).
+
 **New in 2026-08-27:** [Task Ledger](./task-ledger) (durable intent
 resolution + git-write blast radius), transcript recall fallback
 ([Memory & RAG](./memory-and-rag)), the X audit log
@@ -27,6 +33,7 @@ resolution + git-write blast radius), transcript recall fallback
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Guard reload + stall fixes (2026-08-31)** | `--reload` stops the recorded child and port holder, waits the full boot budget, kicks `KazmaAgent` only if the watcher is dead. `file_search` off the event loop. File-tool results capped at 32k. Plan-only hops stay out of the chat transcript. | `python scripts/service/kazma_guard.py --reload`; [Deployment](./deployment) |
 | **Chat as the product (2026-08-26)** | `/` is immersive (no Chat/Home/Chat header). Composer: attach + input + send; Long/YOLO/cost live under **⋯**. Sidebar stays the grouped Work / Activity / Settings list (More was reverted — it never collapsed). | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/CHAT_AS_PRODUCT_UI_GOAL.md); restart after pull |
 | **Sampling HITL + native CUA + CI smoke (2026-08-25)** | MCP sampling is a real Once card (`KAZMA_MCP_SAMPLING=1`). `computer_use` calls Anthropic CUA / Gemini function when that model is active. CI Playwright job: `/health/live` + `#chat-input`. | [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots); `KAZMA_CUA_PLANNER=0` |
 | **Post-industry leftovers (2026-08-25)** | MCP resources/prompts (fenced; sampling HITL). CUA planner adapters on `computer_use`. LiveKit TTS published into the room. 429 backoff on Anthropic. Router word-boundaries + `models.defaults`. Eval tool-trace. Bright Data/Oxylabs stubs. | [GOAL](https://github.com/Mubder/kazma/blob/main/docs/plans/POST_INDUSTRY_NON_SAAS_GOAL.md); [MCP](./skills-mcp-and-tools#57-resources-prompts-sampling-roots) |

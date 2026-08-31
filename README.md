@@ -96,6 +96,11 @@ Kazma's architecture reflects those foundational principles:
 - **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated backups — WAL-safe SQLite copies, `pg_dump` of Postgres and a JSONL export of the graph, snapshotted into deduplicated, encrypted [restic](https://restic.net) repositories (local + offsite) with time-based retention and a verified one-command restore. See [Disaster Recovery](docs/docs/ops/disaster-recovery.md).
 - **Prompt-Fenced Injection**: Wraps untrusted text in `<kazma:data untrusted>` fences that tell the model the enclosed content is observation data, never instructions. Covers recalled memories, compaction summaries, procedural hints, skill frontmatter, document knowledge, swarm phonebook entries, and — since the 2026-08-29 audit — fetched web pages (`read_url`), search results (`web_search`), saved research chunks, and third-party MCP resource bodies. Note this is a mitigation, not a guarantee: a fence lowers the authority of injected text, it does not make the model immune to it.
 
+### 🔁 Operator reload & Windows event loop
+- **Watched host:** after `git pull`, pick up code with `--reload` (see [Quick Start §4](#4-reload--status-watched-host--do-not-skip)). Do not kill `python`/`uvicorn` by hand.
+- **Windows:** the server runs a `SelectorEventLoop` so psycopg-async (LangGraph `AsyncPostgresSaver`) can connect. `python -m uvicorn` hardcodes Proactor on Windows and silently falls back to SQLite checkpoints — start via `kazma serve` / the guard, not raw uvicorn.
+- **Filesystem tools** (`file_search`, `file_read`, `file_list`, …) offload disk I/O off the event loop so a large tree cannot freeze SSE, WebSockets, or `/health/ready`.
+
 ### 🐝 Swarm Orchestration & Dynamic Autoscaler
 - **6 Dispatch Patterns**: `dispatch` (single specialist), `broadcast` (all workers), `pipeline` (sequential handoffs with checkpoint gates), `fan-out` (parallel execution with aggregation/voting), `consult` (independent expert reviews + synthesis), and `conditional` (router-driven execution).
 - **Dynamic Autoscaling**: Zero pre-configured worker requirement. Automatically classifies task prompts and dynamically spins up specialized workers (`coder`, `researcher`, `generalist`) with best-model-per-task selection (coding, reasoning, vision).
@@ -107,6 +112,7 @@ Kazma's architecture reflects those foundational principles:
 - **Model Failover Chains**: Transparent multi-provider failover with per-provider cooldown timers and durable SQLite call ledgers (`kazma-data/llm_calls.db`).
 
 ### 🔒 Triple-Wired HITL Safety Architecture
+- **Default-deny HITL (2026-08-29 audit):** unclassified tools are gated; a Settings `require_approval_for` list **adds** to the tier floor and can no longer un-gate `shell_exec` by omission. Behind a reverse proxy, set `KAZMA_TRUSTED_PROXIES` to the proxy's address (peer 127.0.0.1 is not a credential).
 - **Layer 1 (Graph Interrupt)**: Single-agent execution pauses at the LangGraph level before mutating actions (`file_write`, `shell_exec`, `vault_retrieve`). Resumable from Web, TUI, or chat channels.
 - **Layer 2 (Swarm Bus)**: Multi-agent and CLI swarm dispatches enforce fail-closed approval gates on platform adapters (`FanOutBusAdapter` across Telegram/Discord/Slack).
 - **Layer 3 (Pipeline Checkpoints)**: Multi-stage pipeline tasks pause at designated approval milestones.
@@ -145,18 +151,13 @@ Kazma's architecture reflects those foundational principles:
 
 ---
 
-## 📸 Interface Showcase *(Legacy Previews — Updating Soon)*
+## 📸 Interface Showcase
 
-> [!NOTE]
-> The screenshots below reflect earlier UI builds. Updated high-resolution previews for the IDE, Swarm Builder, and Skills consoles matching the latest V2 Control Plane design system are currently being refreshed.
+Observability Dashboard — dark control plane (English and Arabic).
 
-| Observability Dashboard | Integrated Web IDE | Real-Time Chat & HITL |
-|---|---|---|
-| ![Dashboard](https://kazma.ai/screenshots/Dashboard-en.png) | ![IDE](https://kazma.ai/screenshots/IDE-en.png) | ![Chat](https://kazma.ai/screenshots/Chat-en.png) |
-
-| Swarm Task Builder | Native Skills Manager | MCP Server Marketplace |
-|---|---|---|
-| ![Swarm](https://kazma.ai/screenshots/Swarm-Task-Builder-en.png) | ![Skills](https://kazma.ai/screenshots/Skills-en.png) | ![MCP](https://kazma.ai/screenshots/MCP-en.png) |
+| English | Arabic |
+|---|---|
+| ![Observability Dashboard (English)](docs/screenshots/dashboard-en-dark.png) | ![Observability Dashboard (Arabic)](docs/screenshots/dashboard-ar-dark.png) |
 
 ---
 
@@ -223,6 +224,29 @@ Navigate to:
 - **Web IDE**: `http://127.0.0.1:9090/ide`
 - **Document Intelligence**: `http://127.0.0.1:9090/documents`
 - **Memory & Belief Graph**: `http://127.0.0.1:9090/memory`
+
+### 4. Reload & status (watched host — do not skip)
+
+If `KazmaAgent` is supervising the process (Scheduled Task / systemd / launchd), **this is how you apply a pull**. Hand-killing `python` or `uvicorn` fights the guard: it either respawns the old port holder or reports healthy while serving stale code.
+
+```powershell
+# Apply new code (cold start typically 3–5 minutes; wait for "Kazma is up. build …")
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
+
+# Watcher + /health/ready + pids
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
+```
+
+`--status` should show `supervision : active` and `server : healthy (ready)`. Do not Ctrl+C `--reload` unless you intend to abort the wait; the boot continues.
+
+Linux / macOS (same scripts):
+
+```bash
+.venv/bin/python scripts/service/kazma_guard.py --reload
+.venv/bin/python scripts/service/kazma_guard.py --status
+```
+
+First-time install of the watcher: `python scripts/service/kazma_guard.py --install` (delegates to `install_service.py`).
 
 ---
 
