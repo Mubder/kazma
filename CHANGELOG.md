@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## Runtime stability & operator reload (2026-08-31)
+
+Closes the live stall/checkpointer/reload class from the 2026-08-31
+evening dumps, plus the leftover transcript leak of workbench plans.
+
+### Fixed
+
+- **`file_search` no longer freezes the server.** The walk (`Path.rglob` /
+  `stat` / `read_text`) runs in `asyncio.to_thread`, same as
+  `codebase_search`. `file_list` / `file_append` / `file_delete` / the
+  blocking path in `file_read` follow. `/health/ready` stays ~6 ms during
+  a large search.
+- **Windows Proactor boot no longer silently parks checkpoints on SQLite.**
+  `serve.py` runs uvicorn in-process with `uvicorn_loop_factory`
+  (SelectorEventLoop). Boot logs the live saver class. Health reports the
+  saver actually in use, not "package installed ⇒ Postgres".
+- **File tools no longer inherit the 200k research truncate cap** via a
+  `"file" in name` substring. Dedicated 32k cap
+  (`KAZMA_TOOL_RESULT_FILE_MAX_CHARS`) so a just-trimmed prompt cannot
+  re-inflate to ~50k tokens mid-turn.
+- **Detached-turn answers persist and repaint** after refresh; idle resync
+  paints leftover `pending` rows; checkpoint backfill replaces a short
+  closed interim with the long stored answer.
+- **`kazma_guard.py --reload`** is the deploy command: kills the recorded
+  child and the port holder (Windows `tasklist INFO:` is no longer parsed
+  as a process name), waits the full cold-start budget with progress, kicks
+  `KazmaAgent` only if the watcher PID is gone. `--install` delegates to
+  `install_service.py`.
+- **Plan hops stay out of the transcript.** Tab-return no longer paints
+  `plan- Inspect workspace…` as the answer; checklists stay in the Plan
+  widget. Live plan-only hops show **Planning…**; a different final answer
+  keeps streamed notes under **Working notes**.
+
+### Operator leftovers (not code)
+
+- Rotate provider API keys that the 2026-08-29 settings leak exposed
+  (leak is closed; keys may still be valid).
+- Offsite restic: S3 write probe is in tree; the bucket + append-only host
+  key are still an account step. See [Disaster Recovery](docs/docs/ops/disaster-recovery.md).
+
 ## Context Integrity Hardening (2026-08-30)
 
 Executes `docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md` end to end, closing

@@ -415,6 +415,11 @@
       // Idle: paint durable assistant text even if the row still carries a
       // leftover `pending` flag (detached persist wrote the answer, then
       // the client refreshed before close_reply_turn cleared the marker).
+      // Plan-only rows are workbench chrome — never the answer.
+      if (lastMsg && lastMsg.role === 'assistant' && isPlanOnlyMessage(lastMsg.content)) {
+        try { tryIngestPlanFromText(lastMsg.content); } catch (ePlan) { /* ignore */ }
+        return;
+      }
       if (lastMsg && lastMsg.role === 'assistant' && (lastMsg.content || '').trim()) {
         if (window.KazmaChat && typeof window.KazmaChat.applyFinalAssistantText === 'function') {
           window.KazmaChat.applyFinalAssistantText(lastMsg.content, lastMsg.model || '', { source: 'resync' });
@@ -2682,6 +2687,29 @@
     return String(text || '');
   }
 
+  /** True when *text* is a workbench checklist with no user-facing prose.
+   *  Those rows belong in the Plan widget, never the transcript — tab-return
+   *  used to paint `plan- Inspect workspace…` as if it were the answer. */
+  function isPlanOnlyMessage(text) {
+    var s = String(text || '').trim();
+    if (!s) return false;
+    var parts = splitPlanAndProse(s);
+    if (parts.plan && !String(parts.prose || '').trim()) return true;
+    var lines = s.split('\n');
+    var first = (lines[0] || '').trim();
+    if (!/^plan\b/i.test(first)) return false;
+    var glued = first.replace(/^plan\s*[-–—:]?\s*/i, '').trim();
+    var rest = lines.slice(1).filter(function(l) { return String(l).trim(); });
+    var body = (glued ? [glued] : []).concat(rest);
+    if (!body.length) return true;
+    var listish = 0;
+    body.forEach(function(l) {
+      if (/^\s*(?:[-*]|\d+[.)])\s+\S/.test(l)) listish++;
+    });
+    if (glued && !/^\s*(?:[-*]|\d+[.)])/.test(glued)) listish++;
+    return listish >= Math.max(2, Math.ceil(body.length * 0.6));
+  }
+
   /**
    * Post-process RENDERED plan-fence HTML (pure: html -> html).
    *
@@ -4653,6 +4681,10 @@
           // If the last assistant message is marked pending (client refreshed
           // mid-turn while the LLM was still processing), show a processing
           // indicator; resync below reconciles the final state.
+          if (role === 'assistant' && isPlanOnlyMessage(content)) {
+            try { tryIngestPlanFromText(content); } catch (ePlanLoad) { /* ignore */ }
+            return;
+          }
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
           } else {

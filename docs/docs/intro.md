@@ -20,6 +20,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Understand the engine | [Architecture](guide/architecture) |
 | Configure providers / YAML / env | [Configuration](guide/configuration) · [LLM providers](reference/llm-providers) · [Environment variables](reference/environment-variables) |
 | Run in production | [Deployment](guide/deployment) · [Production checklist](ops/production-checklist) · [Kazma Update](ops/kazma-update) · [Smoke matrix](ops/smoke-matrix) |
+| Pick up code on a watched host | `python scripts/service/kazma_guard.py --reload` (wait for `Kazma is up. build …`; do not kill uvicorn by hand) |
 | Move Kazma to a new machine | [Migration](ops/migration) · [Portability](ops/portability) · [Disaster recovery](ops/disaster-recovery) |
 | Get server status alerts in chat | [Lifecycle notifications](guide/deployment#10-lifecycle-status-notifications) |
 | Debug multi-path bugs ("X related to Y") | [Diagnosis map](ops/diagnosis-map) · [System map](reference/system-map) |

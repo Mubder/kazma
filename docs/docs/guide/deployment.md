@@ -220,18 +220,22 @@ Cross-platform path policy and data layout: **[Portability](../ops/portability)*
 
 ## 6. Server management (from AGENTS)
 
-The canonical server-kill + restart pattern (PowerShell):
+On a host watched by `KazmaAgent` (the health-gated supervisor), pick up
+code with **one** command. Do not kill `python`/`uvicorn` by hand — that
+fights the guard (stale port holder or a 180s false "never ready").
 
 ```powershell
-# Kill any existing Kazma uvicorn server
-Get-Process -Name python -ErrorAction SilentlyContinue |
-  Where-Object { (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.Id)).CommandLine -like '*uvicorn*kazma*' } |
-  ForEach-Object { Stop-Process -Id $_.Id -Force }
-
-# Start (background), dev port 9090
-cd 'G:\GitHubRepos\kazma'
-& '.venv\Scripts\python.exe' -m uvicorn kazma_ui.app:create_app --factory --host 127.0.0.1 --port 9090 --ws-ping-interval 20 --ws-ping-timeout 20
+cd <kazma-install>
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
 ```
+
+Wait for `Kazma is up. build …` (cold start is typically 3–5 minutes,
+budget 900s). `--status` shows whether the watcher and `/health/ready`
+agree. `--install` registers the OS task (`install_service.py`).
+
+On Windows, start via `kazma serve` or the guard — not `python -m uvicorn`.
+Uvicorn 0.36+ hardcodes `ProactorEventLoop`, and psycopg-async then cannot
+open the Postgres checkpointer.
 
 ---
 

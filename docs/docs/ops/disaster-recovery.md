@@ -67,11 +67,25 @@ repositories**:
 | Repository | Location | Credential |
 |---|---|---|
 | Local | `kazma-data/backups/restic` | passphrase at `~/.kazma/restic.pass` |
-| Offsite | `rclone:<remote>/restic` | rclone's own OAuth grant |
+| Offsite (recommended) | `s3:https://<account>.r2.cloudflarestorage.com/<bucket>` (or B2) | append-only host key (`PutObject`/`GetObject`/`ListBucket` + `DeleteObject` on `locks/*` only) |
+| Offsite (legacy) | `rclone:<remote>/restic` | rclone OAuth — **do not use Google Drive / a service account**. Service accounts have no Drive quota; `rclone:` write probes can look healthy while every upload 403s. |
 
-The two use **different credentials on purpose**: the offsite path must not
-fail when a connector token is revoked. It did exactly that on 2026-08-27,
-and 29 consecutive backups went local-only without anyone noticing.
+Prefer **S3-native restic** (Cloudflare R2 or Backblaze B2). The host key
+must not be able to `restic forget --prune`. Keep a full-access prune key
+**off this machine**. `remote_writable()` probes `s3:` with a real SigV4
+PUT+DELETE under `locks/` — an `rclone:` remote that can list but cannot
+write is no longer treated as healthy.
+
+The two repositories use **different credentials on purpose**: the offsite
+path must not fail when a connector token is revoked. Drive+rclone did
+exactly that on 2026-08-27, and 29 consecutive backups went local-only
+without anyone noticing.
+
+**Operator still to do (not code):** create the R2/B2 bucket and the
+append-only host key, set `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`,
+point `backups.restic.remote` at `s3:…`, `restic init`, then run
+`python -m kazma_core.backup.restore_drill` against a restored generation
+before retiring Drive. Escrow the restic passphrase off this host.
 
 **Why restic rather than the zip archives** this runbook used to describe:
 deduplication, encryption, and a restore that upstream tests harder than we
