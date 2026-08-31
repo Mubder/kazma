@@ -191,6 +191,44 @@ def _pause_path() -> Path:
     return _guard_file("guard.paused")
 
 
+def _reload_path() -> Path:
+    """Operator --reload marker. Presence means 'respawn now, not a crash'.
+
+    --reload kills the child so the long-lived guard will start a new one.
+    Without this flag the guard treats that kill as ``process exited (code 1)``
+    and climbs the crash backoff (5s → 300s). The fifth deploy of the day
+    then sits on connection-refused for five minutes (live, 2026-08-31).
+    """
+    env = os.environ.get("KAZMA_GUARD_RELOAD_FILE")
+    if env:
+        return Path(env)
+    return _guard_file("guard.reload")
+
+
+def request_reload() -> None:
+    path = _reload_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"ts": time.time()}), encoding="utf-8")
+
+
+def reload_requested() -> bool:
+    try:
+        return _reload_path().is_file()
+    except Exception:
+        return False
+
+
+def consume_reload_request() -> bool:
+    path = _reload_path()
+    try:
+        if not path.is_file():
+            return False
+        path.unlink()
+        return True
+    except Exception:
+        return False
+
+
 # A forgotten pause is an outage nobody is looking for -- the exact failure
 # this whole project exists to prevent. So a pause EXPIRES by default, and
 # nags on Telegram every hour until it does.
@@ -876,10 +914,18 @@ class Guard:
             return False
         return (now - self.recent[0]) <= CRASH_LOOP_WINDOW_S
 
-    def _sleep(self, seconds: float) -> None:
-        """Interruptible sleep so shutdown stays responsive."""
+    def _sleep(self, seconds: float, *, wake_on_child_exit: bool = False) -> None:
+        """Interruptible sleep so shutdown, --reload, and a dead child stay responsive."""
         end = time.monotonic() + seconds
         while time.monotonic() < end and not self._stop:
+            if reload_requested():
+                return
+            if (
+                wake_on_child_exit
+                and self.proc is not None
+                and self.proc.poll() is not None
+            ):
+                return
             time.sleep(min(1.0, end - time.monotonic()))
 
     # -- main loop ----------------------------------------------------
@@ -984,6 +1030,13 @@ class Guard:
                 self.log("info", "guard.paused_by_operator")
                 continue
 
+            if consume_reload_request():
+                # Operator --reload killed this child on purpose. Spawn the
+                # new process immediately; do not climb the crash ladder and
+                # do not page Telegram as if Kazma died.
+                self.log("info", "guard.operator_reload", reason=reason)
+                continue
+
             self.restarts += 1
             if self._crash_looping():
                 self.log("error", "guard.crash_loop", restarts=self.restarts,
@@ -1060,7 +1113,7 @@ class Guard:
         """Watch a healthy child. Returns the reason it needs restarting."""
         consecutive = 0
         while not self._stop:
-            self._sleep(PROBE_INTERVAL_S)
+            self._sleep(PROBE_INTERVAL_S, wake_on_child_exit=True)
             if self._stop:
                 return "guard shutting down"
 
@@ -1222,6 +1275,10 @@ def _cmd_reload() -> int:
     if clear_pause():
         print("Cleared leftover pause so the supervisor can respawn.")
         log("info", "reload.cleared_pause")
+    # Must land BEFORE the kill: the running guard treats a dead child as a
+    # crash unless this flag is sitting there when it notices.
+    request_reload()
+    log("info", "reload.requested")
     stopped = _stop_recorded_child(log)
     if stopped:
         print(f"Stopped recorded server pid {stopped}.")
@@ -1241,9 +1298,9 @@ def _cmd_reload() -> int:
         print("  python scripts/service/kazma_guard.py --status")
         return 1
 
-    print("Waiting for KazmaAgent to boot the new process…")
+    print("Waiting for the running guard to respawn serve.py…")
     print(
-        f"(Cold start is typically 3–5 minutes; budget {int(START_TIMEOUT_S)}s. "
+        f"(Typical bind is under 2 minutes; budget {int(START_TIMEOUT_S)}s. "
         "Do not Ctrl+C unless you intend to abort.)"
     )
     kicked = False

@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Guard --reload no longer waits out crash backoff (2026-08-31)
+
+`--reload` kills `serve.py` so the long-lived guard can boot new code. The
+guard treated that kill as ``process exited (code 1)`` and climbed the
+crash ladder. After a handful of deploys in one day the fifth one sat on
+WinError 10061 for **300 seconds** before spawning — the operator message
+called it a 3–5 minute cold start, but the process had not even started.
+`--reload` now plants a flag *before* the kill; the guard respawns
+immediately and does not page Telegram as if Kazma died.
+
 ## Brand type + mark (2026-08-31)
 
 IBM Plex Sans / IBM Plex Sans Arabic is the shared face across the web UI,
