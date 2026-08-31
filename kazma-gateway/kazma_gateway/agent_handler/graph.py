@@ -704,7 +704,15 @@ def create_graph_handler(
                     if state_obj and state_obj.values:
                         current_values = dict(state_obj.values)
                         current_values["needs_compaction"] = True
-                        await graph.ainvoke(current_values, config)
+                        from kazma_ui.turn_runtime import invoke_turn as _invoke_compact
+
+                        await _invoke_compact(
+                            graph,
+                            current_values,
+                            config,
+                            thread_id=thread_id,
+                            persist=False,
+                        )
                         reply_msg = "🗜️ Context compaction completed successfully! Your conversation history has been summarized and compressed."
                     else:
                         reply_msg = "🗜️ No conversation history found to compact yet."
@@ -989,8 +997,13 @@ def create_graph_handler(
 
             try:
                 async with cmd_lock:
-                    _rs = await graph.ainvoke(
-                        build_resume_command(action="apply"), config,
+                    from kazma_ui.turn_runtime import invoke_turn as _invoke_steer
+
+                    _rs = await _invoke_steer(
+                        graph,
+                        build_resume_command(action="apply"),
+                        config,
+                        thread_id=thread_id,
                     )
                 _asst = ""
                 for _m in reversed((_rs.get("messages") if isinstance(_rs, dict) else []) or []):

@@ -451,7 +451,16 @@ def create_sse_chat_router(
                         current_values = dict(state_obj.values)
                         current_values["needs_compaction"] = True
                         
-                        result_state = await live_graph.ainvoke(current_values, config)
+                        from kazma_ui.turn_runtime import invoke_turn as _invoke_compact
+
+                        result_state = await _invoke_compact(
+                            live_graph,
+                            current_values,
+                            config,
+                            session_id=getattr(session, "session_id", "") or "",
+                            thread_id=thread_id,
+                            persist=False,
+                        )
                         
                         session.messages = _convert_messages_to_dicts(result_state.get("messages", []))
                         _get_store().put(session)

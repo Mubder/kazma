@@ -310,7 +310,9 @@ async def _stream_llm_response(
     inputs = {"messages": [{"role": "user", "content": text}]}
 
     try:
-        async for event in graph.astream_events(inputs, config=config, version="v2"):
+        from kazma_ui.turn_runtime import astream_events as _astream_turn
+
+        async for event in _astream_turn(graph, inputs, config):
             kind = event.get("event", "")
 
             if kind == "on_chat_model_stream":

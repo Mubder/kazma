@@ -93,7 +93,13 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     except Exception:
         pass
     try:
-        await graph.ainvoke(_resume_cmd, config)
+        from kazma_ui.turn_runtime import invoke_turn
+
+        # Headless resume: the client is gone (or never saw the card).
+        # invoke_turn always projects the checkpoint into SessionStore so
+        # a later reload shows the answer, not the HITL stub
+        # (2026-08-31 silent turn b1cb7994e22a).
+        await invoke_turn(graph, _resume_cmd, config, thread_id=thread_id)
     except Exception:
         logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
 

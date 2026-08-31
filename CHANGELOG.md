@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Turn ledger P0: headless graph finishes write the transcript (2026-09-01)
+
+HITL watchdog auto-deny (and the other UI/gateway `graph.ainvoke` sites)
+ran the graph and never called `reply_sink`. Live incident 2026-08-31
+turn `b1cb7994e22a`: the checkpoint held the full report, the chat kept
+the 257-char HITL stub. `kazma_ui.turn_runtime.invoke_turn` is now the
+only UI/gateway invoke; `close_turn` always projects the checkpoint into
+the open `turn_id` row. AST gate + last-night sequence test lock it.
+Do not add persist calls to `hitl_timeout.py` — the watchdog only calls
+the runner.
+
 ## Chat: CoT stays up; thinking/Stop no longer blink (2026-09-01)
 
 WS journaled `idle` / `stream_end` / `done` called `_endTurn` while SSE

@@ -957,9 +957,17 @@ def create_ws_chat_router(
 
                     from kazma_core.safety.commitment.resume import build_resume_command
 
+                    from kazma_ui.turn_runtime import invoke_turn as _invoke_steer
+
                     register_turn(thread_id, asyncio.current_task())
                     try:
-                        _st_rs = await _st_graph.ainvoke(build_resume_command(action="apply"), _st_cfg)
+                        _st_rs = await _invoke_steer(
+                            _st_graph,
+                            build_resume_command(action="apply"),
+                            _st_cfg,
+                            session_id=session_id,
+                            thread_id=thread_id,
+                        )
                     finally:
                         unregister_turn(thread_id)
                     # Surface the resumed assistant text (custom LLM provider
@@ -1205,7 +1213,16 @@ def create_ws_chat_router(
                                 if _cp_snap and _cp_snap.values:
                                     _cp_values = dict(_cp_snap.values)
                                     _cp_values["needs_compaction"] = True
-                                    _cp_result = await _cp_graph.ainvoke(_cp_values, _cp_cfg)
+                                    from kazma_ui.turn_runtime import invoke_turn as _invoke_compact
+
+                                    _cp_result = await _invoke_compact(
+                                        _cp_graph,
+                                        _cp_values,
+                                        _cp_cfg,
+                                        session_id=session_id,
+                                        thread_id=thread_id,
+                                        persist=False,
+                                    )
                                     from kazma_ui.sse_chat import _convert_messages_to_dicts as _cp_conv
 
                                     session.messages = _cp_conv(_cp_result.get("messages", []))
@@ -1611,12 +1628,11 @@ def create_ws_chat_router(
                             # Without this, is_yolo_active/has_tool_grant never
                             # match and every danger tool re-prompts HITL.
                             from kazma_core.llm_stream import bridged_event_stream
+                            from kazma_ui.turn_runtime import astream_events as _astream_turn
 
                             stream = bridged_event_stream(
                                 thread_id,
-                                graph_inst.astream_events(
-                                    input_state, config=config, version="v2"
-                                ),
+                                _astream_turn(graph_inst, input_state, config),
                             )
                             tokens_emitted = False
                             turn_started_at = time.monotonic()
@@ -2345,8 +2361,16 @@ def create_ws_chat_router(
                             # so a mid-resume F5 still arms the SessionStore poller
                             # and the final answer is not "only visible after refresh".
                             _ensure_pending_assistant_bubble(session_id, force=True)
+                            from kazma_ui.turn_runtime import invoke_turn as _invoke_approve
+
                             resume_task = asyncio.create_task(
-                                graph_inst.ainvoke(resume_command, approve_config)
+                                _invoke_approve(
+                                    graph_inst,
+                                    resume_command,
+                                    approve_config,
+                                    session_id=session_id,
+                                    thread_id=target_thread_id,
+                                )
                             )
                             heartbeat_n = 0
                             while not resume_task.done():

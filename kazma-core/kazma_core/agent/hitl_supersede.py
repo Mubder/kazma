@@ -99,6 +99,15 @@ async def cancel_pending_hitl(
             if not await has_pending_hitl(graph, config):
                 break
             await graph.ainvoke(await _deny_resume_cmd(), config)
+        try:
+            from kazma_ui.turn_runtime import close_turn
+
+            await close_turn(graph, config)
+        except Exception:
+            logger.debug(
+                "[hitl_supersede] close_turn skipped",
+                exc_info=True,
+            )
         return True
     except Exception:
         logger.exception("[hitl_supersede] failed to cancel pending HITL")
