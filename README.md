@@ -97,7 +97,7 @@ Kazma's architecture reflects those foundational principles:
 - **Prompt-Fenced Injection**: Wraps untrusted text in `<kazma:data untrusted>` fences that tell the model the enclosed content is observation data, never instructions. Covers recalled memories, compaction summaries, procedural hints, skill frontmatter, document knowledge, swarm phonebook entries, and — since the 2026-08-29 audit — fetched web pages (`read_url`), search results (`web_search`), saved research chunks, and third-party MCP resource bodies. Note this is a mitigation, not a guarantee: a fence lowers the authority of injected text, it does not make the model immune to it.
 
 ### 🔁 Operator reload & Windows event loop
-- **Pick up code with one command:** `python scripts/service/kazma_guard.py --reload`. Do not kill `python`/`uvicorn` by hand — the `KazmaAgent` scheduled task will otherwise supervise a stale port holder or refuse to start. Cold start is typically 3–5 minutes; wait for `Kazma is up. build …`.
+- **Watched host:** after `git pull`, pick up code with `--reload` (see [Quick Start §4](#4-reload--status-watched-host--do-not-skip)). Do not kill `python`/`uvicorn` by hand.
 - **Windows:** the server runs a `SelectorEventLoop` so psycopg-async (LangGraph `AsyncPostgresSaver`) can connect. `python -m uvicorn` hardcodes Proactor on Windows and silently falls back to SQLite checkpoints — start via `kazma serve` / the guard, not raw uvicorn.
 - **Filesystem tools** (`file_search`, `file_read`, `file_list`, …) offload disk I/O off the event loop so a large tree cannot freeze SSE, WebSockets, or `/health/ready`.
 
@@ -224,6 +224,29 @@ Navigate to:
 - **Web IDE**: `http://127.0.0.1:9090/ide`
 - **Document Intelligence**: `http://127.0.0.1:9090/documents`
 - **Memory & Belief Graph**: `http://127.0.0.1:9090/memory`
+
+### 4. Reload & status (watched host — do not skip)
+
+If `KazmaAgent` is supervising the process (Scheduled Task / systemd / launchd), **this is how you apply a pull**. Hand-killing `python` or `uvicorn` fights the guard: it either respawns the old port holder or reports healthy while serving stale code.
+
+```powershell
+# Apply new code (cold start typically 3–5 minutes; wait for "Kazma is up. build …")
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
+
+# Watcher + /health/ready + pids
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
+```
+
+`--status` should show `supervision : active` and `server : healthy (ready)`. Do not Ctrl+C `--reload` unless you intend to abort the wait; the boot continues.
+
+Linux / macOS (same scripts):
+
+```bash
+.venv/bin/python scripts/service/kazma_guard.py --reload
+.venv/bin/python scripts/service/kazma_guard.py --status
+```
+
+First-time install of the watcher: `python scripts/service/kazma_guard.py --install` (delegates to `install_service.py`).
 
 ---
 
