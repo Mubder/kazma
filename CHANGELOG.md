@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## /x forced LTR on Arabic UI (2026-08-31)
+
+The operator UI is `dir=rtl`. `textDir("")` returned `ltr` and
+`stampAr` wrote that onto the composer and rows, so X Studio was LTR
+on an Arabic page. Empty now inherits the page direction; only
+Latin-only tweets isolate LTR.
+
 ## /x Arabic still LTR after cache disable (2026-08-31)
 
 Chromium `-webkit-box` line-clamp painted tweet rows LTR even with

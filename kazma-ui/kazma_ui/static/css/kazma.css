@@ -1626,6 +1626,8 @@ tbody tr:last-child td {
    -webkit-box line-clamp paints LTR unless direction is pinned. */
 .xs-row .txt.is-ar,
 .xs-row .txt[dir="rtl"],
+.xs-row[dir="rtl"] .txt,
+.xs-row[dir="rtl"] .xs-body,
 .xs-compose textarea.is-ar,
 .xs-compose textarea[dir="rtl"],
 .sched-summary .txt.is-ar,
@@ -1641,9 +1643,12 @@ tbody tr:last-child td {
   font-feature-settings: normal !important;
   letter-spacing: normal;
 }
+.xs-row .xs-body { flex: 1; min-width: 0; }
+.xs-row[dir="rtl"] .txt { width: 100%; }
 /* -webkit-box line-clamp paints LTR in Chromium regardless of dir=rtl. */
 .xs-row .txt.is-ar,
 .xs-row .txt[dir="rtl"],
+.xs-row[dir="rtl"] .txt,
 .sched-summary .txt.is-ar,
 .sched-summary .txt[dir="rtl"],
 .audit-text .txt.is-ar,

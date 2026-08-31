@@ -230,6 +230,11 @@ def test_studio_page_and_sidebar_are_wired() -> None:
     assert "textDir" in js
     assert "stampAr" in js
     assert "x-effect=\"stampAr" in html
+    assert "xs-body" in html
+    assert "pageDir" in (
+        Path(__file__).resolve().parents[1]
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "bidi.js"
+    ).read_text(encoding="utf-8")
     assert "unicode-bidi: plaintext" not in html
     assert "display: -webkit-box" not in html
     css = (root / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css").read_text(

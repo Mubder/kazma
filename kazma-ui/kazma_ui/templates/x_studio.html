@@ -23,7 +23,8 @@
   .xs-reason { font-size: .78rem; color: var(--danger); margin-top: .5rem; }
   .xs-row { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--border-subtle); font-size: .82rem; align-items: flex-start; }
   .xs-row:first-of-type { border-top: 0; }
-  .xs-row .txt { flex: 1; min-width: 0; overflow: hidden; max-height: 4.6em; word-break: break-word; unicode-bidi: isolate; text-align: start; }
+  .xs-body { flex: 1; min-width: 0; }
+  .xs-row .txt { width: 100%; overflow: hidden; max-height: 4.6em; word-break: break-word; unicode-bidi: isolate; text-align: start; }
   .xs-row .kicker { font-size: .68rem; color: var(--text-muted); margin-bottom: 2px; }
   .xs-row .when { font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
   .xs-row .acts { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
@@ -104,13 +105,11 @@
       </div>
       <div class="xs-empty" x-show="!queue.length" x-cloak>{{ t('x_studio.empty_queue') }}</div>
       <template x-for="item in queue" :key="item.id">
-        <div class="xs-row">
-          <div>
+        <div class="xs-row" x-effect="stampAr($el, displayBody(item.summary))">
+          <div class="xs-body">
             <div class="kicker" x-show="item.kicker || displayKicker(item.summary)" x-cloak
                  x-text="item.kicker || displayKicker(item.summary)"></div>
-            <div class="txt" :dir="textDir(displayBody(item.summary))"
-                 x-effect="stampAr($el, displayBody(item.summary))"
-                 x-text="displayBody(item.summary)"></div>
+            <div class="txt" x-text="displayBody(item.summary)"></div>
             <div class="when" x-text="fmtWhen(item.when)"></div>
           </div>
           <div class="acts">
@@ -128,13 +127,11 @@
       <h2>{{ t('x_studio.drafts') }}</h2>
       <div class="xs-empty" x-show="!drafts.length" x-cloak>{{ t('x_studio.empty_drafts') }}</div>
       <template x-for="d in drafts" :key="d.id">
-        <div class="xs-row">
-          <div>
+        <div class="xs-row" x-effect="stampAr($el, displayBody(d.text))">
+          <div class="xs-body">
             <div class="kicker" x-show="displayKicker(d.text)" x-cloak
                  x-text="displayKicker(d.text)"></div>
-            <div class="txt" :dir="textDir(displayBody(d.text))"
-                 x-effect="stampAr($el, displayBody(d.text))"
-                 x-text="displayBody(d.text)"></div>
+            <div class="txt" x-text="displayBody(d.text)"></div>
           </div>
           <button class="btn btn-secondary btn-sm" @click="useDraft(d)">{{ t('x_studio.use') }}</button>
         </div>
@@ -144,13 +141,11 @@
       <h2>{{ t('x_studio.posted') }}</h2>
       <div class="xs-empty" x-show="!audit.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
       <template x-for="e in audit" :key="e.id || (e.ts + e.action)">
-        <div class="xs-row">
-          <div>
+        <div class="xs-row" x-effect="stampAr($el, displayBody(auditText(e)))">
+          <div class="xs-body">
             <div class="kicker" x-show="displayKicker(auditText(e))" x-cloak
                  x-text="displayKicker(auditText(e))"></div>
-            <div class="txt" :dir="textDir(displayBody(auditText(e)))"
-                 x-effect="stampAr($el, displayBody(auditText(e)))"
-                 x-text="displayBody(auditText(e))"></div>
+            <div class="txt" x-text="displayBody(auditText(e))"></div>
             <div class="when" x-text="(e.action || '') + (e.tweet_id ? ' · ' + e.tweet_id : '')"></div>
           </div>
           <div class="acts">

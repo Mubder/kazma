@@ -234,12 +234,22 @@
     return head.slice(0, 120);
   }
 
+  function pageDir() {
+    try {
+      return (document.documentElement.getAttribute('dir') || 'ltr').toLowerCase();
+    } catch (e) {
+      return 'ltr';
+    }
+  }
+
   function textDir(text) {
-    // Tweets on /x and /scheduled: any Arabic → rtl. dir=auto uses the
-    // first strong character, so an English wrapper or a URL prefix paints
-    // the whole block LTR even when the body is Arabic.
-    var sample = extractPostBody(text) || String(text || '');
-    if (hasArabic(sample) || hasArabic(text)) return 'rtl';
+    // Any Arabic → rtl. Empty inherits the PAGE dir (Arabic UI is rtl;
+    // forcing ltr on an empty composer was why /x stayed LTR). Latin-only
+    // tweets isolate ltr so they don't pick up the page rtl.
+    var raw = String(text || '');
+    var sample = extractPostBody(raw) || raw;
+    if (hasArabic(sample) || hasArabic(raw)) return 'rtl';
+    if (!raw.trim()) return pageDir();
     return 'ltr';
   }
 
