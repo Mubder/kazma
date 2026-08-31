@@ -36,6 +36,29 @@ function xStudioPage() {
       return 'ltr';
     },
 
+    /* Chrome's -webkit-box line-clamp ignores CSS direction. Stamp the
+       used direction on the node so drafts/posted/composer cannot stay LTR
+       on an English chrome even if :dir loses a race with x-text. */
+    stampAr(el, raw) {
+      if (!el) return;
+      const rtl = this.textDir(raw) === 'rtl';
+      el.setAttribute('dir', rtl ? 'rtl' : 'ltr');
+      el.classList.toggle('is-ar', rtl);
+      if (rtl) {
+        el.style.direction = 'rtl';
+        el.style.textAlign = 'right';
+        el.style.unicodeBidi = 'isolate';
+        el.style.fontFamily = 'var(--font-arabic)';
+        if (el.tagName !== 'TEXTAREA') el.style.display = 'block';
+      } else {
+        el.style.direction = '';
+        el.style.textAlign = '';
+        el.style.unicodeBidi = '';
+        el.style.fontFamily = '';
+        el.style.display = '';
+      }
+    },
+
     async init() {
       this.when = this._defaultWhen();
       await Promise.all([this.loadStatus(), this.loadQueue(), this.loadDrafts(), this.loadAudit()]);

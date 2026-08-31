@@ -228,12 +228,16 @@ def test_studio_page_and_sidebar_are_wired() -> None:
     assert ":dir=" in html
     assert "displayBody" in js
     assert "textDir" in js
+    assert "stampAr" in js
+    assert "x-effect=\"stampAr" in html
     assert "unicode-bidi: plaintext" not in html
+    assert "display: -webkit-box" not in html
     css = (root / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css").read_text(
         encoding="utf-8"
     )
     assert ".xs-row .txt[dir=\"rtl\"]" in css
-    assert "direction: rtl" in css.split(".xs-row .txt[dir=\"rtl\"]")[1][:400]
+    assert "direction: rtl !important" in css
+    assert "display: block !important" in css
 
 
 def test_bidi_js_pins_arabic_tweets_rtl() -> None:

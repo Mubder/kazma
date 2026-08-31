@@ -1624,17 +1624,35 @@ tbody tr:last-child td {
    Lives here (not in the page <style> block) so soft-nav keeps it.
    unicode-bidi:plaintext ignores dir=rtl (first-strong of a wrapper).
    -webkit-box line-clamp paints LTR unless direction is pinned. */
+.xs-row .txt.is-ar,
 .xs-row .txt[dir="rtl"],
+.xs-compose textarea.is-ar,
 .xs-compose textarea[dir="rtl"],
+.sched-summary .txt.is-ar,
 .sched-summary .txt[dir="rtl"],
+.audit-text .txt.is-ar,
 .audit-text .txt[dir="rtl"],
+.audit-detail .txt.is-ar,
 .audit-detail .txt[dir="rtl"] {
-  direction: rtl;
-  text-align: right;
-  unicode-bidi: isolate;
-  font-family: var(--font-arabic);
-  font-feature-settings: normal;
+  direction: rtl !important;
+  text-align: right !important;
+  unicode-bidi: isolate !important;
+  font-family: var(--font-arabic) !important;
+  font-feature-settings: normal !important;
   letter-spacing: normal;
+}
+/* -webkit-box line-clamp paints LTR in Chromium regardless of dir=rtl. */
+.xs-row .txt.is-ar,
+.xs-row .txt[dir="rtl"],
+.sched-summary .txt.is-ar,
+.sched-summary .txt[dir="rtl"],
+.audit-text .txt.is-ar,
+.audit-text .txt[dir="rtl"] {
+  display: block !important;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  max-height: 4.6em;
+  overflow: hidden;
 }
 /* Isolate inline Latin/Arabic spans so numbers and brand names keep order */
 .bidi-isolate {
