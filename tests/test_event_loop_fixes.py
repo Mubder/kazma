@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,63 @@ async def test_env_context_async_workspace_id_passthrough(tmp_path, monkeypatch)
     finally:
         store.close()
         reset_workspace_store()
+
+
+def test_ready_database_ping_runs_offloop(monkeypatch):
+    """``/health/ready`` must not run the Postgres ping on the event loop.
+
+    Live stall-20260831-181156.txt: readiness → pool.execute_one → getconn
+    froze SSE/Telegram until the guard killed the child.
+    """
+    from kazma_ui import health as health_mod
+
+    main_ident = threading.get_ident()
+    seen: dict[str, int] = {}
+
+    def ping():
+        seen["database"] = threading.get_ident()
+        time.sleep(0.05)
+        return {"status": "ok", "component": "database"}
+
+    monkeypatch.setattr(health_mod, "check_database", ping)
+    monkeypatch.setattr(
+        health_mod, "check_config_store",
+        lambda: {"status": "ok", "component": "config_store"},
+    )
+    monkeypatch.setattr(
+        health_mod, "check_swarm_engine",
+        lambda: {"status": "ok", "component": "swarm_engine"},
+    )
+    monkeypatch.setattr(
+        health_mod, "check_model_registry",
+        lambda: {"status": "ok", "component": "model_registry"},
+    )
+    monkeypatch.setattr(
+        health_mod, "check_agent_runner",
+        lambda: {"status": "ok", "component": "agent_runner"},
+    )
+    monkeypatch.setattr(
+        health_mod, "check_mcp", lambda: {"status": "ok", "component": "mcp"}
+    )
+    monkeypatch.setattr(
+        health_mod, "check_cron", lambda: {"status": "ok", "component": "cron"}
+    )
+    monkeypatch.setattr(
+        health_mod, "check_schedulers",
+        lambda: {"status": "ok", "component": "schedulers"},
+    )
+    monkeypatch.setattr(
+        health_mod, "check_llm_provider",
+        lambda: {"status": "ok", "component": "llm_provider"},
+    )
+
+    resp = asyncio.run(health_mod.readiness())
+    assert seen["database"] != main_ident
+    body = resp.body if hasattr(resp, "body") else None
+    if body:
+        import json as _json
+        data = _json.loads(body)
+        assert data["checks"]["database"]["status"] == "ok"
 
 
 # ═══════════════════════════════════════════════════════════════════

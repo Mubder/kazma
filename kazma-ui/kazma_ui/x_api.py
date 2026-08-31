@@ -65,6 +65,18 @@ def _safe_error(exc: Exception, status: int = 500) -> JSONResponse:
     )
 
 
+def _public_audit_entry(row: dict[str, Any]) -> dict[str, Any]:
+    """Drop raw JSON bodies — the UI shows ``text`` / ``error_detail``.
+
+    The store keeps ``request_body`` / ``response_body`` for forensics;
+    shipping them to ``/scheduled`` is what made a click dump JSON.
+    """
+    out = dict(row)
+    out.pop("request_body", None)
+    out.pop("response_body", None)
+    return out
+
+
 async def _verify_same_origin(request: Request) -> None:
     xrw = request.headers.get("x-requested-with", "").lower()
     if xrw != "xmlhttprequest":
@@ -226,7 +238,10 @@ async def x_audit(limit: int = 50, action: str | None = None) -> JSONResponse:
         from kazma_core.x_api.audit import query_x_audit
 
         bounded = max(1, min(int(limit or 50), 500))
-        entries = query_x_audit(limit=bounded, action=(action or None))
+        entries = [
+            _public_audit_entry(row)
+            for row in query_x_audit(limit=bounded, action=(action or None))
+        ]
         return JSONResponse({"ok": True, "count": len(entries), "entries": entries})
     except Exception as exc:
         return _safe_error(exc)

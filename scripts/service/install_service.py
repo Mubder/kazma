@@ -170,9 +170,9 @@ def launchd_plist() -> str:
     <integer>30</integer>
 
     <key>StandardOutPath</key>
-    <string>{Path.home()}/.kazma/launchd.out.log</string>
+    <string>{REPO_ROOT / ".kazma" / "launchd.out.log"}</string>
     <key>StandardErrorPath</key>
-    <string>{Path.home()}/.kazma/launchd.err.log</string>
+    <string>{REPO_ROOT / ".kazma" / "launchd.err.log"}</string>
 </dict>
 </plist>
 """

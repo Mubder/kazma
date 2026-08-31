@@ -2129,16 +2129,16 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Action",
     },
     "settings.x_audit_details": {
-        "ar": "انقر لعرض الطلب والاستجابة كاملين",
-        "en": "Click to expand full request/response",
+        "ar": "انقر لقراءة النص",
+        "en": "Click a row to read the tweet",
     },
     "settings.x_audit_empty": {
         "ar": "لا يوجد نشاط مسجّل بعد — ستظهر العمليات هنا بعد أول استدعاء للواجهة.",
         "en": "No X activity recorded yet — entries appear here after the first API call.",
     },
     "settings.x_audit_hint": {
-        "ar": "كل عملية من واجهة إكس — نشر، ردود، حذف، أخطاء — بالمحتوى الكامل والوقت. انقر على صف لعرض الطلب والاستجابة كاملين.",
-        "en": "Every X API call — posts, replies, deletes, errors — with full content and timestamp. Click a row to expand the full request/response.",
+        "ar": "كل عملية من واجهة إكس — نشر، ردود، حذف، أخطاء — بالنص والوقت. انقر على صف لقراءة التغريدة.",
+        "en": "Every X API call — posts, replies, deletes, errors — with the tweet text and timestamp. Click a row to read the tweet.",
     },
     "settings.x_audit_moved": {
         "ar": "كل طلب أرسله كازما إلى إكس مع النص الكامل — أصبح الآن في صفحة المهام المجدولة بجوار المنشورات التي أنتجته.",

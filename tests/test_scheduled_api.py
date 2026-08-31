@@ -159,6 +159,13 @@ def test_scheduled_page_shows_error_not_last_result_as_red() -> None:
     assert 'x-text="reason(task)"' not in html
     assert "extractPostBody" in js
     assert ":dir=" in html
+    assert "auditDetailText" in js
+    assert "auditDetailUrl" in js
+    assert "request_body" not in html
+    assert "response_body" not in html
+    assert "x-text=\"auditDetail()\"" not in html
+    assert "JSON.stringify(e" not in js
+    assert "JSON.stringify(this.audit" not in js
 
 
 def test_csrf_blocks_mutation_without_header(client) -> None:

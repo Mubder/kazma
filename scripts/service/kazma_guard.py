@@ -139,7 +139,10 @@ def _kazma_home() -> Path:
     cwd = Path.cwd()
     if (cwd / "pyproject.toml").is_file():
         return cwd / ".kazma"
-    return Path.home() / ".kazma"        # last resort, the old behaviour
+    # Never Path.home()/.kazma — operator rule: no files outside the install.
+    d = cwd / ".kazma"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _legacy_home() -> Path:
@@ -147,17 +150,23 @@ def _legacy_home() -> Path:
 
 
 def _guard_file(name: str) -> Path:
-    """Project-local path for *name*, honouring an existing legacy file.
+    """Always ``<install>/.kazma/<name>``. Copy once from a legacy home.
 
-    An install that already has state under ``~/.kazma`` keeps using it
-    until someone moves it: silently switching paths mid-life would orphan
-    a recorded child PID and hand the next guard an empty state file --
-    precisely the orphan-server bug the state file exists to prevent.
+    The old guard wrote under ``~/.kazma``. Preferring that path forever
+    is why ``C:\\Users\\balfa\\.kazma`` kept growing after the product
+    home moved next to the repo. Copy missing files in, then write only
+    inside the install.
     """
+    dest_dir = _kazma_home()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / name
     legacy = _legacy_home() / name
-    if legacy.exists():
-        return legacy
-    return _kazma_home() / name
+    if not dest.exists() and legacy.exists() and legacy.is_file():
+        try:
+            dest.write_bytes(legacy.read_bytes())
+        except OSError:
+            pass
+    return dest
 
 
 def _state_path() -> Path:

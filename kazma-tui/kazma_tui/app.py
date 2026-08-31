@@ -172,7 +172,7 @@ class KazmaTUI(App[None]):
 
                 prefs_file = preferences_path()
             except Exception:
-                prefs_file = Path.home() / ".kazma" / "preferences.json"
+                prefs_file = Path.cwd() / ".kazma" / "preferences.json"
 
             if not prefs_file.exists():
                 # First run - show tutorial

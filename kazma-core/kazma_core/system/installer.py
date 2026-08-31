@@ -199,7 +199,7 @@ async def _run_install_task(
 
 
 def _record_installed_extra(extra: str | None, package_name: str | None) -> None:
-    """Append installed extras to ConfigStore + ~/.kazma/installed_extras.json."""
+    """Append installed extras to ConfigStore + project-home installed_extras.json."""
     import json
     from pathlib import Path
 
@@ -240,7 +240,7 @@ def _record_installed_extra(extra: str | None, package_name: str | None) -> None
 
         path = installed_extras_path()
     except Exception:
-        path = Path.home() / ".kazma" / "installed_extras.json"
+        path = Path.cwd() / ".kazma" / "installed_extras.json"
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(

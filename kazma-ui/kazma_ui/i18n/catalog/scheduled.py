@@ -229,8 +229,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Could not load X activity",
     },
     "scheduled.x_activity_hint": {
-        "ar": "كل طلب أرسله كازما إلى إكس — منشورات وردود وعمليات حذف — مع النص المُرسَل وردّ إكس. اضغط على أي صف للتفاصيل.",
-        "en": "Every X API call Kazma made — posts, replies, deletions — with the exact content sent and what X returned. Click a row for detail.",
+        "ar": "كل طلب أرسله كازما إلى إكس — منشورات وردود وحذف. اضغط صفًا لقراءة النص.",
+        "en": "Every X API call Kazma made — posts, replies, deletions. Click a row to read the tweet.",
     },
     "scheduled.x_booked": {
         "ar": "تمت جدولة منشور إكس.",

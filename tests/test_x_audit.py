@@ -194,6 +194,26 @@ async def test_audit_endpoint_serves_entries(monkeypatch):
     payload = _json.loads(out.body)
     assert payload["ok"] is True and payload["count"] == 2
     assert payload["entries"][0]["action"] == "post"
+    for entry in payload["entries"]:
+        assert "request_body" not in entry
+        assert "response_body" not in entry
+
+
+def test_public_audit_entry_keeps_text_drops_bodies():
+    from kazma_ui.x_api import _public_audit_entry
+
+    row = {
+        "action": "post",
+        "text": "hello",
+        "error_detail": "",
+        "post_url": "https://x.com/i/web/status/1",
+        "request_body": '{"text":"hello"}',
+        "response_body": '{"data":{"id":"1"}}',
+    }
+    out = _public_audit_entry(row)
+    assert out["text"] == "hello"
+    assert "request_body" not in out
+    assert "response_body" not in out
 
 
 async def test_audit_endpoint_bounds_limit(monkeypatch):
