@@ -5,6 +5,16 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import importlib.util
+
+_GUARD = Path("scripts/service/kazma_guard.py")
+_spec = importlib.util.spec_from_file_location("kazma_guard_under_test", _GUARD)
+_guard = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(_guard)
+parse_tasklist_image = _guard.parse_tasklist_image
+_local_port_of = _guard._local_port_of
+
 
 def test_guard_cli_has_reload() -> None:
     src = Path("scripts/service/kazma_guard.py").read_text(encoding="utf-8")
@@ -24,3 +34,28 @@ def test_reload_clears_pause_and_reaps_port() -> None:
     assert "reap_port_holder" in body
     assert "_stop_recorded_child" in body
     assert "/health" in body or "_live_commit" in body
+
+
+def test_tasklist_info_line_is_not_a_process_name() -> None:
+    assert parse_tasklist_image("INFO: No tasks are running which match the specified criteria.") == ""
+    assert parse_tasklist_image("") == ""
+    csv = '"python.exe","95052","Console","1","123,456 K"\n'
+    assert parse_tasklist_image(csv).lower() == "python.exe"
+    # Negative control: the old split()[0] bug.
+    bogus = "INFO: No tasks are running which match the specified criteria."
+    assert bogus.split()[0].lower() == "info:"
+    assert parse_tasklist_image(bogus) != bogus.split()[0]
+
+
+def test_local_port_does_not_match_superset() -> None:
+    assert _local_port_of("127.0.0.1:9090") == "9090"
+    assert _local_port_of("[::]:9090") == "9090"
+    assert _local_port_of("127.0.0.1:19090") == "19090"
+
+
+def test_guard_cli_has_install_alias() -> None:
+    src = Path("scripts/service/kazma_guard.py").read_text(encoding="utf-8")
+    assert "--install" in src
+    assert "install_service.py" in src
+    body = src.split("def _cmd_install()", 1)[1].split("\ndef ", 1)[0]
+    assert "install_service.py" in body
