@@ -138,6 +138,76 @@ def test_list_proposals_returns_saved_items(tmp_path: Path, monkeypatch: pytest.
     assert all(r["proposal_id"] == payload["proposal_id"] for r in rows)
 
 
+def test_post_now_rewrites_to_stored_proposal(
+    client, studio_env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kazma_core.agent.artifacts import ArtifactStore
+    import kazma_core.agent.artifacts as art_mod
+
+    store = ArtifactStore(tmp_path / "artifacts.db")
+    saved = store.save_proposal("default", "thread-a", "tweets", ["canonical draft"])
+    item_id = saved["items"][0]["id"]
+    monkeypatch.setattr(art_mod, "get_artifact_store", lambda: store)
+
+    captured: dict[str, str] = {}
+
+    class _Ok:
+        async def create_tweet(self, text, reply_to_id=""):
+            captured["text"] = text
+            return {"id": "99", "text": text}
+
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", lambda *a, **k: _Ok())
+    resp = client.post(
+        "/api/x/post",
+        json={"text": "edited in the composer", "proposal_id": item_id},
+        headers=_CSRF,
+    )
+    assert resp.status_code == 200, resp.text
+    assert captured["text"] == "canonical draft"
+    assert resp.json()["tweet_id"] == "99"
+    remaining = store.list_proposals(tenant_id="default")
+    assert remaining == []
+
+
+def test_post_now_unknown_proposal_is_400(client) -> None:
+    resp = client.post(
+        "/api/x/post",
+        json={"text": "hello", "proposal_id": "prop_missing:1"},
+        headers=_CSRF,
+    )
+    assert resp.status_code == 400
+    assert "proposal_id" in resp.json()["error"]
+
+
+def test_delete_csrf_required(client) -> None:
+    resp = client.post("/api/x/delete", json={"tweet_id": "1"})
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_delete_does_not_call_api_when_disabled(
+    studio_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kazma_core.x_api.booking import delete_x_post
+
+    monkeypatch.setattr(
+        "kazma_core.x_api.config.get_x_config",
+        lambda: _cfg(enabled=False),
+    )
+    called = {"n": 0}
+
+    class _Boom:
+        async def delete_tweet(self, *a, **k):
+            called["n"] += 1
+            raise AssertionError("must not hit X when connector is off")
+
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", lambda *a, **k: _Boom())
+    ok, payload = await delete_x_post(tweet_id="123")
+    assert ok is False
+    assert payload["deleted"] is False
+    assert called["n"] == 0
+
+
 def test_studio_page_and_sidebar_are_wired() -> None:
     root = Path(__file__).resolve().parents[1]
     sidebar = (root / "kazma-ui" / "kazma_ui" / "templates" / "components" / "sidebar.html").read_text(
@@ -147,5 +217,10 @@ def test_studio_page_and_sidebar_are_wired() -> None:
     assert (root / "kazma-ui" / "kazma_ui" / "templates" / "x_studio.html").is_file()
     assert (root / "kazma-ui" / "kazma_ui" / "static" / "js" / "x_studio.js").is_file()
     html = (root / "kazma-ui" / "kazma_ui" / "templates" / "x_studio.html").read_text(encoding="utf-8")
+    js = (root / "kazma-ui" / "kazma_ui" / "static" / "js" / "x_studio.js").read_text(encoding="utf-8")
     assert "x-cloak" in html
     assert "two-col-grid" in html
+    assert "replyToId" in js
+    assert "proposal_id" in js
+    assert "reschedule" in js
+    assert "/api/x/delete" in js

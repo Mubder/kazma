@@ -25,7 +25,7 @@ Do **not** paste keys in chat. `vault_store` would put them in history. Settings
 2. User authentication settings → **Read and write**.
 3. Keys and tokens → API Key, API Key Secret, Access Token, Access Token Secret.
 4. Kazma **Settings → X** → paste the four values + your `@handle` → Save → Test (`GET /2/users/me`).
-5. Enable posting. **X Studio** (`/x`) is the Web composer and planner — write, Post now, or Schedule. Chat still drafts via `save_proposal` then `x_post` (always HITL). The **Scheduled** page remains the mixed clock (cron + X).
+5. Enable posting. **X Studio** (`/x`) is the Web composer and planner — write, Post now, Schedule, reschedule, thread hops (`reply_to_id`), and delete a live tweet. Using a saved `save_proposal` draft stamps the id so the **stored** text is what publishes. Chat still drafts via `save_proposal` then `x_post` (always HITL). The **Scheduled** page remains the mixed clock (cron + X).
 
 Optional env (overrides ConfigStore when set): `X_API_KEY`, `X_API_KEY_SECRET`, `X_ACCESS_TOKEN`, `X_ACCESS_TOKEN_SECRET`. Kill-switch: **`KAZMA_X_POST=0`**.
 

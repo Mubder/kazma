@@ -40,6 +40,11 @@ class XPreviewBody(BaseModel):
 class XPostBody(BaseModel):
     text: str = Field(..., min_length=1)
     reply_to_id: str = Field(default="")
+    proposal_id: str = Field(default="")
+
+
+class XDeleteBody(BaseModel):
+    tweet_id: str = Field(..., min_length=1)
 
 
 def _is_production() -> bool:
@@ -75,6 +80,40 @@ async def _verify_same_origin(request: Request) -> None:
             origin_host = ""
         if own_host and origin_host and origin_host != own_host:
             raise HTTPException(status_code=403, detail="cross-origin request denied")
+
+
+def _tenant_id() -> str:
+    try:
+        from kazma_core.tenant_isolation import require_tenant_id
+
+        return require_tenant_id() or "default"
+    except Exception:
+        return "default"
+
+
+def _bind_proposal(text: str, proposal_id: str) -> tuple[str, str]:
+    """If *proposal_id* is set, the stored draft wins. Raises ValueError."""
+    ref = (proposal_id or "").strip()
+    body = (text or "").strip()
+    if not ref:
+        return body, ""
+    from kazma_core.agent.artifacts import get_artifact_store
+
+    stored = get_artifact_store().stored_text_for(ref, tenant_id=_tenant_id())
+    if not stored:
+        raise ValueError("proposal_id did not resolve")
+    return stored, ref
+
+
+def _mark_proposal_posted(ref: str) -> None:
+    if not ref:
+        return
+    try:
+        from kazma_core.agent.artifacts import get_artifact_store
+
+        get_artifact_store().proposal_posted(ref, tenant_id=_tenant_id())
+    except Exception:
+        logger.debug("[x_api] proposal_posted failed for %s", ref, exc_info=True)
 
 
 def _placeholder(value: str) -> bool:
@@ -199,12 +238,36 @@ async def x_post_now(body: XPostBody) -> JSONResponse:
     try:
         from kazma_core.x_api.booking import publish_x_post
 
+        try:
+            text, proposal_ref = _bind_proposal(body.text, body.proposal_id)
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "posted": False, "error": str(exc)},
+                status_code=400,
+            )
         ok, payload = await publish_x_post(
-            text=body.text, reply_to_id=body.reply_to_id or ""
+            text=text, reply_to_id=body.reply_to_id or ""
         )
         payload["ok"] = ok
+        if ok:
+            _mark_proposal_posted(proposal_ref)
+            if proposal_ref:
+                payload["proposal_id"] = proposal_ref
         status = 200 if ok else 400
         return JSONResponse(payload, status_code=status)
+    except Exception as exc:
+        return _safe_error(exc)
+
+
+@protected_router.post("/delete", dependencies=[Depends(_verify_same_origin)])
+async def x_delete_now(body: XDeleteBody) -> JSONResponse:
+    """Delete a live tweet from X Studio. Operator click is the approval."""
+    try:
+        from kazma_core.x_api.booking import delete_x_post
+
+        ok, payload = await delete_x_post(tweet_id=body.tweet_id)
+        payload["ok"] = ok
+        return JSONResponse(payload, status_code=200 if ok else 400)
     except Exception as exc:
         return _safe_error(exc)
 

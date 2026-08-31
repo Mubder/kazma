@@ -27,7 +27,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["book_x_post", "publish_x_post"]
+__all__ = ["book_x_post", "delete_x_post", "publish_x_post"]
 
 
 # The shared timing parser accepts one RECURRING form ("daily at 9am") and
@@ -211,3 +211,33 @@ async def publish_x_post(
         "text": body,
         "policy": decision.reason,
     }
+
+
+async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
+    """DELETE /2/tweets/:id once. Returns ``(ok, payload)``.
+
+    Same no-retry contract as publish. Web Studio treats the operator click
+    as approval; the chat tool stays always-HITL outside this function.
+    """
+    from kazma_core.x_api.client import XApiError, XClient
+    from kazma_core.x_api.config import get_x_config
+    from kazma_core.x_api.ledger import get_ledger
+    from kazma_core.x_api.policy import evaluate_delete
+
+    tid = (tweet_id or "").strip()
+    if not tid:
+        return False, {"deleted": False, "error": "tweet_id is required."}
+    cfg = get_x_config()
+    decision = evaluate_delete(cfg=cfg)
+    if not decision.allow:
+        return False, {"deleted": False, "error": decision.reason}
+    try:
+        data = await XClient(cfg.credentials).delete_tweet(tid)
+    except XApiError as exc:
+        logger.warning("delete_x_post API error: %s", exc)
+        return False, {"deleted": False, "error": str(exc), "tweet_id": tid}
+    except Exception as exc:
+        logger.exception("delete_x_post failed")
+        return False, {"deleted": False, "error": str(exc), "tweet_id": tid}
+    get_ledger().mark_deleted(tid)
+    return True, {"deleted": True, "tweet_id": tid, "api": data}

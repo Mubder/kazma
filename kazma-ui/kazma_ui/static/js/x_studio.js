@@ -5,6 +5,9 @@ function xStudioPage() {
     status: { can_post: false, handle: '', caps: {} },
     text: '',
     when: '',
+    replyToId: '',
+    proposalId: '',
+    _draftText: '',
     preview: { chars: 0, max_chars: 280, allow: true, mentions: [], hashtags: [], cashtags: [], reason: '' },
     queue: [],
     drafts: [],
@@ -39,7 +42,18 @@ function xStudioPage() {
       });
     },
 
+    parseTweetId(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      const m = s.match(/status(?:es)?\/(\d+)/i) || s.match(/^(\d+)$/);
+      return m ? m[1] : s;
+    },
+
     onInput() {
+      if (this.proposalId && this._draftText && (this.text || '') !== this._draftText) {
+        this.proposalId = '';
+        this._draftText = '';
+      }
       this.preview.chars = (this.text || '').trim().length;
       clearTimeout(this._previewTimer);
       this._previewTimer = setTimeout(() => this.refreshPreview(), 250);
@@ -51,7 +65,10 @@ function xStudioPage() {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: this.text || '' }),
+          body: JSON.stringify({
+            text: this.text || '',
+            reply_to_id: this.parseTweetId(this.replyToId),
+          }),
         });
         const data = await resp.json().catch(() => ({}));
         if (data && data.ok) this.preview = data;
@@ -73,7 +90,7 @@ function xStudioPage() {
         const tasks = (data && data.tasks) || [];
         this.queue = tasks.filter(function (t) {
           return t.source === 'x' && (t.status === 'pending' || t.status === 'running');
-        });
+        }).map((t) => Object.assign({}, t, { editWhen: this.toLocalInput(t.when) }));
         this._buildWeek();
       } catch (_e) { this.queue = []; }
     },
@@ -125,6 +142,14 @@ function xStudioPage() {
       this.week = days;
     },
 
+    toLocalInput(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      const shifted = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+      return shifted.toISOString().slice(0, 16);
+    },
+
     fmtWhen(iso) {
       if (!iso) return '';
       try {
@@ -141,6 +166,33 @@ function xStudioPage() {
 
     useDraft(d) {
       this.text = (d && d.text) || '';
+      this.proposalId = (d && (d.id || d.proposal_id)) || '';
+      this._draftText = this.text;
+      this.onInput();
+    },
+
+    clearThread() {
+      this.replyToId = '';
+    },
+
+    replyTo(entry) {
+      this.replyToId = this.parseTweetId((entry && entry.tweet_id) || '');
+    },
+
+    _payload() {
+      const body = {
+        text: (this.text || '').trim(),
+        reply_to_id: this.parseTweetId(this.replyToId),
+      };
+      if (this.proposalId) body.proposal_id = this.proposalId;
+      return body;
+    },
+
+    _resetComposer(nextReplyId) {
+      this.text = '';
+      this.proposalId = '';
+      this._draftText = '';
+      if (nextReplyId) this.replyToId = String(nextReplyId);
       this.onInput();
     },
 
@@ -158,13 +210,12 @@ function xStudioPage() {
       if (!ok) return;
       this.busy = true;
       try {
-        const resp = await this._mutating('POST', '/api/x/post', { text: body });
+        const resp = await this._mutating('POST', '/api/x/post', this._payload());
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok) {
           window.showToast(this.t('x_studio.posted'), 'success');
-          this.text = '';
-          this.onInput();
-          await Promise.all([this.loadStatus(), this.loadAudit()]);
+          this._resetComposer(data.tweet_id || '');
+          await Promise.all([this.loadStatus(), this.loadAudit(), this.loadDrafts()]);
         } else {
           window.showToast(data.error || data.reason || 'Post failed', 'error');
         }
@@ -188,16 +239,14 @@ function xStudioPage() {
       this.busy = true;
       try {
         const whenIso = new Date(this.when).toISOString();
-        const resp = await this._mutating('POST', '/api/scheduled/x', {
-          text: body,
-          when: whenIso,
-        });
+        const payload = this._payload();
+        payload.when = whenIso;
+        const resp = await this._mutating('POST', '/api/scheduled/x', payload);
         const data = await resp.json().catch(() => ({}));
         if (resp.ok && data.ok !== false) {
           window.showToast(this.t('x_studio.scheduled_ok'), 'success');
-          this.text = '';
-          this.onInput();
-          await this.loadQueue();
+          this._resetComposer(this.parseTweetId(this.replyToId));
+          await Promise.all([this.loadQueue(), this.loadDrafts()]);
         } else {
           window.showToast(data.error || 'Schedule failed', 'error');
         }
@@ -205,6 +254,58 @@ function xStudioPage() {
         window.showToast('Schedule failed: ' + e.message, 'error');
       } finally {
         this.busy = false;
+      }
+    },
+
+    async reschedule(item) {
+      if (!(item.editWhen || '').trim()) {
+        window.showToast(this.t('x_studio.timing_required'), 'error');
+        return;
+      }
+      try {
+        const whenIso = new Date(item.editWhen).toISOString();
+        const resp = await this._mutating('PUT', '/api/scheduled/x/' + item.id, { when: whenIso });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.showToast(this.t('x_studio.rescheduled'), 'success');
+          await this.loadQueue();
+        } else {
+          window.showToast(data.error || 'Reschedule failed', 'error');
+        }
+      } catch (e) {
+        window.showToast('Reschedule failed: ' + e.message, 'error');
+      }
+    },
+
+    canDeletePosted(entry) {
+      if (!entry || !entry.tweet_id) return false;
+      const action = String(entry.action || '');
+      if (action === 'delete') return false;
+      return action === 'post' || action === 'reply' || !action;
+    },
+
+    async deletePosted(entry) {
+      const tid = this.parseTweetId((entry && entry.tweet_id) || '');
+      if (!tid) return;
+      const ok = await window.kazmaConfirm({
+        title: this.t('x_studio.delete_post'),
+        message: this.t('x_studio.confirm_delete') + '\n\n' + (this.auditText(entry) || tid),
+        confirmText: this.t('x_studio.delete_post'),
+        danger: true,
+      });
+      if (!ok) return;
+      try {
+        const resp = await this._mutating('POST', '/api/x/delete', { tweet_id: tid });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.showToast(this.t('x_studio.deleted'), 'success');
+          if (this.replyToId === tid) this.replyToId = '';
+          await this.loadAudit();
+        } else {
+          window.showToast(data.error || 'Delete failed', 'error');
+        }
+      } catch (e) {
+        window.showToast('Delete failed: ' + e.message, 'error');
       }
     },
 

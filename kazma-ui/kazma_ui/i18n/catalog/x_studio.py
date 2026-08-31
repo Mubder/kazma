@@ -15,6 +15,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "مسودة",
         "en": "Compose",
     },
+    "x_studio.deleted": {
+        "ar": "تم الحذف.",
+        "en": "Deleted.",
+    },
+    "x_studio.delete_post": {
+        "ar": "حذف",
+        "en": "Delete",
+    },
+    "x_studio.clear_thread": {
+        "ar": "إنهاء السلسلة",
+        "en": "Clear thread",
+    },
+    "x_studio.confirm_delete": {
+        "ar": "حذف هذا المنشور من إكس؟ لا يمكن التراجع.",
+        "en": "Delete this post from X? This cannot be undone.",
+    },
     "x_studio.confirm_post": {
         "ar": "نشر هذا النص الآن على إكس؟",
         "en": "Post this text to X now?",
@@ -63,6 +79,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "اليوم",
         "en": "today",
     },
+    "x_studio.reply": {
+        "ar": "رد",
+        "en": "Reply",
+    },
+    "x_studio.reply_to": {
+        "ar": "رد على (معرّف التغريدة أو الرابط)",
+        "en": "Reply to (tweet id or URL)",
+    },
+    "x_studio.reschedule": {
+        "ar": "إعادة جدولة",
+        "en": "Reschedule",
+    },
+    "x_studio.rescheduled": {
+        "ar": "أُعيدت الجدولة.",
+        "en": "Rescheduled.",
+    },
     "x_studio.schedule": {
         "ar": "جدولة",
         "en": "Schedule",
@@ -86,6 +118,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     "x_studio.use": {
         "ar": "استخدام",
         "en": "Use",
+    },
+    "x_studio.thread_on": {
+        "ar": "سلسلة",
+        "en": "Thread",
     },
     "x_studio.when": {
         "ar": "متى",

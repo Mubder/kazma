@@ -248,6 +248,19 @@ class ArtifactStore:
             "texts": [str(i.get("text") or "") for i in items],
         }
 
+    def stored_text_for(
+        self, ref: str, *, tenant_id: str = "default"
+    ) -> str | None:
+        """Exact stored draft text for a proposal or item id, or None."""
+        info = self.resolve_proposal(ref, tenant_id=tenant_id)
+        if not info:
+            return None
+        for raw in info.get("texts") or []:
+            text = str(raw or "").strip()
+            if text:
+                return text
+        return None
+
     def list_proposals(
         self,
         *,

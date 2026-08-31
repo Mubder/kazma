@@ -10,6 +10,10 @@ instead of burying them in Settings + a mixed Scheduled table.
   API only; operator click is the Web approval). Chat `x_post` stays always-HITL
   + `proposal_id`.
 - **Planner** of upcoming X posts and **saved drafts** from `save_proposal`.
+- **Reschedule** and **cancel** on the queue; **thread hops** (`reply_to_id` or
+  an x.com URL); **delete** a live tweet from Posted (`delete_x_post`).
+- Loading a saved draft stamps `proposal_id`; the stored text wins on post or
+  schedule, then the proposal is marked posted.
 - Scheduled page is unchanged as the mixed cron + X clock.
 
 ## Guard --reload no longer waits out crash backoff (2026-08-31)

@@ -21,10 +21,16 @@
   .xs-actions label { display: block; font-size: .72rem; color: var(--text-muted); margin-bottom: 4px; }
   .xs-actions input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
   .xs-reason { font-size: .78rem; color: var(--danger); margin-top: .5rem; }
-  .xs-row { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--border-subtle); font-size: .82rem; }
+  .xs-row { display: flex; justify-content: space-between; gap: .75rem; padding: .55rem 0; border-top: 1px solid var(--border-subtle); font-size: .82rem; align-items: flex-start; }
   .xs-row:first-of-type { border-top: 0; }
   .xs-row .txt { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
   .xs-row .when { font-size: .72rem; color: var(--text-muted); white-space: nowrap; }
+  .xs-row .acts { display: flex; gap: 4px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
+  .xs-row .acts input { width: 11.5rem; box-sizing: border-box; padding: 4px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); font-size: .72rem; }
+  .xs-thread { display: flex; gap: .5rem; align-items: end; margin-bottom: .75rem; flex-wrap: wrap; }
+  .xs-thread .grow { flex: 1; min-width: 180px; }
+  .xs-thread label { display: block; font-size: .72rem; color: var(--text-muted); margin-bottom: 4px; }
+  .xs-thread input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
   .xs-week { display: flex; gap: 4px; margin-bottom: .75rem; }
   .xs-day { flex: 1; text-align: center; font-size: .68rem; padding: 6px 2px; border-radius: 6px; background: var(--bg-elevated); color: var(--text-muted); }
   .xs-day.has { color: var(--accent-light); background: var(--accent-subtle); }
@@ -54,7 +60,18 @@
       <h2>{{ t('x_studio.composer') }}</h2>
       <textarea x-model="text" @input="onInput()" maxlength="2000"
                 :disabled="!status.can_post" placeholder="{{ t('x_studio.placeholder') }}"></textarea>
+      <div class="xs-thread">
+        <div class="grow">
+          <label for="xs-reply">{{ t('x_studio.reply_to') }}</label>
+          <input id="xs-reply" type="text" x-model="replyToId" :disabled="!status.can_post"
+                 @change="replyToId = parseTweetId(replyToId)">
+        </div>
+        <button class="btn btn-secondary btn-sm" type="button" x-show="replyToId" x-cloak
+                @click="clearThread()">{{ t('x_studio.clear_thread') }}</button>
+      </div>
       <div class="xs-counts">
+        <span class="xs-pill" x-show="replyToId" x-cloak
+              x-text="t('x_studio.thread_on') + ' ' + replyToId"></span>
         <span :class="preview.chars > preview.max_chars ? 'over' : ''"
               x-text="(preview.chars || 0) + '/' + (preview.max_chars || 280)"></span>
         <span x-text="'@' + (preview.mentions ? preview.mentions.length : 0)"></span>
@@ -89,7 +106,11 @@
             <div class="txt" x-text="item.summary"></div>
             <div class="when" x-text="fmtWhen(item.when)"></div>
           </div>
-          <button class="btn btn-danger btn-sm" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
+          <div class="acts">
+            <input type="datetime-local" x-model="item.editWhen">
+            <button class="btn btn-secondary btn-sm" @click="reschedule(item)">{{ t('x_studio.reschedule') }}</button>
+            <button class="btn btn-danger btn-sm" @click="cancel(item)">{{ t('x_studio.cancel') }}</button>
+          </div>
         </div>
       </template>
     </div>
@@ -111,8 +132,17 @@
       <div class="xs-empty" x-show="!audit.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
       <template x-for="e in audit" :key="e.id || (e.ts + e.action)">
         <div class="xs-row">
-          <div class="txt" x-text="auditText(e)"></div>
-          <div class="when" x-text="e.action"></div>
+          <div>
+            <div class="txt" x-text="auditText(e)"></div>
+            <div class="when" x-text="(e.action || '') + (e.tweet_id ? ' · ' + e.tweet_id : '')"></div>
+          </div>
+          <div class="acts">
+            <button class="btn btn-secondary btn-sm" x-show="e.tweet_id" x-cloak
+                    @click="replyTo(e)">{{ t('x_studio.reply') }}</button>
+            <button class="btn btn-danger btn-sm"
+                    x-show="canDeletePosted(e)" x-cloak
+                    @click="deletePosted(e)">{{ t('x_studio.delete_post') }}</button>
+          </div>
         </div>
       </template>
     </div>
