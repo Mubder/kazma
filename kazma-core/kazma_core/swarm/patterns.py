@@ -11,7 +11,7 @@ from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
-from kazma_core.swarm.dispatch_helpers import wait_timeout
+from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
@@ -304,16 +304,14 @@ async def execute_pipeline(
             previous_result,
             blackboard,
         )
-        dispatch_context = SwarmDispatchContext(
-            context_text,
+        dispatch_context = pattern_dispatch_context(
+            task,
             blackboard=blackboard,
-            metadata={
-                **task.metadata,
+            extra={
                 "pipeline_step": step_index,
                 "worker_name": worker_name,
             },
-            task_id=task.id,
-            task_type=task.type.value,
+            context_text=context_text,
         )
 
         try:
@@ -434,16 +432,14 @@ async def resume_pipeline(
             previous_result,
             blackboard,
         )
-        dispatch_context = SwarmDispatchContext(
-            context_text,
+        dispatch_context = pattern_dispatch_context(
+            task,
             blackboard=blackboard,
-            metadata={
-                **task.metadata,
+            extra={
                 "pipeline_step": step_index,
                 "worker_name": worker_name,
             },
-            task_id=task.id,
-            task_type=task.type.value,
+            context_text=context_text,
         )
 
         try:
@@ -580,7 +576,7 @@ async def execute_conditional(
             dispatch_worker_by_name(
                 router_name,
                 task.prompt,
-                task.context,
+                pattern_dispatch_context(task, extra={"worker_name": router_name}),
                 fallback_chain=task.fallback_chain or None,
             ),
             timeout=wait_timeout(task.timeout),
@@ -642,7 +638,11 @@ async def execute_conditional(
     # Step 5: Dispatch to the target worker.
     try:
         target_result = await asyncio.wait_for(
-            dispatch_worker_by_name(target_worker, task.prompt, task.context),
+            dispatch_worker_by_name(
+                target_worker,
+                task.prompt,
+                pattern_dispatch_context(task, extra={"worker_name": target_worker}),
+            ),
             timeout=wait_timeout(task.timeout),
         )
     except TimeoutError:
@@ -706,16 +706,13 @@ async def execute_fan_out(
         )
 
     async def dispatch_one(worker_name: str) -> WorkerResult:
-        dispatch_context = SwarmDispatchContext(
-            task.context,
+        dispatch_context = pattern_dispatch_context(
+            task,
             blackboard=blackboard,
-            metadata={
-                **task.metadata,
+            extra={
                 "worker_name": worker_name,
                 "aggregation": task.aggregation,
             },
-            task_id=task.id,
-            task_type=task.type.value,
         )
 
         try:

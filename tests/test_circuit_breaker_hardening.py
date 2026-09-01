@@ -155,10 +155,13 @@ async def test_graph_parallel_hard_errors_do_not_instant_trip() -> None:
     """One batch of 3 hard errors credits +1 only — does not trip."""
     state = initial_supervisor_state()
     state["consecutive_tool_failures"] = 0
+    # Registered READ tools (SemanticTier.NONE). Dummy names like t1 are
+    # unregistered mutators: the commitment gate denies them as TERMINAL
+    # and the breaker correctly does not credit policy denials (audit T-1).
     state["tool_calls_pending"] = [
-        {"id": "call_1", "name": "t1", "arguments": {}},
-        {"id": "call_2", "name": "t2", "arguments": {}},
-        {"id": "call_3", "name": "t3", "arguments": {}},
+        {"id": "call_1", "name": "file_list", "arguments": {}},
+        {"id": "call_2", "name": "file_read", "arguments": {}},
+        {"id": "call_3", "name": "memory_search", "arguments": {}},
     ]
 
     async def mock_execute(name, args):
@@ -182,7 +185,7 @@ async def test_graph_trips_after_three_hard_rounds() -> None:
     state = initial_supervisor_state()
     state["consecutive_tool_failures"] = 2
     state["tool_calls_pending"] = [
-        {"id": "call_1", "name": "t1", "arguments": {}},
+        {"id": "call_1", "name": "file_list", "arguments": {}},
     ]
 
     async def mock_execute(name, args):

@@ -108,6 +108,15 @@ class SlackAdapter(BaseAdapter):
         """Replace the per-user allowlist at runtime (Settings live apply)."""
         self._allowed_users = {str(uid) for uid in user_ids}
 
+    def actor_allowed(self, user_id: object) -> bool:
+        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
+        if not self._allowed_users and not self._allow_all:
+            return False
+        if self._allowed_users:
+            uid = str(user_id or "")
+            return bool(uid) and uid in self._allowed_users
+        return True
+
     def set_allowed_teams(self, team_ids: list[str] | set[str]) -> None:
         """Replace the team allowlist at runtime."""
         self._allowed_teams = {str(tid) for tid in team_ids}
@@ -262,6 +271,56 @@ class SlackAdapter(BaseAdapter):
                     return False
 
         return True
+
+    async def _prefetch_private_files(self, msg: IncomingMessage) -> IncomingMessage:
+        """Download Slack ``url_private_download`` with the bot token (audit M-5).
+
+        Generic attachment fetch is unauthenticated and 403s these URLs.
+        Bytes live on the Attachment; the token never enters graph state.
+        """
+        if not msg.attachments or not self._http or not self._bot_token:
+            return msg
+        from kazma_gateway.gateway import Attachment
+
+        filled: list[Attachment] = []
+        headers = {
+            "Authorization": f"Bearer {self._bot_token}",
+        }
+        for att in msg.attachments:
+            if att.data or not att.url:
+                filled.append(att)
+                continue
+            try:
+                resp = await self._http.get(att.url, headers=headers, timeout=30.0)
+                resp.raise_for_status()
+                data = resp.content
+                if len(data) > 20 * 1024 * 1024:
+                    logger.warning(
+                        "[Slack] attachment %s over size cap (%d bytes)",
+                        att.filename, len(data),
+                    )
+                    filled.append(att)
+                    continue
+                meta = dict(att.meta or {})
+                meta.pop("bot_token", None)
+                filled.append(
+                    Attachment(
+                        kind=att.kind,
+                        mime=att.mime,
+                        filename=att.filename,
+                        data=data,
+                        url=None,
+                        meta=meta,
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Slack] private file prefetch failed for %s: %s",
+                    att.filename or att.url, exc,
+                )
+                filled.append(att)
+        msg.attachments = filled
+        return msg
 
     async def _maybe_transcribe_audio(self, msg: IncomingMessage) -> IncomingMessage:
         """Telegram-depth STT: size caps, language, provider, metadata tags."""
@@ -493,9 +552,9 @@ class SlackAdapter(BaseAdapter):
                                             _ia_channel, action.kind,
                                         )
                                         continue
-                                    if getattr(self, "_allowed_users", None) and (not _ia_user_id or _ia_user_id not in self._allowed_users):
+                                    if not self.actor_allowed(_ia_user_id):
                                         logger.info(
-                                            "[Slack] Ignoring interaction from non-allowed user %s (action=%s)",
+                                            "[Slack] Ignoring interaction (allowlist fail-closed) user=%s action=%s",
                                             _ia_user_id, action.kind,
                                         )
                                         continue
@@ -576,9 +635,9 @@ class SlackAdapter(BaseAdapter):
                                                     channel,
                                                 )
                                                 continue
-                                            if getattr(self, "_allowed_users", None) and (not user_id or user_id not in self._allowed_users):
+                                            if not self.actor_allowed(user_id):
                                                 logger.info(
-                                                    "[Slack] Ignoring interaction from non-allowed user %s",
+                                                    "[Slack] Ignoring interaction (allowlist fail-closed) user=%s",
                                                     user_id,
                                                 )
                                                 continue
@@ -651,6 +710,7 @@ class SlackAdapter(BaseAdapter):
                                     if not _uid or _uid not in self._allowed_users:
                                         logger.info("[Slack] Dropping event from non-allowed user %s — skipping", _uid)
                                         continue
+                                incoming = await self._prefetch_private_files(incoming)
                                 # Voice: transcribe any audio attachment.
                                 incoming = await self._maybe_transcribe_audio(incoming)
                                 try:
@@ -820,6 +880,7 @@ class SlackAdapter(BaseAdapter):
                 "media": bool(attachments),
             },
         )
+        incoming = await self._prefetch_private_files(incoming)
         # Voice: transcribe any audio attachment (polling path).
         incoming = await self._maybe_transcribe_audio(incoming)
         try:

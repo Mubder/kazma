@@ -122,7 +122,8 @@ def _conn() -> sqlite3.Connection:
             rubric_ok INTEGER,
             created_at REAL,
             updated_at REAL,
-            meta_json TEXT DEFAULT '{}'
+            meta_json TEXT DEFAULT '{}',
+            archived INTEGER DEFAULT 0
         )
         """
     )
@@ -222,8 +223,8 @@ def create_session(
             INSERT INTO research_sessions
             (id, topic, depth, status, stage, message, log_json, report_path,
              summary, error, sources, max_sources, rubric_score, rubric_ok,
-             created_at, updated_at, meta_json)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             created_at, updated_at, meta_json, archived)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 sess.id,
@@ -243,6 +244,7 @@ def create_session(
                 sess.created_at,
                 sess.updated_at,
                 json.dumps(sess.meta),
+                0,
             ),
         )
         c.commit()
@@ -276,8 +278,12 @@ def list_sessions(
         where = ""
         params: list[Any] = []
         if archived is not None:
-            where = "WHERE archived = ?"
-            params.append(1 if archived else 0)
+            # NULL (pre-migration rows / INSERT that omitted the column)
+            # must not vanish from the active list (audit T-5).
+            if archived:
+                where = "WHERE COALESCE(archived, 0) = 1"
+            else:
+                where = "WHERE COALESCE(archived, 0) = 0"
         rows = c.execute(
             f"""
             SELECT * FROM research_sessions
@@ -696,8 +702,8 @@ def record_chat_research(
                 INSERT INTO research_sessions
                 (id, topic, depth, status, stage, message, log_json, report_path,
                  summary, error, sources, max_sources, rubric_score, rubric_ok,
-                 created_at, updated_at, meta_json)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 created_at, updated_at, meta_json, archived)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     sess.id,
@@ -717,6 +723,7 @@ def record_chat_research(
                     sess.created_at,
                     sess.updated_at,
                     json.dumps(sess.meta),
+                    0,
                 ),
             )
             c.commit()

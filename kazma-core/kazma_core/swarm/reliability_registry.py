@@ -70,11 +70,16 @@ class ReliabilityRegistry:
         """Return (or create) the circuit breaker for a worker.
 
         When shared breakers are enabled (multi-user/prod or
-        ``KAZMA_SHARED_BREAKERS=1``), hydrate from ConfigStore on first get.
+        ``KAZMA_SHARED_BREAKERS=1``), hydrate from ConfigStore on first get
+        and refresh on every subsequent get (M-14).
         """
         if worker_name not in self._circuit_breakers:
             shared = CircuitBreaker.load_shared(worker_name)
             self._circuit_breakers[worker_name] = shared or CircuitBreaker()
+        else:
+            # M-14: shared state was only hydrated on first get; refresh
+            # so a replica that already tripped is visible here.
+            self._circuit_breakers[worker_name].refresh_from_shared(worker_name)
         return self._circuit_breakers[worker_name]
 
     def note_breaker_outcome(self, worker_name: str) -> None:

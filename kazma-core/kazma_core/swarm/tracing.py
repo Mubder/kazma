@@ -232,12 +232,11 @@ class OtlpHttpExporter:
                 del self._buffer[: len(self._buffer) - self._MAX_BUFFER]
             batch = list(self._buffer)
         try:
-            import asyncio
+            from kazma_core.background import spawn_background
 
-            loop = asyncio.get_running_loop()
+            spawn_background(self._flush(batch), name="swarm-trace-flush")
         except RuntimeError:
             return  # no loop — keep buffered for a later call
-        loop.create_task(self._flush(batch))
 
     async def _flush(self, batch: list[Span]) -> None:
         try:

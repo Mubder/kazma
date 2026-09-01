@@ -94,7 +94,9 @@ async def speech_to_text(
                 f.write(f"voice.stt_provider in DB: {cs.get('voice.stt_provider')}\n")
                 f.write(f"voice.stt_model in DB: {cs.get('voice.stt_model')}\n")
                 f.write(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e))
+            from kazma_core.errors import safe_error
+
+            raise HTTPException(status_code=500, detail=str(safe_error(e)))
         raise e
 
 
@@ -429,7 +431,9 @@ async def livekit_voice_token(body: _LiveKitTokenBody | None = None) -> dict[str
             identity=identity, room=room, name="Kazma web", config=cfg
         )
     except ValueError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        from kazma_core.errors import safe_error
+
+        raise HTTPException(status_code=503, detail=str(safe_error(exc))) from exc
     return {
         "token": token,
         "url": cfg.url,

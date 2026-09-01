@@ -75,14 +75,15 @@ class TestParseOutputTargetSuffix:
         assert override is None
 
     def test_other_platform_prefix(self):
-        """Any ``platform:id`` form works, not just telegram."""
+        """Discord snowflake (17-20 digits) is accepted as a string (audit M-7)."""
         from kazma_gateway.agent_handler import _parse_output_target_suffix
 
-        clean, override = _parse_output_target_suffix("task -> discord:998877")
+        snowflake = "123456789012345678"
+        clean, override = _parse_output_target_suffix(f"task -> discord:{snowflake}")
         assert clean == "task"
         assert override == {
             "platform": "discord",
-            "chat_id": 998877,
+            "chat_id": snowflake,
             "enabled": True,
         }
 

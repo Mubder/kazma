@@ -222,7 +222,9 @@ def test_chat_js_always_applies_done_content():
     assert "source: 'done'" in src
     assert "function splitPlanAndProse(" in src
     assert "function stripPlanFenceForDisplay(" in src
-    assert "stripPlanFenceForDisplay(tokenAccum)" in src
+    # Projector path (renderTurn / _renderReplyHTML), not a tokenAccum painter.
+    assert "stripPlanFenceForDisplay(text)" in src
+    assert "stripPlanFenceForDisplay(tokenAccum)" not in src
 
 
 def test_chat_js_handles_glued_closer():

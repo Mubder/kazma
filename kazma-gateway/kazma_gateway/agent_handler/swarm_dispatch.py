@@ -235,17 +235,16 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
             )
             return task, None
         
-        try:
-            chat_id = int(chat_id_str)
-        except ValueError:
-            logger.info(
-                "[agent-handler] Ignoring malformed output-target suffix %r "
-                "(chat_id not an integer); task left untouched", raw,
-            )
-            return task, None  # malformed — leave prompt untouched
-        
-        # Validate chat_id for known platforms
+        chat_id: str | int
         if platform == "telegram":
+            try:
+                chat_id = int(chat_id_str)
+            except ValueError:
+                logger.info(
+                    "[agent-handler] Ignoring malformed output-target suffix %r "
+                    "(telegram chat_id not an integer); task left untouched", raw,
+                )
+                return task, None
             if not (TELEGRAM_MIN_CHAT_ID <= chat_id <= TELEGRAM_MAX_CHAT_ID or chat_id > 0):
                 logger.warning(
                     "[agent-handler] Telegram chat_id %d out of valid range "
@@ -253,7 +252,26 @@ def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
                     chat_id, TELEGRAM_MIN_CHAT_ID, TELEGRAM_MAX_CHAT_ID
                 )
                 return task, None
-        
+        elif platform == "slack":
+            # Channel / group / DM ids: C… / G… / D… plus alphanumerics.
+            if not re.fullmatch(r"[CGD][A-Z0-9]+", chat_id_str):
+                logger.info(
+                    "[agent-handler] Ignoring malformed slack channel id %r "
+                    "in output-target suffix; task left untouched", chat_id_str,
+                )
+                return task, None
+            chat_id = chat_id_str
+        elif platform == "discord":
+            if not re.fullmatch(r"\d{17,20}", chat_id_str):
+                logger.info(
+                    "[agent-handler] Ignoring malformed discord snowflake %r "
+                    "in output-target suffix; task left untouched", chat_id_str,
+                )
+                return task, None
+            chat_id = chat_id_str
+        else:
+            chat_id = chat_id_str
+
         return clean, {"platform": platform, "chat_id": chat_id, "enabled": True}
 
 # Unrecognized suffix format (e.g. "@GroupName") — log so the user

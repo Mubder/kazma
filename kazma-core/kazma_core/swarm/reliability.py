@@ -259,6 +259,11 @@ class CircuitBreaker:
     # any future slots/frozen dataclass safe (audit finding).
     _opened_at_wall: float | None = field(default=None, init=False, repr=False)
     _probe_in_flight: bool = field(default=False, init=False, repr=False)
+    # Worker name that currently holds the durable half-open probe lease
+    # (M-14). In-process `_probe_in_flight` stays the first gate; the
+    # ConfigStore lease stops a second replica from probing too.
+    _probe_lease_worker: str | None = field(default=None, init=False, repr=False)
+    _probe_lease_holder: str | None = field(default=None, init=False, repr=False)
 
     # ------------------------------------------------------------------
     # State access
@@ -282,12 +287,16 @@ class CircuitBreaker:
     # Probe gating
     # ------------------------------------------------------------------
 
-    def allow_probe(self) -> bool:
+    def allow_probe(self, worker_name: str | None = None) -> bool:
         """Return ``True`` if a dispatch is allowed.
 
         * ``closed`` -- always allowed
         * ``half-open`` -- allowed only if no probe is already in flight
         * ``open`` -- rejected
+
+        When *worker_name* is set and shared breakers are on, a durable
+        ConfigStore lease backs ``_probe_in_flight`` so a second replica
+        cannot also probe. The in-process flag is never removed.
         """
         current = self.state
         if current == CircuitState.CLOSED:
@@ -295,6 +304,8 @@ class CircuitBreaker:
         if current == CircuitState.HALF_OPEN:
             # Only allow a single probe in half-open state
             if self._probe_in_flight:
+                return False
+            if worker_name and not self._try_acquire_probe_lease(worker_name):
                 return False
             self._probe_in_flight = True
             return True
@@ -307,11 +318,36 @@ class CircuitBreaker:
         without ``record_success`` / ``record_failure``.
         """
         self._probe_in_flight = False
+        self._release_probe_lease()
 
     def check_or_raise(self, worker_name: str) -> None:
-        """Raise :class:`CircuitBreakerOpenError` if the breaker is open."""
-        if not self.allow_probe():
+        """Raise :class:`CircuitBreakerOpenError` if the breaker is open.
+
+        Refreshes from ConfigStore first (M-14) so a replica that already
+        tripped the breaker is visible here, then applies the half-open
+        probe lease.
+        """
+        self.refresh_from_shared(worker_name)
+        if not self.allow_probe(worker_name):
             raise CircuitBreakerOpenError(worker_name)
+
+    def refresh_from_shared(self, worker_name: str) -> None:
+        """Overlay ConfigStore breaker state, keeping a local in-flight probe."""
+        shared = type(self).load_shared(worker_name)
+        if shared is None:
+            return
+        probe = self._probe_in_flight
+        lease_worker = self._probe_lease_worker
+        lease_holder = self._probe_lease_holder
+        self.consecutive_failures = shared.consecutive_failures
+        self.failure_threshold = shared.failure_threshold
+        self.cooldown_seconds = shared.cooldown_seconds
+        self._state = shared._state
+        self._opened_at = shared._opened_at
+        self._opened_at_wall = shared._opened_at_wall
+        self._probe_in_flight = probe
+        self._probe_lease_worker = lease_worker
+        self._probe_lease_holder = lease_holder
 
     # ------------------------------------------------------------------
     # Recording outcomes
@@ -327,6 +363,7 @@ class CircuitBreaker:
         current = self.state
         self.consecutive_failures = 0
         self._probe_in_flight = False
+        self._release_probe_lease()
         if current == CircuitState.HALF_OPEN:
             logger.info("[CircuitBreaker] half-open probe succeeded, closing breaker")
             self._state = CircuitState.CLOSED
@@ -342,6 +379,7 @@ class CircuitBreaker:
         # Use the property accessor to trigger open -> half-open auto-transition.
         current = self.state
         self._probe_in_flight = False
+        self._release_probe_lease()
         if current == CircuitState.HALF_OPEN:
             logger.warning("[CircuitBreaker] half-open probe failed, re-opening breaker")
             self._state = CircuitState.OPEN
@@ -374,6 +412,7 @@ class CircuitBreaker:
         self.consecutive_failures = 0
         self._opened_at = None
         self._probe_in_flight = False
+        self._release_probe_lease()
 
     # ------------------------------------------------------------------
     # Serialization
@@ -417,6 +456,76 @@ class CircuitBreaker:
             else:
                 breaker._opened_at = time.monotonic()
         return breaker
+
+    def _probe_lease_key(self, worker_name: str) -> str:
+        return f"swarm.breaker.probe.{worker_name}"
+
+    def _probe_lease_ttl(self) -> float:
+        return max(float(self.cooldown_seconds), 60.0) + 30.0
+
+    def _new_probe_holder(self) -> str:
+        import os
+
+        return f"{os.getpid()}:{id(self)}"
+
+    def _try_acquire_probe_lease(self, worker_name: str) -> bool:
+        """Best-effort durable CAS for the half-open probe (M-14).
+
+        Fail-open to the in-process flag when shared breakers are off or
+        ConfigStore is unavailable — never deadlock a dispatch.
+        """
+        if not _shared_breakers_enabled():
+            self._probe_lease_worker = worker_name
+            self._probe_lease_holder = self._new_probe_holder()
+            return True
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            key = self._probe_lease_key(worker_name)
+            now = time.time()
+            holder = self._new_probe_holder()
+            raw = cs.get(key)
+            if isinstance(raw, dict):
+                exp = float(raw.get("expires_at") or 0)
+                existing = str(raw.get("holder") or "")
+                if existing and exp > now and existing != holder:
+                    return False
+            payload = {
+                "holder": holder,
+                "expires_at": now + self._probe_lease_ttl(),
+                "acquired_at": now,
+            }
+            cs.set(key, payload, category="swarm")
+            check = cs.get(key)
+            if isinstance(check, dict) and str(check.get("holder") or "") == holder:
+                self._probe_lease_worker = worker_name
+                self._probe_lease_holder = holder
+                return True
+            return False
+        except Exception as exc:
+            logger.debug("[CircuitBreaker] probe lease acquire failed: %s", exc)
+            self._probe_lease_worker = worker_name
+            self._probe_lease_holder = self._new_probe_holder()
+            return True
+
+    def _release_probe_lease(self) -> None:
+        worker_name = self._probe_lease_worker
+        holder = self._probe_lease_holder
+        self._probe_lease_worker = None
+        self._probe_lease_holder = None
+        if not worker_name or not _shared_breakers_enabled():
+            return
+        try:
+            from kazma_core.config_store import get_config_store
+
+            cs = get_config_store()
+            key = self._probe_lease_key(worker_name)
+            raw = cs.get(key)
+            if isinstance(raw, dict) and str(raw.get("holder") or "") == (holder or ""):
+                cs.set(key, {"holder": "", "expires_at": 0.0}, category="swarm")
+        except Exception as exc:
+            logger.debug("[CircuitBreaker] probe lease release failed: %s", exc)
 
     def persist_shared(self, worker_name: str) -> None:
         """Write state to ConfigStore for multi-replica sharing (best-effort)."""

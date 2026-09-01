@@ -1190,7 +1190,7 @@ class SwarmEngine:
         Returns the final ``TaskResult`` after the remaining pipeline steps
         complete, or ``None`` if no active checkpoint exists for *task_id*.
         """
-        entry = self._checkpoint_handler._paused.get(task_id)
+        entry = self._checkpoint_handler.try_claim(task_id, "approving")
         if entry is None:
             return None
 
@@ -1199,10 +1199,7 @@ class SwarmEngine:
         worker_results = list(entry.worker_results)
         blackboard_data = dict(entry.blackboard_data)
 
-        # Cancel the timeout task if present.
-        if entry.timeout_task is not None and not entry.timeout_task.done():
-            entry.timeout_task.cancel()
-            entry.timeout_task = None
+        self._checkpoint_handler._cancel_timeout_if_foreign(entry)
 
         checkpoint.status = "approved"
         checkpoint.needs_approval = False

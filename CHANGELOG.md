@@ -1,5 +1,83 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 8 — lows + H-7 pin-IP (2026-09-02)
+
+L-1: `/health/details` is sensitive; `/health/live` and `/health/ready` stay
+public. L-2: standalone `.metric-card` lives only in `kazma.v5.css` (HITL
+duplicate-selector gate unchanged). L-3: workspace Merge PR / bookmark use
+`kazmaConfirm` / `kazmaPrompt`. L-4: `x-cloak` on listed `x-show` in
+base/chat/ide (chat.js untouched). L-5: GC symlink test targets tmp and
+unlinks on teardown. H-7: `PinHostAsyncTransport` on the direct scraping
+client (skipped when a proxy is configured) plus
+`assert_peer_public` after each `read_url` hop.
+
+## Audit 2026-09-01 Wave 7 — correctness hygiene (2026-09-01)
+
+M-1/M-2: retry-without-tools / response_format and in-band SSE errors
+classify 429/5xx as transient. M-4/M-6: snapshot maintenance and `/kb`
+crawl/refresh use `spawn_background`. M-5: Slack adapter prefetches
+`url_private_download` with the bot token (token never enters graph
+state). M-7: swarm `-> slack:C…` / Discord snowflake. M-8: `/fork`
+persists the full snapshot via `aupdate_state`. M-12: cron
+`astimezone(tz)`. M-13: firing ledger `last_run` + skip unparseable
+plain lines. M-14 leftover: PG-dump stale hours from backup cadence,
+voice `safe_error` + WS utterance cancel, embedder rebuild spawn,
+memory/metrics SQLite off the loop, `/documents` `/scheduled` gated,
+telegram webhook open prefix, document split/fill/index/search and
+chat-upload rate limits, `top_k` clamp. H-7 pin-IP remains Wave 8.
+
+## Audit 2026-09-01 Wave 6 — swarm reliability (2026-09-01)
+
+H-12: swarm fan-out approvals are tri-state (`True` settles; `False` is a
+vote until `expected_voters` or deadline). This is **not** web
+`claim_gate` (first claim 200, second 409). M-14: autoscaler skips busy
+workers and stamps activity at completion; shared breaker refreshes
+before `check_or_raise` and takes a durable half-open probe lease
+(in-process `_probe_in_flight` stays); PG worker-metrics use
+`INSERT … ON CONFLICT DO UPDATE`; MCP `list_resources`/`read_resource`
+go through the workspace scope guard; path-write mode uses the
+`side_effects` mutator vocabulary.
+
+## Audit 2026-09-01 Wave 5 — isolation, cron delivery, PG docs, workspace_id (2026-09-01)
+
+H-1: proposal resolve/posted filter by tenant_id. H-2: cron send_message
+registers discord + slack via one GatewayManager handler (platform: prefix;
+chat_id stays out of graph state). H-13: eight document-catalog tables added
+to KAZMA_PG_TABLES with a DDL-introspection guard. H-10/H-11: one
+pattern_dispatch_context injects workspace_id; TaskStore persists/hydrates it.
+
+## Audit 2026-09-01 Wave 4 — HITL-adjacent, registry-safe (2026-09-01)
+
+H-9: swarm `is_danger_tool()` uses TOOL_TIERS danger floor + list ADDS
+(Settings cannot un-gate `shell_exec`). M-3: `tool_worker_node` live-reads
+`get_hitl_config()` when the graph was compiled with HITL (None stays
+no-gate). H-8: `LocalToolRegistry.execute` applies `rewritten_args` and
+fail-closes clarify/confirm with "run from chat" — no second gate row.
+T-2: checkpoint timeout no longer cancels itself; claim-before-await
+(`pending → approving|rejecting`) plus settle_gate on reject still runs.
+
+## Audit 2026-09-01 Wave 2–3 — honest suite + importer atomicity (2026-09-01)
+
+T-6: skip `shell_exec` timeout when `sleep` is not on PATH (do not call
+blocked `python`). T-1: breaker tests use registered READ tools so
+commitment fail-closed denials are not mistaken for hard errors. T-4:
+DSML/plan-fence/steer tests retargeted onto `renderTurn` / `chat_slash.js`
+— no `tokenAccum` dual-paint restore. T-5: chat research INSERT stamps
+`archived=0`; list treats NULL as active; test uses an isolated DB.
+C-2: PG-bundle preflight + `pg_restore` **before** SQLite swap; failed
+swap rolls `.migrate-backup-*` back. M-9 docker exec `-e PGPASSWORD`.
+M-10 both path-separator variants. M-11 real `memory_audit_log` columns.
+
+## Audit 2026-09-01 Wave 0–1 — industrial Day-0 (2026-09-01)
+
+Execution SoT: `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` (do not follow the
+dump's Part 6 order). C-1 Slack `******` header is **false** on current
+`main` — guard test only. Shipped: H-3 callback empty-allowlist fail-closed
+(Telegram/Discord/Slack), H-6 fence `source` sanitization, H-5 skill-name
+path containment, H-4 telegram auto-attach containment, T-3 guard never
+reaps non-python even when health answers, H-14 `fast_test.py` zero-pass
+floor + traceback digest. Turn Delivery / HITL P6 untouched.
+
 ## HITL Gate Registry P6 — one decision author (2026-09-01)
 
 Dual-run readers are gone. Pending-approvals and the timeout watchdog

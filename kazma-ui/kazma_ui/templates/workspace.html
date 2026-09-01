@@ -1214,7 +1214,15 @@ function workspaceApp() {
             label: 'Merge PR',
             variant: 'btn-success',
             handler: async () => {
-              if (confirm(`Merge PR #${pr.number} (${pr.title})?`)) {
+              const okMerge = window.kazmaConfirm
+                ? await window.kazmaConfirm({
+                    title: 'Merge pull request',
+                    message: `Merge PR #${pr.number} (${pr.title})?`,
+                    confirmText: 'Merge',
+                    danger: true,
+                  })
+                : window.confirm(`Merge PR #${pr.number} (${pr.title})?`);
+              if (okMerge) {
                 try {
                   const mResp = await fetch(`/api/github/pulls/${pr.number}/merge`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({merge_method: 'squash'}) });
                   const mData = await mResp.json();
@@ -1459,7 +1467,12 @@ function workspaceApp() {
     },
 
     async addBookmark() {
-      const path = prompt(t('workspace.bookmark_prompt'));
+      const path = window.kazmaPrompt
+        ? await window.kazmaPrompt({
+            title: t('workspace.bookmark_title') || 'Bookmark',
+            message: t('workspace.bookmark_prompt'),
+          })
+        : window.prompt(t('workspace.bookmark_prompt'));
       if (!path) return;
       const name = path.split('/').pop() || path;
       const type = path.startsWith('http') ? 'url' : 'file';

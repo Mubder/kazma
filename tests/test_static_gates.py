@@ -68,7 +68,10 @@ def _dotted(func: ast.expr) -> str | None:
 
 # ── 1. Blocking DB driver inside async def (F-06) ────────────────────────
 
-BLOCKING_CALLS = {"sqlite3.connect"}
+BLOCKING_CALLS = {"sqlite3.connect", "_sqlite3.connect"}
+#: Sync helpers whose body opens SQLite; calling them from async def is the
+#: same pin as an inline connect (audit M-14 memory_api ``_conn()``).
+BLOCKING_HELPERS = {"_conn"}
 
 #: ``(file, function)`` pairs that are deliberately exempt, each with a reason.
 BLOCKING_ALLOWLIST: dict[tuple[str, str], str] = {
@@ -112,12 +115,15 @@ def test_no_blocking_db_driver_in_async():
             def visit_Call(self, node: ast.Call) -> None:
                 if stack and stack[-1] is not None:
                     name = _dotted(node.func)
-                    if name in BLOCKING_CALLS:
+                    if name in BLOCKING_CALLS or (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id in BLOCKING_HELPERS
+                    ):
                         key = (_rel(path), stack[-1])
                         if key not in BLOCKING_ALLOWLIST:
                             offenders.append(
                                 f"{_rel(path)}:{node.lineno} async def "
-                                f"{stack[-1]} calls {name}"
+                                f"{stack[-1]} calls {name or getattr(node.func, 'id', '?')}"
                             )
                 self.generic_visit(node)
 
@@ -153,7 +159,17 @@ def test_no_bare_create_task():
             # loop's weak reference as the only one.
             if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
                 continue
-            if _dotted(node.value.func) in ("asyncio.create_task", "asyncio.ensure_future"):
+            dotted = _dotted(node.value.func)
+            # Discarded `loop.create_task(...)` is the same GC-able fire-and-
+            # forget (audit M-4 / M-14 embedder rebuild). Assigned tasks
+            # (`task = loop.create_task`) stay allowed.
+            is_loop_create = (
+                isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "create_task"
+                and isinstance(node.value.func.value, ast.Name)
+                and node.value.func.value.id == "loop"
+            )
+            if dotted in ("asyncio.create_task", "asyncio.ensure_future") or is_loop_create:
                 offenders.append(f"{rel}:{node.lineno}")
 
     assert not offenders, (

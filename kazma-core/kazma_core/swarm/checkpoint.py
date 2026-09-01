@@ -46,6 +46,7 @@ class _PausedPipeline:
     completion_event: asyncio.Event = field(default_factory=asyncio.Event)
     timeout_task: asyncio.Task[None] | None = None
     final_result: TaskResult | None = None
+    claim: str = "pending"  # pending | approving | rejecting
 
 
 class HITLCheckpointHandler:
@@ -98,6 +99,36 @@ class HITLCheckpointHandler:
         if entry:
             entry.timeout_task = timeout_task
 
+    def try_claim(self, task_id: str, action: str) -> _PausedPipeline | None:
+        """Claim a pending checkpoint before any await (audit T-2 / M-14).
+
+        ``action`` is ``approving`` or ``rejecting``. Returns the entry, or
+        ``None`` if missing or already claimed.
+        """
+        entry = self._paused.get(task_id)
+        if entry is None:
+            return None
+        if entry.claim != "pending":
+            return None
+        entry.claim = action
+        return entry
+
+    def _cancel_timeout_if_foreign(self, entry: _PausedPipeline) -> None:
+        """Cancel a timeout arm unless it is the currently running task.
+
+        The auto-reject path IS that timeout task. Cancelling it here used
+        to raise CancelledError on the next await in ``reject_checkpoint``,
+        so the task stayed PAUSED (audit T-2).
+        """
+        task = entry.timeout_task
+        entry.timeout_task = None
+        if task is None or task.done():
+            return
+        current = asyncio.current_task()
+        if current is not None and task is current:
+            return
+        task.cancel()
+
     async def reject(
         self,
         task_id: str,
@@ -108,14 +139,11 @@ class HITLCheckpointHandler:
         Returns the finalized ``TaskResult`` with status ``failed``, or
         ``None`` if no active checkpoint exists.
         """
-        entry = self._paused.get(task_id)
+        entry = self.try_claim(task_id, "rejecting")
         if entry is None:
             return None
 
-        # Cancel timeout if running.
-        if entry.timeout_task is not None and not entry.timeout_task.done():
-            entry.timeout_task.cancel()
-            entry.timeout_task = None
+        self._cancel_timeout_if_foreign(entry)
 
         entry.checkpoint.status = "rejected"
         entry.checkpoint.needs_approval = False

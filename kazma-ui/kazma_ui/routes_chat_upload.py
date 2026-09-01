@@ -14,9 +14,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from kazma_ui.chat_attachments import MAX_UPLOAD_BYTES, store_uploaded_attachment
+from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def _classify(mime: str) -> str:
     return "file"
 
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(rate_limit("chat_upload", 20))])
 async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
     """Persist an uploaded file and return an attachment descriptor.
 

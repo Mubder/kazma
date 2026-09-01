@@ -623,12 +623,51 @@ def test_port_is_parsed_from_the_health_url():
 
 
 def test_only_python_holders_are_killed(monkeypatch, tmp_path):
-    """A mistyped port must not take out an unrelated service."""
+    """A mistyped port must not take out an unrelated service.
+
+    Negative control (audit T-3): even when THIS health URL answers, a
+    non-python image must not be reaped. The old `ours = python or health_ok`
+    clause killed sqlservr.exe in that case.
+    """
     monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 4242)
-    monkeypatch.setattr(guard.subprocess, "run",
-                        lambda cmd, **kw: type("R", (), {"stdout": "sqlservr.exe  4242"})())
+    monkeypatch.setattr(guard, "_windows_image_name", lambda pid: "sqlservr.exe")
+    monkeypatch.setattr(guard, "probe", lambda url, timeout: (True, ""))
+    killed: list[list[str]] = []
+
+    def _run(cmd, **kw):
+        killed.append(list(cmd))
+        return type("R", (), {"stdout": "sqlservr.exe"})()
+
+    monkeypatch.setattr(guard.subprocess, "run", _run)
+    monkeypatch.setattr(
+        guard.os, "kill",
+        lambda pid, sig: killed.append(["kill", pid]),
+    )
     log = guard.GuardLog(tmp_path / "g.log")
     assert guard.reap_port_holder("http://127.0.0.1:9090/health/ready", log) is False
+    assert killed == []
+
+
+def test_unknown_image_is_not_reaped_even_if_health_answers(monkeypatch, tmp_path):
+    monkeypatch.setattr(guard, "_port_holder_pid", lambda port: 4242)
+    monkeypatch.setattr(guard, "_windows_image_name", lambda pid: "")
+    monkeypatch.setattr(guard, "probe", lambda url, timeout: (True, ""))
+    monkeypatch.setattr(
+        guard.subprocess, "run",
+        lambda cmd, **kw: type("R", (), {"stdout": ""})(),
+    )
+    monkeypatch.setattr(guard.os, "kill", lambda pid, sig: (_ for _ in ()).throw(AssertionError("must not kill")))
+    log = guard.GuardLog(tmp_path / "g.log")
+    assert guard.reap_port_holder("http://127.0.0.1:9090/health/ready", log) is False
+
+
+def test_is_reapable_image_allowlist() -> None:
+    assert guard._is_reapable_image("python.exe") is True
+    assert guard._is_reapable_image("pythonw.exe") is True
+    assert guard._is_reapable_image("uvicorn.exe") is True
+    assert guard._is_reapable_image("sqlservr.exe") is False
+    assert guard._is_reapable_image("nginx") is False
+    assert guard._is_reapable_image("") is False
 
 
 def test_python_holder_is_killed(monkeypatch, tmp_path):

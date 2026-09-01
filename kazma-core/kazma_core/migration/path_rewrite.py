@@ -129,18 +129,18 @@ def rewrite_text(text: str, path_map: PathMap) -> tuple[str, int]:
     for source, target in path_map:
         if not source:
             continue
-        # Forward-slash variant: always substitute (JSON paths are frequently
-        # forward-slashed even on Windows, and Linux paths are native this way).
+        # Always try both separator variants. A Linux source
+        # ``/home/u/kazma`` still appears as ``\home\u\kazma`` inside some
+        # JSON blobs after a Windows-authored row (audit M-10). Longest-
+        # source-first ordering on PathMap is unchanged.
         fs_source = source.replace("\\", "/")
         fs_target = target.replace("\\", "/")
-        if fs_source in out:
+        if fs_source and fs_source in out:
             count = out.count(fs_source)
             out = out.replace(fs_source, fs_target)
             total += count
-        # Backslash variant: only if the source actually has one (Windows source).
-        # Avoids pointless scans for Linux sources.
-        if "\\" in source:
-            bs_source = source.replace("/", "\\")
+        bs_source = source.replace("/", "\\")
+        if bs_source and bs_source != fs_source:
             bs_target = target.replace("/", "\\")
             if bs_source in out:
                 count = out.count(bs_source)

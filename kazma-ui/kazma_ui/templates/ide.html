@@ -180,7 +180,7 @@
           <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Editor</span>
           <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>(plain textarea)</span>
           <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady && currentFile" x-cloak>
-            <span x-show="lspReady">Ctrl+click definition · hover · complete · </span>
+            <span x-cloak x-show="lspReady">Ctrl+click definition · hover · complete · </span>
             Ctrl+F find · Monaco
           </span>
         </div>
@@ -227,7 +227,7 @@
       <div class="card" style="padding:10px 12px;border:1px solid var(--border-subtle);">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
           <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" x-text="resultTitle || 'Output'"></span>
-          <button class="btn btn-xs btn-secondary" @click="result=''" x-show="result">Clear</button>
+          <button class="btn btn-xs btn-secondary" @click="result=''" x-cloak x-show="result">Clear</button>
         </div>
         <pre class="ide-results" x-text="result || '(no output yet)'"></pre>
       </div>
@@ -243,7 +243,7 @@
         <div style="display:flex;align-items:center;gap:6px;">
           <span><span class="ki" data-icon="message" aria-hidden="true"></span></span>
           <h3 style="margin:0;font-size:0.9rem;font-weight:600;">AI Chat</h3>
-          <span x-show="currentFile" style="font-size:0.68rem;color:var(--text-muted);"
+          <span x-cloak x-show="currentFile" style="font-size:0.68rem;color:var(--text-muted);"
                 x-text="'· ' + currentFile"></span>
         </div>
         <div style="display:flex;gap:6px;">

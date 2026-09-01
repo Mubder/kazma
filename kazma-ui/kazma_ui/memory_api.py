@@ -301,7 +301,7 @@ async def memory_vocab() -> dict[str, Any]:
     first; entities by belief_count. Tenant-scoped like every other route.
     """
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         tid = _memory_tenant_id()
         tfilter = " AND tenant_id = ?" if tid != "default" else ""
         tparam: tuple = (tid,) if tid != "default" else ()
@@ -349,7 +349,7 @@ async def memory_vocab() -> dict[str, Any]:
 @router.get("/api/memory/v2/admin/summary")
 async def memory_admin_summary() -> dict[str, Any]:
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         # Phase 4: scope every count by the active tenant when enforcement is
         # on; unscoped (today's behavior) otherwise. The tenant filter uses
         # the tenant_id-leading indexes so it stays fast either way.
@@ -458,7 +458,7 @@ async def list_entities(
     isolated_only: bool = False,
 ) -> dict[str, Any]:
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         lim = max(1, min(int(limit or 100), 300))
         off = max(0, int(offset or 0))
         # Phase 3: use the materialized belief_count / graph_degree columns
@@ -626,7 +626,7 @@ async def rename_entity(entity_id: str, request: Request) -> dict[str, Any]:
             parse_aliases,
         )
 
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         row = conn.execute(
             "SELECT id, type, name, aliases_json FROM entities WHERE id=?",
             (eid,),
@@ -730,7 +730,7 @@ async def protect_entity(entity_id: str, request: Request) -> dict[str, Any]:
     if not want and str(eid).lower() in _PROTECTED_ENTITIES:
         return {"ok": False, "error": f"cannot unprotect core entity: {eid}"}
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         if not _entity_tenant_ok(conn, eid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -769,7 +769,7 @@ async def set_major_entity(entity_id: str, request: Request) -> dict[str, Any]:
         body = {}
     want = bool(body.get("major"))
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         if not _entity_tenant_ok(conn, eid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -791,7 +791,7 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
     eid = (entity_id or "").strip()
     if not eid:
         return {"ok": False, "error": "entity_id required"}
-    conn = _conn()
+    conn = await asyncio.to_thread(_conn)
     # F3: protection covers the hardcoded floor AND the per-row is_protected
     # flag. Resolved against a connection so the per-row flag is read.
     if not _entity_tenant_ok(conn, eid):
@@ -856,7 +856,7 @@ async def delete_entity(entity_id: str) -> dict[str, Any]:
         conn.close()
 
         async def _restore_entity() -> dict[str, Any]:
-            c = _conn()
+            c = await asyncio.to_thread(_conn)
             c.execute(
                 "INSERT OR IGNORE INTO entities "
                 "(id, tenant_id, type, name, aliases_json, metadata_json, is_high_stakes, is_protected) "
@@ -906,7 +906,7 @@ async def merge_entities(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "source_id and target_id required"}
     if source_id == target_id:
         return {"ok": False, "error": "source and target must differ"}
-    conn = _conn()
+    conn = await asyncio.to_thread(_conn)
     # F3: protection covers the hardcoded floor AND the per-row is_protected flag.
     if _is_protected(conn, source_id):
         conn.close()
@@ -1228,7 +1228,7 @@ async def unlink_entities(request: Request) -> dict[str, Any]:
 
     sub_id = _entity_slug(subject)
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         tid = _memory_tenant_id()
         tsql = " AND tenant_id=?" if tid != "default" else ""
         tparams: list = [tid] if tid != "default" else []
@@ -1329,7 +1329,7 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "predicate_type must be functional|set|state"}
 
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         if not _belief_tenant_ok(conn, bid):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -1442,7 +1442,7 @@ async def edit_belief(belief_id: str, request: Request) -> dict[str, Any]:
             pass
 
         async def _restore_edit() -> dict[str, Any]:
-            c = _conn()
+            c = await asyncio.to_thread(_conn)
             c.execute(
                 "UPDATE beliefs SET subject=?, predicate=?, object=?, predicate_type=? "
                 "WHERE id=?",
@@ -1535,7 +1535,7 @@ async def repoint_belief(belief_id: str, request: Request) -> dict[str, Any]:
         result["op"] = "repoint"
         # F3: surface orphan warning for the OLD subject if it lost its last edge.
         try:
-            conn = _conn()
+            conn = await asyncio.to_thread(_conn)
             warn = _would_orphan(conn, [bid])
             conn.close()
             if warn:
@@ -1561,7 +1561,7 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
     # longer see them as active. The beliefs are still live here.
     warn_orphaned: list[str] = []
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         warn_orphaned = _would_orphan(conn, [str(b) for b in ids[:200]])
         conn.close()
     except Exception:
@@ -1571,7 +1571,7 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
     invalidated_ids: list[str] = []
     # M-05: per-id tenant gate — a bare global-PK id from another tenant is
     # skipped (reported as not-found) instead of invalidated.
-    gate_conn = _conn()
+    gate_conn = await asyncio.to_thread(_conn)
     try:
         for bid in ids[:200]:
             bid_s = str(bid)
@@ -1596,7 +1596,7 @@ async def invalidate_batch(request: Request) -> dict[str, Any]:
         captured = list(invalidated_ids)
 
         async def _restore() -> dict[str, Any]:
-            conn = _conn()
+            conn = await asyncio.to_thread(_conn)
             placeholders = ",".join("?" for _ in captured)
             cur = conn.execute(
                 f"UPDATE beliefs SET valid_until=NULL, invalidated_at=NULL "
@@ -1682,7 +1682,7 @@ def _group_descendants(conn: sqlite3.Connection, root: str) -> list[str]:
 async def graph_groups_list() -> dict[str, Any]:
     """List all graph groupings (view-only associations) for the active tenant."""
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         tid = _memory_tenant_id()
         rows = [
             dict(r) for r in conn.execute(
@@ -1717,7 +1717,7 @@ async def graph_groups_create(request: Request) -> dict[str, Any]:
         return {"ok": False, "error": "group_root and member must differ"}
     label = str(body.get("label") or "").strip() or None
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         if _group_creates_cycle(conn, member, root):
             conn.close()
             return {"ok": False, "error": "cycle: member is an ancestor of group_root"}
@@ -1766,7 +1766,7 @@ async def graph_groups_delete(group_id: str) -> dict[str, Any]:
     if not gid:
         return {"ok": False, "error": "group_id required"}
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         row = conn.execute(
             "SELECT member, tenant_id FROM graph_associations WHERE id=?", (gid,)
         ).fetchone()
@@ -1803,7 +1803,7 @@ async def graph_groups_move(member_id: str, request: Request) -> dict[str, Any]:
     if new_root == member:
         return {"ok": False, "error": "new_root must differ from member"}
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         if not _entity_tenant_ok(conn, member) or not _entity_tenant_ok(conn, new_root):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -1883,7 +1883,7 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
     except Exception:
         return {"ok": False, "error": "tier must be an integer 0-4"}
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         if not _entity_tenant_ok(conn, node):
             conn.close()
             return {"ok": False, "error": "not_found"}
@@ -1909,7 +1909,7 @@ async def graph_groups_set_tier(node_id: str, request: Request) -> dict[str, Any
 async def hygiene_preview() -> dict[str, Any]:
     """Preview safe cleanup candidates (no writes)."""
     try:
-        conn = _conn()
+        conn = await asyncio.to_thread(_conn)
         empty = [
             dict(r)
             for r in conn.execute(
@@ -2038,7 +2038,7 @@ async def hygiene_run(request: Request) -> dict[str, Any]:
     if body.get("archive_invalidated"):
         # Soft-hard: move invalidated rows to beliefs_archive then DELETE
         try:
-            conn = _conn()
+            conn = await asyncio.to_thread(_conn)
             now = time.time()
             rows = conn.execute(
                 """

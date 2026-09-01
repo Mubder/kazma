@@ -122,29 +122,36 @@ def create_metrics_router(gateway: Any, session_store: Any = None) -> APIRouter:
 
         # ── Commitment Layer metrics ─────────────────────────────
         try:
-            import sqlite3 as _sqlite3
-            from kazma_core.paths import memory_ops_db as _ops_db
+            import asyncio as _aio
 
-            _cconn = _sqlite3.connect(_ops_db(), check_same_thread=False)
-            try:
-                _rows = _cconn.execute(
-                    "SELECT policy_decision, COUNT(*) FROM commitments "
-                    "WHERE policy_decision IS NOT NULL GROUP BY policy_decision"
-                ).fetchall()
-                lines.append("# HELP kazma_commitment_decisions_total Commitment gate decisions by type")
-                lines.append("# TYPE kazma_commitment_decisions_total counter")
-                for _dec, _cnt in _rows:
-                    lines.append(f'kazma_commitment_decisions_total{{decision="{_dec}"}} {_cnt}')
+            def _commitment_metric_lines() -> list[str]:
+                import sqlite3 as _sqlite3
+                from kazma_core.paths import memory_ops_db as _ops_db
 
-                _pending = _cconn.execute(
-                    "SELECT COUNT(*) FROM commitments "
-                    "WHERE status IN ('draft','needs_clarify','needs_confirm','ready')"
-                ).fetchone()[0]
-                lines.append("# HELP kazma_commitment_pending Current pending commitments")
-                lines.append("# TYPE kazma_commitment_pending gauge")
-                lines.append(f"kazma_commitment_pending {_pending}")
-            finally:
-                _cconn.close()
+                out: list[str] = []
+                _cconn = _sqlite3.connect(_ops_db(), check_same_thread=False)
+                try:
+                    _rows = _cconn.execute(
+                        "SELECT policy_decision, COUNT(*) FROM commitments "
+                        "WHERE policy_decision IS NOT NULL GROUP BY policy_decision"
+                    ).fetchall()
+                    out.append("# HELP kazma_commitment_decisions_total Commitment gate decisions by type")
+                    out.append("# TYPE kazma_commitment_decisions_total counter")
+                    for _dec, _cnt in _rows:
+                        out.append(f'kazma_commitment_decisions_total{{decision="{_dec}"}} {_cnt}')
+
+                    _pending = _cconn.execute(
+                        "SELECT COUNT(*) FROM commitments "
+                        "WHERE status IN ('draft','needs_clarify','needs_confirm','ready')"
+                    ).fetchone()[0]
+                    out.append("# HELP kazma_commitment_pending Current pending commitments")
+                    out.append("# TYPE kazma_commitment_pending gauge")
+                    out.append(f"kazma_commitment_pending {_pending}")
+                finally:
+                    _cconn.close()
+                return out
+
+            lines.extend(await _aio.to_thread(_commitment_metric_lines))
         except Exception as exc:
             logger.debug("Failed to append Commitment metrics: %s", exc)
 

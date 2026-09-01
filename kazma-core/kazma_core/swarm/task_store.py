@@ -126,6 +126,7 @@ class TaskStore:
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS validation_schema TEXT DEFAULT '';
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS aggregation TEXT DEFAULT '';
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS timeout DOUBLE PRECISION;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS workspace_id TEXT;
             CREATE TABLE IF NOT EXISTS kazma_swarm_worker_metrics (
                 worker TEXT NOT NULL,
                 date TEXT NOT NULL,
@@ -157,6 +158,7 @@ class TaskStore:
                 ("validation_schema", "TEXT DEFAULT ''"),
                 ("aggregation", "TEXT DEFAULT ''"),
                 ("timeout", "REAL"),
+                ("workspace_id", "TEXT"),
             ]
             for col_name, col_def in migrations:
                 if col_name not in existing_cols:
@@ -227,11 +229,12 @@ class TaskStore:
                     INSERT INTO kazma_swarm_tasks (
                         id, type, prompt, status, workers, result, context,
                         dependencies, fallback_chain, validation_schema, aggregation,
-                        timeout, created_at, started_at, completed_at, cost, tokens, metadata
+                        timeout, created_at, started_at, completed_at, cost, tokens,
+                        metadata, workspace_id
                     ) VALUES (
                         %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s,
                         %s::jsonb, %s::jsonb, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s::jsonb
+                        %s, %s, %s, %s, %s, %s, %s::jsonb, %s
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         type = EXCLUDED.type,
@@ -250,7 +253,8 @@ class TaskStore:
                         completed_at = EXCLUDED.completed_at,
                         cost = EXCLUDED.cost,
                         tokens = EXCLUDED.tokens,
-                        metadata = EXCLUDED.metadata
+                        metadata = EXCLUDED.metadata,
+                        workspace_id = EXCLUDED.workspace_id
                     """,
                     (
                         task.id, type_s, task.prompt, status_s, workers_j,
@@ -261,6 +265,7 @@ class TaskStore:
                         getattr(task, "timeout", None),
                         task.created_at, task.started_at, task.completed_at,
                         cost, tokens, meta_j,
+                        getattr(task, "workspace_id", None),
                     ),
                 )
                 return
@@ -270,8 +275,9 @@ class TaskStore:
                    (id, type, prompt, status, workers, result,
                     context, dependencies, fallback_chain,
                     validation_schema, aggregation, timeout,
-                    created_at, started_at, completed_at, cost, tokens, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    created_at, started_at, completed_at, cost, tokens,
+                    metadata, workspace_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task.id, type_s, task.prompt, status_s, workers_j, result_json,
                     task.context or "", deps_j, fb_j, vs,
@@ -279,6 +285,7 @@ class TaskStore:
                     getattr(task, "timeout", None),
                     task.created_at, task.started_at, task.completed_at,
                     cost, tokens, meta_j,
+                    getattr(task, "workspace_id", None),
                 ),
             )
             conn.commit()
@@ -546,105 +553,86 @@ class TaskStore:
         """
         metric_date = date or _utc_today()
         total_tasks = tasks_completed + tasks_failed
+        avg = latency if total_tasks > 0 else 0.0
+        params = (
+            worker, metric_date, tasks_completed, tasks_failed, avg, tokens, cost,
+        )
 
         with self._lock:
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
 
-                existing = get_pool().execute_one(
-                    """SELECT tasks_completed, tasks_failed, avg_latency,
-                              total_tokens, total_cost
-                       FROM kazma_swarm_worker_metrics
-                       WHERE worker = %s AND date = %s""",
-                    (worker, metric_date),
-                )
-                if existing:
-                    prev_completed = int(existing["tasks_completed"] or 0)
-                    prev_failed = int(existing["tasks_failed"] or 0)
-                    prev_avg_latency = float(existing["avg_latency"] or 0)
-                    prev_tokens = int(existing["total_tokens"] or 0)
-                    prev_cost = float(existing["total_cost"] or 0)
-                    new_completed = prev_completed + tasks_completed
-                    new_failed = prev_failed + tasks_failed
-                    prev_total = prev_completed + prev_failed
-                    new_total = prev_total + total_tasks
-                    new_avg = (
-                        ((prev_avg_latency * prev_total) + (latency * total_tasks)) / new_total
-                        if new_total > 0
-                        else 0.0
-                    )
-                    get_pool().execute(
-                        """UPDATE kazma_swarm_worker_metrics
-                           SET tasks_completed = %s, tasks_failed = %s,
-                               avg_latency = %s, total_tokens = %s, total_cost = %s
-                           WHERE worker = %s AND date = %s""",
-                        (
-                            new_completed, new_failed, new_avg,
-                            prev_tokens + tokens, prev_cost + cost,
-                            worker, metric_date,
-                        ),
-                    )
-                else:
-                    get_pool().execute(
-                        """INSERT INTO kazma_swarm_worker_metrics
+                # M-14: SQL-side increments so two replicas cannot lose a
+                # SELECT-then-UPDATE race. PRIMARY KEY (worker, date).
+                get_pool().execute(
+                    """INSERT INTO kazma_swarm_worker_metrics
                            (worker, date, tasks_completed, tasks_failed,
                             avg_latency, total_tokens, total_cost)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                        (
-                            worker, metric_date, tasks_completed, tasks_failed,
-                            latency if total_tasks > 0 else 0.0, tokens, cost,
-                        ),
-                    )
+                       VALUES (%s, %s, %s, %s, %s, %s, %s)
+                       ON CONFLICT (worker, date) DO UPDATE SET
+                         tasks_completed = kazma_swarm_worker_metrics.tasks_completed
+                             + EXCLUDED.tasks_completed,
+                         tasks_failed = kazma_swarm_worker_metrics.tasks_failed
+                             + EXCLUDED.tasks_failed,
+                         total_tokens = kazma_swarm_worker_metrics.total_tokens
+                             + EXCLUDED.total_tokens,
+                         total_cost = kazma_swarm_worker_metrics.total_cost
+                             + EXCLUDED.total_cost,
+                         avg_latency = CASE
+                           WHEN (kazma_swarm_worker_metrics.tasks_completed
+                                 + kazma_swarm_worker_metrics.tasks_failed
+                                 + EXCLUDED.tasks_completed
+                                 + EXCLUDED.tasks_failed) > 0
+                           THEN (
+                             kazma_swarm_worker_metrics.avg_latency
+                               * (kazma_swarm_worker_metrics.tasks_completed
+                                  + kazma_swarm_worker_metrics.tasks_failed)
+                             + EXCLUDED.avg_latency
+                               * (EXCLUDED.tasks_completed + EXCLUDED.tasks_failed)
+                           ) / (kazma_swarm_worker_metrics.tasks_completed
+                                + kazma_swarm_worker_metrics.tasks_failed
+                                + EXCLUDED.tasks_completed
+                                + EXCLUDED.tasks_failed)
+                           ELSE 0
+                         END""",
+                    params,
+                )
                 return
 
             conn = self._get_conn()
-            existing = conn.execute(
-                """SELECT tasks_completed, tasks_failed, avg_latency,
-                          total_tokens, total_cost
-                   FROM swarm_worker_metrics
-                   WHERE worker = ? AND date = ?""",
-                (worker, metric_date),
-            ).fetchone()
-
-            if existing:
-                prev_completed = existing["tasks_completed"]
-                prev_failed = existing["tasks_failed"]
-                prev_avg_latency = existing["avg_latency"]
-                prev_tokens = existing["total_tokens"]
-                prev_cost = existing["total_cost"]
-
-                new_completed = prev_completed + tasks_completed
-                new_failed = prev_failed + tasks_failed
-                prev_total_tasks = prev_completed + prev_failed
-                new_total_tasks = prev_total_tasks + total_tasks
-
-                if new_total_tasks > 0:
-                    new_avg_latency = (
-                        (prev_avg_latency * prev_total_tasks) + (latency * total_tasks)
-                    ) / new_total_tasks
-                else:
-                    new_avg_latency = 0.0
-
-                conn.execute(
-                    """UPDATE swarm_worker_metrics
-                       SET tasks_completed = ?, tasks_failed = ?,
-                           avg_latency = ?, total_tokens = ?, total_cost = ?
-                       WHERE worker = ? AND date = ?""",
-                    (
-                        new_completed, new_failed, new_avg_latency,
-                        prev_tokens + tokens, prev_cost + cost,
-                        worker, metric_date,
-                    ),
-                )
-            else:
-                conn.execute(
-                    """INSERT INTO swarm_worker_metrics
+            conn.execute(
+                """INSERT INTO swarm_worker_metrics
                        (worker, date, tasks_completed, tasks_failed,
                         avg_latency, total_tokens, total_cost)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (worker, metric_date, tasks_completed, tasks_failed,
-                     latency if total_tasks > 0 else 0.0, tokens, cost),
-                )
+                   VALUES (?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(worker, date) DO UPDATE SET
+                     tasks_completed = swarm_worker_metrics.tasks_completed
+                         + excluded.tasks_completed,
+                     tasks_failed = swarm_worker_metrics.tasks_failed
+                         + excluded.tasks_failed,
+                     total_tokens = swarm_worker_metrics.total_tokens
+                         + excluded.total_tokens,
+                     total_cost = swarm_worker_metrics.total_cost
+                         + excluded.total_cost,
+                     avg_latency = CASE
+                       WHEN (swarm_worker_metrics.tasks_completed
+                             + swarm_worker_metrics.tasks_failed
+                             + excluded.tasks_completed
+                             + excluded.tasks_failed) > 0
+                       THEN (
+                         swarm_worker_metrics.avg_latency
+                           * (swarm_worker_metrics.tasks_completed
+                              + swarm_worker_metrics.tasks_failed)
+                         + excluded.avg_latency
+                           * (excluded.tasks_completed + excluded.tasks_failed)
+                       ) / (swarm_worker_metrics.tasks_completed
+                            + swarm_worker_metrics.tasks_failed
+                            + excluded.tasks_completed
+                            + excluded.tasks_failed)
+                       ELSE 0
+                     END""",
+                params,
+            )
             conn.commit()
 
     def get_worker_metrics(self, worker: str) -> list[dict[str, Any]]:
@@ -746,6 +734,8 @@ class TaskStore:
         task.aggregation = row.get("aggregation") or ""
         if row.get("timeout") is not None:
             task.timeout = float(row["timeout"])
+        if row.get("workspace_id"):
+            task.workspace_id = row["workspace_id"]
         return task
 
     @staticmethod
@@ -786,4 +776,6 @@ class TaskStore:
             task.aggregation = row["aggregation"] or ""
         if "timeout" in row.keys() and row["timeout"] is not None:
             task.timeout = float(row["timeout"])
+        if "workspace_id" in row.keys() and row["workspace_id"]:
+            task.workspace_id = row["workspace_id"]
         return task

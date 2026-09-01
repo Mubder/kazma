@@ -221,8 +221,13 @@ def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
             hour += 12
         if match.group(2) == "am" and hour == 12:
             hour = 0
-        next_run = now.replace(hour=hour, minute=0, second=0, microsecond=0, tzinfo=tz)
-        if next_run <= now:
+        # Anchor in the operator zone via astimezone, not replace(tzinfo=)
+        # (audit M-12): replace() on a UTC instant west of UTC can skip a
+        # local calendar day ("daily at 10pm" at 01:00Z → 22:00 same UTC day
+        # instead of yesterday evening).
+        local_now = now.astimezone(tz)
+        next_run = local_now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if next_run <= local_now:
             next_run += timedelta(days=1)
         return next_run
 

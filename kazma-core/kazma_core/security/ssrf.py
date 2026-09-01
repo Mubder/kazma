@@ -103,7 +103,7 @@ def _resolve_host_ips(host: str) -> list[str]:
     return ips
 
 
-def validate_url(url: str, *, block_unresolved: bool = False, allow_private: bool = False) -> None:
+def validate_url(url: str, *, block_unresolved: bool = False, allow_private: bool = False) -> tuple[str, ...]:
     """Validate that *url* points at a public, externally reachable host.
 
     Args:
@@ -140,7 +140,7 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
 
     # When private addresses are explicitly permitted, skip the checks.
     if allow_private:
-        return
+        return ()
 
     # Fast textual rejects for common internal hostnames.
     if host_lower in ("localhost", "0.0.0.0", "::1"):
@@ -161,7 +161,7 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
             raise SSRFError(
                 f"Blocked URL '{url}': host IP '{ip}' is private or reserved."
             )
-        return  # Literal public IP — allowed.
+        return (str(ip),)  # Literal public IP — allowed.
 
     # Resolve the hostname and check every returned address. Blocking on
     # ANY private IP mitigates DNS-rebinding where the first A record is
@@ -175,7 +175,7 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
         # Allow the request to proceed; the HTTP client will fail with a
         # normal connection error if the host is genuinely unreachable.
         logger.debug("SSRF: host '%s' did not resolve; allowing request", host)
-        return
+        return ()
 
     for ip_str in resolved_ips:
         try:
@@ -190,6 +190,70 @@ def validate_url(url: str, *, block_unresolved: bool = False, allow_private: boo
                 f"Blocked URL '{url}': host '{host}' resolves to private/"
                 f"reserved address '{ip}'."
             )
+    return tuple(resolved_ips)
+
+
+def peer_ip_from_response(response: Any) -> str | None:
+    """Return the connected peer IP from an httpx response, if exposed.
+
+    Uses ``response.extensions["network_stream"].get_extra_info("peername")``
+    (httpcore). Returns None when the stream is missing (mocks, some proxies).
+    """
+    ext = getattr(response, "extensions", None) or {}
+    stream = ext.get("network_stream") or ext.get("stream")
+    if stream is None:
+        return None
+    getter = getattr(stream, "get_extra_info", None)
+    if not callable(getter):
+        return None
+    try:
+        peer = getter("peername")
+    except Exception:
+        return None
+    if isinstance(peer, tuple) and peer:
+        ip = str(peer[0])
+        if ip.startswith("::ffff:"):
+            ip = ip[7:]
+        return ip
+    if isinstance(peer, str) and peer:
+        return peer
+    return None
+
+
+def assert_peer_public(
+    response: Any,
+    *,
+    url: str,
+    validated_ips: tuple[str, ...] | set[str] | None = None,
+    via_proxy: bool = False,
+) -> None:
+    """Abort if the connected peer is private or not in *validated_ips* (H-7).
+
+    When *via_proxy* is True the peer is the proxy, not the origin — only
+    the private-range check runs. Missing peer info is a no-op (cannot
+    inspect) rather than a fail-open skip of validate_url, which already ran.
+    """
+    peer = peer_ip_from_response(response)
+    if not peer:
+        return
+    try:
+        ip = ipaddress.ip_address(peer)
+    except ValueError:
+        raise SSRFError(
+            f"Blocked URL '{url}': connected peer '{peer}' is unparseable."
+        ) from None
+    if _is_blocked_ip(ip):
+        raise SSRFError(
+            f"Blocked URL '{url}': connected peer '{peer}' is private or reserved."
+        )
+    if via_proxy or not validated_ips:
+        return
+    allowed = {str(a) for a in validated_ips}
+    if peer not in allowed:
+        raise SSRFError(
+            f"Blocked URL '{url}': connected peer '{peer}' was not in the "
+            f"validated address set (DNS rebinding)."
+        )
 
 
 def is_url_safe(url: str) -> bool:
@@ -267,4 +331,6 @@ __all__: list[str] = [
     "is_url_safe",
     "resolve_redirects",
     "MAX_REDIRECT_HOPS",
+    "peer_ip_from_response",
+    "assert_peer_public",
 ]

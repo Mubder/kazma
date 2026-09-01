@@ -186,7 +186,15 @@ def _scan_one(log: Path, compiled, counts: dict, last: dict,
                     ts = str(obj.get("timestamp") or obj.get("ts") or "")
                 except Exception:  # noqa: BLE001
                     pass
-            if ts and not _within(ts, cutoff):
+            else:
+                # Plain log line: copy the file formatter's datefmt
+                # (``%Y-%m-%d %H:%M:%S``). Unparseable lines are skipped
+                # from the count so months-old undated traces cannot inflate
+                # "fired recently" (audit M-13).
+                m = _PLAIN_TS.match(line)
+                if m:
+                    ts = m.group(1)
+            if not ts or not _within(ts, cutoff):
                 continue
             for sig, rx in compiled:
                 if rx.search(text):
@@ -230,13 +238,39 @@ def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerRepo
     return report
 
 
+_PLAIN_TS = re.compile(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})")
+_LAST_RUN_KEY = "observability.firing_ledger.last_run"
+
+
 def _within(ts: str, cutoff: float) -> bool:
     try:
         import datetime
 
-        return datetime.datetime.fromisoformat(ts).timestamp() >= cutoff
+        stamp = ts.replace(" ", "T", 1) if " " in ts[:19] and "T" not in ts[:19] else ts
+        return datetime.datetime.fromisoformat(stamp).timestamp() >= cutoff
     except Exception:  # noqa: BLE001
-        return True  # unparseable stamp -> count it; undercounting hides firings
+        return False  # unparseable → skip from counts (audit M-13)
+
+
+def _last_run_epoch() -> float | None:
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get(_LAST_RUN_KEY)
+        if raw is None or raw == "":
+            return None
+        return float(raw)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _stamp_last_run() -> None:
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(_LAST_RUN_KEY, time.time(), category="observability")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[firing-ledger] last_run stamp failed: %s", exc)
 
 
 def build_report(hours: float = 168.0) -> LedgerReport:
@@ -284,6 +318,7 @@ def run_weekly_sweep(hours: float = 168.0, *, notify: bool = True) -> LedgerRepo
     logger.info("[firing-ledger] %s", report.summary())
     if notify:
         _send(report)
+    _stamp_last_run()
     return report
 
 
@@ -291,20 +326,26 @@ SWEEP_INTERVAL_HOURS = 168.0
 
 
 async def ledger_scheduler() -> None:
-    """Fire the sweep once a week. Crash-isolated; sleeps first.
+    """Fire the sweep once a week. Crash-isolated.
 
-    A report nobody schedules is the exact shape this module was written
-    to find. It sat unscheduled for its first day of life, which is worth
-    recording rather than quietly fixing: the pattern is that easy to
-    repeat.
-
-    Sleeps first for the same reason the digest does -- a report on every
-    boot fires hardest during an incident, when the operator needs another
-    message least.
+    Persists ``last_run`` in ConfigStore so a server that restarts more
+    often than weekly still emits when overdue (audit M-13). First sleep
+    is short (120s) when there is no last_run, mirroring the backup loop.
     """
+    interval = SWEEP_INTERVAL_HOURS * 3600
+    first = True
     while True:
         try:
-            await asyncio.sleep(SWEEP_INTERVAL_HOURS * 3600)
+            last = _last_run_epoch()
+            now = time.time()
+            if last is None:
+                delay = 120.0 if first else interval
+            else:
+                remaining = interval - (now - last)
+                delay = 0.0 if remaining <= 0 else max(60.0, remaining)
+            first = False
+            if delay > 0:
+                await asyncio.sleep(delay)
             run_weekly_sweep(SWEEP_INTERVAL_HOURS)
         except asyncio.CancelledError:
             raise

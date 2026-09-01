@@ -121,20 +121,30 @@ def test_exporter_pdf_compilation():
 # ── 6. Chat Research Recording Tests ─────────────────────────
 
 
-def test_record_chat_research():
-    from kazma_core.tools.research_session import list_sessions, record_chat_research
+def test_record_chat_research(tmp_path, monkeypatch):
+    """Chat-initiated research must persist a row (audit T-5).
 
-    sess = record_chat_research(
+    Isolate the DB so a live research_sessions.db cannot hide the write,
+    and assert suppress_chat_recording is off (pipeline leak would return None).
+    """
+    import kazma_core.tools.research_session as rs
+
+    data = tmp_path / "data"
+    data.mkdir()
+    monkeypatch.setattr(rs, "_db_path", lambda: data / "research_sessions.db")
+    assert rs._chat_record_suppressed.get() is False
+
+    sess = rs.record_chat_research(
         "اختبار الذكاء الاصطناعي في الكويت",
         tool_name="web_search",
         result_text="نتائج البحث التقني...",
     )
-
+    assert sess is not None
     assert sess.id.startswith("rs_chat_")
     assert "اختبار الذكاء الاصطناعي" in sess.topic
     assert sess.status == "done"
 
-    all_sessions = list_sessions(limit=50)
+    all_sessions = rs.list_sessions(limit=50)
     found = [s for s in all_sessions if s.id == sess.id]
     assert len(found) == 1
     assert found[0].topic == sess.topic

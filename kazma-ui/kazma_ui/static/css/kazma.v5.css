@@ -158,6 +158,9 @@ html[data-theme="light"] { color-scheme: only light; }
   align-items: flex-start;
   text-align: start;
   padding: 18px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
   transition: border-color var(--transition-fast),
               box-shadow var(--transition-fast),
               transform var(--transition-fast);

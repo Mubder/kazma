@@ -10,11 +10,20 @@ from typing import Any
 
 import yaml
 
-__all__ = ["ParsedSkill", "parse_skill_md", "validate_manifest", "validate_skill_name"]
+__all__ = [
+    "ParsedSkill",
+    "parse_skill_md",
+    "validate_manifest",
+    "validate_skill_name",
+    "is_safe_skill_name",
+]
 
 logger = logging.getLogger(__name__)
 
 _NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# Security gate for install/uninstall paths (audit H-5). Style warnings
+# stay on _NAME_RE; this one only asks "can this be a directory name?"
+_SAFE_SKILL_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-_]{0,63}$")
 _FRONTMATTER_RE = re.compile(
     r"\A---\s*\n(.*?)\n---\s*\n?(.*)\Z",
     re.DOTALL,
@@ -45,6 +54,19 @@ class ParsedSkill:
         return self.metadata.get("version", "")
 
 
+def is_safe_skill_name(name: str) -> bool:
+    """True when *name* is a slug that cannot escape a skills directory.
+
+    Hard-fail this at install/uninstall (copytree/rmtree). Catalog load of
+    an already-installed skill may still warn via :func:`validate_skill_name`.
+    """
+    if not name or len(name) > 64:
+        return False
+    if ".." in name or "/" in name or "\\" in name:
+        return False
+    return _SAFE_SKILL_NAME_RE.fullmatch(name) is not None
+
+
 def validate_skill_name(name: str) -> list[str]:
     """Return soft-validation warnings for a skill name (lenient load)."""
     warnings: list[str] = []
@@ -58,6 +80,8 @@ def validate_skill_name(name: str) -> list[str]:
             "name should be lowercase alphanumeric with single hyphens "
             f"(got {name!r})"
         )
+    if not is_safe_skill_name(name):
+        warnings.append(f"name is not a safe directory slug (got {name!r})")
     return warnings
 
 
@@ -156,6 +180,12 @@ def parse_skill_md(
 
     if not name:
         name = directory_name or "unnamed-skill"
+
+    # Path-shaped names must not become ParsedSkill.name — install would
+    # copytree/rmtree outside the skills dir (audit H-5).
+    if name and (".." in name or "/" in name or "\\" in name):
+        logger.warning("SKILL.md name is path-shaped — refusing: %s", name)
+        return None
 
     warnings = validate_skill_name(name)
     if directory_name and name != directory_name:

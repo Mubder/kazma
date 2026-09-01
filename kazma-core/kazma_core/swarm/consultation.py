@@ -10,7 +10,7 @@ from typing import Any
 
 from kazma_core.swarm.aggregator import ResultAggregator
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
-from kazma_core.swarm.dispatch_helpers import wait_timeout
+from kazma_core.swarm.dispatch_helpers import pattern_dispatch_context, wait_timeout
 from kazma_core.swarm.reliability import BoundedConcurrency
 from kazma_core.swarm.task import SwarmTask, WorkerCapabilities, WorkerResult
 from kazma_core.swarm.worker import SwarmWorker
@@ -151,18 +151,15 @@ async def execute_consult(
         worker = resolve_worker(worker_name)
         capabilities = _worker_capabilities(worker)
         system_prompt = _build_consult_system_prompt(worker_name, worker)
-        dispatch_context = SwarmDispatchContext(
-            task.context,
+        dispatch_context = pattern_dispatch_context(
+            task,
             blackboard=blackboard,
-            metadata={
-                **task.metadata,
+            extra={
                 "worker_name": worker_name,
                 "consult_role": capabilities.role or worker_name,
                 "consult_expertise": list(capabilities.expertise),
                 "consult_mode": True,
             },
-            task_id=task.id,
-            task_type=task.type.value,
             system_prompt=system_prompt,
         )
 

@@ -21,9 +21,14 @@ def _js() -> str:
 
 
 def test_steer_menu_queues_draft_instead_of_autosend() -> None:
+    """Catalog lives in chat_slash.js; chat.js queues on data-insert."""
     js = _js()
-    assert "insert: '/steer '" in js
-    assert "insert: '/steer! '" in js
+    slash = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat_slash.js"
+    ).read_text(encoding="utf-8")
+    assert "insert: '/steer '" in slash
+    assert "insert: '/steer! '" in slash
     assert "data-insert=" in js
     assert "Steer queued — add your note, then Enter to apply." in js
     # Must not auto-send the placeholder template anymore.

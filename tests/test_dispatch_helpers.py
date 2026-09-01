@@ -8,6 +8,7 @@ from kazma_core.swarm.dispatch_helpers import (
     build_handoff_context,
     normalize_worker_type,
     overall_status,
+    pattern_dispatch_context,
     resolve_max_concurrent,
 )
 from kazma_core.swarm.task import SwarmTask, TaskType, WorkerResult
@@ -70,3 +71,20 @@ def test_resolve_max_concurrent():
     assert resolve_max_concurrent(task, 5) == 3
     task.metadata["max_concurrent"] = "bad"
     assert resolve_max_concurrent(task, 5) == 5
+
+
+def test_pattern_dispatch_context_injects_workspace_and_keeps_scope():
+    """H-10: every pattern must carry workspace_id + commitment_scope."""
+    task = SwarmTask(
+        type=TaskType.PIPELINE,
+        prompt="x",
+        context="ctx",
+        workers=["w"],
+        workspace_id="ws-repo",
+        metadata={"commitment_scope": "worker"},
+    )
+    ctx = pattern_dispatch_context(task, extra={"pipeline_step": 2})
+    assert ctx.metadata["workspace_id"] == "ws-repo"
+    assert ctx.metadata["commitment_scope"] == "worker"
+    assert ctx.metadata["pipeline_step"] == 2
+    assert ctx.task_id == task.id

@@ -827,7 +827,7 @@ async def _fetch_full_text(url: str) -> str:
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
 
-        validate_url(url)
+        validated_ips = validate_url(url) or ()
     except SSRFError as exc:
         return f"Error: {exc}"
     except ValueError as exc:
@@ -850,17 +850,36 @@ async def _fetch_full_text(url: str) -> str:
     final_url = url
 
     try:
-        from kazma_core.proxy.client import get_scraping_client
+        from urllib.parse import urlparse as _urlparse
+
+        from kazma_core.proxy.client import get_active_proxy_url, get_scraping_client
+        from kazma_core.security.ssrf import assert_peer_public
+
+        _pins: dict[str, str] = {}
+        _host = (_urlparse(url).hostname or "").lower()
+        if _host and validated_ips:
+            _pins[_host] = validated_ips[0]
+        _via_proxy = bool(get_active_proxy_url())
 
         async with get_scraping_client(
             follow_redirects=False,
             timeout=30.0,
             headers=dict(_HTTP_HEADERS),
             rotate_ua=True,
+            pin_hosts=_pins if _pins and not _via_proxy else None,
         ) as client:
             _max_bytes = _fetch_max_bytes()
             response, html_raw, _trunc = await _get_capped(client, final_url, _max_bytes)
-            # Retry with backoff on 429/403 (bot wall) AND 5xx (transient
+            try:
+                assert_peer_public(
+                    response,
+                    url=final_url,
+                    validated_ips=validated_ips,
+                    via_proxy=_via_proxy,
+                )
+            except SSRFError as exc:
+                return f"Error: {exc}"
+            # Retry with backoff on 429/403 (bot wall) AND 5xx (transient)
             # origin errors) — industry-standard: a 502/503 deserves one or
             # two retries with jitter before the recovery cascade fires.
             import asyncio as _asyncio
@@ -882,6 +901,15 @@ async def _fetch_full_text(url: str) -> str:
                 except Exception:
                     pass
                 response, html_raw, _trunc = await _get_capped(client, final_url, _max_bytes)
+                try:
+                    assert_peer_public(
+                        response,
+                        url=final_url,
+                        validated_ips=validated_ips,
+                        via_proxy=_via_proxy,
+                    )
+                except SSRFError as exc:
+                    return f"Error: {exc}"
             for _ in range(3):
                 if response.status_code not in (301, 302, 303, 307, 308):
                     break
@@ -893,12 +921,24 @@ async def _fetch_full_text(url: str) -> str:
                 try:
                     from kazma_core.security.ssrf import SSRFError, validate_url
 
-                    validate_url(redirect_url)
+                    validated_ips = validate_url(redirect_url) or ()
                 except SSRFError as exc:
                     return f"Error: Redirect blocked (SSRF): {exc}"
                 except ValueError as exc:
                     return f"Error: Redirect target invalid — {exc}"
+                _rh = (_urlparse(redirect_url).hostname or "").lower()
+                if _rh and validated_ips and not _via_proxy:
+                    _pins[_rh] = validated_ips[0]
                 response, html_raw, _trunc = await _get_capped(client, redirect_url, _max_bytes)
+                try:
+                    assert_peer_public(
+                        response,
+                        url=redirect_url,
+                        validated_ips=validated_ips,
+                        via_proxy=_via_proxy,
+                    )
+                except SSRFError as exc:
+                    return f"Error: Redirect blocked (SSRF): {exc}"
                 final_url = redirect_url
 
             # Content-type gate: binary payloads (PDF, images, archives) are

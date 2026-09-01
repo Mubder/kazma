@@ -11,11 +11,12 @@ Entry point: :func:`import_bundle`. Orchestrates:
      the target root across snapshots.state_json, workspaces.root_path,
      chat_sessions.messages, memory episodes, cron prompts, config.yaml.
   5. **backup** the existing live DBs to ``.migrate-backup-<ts>/`` (WAL-safe).
-  6. **swap** staging → live atomically (one renamem per file).
+  6. **preflight** Postgres-bundle vs SQLite-target (abort before live writes).
+     Then **pg_restore** (if dump present), then **swap** SQLite atomically.
   7. **report** — row counts changed, warnings, the backup path to roll back.
 
-Any exception before step 6 leaves live data untouched; the staging dir is
-preserved on failure for inspection (printed in the report).
+Any exception before the SQLite swap leaves live SQLite untouched; a failed
+swap rolls ``.migrate-backup-<ts>`` back. Staging is preserved on failure.
 """
 
 from __future__ import annotations
@@ -60,7 +61,11 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
         ("procedural_dags", "postconditions_json"),
     ]),
     # memory_ops.db — audit/task queue references.
-    ("memory_ops.db", [("memory_audit_log", "details")]),
+    ("memory_ops.db", [
+        ("memory_audit_log", "reason"),
+        ("memory_audit_log", "state_before_json"),
+        ("memory_audit_log", "state_after_json"),
+    ]),
     # cron.db — prompt text may reference file paths.
     ("cron.db", [("cron_jobs", "prompt")]),
 ]
@@ -244,62 +249,89 @@ def import_bundle(
             )
             return report
 
-    # ── 6. Backup live DBs, then swap ──────────────────────────────────
+    # ── 6. Preflight PG bundle, backup live DBs, pg_restore, then SQLite swap
+    # (audit C-2). SQLite-target + postgres.dump used to abort AFTER live
+    # SQLite files were already replaced.
+    from kazma_core.memory.backup import _backup_one
+
+    staged_data = staging / "data"
+    staged_pg_dump = staged_data / "postgres.dump"
+    if staged_pg_dump.exists():
+        from kazma_core.db.backend import is_postgres, get_database_url
+
+        if not is_postgres():
+            report.error(
+                "bundle contains a Postgres dump but the target backend is SQLite. "
+                "The Postgres tables (settings, chat sessions, checkpoints) cannot "
+                "be restored into SQLite. Set KAZMA_DB_BACKEND=postgres + "
+                "KAZMA_DATABASE_URL on the target and re-import. Live SQLite "
+                "files were not modified."
+            )
+            return report
+        if not get_database_url():
+            report.error(
+                "bundle has a Postgres dump and target is Postgres, but "
+                "KAZMA_DATABASE_URL is not set. Set it and re-run. Live "
+                "SQLite files were not modified."
+            )
+            return report
+
     backup_dir = data_dir / f".migrate-backup-{ts}"
     backup_dir.mkdir(parents=True, exist_ok=True)
     report.backup_path = str(backup_dir)
     _log(f"Backing up live DBs to {backup_dir.name}/…")
 
-    from kazma_core.memory.backup import _backup_one
+    for arc_name, resolver_name in _BUNDLE_DB_TO_DEST_RESOLVER.items():
+        src_staged = staged_data / arc_name
+        if not src_staged.exists():
+            continue
+        dest = _dest_for_bundle_db(arc_name, resolver_name, paths, data_dir)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            _backup_one(dest, backup_dir / arc_name)
 
-    staged_data = staging / "data"
+    if staged_pg_dump.exists():
+        from kazma_core.db.backend import get_database_url
+        from kazma_core.migration.pg_bridge import PgToolNotFound, restore_database
+
+        target_dsn = get_database_url()
+        _log("Restoring Postgres dump into target DB (before SQLite swap)…")
+        try:
+            warnings = restore_database(
+                staged_pg_dump, target_dsn,
+                progress=lambda p: _log(f"    {p}"),
+            )
+            if warnings:
+                report.warnings.append(
+                    f"pg_restore emitted {warnings} non-fatal warning line(s) "
+                    "(typical for --clean on a fresh DB; safe to ignore)."
+                )
+            _log("  Postgres dump restored.")
+        except PgToolNotFound as exc:
+            report.error(f"pg_restore not available: {exc}")
+            return report
+        except Exception as exc:
+            report.error(f"pg_restore failed: {exc}")
+            return report
+
     swapped: list[str] = []
-    # Track per-DB install failures so a failed swap fails the whole import
-    # (previously a failed install only warned and report.ok stayed True — a
-    # partial import reported as success) (audit finding).
     install_failures: list[str] = []
     for arc_name, resolver_name in _BUNDLE_DB_TO_DEST_RESOLVER.items():
         src_staged = staged_data / arc_name
         if not src_staged.exists():
             continue
-        # Resolve destination path.
-        if resolver_name:
-            dest = Path(getattr(paths, resolver_name)())
-        else:
-            dest = data_dir / arc_name
+        dest = _dest_for_bundle_db(arc_name, resolver_name, paths, data_dir)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        # Back up the existing live file (if any) before swapping. Use the
-        # WAL-safe online-backup primitive so the backup is a consistent
-        # single file (no -wal/-shm dependency).
-        if dest.exists():
-            _backup_one(dest, backup_dir / arc_name)
-        # CRITICAL: remove any stale -wal / -shm sidecars at the destination
-        # before writing the new main file. A leftover -wal from the previous
-        # DB would be inconsistent with the new main file and SQLite would
-        # either replay stale transactions (corruption) or report "database
-        # disk image is malformed" — this was the root cause of the vault.db
-        # corruption bug on the first migration import.
         for suffix in ("-wal", "-shm", "-journal"):
             stale = dest.with_name(dest.name + suffix)
             stale.unlink(missing_ok=True)
-        # Install via the WAL-safe online backup INTO A SIBLING TEMP, then
-        # atomically replace the live file. Backing up directly into the live
-        # dest left it half-overwritten if the process died mid-swap (a 304MB
-        # snapshots.db checkpoint is not instantaneous) — os.replace is atomic
-        # on the same volume, so the live file is never in a partial state
-        # (audit finding).
         swap_tmp = dest.with_name(dest.name + ".swap-tmp")
-        # Pre-clean a stale swap-tmp from a crashed prior run before backing
-        # up into it — otherwise sqlite3.backup into the corrupt leftover
-        # fails and the whole import aborts on re-run (audit finding).
         swap_tmp.unlink(missing_ok=True)
         if not _backup_one(src_staged, swap_tmp):
             report.error(f"failed to install {arc_name} (online backup failed)")
             install_failures.append(arc_name)
             swap_tmp.unlink(missing_ok=True)
             continue
-        # dest's -wal/-shm sidecars were already removed above; replace the
-        # main file atomically (overwrites the existing live file).
         try:
             os.replace(swap_tmp, dest)
         except OSError as exc:
@@ -307,70 +339,17 @@ def import_bundle(
             install_failures.append(arc_name)
             swap_tmp.unlink(missing_ok=True)
             continue
-        # NOTE: do NOT unlink src_staged here — _backup_one's sqlite3
-        # connection has just released the Windows file handle and the OS
-        # may still hold a lingering lock (WinError 32 on the 304MB
-        # snapshots.db). The whole staging dir is removed by shutil.rmtree
-        # at the end of a successful import, which is the right cleanup
-        # point (after all _backup_one calls are long done).
         swapped.append(arc_name)
     report.files_restored = swapped
+    if install_failures:
+        _log(
+            f"  {len(install_failures)} DB(s) failed to install — rolling back "
+            + ", ".join(install_failures)
+        )
+        _rollback_sqlite_swap(backup_dir, swapped, paths, data_dir)
+        report.files_restored = []
+        return report
     _log(f"  restored {len(swapped)} data files")
-
-    # 6b. Postgres dump restore (v2). If the bundle contains a postgres.dump,
-    # the source was Postgres-backed and the shared-state tables (settings,
-    # chat sessions, checkpoints) live in that dump, NOT in the SQLite files.
-    # - Target Postgres: pg_restore the dump into KAZMA_DATABASE_URL. Schema
-    #   self-recreates (--clean --if-exists), so the target DB can be empty.
-    # - Target SQLite: the dump is unusable (different backend) — abort with
-    #   a clear error rather than silently importing partial data.
-    staged_pg_dump = staged_data / "postgres.dump"
-    if staged_pg_dump.exists():
-        from kazma_core.db.backend import is_postgres, get_database_url
-
-        if is_postgres():
-            target_dsn = get_database_url()
-            if not target_dsn:
-                report.error(
-                    "bundle has a Postgres dump and target is Postgres, but "
-                    "KAZMA_DATABASE_URL is not set. Set it and re-run."
-                )
-                return report
-            _log("Restoring Postgres dump into target DB…")
-            try:
-                from kazma_core.migration.pg_bridge import (
-                    PgToolNotFound,
-                    restore_database,
-                )
-                warnings = restore_database(
-                    staged_pg_dump, target_dsn,
-                    progress=lambda p: _log(f"    {p}"),
-                )
-                if warnings:
-                    report.warnings.append(
-                        f"pg_restore emitted {warnings} non-fatal warning line(s) "
-                        "(typical for --clean on a fresh DB; safe to ignore)."
-                    )
-                _log("  Postgres dump restored.")
-            except PgToolNotFound as exc:
-                report.error(f"pg_restore not available: {exc}")
-                return report
-            except Exception as exc:
-                report.error(f"pg_restore failed: {exc}")
-                return report
-        else:
-            # Bundle is Postgres-backed but target is SQLite — the dump is
-            # unusable. Don't silently produce a half-migrated install.
-            report.error(
-                "bundle contains a Postgres dump but the target backend is SQLite. "
-                "The Postgres tables (settings, chat sessions, checkpoints) cannot "
-                "be restored into SQLite. To use the migrated Postgres data, set "
-                "KAZMA_DB_BACKEND=postgres + KAZMA_DATABASE_URL on the target (and "
-                "run a Postgres instance), then re-import. The SQLite files "
-                "(vault/memory/snapshots) were restored, but without the Postgres "
-                "data the install is incomplete."
-            )
-            return report
 
     # 7. Restore config (config.yaml → ConfigStore.import_yaml).
     config_path = staging / "config.yaml"
@@ -464,6 +443,45 @@ def import_bundle(
     if report.backup_path:
         _log(f"  pre-import backup: {report.backup_path}")
     return report
+
+
+def _dest_for_bundle_db(
+    arc_name: str,
+    resolver_name: str | None,
+    paths: Any,
+    data_dir: Path,
+) -> Path:
+    if resolver_name:
+        return Path(getattr(paths, resolver_name)())
+    return data_dir / arc_name
+
+
+def _rollback_sqlite_swap(
+    backup_dir: Path,
+    swapped: list[str],
+    paths: Any,
+    data_dir: Path,
+) -> None:
+    """Restore live SQLite files from the pre-swap backup (audit C-2)."""
+    from kazma_core.memory.backup import _backup_one
+
+    for arc_name in swapped:
+        resolver_name = _BUNDLE_DB_TO_DEST_RESOLVER.get(arc_name)
+        dest = _dest_for_bundle_db(arc_name, resolver_name, paths, data_dir)
+        bak = backup_dir / arc_name
+        if bak.exists():
+            try:
+                _backup_one(bak, dest)
+            except Exception:
+                logger.warning(
+                    "[migrate:import] rollback of %s failed", arc_name, exc_info=True
+                )
+            continue
+        # File did not exist live before the swap — drop the new one.
+        try:
+            dest.unlink(missing_ok=True)
+        except OSError:
+            logger.debug("[migrate:import] could not unlink rolled-back %s", dest)
 
 
 # ── Path-rewrite orchestration ────────────────────────────────────────────

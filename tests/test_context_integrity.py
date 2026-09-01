@@ -558,6 +558,22 @@ class TestS12ArtifactStore:
         # Unknown id does not resolve.
         assert artifact_db.resolve_proposal("prop_does_not_exist") is None
 
+    def test_proposal_resolve_is_tenant_scoped(self, artifact_db):
+        """H-1: tenant B cannot resolve or mark-posted tenant A's draft."""
+        payload = artifact_db.save_proposal(
+            "tenant-a", "thread-a", "tweets", ["secret draft A"]
+        )
+        pid = payload["proposal_id"]
+        assert artifact_db.resolve_proposal(pid, tenant_id="tenant-a") is not None
+        assert artifact_db.resolve_proposal(pid, tenant_id="tenant-b") is None
+        artifact_db.proposal_posted(pid, tenant_id="tenant-b")
+        still = artifact_db.resolve_proposal(pid, tenant_id="tenant-a")
+        assert still is not None
+        assert still["kind"] == "tweets"
+        artifact_db.proposal_posted(pid, tenant_id="tenant-a")
+        posted = artifact_db.list_proposals(tenant_id="tenant-a", include_posted=True)
+        assert any(r["proposal_id"] == pid and r["posted"] for r in posted)
+
 
 # ═══════════════════════════════════════════════════════════════════
 # S1-3 — proposal enforcement at the outbound chokepoint

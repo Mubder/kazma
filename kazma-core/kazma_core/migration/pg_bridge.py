@@ -117,6 +117,9 @@ def _resolve_tool(tool: str) -> Sequence[str]:
             timeout=15,
         )
         if probe.returncode == 0:
+            # PGPASSWORD is injected at dump/restore time via
+            # ``_with_docker_pgpassword`` (docker exec does not inherit
+            # the host env — audit M-9).
             return [docker, "exec", "-i", container, tool]
     # (3) Neither — clear error.
     hint_path = f"install PostgreSQL client tools (so '{tool}' is on PATH)"
@@ -186,9 +189,10 @@ def dump_database(
         conn_parts.dbname,
     ]
     env = _libpq_env(parts)
+    cmd = _with_docker_pgpassword(cmd, parts)
     if progress:
         progress(f"pg_dump {conn_parts.dbname}@{conn_parts.host}:{conn_parts.port} -> {out_path.name}")
-    logger.info("[pg_bridge] dump: %s", " ".join(cmd[:-1] + [_redact(cmd[-1])]))
+    logger.info("[pg_bridge] dump: %s", " ".join(_redact_cmd(cmd)))
     with open(out_path, "wb") as f:
         proc = subprocess.run(
             cmd, env=env, stdout=f, stderr=subprocess.PIPE, timeout=1800
@@ -247,9 +251,10 @@ def restore_database(
         "-d", conn_parts.dbname,
     ]
     env = _libpq_env(parts)
+    cmd = _with_docker_pgpassword(cmd, parts)
     if progress:
         progress(f"pg_restore {dump_path.name} -> {conn_parts.dbname}@{conn_parts.host}:{conn_parts.port}")
-    logger.info("[pg_bridge] restore: %s", " ".join(cmd[:-1] + [_redact(cmd[-1])]))
+    logger.info("[pg_bridge] restore: %s", " ".join(_redact_cmd(cmd)))
     with open(dump_path, "rb") as f:
         proc = subprocess.run(
             cmd, env=env, stdin=f, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -311,6 +316,47 @@ def _docker_adjusted_parts(tool_cmd: Sequence[str], parts: _DsnParts) -> _DsnPar
             dbname=parts.dbname,
         )
     return parts
+
+
+def _with_docker_pgpassword(cmd: Sequence[str], parts: _DsnParts) -> list[str]:
+    """Insert ``-e PGPASSWORD=…`` into a ``docker exec`` argv (audit M-9).
+
+    ``docker exec`` does not inherit the host process environment, so
+    ``_libpq_env`` alone never reaches libpq inside the container.
+    """
+    out = list(cmd)
+    if not parts.password:
+        return out
+    if len(out) < 4:
+        return out
+    exe = Path(out[0]).name.lower()
+    if "docker" not in exe or out[1] != "exec":
+        return out
+    i = 2
+    while i < len(out) and out[i].startswith("-") and out[i] not in ("-e", "--env"):
+        i += 1
+    out[i:i] = ["-e", f"PGPASSWORD={parts.password}"]
+    return out
+
+
+def _redact_cmd(cmd: Sequence[str]) -> list[str]:
+    """Log-safe argv: never print PGPASSWORD or DSN userinfo."""
+    out: list[str] = []
+    hide_next = False
+    for part in cmd:
+        if hide_next:
+            out.append("PGPASSWORD=***" if "PASSWORD" in part.upper() else "***")
+            hide_next = False
+            continue
+        if part in ("-e", "--env"):
+            out.append(part)
+            hide_next = True
+            continue
+        if part.startswith("PGPASSWORD="):
+            out.append("PGPASSWORD=***")
+            continue
+        out.append(_redact(part))
+    return out
 
 
 def _redact(s: str) -> str:

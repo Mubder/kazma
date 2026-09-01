@@ -188,10 +188,9 @@ def notify_root_changed(root: str | Path, *, reason: str = "switch") -> None:
             # Fire-and-forget coroutine if subscriber is async
             if hasattr(result, "__await__"):
                 try:
-                    import asyncio
+                    from kazma_core.background import spawn_background
 
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(result)  # type: ignore[arg-type]
+                    spawn_background(result, name="workspace-binding-notify")  # type: ignore[arg-type]
                 except RuntimeError:
                     # No running loop — sync contexts cannot await; log once.
                     logger.debug(

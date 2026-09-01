@@ -203,14 +203,23 @@ def test_supervisor_handles_post_clarify() -> None:
 
 
 def test_dsml_scrub_wired_in_client() -> None:
+    """Scrub lives on the projector path — not a second tokenAccum painter.
+
+    Turn Delivery deleted the live ``tokenAccum`` dual-paint. Restoring
+    ``_scrubDsml(stripPlanFenceForDisplay(tokenAccum))`` as a DOM writer
+    would reintroduce dual-run (audit T-4 collision recipe).
+    """
     js = (
         Path(__file__).resolve().parents[1]
         / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
     ).read_text(encoding="utf-8")
     assert "function _scrubDsml(text)" in js
-    assert "_scrubDsml(stripPlanFenceForDisplay(tokenAccum))" in js
+    assert "function renderTurn(doc, meta)" in js
+    assert "function _renderReplyHTML(text)" in js
+    assert "_scrubDsml(stripPlanFenceForDisplay(text))" in js
     assert "_scrubDsml(stripPlanFenceForDisplay(content))" in js
     assert "liveParts.prose = _scrubDsml(liveParts.prose);" in js
+    assert "_scrubDsml(stripPlanFenceForDisplay(tokenAccum))" not in js
 
 
 def test_scrub_removes_pseudo_toolcall_json_blocks() -> None:

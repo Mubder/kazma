@@ -102,10 +102,32 @@ def test_kazma_pg_tables_cover_all_shared_state() -> None:
         "kazma_web_sessions",
         "document_jobs",
         "document_job_events",
+        "documents",
+        "document_blobs",
+        "document_versions",
+        "document_artifacts",
+        "document_acl",
+        "document_tombstones",
+        "document_chunks",
+        "document_audit_events",
     }
     assert set(pg_backup.KAZMA_PG_TABLES) == expected
     # No duplicates — a dup would produce redundant pg_dump -t flags.
     assert len(pg_backup.KAZMA_PG_TABLES) == len(set(pg_backup.KAZMA_PG_TABLES))
+
+
+def test_kazma_pg_tables_covers_document_ddl() -> None:
+    """H-13: every CREATE TABLE in repository_pg / jobs_pg is backed up."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core" / "documents"
+    names: set[str] = set()
+    for fname in ("repository_pg.py", "jobs_pg.py"):
+        src = (root / fname).read_text(encoding="utf-8")
+        names.update(re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", src))
+    missing = names - set(pg_backup.KAZMA_PG_TABLES)
+    assert not missing, f"document PG tables missing from KAZMA_PG_TABLES: {sorted(missing)}"
 
 
 # ── config ─────────────────────────────────────────────────────────────────

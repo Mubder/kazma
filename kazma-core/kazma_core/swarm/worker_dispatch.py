@@ -313,6 +313,10 @@ async def dispatch_worker(
 
         worker.mark_completed(worker_result.status)
         dispatched = False  # busy released on the normal result path
+        # Stamp activity at completion so a long task does not look idle
+        # the moment busy drops (M-14). reap_idle also skips busy workers.
+        if engine._autoscaler is not None:
+            engine._autoscaler.record_activity(worker.name)
 
         # Index successful worker output as a V2 swarm_result episode under
         # this worker's name so swarm memory is not only "default".
@@ -378,6 +382,8 @@ async def dispatch_worker(
                     if isinstance(exc, asyncio.CancelledError)
                     else "error"
                 )
+                if engine._autoscaler is not None:
+                    engine._autoscaler.record_activity(worker.name)
             except Exception:
                 logger.debug(
                     "[SwarmEngine] mark_completed on abort failed for worker '%s'",

@@ -13,7 +13,7 @@ from kazma_core.agent_skills.installer import (
     parse_github_source,
     uninstall_skill,
 )
-from kazma_core.agent_skills.parser import parse_skill_md
+from kazma_core.agent_skills.parser import is_safe_skill_name, parse_skill_md
 
 
 SAMPLE_SKILL_MD = """\
@@ -58,6 +58,12 @@ class TestParseSkillMd:
     def test_missing_description_returns_none(self):
         bad = "---\nname: x\n---\n\nbody\n"
         assert parse_skill_md(bad) is None
+
+    def test_path_shaped_name_is_refused(self):
+        evil = "---\nname: ..\\\\..\\\\something\ndescription: x\n---\n\nbody\n"
+        assert parse_skill_md(evil) is None
+        assert is_safe_skill_name("..\\..\\something") is False
+        assert is_safe_skill_name("improve") is True
 
     def test_lenient_colon_in_description(self):
         text = (
@@ -119,6 +125,28 @@ class TestDiscoveryAndInstall:
         assert (dest / "improve" / "SKILL.md").is_file()
         assert (dest / "improve" / "references" / "playbook.md").is_file()
         assert (dest / "improve" / ".kazma-install.json").is_file()
+
+    def test_install_rejects_traversal_name(self, tmp_path: Path):
+        src = _write_skill(tmp_path / "src", name="improve")
+        # Overwrite SKILL.md with a traversal name after a valid parse would
+        # have used directory_name; parser refuses path-shaped names.
+        (src / "SKILL.md").write_text(
+            "---\nname: ..\\..\\escape\ndescription: boom\n---\n\n# x\n",
+            encoding="utf-8",
+        )
+        dest = tmp_path / "dest"
+        result = install_from_source(src, target_dir=dest)
+        assert result.success is False
+        assert result.errors
+        assert not (dest / "escape").exists()
+        assert not (dest / "something").exists()
+
+    def test_uninstall_rejects_traversal_name(self, tmp_path: Path):
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        result = uninstall_skill("..\\..\\escape", target_dir=dest)
+        assert result.success is False
+        assert "Invalid skill name" in result.message
 
     def test_uninstall(self, tmp_path: Path):
         src = _write_skill(tmp_path / "src")
