@@ -277,3 +277,110 @@ async def test_close_turn_registry_off_leftover_same_gate_closes(monkeypatch, tm
     )
     assert ok is True
     assert captured.get("interrupted") in (False, None)
+
+
+# ── watchdog auto-deny dual-write + ghost-row sweep (2026-09-01) ───────────
+
+
+class _AsyncBroker:
+    async def emit(self, *a, **k):
+        return {}
+
+
+async def test_watchdog_auto_deny_claims_gate(monkeypatch):
+    """An auto-deny must CAS the gate pending->claimed(deny)->resuming like
+    the manual endpoint — leaving it pending was a permanent ghost card."""
+    import kazma_core.safety.commitment.resume as resume_mod
+    import kazma_ui.hitl_status as hs
+    import kazma_ui.hitl_timeout as wd
+    import kazma_ui.reply_sink as reply_sink
+    import kazma_ui.sse_chat._streaming as streaming
+    import kazma_ui.turn_runtime as tr_mod
+    import kazma_ui.delivery as delivery
+
+    payload = {"interrupt_id": "gwd1", "tool": "file_write", "kind": "security"}
+    register_gate(GateRow(gate_id="gwd1", thread_id="t-wd-1", tool="file_write"))
+
+    async def _read_pending(graph, cfg):
+        return dict(payload)
+
+    monkeypatch.setattr(resume_mod, "read_pending_interrupt", _read_pending)
+    monkeypatch.setattr(
+        resume_mod, "build_resume_command", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(hs, "is_resume_claimed", lambda t: False)
+    monkeypatch.setattr(tr_mod, "ensure_session_for_thread", lambda t: "sess-wd")
+    monkeypatch.setattr(reply_sink, "resolve_reply_turn", lambda *a, **k: "turn-wd")
+    monkeypatch.setattr(delivery, "get_turn_broker", lambda: _AsyncBroker())
+
+    async def _no_drive(*a, **k):
+        return None
+
+    monkeypatch.setattr(streaming, "_drive_graph_to_journal", _no_drive)
+    monkeypatch.setattr(streaming, "mark_thread_unpaused", lambda t: None)
+
+    await wd._auto_deny(object(), "t-wd-1", 300.0)
+
+    row = gate_for("gwd1")
+    assert row is not None
+    assert row.state in ("claimed", "resuming")
+    assert row.decision == "deny"
+
+
+async def test_watchdog_sweeps_ghost_pending_row(monkeypatch):
+    """Registry row pending + NO live checkpoint interrupt + no running turn
+    => the watchdog orphan-settles the ghost instead of skipping forever."""
+    import kazma_core.safety.commitment.resume as resume_mod
+    import kazma_ui.hitl_gate_bridge as bridge
+    import kazma_ui.hitl_timeout as wd
+
+    register_gate(GateRow(gate_id="ghost1", thread_id="t-wd-2", tool="file_write"))
+
+    async def _read_none(graph, cfg):
+        return None
+
+    monkeypatch.setattr(resume_mod, "read_pending_interrupt", _read_none)
+    monkeypatch.setattr(wd, "_SCAN_INTERVAL_SECONDS", 0.02)
+
+    import kazma_core.safety.hitl as hitl_mod
+
+    monkeypatch.setattr(
+        hitl_mod,
+        "get_hitl_config",
+        lambda: {
+            "enabled": True,
+            "approval_timeout_seconds": 0.01,
+            "auto_deny_on_timeout": True,
+        },
+    )
+
+    async def _items():
+        return [
+            bridge.gate_row_to_pending_item(r)
+            for r in __import__(
+                "kazma_core.safety.hitl_gates", fromlist=["pending_gates"]
+            ).pending_gates()
+        ]
+
+    monkeypatch.setattr(bridge, "pending_items_from_registry", _items)
+
+    import asyncio
+
+    task = asyncio.get_event_loop().create_task(
+        wd._watchdog_loop(lambda: object(), lambda: object())
+    )
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            row = gate_for("ghost1")
+            if row is not None and row.state == "settled":
+                break
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    row = gate_for("ghost1")
+    assert row is not None and row.state == "settled"
+    assert row.decision == "orphaned"
