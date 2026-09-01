@@ -26,6 +26,23 @@ def _src(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def test_hard_steer_is_json_journal_resume() -> None:
+    src = _src(_INIT)
+    fn = src.split("async def steer_chat_turn", 1)[1].split(
+        "async def abort_chat_turn", 1
+    )[0]
+    assert "StreamingResponse" not in fn
+    assert "_drive_graph_to_journal" in fn
+    assert "text/event-stream" not in fn
+    stream = _src(_STREAMING)
+    assert "is_hard_steer_interrupt" in stream
+    chat = _src(_CHAT_JS)
+    assert "text/event-stream" not in chat.split("fetch('/api/chat/steer'", 1)[1].split(
+        "return;", 1
+    )[0]
+    assert "_reopenSse('steer-json')" in chat
+
+
 def test_approve_route_returns_json_not_sse() -> None:
     src = _src(_MISC)
     fn = src.split("async def approve_tool", 1)[1].split("\n    @self.app.", 1)[0]

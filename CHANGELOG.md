@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Hard-steer is JSON + journal, not a second graph SSE (2026-09-01)
+
+`/steer!` used the old Approve shape: `StreamingResponse` of
+`_stream_langgraph_events` that the client never tailed. The original
+turn also emitted terminal `done` on a hard-steer interrupt, so the
+attach died before resume. Pause is now non-terminal; resume is JSON
+into the same journal.
+
 ## Turn Delivery CQRS: journal subscriber, JSON approve (2026-09-01)
 
 Chat HTTP is a journal attach after the graph pump starts — not a

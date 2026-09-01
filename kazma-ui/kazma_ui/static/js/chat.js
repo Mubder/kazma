@@ -1737,10 +1737,6 @@
         }),
         credentials: 'same-origin',
       }).then(function(r) {
-        var ct = (r.headers.get('content-type') || '').toLowerCase();
-        if (ct.indexOf('text/event-stream') >= 0) {
-          return { ok: r.ok, mode: 'hard', streamed: true };
-        }
         return r.ok ? r.json() : r.json().catch(function() { return { ok: false }; });
       }).then(function(body) {
         if (body && body.ok === false && window.showToast) {
@@ -1749,10 +1745,19 @@
           } else if (body.reason) {
             window.showToast('Steer failed: ' + body.reason, 'error', 3500);
           }
-        } else if (body && body.demoted && window.showToast) {
+          return;
+        }
+        if (body && body.demoted && window.showToast) {
           window.showToast(
             'Steer will apply on the next step (could not pause in time).',
             'info', 3500);
+          return;
+        }
+        if (body && body.mode === 'hard') {
+          _awaitingReply = true;
+          if (!activeStream) {
+            try { _reopenSse('steer-json'); } catch (eRe) { /* ignore */ }
+          }
         }
       }).catch(function() { /* best-effort */ });
       return;
@@ -3860,13 +3865,20 @@
         if (!hit && pending.length === 1) hit = pending[0];
         if (!hit) return;
         console.warn('[KazmaChat] Recovering missed approval card for thread=' + hit.thread_id);
-        renderHitlCard({
-          thread_id: hit.thread_id,
-          kind: hit.kind || 'security',
+        applyTurnEvent({
+          type: 'hitl',
+          state: 'pending',
           tool: hit.tool_name || hit.tool || 'unknown',
-          args: hit.arguments || hit.args || {},
-          message: hit.message || '',
-          yolo_allowed: hit.yolo_allowed !== false,
+          payload: {
+            thread_id: hit.thread_id,
+            kind: hit.kind || 'security',
+            tool: hit.tool_name || hit.tool || 'unknown',
+            args: hit.arguments || hit.args || {},
+            message: hit.message || '',
+            yolo_allowed: hit.yolo_allowed !== false,
+          },
+          turn_id: _liveTurnId,
+          source: 'recover',
         });
       })
       .catch(function() { /* best-effort */ });
@@ -3940,6 +3952,21 @@
           fetch('/api/approve/' + encodeURIComponent(data.thread_id || targetThreadId), {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
+            credentials: 'same-origin',
+          }).then(function(r) {
+            return r.json().then(function(body) {
+              return { status: r.status, body: body || {} };
+            }).catch(function() { return { status: r.status, body: {} }; });
+          }).then(function(res) {
+            if (res.status >= 400 || (res.body && res.body.ok === false)) {
+              if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
+              return;
+            }
+            _awaitingApproval = false;
+            _awaitingReply = true;
+            if (!activeStream && typeof _reopenSseRef === 'function') {
+              try { _reopenSseRef('approve-json'); } catch (eRe) { /* ignore */ }
+            }
           }).catch(function() {
             if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
           });
@@ -4916,9 +4943,14 @@
             if (!hasInlineApprovalCard()) {
               item.tool = item.tool || item.tool_name;
               item.args = item.args || item.arguments;
-              // renderHitlCard clears $store.agent.pendingApproval so the
-              // bottom Alpine card can't duplicate the inline one.
-              renderHitlCard(item);
+              applyTurnEvent({
+                type: 'hitl',
+                state: 'pending',
+                tool: item.tool,
+                payload: item,
+                turn_id: _liveTurnId,
+                source: 'pending-list',
+              });
             }
             break;
           }

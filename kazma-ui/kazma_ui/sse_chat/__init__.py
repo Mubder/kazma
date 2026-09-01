@@ -1602,9 +1602,10 @@ def create_sse_chat_router(
           next iteration and folds it into the LLM call. Returns ``{ok: true}``.
         * **hard**: pause the running turn at the next supervisor entry via a
           LangGraph ``interrupt()``, inject the note as a first-class message,
-          and resume. Returns a streaming response (like ``/api/approve``) so
-          the continued turn streams back to the client. If the turn is
-          finalizing and the pause isn't reached within ~12s, demotes to soft.
+          and resume. Returns JSON immediately (same contract as
+          ``POST /api/approve``); tokens arrive on the journal attach. If the
+          turn is finalizing and the pause isn't reached within ~12s, demotes
+          to soft.
 
         Requires an active turn on the thread; otherwise returns
         ``{ok: false, reason: "no_active_task"}``.
@@ -1722,24 +1723,39 @@ def create_sse_chat_router(
             logger.info("[SSE] hard steer demoted to soft thread=%s", thread_id[:12])
             return {"ok": True, "mode": "soft", "demoted": True, "reason": "finalizing"}
 
-        # Resume: drive the graph forward. The supervisor pops the steer,
-        # injects it as a first-class message, and continues. Stream the
-        # continued turn to the client (same shape as /api/approve).
+        # Resume into the journal — same JSON command as /api/approve.
+        # A second graph SSE here is the dual-tail class (client never
+        # consumed the steer body; cancelling it raced the shielded invoke).
         logger.info("[SSE] hard steer resuming thread=%s", thread_id[:12])
         from kazma_core.safety.commitment.resume import build_resume_command
+        from kazma_ui.active_turns import register_turn
+        from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
+        from kazma_ui.sse_chat._streaming import (
+            _drive_graph_to_journal,
+            mark_thread_unpaused,
+        )
 
         resume_input = build_resume_command(action="apply")
-        # Same turn as the steered reply — the answer continues one bubble.
-        from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
-
-        return StreamingResponse(
-            _stream_langgraph_events(
-                graph_inst, resume_input, config,
-                thread_id=thread_id, session_id=session_id,
-                reply_turn_id=_resolve_steer_turn(thread_id, session_id),
-            ),
-            media_type="text/event-stream",
+        _steer_turn = _resolve_steer_turn(thread_id, session_id)
+        _steer_task = asyncio.create_task(
+            _drive_graph_to_journal(
+                graph_inst,
+                resume_input,
+                config,
+                thread_id=thread_id,
+                session_id=session_id,
+                reply_turn_id=_steer_turn,
+            )
         )
+        register_turn(thread_id, _steer_task)
+        mark_thread_unpaused(thread_id)
+        return {
+            "ok": True,
+            "mode": "hard",
+            "thread_id": thread_id,
+            "turn_id": _steer_turn,
+            "running": True,
+        }
 
     # ── Abort: cancel + abandon the running task (/abort) ────────────
     @r.post("/api/chat/abort")

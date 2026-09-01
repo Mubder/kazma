@@ -587,6 +587,35 @@ class TestSseApprovalFrame:
         assert any("approval_required" in f for f in frames)
         assert any("shell_exec" in f for f in frames)
 
+    @pytest.mark.asyncio
+    async def test_hard_steer_pause_is_not_terminal(self):
+        """Hard-steer interrupt must not emit done — the attach stays up."""
+        from kazma_ui.sse_chat import _stream_langgraph_events
+        from kazma_ui.sse_chat._streaming import mark_thread_unpaused
+
+        snapshot = _MockSnapshot(
+            next_nodes=("supervisor",),
+            tasks=[_MockTask([_MockInterrupt({
+                "type": "hard_steer",
+                "text": "do it in Arabic",
+                "message": "The user paused this task to add a requirement.",
+            })])],
+            values={"messages": [{"role": "assistant", "content": "working on it"}]},
+        )
+        graph = _MockGraph(snapshot)
+        config = {"configurable": {"thread_id": "sse-steer-1"}}
+        frames = []
+        try:
+            async for frame in _stream_langgraph_events(
+                graph, {"messages": []}, config
+            ):
+                frames.append(frame)
+        finally:
+            mark_thread_unpaused("sse-steer-1")
+        assert not any("event: done" in f for f in frames)
+        assert not any("event: turn_complete" in f for f in frames)
+        assert not any("approval_required" in f for f in frames)
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Unresumable-interrupt elimination (audit H1/H2/F2/F9): checkpointer-less

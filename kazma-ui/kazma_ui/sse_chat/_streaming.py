@@ -734,6 +734,25 @@ async def _stream_langgraph_events(
                                 break
                             if interrupted:
                                 break
+                        if not interrupted:
+                            try:
+                                from kazma_core.agent.steer import (
+                                    is_hard_steer_interrupt,
+                                )
+
+                                if is_hard_steer_interrupt(snapshot):
+                                    interrupted = True
+                                    mark_thread_paused(thread_id)
+                                    logger.info(
+                                        "[SSE] hard-steer pause thread=%s — "
+                                        "no terminal done",
+                                        thread_id,
+                                    )
+                            except Exception:
+                                logger.debug(
+                                    "[SSE] hard-steer probe skipped",
+                                    exc_info=True,
+                                )
                         # Paused mid-graph but no parseable HITL payload
                         if not interrupted and not content_acc:
                             logger.warning(
