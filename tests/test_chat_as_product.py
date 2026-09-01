@@ -184,7 +184,11 @@ def test_streaming_paint_throttled_not_per_token() -> None:
     assert "isPlanOnlyMessage(content)" in js
     assert "tryIngestPlanFromText(content)" in js
     assert "function _flushLiveTextPaint()" in js
-    assert "_paintLiveTextNow(_liveRenderEl, true)" in js
+    # The flush releases its target BEFORE painting (duplicate-terminal
+    # guard, 2026-09-02) — the old "_paintLiveTextNow(_liveRenderEl, true)"
+    # shape let a second transport's done repaint a closed turn.
+    assert "_liveRenderEl = null" in js
+    assert "_paintLiveTextNow(el, true)" in js
 
 
 def test_user_bubble_renders_markdown() -> None:
