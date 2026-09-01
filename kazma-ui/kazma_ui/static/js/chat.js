@@ -875,6 +875,8 @@
    */
   function _collapseFinishedWorkbenches() {
     if (!messagesEl) return;
+    var bubbles = messagesEl.querySelectorAll('.message-assistant');
+    for (var b = 0; b < bubbles.length; b++) _rescueTurnDom(bubbles[b]);
     var panels = messagesEl.querySelectorAll('.agent-progress.is-done');
     for (var i = 0; i < panels.length; i++) {
       var p = panels[i];
@@ -2462,9 +2464,16 @@
 
   function ensureProgressPanel() {
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+    _rescueTurnDom(currentMsgEl);
     var content = currentMsgEl.querySelector('.message-content');
     if (!content) return null;
-    var panel = content.querySelector('.agent-progress');
+    var panel = null;
+    for (var pi = 0; pi < content.children.length; pi++) {
+      if (content.children[pi].classList && content.children[pi].classList.contains('agent-progress')) {
+        panel = content.children[pi];
+        break;
+      }
+    }
     if (panel) {
       _progressEl = panel;
       return panel;
@@ -2512,7 +2521,13 @@
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
         '<ul class="agent-progress-steps" role="log" aria-live="polite"></ul>' +
       '</div>';
-    var textEl = content.querySelector('.message-text');
+    var textEl = null;
+    for (var ti = 0; ti < content.children.length; ti++) {
+      if (content.children[ti].classList && content.children[ti].classList.contains('message-text')) {
+        textEl = content.children[ti];
+        break;
+      }
+    }
     if (textEl) content.insertBefore(panel, textEl);
     else content.appendChild(panel);
     var header = panel.querySelector('.agent-progress-header');
@@ -5200,6 +5215,52 @@
     init();
   }
 
+  function _rescueTurnDom(el) {
+    // Collapsed CoT must never own the answer. If .message-text (or the HITL
+    // card) landed inside .agent-progress-body, expanding CoT was the only
+    // way to see the reply (2026-09-01).
+    if (!el) return;
+    var content = el.querySelector ? el.querySelector('.message-content') : null;
+    if (!content) return;
+    var panel = null;
+    var kids = content.children;
+    var i;
+    for (i = 0; i < kids.length; i++) {
+      if (kids[i].classList && kids[i].classList.contains('agent-progress')) {
+        panel = kids[i];
+        break;
+      }
+    }
+    if (panel) {
+      var trapped = panel.querySelectorAll('.message-text, .hitl-approval-card, .message-meta, .message-actions');
+      var anchor = panel.nextSibling;
+      for (i = 0; i < trapped.length; i++) {
+        content.insertBefore(trapped[i], anchor);
+      }
+    }
+    for (i = 0; i < content.children.length; i++) {
+      var n = content.children[i];
+      if (n.classList && n.classList.contains('message-text')) {
+        if (n.style.display === 'none') n.style.display = '';
+        n.classList.remove('typing-visible');
+      }
+    }
+  }
+
+  function _answerFromDoc(TD, doc) {
+    var text = (TD && TD.textOf) ? TD.textOf(doc.parts) : '';
+    if (!text) text = doc.stream || '';
+    if (String(text || '').trim()) return String(text).trim();
+    var parts = doc.parts || [];
+    for (var i = parts.length - 1; i >= 0; i--) {
+      var p = parts[i];
+      if (p && p.type === 'reasoning' && String(p.text || '').trim()) {
+        return String(p.text).trim();
+      }
+    }
+    return '';
+  }
+
   function _cssEscapeAttr(s) {
     if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(s);
     return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
@@ -5221,8 +5282,16 @@
     var steps = (html.match(/<li /g) || []).length;
     _progressToolCount = tools;
     _progressStepCount = steps;
+    _rescueTurnDom(el);
     if (terminal) {
-      var existingCot = el.querySelector('.agent-progress');
+      var existingCot = null;
+      var ckids = (el.querySelector('.message-content') || el).children;
+      for (var ci = 0; ci < ckids.length; ci++) {
+        if (ckids[ci].classList && ckids[ci].classList.contains('agent-progress')) {
+          existingCot = ckids[ci];
+          break;
+        }
+      }
       var liveActive = existingCot && existingCot.classList.contains('is-active')
         && !existingCot.classList.contains('kazma-cot-restored');
       if (liveActive) return;
@@ -5230,9 +5299,19 @@
       if (!cot) return;
       if (existingCot) existingCot.replaceWith(cot);
       else {
-        var tw = el.querySelector('.message-text');
-        if (tw && tw.parentNode) tw.parentNode.insertBefore(cot, tw);
+        var contentHost = el.querySelector('.message-content') || el;
+        var tw = null;
+        var tKids = contentHost.children;
+        for (var ti = 0; ti < tKids.length; ti++) {
+          if (tKids[ti].classList && tKids[ti].classList.contains('message-text')) {
+            tw = tKids[ti];
+            break;
+          }
+        }
+        if (tw) contentHost.insertBefore(cot, tw);
+        else contentHost.appendChild(cot);
       }
+      _rescueTurnDom(el);
       return;
     }
     var prev = currentMsgEl;
@@ -5278,9 +5357,18 @@
     if (turnId) {
       try { el.setAttribute('data-turn-id', turnId); } catch (eAttr) { /* ignore */ }
     }
-    var text = TD.textOf(doc.parts) || doc.stream || '';
+    _rescueTurnDom(el);
+    var text = _answerFromDoc(TD, doc);
     if (text) tokenAccum = text;
-    var textEl = el.querySelector('.message-text');
+    var textEl = null;
+    var host = el.querySelector('.message-content') || el;
+    for (var hi = 0; hi < host.children.length; hi++) {
+      if (host.children[hi].classList && host.children[hi].classList.contains('message-text')) {
+        textEl = host.children[hi];
+        break;
+      }
+    }
+    if (!textEl) textEl = el.querySelector('.message-text');
     if (textEl && text) {
       tryIngestPlanFromText(text);
       var display = _scrubDsml(stripPlanFenceForDisplay(text));
@@ -5305,6 +5393,7 @@
     }
     var activity = TD.activityOf(doc.parts);
     _syncCotPanel(el, activity, doc.status, meta);
+    _rescueTurnDom(el);
     if (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done') {
       _awaitingReply = false;
     }
