@@ -1211,6 +1211,13 @@ class SwarmEngine:
             task_id,
             checkpoint.step,
         )
+        # Gate registry (P4): record the decision. Best-effort.
+        try:
+            from kazma_core.swarm.checkpoint_manager import _gate_settle_pipeline
+
+            await asyncio.to_thread(_gate_settle_pipeline, task_id, "approve")
+        except Exception:
+            logger.debug("[SwarmEngine] gate settle skipped", exc_info=True)
 
         # Remove from paused state before resuming.
         self._checkpoint_mgr.pop_paused_entry(task_id)
@@ -1266,6 +1273,15 @@ class SwarmEngine:
         """
         result = await self._checkpoint_handler.reject(task_id, reason=reason)
         if result is not None:
+            # Gate registry (P4): record the rejection. Best-effort.
+            try:
+                from kazma_core.swarm.checkpoint_manager import (
+                    _gate_settle_pipeline,
+                )
+
+                await asyncio.to_thread(_gate_settle_pipeline, task_id, "deny")
+            except Exception:
+                logger.debug("[SwarmEngine] gate settle skipped", exc_info=True)
             # Clear in-flight maps (audit H6) — paused tasks stay in
             # _active_tasks until reject/resume.
             active = self._active_tasks.get(task_id)

@@ -16,6 +16,7 @@ danger tools unless headless escape is enabled.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
@@ -268,6 +269,39 @@ class SafetyMiddleware:
             await _notify_cron_denial(tool_name, "blocked (no approval bus)")
             return False
 
+        approved = False
+        _gate_id = ""
+        # Gate registry (P4): a swarm-bus approval is a gate row too — the
+        # dashboard / status readers see it next to graph gates. Best-effort.
+        try:
+            import asyncio as _aio
+
+            from kazma_core.safety.hitl_gates import (
+                GateRow,
+                gate_registry_enabled,
+                make_gate_id,
+                register_gate,
+            )
+
+            if gate_registry_enabled():
+                _gate_id = make_gate_id(
+                    tid or task_id or "swarm", tool_name, tool_args,
+                    seq=int(time.time() * 1000) % 1_000_000,
+                )
+                await _aio.to_thread(
+                    register_gate,
+                    GateRow(
+                        gate_id=_gate_id,
+                        thread_id=tid or task_id or "swarm",
+                        tool=tool_name,
+                        mechanism="swarm_bus",
+                        message=(tool_args or "")[:500],
+                    ),
+                    ttl_seconds=self._approval_timeout,
+                )
+        except Exception:
+            logger.debug("[Safety] gate register skipped", exc_info=True)
+
         approved = await bus.request_approval(
             worker_name=worker_name,
             task_description=f"Tool: {tool_name}" + (f" — {tool_args[:100]}" if tool_args else ""),
@@ -275,6 +309,35 @@ class SafetyMiddleware:
             task_id=task_id,
             timeout=self._approval_timeout,
         )
+
+        # Gate registry (P4): settle the row with the bus outcome.
+        if _gate_id:
+            try:
+                import asyncio as _aio
+
+                from kazma_core.safety.hitl_gates import (
+                    TransitionConflict,
+                    claim_gate,
+                    settle_gate,
+                )
+
+                def _settle() -> None:
+                    try:
+                        claim_gate(
+                            _gate_id,
+                            "approve" if approved else "deny",
+                            "swarm_bus",
+                        )
+                    except TransitionConflict:
+                        pass
+                    try:
+                        settle_gate(_gate_id)
+                    except TransitionConflict:
+                        pass
+
+                await _aio.to_thread(_settle)
+            except Exception:
+                logger.debug("[Safety] gate settle skipped", exc_info=True)
 
         if approved:
             self._approved_count += 1

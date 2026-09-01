@@ -743,6 +743,25 @@ def _start_commitment_gc_scheduler() -> None:
                     logger.info("[memory_worker] artifact GC: %s", art)
             except Exception:
                 logger.debug("[memory_worker] artifact GC failed", exc_info=True)
+            # HITL gate registry TTL sweep rides the SAME cadence (plan:
+            # docs/plans/HITL_GATE_REGISTRY_PLAN.md — no new sweeper loop).
+            # Expired live gates → `timeout` (auto-deny posture), emitted so
+            # every surface shows the card timing out at once.
+            try:
+                from kazma_core.safety.hitl_gates import (
+                    expire_due_gates,
+                    gate_registry_enabled,
+                )
+
+                if gate_registry_enabled():
+                    expired = await asyncio.to_thread(expire_due_gates)
+                    if expired:
+                        logger.info(
+                            "[memory_worker] gate TTL sweep: %d expired",
+                            len(expired),
+                        )
+            except Exception:
+                logger.debug("[memory_worker] gate TTL sweep failed", exc_info=True)
             await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
 
     try:

@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## HITL Gate Registry — one gate, one row, one truth (2026-09-01)
+
+Gate identity/state was re-derived in three places (hitl_status, close_turn,
+chat.js heuristics) plus per-poll checkpoint scans — the root soil of ghost
+cards, pre-approved stamps, and second questions only the dashboard admitted.
+New `kazma_core/safety/hitl_gates.py`: one SQLite registry
+(`hitl_gates.db`), strict CAS state machine (`pending → claimed → resuming
+→ settled` + timeout/superseded/error; 0-row UPDATE ⇒ 409 with the actual
+state; same-decision re-claim is 200), idempotent on both the LangGraph
+interrupt id and the deterministic alias hash (one pause can never mint two
+cards; a settled hash row can't eat a new ask). All four mechanisms write
+it: SSE post-stream scan + `/api/approve` + drive terminal (web), gateway
+pause/`/hitl` resume, swarm bus `safety.check()`, pipeline checkpoints.
+Readers are registry-first (`hitl_thread_status`, `close_turn` — any pending
+row keeps the turn OPEN (no fake wrap-up), pending-approvals decision-truth
+filter, chat.js renders live buttons ONLY for `pending` rows); legacy
+derivation remains solely as the kill-switch/degradation path
+(`KAZMA_GATE_REGISTRY=0`). Reconciler: approve-on-missing-row backfill,
+close_turn orphan-settle in seconds, boot sweep (orphans stale
+claimed/resuming, never touches pending), TTL sweep on the 15-min GC
+cadence. Metrics: `kazma_hitl_gates_total`,
+`kazma_hitl_gate_parity_mismatch_total`, `kazma_hitl_gate_reconciled_total`.
+69 new tests across 5 files. Plan: `docs/plans/HITL_GATE_REGISTRY_PLAN.md`;
+AGENTS.md §30.
+
 ## HITL Approve cannot make the same card vanish and come back (2026-09-01)
 
 Clicking Allow tool tore down the disabled card (`querySelectorAll` remove)

@@ -1505,6 +1505,21 @@ def create_graph_handler(
                 if hitl_payload is None:
                     hitl_payload = await _check_graph_interrupt(graph, config)
                 if hitl_payload is not None:
+                    # Gate registry (P3): the gateway pause is a gate row too
+                    # — chat, dashboard and platform now share one truth.
+                    try:
+                        from kazma_ui.hitl_gate_bridge import (
+                            gate_pending_from_payload,
+                        )
+
+                        _gate_payload = dict(hitl_payload)
+                        _gate_payload["thread_id"] = thread_id
+                        await gate_pending_from_payload(_gate_payload)
+                    except Exception:
+                        logger.debug(
+                            "[agent-handler] gate register skipped",
+                            exc_info=True,
+                        )
                     ctx = await _store.get(thread_id)
                     if not ctx:
                         ctx = msg.context_metadata

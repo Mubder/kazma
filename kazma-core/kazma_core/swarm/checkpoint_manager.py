@@ -27,6 +27,63 @@ __all__ = ["CheckpointManager"]
 logger = logging.getLogger(__name__)
 
 
+def _gate_register_pipeline(task_id: str, step: int, worker: str, preview: str) -> None:
+    """Gate registry (P4): a pipeline checkpoint is a gate row too.
+
+    Idempotent on gate_id (``pipeline-{task}-step{n}``) so restore after a
+    restart re-registers harmlessly. Best-effort — never raises.
+    """
+    try:
+        from kazma_core.safety.hitl_gates import (
+            GateRow,
+            gate_registry_enabled,
+            register_gate,
+        )
+
+        if not gate_registry_enabled():
+            return
+        register_gate(
+            GateRow(
+                gate_id=f"pipeline-{task_id}-step{step}",
+                thread_id=str(task_id),
+                tool=worker or "pipeline_step",
+                mechanism="pipeline",
+                message=(preview or "")[:500],
+            ),
+            ttl_seconds=0,  # pipeline timeouts are owned by the auto-reject arm
+        )
+    except Exception:
+        logger.debug("[CheckpointManager] gate register skipped", exc_info=True)
+
+
+def _gate_settle_pipeline(task_id: str, decision: str) -> None:
+    """Claim+settle every live pipeline gate for a task. Best-effort."""
+    try:
+        from kazma_core.safety.hitl_gates import (
+            TransitionConflict,
+            claim_gate,
+            gate_registry_enabled,
+            live_gates,
+            settle_gate,
+        )
+
+        if not gate_registry_enabled():
+            return
+        for row in live_gates(str(task_id)):
+            if row.mechanism != "pipeline":
+                continue
+            try:
+                claim_gate(row.gate_id, decision, "pipeline")
+            except TransitionConflict:
+                pass
+            try:
+                settle_gate(row.gate_id)
+            except TransitionConflict:
+                pass
+    except Exception:
+        logger.debug("[CheckpointManager] gate settle skipped", exc_info=True)
+
+
 class CheckpointManager:
     """Manages HITL checkpoint state for paused pipelines.
 
@@ -113,6 +170,7 @@ class CheckpointManager:
             worker_results=pattern_result.worker_results,
             blackboard_data=blackboard_data,
         )
+        _gate_register_pipeline(task_id, step, worker, output_preview)
 
         # Set up checkpoint timeout auto-reject if configured.
         timeout_seconds = task.metadata.get("checkpoint_timeout")
@@ -294,6 +352,12 @@ class CheckpointManager:
                     checkpoint=checkpoint,
                     worker_results=worker_results,
                     blackboard_data=blackboard_data,
+                )
+                _gate_register_pipeline(
+                    task.id,
+                    checkpoint_meta.get("step", 0),
+                    checkpoint_meta.get("worker", ""),
+                    checkpoint_meta.get("output_preview", ""),
                 )
                 # Re-arm the auto-reject timeout. Previously this was only
                 # armed on first pause (handle_pipeline_checkpoint); after a

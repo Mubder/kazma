@@ -45,6 +45,16 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
         return None
     for intr in interrupts:
         value = getattr(intr, "value", None)
+        # LangGraph's own interrupt id is the ONLY id that matches what the
+        # chat journal stamped for this pause. A minted hash with a per-call
+        # seq bump changes on every poll — that mismatch drew ghost second
+        # cards (recovered card ≠ journal card, 2026-09-01).
+        iid = ""
+        for attr in ("id", "ns"):
+            v = getattr(intr, attr, None)
+            if v:
+                iid = str(v)
+                break
         if isinstance(value, dict) and value.get("type") == "hitl_approval":
             tool = value.get("tool") or value.get("tool_name") or "unknown"
             msg = value.get("message")
@@ -55,6 +65,7 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "kind": value.get("kind", "security"),
                 "items": value.get("items") or [],
                 "yolo_allowed": bool(value.get("yolo_allowed", True)),
+                "interrupt_id": iid,
             }
         # Fallback: some interrupt payloads may not carry the type tag but
         # still have tool/args keys
@@ -70,6 +81,7 @@ def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
                 "kind": value.get("kind", "security"),
                 "items": value.get("items") or [],
                 "yolo_allowed": bool(value.get("yolo_allowed", True)),
+                "interrupt_id": iid,
             }
     return None
 
@@ -215,18 +227,32 @@ async def _get_pending_approvals(
         for task in getattr(state, "tasks", ()):
             info = _extract_interrupt_info(task)
             if info is not None:
-                iid = ""
-                try:
-                    from kazma_ui.turn_document import assign_interrupt_id
+                # Prefer LangGraph's own interrupt id (matches the journal
+                # stamp). Fallback: a deterministic hash anchored on the
+                # checkpoint id — stable across polls (seq=0, no counter).
+                iid = str(info.pop("interrupt_id", "") or "")
+                if not iid:
+                    try:
+                        from kazma_ui.turn_document import make_interrupt_id
 
-                    payload = {
-                        "tool": info["tool_name"],
-                        "args": info["arguments"],
-                        "thread_id": thread_id,
-                    }
-                    iid = assign_interrupt_id(payload, thread_id=thread_id)
-                except Exception:
-                    iid = ""
+                        ck = ""
+                        try:
+                            cfg = getattr(state, "config", None) or {}
+                            ck = str(
+                                (cfg.get("configurable") or {}).get("checkpoint_id")
+                                or ""
+                            )
+                        except Exception:
+                            ck = ""
+                        iid = make_interrupt_id(
+                            thread_id=thread_id,
+                            tool=info["tool_name"],
+                            args=info["arguments"],
+                            checkpoint_id=ck,
+                            seq=0,
+                        )
+                    except Exception:
+                        iid = ""
                 approvals.append(
                     {
                         "thread_id": thread_id,

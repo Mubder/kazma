@@ -1801,6 +1801,24 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[Memory] V2 worker start failed: %s", e)
 
+        # ── HITL gate registry boot sweep ─────────────────────────────
+        # Rows a dead process left claimed/resuming are settled `orphaned`
+        # (the drive died with the process); pending rows are kept — the
+        # checkpoint pause survives a restart and the card must keep
+        # showing. Best-effort: never blocks boot.
+        try:
+            from kazma_core.safety.hitl_gates import (
+                boot_sweep_async,
+                gate_registry_enabled,
+            )
+
+            if gate_registry_enabled():
+                _swept = await boot_sweep_async()
+                if any(_swept.values()):
+                    logger.info("[HITL] gate boot sweep: %s", _swept)
+        except Exception as e:
+            logger.warning("[HITL] gate boot sweep failed: %s", e)
+
         # ── Temporal durable swarm worker (opt-in) ───────────────────
         # Same process as SwarmEngine so activities can call _dispatch_inner.
         # No-ops unless KAZMA_TEMPORAL_HOST is set. Never blocks boot.

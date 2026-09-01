@@ -1187,12 +1187,39 @@ def create_sse_chat_router(
             except Exception:
                 hitl = None
 
+        # ── Gate registry (P2): the live-gates list rides along so the
+        # client renders decision truth (one entry per gate — a second
+        # pending question is naturally visible next to the claimed first).
+        gates: list[dict[str, Any]] = []
+        if thread_id:
+            try:
+                from kazma_ui.hitl_gate_bridge import registry_on
+
+                if registry_on():
+                    from kazma_core.safety.hitl_gates import live_gates_async
+
+                    gates = [
+                        {
+                            "gate_id": g.gate_id,
+                            "state": g.state,
+                            "tool": g.tool,
+                            "kind": g.kind,
+                            "decision": g.decision,
+                            "message": g.message,
+                            "payload": g.payload(),
+                        }
+                        for g in await live_gates_async(thread_id)
+                    ]
+            except Exception:
+                gates = []
+
         return {
             "session_id": session_id,
             "thread_id": thread_id,
             "generating": bool(is_running),
             "paused": bool(paused),
             "hitl": hitl,
+            "gates": gates,
         }
 
     @r.delete("/api/chat/sessions/{session_id}")

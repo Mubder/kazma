@@ -385,3 +385,58 @@ class TestYoloAllowedPlumbing:
     def test_agent_store_forwards_yolo_allowed(self) -> None:
         src = self._src("kazma-ui/kazma_ui/static/js/stores/agentStore.js")
         assert "yolo_allowed: frame.yolo_allowed !== undefined" in src
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Stable interrupt ids on the pending list (2026-09-01 ghost-card fix)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class MockInterruptWithId(MockInterrupt):
+    def __init__(self, value: dict[str, Any], iid: str) -> None:
+        super().__init__(value)
+        self.id = iid
+
+
+class TestPendingInterruptIds:
+    """The pending list must carry the SAME id the chat journal stamped."""
+
+    @pytest.mark.asyncio
+    async def test_prefers_langgraph_interrupt_id(self) -> None:
+        graph = MockGraph({
+            "t-native-id": MockStateSnapshot(
+                next_nodes=("tool_worker",),
+                tasks=[MockTask(interrupts=[
+                    MockInterruptWithId(
+                        {"type": "hitl_approval", "tool": "file_write", "args": {}},
+                        "intr-native-1",
+                    )
+                ])],
+            ),
+        })
+        checkpointer = MockCheckpointer(thread_ids=["t-native-id"])
+        result = await _get_pending_approvals(graph, checkpointer)
+        assert len(result) == 1
+        assert result[0]["interrupt_id"] == "intr-native-1"
+
+    @pytest.mark.asyncio
+    async def test_fallback_id_is_stable_across_polls(self) -> None:
+        """No native id → deterministic hash. A per-poll id churned the
+        recovered chat card vs the journal card (ghost second card)."""
+        graph = MockGraph({
+            "t-hash-id": MockStateSnapshot(
+                next_nodes=("tool_worker",),
+                tasks=[MockTask(interrupts=[
+                    MockInterrupt(
+                        {"type": "hitl_approval", "tool": "file_write",
+                         "args": {"path": "x"}},
+                    )
+                ])],
+            ),
+        })
+        checkpointer = MockCheckpointer(thread_ids=["t-hash-id"])
+        first = await _get_pending_approvals(graph, checkpointer)
+        second = await _get_pending_approvals(graph, checkpointer)
+        assert len(first) == 1 and len(second) == 1
+        assert first[0]["interrupt_id"]
+        assert first[0]["interrupt_id"] == second[0]["interrupt_id"]

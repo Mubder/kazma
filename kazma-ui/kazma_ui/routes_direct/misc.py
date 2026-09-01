@@ -743,6 +743,26 @@ def register_misc_routes(self: Any) -> None:
                     )
                 except Exception:
                     logger.debug("[HITL] hitl journal frame skipped", exc_info=True)
+                # Gate registry dual-write (P1): record the decision (CAS)
+                # and the resume start. Best-effort — legacy stays
+                # authoritative for this response.
+                try:
+                    from kazma_ui.hitl_gate_bridge import (
+                        gate_claimed as _gate_claimed,
+                        gate_resuming as _gate_resuming,
+                    )
+
+                    await _gate_claimed(
+                        thread_id,
+                        _live_iid,
+                        "approve" if approved else "deny",
+                        actor,
+                        tool=pending_tool_name,
+                        payload=_stamp_payload,
+                    )
+                    await _gate_resuming(_live_iid)
+                except Exception:
+                    logger.debug("[HITL] gate claim skipped", exc_info=True)
                 _resume_inflight.add(thread_id)
                 _resume_task = asyncio.create_task(
                     _drive_graph_to_journal(
@@ -812,6 +832,72 @@ def register_misc_routes(self: Any) -> None:
                 is not None
             ]
             pending = list(pending) + list(sampling)
+            # ── Gate registry read cutover (P2) ───────────────────────
+            # Checkpoint scan = execution truth (which pauses exist);
+            # registry = decision truth (which are still unanswered).
+            # A legacy item with no registry row is backfilled (the
+            # crash-between-interrupt-and-write case); an item whose row
+            # is past `pending` is dropped — the decision was already made
+            # and a card with live buttons would be a lie.
+            try:
+                from kazma_ui.hitl_gate_bridge import (
+                    gate_pending_from_payload,
+                    registry_on,
+                )
+
+                if registry_on():
+                    from kazma_core.metrics import (
+                        record_hitl_gate_reconciled,
+                    )
+                    from kazma_core.safety.hitl_gates import gate_for_async
+
+                    kept: list[Any] = []
+                    for item in pending:
+                        if not isinstance(item, dict):
+                            kept.append(item)
+                            continue
+                        iid = str(item.get("interrupt_id") or "").strip()
+                        row = await gate_for_async(iid) if iid else None
+                        if row is None:
+                            await gate_pending_from_payload(dict(item))
+                            record_hitl_gate_reconciled("created_missing")
+                            kept.append(item)
+                        elif row.state == "pending":
+                            kept.append(item)
+                        # else: claimed/resuming/terminal — decision made.
+                    pending = kept
+            except Exception:
+                logger.debug(
+                    "[HITL] gate decision-truth filter skipped", exc_info=True
+                )
+            # P1 parity watch: registry pending-thread set vs legacy scan.
+            try:
+                from kazma_ui.hitl_gate_bridge import registry_on
+
+                if registry_on():
+                    from kazma_core.metrics import (
+                        record_hitl_gate_parity_mismatch,
+                    )
+                    from kazma_core.safety.hitl_gates import (
+                        pending_gates_async,
+                    )
+
+                    reg_threads = {
+                        r.thread_id for r in await pending_gates_async()
+                    }
+                    legacy_threads = {
+                        str(i.get("thread_id") or "")
+                        for i in pending
+                        if isinstance(i, dict)
+                    }
+                    if reg_threads != legacy_threads:
+                        record_hitl_gate_parity_mismatch("pending_list")
+                        logger.info(
+                            "[HITL] gate parity: registry=%s legacy=%s",
+                            sorted(reg_threads), sorted(legacy_threads),
+                        )
+            except Exception:
+                logger.debug("[HITL] gate parity check skipped", exc_info=True)
             return _JSONResponse({"pending": pending, "count": len(pending)})
         except Exception:
             logger.exception("[HITL] Failed to list pending approvals")
@@ -842,6 +928,17 @@ def register_misc_routes(self: Any) -> None:
                 else:
                     continue
                 cleared += 1
+                # Keep the gate registry honest: the pause is gone.
+                try:
+                    from kazma_core.safety.hitl_gates import (
+                        live_gates_async,
+                        settle_gate_async,
+                    )
+
+                    for row in await live_gates_async(thread_id):
+                        await settle_gate_async(row.gate_id, "cleared")
+                except Exception:
+                    logger.debug("[HITL] gate clear skipped", exc_info=True)
             return _JSONResponse({"status": "ok", "cleared": cleared})
         except Exception:
             logger.exception("[HITL] Failed to clear pending approvals")

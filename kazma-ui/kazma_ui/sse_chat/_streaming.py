@@ -770,6 +770,24 @@ async def _stream_langgraph_events(
                                         "[SSE] interrupt_id stamp skipped",
                                         exc_info=True,
                                     )
+                                # Gate registry dual-write (P1): the pause is
+                                # observed and the real id is in hand — the
+                                # primary register site. Best-effort.
+                                try:
+                                    from kazma_ui.hitl_gate_bridge import (
+                                        gate_pending_from_payload,
+                                    )
+
+                                    await gate_pending_from_payload(
+                                        _hitl_payload_saved,
+                                        session_id=session_id or "",
+                                        turn_id=reply_turn_id or "",
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "[SSE] gate register skipped",
+                                        exc_info=True,
+                                    )
                                 yield await emit_j(
                                     "approval_required",
                                     _hitl_payload_saved,
@@ -960,6 +978,15 @@ async def _stream_langgraph_events(
                         yield frame
                 return
             mark_thread_unpaused(thread_id)
+            # Gate registry dual-write (P1): terminal turn — settle any
+            # claimed/resuming gates on this thread. Pending rows are left
+            # alone (a second live question must keep the turn open).
+            try:
+                from kazma_ui.hitl_gate_bridge import settle_thread_gates
+
+                await settle_thread_gates(thread_id)
+            except Exception:
+                logger.debug("[SSE] gate settle skipped", exc_info=True)
             yield await emit_j("done", _done_payload)
             yield await emit_j("turn_complete", _done_payload)
             logger.info(

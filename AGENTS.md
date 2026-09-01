@@ -1482,6 +1482,67 @@ output force RESPOND with "what's missing + one concrete question"
 that caused the trim.
 
 
+### 30. HITL Gate Registry (`kazma_core/safety/hitl_gates.py`) — one gate, one row, one truth
+
+Born from the 2026-09-01 chat-card incident chain (ghost cards, pre-approved
+stamps, second question hidden on the dashboard). Plan SoT:
+`docs/plans/HITL_GATE_REGISTRY_PLAN.md`. Every HITL approval across ALL FOUR
+mechanisms (graph interrupt, swarm bus, pipeline checkpoints, semantic cards)
+is one row in `kazma-data/hitl_gates.db` with a strict CAS state machine:
+`pending → claimed → resuming → settled` (+ `timeout`/`superseded`/`error`).
+Kill-switch `KAZMA_GATE_REGISTRY=0` reverts every consumer to legacy
+derivation.
+
+**A. Decision truth vs execution truth (the split is load-bearing).**
+The registry owns the DECISION (was this gate answered, by whom); the
+LangGraph checkpoint owns EXECUTION (is the graph actually paused). Readers
+consult the registry FIRST (`hitl_thread_status`, `close_turn`,
+`/api/pending-approvals`, chat.js `_serverGates`); the legacy snapshot
+derivation is the DEFINED DEGRADATION PATH when the registry has no rows or
+is unreachable — do not delete it, and do not let it override a live row.
+
+**B. Every transition is a single CAS UPDATE.** Zero rows affected ⇒
+`TransitionConflict` carrying the row's actual state — that IS the 409 body.
+Idempotent same-decision re-claim returns the row (200 semantics). `pending`
+is the ONLY state a card renders live buttons for; the client never infers a
+claim.
+
+**C. Two-id rule.** `register_gate` is idempotent on both `gate_id`
+(LangGraph `intr.id` preferred) and `alias_id` (the deterministic
+`make_gate_id` hash) — one pause can never mint two cards. A terminal row
+under a HASH id does not eat a NEW ask for the same tool+args (fresh row,
+uniquified suffix); a native-id repeat returns the terminal row.
+
+**D. Surfaces render; they never mint.** Gate transitions publish through
+`GateEvents` into the EXISTING turn journal (`hitl` parts of the same
+TurnDocument) — never a parallel event stream. Writer sites: SSE post-stream
+scan (primary register, has `intr.id`), `/api/approve` (claim + resuming),
+drive terminal (`settle_thread_gates` — settles claimed/resuming, NEVER
+pending: a second live question keeps the turn open), gateway pause/resume
+(`gate_claimed_for_thread` — platform cards are per-thread), swarm
+`safety.check()` (register→bus→claim+settle), pipeline
+`checkpoint_manager._gate_register_pipeline`/`_gate_settle_pipeline`.
+
+**E. Reconciler — every crash window has one behavior.**
+Approve-on-missing-row backfills (`created_missing`); `close_turn` settles
+pending rows whose checkpoint is NOT paused as `orphaned` (in seconds);
+`boot_sweep()` (app startup) orphans stale claimed/resuming rows past grace
+and NEVER touches pending (the card must survive a restart); TTL sweep rides
+the 15-min commitment GC cadence in `worker_bootstrap.py` (no new scheduler
+loop). Metrics: `kazma_hitl_gates_total{state,mechanism}`,
+`kazma_hitl_gate_parity_mismatch_total{site}` (must trend to zero),
+`kazma_hitl_gate_reconciled_total{action}`.
+
+**F. Honesty limits.** `hitl_gates.db` is single-process truth (like the
+turn journal) — no multi-replica claims; a Postgres backend goes next to §21
+when needed. The registry cannot stop the model narrating while paused —
+that is handled by close_turn keeping the turn open on any pending row.
+
+Tests: `tests/test_hitl_gates.py`, `test_hitl_gate_bridge.py`,
+`test_hitl_gate_read_cutover.py`, `test_hitl_gate_swarm_pipeline.py`,
+`test_hitl_gate_reconciler.py`.
+
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser
