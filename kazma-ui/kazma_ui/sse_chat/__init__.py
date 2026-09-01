@@ -1152,11 +1152,21 @@ def create_sse_chat_router(
         hitl: dict[str, Any] | None = None
         if thread_id:
             try:
-                from kazma_ui.hitl_status import persisted_hitl_for_thread
+                from kazma_ui.hitl_status import (
+                    hitl_thread_status,
+                    persisted_hitl_for_thread,
+                )
 
+                gate = "idle"
+                try:
+                    gate = await hitl_thread_status(thread_id, graph=_get_graph())
+                except Exception:
+                    gate = "idle"
                 part = persisted_hitl_for_thread(thread_id)
+                payload: dict[str, Any] = {}
                 if isinstance(part, dict):
-                    payload = part.get("payload") if isinstance(part.get("payload"), dict) else {}
+                    raw_payload = part.get("payload")
+                    payload = raw_payload if isinstance(raw_payload, dict) else {}
                     hitl = {
                         "state": str(part.get("state") or "pending"),
                         "tool": str(part.get("tool") or payload.get("tool") or ""),
@@ -1165,6 +1175,14 @@ def create_sse_chat_router(
                             or payload.get("interrupt_id")
                             or ""
                         ),
+                        "gate": gate,
+                    }
+                elif gate != "idle":
+                    hitl = {
+                        "state": gate,
+                        "tool": "",
+                        "interrupt_id": "",
+                        "gate": gate,
                     }
             except Exception:
                 hitl = None

@@ -196,6 +196,30 @@ def test_new_session_resets_hitl_client_state() -> None:
     assert "_resetSessionTurnState()" in load
 
 
+def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
+    """pauseForApproval sets _awaitingApproval before the card exists.
+
+    Using that flag (or generating && !paused) as inflight painted
+    "Approved — running…" with no click, while the dashboard still had
+    live buttons (2026-09-01).
+    """
+    chat = _src(_CHAT_JS)
+    paint = chat.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
+        "function renderTurn(doc, meta)", 1
+    )[0]
+    assert "_awaitingApproval" not in paint
+    assert "_serverGenerating && !_serverPaused" not in paint
+    assert "_hitlAlreadyClaimed(hitl)" in paint
+    assert "gate === 'inflight'" in paint or 'gate === "inflight"' in paint
+    assert "renderHitlCard(hitl.payload)" in paint
+    status = _src(_INIT)
+    sess = status.split("async def get_session_status", 1)[1].split(
+        "async def delete_session", 1
+    )[0]
+    assert "hitl_thread_status" in sess
+    assert '"gate"' in sess or "'gate'" in sess
+
+
 def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     """Empty interrupt_id must not treat ANY claimed card as this gate."""
     chat = _src(_CHAT_JS)
