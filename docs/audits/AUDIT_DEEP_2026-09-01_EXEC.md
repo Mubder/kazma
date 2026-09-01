@@ -32,7 +32,12 @@ Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`, `_hitlAlreadyClai
 - **3** Real critical: C-2 importer order + M-9/M-10/M-11. **Shipped.**
 - **4** HITL-adjacent: H-9, M-3, H-8, T-2. **Shipped.**
 - **5** Isolation / cron / PG docs / workspace_id: H-1, H-2, H-13, H-10/H-11. **Shipped.**
-- **6–8** Swarm reliability, hygiene, SSRF last.
+- **6** Swarm reliability: H-12 fan-out tri-state (swarm bus only, not web
+  `claim_gate`); M-14 remainder (autoscaler skip-busy + activity at
+  completion; breaker refresh + durable probe lease; PG metrics SQL-side
+  upsert; MCP list/read through scope guard; path-write keywords from
+  `side_effects` SoT). **Shipped.**
+- **7–8** Hygiene, SSRF last.
 
 Industrial minimum if we stop early: Wave 1 + C-2 + T-4 retarget.
 

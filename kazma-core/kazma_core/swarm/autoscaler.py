@@ -336,10 +336,20 @@ class AutoScaler:
             if not self._instances:
                 return 0
             now = time.monotonic()
-            to_reap = [
-                name for name, (_, _, last_active) in self._instances.items()
-                if (now - last_active) > self._idle_ttl
-            ]
+            to_reap: list[str] = []
+            for name, (_, _, last_active) in self._instances.items():
+                if (now - last_active) <= self._idle_ttl:
+                    continue
+                worker = None
+                try:
+                    getter = getattr(self._engine, "get_worker", None)
+                    worker = getter(name) if callable(getter) else None
+                except Exception:
+                    worker = None
+                if worker is not None and getattr(worker, "busy", False):
+                    logger.debug("[AutoScaler] skip reap of busy worker %s", name)
+                    continue
+                to_reap.append(name)
 
         for name in to_reap:
             self._reap_instance(name)

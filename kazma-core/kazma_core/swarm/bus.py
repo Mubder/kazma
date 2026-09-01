@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -148,6 +149,10 @@ class FanOutBusAdapter(BusAdapter):
     With this adapter, every configured platform receives stream/report/alert
     traffic, and ``request_approval`` returns True if **any** platform
     approves (first yes wins; remaining waiters are cancelled).
+
+    First-yes here is the gather loop. H-12 (a Discord timeout-as-False
+    denying a later Telegram Approve) is fixed in ``shared_approvals``
+    tri-state, not by changing web ``claim_gate``.
     """
 
     def __init__(self, adapters: list[BusAdapter]) -> None:
@@ -172,6 +177,24 @@ class FanOutBusAdapter(BusAdapter):
         )
 
     async def request_approval(self, approval: ApprovalRequest, timeout: float = 60.0) -> bool:
+        # H-12: stamp expected voter count BEFORE adapters call
+        # create_pending(expected=1). Shared-approvals tri-state lives
+        # there (True settles; False is a vote). This is the swarm bus
+        # only — web claim_gate stays first-claim 200 / second 409.
+        n = len(self._adapters)
+        if approval.task_id and n:
+            try:
+                from kazma_core.swarm import shared_approvals
+
+                shared_approvals.create_pending(
+                    approval.task_id,
+                    expected_voters=n,
+                    deadline=time.time() + max(0.5, float(timeout)),
+                    meta={"fanout": True, "platforms": n},
+                )
+            except Exception as exc:
+                logger.debug("[FanOutBus] stamp expected_voters failed: %s", exc)
+
         async def _one(adapter: BusAdapter) -> bool:
             try:
                 return bool(await adapter.request_approval(approval, timeout=timeout))

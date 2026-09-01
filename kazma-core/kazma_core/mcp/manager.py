@@ -151,8 +151,52 @@ def _mcp_raw_tool_name(tool_name: str) -> str:
 
 _FS_PATH_KEYS = ("path", "paths", "directory", "filePath", "filepath",
                   "source", "destination", "src", "dst", "target", "folder")
-_WRITE_KEYWORDS = ("write", "edit", "delete", "move", "create", "rename",
-                    "mkdir", "remove", "rm", "rmdir", "touch", "copy", "cp")
+# Filesystem verbs that are writes but not always in `_MUTATOR_TOKENS`
+# (append/patch/edit/unix short names). Unioned with the side_effects SoT.
+_FS_WRITE_EXTRA = frozenset({
+    "edit", "move", "rename", "mkdir", "rm", "rmdir", "touch", "copy", "cp",
+    "append", "patch",
+})
+
+
+def _write_keywords() -> frozenset[str]:
+    """Path-access write vocabulary — mutator SoT plus filesystem extras."""
+    return frozenset(_mutator_tokens()) | _FS_WRITE_EXTRA
+
+
+def _mcp_path_mode(raw_tool_name: str) -> str:
+    """Return ``write`` or ``read`` for MCP path-grant checks (M-14)."""
+    name_lower = (raw_tool_name or "").lower()
+    tokens = set(re.split(r"[^a-z0-9]+", name_lower)) - {""}
+    write_vocab = _write_keywords()
+    if tokens & write_vocab:
+        return "write"
+    if any(kw in name_lower for kw in ("rm", "cp", "mkdir", "rmdir")):
+        return "write"
+    return "read"
+
+
+def _resource_path_from_uri(uri: str) -> str | None:
+    """Return a filesystem path for file: / path-shaped resource URIs."""
+    u = (uri or "").strip()
+    if not u:
+        return None
+    if u.lower().startswith("file:"):
+        try:
+            from urllib.parse import unquote, urlparse
+
+            parsed = urlparse(u)
+            path = unquote(parsed.path or "")
+            if parsed.netloc and parsed.netloc not in (".", "localhost"):
+                # file://host/path — keep host as Windows drive if one letter
+                if len(parsed.netloc) == 1:
+                    path = f"{parsed.netloc}:{path}"
+            return path or None
+        except Exception:
+            return u[5:].lstrip("/") or None
+    if u.startswith("/") or (len(u) > 2 and u[1] == ":"):
+        return u
+    return None
 
 
 def _gate_mcp_path_access(
@@ -176,8 +220,7 @@ def _gate_mcp_path_access(
     if not paths:
         return None  # no path args → not a filesystem op
 
-    name_lower = raw_tool_name.lower()
-    mode = "write" if any(kw in name_lower for kw in _WRITE_KEYWORDS) else "read"
+    mode = _mcp_path_mode(raw_tool_name)
 
     try:
         from kazma_core.safety.hitl import get_current_thread_id
@@ -687,6 +730,11 @@ class AsyncMCPManager:
             handle = self._servers.get(name)
             if handle is None or not handle.connected:
                 continue
+            routed, scope_err = await self._route_workspace_scope(name, handle)
+            if scope_err is not None:
+                logger.debug("[MCP] resources/list skipped: %s", scope_err.get("content"))
+                continue
+            handle = routed
             try:
                 result = await self._send(handle, "resources/list", {})
                 resources = result.get("resources") if isinstance(result, dict) else []
@@ -712,9 +760,18 @@ class AsyncMCPManager:
                 "content": f"MCP server '{server_name}' not connected.",
                 "is_error": True,
             }
+        routed, scope_err = await self._route_workspace_scope(server_name, handle)
+        if scope_err is not None:
+            return scope_err
+        handle = routed
         target = (uri or "").strip()
         if not target:
             return {"content": "uri is required", "is_error": True}
+        path_arg = _resource_path_from_uri(target)
+        if path_arg:
+            denial = _gate_mcp_path_access("resources_read", {"path": path_arg})
+            if denial is not None:
+                return denial
         try:
             result = await self._send(handle, "resources/read", {"uri": target})
         except Exception as exc:

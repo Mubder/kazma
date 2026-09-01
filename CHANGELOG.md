@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 6 — swarm reliability (2026-09-01)
+
+H-12: swarm fan-out approvals are tri-state (`True` settles; `False` is a
+vote until `expected_voters` or deadline). This is **not** web
+`claim_gate` (first claim 200, second 409). M-14: autoscaler skips busy
+workers and stamps activity at completion; shared breaker refreshes
+before `check_or_raise` and takes a durable half-open probe lease
+(in-process `_probe_in_flight` stays); PG worker-metrics use
+`INSERT … ON CONFLICT DO UPDATE`; MCP `list_resources`/`read_resource`
+go through the workspace scope guard; path-write mode uses the
+`side_effects` mutator vocabulary.
+
 ## Audit 2026-09-01 Wave 5 — isolation, cron delivery, PG docs, workspace_id (2026-09-01)
 
 H-1: proposal resolve/posted filter by tenant_id. H-2: cron send_message
