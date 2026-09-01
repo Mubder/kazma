@@ -104,6 +104,15 @@ class DiscordAdapter(BaseAdapter):
         """
         self._allowed_users = {str(uid) for uid in user_ids}
 
+    def actor_allowed(self, user_id: object) -> bool:
+        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
+        if not self._allowed_users and not self._allow_all:
+            return False
+        if self._allowed_users:
+            uid = str(user_id or "")
+            return bool(uid) and uid in self._allowed_users
+        return True
+
     async def listen(
         self,
         queue: asyncio.Queue[IncomingMessage],
@@ -355,9 +364,9 @@ class DiscordAdapter(BaseAdapter):
         # Reject a task, or trigger a remote package install by clicking a button.
         _ia_user = data.get("member", {}).get("user") or data.get("user") or {}
         _ia_user_id = str(_ia_user.get("id", ""))
-        if self._allowed_users and (not _ia_user_id or _ia_user_id not in self._allowed_users):
+        if not self.actor_allowed(_ia_user_id):
             logger.info(
-                "[discord] Ignoring interaction from non-allowed user %s (action=%s)",
+                "[discord] Ignoring interaction (allowlist fail-closed) user=%s action=%s",
                 _ia_user_id, action.kind,
             )
             await _ack({"type": 6})
@@ -394,17 +403,7 @@ class DiscordAdapter(BaseAdapter):
                 user = data.get("member", {}).get("user") or data.get("user") or {}
                 channel_id = str(data.get("channel_id") or "")
                 user_id = str(user.get("id", ""))
-                # Audit G2a: interactions (HITL approval buttons, pickers) MUST
-                # respect the user allowlist, same as MESSAGE_CREATE. Previously
-                # a non-allowlisted user clicking an approval button could fire
-                # `hitl approve <thread>` into the queue unchecked.
-                if self._allowed_users and (not user_id or user_id not in self._allowed_users):
-                    logger.info(
-                        "[discord] Ignoring interaction from non-allowed user %s (kind=%s)",
-                        user_id, action.kind,
-                    )
-                    await _ack({"type": 6})
-                    return
+                # Top-of-handler actor_allowed already covered empty + nonempty.
                 msg = IncomingMessage(
                     platform="discord",
                     sender_id=(

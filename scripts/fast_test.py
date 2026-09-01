@@ -145,6 +145,30 @@ _BENIGN_EXIT_CODES = (0, 1, 5)
 
 _DIGEST_LIMIT = 6000
 
+# A poisoned TEMP (WinError 5 junctions) made every chunk 0 passed / exit 1
+# while this runner still returned 0 (audit H-14). Floor is a sanity check
+# against "CI ran nothing and reported success."
+MIN_EXPECTED_PASSED = 500
+
+
+def suite_exit_code(
+    totals: dict[str, int],
+    *,
+    failed: list[str],
+    poison: list[str],
+) -> int:
+    """Exit code for the aggregated run.
+
+    0 = green and the suite actually ran. 1 = test failures or poison.
+    2 = ran effectively nothing (or below the sanity floor).
+    """
+    passed = int(totals.get("passed", 0) or 0)
+    if poison or failed:
+        return 1
+    if passed < MIN_EXPECTED_PASSED:
+        return 2
+    return 0
+
 
 def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
     """Extract the FAILURES/ERRORS sections (tracebacks) from pytest -q output.
@@ -158,14 +182,21 @@ def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
     """
     sections: list[str] = []
     for name in ("FAILURES", "ERRORS"):
-        m = re.search(rf"^=+ {name} =+\s*$", log, re.M)
+        m = re.search(rf"=+\s*{name}\s*=+", log)
         if m is None:
             continue
         rest = log[m.start():]
-        m2 = re.search(r"^=+ (short test summary|slowest\d* test) ", rest, re.M)
+        m2 = re.search(r"=+\s*(short test summary|slowest\d*\s*test)", rest)
         section = rest[: m2.start()] if m2 else rest
         sections.append(section[:limit])
-    return "\n".join(sections)[:limit]
+    joined = "\n".join(sections).strip()
+    if joined:
+        return joined[:limit]
+    # Retried-chunk logs sometimes omit the FAILURES banner (audit Part 5).
+    # Still show a tail so CI is not id-only.
+    if "FAILED" in log or "ERROR" in log:
+        return log[-limit:]
+    return ""
 
 
 def is_crash(code: int) -> bool:
@@ -302,17 +333,25 @@ def main() -> int:
         digest = "\n\n".join(
             _failure_digest(log, limit=3000) for log in failure_logs
         ).strip()
-        if digest:
-            print("\n[fast-test] failure tracebacks (per-chunk FAILURES sections):")
-            # Windows consoles default to cp1252 — tracebacks can contain
-            # replacement chars from crashed-chunk output. Never let the
-            # REPORTER crash after the suite already ran.
-            sys.stdout.buffer.write(digest[:24000].encode("utf-8", errors="replace"))
+        print("\n[fast-test] failure tracebacks (per-chunk FAILURES sections):")
+        payload = digest or "(no FAILURES/ERRORS section parsed — see chunk logs)"
+        # Windows consoles default to cp1252 — tracebacks can contain
+        # replacement chars from crashed-chunk output. Never let the
+        # REPORTER crash after the suite already ran.
+        sys.stdout.buffer.write(payload[:24000].encode("utf-8", errors="replace"))
+        sys.stdout.buffer.write(b"\n")
     if poison:
         print(f"\n[fast-test] POISON files (crash/hang even standalone):")
         for p in poison:
             print(f"  POISON {p}")
-    return 0 if (not all_failed and not poison) else 1
+    code = suite_exit_code(totals, failed=all_failed, poison=poison)
+    passed = int(totals.get("passed", 0) or 0)
+    if code == 2:
+        print(
+            f"\n[fast-test] suite ran no tests "
+            f"(passed={passed} < MIN_EXPECTED={MIN_EXPECTED_PASSED})"
+        )
+    return code
 
 
 if __name__ == "__main__":

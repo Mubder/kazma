@@ -23,7 +23,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from kazma_core.agent_skills.discovery import user_agent_skills_dir
-from kazma_core.agent_skills.parser import parse_skill_md
+from kazma_core.agent_skills.parser import is_safe_skill_name, parse_skill_md
 
 __all__ = [
     "InstallResult",
@@ -149,6 +149,22 @@ def _find_skill_dirs(root: Path) -> list[Path]:
     return found
 
 
+def _assert_skill_dest(dest_dir: Path, name: str) -> Path:
+    """Return dest_dir/name after hard-failing traversal / unsafe slugs."""
+    if not is_safe_skill_name(name):
+        raise ValueError(
+            f"Refusing skill name {name!r}: must match "
+            r"^[a-z0-9][a-z0-9-_]{0,63}$"
+        )
+    dest_root = dest_dir.resolve()
+    target = (dest_dir / name).resolve()
+    if not target.is_relative_to(dest_root):
+        raise ValueError(
+            f"Refusing skill path escape: {target} is not under {dest_root}"
+        )
+    return target
+
+
 def _copy_skill(src_dir: Path, dest_dir: Path, *, source: str) -> dict[str, str]:
     """Copy a skill directory into dest_dir/<name>/ and write install meta."""
     text = (src_dir / "SKILL.md").read_text(encoding="utf-8")
@@ -157,7 +173,7 @@ def _copy_skill(src_dir: Path, dest_dir: Path, *, source: str) -> dict[str, str]
         raise ValueError(f"Invalid SKILL.md in {src_dir}")
 
     name = parsed.name or src_dir.name
-    target = dest_dir / name
+    target = _assert_skill_dest(dest_dir, name)
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(
@@ -489,17 +505,40 @@ async def _attach_basic_certification(result: InstallResult) -> InstallResult:
 def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResult:
     """Remove an installed Agent Skill by name from the user skills dir."""
     dest = target_dir or user_agent_skills_dir()
-    target = dest / name
+    try:
+        target = _assert_skill_dest(dest, name)
+    except ValueError as exc:
+        return InstallResult(
+            success=False,
+            message="Invalid skill name",
+            source=name,
+            errors=[str(exc)],
+        )
     # Project-local + legacy homes (read/remove only — no new writes to legacy)
     try:
         from kazma_core.paths import agent_skills_dir, legacy_user_home
 
         alts = [
-            agent_skills_dir() / name,
-            legacy_user_home() / "agent-skills" / name,
+            _assert_skill_dest(agent_skills_dir(), name),
+            _assert_skill_dest(legacy_user_home() / "agent-skills", name),
         ]
+    except ValueError as exc:
+        return InstallResult(
+            success=False,
+            message="Invalid skill name",
+            source=name,
+            errors=[str(exc)],
+        )
     except Exception:
-        alts = [Path.home() / ".kazma" / "agent-skills" / name]
+        try:
+            alts = [_assert_skill_dest(Path.home() / ".kazma" / "agent-skills", name)]
+        except ValueError as exc:
+            return InstallResult(
+                success=False,
+                message="Invalid skill name",
+                source=name,
+                errors=[str(exc)],
+            )
     removed_from: list[str] = []
     seen: set[str] = set()
     for path in (target, *alts):
@@ -507,6 +546,9 @@ def uninstall_skill(name: str, *, target_dir: Path | None = None) -> InstallResu
         if key in seen:
             continue
         seen.add(key)
+        parent = path.parent.resolve()
+        if not path.resolve().is_relative_to(parent):
+            continue
         if path.is_dir() and (path / "SKILL.md").is_file():
             shutil.rmtree(path)
             removed_from.append(str(path))

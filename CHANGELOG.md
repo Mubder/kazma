@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 0–1 — industrial Day-0 (2026-09-01)
+
+Execution SoT: `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` (do not follow the
+dump's Part 6 order). C-1 Slack `******` header is **false** on current
+`main` — guard test only. Shipped: H-3 callback empty-allowlist fail-closed
+(Telegram/Discord/Slack), H-6 fence `source` sanitization, H-5 skill-name
+path containment, H-4 telegram auto-attach containment, T-3 guard never
+reaps non-python even when health answers, H-14 `fast_test.py` zero-pass
+floor + traceback digest. Turn Delivery / HITL P6 untouched.
+
 ## HITL Gate Registry P6 — one decision author (2026-09-01)
 
 Dual-run readers are gone. Pending-approvals and the timeout watchdog

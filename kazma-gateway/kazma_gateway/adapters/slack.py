@@ -108,6 +108,15 @@ class SlackAdapter(BaseAdapter):
         """Replace the per-user allowlist at runtime (Settings live apply)."""
         self._allowed_users = {str(uid) for uid in user_ids}
 
+    def actor_allowed(self, user_id: object) -> bool:
+        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
+        if not self._allowed_users and not self._allow_all:
+            return False
+        if self._allowed_users:
+            uid = str(user_id or "")
+            return bool(uid) and uid in self._allowed_users
+        return True
+
     def set_allowed_teams(self, team_ids: list[str] | set[str]) -> None:
         """Replace the team allowlist at runtime."""
         self._allowed_teams = {str(tid) for tid in team_ids}
@@ -493,9 +502,9 @@ class SlackAdapter(BaseAdapter):
                                             _ia_channel, action.kind,
                                         )
                                         continue
-                                    if getattr(self, "_allowed_users", None) and (not _ia_user_id or _ia_user_id not in self._allowed_users):
+                                    if not self.actor_allowed(_ia_user_id):
                                         logger.info(
-                                            "[Slack] Ignoring interaction from non-allowed user %s (action=%s)",
+                                            "[Slack] Ignoring interaction (allowlist fail-closed) user=%s action=%s",
                                             _ia_user_id, action.kind,
                                         )
                                         continue
@@ -576,9 +585,9 @@ class SlackAdapter(BaseAdapter):
                                                     channel,
                                                 )
                                                 continue
-                                            if getattr(self, "_allowed_users", None) and (not user_id or user_id not in self._allowed_users):
+                                            if not self.actor_allowed(user_id):
                                                 logger.info(
-                                                    "[Slack] Ignoring interaction from non-allowed user %s",
+                                                    "[Slack] Ignoring interaction (allowlist fail-closed) user=%s",
                                                     user_id,
                                                 )
                                                 continue

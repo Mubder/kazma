@@ -672,6 +672,14 @@ def parse_tasklist_image(stdout: str) -> str:
     return line.split()[0]
 
 
+def _is_reapable_image(name: str) -> bool:
+    """True only for python/uvicorn holders — never sqlservr, nginx, …"""
+    image = name.replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    if not image:
+        return False
+    return image.startswith("python") or image.startswith("uvicorn")
+
+
 def _windows_image_name(pid: int) -> str:
     """Best-effort process image for *pid* on Windows. Empty if unknown."""
     if pid <= 0:
@@ -731,18 +739,16 @@ def reap_port_holder(url: str, log: GuardLog) -> bool:
     except Exception:
         name = ""
     name_l = name.lower()
-    # If THIS health URL is answering, the listener is Kazma even when
-    # tasklist cannot see the image (Scheduled Task / other session →
-    # "INFO: No tasks are running", parsed as name "info:").
-    health_ok, _ = probe(url, 5.0)
-    ours = "python" in name_l or health_ok
-    if not ours:
-        log("error", "port.holder_not_ours", pid=pid, port=port, name=name or "unknown",
+    # Image allowlist is the ONLY reap credential. Health answering used to
+    # make `ours=True` for sqlservr.exe (and any unknown image) whenever
+    # THIS url still served — a mistyped port plus a live probe then killed
+    # a foreign holder (audit T-3). Unknown name + health_ok → log and refuse.
+    if not _is_reapable_image(name_l):
+        health_ok, _ = probe(url, 5.0)
+        log("error", "port.holder_not_ours", pid=pid, port=port,
+            name=name or "unknown", health_ok=health_ok,
             note="refusing to kill a non-python process")
         return False
-    if "python" not in name_l and health_ok:
-        log("warn", "port.holder_name_unknown_but_health_answers",
-            pid=pid, port=port, name=name or "unknown")
     log("warn", "port.reaping_holder", pid=pid, port=port, name=name)
     try:
         if os.name == "nt":

@@ -30,6 +30,30 @@ class TestSlackAdapter:
         assert adapter._allowed_channels == {"C456"}
         assert adapter.name == "slack"
 
+    def test_headers_use_bearer_token_never_a_mask(self) -> None:
+        """C-1 negative control: a redaction pass must not rewrite source.
+
+        Current tree already sends Bearer {token}. This test fails if someone
+        "fixes" the audit by writing f\"******\" back into _headers().
+        """
+        from pathlib import Path
+
+        adapter = SlackAdapter(bot_token="xoxb-real-token", app_token="xapp-x")
+        auth = adapter._headers()["Authorization"]
+        assert auth.startswith("Bearer ")
+        assert "xoxb-real-token" in auth
+        assert "******" not in auth
+        src = (
+            Path(__file__).resolve().parents[1]
+            / "kazma-gateway"
+            / "kazma_gateway"
+            / "adapters"
+            / "slack.py"
+        ).read_text(encoding="utf-8")
+        assert 'f"******"' not in src
+        assert "f'******'" not in src
+        assert "Authorization" in src
+
     def test_parse_regular_message(self):
         """Test parsing a regular message event."""
         adapter = SlackAdapter("xoxb-test", "xapp-test")

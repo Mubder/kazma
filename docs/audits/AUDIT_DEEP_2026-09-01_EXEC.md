@@ -1,0 +1,41 @@
+# Execution SoT for AUDIT_DEEP_2026-09-01
+
+The finding dump is `AUDIT_DEEP_2026-09-01.md`. **Do not follow its Part 6 order.**
+This file is the in-repo execution contract so Turn Delivery and the HITL
+Gate Registry (P6) are not restacked by a naive “do the audit” pass.
+
+Verified against `main` at plan time (`20e9d198` and later).
+
+## Skip / recast
+
+| ID | Do this |
+|---|---|
+| **C-1** | False on current tree (`Bearer {token}`). Guard test only. Never “restore” headers. |
+| **T-4** | Retarget projector tests. Do not restore `tokenAccum` dual-paint. |
+| **H-7** | Residual DNS-rebinding; dedicated pin-IP design later, not Day-0. |
+| **H-12** | Swarm bus tri-state only. Must not retarget web `claim_gate`. |
+
+## Collision recipes (protected)
+
+1. **T-4 / `chat.js`:** scrub stays inside `renderTurn`. No second painter.
+2. **H-8 / `tool_registry.execute`:** apply `rewritten_args`; `clarify`/`confirm` fail closed (“run from chat”). Never mint a second gate row.
+3. **T-2 pipeline timeout:** finalize the task **and** `settle_gate`.
+4. **H-9 bus:** `is_danger_tool()` → `requires_approval()`. Not FanOut first-wins.
+
+Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`, `_hitlAlreadyClaimed`, `_serverGates`), `turn_document.js`, `turn_runtime.py` (`close_turn`), `hitl_gates.py`, `hitl_status.py`.
+
+## Waves
+
+- **0** Preflight: this file + C-1 guard + HITL/delivery baseline green.
+- **1** Day-0 security: H-3, H-6, H-5, H-4, T-3, H-14.
+- **2** Honest suite: T-6, T-1 (do **not** count commitment denials as tool failures; register dummy tools), T-4 retarget, T-5.
+- **3** Real critical: C-2 importer order + M-9/M-10/M-11.
+- **4** HITL-adjacent: H-9, M-3, H-8, T-2.
+- **5–8** Isolation, swarm reliability, hygiene, SSRF last.
+
+Industrial minimum if we stop early: Wave 1 + C-2 + T-4 retarget.
+
+## Per-PR
+
+Finding ID in the subject. Behavior test + negative control. No server start.
+Operator: `kazma_guard.py --reload` after Python; Ctrl+F5 after JS.

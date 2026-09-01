@@ -181,6 +181,18 @@ class TelegramAdapter(BaseAdapter):
         """
         self._allowed_users = set(user_ids)
 
+    def actor_allowed(self, user_id: object) -> bool:
+        """Fail-closed allowlist: empty + ``allow_all=False`` rejects everyone."""
+        if not self._allowed_users and not self._allow_all:
+            return False
+        if self._allowed_users:
+            try:
+                uid = int(user_id)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return False
+            return uid in self._allowed_users
+        return True
+
     async def start(
         self,
         queue: asyncio.Queue[IncomingMessage],
@@ -800,11 +812,9 @@ class TelegramAdapter(BaseAdapter):
             if msg is None:
                 return JSONResponse({"status": "ignored", "reason": "no_text"})
 
-            # User whitelist
-            if self._allowed_users:
-                user_id = msg.context_metadata.get("user_id", 0)
-                if user_id not in self._allowed_users:
-                    return JSONResponse({"status": "ignored", "reason": "not_whitelisted"})
+            # User whitelist (fail-closed, same as polling / callbacks)
+            if not self.actor_allowed(msg.context_metadata.get("user_id", 0)):
+                return JSONResponse({"status": "ignored", "reason": "not_whitelisted"})
 
             if self._queue is None:
                 logger.error("[telegram-webhook] Queue not initialized — adapter not started")
@@ -1289,13 +1299,15 @@ class TelegramAdapter(BaseAdapter):
         message = callback_query.get("message", {})
         from_user = callback_query.get("from", {})
 
-        # Enforce user whitelist on callback queries too
-        if self._allowed_users:
-            user_id = from_user.get("id", 0)
-            if user_id not in self._allowed_users:
-                logger.warning("[telegram] Callback from non-whitelisted user %d", user_id)
-                self._spawn(self._answer_callback_query(cb_id, "Not authorized"))
-                return
+        # Fail-closed: empty allowlist + allow_all=False rejects callbacks
+        # the same way messages are rejected (audit H-3).
+        if not self.actor_allowed(from_user.get("id", 0)):
+            logger.warning(
+                "[telegram] Callback rejected (allowlist fail-closed) user=%s",
+                from_user.get("id", 0),
+            )
+            self._spawn(self._answer_callback_query(cb_id, "Not authorized"))
+            return
 
         from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
 

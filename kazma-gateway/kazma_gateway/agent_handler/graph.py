@@ -2232,23 +2232,22 @@ def create_graph_handler(
                                     data=fpath.read_bytes(),
                                 ))
 
-            # Auto-extract generated document file paths mentioned in response text
-            import re
-            from pathlib import Path
-            file_matches = re.findall(r"(?:kazma-data/documents/|reports/|data/)[^\s\"'\(\)\[\]`]+\.(?:pdf|docx|html)", text)
-            for file_path_str in file_matches:
-                fpath = Path(file_path_str).expanduser().resolve()
-                if fpath.exists() and fpath.is_file():
-                    if not any(a.filename == fpath.name for a in outbound_attachments):
-                        try:
-                            outbound_attachments.append(Attachment(
-                                kind="document",
-                                filename=fpath.name,
-                                mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
-                                data=fpath.read_bytes(),
-                            ))
-                        except Exception as exc:
-                            logger.warning("[telegram] auto-attach file failed: %s", exc)
+            # Auto-extract generated document paths mentioned in response text.
+            # Containment is required: model text is untrusted (audit H-4).
+            from kazma_gateway.agent_handler.attachments import find_auto_attach_paths
+
+            for fpath in find_auto_attach_paths(text):
+                if any(a.filename == fpath.name for a in outbound_attachments):
+                    continue
+                try:
+                    outbound_attachments.append(Attachment(
+                        kind="document",
+                        filename=fpath.name,
+                        mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
+                        data=fpath.read_bytes(),
+                    ))
+                except Exception as exc:
+                    logger.warning("[telegram] auto-attach file failed: %s", exc)
 
             outbound = OutboundMessage(
                 target_id=target_id, text=out_text, context_metadata=out_ctx,

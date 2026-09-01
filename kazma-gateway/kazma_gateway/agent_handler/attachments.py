@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,74 @@ _INLINE_IMAGE_MIMES = frozenset(
 # Where over-cap / non-image attachments are persisted so the agent can
 # open them with file_read. Relative to CWD, matching tools/image_gen.py.
 ATTACHMENT_DIR = Path("kazma-data/attachments")
+
+# Model-emitted paths in chat text that we may auto-attach (telegram send).
+# Untrusted: the regex is not a permission check. Containment is.
+_AUTO_ATTACH_RE = re.compile(
+    r"(?:kazma-data/documents/|reports/|data/)[^\s\"'\(\)\[\]`]+\.(?:pdf|docx|html)",
+    re.IGNORECASE,
+)
+
+
+def auto_attach_roots() -> tuple[Path, Path]:
+    """Allowlisted directories for telegram auto-attach (audit H-4)."""
+    from kazma_core.paths import data_dir
+
+    d = data_dir()
+    return (d / "documents", d / "exports")
+
+
+def resolve_auto_attach_path(
+    file_path_str: str,
+    *,
+    roots: tuple[Path, ...] | list[Path] | None = None,
+) -> Path | None:
+    """Return a contained file path or None.
+
+    Rejects ``..`` before resolve, then requires ``is_relative_to`` an
+    allowlisted root after ``resolve()`` (symlink-aware).
+    """
+    raw = str(file_path_str or "").strip()
+    if not raw:
+        return None
+    if ".." in raw.replace("\\", "/"):
+        return None
+    try:
+        fpath = Path(raw).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not fpath.is_file():
+        return None
+    allow = tuple(Path(r).resolve() for r in (roots or auto_attach_roots()))
+    for root in allow:
+        try:
+            if fpath.is_relative_to(root):
+                return fpath
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def find_auto_attach_paths(
+    text: str,
+    *,
+    roots: tuple[Path, ...] | list[Path] | None = None,
+) -> list[Path]:
+    """Extract contained auto-attach files mentioned in *text*."""
+    found: list[Path] = []
+    seen: set[str] = set()
+    for match in _AUTO_ATTACH_RE.findall(text or ""):
+        fpath = resolve_auto_attach_path(match, roots=roots)
+        if fpath is None:
+            continue
+        key = str(fpath)
+        if key in seen:
+            continue
+        seen.add(key)
+        found.append(fpath)
+    return found
+
+
 _MAX_ATTACHMENT_REDIRECTS = 3
 MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 MAX_ATTACHMENT_COUNT = 10
