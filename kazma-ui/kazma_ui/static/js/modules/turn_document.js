@@ -180,8 +180,29 @@
       return 'seq:' + String(ev.seq);
     }
     var t = String((ev && ev.type) || '');
-    var c = String((ev && (ev.content || ev.reply || (ev.step && ev.step.title) || '')) || '');
-    return 'h:' + t + ':' + c.length + ':' + c.slice(0, 48);
+    var step = (ev && ev.step) || {};
+    var c = String((ev && (ev.content || ev.reply || step.title || '')) || '');
+    var st = String(step.state || ev.state || '');
+    var d = String(step.detail || ev.detail || '').slice(0, 40);
+    return 'h:' + t + ':' + c.length + ':' + c.slice(0, 48) + ':' + st + ':' + d;
+  }
+
+  function replaceToolPart(parts, incoming) {
+    var name = String((incoming && (incoming.name || incoming.title)) || '');
+    var next = (parts || []).slice();
+    var found = -1;
+    for (var i = next.length - 1; i >= 0; i--) {
+      if (next[i] && next[i].type === 'tool'
+          && String(next[i].name || next[i].title || '') === name) {
+        found = i;
+        break;
+      }
+    }
+    if (found >= 0) {
+      next[found] = incoming;
+      return next;
+    }
+    return mergeParts(next, [incoming]);
   }
 
   function eventToParts(ev) {
@@ -286,12 +307,51 @@
       return next;
     }
     var extra = eventToParts(ev);
-    if (extra.length) next.parts = mergeParts(next.parts, extra);
+    if (extra.length) {
+      var toolish = extra.length === 1 && extra[0].type === 'tool';
+      next.parts = toolish
+        ? replaceToolPart(next.parts, extra[0])
+        : mergeParts(next.parts, extra);
+    }
     return next;
   }
 
-  function fromMessage(msg) {
+  function legacyTurnId(msg) {
     msg = msg || {};
+    var raw = String(msg.ts || '') + '|' + String(msg.content || '');
+    var h = 0;
+    for (var i = 0; i < raw.length; i++) {
+      h = ((h << 5) - h + raw.charCodeAt(i)) | 0;
+    }
+    return 'legacy-' + (h >>> 0).toString(16);
+  }
+
+  function hydrateMessage(msg) {
+    if (!msg || typeof msg !== 'object') return msg;
+    if (String(msg.role || '').toLowerCase() !== 'assistant') return msg;
+    var out = {};
+    var k;
+    for (k in msg) {
+      if (Object.prototype.hasOwnProperty.call(msg, k)) out[k] = msg[k];
+    }
+    var parts = Array.isArray(out.parts) ? out.parts : null;
+    var activity = Array.isArray(out.activity) ? out.activity : null;
+    if (!parts || !parts.length) {
+      parts = partsFromStream('', String(out.content || ''), activity);
+      if (parts && parts.length) out.parts = parts;
+    }
+    if (parts && parts.length && !(activity && activity.length)) {
+      var derived = activityOf(parts);
+      if (derived.length) out.activity = derived;
+    }
+    if (!String(out.turn_id || out.turnId || '').trim()) {
+      out.turn_id = legacyTurnId(out);
+    }
+    return out;
+  }
+
+  function fromMessage(msg) {
+    msg = hydrateMessage(msg || {});
     var doc = empty(String(msg.turn_id || msg.turnId || ''));
     return applyEvent(doc, {
       type: 'hydrate',
@@ -315,5 +375,7 @@
     empty: empty,
     applyEvent: applyEvent,
     fromMessage: fromMessage,
+    hydrateMessage: hydrateMessage,
+    replaceToolPart: replaceToolPart,
   };
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

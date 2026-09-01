@@ -79,5 +79,26 @@ assert("hydrate keeps prior text as reasoning", hydrated.parts.some(function (p)
 }));
 assert("hydrate activity", TD.activityOf(hydrated.parts).some(function (r) { return r.kind === "thought" || r.kind === "tool"; }));
 
+var runThenDone = TD.empty("t2");
+runThenDone = TD.applyEvent(runThenDone, {
+  type: "progress",
+  step: { kind: "tool", title: "file_read", detail: "", state: "running" },
+});
+runThenDone = TD.applyEvent(runThenDone, {
+  type: "progress",
+  step: { kind: "tool", title: "file_read", detail: "hitl.py", state: "done" },
+});
+var tools = runThenDone.parts.filter(function (p) { return p.type === "tool"; });
+assert("tool running replaced by done", tools.length === 1 && tools[0].state === "done");
+
+var old = TD.hydrateMessage({
+  role: "assistant",
+  content: "The timeout is 300 seconds.",
+  activity: [{ kind: "tool", title: "file_read", detail: "hitl.py", state: "done" }],
+});
+assert("hydrateMessage turn_id", String(old.turn_id || "").indexOf("legacy-") === 0);
+assert("hydrateMessage parts", TD.textOf(old.parts) === "The timeout is 300 seconds.");
+assert("hydrateMessage activity", TD.activityOf(old.parts).some(function (r) { return r.kind === "tool"; }));
+
 if (fail) process.exit(1);
 console.log("all ok");

@@ -100,6 +100,21 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         # a later reload shows the answer, not the HITL stub
         # (2026-08-31 silent turn b1cb7994e22a).
         await invoke_turn(graph, _resume_cmd, config, thread_id=thread_id)
+        try:
+            from kazma_ui.delivery import get_turn_broker
+
+            await get_turn_broker().emit(thread_id, {
+                "type": "approval_timeout",
+                "data": {
+                    "thread_id": thread_id,
+                    "message": (
+                        "Approval timed out after "
+                        f"{int(timeout_s)}s — continuing without this tool."
+                    ),
+                },
+            })
+        except Exception:
+            logger.debug("[HITL-WD] timeout frame skipped", exc_info=True)
     except Exception:
         logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
 

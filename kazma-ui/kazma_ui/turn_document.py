@@ -15,6 +15,8 @@ from typing import Any
 
 __all__ = [
     "activity_of",
+    "hydrate_message",
+    "legacy_turn_id",
     "merge_parts",
     "parts_from_stream",
     "split_stream_and_final",
@@ -208,3 +210,40 @@ def parts_from_stream(
     if text:
         incoming.append({"type": "text", "text": text})
     return merge_parts([], incoming)
+
+
+def legacy_turn_id(msg: dict[str, Any] | None) -> str:
+    """Stable id for an assistant row that never got a turn_id."""
+    import hashlib
+
+    msg = msg or {}
+    raw = f"{msg.get('ts') or ''}|{msg.get('content') or ''}"
+    return "legacy-" + hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def hydrate_message(msg: dict[str, Any] | None) -> dict[str, Any]:
+    """Fill ``parts`` / ``activity`` / ``turn_id`` on older assistant rows.
+
+    Read-side only: does not write the store. Rows with no activity still
+    get a text part so the projector has something to bind.
+    """
+    if not isinstance(msg, dict):
+        return {}
+    out = dict(msg)
+    role = str(out.get("role") or "").lower()
+    if role != "assistant":
+        return out
+    parts = out.get("parts") if isinstance(out.get("parts"), list) else None
+    activity = out.get("activity") if isinstance(out.get("activity"), list) else None
+    content = str(out.get("content") or "")
+    if not parts:
+        parts = parts_from_stream(streamed="", final=content, activity=activity)
+    if parts:
+        out["parts"] = parts
+        if not (isinstance(activity, list) and activity):
+            derived = activity_of(parts)
+            if derived:
+                out["activity"] = derived
+    if not str(out.get("turn_id") or "").strip():
+        out["turn_id"] = legacy_turn_id(out)
+    return out

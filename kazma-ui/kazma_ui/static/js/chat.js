@@ -879,6 +879,8 @@
     for (var i = 0; i < panels.length; i++) {
       var p = panels[i];
       if (p.classList.contains('is-collapsed')) continue;
+      var bubble = p.closest('.message');
+      if (bubble && bubble.querySelector('.hitl-approval-card button:not([disabled])')) continue;
       p.classList.add('is-collapsed');
       var chev = p.querySelector('.agent-progress-chevron');
       if (chev) chev.textContent = '▸';
@@ -3040,10 +3042,30 @@
 
   function logProgress(step) {
     if (!step) return;
+    var kind = step.kind || 'status';
+    if (kind === 'plan') {
+      var planDetail = step.detail != null ? String(step.detail) : '';
+      var planTitle = String(step.title || '').trim() || '\u2026';
+      if (planDetail) setPlan(planDetail.split('\n'));
+      else setPlan([planTitle]);
+      return;
+    }
+    if (kind === 'tool') _setCotPhase('act');
+    else if (/synth|compos|writing reply/i.test(String(step.title || ''))) _setCotPhase('write');
+    else _setCotPhase('think');
+    if (window.KazmaTurnDocument && typeof window.KazmaTurnDocument.applyEvent === 'function') {
+      applyTurnEvent({
+        type: 'progress',
+        step: step,
+        source: 'progress',
+        turn_id: _liveTurnId,
+      });
+      return;
+    }
+
     var panel = ensureProgressPanel();
     if (!panel) return;
 
-    var kind = step.kind || 'status';
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
 
     // Reactivate panel if a new active step arrives (prevents premature "Done" title during background execution)
@@ -3069,20 +3091,6 @@
       title = _localizeCotTitle(title);
     }
     var detail = step.detail != null ? String(step.detail) : '';
-
-    // Plan lines go to the sticky plan list (not the activity log)
-    if (kind === 'plan') {
-      if (detail) {
-        setPlan(detail.split('\n'));
-      } else {
-        setPlan([title]);
-      }
-      return;
-    }
-
-    if (kind === 'tool') _setCotPhase('act');
-    else if (/synth|compos|writing reply/i.test(rawTitle + ' ' + title)) _setCotPhase('write');
-    else _setCotPhase('think');
 
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
@@ -3687,6 +3695,30 @@
             .replace(/\n{3,}/g, '\n\n').trim();
   }
 
+  function markApprovalTimedOut(msg) {
+    var text = String(msg || 'Approval timed out — continuing without this tool.');
+    if (messagesEl) {
+      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
+        var btns = card.querySelectorAll('button');
+        var live = false;
+        for (var i = 0; i < btns.length; i++) {
+          if (!btns[i].disabled) live = true;
+        }
+        if (!live) return;
+        btns.forEach(function(b) { b.disabled = true; });
+        card.className = 'hitl-approval-card hitl-denied';
+        var actions = card.querySelector('.hitl-approval-actions');
+        if (actions) {
+          actions.innerHTML = '<span class="hitl-status hitl-denied">' + escapeHtml(text) + '</span>';
+        }
+      });
+    }
+    _awaitingApproval = false;
+    if (window.showToast) {
+      try { window.showToast(text, 'warning', 6000); } catch (e) { /* ignore */ }
+    }
+  }
+
   function hasInlineApprovalCard() {
     if (!messagesEl) return false;
     var cards = messagesEl.querySelectorAll('.hitl-approval-card');
@@ -3907,7 +3939,18 @@
           : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
-    content.appendChild(card);
+    var progress = content.querySelector('.agent-progress');
+    if (progress) {
+      progress.classList.remove('is-collapsed');
+      if (progress.parentNode === content) {
+        if (progress.nextSibling) content.insertBefore(card, progress.nextSibling);
+        else content.appendChild(card);
+      } else {
+        content.appendChild(card);
+      }
+    } else {
+      content.appendChild(card);
+    }
     scrollToBottom();
 
     function setCardState(state, label) {
@@ -4076,6 +4119,14 @@
         onDone: function(doneData) {
           KS.hideTyping(approvalTypingEl);
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
+          if (doneData && doneData.error) {
+            endTurn();
+            return;
+          }
+          if (card.classList.contains('hitl-error')) {
+            endTurn();
+            return;
+          }
           var okLabel = action === 'deny' ? 'Denied \u2717'
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
@@ -4727,6 +4778,10 @@
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
           } else {
+            if (role === 'assistant' && window.KazmaTurnDocument && KazmaTurnDocument.hydrateMessage) {
+              msg = KazmaTurnDocument.hydrateMessage(msg);
+              content = msg.content || content;
+            }
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
               activity: (window.KazmaTurnDocument && KazmaTurnDocument.activityForMessage)
                 ? KazmaTurnDocument.activityForMessage(msg)
@@ -5150,6 +5205,57 @@
     return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
   }
 
+  function _syncCotPanel(el, activity, status, meta) {
+    if (!el || !activity || !activity.length) return;
+    meta = meta || {};
+    var hitlLive = false;
+    try {
+      hitlLive = !!(el.querySelector('.hitl-approval-card button:not([disabled])'));
+    } catch (eHitl) { hitlLive = false; }
+    var holdOpen = hitlLive || _awaitingApproval;
+    var terminal = !holdOpen && (status === 'done' || status === 'paused'
+      || meta.source === 'hydrate' || meta.source === 'resync');
+    var html = _activityRowsHtml(activity);
+    if (!html) return;
+    var tools = (html.match(/data-kind="tool"/g) || []).length;
+    var steps = (html.match(/<li /g) || []).length;
+    _progressToolCount = tools;
+    _progressStepCount = steps;
+    if (terminal) {
+      var existingCot = el.querySelector('.agent-progress');
+      var liveActive = existingCot && existingCot.classList.contains('is-active')
+        && !existingCot.classList.contains('kazma-cot-restored');
+      if (liveActive) return;
+      var cot = _buildRestoredWorkbench(activity);
+      if (!cot) return;
+      if (existingCot) existingCot.replaceWith(cot);
+      else {
+        var tw = el.querySelector('.message-text');
+        if (tw && tw.parentNode) tw.parentNode.insertBefore(cot, tw);
+      }
+      return;
+    }
+    var prev = currentMsgEl;
+    currentMsgEl = el;
+    var panel = ensureProgressPanel();
+    currentMsgEl = prev || el;
+    if (!panel) return;
+    if (holdOpen) {
+      panel.classList.remove('is-collapsed', 'is-done');
+      panel.classList.add('is-active');
+    }
+    var list = panel.querySelector('.agent-progress-steps');
+    if (!list) return;
+    if (list._kzCotHTML === html) return;
+    list._kzCotHTML = html;
+    list.innerHTML = html;
+    _wireStepToggles(list);
+    var countEl = panel.querySelector('.agent-progress-count');
+    if (countEl) {
+      countEl.textContent = steps + ' ' + (steps === 1 ? ti('step', 'step') : ti('steps', 'steps'));
+    }
+  }
+
   /**
    * Law 3: the only DOM writer for the live assistant bubble + restored CoT.
    * Transports mutate the in-memory TurnDocument; this paints it.
@@ -5198,23 +5304,7 @@
       }
     }
     var activity = TD.activityOf(doc.parts);
-    var terminal = doc.status === 'done' || doc.status === 'paused'
-      || meta.source === 'hydrate' || meta.source === 'resync';
-    if (terminal && activity && activity.length) {
-      var existingCot = el.querySelector('.agent-progress');
-      var liveActive = existingCot && existingCot.classList.contains('is-active')
-        && !existingCot.classList.contains('kazma-cot-restored');
-      if (!liveActive) {
-        var cot = _buildRestoredWorkbench(activity);
-        if (cot) {
-          if (existingCot) existingCot.replaceWith(cot);
-          else {
-            var tw = el.querySelector('.message-text');
-            if (tw && tw.parentNode) tw.parentNode.insertBefore(cot, tw);
-          }
-        }
-      }
-    }
+    _syncCotPanel(el, activity, doc.status, meta);
     if (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done') {
       _awaitingReply = false;
     }
@@ -5258,6 +5348,7 @@
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
     _hitlApproval: renderHitlCard,
+    markApprovalTimedOut: markApprovalTimedOut,
     hasInlineApprovalCard: hasInlineApprovalCard,
     beginTurn: beginTurn,
     endTurn: endTurn,

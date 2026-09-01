@@ -111,6 +111,70 @@ def test_apply_final_fence_fails_on_synthetic_violation() -> None:
     assert "applyFinalAssistantText" not in _src(_CHAT_JS)
 
 
+def test_duplicate_resume_attaches_instead_of_dead_ending() -> None:
+    src = _src(_UI / "sse_chat" / "_streaming.py")
+    assert "attaching to in-flight" in src
+    assert "_sse_attach_stream" in src
+    assert "Rejecting duplicate resume" not in src
+
+
+def test_error_frame_finishes_the_sse_stream() -> None:
+    src = _src(_UI / "static" / "js" / "streaming.js")
+    err = src.split("case 'error':", 1)[1].split("case ", 1)[0]
+    assert "finishStream" in err
+    chat = _src(_CHAT_JS)
+    assert "doneData.error" in chat
+    assert "hitl-error" in chat
+
+
+def test_live_hitl_card_does_not_collapse_into_cot() -> None:
+    chat = _src(_CHAT_JS)
+    assert "holdOpen" in chat
+    assert "markApprovalTimedOut" in chat
+    assert "approval_timeout" in _src(_STORE_JS)
+
+
+def test_live_cot_goes_through_the_document() -> None:
+    chat = _src(_CHAT_JS)
+    log = chat.split("function logProgress(step)", 1)[1].split("\n  function ", 1)[0]
+    assert "applyTurnEvent" in log
+    assert "function _syncCotPanel(el, activity, status, meta)" in chat
+
+
+def test_messages_get_hydrates_legacy_rows() -> None:
+    src = _src(_UI / "sse_chat" / "__init__.py")
+    assert "hydrate_message" in src
+
+
+def test_platform_sync_keeps_parts() -> None:
+    from kazma_gateway.agent_handler.graph import _merge_transcript
+
+    existing = [
+        {
+            "role": "user",
+            "content": "check it",
+        },
+        {
+            "role": "assistant",
+            "content": "The timeout is 300 seconds.",
+            "turn_id": "turn-1",
+            "parts": [
+                {"type": "reasoning", "text": "live API endpoint"},
+                {"type": "text", "text": "The timeout is 300 seconds."},
+            ],
+        },
+    ]
+    converted = [
+        {"role": "user", "content": "check it"},
+        {"role": "assistant", "content": "The timeout is 300 seconds."},
+    ]
+    out = _merge_transcript(existing, converted)
+    asst = [m for m in out if m.get("role") == "assistant"]
+    assert len(asst) == 1
+    assert asst[0]["turn_id"] == "turn-1"
+    assert any(p.get("type") == "reasoning" for p in asst[0]["parts"])
+
+
 def test_core_and_ui_ainvoke_allowlist() -> None:
     repo = _ROOT
 
