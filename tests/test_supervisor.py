@@ -382,8 +382,16 @@ class TestBuiltinTools:
 
     @pytest.mark.asyncio
     async def test_shell_exec_timeout(self):
-        """Timeout test — 'sleep' is in the SAFE_BINARIES allowlist and Git
-        Bash on Windows provides it; the tool's timeout fires before 10s."""
+        """Timeout fires before the allowlisted hang finishes.
+
+        ``sleep`` is on the product allowlist. Windows has no ``sleep.exe``
+        and interpreters are banned in shell_exec, so skip when sleep is
+        missing rather than calling python (audit T-6).
+        """
+        import shutil
+
+        if shutil.which("sleep") is None:
+            pytest.skip("sleep is not on PATH (typical Windows without Git Bash)")
         registry = LocalToolRegistry(include_builtins=True)
         result = await registry.execute("shell_exec", {"command": "sleep 10", "timeout": 1})
         assert "timed out" in result["content"].lower()

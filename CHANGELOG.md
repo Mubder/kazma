@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 2–3 — honest suite + importer atomicity (2026-09-01)
+
+T-6: skip `shell_exec` timeout when `sleep` is not on PATH (do not call
+blocked `python`). T-1: breaker tests use registered READ tools so
+commitment fail-closed denials are not mistaken for hard errors. T-4:
+DSML/plan-fence/steer tests retargeted onto `renderTurn` / `chat_slash.js`
+— no `tokenAccum` dual-paint restore. T-5: chat research INSERT stamps
+`archived=0`; list treats NULL as active; test uses an isolated DB.
+C-2: PG-bundle preflight + `pg_restore` **before** SQLite swap; failed
+swap rolls `.migrate-backup-*` back. M-9 docker exec `-e PGPASSWORD`.
+M-10 both path-separator variants. M-11 real `memory_audit_log` columns.
+
 ## Audit 2026-09-01 Wave 0–1 — industrial Day-0 (2026-09-01)
 
 Execution SoT: `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` (do not follow the

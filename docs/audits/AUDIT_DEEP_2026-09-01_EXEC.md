@@ -28,8 +28,8 @@ Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`, `_hitlAlreadyClai
 
 - **0** Preflight: this file + C-1 guard + HITL/delivery baseline green.
 - **1** Day-0 security: H-3, H-6, H-5, H-4, T-3, H-14.
-- **2** Honest suite: T-6, T-1 (do **not** count commitment denials as tool failures; register dummy tools), T-4 retarget, T-5.
-- **3** Real critical: C-2 importer order + M-9/M-10/M-11.
+- **2** Honest suite: T-6, T-1 (do **not** count commitment denials as tool failures; register dummy tools), T-4 retarget, T-5. **Shipped.**
+- **3** Real critical: C-2 importer order + M-9/M-10/M-11. **Shipped.**
 - **4** HITL-adjacent: H-9, M-3, H-8, T-2.
 - **5–8** Isolation, swarm reliability, hygiene, SSRF last.
 
