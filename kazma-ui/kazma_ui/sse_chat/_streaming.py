@@ -213,14 +213,23 @@ async def _stream_langgraph_events(
                 # this thread, reject the second resume so two graphs don't
                 # race on the same checkpoint and corrupt the delivery path.
                 if is_turn_running(thread_id):
+                    # Auto-deny (or a first Approve) already resumed this
+                    # thread. A second Approve used to emit one error frame
+                    # then close — the approve-stream onDone then painted
+                    # "Approved" and no answer (2026-09-01 turn 51c9044d).
+                    # Catch up on the in-flight journal instead.
                     logger.warning(
-                        "[SSE] Rejecting duplicate resume — turn already "
-                        "running for thread=%s", thread_id,
+                        "[SSE] Duplicate resume — attaching to in-flight "
+                        "turn thread=%s", thread_id,
                     )
-                    yield await emit_j("error", {
-                        "content": "This conversation is already processing. "
-                                   "Please wait for the current turn to finish."
+                    yield await emit_j("status", {
+                        "content": "This turn is already running — catching up.",
+                        "status": "thinking",
                     })
+                    async for frame in _sse_attach_stream(
+                        thread_id, session_id or "", 0,
+                    ):
+                        yield frame
                     return
                 logger.debug(
                     "[SSE] HITL resume path — using ainvoke() for thread=%s",

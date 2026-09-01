@@ -1010,6 +1010,16 @@ function registerAgentStore() {
           }
           break;
 
+        case 'approval_timeout':
+          try {
+            if (window.KazmaChat && typeof window.KazmaChat.markApprovalTimedOut === 'function') {
+              window.KazmaChat.markApprovalTimedOut(
+                (data && data.message) || (frame && frame.message) || ''
+              );
+            }
+          } catch (e) { /* ignore */ }
+          break;
+
         case 'approval_required':
           this._progress({
             kind: 'status',

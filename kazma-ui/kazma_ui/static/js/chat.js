@@ -879,6 +879,8 @@
     for (var i = 0; i < panels.length; i++) {
       var p = panels[i];
       if (p.classList.contains('is-collapsed')) continue;
+      var bubble = p.closest('.message');
+      if (bubble && bubble.querySelector('.hitl-approval-card button:not([disabled])')) continue;
       p.classList.add('is-collapsed');
       var chev = p.querySelector('.agent-progress-chevron');
       if (chev) chev.textContent = '▸';
@@ -3693,6 +3695,30 @@
             .replace(/\n{3,}/g, '\n\n').trim();
   }
 
+  function markApprovalTimedOut(msg) {
+    var text = String(msg || 'Approval timed out — continuing without this tool.');
+    if (messagesEl) {
+      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
+        var btns = card.querySelectorAll('button');
+        var live = false;
+        for (var i = 0; i < btns.length; i++) {
+          if (!btns[i].disabled) live = true;
+        }
+        if (!live) return;
+        btns.forEach(function(b) { b.disabled = true; });
+        card.className = 'hitl-approval-card hitl-denied';
+        var actions = card.querySelector('.hitl-approval-actions');
+        if (actions) {
+          actions.innerHTML = '<span class="hitl-status hitl-denied">' + escapeHtml(text) + '</span>';
+        }
+      });
+    }
+    _awaitingApproval = false;
+    if (window.showToast) {
+      try { window.showToast(text, 'warning', 6000); } catch (e) { /* ignore */ }
+    }
+  }
+
   function hasInlineApprovalCard() {
     if (!messagesEl) return false;
     var cards = messagesEl.querySelectorAll('.hitl-approval-card');
@@ -3913,7 +3939,18 @@
           : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
-    content.appendChild(card);
+    var progress = content.querySelector('.agent-progress');
+    if (progress) {
+      progress.classList.remove('is-collapsed');
+      if (progress.parentNode === content) {
+        if (progress.nextSibling) content.insertBefore(card, progress.nextSibling);
+        else content.appendChild(card);
+      } else {
+        content.appendChild(card);
+      }
+    } else {
+      content.appendChild(card);
+    }
     scrollToBottom();
 
     function setCardState(state, label) {
@@ -4082,6 +4119,14 @@
         onDone: function(doneData) {
           KS.hideTyping(approvalTypingEl);
           if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
+          if (doneData && doneData.error) {
+            endTurn();
+            return;
+          }
+          if (card.classList.contains('hitl-error')) {
+            endTurn();
+            return;
+          }
           var okLabel = action === 'deny' ? 'Denied \u2717'
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
@@ -5163,8 +5208,13 @@
   function _syncCotPanel(el, activity, status, meta) {
     if (!el || !activity || !activity.length) return;
     meta = meta || {};
-    var terminal = status === 'done' || status === 'paused'
-      || meta.source === 'hydrate' || meta.source === 'resync';
+    var hitlLive = false;
+    try {
+      hitlLive = !!(el.querySelector('.hitl-approval-card button:not([disabled])'));
+    } catch (eHitl) { hitlLive = false; }
+    var holdOpen = hitlLive || _awaitingApproval;
+    var terminal = !holdOpen && (status === 'done' || status === 'paused'
+      || meta.source === 'hydrate' || meta.source === 'resync');
     var html = _activityRowsHtml(activity);
     if (!html) return;
     var tools = (html.match(/data-kind="tool"/g) || []).length;
@@ -5190,6 +5240,10 @@
     var panel = ensureProgressPanel();
     currentMsgEl = prev || el;
     if (!panel) return;
+    if (holdOpen) {
+      panel.classList.remove('is-collapsed', 'is-done');
+      panel.classList.add('is-active');
+    }
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
     if (list._kzCotHTML === html) return;
@@ -5294,6 +5348,7 @@
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
     _hitlApproval: renderHitlCard,
+    markApprovalTimedOut: markApprovalTimedOut,
     hasInlineApprovalCard: hasInlineApprovalCard,
     beginTurn: beginTurn,
     endTurn: endTurn,

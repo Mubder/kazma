@@ -138,6 +138,14 @@ var KazmaStream = (function() {
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;
+          case 'approval_timeout':
+            try {
+              if (window.KazmaChat && typeof window.KazmaChat.markApprovalTimedOut === 'function') {
+                window.KazmaChat.markApprovalTimedOut((data && data.message) || '');
+              }
+            } catch (e) { /* ignore */ }
+            if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'capacity':
             try {
               if (data && data.reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
@@ -151,6 +159,10 @@ var KazmaStream = (function() {
             break;
           case 'error':
             if (callbacks.onError) callbacks.onError(data ? data.content : 'Unknown error');
+            // Mark the stream finished HERE. Otherwise the HTTP body close
+            // fires onDone(undefined), which the approve-resume path treated
+            // as a successful Approved with no answer (2026-09-01).
+            finishStream({ error: true, content: data && data.content });
             break;
           default:
             if (callbacks.onEvent) callbacks.onEvent(type, data);

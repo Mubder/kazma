@@ -111,6 +111,29 @@ def test_apply_final_fence_fails_on_synthetic_violation() -> None:
     assert "applyFinalAssistantText" not in _src(_CHAT_JS)
 
 
+def test_duplicate_resume_attaches_instead_of_dead_ending() -> None:
+    src = _src(_UI / "sse_chat" / "_streaming.py")
+    assert "attaching to in-flight" in src
+    assert "_sse_attach_stream" in src
+    assert "Rejecting duplicate resume" not in src
+
+
+def test_error_frame_finishes_the_sse_stream() -> None:
+    src = _src(_UI / "static" / "js" / "streaming.js")
+    err = src.split("case 'error':", 1)[1].split("case ", 1)[0]
+    assert "finishStream" in err
+    chat = _src(_CHAT_JS)
+    assert "doneData.error" in chat
+    assert "hitl-error" in chat
+
+
+def test_live_hitl_card_does_not_collapse_into_cot() -> None:
+    chat = _src(_CHAT_JS)
+    assert "holdOpen" in chat
+    assert "markApprovalTimedOut" in chat
+    assert "approval_timeout" in _src(_STORE_JS)
+
+
 def test_live_cot_goes_through_the_document() -> None:
     chat = _src(_CHAT_JS)
     log = chat.split("function logProgress(step)", 1)[1].split("\n  function ", 1)[0]
