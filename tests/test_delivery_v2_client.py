@@ -74,7 +74,10 @@ class TestV2ArchitecturePresent:
         assert "function _resyncDelivery(" in src
         # Fired from all page-level triggers. (seq-gap / resume-gap fire from
         # agentStore — asserted in test_store_handles_structured_resumed_frame.)
-        for trigger in ("'visibility'", "'focus'", "'pageshow'", "'init'", "'load'", "'idle-watchdog'"):
+        # 'init' was removed 2026-09-01: the boot resync raced loadSession's
+        # wipe+render (reply appeared → vanished → reappeared); loadSession's
+        # trailing 'load' resync is the single boot reconciler.
+        for trigger in ("'visibility'", "'focus'", "'pageshow'", "'load'", "'idle-watchdog'"):
             assert trigger in src, f"missing resync trigger {trigger}"
 
     def test_resync_reattaches_live_stream_when_generating(self):
@@ -584,6 +587,40 @@ class TestResyncFragmentationFixes:
         render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
         assert "meta.source === 'resync'" in render_fn
         assert "&& !activeStream" in render_fn
+
+
+class TestSingleBootPainter:
+    """2026-09-01 refresh flicker: final reply appeared, vanished 1-2s,
+    reappeared.
+
+    Boot ran TWO painters for the same session: _resyncDelivery('init')
+    attached a journal replay that painted the reply first, then
+    loadSession() wiped messagesEl to "Loading messages…" for the fetch
+    duration before the transcript repainted it. loadSession (which ends
+    with _resyncDelivery('load')) is the ONLY boot painter now.
+    """
+
+    def test_no_boot_init_resync(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "_resyncDelivery('init')" not in src
+
+    def test_boot_persists_url_session_param(self):
+        """?s= must be persisted so loadSession(savedSid) loads it,
+        not the previous localStorage session."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        boot = src.split("var initialSessionId = localStorage.getItem", 1)[1]
+        boot = boot.split("loadModels();", 1)[0]
+        assert "persistSessionId();" in boot
+
+    def test_load_session_invalidates_stale_painters(self):
+        """loadSession bumps _sseEpoch so any resync/journal-attach
+        dispatched before the load is a guaranteed no-op (epoch guard)."""
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        fn = src.split("function loadSession(sessionId) {", 1)[1]
+        head = fn.split("fetch('/api/chat/sessions/", 1)[0]
+        assert "_sseEpoch++;" in head
+        # …and still reconciles with server truth after render.
+        assert "_resyncDelivery('load')" in fn
 
 
 class TestServerSidePingPin:
