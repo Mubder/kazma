@@ -200,17 +200,16 @@ async def _get_pending_approvals(
             continue
 
         try:
-            from kazma_ui.hitl_status import hitl_thread_status
+            from kazma_ui.hitl_status import is_truly_pending
 
-            status = await hitl_thread_status(
+            if not await is_truly_pending(
                 thread_id, graph=graph, snapshot=state
-            )
+            ):
+                continue
         except Exception:
             logger.debug(
-                "[HITL] hitl_thread_status failed thread=%s", thread_id, exc_info=True
+                "[HITL] hitl pending check failed thread=%s", thread_id, exc_info=True
             )
-            status = "pending"
-        if status != "pending":
             continue
 
         for task in getattr(state, "tasks", ()):

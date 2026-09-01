@@ -6,7 +6,11 @@ from typing import Any
 
 import pytest
 
-from kazma_ui.hitl_status import hitl_thread_status, is_resume_claimed
+from kazma_ui.hitl_status import (
+    hitl_thread_status,
+    is_resume_claimed,
+    is_truly_pending,
+)
 
 
 class _LiveTask:
@@ -108,5 +112,66 @@ async def test_pending_list_excludes_running_thread() -> None:
     try:
         pending = await _get_pending_approvals(graph, checkpointer)
         assert pending == []
+    finally:
+        unregister_turn(tid, task)
+
+
+@pytest.mark.asyncio
+async def test_is_truly_pending_false_when_status_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A broken helper must not emit a live card (fail closed)."""
+    import kazma_ui.hitl_status as hs
+
+    async def _boom(*_a: object, **_k: object) -> str:
+        raise RuntimeError("status exploded")
+
+    monkeypatch.setattr(hs, "hitl_thread_status", _boom)
+    assert await is_truly_pending("t-boom") is False
+
+
+@pytest.mark.asyncio
+async def test_refresh_during_claimed_resume_is_not_pending() -> None:
+    """03:59 class as one story: interrupt still in the checkpoint, Approve claimed.
+
+    Refresh asks the pending list + status helper. Neither may report a live
+    gate while ``register_turn`` holds the resume.
+    """
+    from kazma_ui.active_turns import register_turn, unregister_turn
+    from kazma_ui.hitl_approval import _get_pending_approvals
+    from tests.test_hitl_approval_ui import (
+        MockCheckpointer,
+        MockGraph,
+        MockInterrupt,
+        MockStateSnapshot,
+        MockTask,
+    )
+
+    tid = "thread-refresh-claimed"
+    snap = MockStateSnapshot(
+        next_nodes=("tool_worker",),
+        tasks=[MockTask(interrupts=[
+            MockInterrupt({
+                "type": "hitl_approval",
+                "tool": "file_write",
+                "args": {"path": "hitl-webui-test.txt"},
+            })
+        ])],
+    )
+    graph = MockGraph({tid: snap})
+    checkpointer = MockCheckpointer(thread_ids=[tid])
+
+    before = await _get_pending_approvals(graph, checkpointer)
+    assert len(before) == 1
+    assert await is_truly_pending(tid, graph=graph, snapshot=snap) is True
+
+    task = _LiveTask()
+    register_turn(tid, task)
+    try:
+        assert is_resume_claimed(tid) is True
+        assert await hitl_thread_status(tid, graph=graph, snapshot=snap) == "inflight"
+        assert await is_truly_pending(tid, graph=graph, snapshot=snap) is False
+        after = await _get_pending_approvals(graph, checkpointer)
+        assert after == []
     finally:
         unregister_turn(tid, task)

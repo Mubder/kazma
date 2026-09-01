@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## HITL leftover painters cannot fail open (2026-09-01)
+
+Dead `checkPendingApprovals` removed from chat load. WS scan and the
+pending-list skip a thread when `hitl_thread_status` errors instead of
+re-emitting the leftover checkpoint interrupt. Refresh-during-claimed-
+resume is one integration test.
+
 ## HITL is one projection: Approve + refresh cannot re-arm the card (2026-09-01)
 
 The leftover LangGraph interrupt was still treated as a live Approve
