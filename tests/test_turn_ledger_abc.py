@@ -127,6 +127,17 @@ def test_error_frame_finishes_the_sse_stream() -> None:
     assert "hitl-error" in chat
 
 
+def test_composer_clears_before_begin_turn() -> None:
+    chat = _src(_CHAT_JS)
+    send = chat.split("function sendMessage()", 1)[1].split("\n  function retry(", 1)[0]
+    clear_at = send.find("_clearComposer()")
+    begin_at = send.find("disableInput()")
+    assert clear_at != -1 and begin_at != -1
+    assert clear_at < begin_at, "composer must empty before beginTurn can throw"
+    assert "e.isComposing" in chat
+    assert "keyCode === 229" in chat
+
+
 def test_collapsed_cot_cannot_eat_the_answer() -> None:
     chat = _src(_CHAT_JS)
     assert "function _rescueTurnDom(el)" in chat

@@ -652,8 +652,22 @@
     });
   }
 
+  function _clearComposer() {
+    if (!inputEl) return;
+    inputEl.value = '';
+    inputEl.style.height = 'auto';
+    try { inputEl.setAttribute('dir', 'auto'); } catch (e) { /* ignore */ }
+    syncInputBidi();
+    updateComposerCharCount();
+    syncSendButtonForDraft();
+  }
+
   // ── Input handling ────────────────────────────────────
   function onInputKeydown(e) {
+    // IME (Arabic/CJK): Enter confirms composition. Sending on that
+    // keydown clears the box, then compositionend puts the committed
+    // text back — the "sent message still sitting in the composer" bug.
+    if (e.isComposing || e.keyCode === 229) return;
     // Enter (without Shift and without Ctrl) sends the message.
     // Ctrl+Enter also sends the message (so users who press Ctrl+Enter
     // from muscle-memory get the expected behaviour).
@@ -1785,23 +1799,25 @@
     appendMessage('user', content, displayAttachName);
     scrollToBottomForce();
 
-    // Start a clean assistant turn (must clear currentMsgEl *before* beginTurn
-    // so progress attaches to a new bubble, not the previous reply).
+    // Clear the composer BEFORE beginTurn/logProgress. Those paint the CoT
+    // panel and used to throw after the user bubble was already on screen,
+    // leaving the sent text in the box (and Stop on the button, so the
+    // only way to "clear" was to send it again).
     currentMsgEl = null;
     tokenAccum = '';
     _turnPainted = false;
+    clearPendingAttachments();
+    _clearComposer();
+    inputEl.placeholder = _defaultPlaceholder();
+
     var _instantSlash = _isInstantCapacitySlash(content);
     if (!_instantSlash) {
-      disableInput(); // → beginTurn → progress panel on new assistant bubble
+      try {
+        disableInput(); // → beginTurn → progress panel on new assistant bubble
+      } catch (eBegin) {
+        console.error('[KazmaChat] beginTurn failed', eBegin);
+      }
     }
-
-    // Reset attachment state (chips above the box, not placeholder text)
-    clearPendingAttachments();
-    inputEl.value = '';
-    inputEl.style.height = 'auto';
-    inputEl.placeholder = _defaultPlaceholder();
-    syncInputBidi();
-    updateComposerCharCount();
 
     // Status strip is store-owned now; beginTurn arms it below.
     activeTypingEl = typingEl;
