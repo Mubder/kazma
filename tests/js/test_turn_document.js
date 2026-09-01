@@ -100,5 +100,45 @@ assert("hydrateMessage turn_id", String(old.turn_id || "").indexOf("legacy-") ==
 assert("hydrateMessage parts", TD.textOf(old.parts) === "The timeout is 300 seconds.");
 assert("hydrateMessage activity", TD.activityOf(old.parts).some(function (r) { return r.kind === "tool"; }));
 
+var approved = TD.empty("hitl-1");
+approved = TD.applyEvent(approved, {
+  type: "hitl",
+  state: "pending",
+  interrupt_id: "abc",
+  tool: "file_write",
+  payload: { tool: "file_write", interrupt_id: "abc", path: "x" },
+});
+assert("hitl pending pauses", approved.status === "paused");
+approved = TD.applyEvent(approved, {
+  type: "hitl",
+  state: "approved",
+  interrupt_id: "abc",
+  tool: "file_write",
+  payload: { tool: "file_write", interrupt_id: "abc", path: "x" },
+});
+assert("hitl approved streams", approved.status === "streaming");
+var replayed = TD.applyEvent(approved, {
+  type: "hitl",
+  state: "pending",
+  interrupt_id: "abc",
+  tool: "file_write",
+  payload: { tool: "file_write", interrupt_id: "abc" },
+});
+var replayHitl = replayed.parts.filter(function (p) { return p.type === "hitl"; })[0];
+assert("replay cannot regress approved to pending", replayHitl && replayHitl.state === "approved");
+assert("replay keeps payload", replayHitl && replayHitl.payload && replayHitl.payload.path === "x");
+assert("replay status stays streaming", replayed.status === "streaming");
+
+var secondGate = TD.applyEvent(replayed, {
+  type: "hitl",
+  state: "pending",
+  interrupt_id: "def",
+  tool: "python_exec",
+  payload: { tool: "python_exec", interrupt_id: "def" },
+});
+var secondHitl = secondGate.parts.filter(function (p) { return p.type === "hitl"; })[0];
+assert("new interrupt_id is a new gate", secondHitl && secondHitl.state === "pending" && secondHitl.interrupt_id === "def");
+assert("new gate pauses", secondGate.status === "paused");
+
 if (fail) process.exit(1);
 console.log("all ok");

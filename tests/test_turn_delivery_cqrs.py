@@ -148,6 +148,36 @@ def test_load_session_paints_hitl_from_parts() -> None:
         "function checkPendingApprovals", 1
     )[0]
     assert "_paintHitlFromDoc" in load
+    assert "checkPendingApprovals()" not in load
+
+
+def test_hitl_projector_is_monotonic() -> None:
+    doc = _src(_DOC_JS)
+    assert "function mergeHitlPart(" in doc
+    assert "hitlRank(" in doc
+    py = (
+        _ROOT / "kazma-ui" / "kazma_ui" / "turn_document.py"
+    ).read_text(encoding="utf-8")
+    assert "def merge_hitl_part(" in py
+    assert "HITL_RANK" in py
+
+
+def test_attach_journal_has_inflight_guard() -> None:
+    chat = _src(_CHAT_JS)
+    attach = chat.split("function _attachJournal(reason)", 1)[1].split(
+        "function _defaultAttachCallbacks", 1
+    )[0]
+    assert "_attachInFlight" in attach
+
+
+def test_approve_409_running_is_not_error() -> None:
+    chat = _src(_CHAT_JS)
+    approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
+        "var onceBtn", 1
+    )[0]
+    assert "res.status === 409" in approve
+    assert "state: 'inflight'" in approve or 'state: "inflight"' in approve
+    assert "body.running" in approve
 
 
 def test_journal_bounds_are_explicit() -> None:

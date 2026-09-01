@@ -199,9 +199,35 @@ async def _get_pending_approvals(
         if not getattr(state, "next", None):
             continue
 
+        try:
+            from kazma_ui.hitl_status import hitl_thread_status
+
+            status = await hitl_thread_status(
+                thread_id, graph=graph, snapshot=state
+            )
+        except Exception:
+            logger.debug(
+                "[HITL] hitl_thread_status failed thread=%s", thread_id, exc_info=True
+            )
+            status = "pending"
+        if status != "pending":
+            continue
+
         for task in getattr(state, "tasks", ()):
             info = _extract_interrupt_info(task)
             if info is not None:
+                iid = ""
+                try:
+                    from kazma_ui.turn_document import assign_interrupt_id
+
+                    payload = {
+                        "tool": info["tool_name"],
+                        "args": info["arguments"],
+                        "thread_id": thread_id,
+                    }
+                    iid = assign_interrupt_id(payload, thread_id=thread_id)
+                except Exception:
+                    iid = ""
                 approvals.append(
                     {
                         "thread_id": thread_id,
@@ -209,6 +235,7 @@ async def _get_pending_approvals(
                         "arguments": info["arguments"],
                         "message": info["message"],
                         "yolo_allowed": info.get("yolo_allowed", True),
+                        "interrupt_id": iid,
                     }
                 )
                 # Only need one interrupt per thread

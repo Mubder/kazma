@@ -569,7 +569,9 @@ class TestResyncFragmentationFixes:
 
     def test_resync_never_aborts_a_live_stream(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        generating = src.split("if (generating) {", 1)[1].split("return;\n      }", 1)[0]
+        generating = src.split("if (generating || paused) {", 1)[1].split(
+            "return;\n      }", 1
+        )[0]
         # The generating branch must early-return while a stream is live…
         assert "if (activeStream) {" in generating
         assert "NEVER abort it here" in generating

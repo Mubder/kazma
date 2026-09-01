@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## HITL is one projection: Approve + refresh cannot re-arm the card (2026-09-01)
+
+The leftover LangGraph interrupt was still treated as a live Approve
+card after JSON approve (pending-list, WS scan, journal replay of
+`approval_required`, `close_turn` OR-ing `paused`). HITL parts are now
+monotonic per `interrupt_id` (`pending → approved → inflight → settled`).
+`hitl_thread_status` is the only "is this still pending?" helper.
+Chat load paints from parts, not `GET /api/pending-approvals`. 409 with
+`running: true` is inflight, not an error. Empty HITL stamps cannot
+clobber the answer.
+
 ## HITL approve self-deadlock + refresh had no journal attach (2026-09-01)
 
 Turn `c21fd638cdaf`: JSON approve registered the drive task, then the

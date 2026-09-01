@@ -11,17 +11,173 @@ shorter final (the tweet-post hop) moves the previous text into
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 __all__ = [
+    "HITL_RANK",
     "activity_of",
+    "assign_interrupt_id",
+    "hitl_part_of",
+    "hitl_rank",
     "hydrate_message",
     "legacy_turn_id",
+    "make_interrupt_id",
+    "merge_hitl_part",
     "merge_parts",
     "parts_from_stream",
     "split_stream_and_final",
     "text_of",
 ]
+
+# Monotonic HITL part states. Replay of approval_required after Approve
+# must not walk this backwards for the same interrupt_id.
+HITL_RANK: dict[str, int] = {
+    "pending": 0,
+    "approved": 1,
+    "denied": 1,
+    "inflight": 2,
+    "settled": 3,
+    "done": 3,
+    "timeout": 3,
+    "error": 3,
+}
+
+_hitl_emit_seq: dict[str, int] = {}
+
+
+def hitl_rank(state: str | None) -> int:
+    return HITL_RANK.get(str(state or "pending").strip().lower(), 0)
+
+
+def hitl_part_of(parts: list[dict[str, Any]] | None) -> dict[str, Any] | None:
+    """Last HITL part, if any."""
+    found: dict[str, Any] | None = None
+    for p in parts or []:
+        if isinstance(p, dict) and p.get("type") == "hitl":
+            found = p
+    return found
+
+
+def _interrupt_id_of(part: dict[str, Any] | None) -> str:
+    if not isinstance(part, dict):
+        return ""
+    raw = part.get("interrupt_id")
+    if raw:
+        return str(raw)
+    payload = part.get("payload")
+    if isinstance(payload, dict) and payload.get("interrupt_id"):
+        return str(payload.get("interrupt_id"))
+    return ""
+
+
+def make_interrupt_id(
+    *,
+    thread_id: str = "",
+    tool: str = "",
+    args: Any = None,
+    interrupt: Any = None,
+    checkpoint_id: str = "",
+    seq: int | None = None,
+) -> str:
+    """Stable id for one graph interrupt. Prefer LangGraph's own id."""
+    if interrupt is not None:
+        for attr in ("id", "ns"):
+            v = getattr(interrupt, attr, None)
+            if v:
+                return str(v)
+    payload = json.dumps(
+        {
+            "th": str(thread_id or ""),
+            "tool": str(tool or ""),
+            "args": args if args is not None else {},
+            "ck": str(checkpoint_id or ""),
+            "n": int(seq or 0),
+        },
+        sort_keys=True,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+def assign_interrupt_id(
+    payload: dict[str, Any] | None,
+    *,
+    thread_id: str = "",
+    interrupt: Any = None,
+    checkpoint_id: str = "",
+) -> str:
+    """Stamp ``interrupt_id`` on a HITL payload. Idempotent. Never raises."""
+    data = payload if isinstance(payload, dict) else {}
+    existing = str(data.get("interrupt_id") or "").strip()
+    if existing:
+        return existing
+    tid = str(thread_id or data.get("thread_id") or "")
+    n = 0
+    if tid:
+        n = _hitl_emit_seq.get(tid, 0) + 1
+        _hitl_emit_seq[tid] = n
+    iid = make_interrupt_id(
+        thread_id=tid,
+        tool=str(data.get("tool") or data.get("tool_name") or ""),
+        args=data.get("args") or data.get("arguments"),
+        interrupt=interrupt,
+        checkpoint_id=checkpoint_id,
+        seq=n,
+    )
+    if isinstance(payload, dict):
+        payload["interrupt_id"] = iid
+        if tid and not payload.get("thread_id"):
+            payload["thread_id"] = tid
+    return iid
+
+
+def merge_hitl_part(
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """One HITL slot: newer rank wins; pending never overwrites a claim.
+
+    A *different* ``interrupt_id`` is a new gate (second danger tool) and
+    replaces the slot. Missing ids compare as the same slot so a stamp
+    without an id still advances pending → approved.
+    """
+    if not isinstance(incoming, dict):
+        return dict(existing) if isinstance(existing, dict) else {}
+    if not isinstance(existing, dict) or existing.get("type") != "hitl":
+        out = dict(incoming)
+        if not out.get("type"):
+            out["type"] = "hitl"
+        return out
+    old_id = _interrupt_id_of(existing)
+    new_id = _interrupt_id_of(incoming)
+    if old_id and new_id and old_id != new_id:
+        out = dict(incoming)
+        out["type"] = "hitl"
+        return out
+    if hitl_rank(incoming.get("state")) < hitl_rank(existing.get("state")):
+        return dict(existing)
+    out = dict(existing)
+    out.update(incoming)
+    out["type"] = "hitl"
+    inc_payload = incoming.get("payload")
+    old_payload = existing.get("payload")
+    if not inc_payload and isinstance(old_payload, dict):
+        out["payload"] = dict(old_payload)
+    elif isinstance(inc_payload, dict) and isinstance(old_payload, dict):
+        merged_payload = dict(old_payload)
+        merged_payload.update(inc_payload)
+        out["payload"] = merged_payload
+    iid = new_id or old_id
+    if iid:
+        out["interrupt_id"] = iid
+        payload = out.get("payload")
+        if isinstance(payload, dict) and not payload.get("interrupt_id"):
+            payload = dict(payload)
+            payload["interrupt_id"] = iid
+            out["payload"] = payload
+    return out
 
 
 def text_of(parts: list[dict[str, Any]] | None) -> str:
@@ -71,9 +227,17 @@ def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
                 **({"ts": p["ts"]} if p.get("ts") else {}),
             })
         elif kind == "hitl":
+            state = str(p.get("state") or "pending")
+            title = "Waiting for approval"
+            if state in ("approved", "inflight"):
+                title = "Approved"
+            elif state == "denied":
+                title = "Denied"
+            elif state in ("timeout", "error", "settled", "done"):
+                title = "Approval resolved"
             rows.append({
                 "kind": "status",
-                "title": "Waiting for approval",
+                "title": title,
                 "detail": str(p.get("tool") or p.get("detail") or ""),
                 "state": "info",
                 **({"ts": p["ts"]} if p.get("ts") else {}),
@@ -173,7 +337,7 @@ def merge_parts(
             if replace and part.get("type") == "hitl":
                 for i, x in enumerate(out):
                     if _part_key(x) == key:
-                        out[i] = dict(part)
+                        out[i] = merge_hitl_part(x, part)
                         return
             return
         seen.add(key)

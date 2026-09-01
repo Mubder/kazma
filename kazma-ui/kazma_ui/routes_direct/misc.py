@@ -515,6 +515,8 @@ def register_misc_routes(self: Any) -> None:
                             "content": "",
                             "error": "No pending approval for this thread (already resumed or expired).",
                             "reason": "not_pending",
+                            "running": False,
+                            "hitl_state": "settled",
                         },
                         status_code=409,
                     )
@@ -608,11 +610,33 @@ def register_misc_routes(self: Any) -> None:
 
             async with _approve_lock_for(thread_id):
                 if is_turn_running(thread_id) or thread_id in _resume_inflight:
+                    _claimed_turn = ""
+                    try:
+                        _claimed_turn = resolve_reply_turn(thread_id, "") or ""
+                    except Exception:
+                        _claimed_turn = ""
+                    _claimed_iid = str(body.get("interrupt_id") or "")
+                    try:
+                        from kazma_ui.hitl_status import persisted_hitl_for_thread
+
+                        _part = persisted_hitl_for_thread(thread_id)
+                        if isinstance(_part, dict):
+                            _claimed_iid = str(
+                                _part.get("interrupt_id")
+                                or (_part.get("payload") or {}).get("interrupt_id")
+                                or _claimed_iid
+                            )
+                    except Exception:
+                        pass
                     return _JSONResponse(
                         {
                             "ok": False,
                             "error": "This approval is no longer pending.",
                             "reason": "not_pending",
+                            "running": True,
+                            "turn_id": _claimed_turn,
+                            "interrupt_id": _claimed_iid,
+                            "hitl_state": "inflight",
                         },
                         status_code=409,
                     )
@@ -634,13 +658,91 @@ def register_misc_routes(self: Any) -> None:
                         thread_id,
                     )
 
+                _stamp_payload: dict[str, Any] = {}
+                if isinstance(_intr_payload, dict):
+                    _stamp_payload = dict(_intr_payload)
+                _stamp_payload["thread_id"] = thread_id
+                if pending_tool_name:
+                    _stamp_payload["tool"] = pending_tool_name
+                _stored_iid = ""
+                _stored_state = ""
+                try:
+                    from kazma_ui.hitl_status import persisted_hitl_for_thread
+
+                    _part = persisted_hitl_for_thread(thread_id)
+                    if isinstance(_part, dict):
+                        _stored_state = str(_part.get("state") or "")
+                        _stored_iid = str(
+                            _part.get("interrupt_id")
+                            or (_part.get("payload") or {}).get("interrupt_id")
+                            or ""
+                        )
+                except Exception:
+                    _stored_iid = ""
+                _req_iid = str(body.get("interrupt_id") or "").strip()
+                if _stored_iid:
+                    _stamp_payload["interrupt_id"] = _stored_iid
+                elif _req_iid:
+                    _stamp_payload["interrupt_id"] = _req_iid
+                else:
+                    try:
+                        from kazma_ui.turn_document import assign_interrupt_id
+
+                        assign_interrupt_id(
+                            _stamp_payload, thread_id=thread_id
+                        )
+                    except Exception:
+                        logger.debug(
+                            "[HITL] interrupt_id stamp skipped", exc_info=True
+                        )
+                _live_iid = str(_stamp_payload.get("interrupt_id") or "").strip()
+                if (
+                    _req_iid
+                    and _stored_iid
+                    and _req_iid != _stored_iid
+                    and _stored_state.lower()
+                    in ("approved", "denied", "inflight", "settled", "done")
+                ):
+                    return _JSONResponse(
+                        {
+                            "ok": False,
+                            "error": "This approval is no longer pending.",
+                            "reason": "not_pending",
+                            "running": False,
+                            "interrupt_id": _stored_iid,
+                            "hitl_state": _stored_state or "settled",
+                        },
+                        status_code=409,
+                    )
                 stamp_hitl_part_state(
                     _resume_session_id,
                     _resume_turn,
                     state="approved" if approved else "denied",
                     thread_id=thread_id,
                     tool=pending_tool_name,
+                    payload=_stamp_payload,
+                    interrupt_id=str(_stamp_payload.get("interrupt_id") or ""),
                 )
+                try:
+                    from kazma_ui.delivery import get_turn_broker
+
+                    await get_turn_broker().emit(
+                        thread_id,
+                        {
+                            "type": "hitl",
+                            "data": {
+                                "state": "approved" if approved else "denied",
+                                "interrupt_id": str(
+                                    _stamp_payload.get("interrupt_id") or ""
+                                ),
+                                "tool": pending_tool_name,
+                                "thread_id": thread_id,
+                                "turn_id": _resume_turn,
+                            },
+                        },
+                    )
+                except Exception:
+                    logger.debug("[HITL] hitl journal frame skipped", exc_info=True)
                 _resume_inflight.add(thread_id)
                 _resume_task = asyncio.create_task(
                     _drive_graph_to_journal(
@@ -670,6 +772,10 @@ def register_misc_routes(self: Any) -> None:
                         "thread_id": thread_id,
                         "turn_id": _resume_turn,
                         "running": True,
+                        "interrupt_id": str(
+                            _stamp_payload.get("interrupt_id") or ""
+                        ),
+                        "hitl_state": "approved" if approved else "denied",
                     }
                 )
         except Exception:

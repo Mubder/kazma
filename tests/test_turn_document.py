@@ -45,6 +45,51 @@ def test_parts_from_stream_round_trip_activity() -> None:
     assert "tool" in kinds
 
 
+def test_merge_hitl_pending_cannot_replace_approved() -> None:
+    """Replay of approval_required after Approve must not resurrect buttons."""
+    approved = [{
+        "type": "hitl",
+        "tool": "file_write",
+        "state": "approved",
+        "interrupt_id": "abc",
+        "payload": {"tool": "file_write", "interrupt_id": "abc", "path": "x"},
+    }]
+    replay = [{
+        "type": "hitl",
+        "tool": "file_write",
+        "state": "pending",
+        "interrupt_id": "abc",
+        "payload": {"tool": "file_write", "interrupt_id": "abc"},
+    }]
+    merged = merge_parts(approved, replay)
+    hitl = [p for p in merged if p.get("type") == "hitl"]
+    assert len(hitl) == 1
+    assert hitl[0]["state"] == "approved"
+    assert (hitl[0].get("payload") or {}).get("path") == "x"
+
+
+def test_merge_hitl_new_interrupt_id_is_a_new_gate() -> None:
+    first = [{
+        "type": "hitl",
+        "tool": "file_write",
+        "state": "approved",
+        "interrupt_id": "one",
+        "payload": {"interrupt_id": "one"},
+    }]
+    second = [{
+        "type": "hitl",
+        "tool": "python_exec",
+        "state": "pending",
+        "interrupt_id": "two",
+        "payload": {"interrupt_id": "two", "tool": "python_exec"},
+    }]
+    merged = merge_parts(first, second)
+    hitl = [p for p in merged if p.get("type") == "hitl"]
+    assert len(hitl) == 1
+    assert hitl[0]["state"] == "pending"
+    assert hitl[0]["interrupt_id"] == "two"
+
+
 def test_merge_hitl_pending_replaces_with_approved() -> None:
     pending = [{
         "type": "hitl",
@@ -93,6 +138,19 @@ def test_messages_api_forwards_parts_and_derived_activity() -> None:
     assert "_extras" in src
     assert '"parts"' in src
     assert "hydrate_message" in src
+
+
+def test_empty_hitl_stamp_keeps_answer_text() -> None:
+    """stamp_hitl_part_state must not clobber a stored answer."""
+    existing = [
+        {"type": "hitl", "state": "pending", "interrupt_id": "a", "payload": {"tool": "x"}},
+        {"type": "text", "text": "A" * 1367},
+    ]
+    incoming = [{"type": "hitl", "state": "approved", "interrupt_id": "a", "payload": {}}]
+    merged = merge_parts(existing, incoming)
+    assert text_of(merged) == "A" * 1367
+    hitl = [p for p in merged if p.get("type") == "hitl"]
+    assert hitl[0]["state"] == "approved"
 
 
 def test_hydrate_message_fills_activity_and_turn_id() -> None:
