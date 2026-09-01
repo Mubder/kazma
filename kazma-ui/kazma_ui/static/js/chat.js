@@ -1029,6 +1029,14 @@
       KS.hideTyping(activeTypingEl);
     }
     activeTypingEl = null;
+    // Approve-resume used a local typing row that endTurn never saw, so
+    // "Thinking…" stayed under a finished answer (2026-09-01).
+    if (currentMsgEl) {
+      var leftover = currentMsgEl.querySelectorAll('.kz-typing-row');
+      for (var _ti = 0; _ti < leftover.length; _ti++) {
+        if (leftover[_ti].parentNode) leftover[_ti].parentNode.removeChild(leftover[_ti]);
+      }
+    }
     _clearStatusStrip();
     if (inputEl) {
       inputEl.disabled = false;
@@ -2191,9 +2199,16 @@
         var lastId = (activeStream && typeof activeStream.lastEventId === 'function')
           ? activeStream.lastEventId() : null;
         activeStream = null;
+        // HITL pause closes the HTTP body. That is not a failed turn — the
+        // card is already on screen. Overwriting it with "network error"
+        // was the live-vs-refresh mismatch (2026-09-01).
+        if (_awaitingApproval) {
+          setTimeout(recoverMissedApproval, 400);
+          return;
+        }
         // One cursor resume while the turn is still awaited — only possible
         // if we actually saw a journaled id on the dead stream.
-        if (_sseAttempts <= 2 && _awaitingReply && !_awaitingApproval
+        if (_sseAttempts <= 2 && _awaitingReply
             && lastId != null && Number(lastId) > 0) {
           console.warn('[KazmaChat] SSE stream lost at seq=' + lastId + ' — resuming');
           noteTurnActivity();
@@ -2201,6 +2216,12 @@
             _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
           } catch (_t) {}
           _dispatchSse({ last_event_id: Number(lastId) });
+          return;
+        }
+        // A painted reply must not be replaced by the transport error; the
+        // durable store is SoT. Resync instead of clobbering the bubble.
+        if (_turnPainted) {
+          _resyncDelivery('sse-fail');
           return;
         }
         // Final failure: surface it, then reconcile with server truth (the
@@ -4183,6 +4204,13 @@
             endTurn();
             return;
           }
+          // Truncated close (browser "network error" on a long tool call):
+          // the server is often still running. Do not stamp Approved or
+          // Error — reconcile with durable truth instead (2026-09-01).
+          if (!doneData) {
+            _resyncDelivery('approve-truncated');
+            return;
+          }
           var okLabel = action === 'deny' ? 'Denied \u2717'
             : (scope === 'yolo' ? 'YOLO on \u2713'
               : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
@@ -4227,6 +4255,15 @@
           if (showArchived) loadArchivedSessions(); else loadSessions();
         },
         onError: function(errMsg) {
+          KS.hideTyping(approvalTypingEl);
+          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
+          // A painted resume or an in-flight turn is not "Approval failed".
+          // The HITL card "Error: network error" + leftover Thinking row
+          // while the answer sat underneath was this path (2026-09-01).
+          if (_turnPainted || tokenAccum || _isGenerating || _awaitingReply) {
+            _resyncDelivery('approve-sse-fail');
+            return;
+          }
           setCardState('error', 'Error: ' + truncateStr(String(errMsg || 'Approval failed'), 120));
           appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg || 'Error')) + '_');
           endTurn();

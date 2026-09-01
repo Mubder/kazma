@@ -127,6 +127,36 @@ def test_error_frame_finishes_the_sse_stream() -> None:
     assert "hitl-error" in chat
 
 
+def test_benign_sse_close_is_not_a_failed_turn() -> None:
+    """Firefox/Edge report a normal SSE close as 'network error'.
+
+    That must finish the stream (truncated), not call onError — otherwise
+    the HITL card flips to Error while the server is still running and
+    refresh shows a different transcript (turn f3525a25e05c, 2026-09-01).
+    """
+    src = _src(_UI / "static" / "js" / "streaming.js")
+    pump = src.split("function pump()", 1)[1].split("function dispatch", 1)[0]
+    assert "isBenignStreamClose" in pump
+    assert "finishStream(undefined)" in pump
+    assert "network error" in src
+    chat = _src(_CHAT_JS)
+    approve_err = chat.split("onError: function(errMsg)", 1)[1].split("\n        }", 1)[0]
+    assert "hideTyping(approvalTypingEl)" in approve_err
+    assert "_resyncDelivery('approve-sse-fail')" in approve_err
+    approve_done = chat.split("onDone: function(doneData)", 1)[1].split("onError: function(errMsg)", 1)[0]
+    assert "_resyncDelivery('approve-truncated')" in approve_done
+    main_err = chat.split("onError: function(msg)", 1)[1].split("onApprovalRequired", 1)[0]
+    if "onError: function(msg)" in chat:
+        # The main SSE onError is the later one inside buildSseCallbacks.
+        pass
+    main_on_error = chat.split("buildSseCallbacks", 1)[1].split("onError: function(msg)", 1)[1].split("};", 1)[0]
+    assert "_awaitingApproval" in main_on_error
+    assert "_turnPainted" in main_on_error
+    planted = "callbacks.onError(err.message);\n"  # catch with no benign guard
+    assert "isBenignStreamClose" not in planted
+    assert "isBenignStreamClose" in pump
+
+
 def test_composer_clears_before_begin_turn() -> None:
     chat = _src(_CHAT_JS)
     send = chat.split("function sendMessage()", 1)[1].split("\n  function retry(", 1)[0]

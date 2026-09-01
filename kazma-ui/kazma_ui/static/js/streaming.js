@@ -43,6 +43,18 @@ var KazmaStream = (function() {
         if (callbacks.onDone) callbacks.onDone(data);
       }
 
+      function isBenignStreamClose(err) {
+        if (!err) return true;
+        if (err.name === 'AbortError') return true;
+        var msg = String((err && err.message) || err || '').toLowerCase();
+        return msg === 'network error'
+          || msg.indexOf('networkerror') >= 0
+          || msg.indexOf('failed to fetch') >= 0
+          || msg.indexOf('load failed') >= 0
+          || msg.indexOf('body stream') >= 0
+          || msg.indexOf('err_incomplete') >= 0;
+      }
+
       function pump() {
         reader.read().then(function(result) {
           if (result.done) {
@@ -77,9 +89,16 @@ var KazmaStream = (function() {
           }
           pump();
         }).catch(function(err) {
-          if (err.name !== 'AbortError' && callbacks.onError) {
-            callbacks.onError(err.message);
+          if (err.name === 'AbortError') return;
+          if (streamFinished) return;
+          // Firefox/Edge report a normal SSE close as "network error".
+          // That is a truncated close, not a failed turn (HITL pause and
+          // long tool calls both close the HTTP body this way — 2026-09-01).
+          if (isBenignStreamClose(err)) {
+            finishStream(undefined);
+            return;
           }
+          if (callbacks.onError) callbacks.onError(err.message);
         });
       }
 
