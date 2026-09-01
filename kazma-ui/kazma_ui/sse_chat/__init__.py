@@ -1491,6 +1491,67 @@ def create_sse_chat_router(
                 return False
             return True
 
+        def _coalesce_assistant_runs(
+            rows: list[dict[str, Any]],
+        ) -> list[dict[str, Any]]:
+            """Collapse related consecutive assistant snapshots to one row.
+
+            A single user turn should project as one assistant row. If a
+            delivery drift left a chain of consecutive assistant snapshots
+            whose content is a growing prefix, return only the newest/richest
+            snapshot so clients do not render a fake "many answers" ladder.
+            Distinct assistant replies (no prefix relation) are preserved.
+            """
+            out: list[dict[str, Any]] = []
+            for row in rows:
+                role = str((row or {}).get("role") or "").lower()
+                if role != "assistant":
+                    out.append(row)
+                    continue
+                if not out or str((out[-1] or {}).get("role") or "").lower() != "assistant":
+                    out.append(row)
+                    continue
+
+                prev = out[-1]
+                p = str(prev.get("content") or "").strip()
+                c = str(row.get("content") or "").strip()
+                same_turn = bool(
+                    prev.get("turn_id")
+                    and row.get("turn_id")
+                    and str(prev.get("turn_id")) == str(row.get("turn_id"))
+                )
+                related = (
+                    same_turn
+                    or not p
+                    or not c
+                    or c.startswith(p)
+                    or p.startswith(c)
+                )
+                if not related:
+                    out.append(row)
+                    continue
+
+                merged = dict(prev)
+                merged.update(row)
+                if not c and p:
+                    merged["content"] = prev.get("content", "")
+                prev_parts = prev.get("parts") if isinstance(prev.get("parts"), list) else []
+                cur_parts = row.get("parts") if isinstance(row.get("parts"), list) else []
+                if len(prev_parts) > len(cur_parts):
+                    merged["parts"] = prev_parts
+                prev_act = (
+                    prev.get("activity") if isinstance(prev.get("activity"), list) else []
+                )
+                cur_act = (
+                    row.get("activity") if isinstance(row.get("activity"), list) else []
+                )
+                if len(prev_act) > len(cur_act):
+                    merged["activity"] = prev_act
+                if not row.get("turn_id") and prev.get("turn_id"):
+                    merged["turn_id"] = prev.get("turn_id")
+                out[-1] = merged
+            return out
+
         payload: list[dict[str, Any]] = []
         for msg in messages:
             if not _visible(msg):
@@ -1524,6 +1585,7 @@ def create_sse_chat_router(
 
                 item = hydrate_message(item)
             payload.append(item)
+        payload = _coalesce_assistant_runs(payload)
         if stats:
             return {
                 "session_id": session.session_id or session_id,
