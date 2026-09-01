@@ -171,6 +171,53 @@ def test_attach_journal_has_inflight_guard() -> None:
     assert "_attachInFlight" in attach
 
 
+def test_new_session_resets_hitl_client_state() -> None:
+    """A new season must not inherit the previous season's generating/HITL flags.
+
+    Leftover `_serverGenerating=true` after Approve painted the next session's
+    pending card as already approved (2026-09-01). Server grants stay
+    thread-scoped; this lock is the client half.
+    """
+    chat = _src(_CHAT_JS)
+    assert "function _resetSessionTurnState()" in chat
+    reset = chat.split("function _resetSessionTurnState()", 1)[1].split(
+        "function _clearTurnTimers", 1
+    )[0]
+    assert "_serverGenerating = false" in reset
+    assert "_docs = {}" in reset
+    assert "_lastInterruptedThreadId = ''" in reset or '_lastInterruptedThreadId = ""' in reset
+    new_fn = chat.split("function newSession()", 1)[1].split(
+        "async function deleteSession", 1
+    )[0]
+    assert "_resetSessionTurnState()" in new_fn
+    load = chat.split("function loadSession(sessionId)", 1)[1].split(
+        "function bindCapacityBar", 1
+    )[0]
+    assert "_resetSessionTurnState()" in load
+
+
+def test_hitl_claimed_match_is_interrupt_scoped() -> None:
+    """Empty interrupt_id must not treat ANY claimed card as this gate."""
+    chat = _src(_CHAT_JS)
+    claimed = chat.split("function _hitlAlreadyClaimed(data)", 1)[1].split(
+        "function _findHitlCard", 1
+    )[0]
+    assert "if (!iid) return true" not in claimed
+    assert "iid === cid" in claimed
+    paint = chat.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
+        "function renderTurn(doc, meta)", 1
+    )[0]
+    assert "_findHitlCard" in paint
+    render = chat.split("function renderHitlCard(data)", 1)[1].split(
+        "function submitApproval(action, scope)", 1
+    )[0]
+    assert "_findHitlCard" in render
+    approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
+        "var onceBtn", 1
+    )[0]
+    assert "_clearStoreApproval()" in approve
+
+
 def test_hitl_card_is_not_torn_down_after_approve() -> None:
     chat = _src(_CHAT_JS)
     render = chat.split("function renderHitlCard(data)", 1)[1].split(
@@ -198,6 +245,20 @@ def test_ws_hitl_scan_fails_closed() -> None:
     assert "is_truly_pending" in fn
     except_block = fn.split("except Exception:", 1)[1]
     assert "return False" in except_block.split("try:", 1)[0]
+    assert "assign_interrupt_id" in fn
+    assert "interrupt_id" in fn
+
+
+def test_http_approve_once_does_not_grant() -> None:
+    """Approve once must not write a tool grant (no cross-command immunity)."""
+    src = _src(_MISC)
+    fn = src.split("async def approve_tool", 1)[1].split(
+        "async def list_pending_approvals", 1
+    )[0]
+    assert 'elif approved and scope == "tool":' in fn
+    before_tool, after_tool = fn.split('elif approved and scope == "tool":', 1)
+    assert "grant_tool(" not in before_tool
+    assert "grant_tool(" in after_tool
 
 
 def test_approve_409_running_is_not_error() -> None:

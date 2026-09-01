@@ -920,6 +920,7 @@ function registerAgentStore() {
               args: frame.args || data.args || {},
               tools: frame.tools || data.tools || [],
               message: frame.message || data.message || '',
+              interrupt_id: frame.interrupt_id || data.interrupt_id || '',
               // kind/items drive the semantic clarify/confirm option cards
               // in chat.js — dropping them degraded every WS approval to a
               // generic Approve/Deny (SSE passed them through correctly).
@@ -1033,6 +1034,7 @@ function registerAgentStore() {
             args: frame.args || data.args || {},
             tools: frame.tools || data.tools || [],
             message: frame.message || data.message || '',
+            interrupt_id: frame.interrupt_id || data.interrupt_id || '',
             // kind/items drive the semantic clarify/confirm option cards
             // (see the paused_for_approval case above).
             kind: frame.kind || data.kind || '',

@@ -210,6 +210,8 @@ class EventBridge:
         tools: Optional[list] = None,
         kind: Optional[str] = None,
         items: Optional[list] = None,
+        interrupt_id: Optional[str] = None,
+        yolo_allowed: Optional[bool] = None,
     ) -> TelemetryEvent:
         """Create a TelemetryEvent for HITL tool approval required.
 
@@ -232,6 +234,10 @@ class EventBridge:
             data["kind"] = kind
         if items:
             data["items"] = items
+        if interrupt_id:
+            data["interrupt_id"] = interrupt_id
+        if yolo_allowed is not None:
+            data["yolo_allowed"] = bool(yolo_allowed)
         return TelemetryEvent(type="status_update", data=data, thread_id=thread_id)
 
     @staticmethod

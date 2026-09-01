@@ -44,6 +44,18 @@ def test_semantic_approval_event_carries_kind_and_items():
     assert [o["id"] for o in ev.data["items"][0]["options"]] == ["from_now", "cancel"]
 
 
+def test_approval_event_carries_interrupt_id_when_set():
+    ev = EventBridge.create_approval_event(
+        thread_id="t1", tool_name="file_write",
+        args={"path": "/x"}, interrupt_id="intr-1",
+    )
+    assert ev.data.get("interrupt_id") == "intr-1"
+    bare = EventBridge.create_approval_event(
+        thread_id="t1", tool_name="file_write", args={},
+    )
+    assert "interrupt_id" not in bare.data
+
+
 def test_kind_only_included_when_truthy():
     ev = EventBridge.create_approval_event(
         thread_id="t1", tool_name="x", args={}, kind="", items=None,

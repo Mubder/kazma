@@ -946,6 +946,21 @@
   var _serverPaused = false;
   var _serverHitl = null;
   var _attachInFlight = false;
+
+  /** Drop HITL/turn client leftovers when switching sessions.
+   *  Leftover `_serverGenerating=true` from a previous session's post-Approve
+   *  resync painted the next session's pending card as already approved
+   *  (2026-09-01). Grants stay server-side and thread-scoped; this is UI only. */
+  function _resetSessionTurnState() {
+    _docs = {};
+    _liveTurnId = '';
+    _serverGenerating = false;
+    _serverPaused = false;
+    _serverHitl = null;
+    _lastInterruptedThreadId = '';
+    _awaitingApproval = false;
+    _clearStoreApproval();
+  }
   /** Progress-idle failsafe — only fires when NO activity for IDLE ms (not wall-clock). */
   var _turnWatchdogTimer = null;
   /** Desync healer: if agent store is idle but Stop is still on, release. */
@@ -3986,17 +4001,42 @@
     if (part) {
       var st = String(part.state || 'pending');
       var pid = _hitlInterruptIdOf(part);
-      if (st !== 'pending' && (!iid || !pid || iid === pid)) return true;
+      // Same interrupt only. An empty incoming id must NOT match a leftover
+      // claimed part from another turn/session — that painted a new gate as
+      // already approved (2026-09-01).
+      if (st !== 'pending' && pid && (!iid || iid === pid)) return true;
     }
+    var host = currentMsgEl;
     if (messagesEl) {
       var cards = messagesEl.querySelectorAll('.hitl-approval-card');
       for (var i = 0; i < cards.length; i++) {
         if (!_hitlCardIsClaimed(cards[i])) continue;
-        if (!iid) return true;
-        if (String(cards[i].getAttribute('data-interrupt-id') || '') === iid) return true;
+        var cid = String(cards[i].getAttribute('data-interrupt-id') || '');
+        if (iid && cid && iid === cid) return true;
+        // Same bubble, missing id on either side: this is the card we claimed.
+        if (host && host.contains && host.contains(cards[i]) && (!iid || !cid)) return true;
       }
     }
     return false;
+  }
+
+  /** Existing HITL card for this interrupt, else the card already in *host*. */
+  function _findHitlCard(interruptId, host) {
+    interruptId = String(interruptId || '');
+    var cards = messagesEl ? messagesEl.querySelectorAll('.hitl-approval-card') : [];
+    var i;
+    if (interruptId) {
+      for (i = 0; i < cards.length; i++) {
+        if (String(cards[i].getAttribute('data-interrupt-id') || '') === interruptId) {
+          return cards[i];
+        }
+      }
+    }
+    if (host && host.querySelector) {
+      var local = host.querySelector('.hitl-approval-card');
+      if (local) return local;
+    }
+    return null;
   }
 
   function _freezeHitlButtons() {
@@ -4091,6 +4131,10 @@
     // went completely silent (2026-08-26 X-post incident).
     if (_hitlAlreadyClaimed(data)) return;
     if (hasInlineApprovalCard()) return;
+    // Never clone a card that is already on this bubble or this interrupt —
+    // Approve used to mint a second card beside the claimed one (refresh
+    // then showed one, because persist has a single HITL part).
+    if (_findHitlCard(_hitlInterruptIdOf(data), currentMsgEl)) return;
     pauseForApproval(data);
     // The inline card is the primary approval UI. Hide the bottom Alpine card
     // (driven by $store.agent.pendingApproval) so the same approval is never
@@ -4302,6 +4346,7 @@
       function submitApproval(action, scope) {
       scope = scope || 'once';
       var hitlState = action === 'deny' ? 'denied' : 'approved';
+      _clearStoreApproval();
       // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
       tokenAccum = '';
       // RESUME, not a new turn: keep this turn's workbench and its steps.
@@ -4918,6 +4963,7 @@
       activeStream = null;
     }
     endTurn();
+    _resetSessionTurnState();
 
     chatSessionId = sessionId;
     persistSessionId();
@@ -5157,6 +5203,7 @@
     // MUST clear Stop/Enter lock — previously new chat inherited a stuck turn
     // so users had to press ESC before typing in a brand-new session.
     forceEndTurn();
+    _resetSessionTurnState();
 
     chatSessionId = generateSessionId();
     persistSessionId();
@@ -5531,14 +5578,24 @@
     }
     if (!hitl) return;
     var state = String(hitl.state || 'pending');
+    var iid = _hitlInterruptIdOf(hitl);
     var prev = currentMsgEl;
     if (el) currentMsgEl = el;
     try {
       // A finished turn must not revive a live Approve card on refresh.
       // pending + generating + not paused = Approve already claimed and the
       // persist lagged; paint a disabled card, not live buttons.
+      // `_serverGenerating` is THIS session only — newSession/loadSession
+      // reset it so a previous session's post-Approve resync cannot stamp
+      // the next session's pending gate as already approved.
       if (state === 'pending' && hitl.payload && doc.status !== 'done') {
-        if (_serverGenerating && !_serverPaused) {
+        var claimedHere = _hitlAlreadyClaimed(hitl) || _awaitingApproval;
+        var statusInflight = !!(
+          _serverHitl
+          && (_serverHitl.state === 'approved' || _serverHitl.state === 'inflight')
+          && (!_serverHitl.interrupt_id || !iid || String(_serverHitl.interrupt_id) === iid)
+        );
+        if (claimedHere || statusInflight || (_serverGenerating && !_serverPaused)) {
           state = 'inflight';
         } else {
           renderHitlCard(hitl.payload);
@@ -5546,11 +5603,11 @@
         }
       }
       var host = el || currentMsgEl;
-      var card = host && host.querySelector && host.querySelector('.hitl-approval-card');
+      var card = _findHitlCard(iid, host);
       if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved' || state === 'inflight' || state === 'settled')) {
         renderHitlCard(hitl.payload);
         host = el || currentMsgEl;
-        card = host && host.querySelector && host.querySelector('.hitl-approval-card');
+        card = _findHitlCard(iid, host);
       }
       if (!card) return;
       card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
