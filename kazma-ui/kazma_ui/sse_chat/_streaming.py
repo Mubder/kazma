@@ -29,7 +29,26 @@ _ATTACH_IDLE_TIMEOUT_S = 10.0
 _ATTACH_MAX_IDLE_TICKS = 30
 
 #: Journal frame types that terminate an attached stream.
-_SSE_ATTACH_TERMINAL = frozenset({"done", "turn_complete", "stream_end"})
+#: HITL pause is NOT terminal — the attach stays on the journal until a
+#: real ``done``/``turn_complete`` (or a fatal ``error``).
+_SSE_ATTACH_TERMINAL = frozenset({"done", "turn_complete", "stream_end", "error"})
+
+#: Threads sitting on a graph interrupt. Attach must not close just because
+#: the pump task finished — the graph is paused, not over.
+_paused_threads: set[str] = set()
+
+
+def mark_thread_paused(thread_id: str) -> None:
+    if thread_id:
+        _paused_threads.add(thread_id)
+
+
+def mark_thread_unpaused(thread_id: str) -> None:
+    _paused_threads.discard(thread_id or "")
+
+
+def is_thread_paused(thread_id: str) -> bool:
+    return bool(thread_id) and thread_id in _paused_threads
 
 
 from kazma_ui.sse_chat._helpers import (
@@ -43,6 +62,57 @@ from kazma_ui.sse_chat._persistence import (
 from kazma_ui.turn_runtime import persist_reply
 
 __all__: list[str] = []
+
+
+def _hitl_persist_parts(
+    content: str,
+    interrupted: bool,
+    hitl_payload: dict[str, Any] | None,
+    *,
+    state: str = "pending",
+) -> list[dict[str, Any]] | None:
+    """SessionStore parts so refresh can rebuild the HITL card."""
+    from kazma_ui.turn_document import parts_from_stream
+
+    parts = parts_from_stream(streamed=content or "", final=content or "")
+    if interrupted and hitl_payload:
+        parts.append({
+            "type": "hitl",
+            "tool": str(hitl_payload.get("tool") or ""),
+            "state": str(state or "pending"),
+            "payload": dict(hitl_payload),
+        })
+    return parts
+
+
+def stamp_hitl_part_state(
+    session_id: str,
+    reply_turn_id: str,
+    *,
+    state: str,
+    thread_id: str = "",
+    tool: str = "",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """Merge a HITL state transition into the open turn row. Never raises."""
+    if not session_id or not reply_turn_id or not state:
+        return
+    try:
+        persist_reply(
+            session_id,
+            reply_turn_id,
+            "",
+            interrupted=True,
+            thread_id=thread_id,
+            parts=[{
+                "type": "hitl",
+                "tool": str(tool or (payload or {}).get("tool") or ""),
+                "state": str(state),
+                **({"payload": dict(payload)} if payload else {}),
+            }],
+        )
+    except Exception:
+        logger.debug("[SSE] hitl part stamp skipped", exc_info=True)
 
 router = APIRouter(tags=["chat-sse"])
 
@@ -86,6 +156,33 @@ _watchdog_tasks: set[asyncio.Task] = set()
 from kazma_ui.sse_utils import sse_frame as _sse_frame
 
 
+async def _drive_graph_to_journal(
+    graph: Any,
+    input_state: dict[str, Any] | Any,
+    config: dict[str, Any],
+    *,
+    thread_id: str = "",
+    session_id: str = "",
+    reply_turn_id: str = "",
+) -> None:
+    """Run the graph and journal every frame. No HTTP body.
+
+    Approve/watchdog resume use this so the browser is only a journal
+    subscriber. HITL pause journals ``approval_required`` and returns
+    without a terminal ``done``.
+    """
+    async for _frame in _stream_langgraph_events(
+        graph,
+        input_state,
+        config,
+        thread_id=thread_id,
+        session_id=session_id,
+        reply_turn_id=reply_turn_id,
+        wait_for_resume=False,
+    ):
+        pass
+
+
 async def _stream_langgraph_events(
     graph: Any,
     input_state: dict[str, Any] | Any,
@@ -94,6 +191,7 @@ async def _stream_langgraph_events(
     thread_id: str = "",
     session_id: str = "",
     reply_turn_id: str = "",
+    wait_for_resume: bool = False,
 ) -> AsyncGenerator[str, None]:
     """Consume LangGraph astream_events and yield SSE frames.
 
@@ -571,6 +669,7 @@ async def _stream_langgraph_events(
             # with only "Thinking…".
             thread_id = (config.get("configurable") or {}).get("thread_id", "")
             interrupted = False
+            _hitl_payload_saved: dict[str, Any] | None = None
             snapshot = None
             try:
                 snapshot = await graph.aget_state(config)
@@ -610,20 +709,22 @@ async def _stream_langgraph_events(
                                 if not payload:
                                     continue
                                 interrupted = True
+                                mark_thread_paused(thread_id)
+                                _hitl_payload_saved = {
+                                    "thread_id": thread_id,
+                                    "kind": payload.get("kind", "security"),
+                                    "tool": payload.get("tool", ""),
+                                    "args": payload.get("args", {}),
+                                    "tools": payload.get("tools") or [],
+                                    "items": payload.get("items") or [],
+                                    "message": payload.get("message", ""),
+                                    "yolo_allowed": payload.get(
+                                        "yolo_allowed", True
+                                    ),
+                                }
                                 yield await emit_j(
                                     "approval_required",
-                                    {
-                                        "thread_id": thread_id,
-                                        "kind": payload.get("kind", "security"),
-                                        "tool": payload.get("tool", ""),
-                                        "args": payload.get("args", {}),
-                                        "tools": payload.get("tools") or [],
-                                        "items": payload.get("items") or [],
-                                        "message": payload.get("message", ""),
-                                        "yolo_allowed": payload.get(
-                                            "yolo_allowed", True
-                                        ),
-                                    },
+                                    _hitl_payload_saved,
                                 )
                                 logger.info(
                                     "[SSE] HITL interrupt: thread=%s tool=%s — awaiting approval",
@@ -771,7 +872,27 @@ async def _stream_langgraph_events(
                 model=_done_model,
                 tokens=total_tokens,
                 cost=total_cost,
+                parts=_hitl_persist_parts(
+                    content_acc, interrupted, _hitl_payload_saved
+                ),
             )
+            if interrupted:
+                # Pause is not a finished turn. Journal the card; do not
+                # emit terminal done. Attached clients wait; approve JSON
+                # resumes into the same journal.
+                mark_thread_paused(thread_id)
+                if wait_for_resume:
+                    head = 0
+                    try:
+                        head = int(get_turn_broker().resume(thread_id, 0)[2] or 0)
+                    except Exception:
+                        head = 0
+                    async for frame in _sse_attach_stream(
+                        thread_id, session_id or "", max(0, head - 1)
+                    ):
+                        yield frame
+                return
+            mark_thread_unpaused(thread_id)
             yield await emit_j("done", _done_payload)
             yield await emit_j("turn_complete", _done_payload)
             logger.info(
@@ -896,8 +1017,10 @@ async def _sse_attach_stream(
             if is_replayable(frame):
                 yield _frame_from_journaled(frame)
                 last_yielded = max(last_yielded, int(frame.get("seq") or 0))
-        if not running:
+        if not running and not is_thread_paused(thread_id):
             # Nothing live to attach to — replay covered everything missed.
+            # A HITL pause is not "nothing": the graph is parked and approve
+            # will journal into this same tail.
             return
 
         idle_ticks = 0
@@ -910,9 +1033,14 @@ async def _sse_attach_stream(
                 idle_ticks += 1
                 yield ": keepalive\n\n"
                 still_running = is_turn_running(thread_id)
-                if not still_running and queue.empty():
+                paused = is_thread_paused(thread_id)
+                if not still_running and not paused and queue.empty():
                     return
-                if idle_ticks >= _ATTACH_MAX_IDLE_TICKS and not still_running:
+                if (
+                    idle_ticks >= _ATTACH_MAX_IDLE_TICKS
+                    and not still_running
+                    and not paused
+                ):
                     return
                 continue
             idle_ticks = 0

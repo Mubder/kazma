@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Turn Delivery CQRS: journal subscriber, JSON approve (2026-09-01)
+
+Chat HTTP is a journal attach after the graph pump starts — not a
+request-coupled `astream_events` body. `POST /api/approve` returns JSON
+immediately (`409` if the HITL part is no longer pending) and resumes
+into the same journal. HITL pause no longer emits terminal `done`. A
+stale `last_event_id` after process restart is a gap → SessionStore
+resync. Dashboard approve uses the same JSON contract. Class locks:
+no dual SSE, concurrent 409, interrupt not terminal, out-of-bounds
+reattach.
+
 ## Turn ledger P3: one persist path, fences for the rest (2026-09-01)
 
 SSE incremental persist, WS final/incremental persist, pending bubbles,

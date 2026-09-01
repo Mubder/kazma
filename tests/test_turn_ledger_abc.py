@@ -123,8 +123,12 @@ def test_error_frame_finishes_the_sse_stream() -> None:
     err = src.split("case 'error':", 1)[1].split("case ", 1)[0]
     assert "finishStream" in err
     chat = _src(_CHAT_JS)
-    assert "doneData.error" in chat
-    assert "hitl-error" in chat
+    approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
+        "var onceBtn", 1
+    )[0]
+    assert "setCardState('error'" in approve
+    css = _src(_UI / "static" / "css" / "kazma.css")
+    assert ".hitl-approval-card.hitl-error" in css
 
 
 def test_benign_sse_close_is_not_a_failed_turn() -> None:
@@ -140,15 +144,12 @@ def test_benign_sse_close_is_not_a_failed_turn() -> None:
     assert "finishStream(undefined)" in pump
     assert "network error" in src
     chat = _src(_CHAT_JS)
-    approve_err = chat.split("onError: function(errMsg)", 1)[1].split("\n        }", 1)[0]
-    assert "hideTyping(approvalTypingEl)" in approve_err
-    assert "_resyncDelivery('approve-sse-fail')" in approve_err
-    approve_done = chat.split("onDone: function(doneData)", 1)[1].split("onError: function(errMsg)", 1)[0]
-    assert "_resyncDelivery('approve-truncated')" in approve_done
-    main_err = chat.split("onError: function(msg)", 1)[1].split("onApprovalRequired", 1)[0]
-    if "onError: function(msg)" in chat:
-        # The main SSE onError is the later one inside buildSseCallbacks.
-        pass
+    approve = chat.split("function submitApproval(action, scope)", 1)[1]
+    approve = approve.split("var onceBtn", 1)[0]
+    assert "sseFn" not in approve
+    assert "fetch(approvalUrl" in approve
+    assert "res.status === 409" in approve
+    assert "text/event-stream" not in approve
     main_on_error = chat.split("buildSseCallbacks", 1)[1].split("onError: function(msg)", 1)[1].split("};", 1)[0]
     assert "_awaitingApproval" in main_on_error
     assert "_turnPainted" in main_on_error

@@ -190,9 +190,12 @@ var KazmaStream = (function() {
 
       pump();
     }).catch(function(err) {
-      if (err.name !== 'AbortError' && callbacks.onError) {
-        callbacks.onError(err.message);
+      if (err.name === 'AbortError') return;
+      if (isBenignStreamClose(err)) {
+        finishStream(undefined);
+        return;
       }
+      if (callbacks.onError) callbacks.onError(err.message);
     });
 
     return {

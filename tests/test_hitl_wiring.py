@@ -500,16 +500,24 @@ class TestSseApprovalFrame:
         config = {"configurable": {"thread_id": "sse-test-1"}}
 
         frames = []
-        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
-            frames.append(frame)
+        try:
+            async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+                frames.append(frame)
+        finally:
+            from kazma_ui.sse_chat._streaming import mark_thread_unpaused
 
-        # Should have an approval_required frame AND a done frame.
+            mark_thread_unpaused("sse-test-1")
+
+        # Pause journals the card. It must NOT emit terminal done/turn_complete
+        # (that closed the HTTP tail and painted "Error: network error").
         approval_frames = [f for f in frames if "approval_required" in f]
         assert len(approval_frames) == 1, f"Expected 1 approval frame, got {len(approval_frames)}"
         # Verify the frame contains the thread_id and tool name.
         frame = approval_frames[0]
         assert "sse-test-1" in frame
         assert "shell_exec" in frame
+        assert not any("event: done" in f for f in frames)
+        assert not any("event: turn_complete" in f for f in frames)
 
     @pytest.mark.asyncio
     async def test_no_frame_when_graph_completes(self):
@@ -568,8 +576,13 @@ class TestSseApprovalFrame:
         config = {"configurable": {"thread_id": "sse-fallback-type"}}
 
         frames = []
-        async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
-            frames.append(frame)
+        try:
+            async for frame in _stream_langgraph_events(graph, {"messages": []}, config):
+                frames.append(frame)
+        finally:
+            from kazma_ui.sse_chat._streaming import mark_thread_unpaused
+
+            mark_thread_unpaused("sse-fallback-type")
 
         assert any("approval_required" in f for f in frames)
         assert any("shell_exec" in f for f in frames)

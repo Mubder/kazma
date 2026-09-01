@@ -233,74 +233,36 @@
       );
     }
 
-    var sseFn = (window.KazmaStream && (KazmaStream.ssePost || KazmaStream.sse));
-    if (!sseFn) {
-      if (statusEl) {
-        statusEl.style.display = 'inline';
-        statusEl.textContent = t('dashboard.hitl_stream_unavailable', 'Streaming unavailable');
-        statusEl.className = 'hitl-approval-status hitl-status-error';
-      }
+    try {
+      var resp = await fetch(url, {
+        method: 'POST',
+        headers: approvalHeaders(),
+        credentials: 'same-origin',
+        body: JSON.stringify(payload),
+      });
+      var body = {};
+      try { body = await resp.json(); } catch (eParse) { body = {}; }
       if (window.KazmaApp && window.KazmaApp.setIsThinking) {
         window.KazmaApp.setIsThinking(false);
       }
-      return;
-    }
-    sseFn(url, payload, {
-      onEvent: function(type, data) {
-        if (type === 'status' && data && data.content && statusEl) {
-          statusEl.textContent = data.content;
-          if (window.KazmaApp && window.KazmaApp.setIsThinking) {
-            window.KazmaApp.setIsThinking(true, data.content);
-          }
-        }
-      },
-      onToken: function(d) {
-        if (window.KazmaApp) {
-          if (window.KazmaApp.setIsThinking) window.KazmaApp.setIsThinking(false);
-          if (window.KazmaApp.appendToken && d && d.content) {
-            window.KazmaApp.appendToken(d.content);
-          }
-        }
-      },
-      onToolCall: function(d) {
-        if (window.KazmaApp) {
-          if (window.KazmaApp.setIsThinking) {
-            window.KazmaApp.setIsThinking(
-              true,
-              t('dashboard.hitl_executing', 'Executing tool: {name}…').replace(
-                '{name}',
-                (d && d.name) || 'tool'
-              )
-            );
-          }
-          if (window.KazmaApp.addToolCall) window.KazmaApp.addToolCall(d);
-        }
-      },
-      onDone: function(d) {
-        if (window.KazmaApp && window.KazmaApp.setIsThinking) {
-          window.KazmaApp.setIsThinking(false);
-        }
+      if (resp.status === 409 || body.reason === 'not_pending') {
         if (statusEl) {
-          statusEl.textContent = approve
-            ? t('dashboard.hitl_approved', 'Approved — complete')
-            : t('dashboard.hitl_denied', 'Denied');
-          statusEl.className = 'hitl-approval-status hitl-status-' + (approve ? 'ok' : 'denied');
+          statusEl.textContent = t('dashboard.hitl_not_pending', 'No longer pending');
+          statusEl.className = 'hitl-approval-status hitl-status-error';
+          statusEl.style.display = 'inline-block';
         }
-        setTimeout(function () {
-          if (card) card.remove();
-          refreshPending();
-        }, 1500);
-      },
-      onError: function(err) {
-        if (window.KazmaApp && window.KazmaApp.setIsThinking) {
-          window.KazmaApp.setIsThinking(false);
-        }
+        refreshPending();
+        return;
+      }
+      if (!resp.ok || body.ok === false) {
+        var errText = String(body.error || body.reason || ('HTTP ' + resp.status));
         if (statusEl) {
           statusEl.innerHTML =
-            (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' + escapeHtml(err) +
+            (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' + escapeHtml(errText) +
             ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
             t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
           statusEl.className = 'hitl-approval-status hitl-status-error';
+          statusEl.style.display = 'inline-block';
           var dismissLink = statusEl.querySelector('.hitl-dismiss-link');
           if (dismissLink) {
             dismissLink.addEventListener('click', function(e) {
@@ -311,8 +273,42 @@
           }
         }
         buttons.forEach(function (b) { b.disabled = false; });
+        return;
       }
-    });
+      if (statusEl) {
+        statusEl.textContent = approve
+          ? t('dashboard.hitl_approved', 'Approved — running')
+          : t('dashboard.hitl_denied', 'Denied');
+        statusEl.className = 'hitl-approval-status hitl-status-' + (approve ? 'ok' : 'denied');
+        statusEl.style.display = 'inline-block';
+      }
+      setTimeout(function () {
+        if (card) card.remove();
+        refreshPending();
+      }, 1500);
+    } catch (err) {
+      if (window.KazmaApp && window.KazmaApp.setIsThinking) {
+        window.KazmaApp.setIsThinking(false);
+      }
+      if (statusEl) {
+        statusEl.innerHTML =
+          (window.KazmaIcons ? KazmaIcons.span('alert') : '') + ' ' +
+          escapeHtml(String((err && err.message) || err || 'Approval failed')) +
+          ' <a href="#" class="hitl-dismiss-link" style="margin-left:8px;color:var(--text-danger);text-decoration:underline;">' +
+          t('dashboard.hitl_dismiss', 'Dismiss') + '</a>';
+        statusEl.className = 'hitl-approval-status hitl-status-error';
+        statusEl.style.display = 'inline-block';
+        var dismissCatch = statusEl.querySelector('.hitl-dismiss-link');
+        if (dismissCatch) {
+          dismissCatch.addEventListener('click', function(e) {
+            e.preventDefault();
+            if (card) card.remove();
+            refreshPending();
+          });
+        }
+      }
+      buttons.forEach(function (b) { b.disabled = false; });
+    }
   }
 
   async function refreshPending() {

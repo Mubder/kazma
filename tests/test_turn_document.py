@@ -45,6 +45,25 @@ def test_parts_from_stream_round_trip_activity() -> None:
     assert "tool" in kinds
 
 
+def test_merge_hitl_pending_replaces_with_approved() -> None:
+    pending = [{
+        "type": "hitl",
+        "tool": "python_exec",
+        "state": "pending",
+        "payload": {"tool": "python_exec"},
+    }]
+    decided = [{
+        "type": "hitl",
+        "tool": "python_exec",
+        "state": "approved",
+        "payload": {"tool": "python_exec"},
+    }]
+    merged = merge_parts(pending, decided)
+    hitl = [p for p in merged if p.get("type") == "hitl"]
+    assert len(hitl) == 1
+    assert hitl[0]["state"] == "approved"
+
+
 def test_merge_displaced_text_becomes_reasoning() -> None:
     existing = [{"type": "text", "text": "let me pull the texts…"}]
     incoming = [{"type": "text", "text": "Posted all 4 Arabic tweets."}]

@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["register_misc_routes"]
 
+_approve_locks: dict[str, asyncio.Lock] = {}
+_resume_inflight: set[str] = set()
+
+
+def _approve_lock_for(thread_id: str) -> asyncio.Lock:
+    lock = _approve_locks.get(thread_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _approve_locks[thread_id] = lock
+    return lock
+
 
 def register_misc_routes(self: Any) -> None:
     """Register the misc routes onto ``self.app``."""
@@ -498,10 +509,12 @@ def register_misc_routes(self: Any) -> None:
                     )
                     return _JSONResponse(
                         {
+                            "ok": False,
                             "status": "expired",
                             "thread_id": thread_id,
                             "content": "",
                             "error": "No pending approval for this thread (already resumed or expired).",
+                            "reason": "not_pending",
                         },
                         status_code=409,
                     )
@@ -581,127 +594,81 @@ def register_misc_routes(self: Any) -> None:
                     approved=approved, scope=scope, reason=body.get("reason", ""),
                 )
 
-            from collections.abc import AsyncGenerator
-
-            from fastapi.responses import StreamingResponse
-            from kazma_core.safety.hitl import (
-                reset_current_thread_id,
-                set_current_thread_id,
-            )
-
-            # ── Durable identity for the resumed reply ─────────────────
-            # This endpoint used to stream the post-approval answer to the
-            # browser and persist NOTHING: it passed no session_id, and the
-            # Command path inside the streamer takes ainvoke (no pump, so no
-            # done-callback). Two finished answers were lost that way on
-            # 2026-08-28 (1,402 and 1,781 chars) — present on screen, absent
-            # after refresh.
-            #
-            # Resolving the OPEN turn (rather than minting a new one) keeps
-            # the pre-approval narration and the final answer in one bubble,
-            # which is what the user asked one question to get.
+            # JSON command, not a second graph SSE. The live tail is the
+            # journal attach the chat client already holds (or re-opens).
+            from kazma_ui.active_turns import is_turn_running, register_turn
             from kazma_ui.reply_sink import resolve_reply_turn
             from kazma_ui.session_manager import get_session_manager as _gsm_resume
-            from kazma_ui.sse_chat import _sse_frame, _stream_langgraph_events
-
+            from kazma_ui.sse_chat._streaming import (
+                _drive_graph_to_journal,
+                mark_thread_unpaused,
+                stamp_hitl_part_state,
+            )
             from kazma_ui.turn_runtime import ensure_session_for_thread
 
-            _resume_session_id = ""
-            try:
-                _owner = _gsm_resume().get_by_thread_id(thread_id)
-                if _owner is not None:
-                    _resume_session_id = str(_owner.session_id or "")
-            except Exception:
-                logger.debug("[HITL] could not resolve session for resume", exc_info=True)
-            if not _resume_session_id:
-                _resume_session_id = ensure_session_for_thread(thread_id)
-            _resume_turn = resolve_reply_turn(thread_id, _resume_session_id)
-            if not _resume_session_id:
-                logger.warning(
-                    "[HITL] Resume mint failed for thread=%s — persist_reply "
-                    "will refuse the write",
-                    thread_id,
-                )
+            async with _approve_lock_for(thread_id):
+                if is_turn_running(thread_id) or thread_id in _resume_inflight:
+                    return _JSONResponse(
+                        {
+                            "ok": False,
+                            "error": "This approval is no longer pending.",
+                            "reason": "not_pending",
+                        },
+                        status_code=409,
+                    )
 
-            async def _approval_stream_generator() -> AsyncGenerator[str, None]:
-                status_msg = (
-                    "Executing approved tool..."
-                    if approved
-                    else "Continuing after denial..."
-                )
-                yield _sse_frame("status", {"content": status_msg})
-
-                # Update checkpoint metadata with HITL resolution state
-                # This ensures the thread won't show up in pending approvals after this
-                _hitl_state = "approved" if approved else "denied"
-                _resolution_time = datetime.now(UTC).isoformat()
-                # Postgres jsonb_set needs JSON text ('"approved"'), not bare approved.
-                import json as _json
-
-                _hitl_state_json = _json.dumps(_hitl_state)
-                _resolution_json = _json.dumps(_resolution_time)
-
+                _resume_session_id = ""
                 try:
-                    cp = _resolve_hitl_checkpointer()
-                    if cp is not None:
-                        conn = getattr(cp, "conn", None)
-                        if conn is not None:
-                            try:
-                                if hasattr(conn, "execute"):
-                                    # SQLite: plain strings become JSON strings
-                                    await conn.execute(
-                                        "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_state', ?) WHERE thread_id = ?",
-                                        (_hitl_state, thread_id),
-                                    )
-                                    await conn.execute(
-                                        "UPDATE checkpoints SET metadata = json_set(metadata, '$.hitl_resolved_at', ?) WHERE thread_id = ?",
-                                        (_resolution_time, thread_id),
-                                    )
-                                    await conn.commit()
-                                elif hasattr(conn, "connection"):
-                                    # Postgres: jsonb_set requires a JSON document
-                                    async with conn.connection() as pg_conn:
-                                        async with pg_conn.cursor() as cur:
-                                            await cur.execute(
-                                                "UPDATE checkpoints SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{hitl_state}', %s::jsonb) WHERE thread_id = %s",
-                                                (_hitl_state_json, thread_id),
-                                            )
-                                            await cur.execute(
-                                                "UPDATE checkpoints SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{hitl_resolved_at}', %s::jsonb) WHERE thread_id = %s",
-                                                (_resolution_json, thread_id),
-                                            )
-                                            await pg_conn.commit()
-                            except Exception as e:
-                                logger.warning(
-                                    "[HITL] Failed to update checkpoint metadata for thread=%s: %s",
-                                    thread_id,
-                                    e,
-                                )
-                except Exception as e:
-                    logger.debug("[HITL] Could not update checkpoint metadata: %s", e)
+                    _owner = _gsm_resume().get_by_thread_id(thread_id)
+                    if _owner is not None:
+                        _resume_session_id = str(_owner.session_id or "")
+                except Exception:
+                    logger.debug("[HITL] could not resolve session for resume", exc_info=True)
+                if not _resume_session_id:
+                    _resume_session_id = ensure_session_for_thread(thread_id)
+                _resume_turn = resolve_reply_turn(thread_id, _resume_session_id)
+                if not _resume_session_id:
+                    logger.warning(
+                        "[HITL] Resume mint failed for thread=%s — persist_reply "
+                        "will refuse the write",
+                        thread_id,
+                    )
 
-                _tid_token = set_current_thread_id(thread_id)
-                try:
-                    async for frame in _stream_langgraph_events(
+                mark_thread_unpaused(thread_id)
+                stamp_hitl_part_state(
+                    _resume_session_id,
+                    _resume_turn,
+                    state="approved" if approved else "denied",
+                    thread_id=thread_id,
+                    tool=pending_tool_name,
+                )
+                _resume_inflight.add(thread_id)
+                _resume_task = asyncio.create_task(
+                    _drive_graph_to_journal(
                         graph_ref,
                         resume_cmd,
-                        config=config,
+                        config,
                         thread_id=thread_id,
                         session_id=_resume_session_id,
                         reply_turn_id=_resume_turn,
-                    ):
-                        yield frame
-                finally:
-                    reset_current_thread_id(_tid_token)
+                    )
+                )
+                register_turn(thread_id, _resume_task)
 
-            return StreamingResponse(
-                _approval_stream_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                },
-            )
+                def _clear_inflight(t: asyncio.Task, tid: str = thread_id) -> None:
+                    _resume_inflight.discard(tid)
+
+                _resume_task.add_done_callback(_clear_inflight)
+
+                return _JSONResponse(
+                    {
+                        "ok": True,
+                        "approved": approved,
+                        "thread_id": thread_id,
+                        "turn_id": _resume_turn,
+                        "running": True,
+                    }
+                )
         except Exception:
             logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)
             return _JSONResponse({"error": "Internal error"}, status_code=500)

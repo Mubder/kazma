@@ -34,6 +34,7 @@ import pytest
 from kazma_ui import reply_sink
 from kazma_ui.reply_sink import resolve_reply_turn
 from kazma_ui.sse_chat import _stream_langgraph_events
+from kazma_ui.sse_chat._streaming import mark_thread_unpaused
 from langgraph.types import Command
 
 NARRATION = "The state is now clear from the DBs - let me pull the exact texts."
@@ -147,21 +148,29 @@ def test_pause_then_approve_leaves_one_bubble_holding_the_final_answer(store):
     async def _run():
         # ── half 1: the prompt turn, which pauses for approval ──
         prompt_turn = reply_sink.open_reply_turn("thread-1")
-        await _drain(
-            _stream_langgraph_events(
-                graph,
-                {"messages": []},
-                config,
-                thread_id="thread-1",
-                session_id="sess-1",
-                reply_turn_id=prompt_turn,
-            )
-        )
+        pause_frames: list[str] = []
+        async for frame in _stream_langgraph_events(
+            graph,
+            {"messages": []},
+            config,
+            thread_id="thread-1",
+            session_id="sess-1",
+            reply_turn_id=prompt_turn,
+        ):
+            pause_frames.append(frame)
+        assert any("approval_required" in f for f in pause_frames)
+        assert not any("event: done" in f for f in pause_frames)
+        assert not any("event: turn_complete" in f for f in pause_frames)
 
         rows = _assistant_rows(store)
         assert len(rows) == 1, f"pause must not duplicate: {rows}"
         assert rows[0]["content"] == NARRATION
         assert rows[0]["open"] is True, "a paused turn stays open for its resume"
+        hitl_parts = [
+            p for p in (rows[0].get("parts") or [])
+            if isinstance(p, dict) and p.get("type") == "hitl"
+        ]
+        assert hitl_parts and hitl_parts[0].get("state") == "pending"
 
         # ── half 2: POST /api/approve resumes the SAME turn ──
         # This is what the endpoint now does; before, it passed neither a
@@ -180,7 +189,10 @@ def test_pause_then_approve_leaves_one_bubble_holding_the_final_answer(store):
             )
         )
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    finally:
+        mark_thread_unpaused("thread-1")
 
     rows = _assistant_rows(store)
     assert len(rows) == 1, f"one question must leave one bubble, got {len(rows)}"
@@ -231,7 +243,10 @@ def test_paused_turn_row_stays_open_for_a_restarted_process(store):
             "sess-1", turn, NARRATION, open_turn=True, model="deepseek-v4-flash"
         )
 
-    asyncio.run(_run())
+    try:
+        asyncio.run(_run())
+    finally:
+        mark_thread_unpaused("thread-1")
 
     row = _assistant_rows(store)[-1]
     assert row["open"] is True

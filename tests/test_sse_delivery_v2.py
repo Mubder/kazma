@@ -172,6 +172,17 @@ class TestAttachStream:
         # No journaled event frames may follow a gap signal.
         assert not any(f.startswith("event: llm_delta") for f in frames)
 
+    @pytest.mark.asyncio
+    async def test_stale_cursor_after_empty_journal_resyncs(self):
+        """Client re-attaches with last_event_id from a previous process."""
+        frames = await _collect(
+            _sse_attach_stream("tRestart", "sess-R", 77), timeout=5.0
+        )
+        joined = "\n".join(frames)
+        assert '"gap": true' in joined
+        assert '"status": "resync"' in joined
+        assert not any("event: llm_delta" in f for f in frames)
+
 
 # ── Endpoint integration (POST /api/chat/stream with cursor) ─────────────
 

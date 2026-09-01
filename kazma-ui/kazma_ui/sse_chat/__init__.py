@@ -52,10 +52,15 @@ from kazma_ui.sse_chat._persistence import (  # noqa: F401
     _snapshot_paused,
 )
 from kazma_ui.sse_chat._streaming import (  # noqa: F401
+    _drive_graph_to_journal,
     _frame_from_journaled,
     _journal_fast_path,
     _sse_attach_stream,
     _stream_langgraph_events,
+    is_thread_paused,
+    mark_thread_paused,
+    mark_thread_unpaused,
+    stamp_hitl_part_state,
 )
 
 __all__ = ["create_sse_chat_router", "router"]
@@ -975,19 +980,37 @@ def create_sse_chat_router(
             _flushed_at = [0]
 
             try:
-                async for frame in _stream_langgraph_events(
-                    graph=current_graph,
-                    input_state=input_state,
-                    config=graph_config,
-                    thread_id=thread_id,
-                    session_id=session_id,
-                    reply_turn_id=_reply_turn,
-                ):
+                # CQRS: the graph runs in a shielded background task that
+                # journals only. This HTTP body is a journal subscriber —
+                # a 70s MCP call or a dropped TCP cannot kill the turn.
+                _drive = asyncio.create_task(
+                    _drive_graph_to_journal(
+                        current_graph,
+                        input_state,
+                        graph_config,
+                        thread_id=thread_id,
+                        session_id=session_id,
+                        reply_turn_id=_reply_turn,
+                    )
+                )
+                register_turn(thread_id, _drive)
+
+                def _on_drive_done(t: asyncio.Task, tid: str = thread_id) -> None:
+                    unregister_turn(tid, t)
+
+                _drive.add_done_callback(_on_drive_done)
+
+                async for frame in _sse_attach_stream(thread_id, session_id, 0):
                     parsed = _parse_frame(frame)
                     if parsed is None:
                         yield frame
                         continue
                     ev_type, data = parsed
+                    if ev_type in ("status_update", "status") and str(
+                        data.get("status") or ""
+                    ) == "resync":
+                        yield frame
+                        return
 
                     # Accumulate content + record CoT activity
                     if ev_type == "token":
@@ -1064,7 +1087,7 @@ def create_sse_chat_router(
                 # the PREVIOUS turn's answer, silently replacing good history
                 # with a fragment.
                 _persist_now(open_turn=True)
-                yield _sse_frame("error", {"content": "Connection closed"})
+                raise
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)

@@ -42,6 +42,8 @@ _SCAN_INTERVAL_SECONDS = 15.0
 _watchdog_task: asyncio.Task | None = None
 # thread_id → monotonic timestamp when the pending approval was first seen
 _first_seen: dict[str, float] = {}
+# Strong refs so auto-deny graph tasks are not GC'd mid-resume.
+_deny_tasks: set[asyncio.Task] = set()
 
 
 async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
@@ -93,13 +95,26 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
     except Exception:
         pass
     try:
-        from kazma_ui.turn_runtime import invoke_turn
+        from kazma_ui.active_turns import register_turn
+        from kazma_ui.reply_sink import resolve_reply_turn
+        from kazma_ui.session_manager import get_session_manager
+        from kazma_ui.sse_chat._streaming import (
+            _drive_graph_to_journal,
+            mark_thread_unpaused,
+        )
+        from kazma_ui.turn_runtime import ensure_session_for_thread
 
-        # Headless resume: the client is gone (or never saw the card).
-        # invoke_turn always projects the checkpoint into SessionStore so
-        # a later reload shows the answer, not the HITL stub
-        # (2026-08-31 silent turn b1cb7994e22a).
-        await invoke_turn(graph, _resume_cmd, config, thread_id=thread_id)
+        session_id = ""
+        try:
+            owner = get_session_manager().get_by_thread_id(thread_id)
+            if owner is not None:
+                session_id = str(owner.session_id or "")
+        except Exception:
+            session_id = ""
+        if not session_id:
+            session_id = ensure_session_for_thread(thread_id)
+        turn_id = resolve_reply_turn(thread_id, session_id)
+
         try:
             from kazma_ui.delivery import get_turn_broker
 
@@ -115,6 +130,24 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             })
         except Exception:
             logger.debug("[HITL-WD] timeout frame skipped", exc_info=True)
+
+        mark_thread_unpaused(thread_id)
+        # Journal-only resume — do not await the graph on the watchdog tick.
+        # invoke_turn still runs inside the streamer so SessionStore gets
+        # the continuation (2026-08-31 silent turn b1cb7994e22a).
+        task = asyncio.create_task(
+            _drive_graph_to_journal(
+                graph,
+                _resume_cmd,
+                config,
+                thread_id=thread_id,
+                session_id=session_id,
+                reply_turn_id=turn_id,
+            )
+        )
+        _deny_tasks.add(task)
+        task.add_done_callback(_deny_tasks.discard)
+        register_turn(thread_id, task)
     except Exception:
         logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
 

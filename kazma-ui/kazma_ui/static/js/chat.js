@@ -2175,15 +2175,16 @@
 
       onApprovalRequired: function(data) {
         if (!_mine()) return;
-        // HITL: graph paused — render scope-aware approval card and lock input.
+        // HITL: graph paused — journal part + one projector paints the card.
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
         activeTypingEl = null;
-        logProgress({
-          kind: 'status',
-          title: 'Waiting for approval',
-          detail: (data && (data.tool || data.message)) || '',
-          state: 'info',
+        applyTurnEvent({
+          type: 'hitl',
+          tool: (data && data.tool) || '',
+          payload: data || {},
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
         });
         pauseForApproval(data);
         renderHitlCard(data);
@@ -3774,6 +3775,13 @@
 
   function markApprovalTimedOut(msg) {
     var text = String(msg || 'Approval timed out — continuing without this tool.');
+    applyTurnEvent({
+      type: 'hitl',
+      state: 'timeout',
+      payload: { message: text },
+      turn_id: _liveTurnId,
+      source: 'timeout',
+    });
     if (messagesEl) {
       messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
         var btns = card.querySelectorAll('button');
@@ -4082,8 +4090,9 @@
         state: 'running',
       });
 
-      // HITL resume is SSE (`POST /api/approve/{thread_id}`). WS approve_tool
-      // is off unless KAZMA_WS_GRAPH=1; the browser never uses that path.
+      // Approve is a JSON command. The live tail is the existing chat SSE
+      // (or a journal re-attach). A second graph SSE is how "Error: network
+      // error" + leftover Thinking + refresh drift happened (2026-09-01).
       if (scope === 'yolo' && KS.toast) {
         KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
       }
@@ -4101,173 +4110,42 @@
         currentMsgEl = createAssistantMessage();
       }
 
-      var approvalTypingEl = KS.showTyping(currentMsgEl.querySelector('.message-content'));
+      var okLabel = action === 'deny' ? 'Denied \u2717'
+        : (scope === 'yolo' ? 'YOLO on \u2713'
+          : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
+      setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
+
       var approvalUrl = '/api/approve/' + encodeURIComponent(data.thread_id || targetThreadId);
-      var sseFn = (KS && (KS.ssePost || KS.sse)) || (window.KazmaStream && (KazmaStream.ssePost || KazmaStream.sse));
-
-      if (!sseFn) {
-        setCardState('error', 'Streaming unavailable');
-        endTurn();
-        return;
-      }
-
-      if (activeStream) {
-        try { activeStream.abort(); } catch (e) {}
-        activeStream = null;
-      }
-      // The approve-resume stream now owns the turn: invalidate the original
-      // main-stream callbacks (epoch) so its lingering terminal can never
-      // paint the empty-notice or finalize over the resumed turn.
-      _sseEpoch++;
-
-      activeStream = sseFn(approvalUrl, payload, {
-        onEvent: function() {},
-        onToken: function(tokenData) {
-          KS.hideTyping(approvalTypingEl);
-          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          applyTurnEvent({
-            type: 'token',
-            content: tokenData.content,
-            seq: tokenData.seq,
-            turn_id: tokenData.turn_id || _liveTurnId,
-            full: !!tokenData.full,
-            source: 'sse',
-          });
-        },
-        // Tool activity goes into the WORKBENCH, exactly as the main stream
-        // does it (see the main onToolCall). This path used to append raw
-        // .tool-call-box divs straight into the message body instead \u2014 so
-        // everything the agent did after an approval was invisible to the
-        // CoT, which is why the panel looked empty post-approval while the
-        // answer sprouted loose boxes above it.
-        onToolCall: function(toolData) {
-          KS.hideTyping(approvalTypingEl);
-          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          if (!currentMsgEl) currentMsgEl = createAssistantMessage();
-          var inputs = toolData.inputs;
-          if (typeof inputs === 'object') {
-            try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
-          }
-          logProgress({
-            kind: 'tool',
-            title: toolData.tool_name || toolData.name || 'tool',
-            detail: String(inputs || ''),
-            state: 'running',
-          });
-          scrollToBottom();
-        },
-        // Mirrors the main stream's onToolResult: the result lands in the
-        // workbench row for that tool. Only a dispatched swarm still gets an
-        // inline badge, because it describes work that outlives this turn.
-        onToolResult: function(resultData) {
-          if (!currentMsgEl) return;
-          var isSwarm = (resultData.tool_name === 'dispatch_swarm' || resultData.tool_name === 'swarm_dispatch' || (resultData.result && resultData.result.indexOf('Swarm task dispatched') !== -1));
-          logProgress({
-            kind: 'tool',
-            title: resultData.tool_name || 'tool',
-            detail: String(resultData.result || ''),
-            state: isSwarm ? 'running' : 'done',
-          });
-          if (isSwarm) {
-            var contentEl = currentMsgEl.querySelector('.message-content');
-            var resultBox = document.createElement('div');
-            resultBox.className = 'swarm-bg-badge';
-            resultBox.innerHTML = '<span class="pulse-dot"></span><div><strong>Background Task Active:</strong> ' + escapeHtml(truncateStr(resultData.result, 300)) + '</div>';
-            contentEl.appendChild(resultBox);
-          }
-          scrollToBottom();
-        },
-        onApprovalRequired: function(nextApproval) {
-          KS.hideTyping(approvalTypingEl);
-          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          var okLabel = action === 'deny' ? 'Denied \u2717'
-            : (scope === 'yolo' ? 'YOLO on \u2713'
-              : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
-          setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
-          // Another danger tool after grant — should be rare for YOLO; surface card.
-          // Do NOT eagerly create an assistant bubble here — tokens create it
-          // lazily; an eager empty one stayed blank when the turn ended
-          // (the stray "Thinking…"/empty containers, 2026-08-26).
-          setTimeout(function() {
-            tokenAccum = '';
-            renderHitlCard(nextApproval);
-          }, 40);
-        },
-        onDone: function(doneData) {
-          KS.hideTyping(approvalTypingEl);
-          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          if (doneData && doneData.error) {
-            endTurn();
-            return;
-          }
-          if (card.classList.contains('hitl-error')) {
-            endTurn();
-            return;
-          }
-          // Truncated close (browser "network error" on a long tool call):
-          // the server is often still running. Do not stamp Approved or
-          // Error — reconcile with durable truth instead (2026-09-01).
-          if (!doneData) {
-            _resyncDelivery('approve-truncated');
-            return;
-          }
-          var okLabel = action === 'deny' ? 'Denied \u2717'
-            : (scope === 'yolo' ? 'YOLO on \u2713'
-              : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
-          setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
-
-          if (scope === 'tool' && KS.toast) {
-            KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
-          }
-          if (scope === 'yolo' && KS.toast) {
-            KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
-          }
-
-          var interrupted = !!(doneData && doneData.interrupted);
-          // Same rule as the main onDone: never after a painted reply
-          // (sequential approvals clear tokenAccum/currentMsgEl — a later
-          // resume terminal with cleared state used to print this UNDER
-          // the successful answer).
-          if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval
-              && !_turnPainted) {
-            appendAssistantText('_No response received._');
-          }
-
-          if (doneData && (doneData.cost || doneData.tokens)) {
-            if (currentMsgEl) {
-              var meta = currentMsgEl.querySelector('.message-meta');
-              if (meta) {
-                var _toksLabel = ti('tokens', 'tokens');
-                meta.innerHTML = '<span dir="auto">' + (doneData.tokens ? doneData.tokens.toLocaleString() + ' ' + _toksLabel : '') +
-                  (doneData.cost ? ' \u2022 $' + doneData.cost.toFixed(4) : '') +
-                  (doneData.duration_ms ? ' \u2022 ' + (doneData.duration_ms / 1000).toFixed(1) + 's' : '') +
-                  '</span>';
-              }
-            }
-          }
-
-          if (interrupted || _awaitingApproval) {
-            activeStream = null;
-            if (!_awaitingApproval) pauseForApproval(null);
-          } else {
-            endTurn();
-          }
-          if (showArchived) loadArchivedSessions(); else loadSessions();
-        },
-        onError: function(errMsg) {
-          KS.hideTyping(approvalTypingEl);
-          if (activeTypingEl) { KS.hideTyping(activeTypingEl); activeTypingEl = null; }
-          // A painted resume or an in-flight turn is not "Approval failed".
-          // The HITL card "Error: network error" + leftover Thinking row
-          // while the answer sat underneath was this path (2026-09-01).
-          if (_turnPainted || tokenAccum || _isGenerating || _awaitingReply) {
-            _resyncDelivery('approve-sse-fail');
-            return;
-          }
-          setCardState('error', 'Error: ' + truncateStr(String(errMsg || 'Approval failed'), 120));
-          appendAssistantText('_Approval failed: ' + escapeHtml(String(errMsg || 'Error')) + '_');
-          endTurn();
+      fetch(approvalUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        credentials: 'same-origin',
+      }).then(function(r) {
+        return r.json().then(function(body) {
+          return { status: r.status, body: body || {} };
+        }).catch(function() {
+          return { status: r.status, body: {} };
+        });
+      }).then(function(res) {
+        if (res.status === 409) {
+          setCardState('error', 'No longer pending');
+          _resyncDelivery('approve-409');
+          return;
         }
+        if (res.status >= 400 || (res.body && res.body.ok === false)) {
+          setCardState('error', 'Error: ' + truncateStr(String((res.body && (res.body.error || res.body.reason)) || res.status), 120));
+          return;
+        }
+        _awaitingReply = true;
+        if (!activeStream) {
+          if (typeof _reopenSseRef === 'function') {
+            try { _reopenSseRef('approve-json'); } catch (eRe) { /* ignore */ }
+          }
+          _resyncDelivery('approve-json');
+        }
+      }).catch(function(err) {
+        setCardState('error', 'Error: ' + truncateStr(String((err && err.message) || 'Approval failed'), 120));
       });
     }
 
@@ -4875,7 +4753,7 @@
               msg = KazmaTurnDocument.hydrateMessage(msg);
               content = msg.content || content;
             }
-            appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
+            var painted = appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
               activity: (window.KazmaTurnDocument && KazmaTurnDocument.activityForMessage)
                 ? KazmaTurnDocument.activityForMessage(msg)
                 : msg.activity,
@@ -4883,8 +4761,10 @@
               model: msg.model || '',
               turn_id: msg.turn_id || '',
             });
-            if (role === 'assistant' && msg.turn_id && window.KazmaTurnDocument && KazmaTurnDocument.fromMessage) {
-              _docs[String(msg.turn_id)] = KazmaTurnDocument.fromMessage(msg);
+            if (role === 'assistant' && window.KazmaTurnDocument && KazmaTurnDocument.fromMessage) {
+              var hydratedDoc = KazmaTurnDocument.fromMessage(msg);
+              if (msg.turn_id) _docs[String(msg.turn_id)] = hydratedDoc;
+              _paintHitlFromDoc(painted, hydratedDoc);
             }
           }
         });
@@ -5403,6 +5283,52 @@
     }
   }
 
+  function _paintHitlFromDoc(el, doc) {
+    var parts = (doc && doc.parts) || [];
+    var hitl = null;
+    for (var i = parts.length - 1; i >= 0; i--) {
+      if (parts[i] && parts[i].type === 'hitl') { hitl = parts[i]; break; }
+    }
+    if (!hitl) return;
+    var state = String(hitl.state || 'pending');
+    var prev = currentMsgEl;
+    if (el) currentMsgEl = el;
+    try {
+      // A finished turn must not revive a live Approve card on refresh.
+      if (state === 'pending' && hitl.payload && doc.status !== 'done') {
+        renderHitlCard(hitl.payload);
+        return;
+      }
+      var host = el || currentMsgEl;
+      var card = host && host.querySelector && host.querySelector('.hitl-approval-card');
+      if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved')) {
+        renderHitlCard(hitl.payload);
+        host = el || currentMsgEl;
+        card = host && host.querySelector && host.querySelector('.hitl-approval-card');
+      }
+      if (!card) return;
+      card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+      if (state === 'timeout' || state === 'denied') {
+        card.className = 'hitl-approval-card hitl-denied';
+        var deniedActions = card.querySelector('.hitl-approval-actions');
+        if (deniedActions && !deniedActions.querySelector('.hitl-status')) {
+          deniedActions.innerHTML = '<span class="hitl-status hitl-denied">' +
+            escapeHtml(state === 'timeout'
+              ? 'Approval timed out — continuing without this tool.'
+              : 'Denied') + '</span>';
+        }
+      } else if (state === 'approved') {
+        card.className = 'hitl-approval-card hitl-approved';
+        var okActions = card.querySelector('.hitl-approval-actions');
+        if (okActions && !okActions.querySelector('.hitl-status')) {
+          okActions.innerHTML = '<span class="hitl-status hitl-approved">Approved</span>';
+        }
+      }
+    } finally {
+      currentMsgEl = prev || el;
+    }
+  }
+
   /**
    * Law 3: the only DOM writer for the live assistant bubble + restored CoT.
    * Transports mutate the in-memory TurnDocument; this paints it.
@@ -5462,6 +5388,7 @@
     }
     var activity = TD.activityOf(doc.parts);
     _syncCotPanel(el, activity, doc.status, meta);
+    _paintHitlFromDoc(el, doc);
     _rescueTurnDom(el);
     if (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done') {
       _awaitingReply = false;

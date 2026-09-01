@@ -107,6 +107,20 @@ class TestReplay:
         assert frames == []
         assert gap is False
 
+    def test_stale_cursor_after_restart_is_a_gap(self) -> None:
+        """Process crash wipes the in-memory journal; last_event_id must resync."""
+        journal = TurnJournal()
+        frames, gap = journal.replay("never-seen", 42)
+        assert frames == []
+        assert gap is True
+
+    def test_cursor_ahead_of_head_is_a_gap(self) -> None:
+        journal = TurnJournal()
+        journal.append("t1", {"type": "token"})
+        frames, gap = journal.replay("t1", 99)
+        assert frames == []
+        assert gap is True
+
     def test_cursor_predates_retention_reports_gap(self) -> None:
         journal = TurnJournal(max_events_per_thread=3)
         for i in range(10):  # retains seqs 8,9,10
