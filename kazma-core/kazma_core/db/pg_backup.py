@@ -70,6 +70,16 @@ KAZMA_PG_TABLES: list[str] = [
     # Document job queue (auto-created by documents/jobs_pg.py)
     "document_jobs",
     "document_job_events",
+    # Document catalog / ACL (documents/repository_pg.py) — required when
+    # KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto (audit H-13 / §21A).
+    "documents",
+    "document_blobs",
+    "document_versions",
+    "document_artifacts",
+    "document_acl",
+    "document_tombstones",
+    "document_chunks",
+    "document_audit_events",
 ]
 
 # How many raw .dump files stay on local disk. These are staging, not the

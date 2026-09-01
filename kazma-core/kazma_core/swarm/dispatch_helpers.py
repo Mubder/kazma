@@ -7,7 +7,7 @@ from typing import Any
 from kazma_core.swarm.blackboard import BlackboardStore, SwarmDispatchContext
 from kazma_core.swarm.task import SwarmTask, WorkerResult
 
-__all__ = ["NO_DEADLINE_SENTINEL", "WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "resolve_max_concurrent", "wait_timeout"]
+__all__ = ["NO_DEADLINE_SENTINEL", "WORKER_TYPE_ALIASES", "aggregate_outputs", "build_dispatch_context", "build_handoff_context", "build_result_metadata", "normalize_worker_type", "overall_status", "pattern_dispatch_context", "resolve_max_concurrent", "wait_timeout"]
 
 # Map free-form worker type aliases to canonical WorkerConfig.type values
 WORKER_TYPE_ALIASES: dict[str, str] = {
@@ -108,6 +108,35 @@ def build_handoff_context(
     return context_text
 
 
+def pattern_dispatch_context(
+    task: SwarmTask,
+    *,
+    blackboard: BlackboardStore | None = None,
+    extra: dict[str, Any] | None = None,
+    context_text: str | None = None,
+    system_prompt: str = "",
+) -> SwarmDispatchContext:
+    """One context builder for every swarm pattern (audit H-10).
+
+    Always injects ``workspace_id`` (and keeps ``commitment_scope`` already
+    on ``task.metadata``). Patterns must not assemble metadata by hand.
+    """
+    meta = dict(task.metadata or {})
+    ws = getattr(task, "workspace_id", None)
+    if ws and "workspace_id" not in meta:
+        meta["workspace_id"] = ws
+    if extra:
+        meta.update(extra)
+    return SwarmDispatchContext(
+        task.context if context_text is None else context_text,
+        blackboard=blackboard,
+        metadata=meta,
+        task_id=task.id,
+        task_type=task.type.value,
+        system_prompt=system_prompt,
+    )
+
+
 def build_dispatch_context(
     task: SwarmTask,
     *,
@@ -117,18 +146,8 @@ def build_dispatch_context(
     """Build context passed to worker.dispatch()."""
     if blackboard is None:
         return task.context
-    # Carry the per-task workspace_id into metadata so the worker path can
-    # set up the workspace_scope (Phase 3) and env_context honors it.
-    meta = dict(task.metadata)
-    if getattr(task, "workspace_id", None) and "workspace_id" not in meta:
-        meta["workspace_id"] = task.workspace_id
-    return SwarmDispatchContext(
-        task.context,
-        blackboard=blackboard,
-        metadata=meta,
-        task_id=task.id,
-        task_type=task.type.value,
-        system_prompt=system_prompt,
+    return pattern_dispatch_context(
+        task, blackboard=blackboard, system_prompt=system_prompt
     )
 
 

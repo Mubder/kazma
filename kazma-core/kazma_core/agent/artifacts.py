@@ -222,13 +222,15 @@ class ArtifactStore:
             except ValueError:
                 pass
         key = ref if ref.startswith(_PROPOSAL_PREFIX) else f"{_PROPOSAL_PREFIX}{ref}"
+        tenant = tenant_id or "default"
         with self._connect() as conn:
             row = conn.execute(
                 """
                 SELECT value FROM agent_artifacts
-                WHERE key = ? ORDER BY updated_at DESC LIMIT 1
+                WHERE key = ? AND tenant_id = ?
+                ORDER BY updated_at DESC LIMIT 1
                 """,
-                (key,),
+                (key, tenant),
             ).fetchone()
         if row is None:
             return None
@@ -322,9 +324,9 @@ class ArtifactStore:
             conn.execute(
                 """
                 UPDATE agent_artifacts SET kind = 'proposal_posted', updated_at = ?
-                WHERE key = ?
+                WHERE key = ? AND tenant_id = ?
                 """,
-                (time.time(), f"{_PROPOSAL_PREFIX}{pid}"),
+                (time.time(), f"{_PROPOSAL_PREFIX}{pid}", tenant_id or "default"),
             )
 
     # ── GC (wired into the commitment-GC cadence, not a new sweeper) ──

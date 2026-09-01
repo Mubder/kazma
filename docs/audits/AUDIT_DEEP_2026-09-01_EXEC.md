@@ -31,7 +31,8 @@ Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`, `_hitlAlreadyClai
 - **2** Honest suite: T-6, T-1 (do **not** count commitment denials as tool failures; register dummy tools), T-4 retarget, T-5. **Shipped.**
 - **3** Real critical: C-2 importer order + M-9/M-10/M-11. **Shipped.**
 - **4** HITL-adjacent: H-9, M-3, H-8, T-2. **Shipped.**
-- **5–8** Isolation, swarm reliability, hygiene, SSRF last.
+- **5** Isolation / cron / PG docs / workspace_id: H-1, H-2, H-13, H-10/H-11. **Shipped.**
+- **6–8** Swarm reliability, hygiene, SSRF last.
 
 Industrial minimum if we stop early: Wave 1 + C-2 + T-4 retarget.
 

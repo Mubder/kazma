@@ -126,6 +126,7 @@ class TaskStore:
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS validation_schema TEXT DEFAULT '';
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS aggregation TEXT DEFAULT '';
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS timeout DOUBLE PRECISION;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS workspace_id TEXT;
             CREATE TABLE IF NOT EXISTS kazma_swarm_worker_metrics (
                 worker TEXT NOT NULL,
                 date TEXT NOT NULL,
@@ -157,6 +158,7 @@ class TaskStore:
                 ("validation_schema", "TEXT DEFAULT ''"),
                 ("aggregation", "TEXT DEFAULT ''"),
                 ("timeout", "REAL"),
+                ("workspace_id", "TEXT"),
             ]
             for col_name, col_def in migrations:
                 if col_name not in existing_cols:
@@ -227,11 +229,12 @@ class TaskStore:
                     INSERT INTO kazma_swarm_tasks (
                         id, type, prompt, status, workers, result, context,
                         dependencies, fallback_chain, validation_schema, aggregation,
-                        timeout, created_at, started_at, completed_at, cost, tokens, metadata
+                        timeout, created_at, started_at, completed_at, cost, tokens,
+                        metadata, workspace_id
                     ) VALUES (
                         %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s,
                         %s::jsonb, %s::jsonb, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s::jsonb
+                        %s, %s, %s, %s, %s, %s, %s::jsonb, %s
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         type = EXCLUDED.type,
@@ -250,7 +253,8 @@ class TaskStore:
                         completed_at = EXCLUDED.completed_at,
                         cost = EXCLUDED.cost,
                         tokens = EXCLUDED.tokens,
-                        metadata = EXCLUDED.metadata
+                        metadata = EXCLUDED.metadata,
+                        workspace_id = EXCLUDED.workspace_id
                     """,
                     (
                         task.id, type_s, task.prompt, status_s, workers_j,
@@ -261,6 +265,7 @@ class TaskStore:
                         getattr(task, "timeout", None),
                         task.created_at, task.started_at, task.completed_at,
                         cost, tokens, meta_j,
+                        getattr(task, "workspace_id", None),
                     ),
                 )
                 return
@@ -270,8 +275,9 @@ class TaskStore:
                    (id, type, prompt, status, workers, result,
                     context, dependencies, fallback_chain,
                     validation_schema, aggregation, timeout,
-                    created_at, started_at, completed_at, cost, tokens, metadata)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    created_at, started_at, completed_at, cost, tokens,
+                    metadata, workspace_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task.id, type_s, task.prompt, status_s, workers_j, result_json,
                     task.context or "", deps_j, fb_j, vs,
@@ -279,6 +285,7 @@ class TaskStore:
                     getattr(task, "timeout", None),
                     task.created_at, task.started_at, task.completed_at,
                     cost, tokens, meta_j,
+                    getattr(task, "workspace_id", None),
                 ),
             )
             conn.commit()
@@ -746,6 +753,8 @@ class TaskStore:
         task.aggregation = row.get("aggregation") or ""
         if row.get("timeout") is not None:
             task.timeout = float(row["timeout"])
+        if row.get("workspace_id"):
+            task.workspace_id = row["workspace_id"]
         return task
 
     @staticmethod
@@ -786,4 +795,6 @@ class TaskStore:
             task.aggregation = row["aggregation"] or ""
         if "timeout" in row.keys() and row["timeout"] is not None:
             task.timeout = float(row["timeout"])
+        if "workspace_id" in row.keys() and row["workspace_id"]:
+            task.workspace_id = row["workspace_id"]
         return task

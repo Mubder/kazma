@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 5 — isolation, cron delivery, PG docs, workspace_id (2026-09-01)
+
+H-1: proposal resolve/posted filter by tenant_id. H-2: cron send_message
+registers discord + slack via one GatewayManager handler (platform: prefix;
+chat_id stays out of graph state). H-13: eight document-catalog tables added
+to KAZMA_PG_TABLES with a DDL-introspection guard. H-10/H-11: one
+pattern_dispatch_context injects workspace_id; TaskStore persists/hydrates it.
+
 ## Audit 2026-09-01 Wave 4 — HITL-adjacent, registry-safe (2026-09-01)
 
 H-9: swarm `is_danger_tool()` uses TOOL_TIERS danger floor + list ADDS

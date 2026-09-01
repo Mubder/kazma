@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "create_graph_handler",
+    "make_gateway_send_handler",
 ]
 
 
@@ -358,6 +359,87 @@ async def _majlis_fast_path_reply(text: str, *, sender_id: str = "") -> str | No
         return await maybe_majlis_short_circuit(text, sender_id=sender_id)
     except Exception:
         return None
+
+
+def make_gateway_send_handler(manager: Any, store: Any):
+    """send_message backend: parse platform: off target_id, GatewayManager.send.
+
+    Used for telegram, discord, and slack so cron delivery_target fires
+    on every configured platform (audit H-2). SessionStore is keyed by
+    thread ids (gw-…), never by platform-prefixed target ids.
+    """
+
+    async def _handler(target_id: str, text: str, **kwargs: Any) -> str:
+        platform = "telegram"
+        raw = str(target_id)
+        if ":" in raw:
+            platform = raw.split(":", 1)[0].lower() or "telegram"
+        ctx = None
+        if raw.startswith("gw-"):
+            ctx = await store.get(target_id)
+        if not ctx:
+            ctx = {"thread_id": target_id}
+        out_ctx = dict(ctx)
+        if platform == "telegram":
+            out_ctx["parse_mode"] = "HTML"
+            out_text: str = md_to_tg_html(text)
+        else:
+            out_text = text
+        out_ctx = apply_hitl_approval_markup(
+            out_ctx,
+            platform=platform,
+            hitl_approval=kwargs.get("hitl_approval")
+            if isinstance(kwargs.get("hitl_approval"), dict)
+            else None,
+        )
+        if kwargs.get("reply_markup"):
+            out_ctx["reply_markup"] = kwargs["reply_markup"]
+        raw_attachments = kwargs.get("attachments")
+        outbound_attachments: list[Attachment] = []
+        if raw_attachments and isinstance(raw_attachments, list):
+            for att in raw_attachments:
+                if isinstance(att, dict):
+                    if att.get("data"):
+                        outbound_attachments.append(Attachment(
+                            kind=att.get("kind", "file"),
+                            filename=att.get("filename", "file"),
+                            mime=att.get("mime", "application/octet-stream"),
+                            data=att["data"],
+                        ))
+                    elif att.get("path"):
+                        from pathlib import Path
+                        fpath = Path(att["path"]).expanduser().resolve()
+                        if fpath.exists() and fpath.is_file():
+                            outbound_attachments.append(Attachment(
+                                kind=att.get("kind", "document"),
+                                filename=fpath.name,
+                                mime=att.get("mime", "application/octet-stream"),
+                                data=fpath.read_bytes(),
+                            ))
+        if platform == "telegram":
+            from kazma_gateway.agent_handler.attachments import find_auto_attach_paths
+
+            for fpath in find_auto_attach_paths(text):
+                if any(a.filename == fpath.name for a in outbound_attachments):
+                    continue
+                try:
+                    outbound_attachments.append(Attachment(
+                        kind="document",
+                        filename=fpath.name,
+                        mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
+                        data=fpath.read_bytes(),
+                    ))
+                except Exception as exc:
+                    logger.warning("[telegram] auto-attach file failed: %s", exc)
+
+        outbound = OutboundMessage(
+            target_id=target_id, text=out_text, context_metadata=out_ctx,
+            attachments=outbound_attachments,
+        )
+        await manager.send(outbound)
+        return f"sent:{target_id}"
+
+    return _handler
 
 
 def create_graph_handler(
@@ -2176,87 +2258,18 @@ def create_graph_handler(
             logger.warning("[agent-handler] /fork failed: %s", exc, exc_info=True)
             return f"⚠️ Could not fork from iteration `{iteration}`: {exc}"
 
-    # ── Register telegram backend with core's send_message dispatcher ──
+    # ── Register send_message backends (telegram + discord + slack) ──
+    # Cron captures delivery_target as "discord:…" / "slack:…" at schedule
+    # time (AGENTS.md §16B). Only telegram was registered, so those fires
+    # returned "no backend" (audit H-2). One handler: parse platform: off
+    # target_id and route through GatewayManager.send. chat_id stays out of
+    # graph state.
     try:
         from kazma_core.tools.send_message import register_message_backend
 
-        async def _telegram_backend_handler(target_id: str, text: str, **kwargs: Any) -> str:
-            # SessionStore is keyed by thread ids (gw-…), never by the
-            # platform-prefixed target ids (telegram:…) this dispatcher
-            # receives — the old unconditional _store.get(target_id) could
-            # never hit. Only a genuine thread id (gw-…) resolves.
-            ctx = None
-            if str(target_id).startswith("gw-"):
-                ctx = await _store.get(target_id)
-            if not ctx:
-                ctx = {"thread_id": target_id}
-            # Always copy — HITL markup must not mutate a shared session ctx.
-            out_ctx = dict(ctx)
-            # target_id is prefixed "telegram:..." — convert markdown to HTML
-            # so worker output renders instead of showing literal markers.
-            if str(target_id).startswith("telegram:"):
-                out_ctx["parse_mode"] = "HTML"
-                out_text: str = md_to_tg_html(text)
-            else:
-                out_text = text
-            out_ctx = apply_hitl_approval_markup(
-                out_ctx,
-                platform="telegram",
-                hitl_approval=kwargs.get("hitl_approval")
-                if isinstance(kwargs.get("hitl_approval"), dict)
-                else None,
-            )
-            if kwargs.get("reply_markup"):
-                out_ctx["reply_markup"] = kwargs["reply_markup"]
-            # Build attachments from kwargs (file delivery via send_file_message).
-            raw_attachments = kwargs.get("attachments")
-            outbound_attachments: list[Attachment] = []
-            if raw_attachments and isinstance(raw_attachments, list):
-                for att in raw_attachments:
-                    if isinstance(att, dict):
-                        if att.get("data"):
-                            outbound_attachments.append(Attachment(
-                                kind=att.get("kind", "file"),
-                                filename=att.get("filename", "file"),
-                                mime=att.get("mime", "application/octet-stream"),
-                                data=att["data"],
-                            ))
-                        elif att.get("path"):
-                            from pathlib import Path
-                            fpath = Path(att["path"]).expanduser().resolve()
-                            if fpath.exists() and fpath.is_file():
-                                outbound_attachments.append(Attachment(
-                                    kind=att.get("kind", "document"),
-                                    filename=fpath.name,
-                                    mime=att.get("mime", "application/octet-stream"),
-                                    data=fpath.read_bytes(),
-                                ))
-
-            # Auto-extract generated document paths mentioned in response text.
-            # Containment is required: model text is untrusted (audit H-4).
-            from kazma_gateway.agent_handler.attachments import find_auto_attach_paths
-
-            for fpath in find_auto_attach_paths(text):
-                if any(a.filename == fpath.name for a in outbound_attachments):
-                    continue
-                try:
-                    outbound_attachments.append(Attachment(
-                        kind="document",
-                        filename=fpath.name,
-                        mime="application/pdf" if fpath.suffix.lower() == ".pdf" else "application/octet-stream",
-                        data=fpath.read_bytes(),
-                    ))
-                except Exception as exc:
-                    logger.warning("[telegram] auto-attach file failed: %s", exc)
-
-            outbound = OutboundMessage(
-                target_id=target_id, text=out_text, context_metadata=out_ctx,
-                attachments=outbound_attachments,
-            )
-            await manager.send(outbound)
-            return f"sent:{target_id}"
-
-        register_message_backend("telegram", _telegram_backend_handler)
+        handler = make_gateway_send_handler(manager, _store)
+        for name in ("telegram", "discord", "slack"):
+            register_message_backend(name, handler)
     except ImportError:
         logger.debug("[agent-handler] kazma_core not available — backend registration skipped")
 
