@@ -301,12 +301,13 @@
   }
 
   function _attachJournal(reason) {
-    if (activeStream) return;
+    if (activeStream || _attachInFlight) return;
     if (!chatSessionId) return;
     var stream = window.KazmaStream;
     if (!stream || typeof stream.sse !== 'function') return;
     if (_reopenCount >= _REOPEN_MAX) return;
     _reopenCount++;
+    _attachInFlight = true;
     var cursor = _lastSeqSeen > 0 ? _lastSeqSeen : 0;
     console.warn('[KazmaChat] Attaching journal (' + (reason || '?') + ') from seq=' + cursor);
     try { noteTurnActivity(); } catch (eN) { /* ignore */ }
@@ -314,11 +315,15 @@
     var callbacks = (typeof _buildSseCallbacks === 'function')
       ? _buildSseCallbacks(epoch)
       : _defaultAttachCallbacks(epoch);
-    activeStream = stream.sse('/api/chat/stream', {
-      session_id: chatSessionId,
-      last_event_id: cursor,
-      workspace_id: _activeWorkspaceId || '',
-    }, callbacks);
+    try {
+      activeStream = stream.sse('/api/chat/stream', {
+        session_id: chatSessionId,
+        last_event_id: cursor,
+        workspace_id: _activeWorkspaceId || '',
+      }, callbacks);
+    } finally {
+      _attachInFlight = false;
+    }
   }
   function _defaultAttachCallbacks(epoch) {
     function _mine() { return epoch === _sseEpoch; }
@@ -372,6 +377,22 @@
           type: 'hitl',
           state: 'pending',
           tool: (data && data.tool) || '',
+          interrupt_id: (data && data.interrupt_id) || '',
+          payload: data || {},
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
+        });
+      },
+      onHitl: function(data) {
+        if (!_mine()) return;
+        var st = String((data && data.state) || 'pending');
+        if (st === 'pending') pauseForApproval(data);
+        else _awaitingApproval = false;
+        applyTurnEvent({
+          type: 'hitl',
+          state: st,
+          tool: (data && data.tool) || '',
+          interrupt_id: (data && data.interrupt_id) || '',
           payload: data || {},
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
@@ -505,6 +526,9 @@
       var messages = pair[1] || [];
       var generating = !!status.generating;
       var paused = !!status.paused;
+      _serverGenerating = generating;
+      _serverPaused = paused;
+      _serverHitl = (status.hitl && typeof status.hitl === 'object') ? status.hitl : null;
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
       // Still running server-side → keep waiting honestly AND re-attach a
@@ -917,6 +941,10 @@
    */
   var _isGenerating = false;
   var _awaitingApproval = false;
+  var _serverGenerating = false;
+  var _serverPaused = false;
+  var _serverHitl = null;
+  var _attachInFlight = false;
   /** Progress-idle failsafe — only fires when NO activity for IDLE ms (not wall-clock). */
   var _turnWatchdogTimer = null;
   /** Desync healer: if agent store is idle but Stop is still on, release. */
@@ -2263,7 +2291,8 @@
         // tab switch) is included: the interrupt event may have fired AFTER
         // this tab's stream dropped, so `interrupted` stays false and the
         // pending approval would otherwise be invisible until auto-deny.
-        if ((interrupted || truncated) && !hasInlineApprovalCard() && !_awaitingApproval) {
+        if ((interrupted || truncated) && !hasInlineApprovalCard() && !_awaitingApproval
+            && !_serverGenerating) {
           setTimeout(recoverMissedApproval, 1200);
         }
         }
@@ -2280,6 +2309,29 @@
           type: 'hitl',
           state: 'pending',
           tool: (data && data.tool) || '',
+          interrupt_id: (data && data.interrupt_id) || '',
+          payload: data || {},
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
+        });
+        refreshSessionsSoon();
+      },
+      onHitl: function(data) {
+        if (!_mine()) return;
+        var st = String((data && data.state) || 'pending');
+        if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
+        if (st === 'pending') {
+          _clearStatusStrip();
+          activeTypingEl = null;
+          pauseForApproval(data);
+        } else {
+          _awaitingApproval = false;
+        }
+        applyTurnEvent({
+          type: 'hitl',
+          state: st,
+          tool: (data && data.tool) || '',
+          interrupt_id: (data && data.interrupt_id) || '',
           payload: data || {},
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
@@ -2300,7 +2352,7 @@
         // card is already on screen. Overwriting it with "network error"
         // was the live-vs-refresh mismatch (2026-09-01).
         if (_awaitingApproval) {
-          setTimeout(recoverMissedApproval, 400);
+          if (!_serverGenerating) setTimeout(recoverMissedApproval, 400);
           return;
         }
         // One cursor resume while the turn is still awaited — only possible
@@ -2335,7 +2387,7 @@
         // A dead stream can also mean the turn parked on a HITL interrupt
         // server-side that this tab never rendered — surface the approval
         // card from server truth so the user can act before auto-deny.
-        setTimeout(recoverMissedApproval, 800);
+        if (!_serverGenerating) setTimeout(recoverMissedApproval, 800);
         if (msg && window.showToast) {
           try { window.showToast(String(msg), 'error', 4000); } catch (_t) {}
         }
@@ -3931,8 +3983,21 @@
   // RIGHT pending approval instead of guessing (audit P2).
   var _lastInterruptedThreadId = '';
 
+  function _openHitlPart() {
+    var doc = _docs[_liveTurnId] || null;
+    if (!doc || !doc.parts) return null;
+    for (var i = doc.parts.length - 1; i >= 0; i--) {
+      if (doc.parts[i] && doc.parts[i].type === 'hitl') return doc.parts[i];
+    }
+    return null;
+  }
+
   function recoverMissedApproval() {
     if (hasInlineApprovalCard() || _awaitingApproval) return;
+    if (_serverGenerating && !_serverPaused) return;
+    var existing = _openHitlPart();
+    if (existing && String(existing.state || 'pending') !== 'pending') return;
+    if (existing && String(existing.state || '') === 'pending') return;
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(payload) {
@@ -3957,6 +4022,7 @@
           type: 'hitl',
           state: 'pending',
           tool: hit.tool_name || hit.tool || 'unknown',
+          interrupt_id: hit.interrupt_id || '',
           payload: {
             thread_id: hit.thread_id,
             kind: hit.kind || 'security',
@@ -3964,6 +4030,7 @@
             args: hit.arguments || hit.args || {},
             message: hit.message || '',
             yolo_allowed: hit.yolo_allowed !== false,
+            interrupt_id: hit.interrupt_id || '',
           },
           turn_id: _liveTurnId,
           source: 'recover',
@@ -4219,6 +4286,7 @@
         scope: scope,
         session_id: chatSessionId || '',
         tool: data.tool || '',
+        interrupt_id: data.interrupt_id || '',
       };
 
       if (!currentMsgEl) {
@@ -4229,6 +4297,7 @@
         type: 'hitl',
         state: hitlState,
         tool: data.tool || '',
+        interrupt_id: data.interrupt_id || '',
         payload: data,
         turn_id: _liveTurnId,
         source: 'approve',
@@ -4248,6 +4317,22 @@
         });
       }).then(function(res) {
         if (res.status === 409) {
+          var running409 = !!(res.body && (res.body.running
+            || res.body.hitl_state === 'inflight'
+            || res.body.hitl_state === 'approved'));
+          if (running409) {
+            applyTurnEvent({
+              type: 'hitl', state: 'inflight', tool: data.tool || '',
+              interrupt_id: (res.body && res.body.interrupt_id) || data.interrupt_id || '',
+              payload: data, turn_id: _liveTurnId, source: 'approve-409',
+            });
+            _awaitingApproval = false;
+            _awaitingReply = true;
+            if (!activeStream && typeof _reopenSseRef === 'function') {
+              try { _reopenSseRef('approve-409'); } catch (eRe) { /* ignore */ }
+            }
+            return;
+          }
           applyTurnEvent({
             type: 'hitl', state: 'error', tool: data.tool || '',
             payload: data, turn_id: _liveTurnId, source: 'approve-409',
@@ -4905,10 +4990,10 @@
         // Covers trailing-pending (turn still running → keep waiting) and
         // trailing-user (detached turn may exist) without any pollers —
         // live delivery arrives via the resumed WS cursor stream.
+        _reopenCount = 0;
         _resyncDelivery('load');
 
         scrollToBottomForce(); // session load shows the latest turn
-        checkPendingApprovals();
         updateContextBadge();
         refreshCapacity();
         _restoreUndeliveredOutbox(messages);
@@ -5009,6 +5094,10 @@
 
   function checkPendingApprovals() {
     if (!chatSessionId) return;
+    if (_serverGenerating && !_serverPaused) return;
+    if (hasInlineApprovalCard() || _awaitingApproval) return;
+    var existingHitl = _openHitlPart();
+    if (existingHitl && String(existingHitl.state || '') !== 'pending') return;
     // Resolve LangGraph thread_id from the sidebar session list (web sessions
     // use session_id ≠ thread_id — matching only session_id missed approvals).
     var threadId = '';
@@ -5432,13 +5521,19 @@
     if (el) currentMsgEl = el;
     try {
       // A finished turn must not revive a live Approve card on refresh.
+      // pending + generating + not paused = Approve already claimed and the
+      // persist lagged; paint a disabled card, not live buttons.
       if (state === 'pending' && hitl.payload && doc.status !== 'done') {
-        renderHitlCard(hitl.payload);
-        return;
+        if (_serverGenerating && !_serverPaused) {
+          state = 'inflight';
+        } else {
+          renderHitlCard(hitl.payload);
+          return;
+        }
       }
       var host = el || currentMsgEl;
       var card = host && host.querySelector && host.querySelector('.hitl-approval-card');
-      if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved')) {
+      if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved' || state === 'inflight' || state === 'settled')) {
         renderHitlCard(hitl.payload);
         host = el || currentMsgEl;
         card = host && host.querySelector && host.querySelector('.hitl-approval-card');
@@ -5456,11 +5551,12 @@
             (state === 'error' ? 'error' : 'denied') + '">' +
             escapeHtml(errLabel) + '</span>';
         }
-      } else if (state === 'approved') {
+      } else if (state === 'approved' || state === 'inflight' || state === 'settled') {
         card.className = 'hitl-approval-card hitl-approved';
         var okActions = card.querySelector('.hitl-approval-actions');
         if (okActions) {
-          okActions.innerHTML = '<span class="hitl-status hitl-approved">Approved</span>';
+          var okLabel = state === 'inflight' ? 'Approved — running\u2026' : 'Approved';
+          okActions.innerHTML = '<span class="hitl-status hitl-approved">' + okLabel + '</span>';
         }
       }
     } finally {

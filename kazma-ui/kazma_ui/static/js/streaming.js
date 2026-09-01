@@ -161,6 +161,13 @@ var KazmaStream = (function() {
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;
+          case 'hitl':
+            if (callbacks.onHitl) callbacks.onHitl(data);
+            else if (data && String(data.state || 'pending') === 'pending'
+                && callbacks.onApprovalRequired) {
+              callbacks.onApprovalRequired(data);
+            } else if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'approval_timeout':
             try {
               if (window.KazmaChat && typeof window.KazmaChat.markApprovalTimedOut === 'function') {

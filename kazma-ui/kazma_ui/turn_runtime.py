@@ -221,10 +221,44 @@ async def close_turn(
             except Exception:
                 logger.debug("[turn] close_turn aget_state failed", exc_info=True)
         paused = _snapshot_paused(snap)
+        running = False
+        claimed = False
+        if thread_id:
+            try:
+                from kazma_ui.active_turns import is_turn_running
+
+                running = is_turn_running(thread_id)
+            except Exception:
+                running = False
+            try:
+                from kazma_ui.hitl_status import is_resume_claimed
+
+                claimed = is_resume_claimed(thread_id)
+            except Exception:
+                claimed = running
+        leftover_claimed = False
+        if paused and thread_id:
+            try:
+                from kazma_ui.hitl_status import persisted_hitl_for_thread
+
+                part = persisted_hitl_for_thread(thread_id)
+                st = str((part or {}).get("state") or "").lower()
+                leftover_claimed = st in (
+                    "approved",
+                    "denied",
+                    "inflight",
+                    "settled",
+                    "done",
+                )
+            except Exception:
+                leftover_claimed = False
+        # A leftover checkpoint interrupt after Approve must not re-open
+        # the row as pending. A live resume (running/claimed) is the same.
+        stale_pause = paused and (running or claimed or leftover_claimed)
         if interrupted is None:
-            interrupted = paused
+            interrupted = bool(paused) and not stale_pause
         else:
-            interrupted = bool(interrupted) or paused
+            interrupted = bool(interrupted) or (bool(paused) and not stale_pause)
 
         from kazma_ui.reply_sink import resolve_reply_text, resolve_reply_turn
 

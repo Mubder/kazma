@@ -69,18 +69,22 @@ def _hitl_persist_parts(
     interrupted: bool,
     hitl_payload: dict[str, Any] | None,
     *,
-    state: str = "pending",
+    state: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """SessionStore parts so refresh can rebuild the HITL card."""
     from kazma_ui.turn_document import parts_from_stream
 
     parts = parts_from_stream(streamed=content or "", final=content or "")
-    if interrupted and hitl_payload:
+    if hitl_payload:
+        payload = dict(hitl_payload)
+        iid = str(payload.get("interrupt_id") or "")
+        resolved = str(state or "") or ("pending" if interrupted else "settled")
         parts.append({
             "type": "hitl",
-            "tool": str(hitl_payload.get("tool") or ""),
-            "state": str(state or "pending"),
-            "payload": dict(hitl_payload),
+            "tool": str(payload.get("tool") or ""),
+            "state": resolved,
+            "interrupt_id": iid,
+            "payload": payload,
         })
     return parts
 
@@ -93,22 +97,46 @@ def stamp_hitl_part_state(
     thread_id: str = "",
     tool: str = "",
     payload: dict[str, Any] | None = None,
+    interrupt_id: str = "",
 ) -> None:
-    """Merge a HITL state transition into the open turn row. Never raises."""
+    """Merge a HITL state transition into the open turn row. Never raises.
+
+    Empty content is intentional: ``upsert_reply`` keeps the longer stored
+    text. Payload from a previous pending part is kept by ``merge_hitl_part``.
+    """
     if not session_id or not reply_turn_id or not state:
         return
     try:
+        body = dict(payload) if isinstance(payload, dict) else {}
+        iid = str(
+            interrupt_id
+            or body.get("interrupt_id")
+            or ""
+        )
+        if iid:
+            body["interrupt_id"] = iid
+        if thread_id and not body.get("thread_id"):
+            body["thread_id"] = thread_id
+        if tool and not body.get("tool"):
+            body["tool"] = tool
+        open_turn = str(state).lower() in (
+            "pending",
+            "approved",
+            "denied",
+            "inflight",
+        )
         persist_reply(
             session_id,
             reply_turn_id,
             "",
-            interrupted=True,
+            interrupted=open_turn,
             thread_id=thread_id,
             parts=[{
                 "type": "hitl",
-                "tool": str(tool or (payload or {}).get("tool") or ""),
+                "tool": str(tool or body.get("tool") or ""),
                 "state": str(state),
-                **({"payload": dict(payload)} if payload else {}),
+                "interrupt_id": iid,
+                "payload": body,
             }],
         )
     except Exception:
@@ -727,6 +755,21 @@ async def _stream_langgraph_events(
                                         "yolo_allowed", True
                                     ),
                                 }
+                                try:
+                                    from kazma_ui.turn_document import (
+                                        assign_interrupt_id,
+                                    )
+
+                                    assign_interrupt_id(
+                                        _hitl_payload_saved,
+                                        thread_id=thread_id,
+                                        interrupt=intr,
+                                    )
+                                except Exception:
+                                    logger.debug(
+                                        "[SSE] interrupt_id stamp skipped",
+                                        exc_info=True,
+                                    )
                                 yield await emit_j(
                                     "approval_required",
                                     _hitl_payload_saved,

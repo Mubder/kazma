@@ -246,6 +246,15 @@
         window.KazmaApp.setIsThinking(false);
       }
       if (resp.status === 409 || body.reason === 'not_pending') {
+        if (body.running) {
+          if (statusEl) {
+            statusEl.textContent = t('dashboard.hitl_running', 'Running approved tool…');
+            statusEl.className = 'hitl-approval-status';
+            statusEl.style.display = 'inline-block';
+          }
+          refreshPending();
+          return;
+        }
         if (statusEl) {
           statusEl.textContent = t('dashboard.hitl_not_pending', 'No longer pending');
           statusEl.className = 'hitl-approval-status hitl-status-error';

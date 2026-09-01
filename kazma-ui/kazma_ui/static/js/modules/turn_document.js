@@ -49,9 +49,16 @@
           ts: p.ts || null,
         });
       } else if (kind === 'hitl') {
+        var hs = String(p.state || 'pending');
+        var htitle = 'Waiting for approval';
+        if (hs === 'approved' || hs === 'inflight') htitle = 'Approved';
+        else if (hs === 'denied') htitle = 'Denied';
+        else if (hs === 'timeout' || hs === 'error' || hs === 'settled' || hs === 'done') {
+          htitle = 'Approval resolved';
+        }
         rows.push({
           kind: 'status',
-          title: 'Waiting for approval',
+          title: htitle,
           detail: String(p.tool || p.detail || ''),
           state: 'info',
           ts: p.ts || null,
@@ -96,6 +103,93 @@
     return kind + ':' + JSON.stringify(part).slice(0, 80);
   }
 
+  var HITL_RANK = {
+    pending: 0,
+    approved: 1,
+    denied: 1,
+    inflight: 2,
+    settled: 3,
+    done: 3,
+    timeout: 3,
+    error: 3,
+  };
+
+  function hitlRank(state) {
+    var s = String(state || 'pending').toLowerCase();
+    return Object.prototype.hasOwnProperty.call(HITL_RANK, s) ? HITL_RANK[s] : 0;
+  }
+
+  function interruptIdOf(part) {
+    if (!part || typeof part !== 'object') return '';
+    if (part.interrupt_id) return String(part.interrupt_id);
+    if (part.payload && part.payload.interrupt_id) return String(part.payload.interrupt_id);
+    return '';
+  }
+
+  function mergeHitlPart(existing, incoming) {
+    if (!incoming || typeof incoming !== 'object') {
+      return existing && typeof existing === 'object' ? existing : {};
+    }
+    if (!existing || typeof existing !== 'object' || existing.type !== 'hitl') {
+      var fresh = {};
+      var fk;
+      for (fk in incoming) {
+        if (Object.prototype.hasOwnProperty.call(incoming, fk)) fresh[fk] = incoming[fk];
+      }
+      fresh.type = 'hitl';
+      return fresh;
+    }
+    var oldId = interruptIdOf(existing);
+    var newId = interruptIdOf(incoming);
+    if (oldId && newId && oldId !== newId) {
+      var nextGate = {};
+      var nk;
+      for (nk in incoming) {
+        if (Object.prototype.hasOwnProperty.call(incoming, nk)) nextGate[nk] = incoming[nk];
+      }
+      nextGate.type = 'hitl';
+      return nextGate;
+    }
+    if (hitlRank(incoming.state) < hitlRank(existing.state)) return existing;
+    var out = {};
+    var ek;
+    for (ek in existing) {
+      if (Object.prototype.hasOwnProperty.call(existing, ek)) out[ek] = existing[ek];
+    }
+    var ik;
+    for (ik in incoming) {
+      if (Object.prototype.hasOwnProperty.call(incoming, ik)) out[ik] = incoming[ik];
+    }
+    out.type = 'hitl';
+    var incPayload = incoming.payload;
+    var oldPayload = existing.payload;
+    if (!incPayload && oldPayload) out.payload = oldPayload;
+    else if (incPayload && oldPayload && typeof incPayload === 'object' && typeof oldPayload === 'object') {
+      var mp = {};
+      var pk;
+      for (pk in oldPayload) {
+        if (Object.prototype.hasOwnProperty.call(oldPayload, pk)) mp[pk] = oldPayload[pk];
+      }
+      for (pk in incPayload) {
+        if (Object.prototype.hasOwnProperty.call(incPayload, pk)) mp[pk] = incPayload[pk];
+      }
+      out.payload = mp;
+    }
+    var iid = newId || oldId;
+    if (iid) {
+      out.interrupt_id = iid;
+      if (out.payload && typeof out.payload === 'object' && !out.payload.interrupt_id) {
+        var pp = {};
+        for (pk in out.payload) {
+          if (Object.prototype.hasOwnProperty.call(out.payload, pk)) pp[pk] = out.payload[pk];
+        }
+        pp.interrupt_id = iid;
+        out.payload = pp;
+      }
+    }
+    return out;
+  }
+
   function activityToParts(activity) {
     var out = [];
     if (!Array.isArray(activity)) return out;
@@ -135,7 +229,7 @@
       if (seen[key]) {
         if (replace && part.type === 'hitl') {
           for (var ri = 0; ri < out.length; ri++) {
-            if (partKey(out[ri]) === key) { out[ri] = part; return; }
+            if (partKey(out[ri]) === key) { out[ri] = mergeHitlPart(out[ri], part); return; }
           }
         }
         return;
@@ -187,6 +281,13 @@
       return 'seq:' + String(ev.seq);
     }
     var t = String((ev && ev.type) || '');
+    if (t === 'hitl' || t === 'approval_required' || t === 'approval_needed'
+        || t === 'paused_for_approval') {
+      var iid = String((ev && (ev.interrupt_id
+        || (ev.payload && ev.payload.interrupt_id))) || '');
+      var hs = String((ev && ev.state) || '');
+      return 'hitl:' + iid + ':' + hs;
+    }
     var step = (ev && ev.step) || {};
     var c = String((ev && (ev.content || ev.reply || step.title || '')) || '');
     var st = String(step.state || ev.state || '');
@@ -278,7 +379,19 @@
       if (Array.isArray(ev.activity) && ev.activity.length) {
         next.parts = mergeParts(next.parts, activityToParts(ev.activity));
       }
-      next.status = (ev.open || ev.pending) ? 'paused' : 'done';
+      var hydratedHitl = null;
+      var hi;
+      for (hi = next.parts.length - 1; hi >= 0; hi--) {
+        if (next.parts[hi] && next.parts[hi].type === 'hitl') {
+          hydratedHitl = next.parts[hi];
+          break;
+        }
+      }
+      var hState = hydratedHitl ? String(hydratedHitl.state || 'pending') : '';
+      if (hState === 'pending' && (ev.open || ev.pending)) next.status = 'paused';
+      else if ((hState === 'approved' || hState === 'denied' || hState === 'inflight')
+          && (ev.open || ev.pending)) next.status = 'streaming';
+      else next.status = (ev.open || ev.pending) ? 'paused' : 'done';
       return next;
     }
     if (type === 'token' || type === 'llm_delta') {
@@ -305,14 +418,33 @@
       next.status = 'done';
       return next;
     }
-    if (type === 'hitl' || type === 'approval_needed' || type === 'paused_for_approval') {
+    if (type === 'hitl' || type === 'approval_needed' || type === 'paused_for_approval'
+        || type === 'approval_required') {
+      var hitlState = String(ev.state || 'pending');
+      var hitlPayload = ev.payload || ev;
+      var iid = String(ev.interrupt_id || (hitlPayload && hitlPayload.interrupt_id) || '');
       next.parts = mergeParts(next.parts, [{
         type: 'hitl',
         tool: String(ev.tool || (ev.step && ev.step.title) || ''),
-        state: String(ev.state || 'pending'),
-        payload: ev.payload || ev,
+        state: hitlState,
+        interrupt_id: iid,
+        payload: hitlPayload,
       }]);
-      next.status = 'paused';
+      var mergedHitl = null;
+      var mi;
+      for (mi = next.parts.length - 1; mi >= 0; mi--) {
+        if (next.parts[mi] && next.parts[mi].type === 'hitl') {
+          mergedHitl = next.parts[mi];
+          break;
+        }
+      }
+      var resolved = String((mergedHitl && mergedHitl.state) || hitlState);
+      if (resolved === 'pending') next.status = 'paused';
+      else if (resolved === 'approved' || resolved === 'denied' || resolved === 'inflight') {
+        next.status = 'streaming';
+      } else {
+        next.status = 'done';
+      }
       return next;
     }
     var extra = eventToParts(ev);
@@ -379,6 +511,8 @@
     activityOf: activityOf,
     activityForMessage: activityForMessage,
     mergeParts: mergeParts,
+    mergeHitlPart: mergeHitlPart,
+    hitlRank: hitlRank,
     partsFromStream: partsFromStream,
     splitStreamAndFinal: splitStreamAndFinal,
     empty: empty,

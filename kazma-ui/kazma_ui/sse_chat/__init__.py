@@ -1149,12 +1149,32 @@ def create_sse_chat_router(
         # Check if a detached turn is running for this thread (SSE or WS)
         is_running = thread_id and is_turn_running(thread_id)
         paused = bool(thread_id) and is_thread_paused(thread_id)
+        hitl: dict[str, Any] | None = None
+        if thread_id:
+            try:
+                from kazma_ui.hitl_status import persisted_hitl_for_thread
+
+                part = persisted_hitl_for_thread(thread_id)
+                if isinstance(part, dict):
+                    payload = part.get("payload") if isinstance(part.get("payload"), dict) else {}
+                    hitl = {
+                        "state": str(part.get("state") or "pending"),
+                        "tool": str(part.get("tool") or payload.get("tool") or ""),
+                        "interrupt_id": str(
+                            part.get("interrupt_id")
+                            or payload.get("interrupt_id")
+                            or ""
+                        ),
+                    }
+            except Exception:
+                hitl = None
 
         return {
             "session_id": session_id,
             "thread_id": thread_id,
             "generating": bool(is_running),
             "paused": bool(paused),
+            "hitl": hitl,
         }
 
     @r.delete("/api/chat/sessions/{session_id}")
