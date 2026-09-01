@@ -94,6 +94,27 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
             return
     except Exception:
         pass
+    # Gate registry: record the deny decision (CAS pending→claimed→resuming)
+    # exactly like the manual approve endpoint. Without this the row stayed
+    # `pending` forever after an auto-deny — a permanent ghost card in chat
+    # and dashboard (2026-09-01). Best-effort: a registry failure never
+    # blocks the deny; the terminal block settles claimed/resuming rows.
+    try:
+        from kazma_ui.hitl_gate_bridge import gate_claimed, gate_resuming
+
+        _iid = str((_intr_payload or {}).get("interrupt_id") or "")
+        await gate_claimed(
+            thread_id,
+            _iid,
+            "deny",
+            "watchdog:timeout",
+            tool=str((_intr_payload or {}).get("tool") or ""),
+            payload=dict(_intr_payload or {}),
+        )
+        if _iid:
+            await gate_resuming(_iid)
+    except Exception:
+        logger.debug("[HITL-WD] gate claim skipped", exc_info=True)
     try:
         from kazma_ui.active_turns import register_turn
         from kazma_ui.reply_sink import resolve_reply_turn
@@ -224,6 +245,44 @@ async def _watchdog_loop(
                             "no live checkpoint interrupt",
                             tid,
                         )
+                        # Registry says pending but the checkpoint holds no
+                        # live interrupt and no turn is running — a ghost row
+                        # (crash between resume and settle, or a pre-dual-write
+                        # auto-deny). Orphan-settle it here or the card sits
+                        # in chat/dashboard forever and re-scans every window.
+                        try:
+                            from kazma_ui.active_turns import is_turn_running
+
+                            if not is_turn_running(tid):
+                                from kazma_core.metrics import (
+                                    record_hitl_gate_reconciled,
+                                )
+                                from kazma_core.safety.hitl_gates import (
+                                    live_gates_async,
+                                    settle_gate_async,
+                                )
+
+                                for row in await live_gates_async(tid):
+                                    if row.state == "pending":
+                                        try:
+                                            await settle_gate_async(
+                                                row.gate_id, "orphaned"
+                                            )
+                                            record_hitl_gate_reconciled(
+                                                "orphaned"
+                                            )
+                                            logger.info(
+                                                "[HITL-WD] orphan-settled ghost "
+                                                "gate=%s thread=%s",
+                                                row.gate_id,
+                                                tid,
+                                            )
+                                        except Exception:
+                                            pass
+                        except Exception:
+                            logger.debug(
+                                "[HITL-WD] orphan sweep skipped", exc_info=True
+                            )
                         continue
                     await _auto_deny(graph, tid, timeout_s)
                 else:
