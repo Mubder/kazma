@@ -1914,13 +1914,17 @@
      */
     function _reopenSse(reason) {
       if (activeStream) return;               // already live
-      if (!_awaitingReply || _awaitingApproval) return;
-      if (_lastSeqSeen <= 0) return;          // no cursor → replaying from 0 risks duplication
+      if (!_awaitingReply) return;
+      // HITL wait: the graph is paused, not running. Re-attach after the
+      // JSON approve clears _awaitingApproval (the live tail may have died
+      // during the pause — 2026-09-01 70s MCP after Approve).
+      if (_awaitingApproval) return;
       if (_reopenCount >= _REOPEN_MAX) return; // bounded: gap-attach loops must die out
       _reopenCount++;
-      console.warn('[KazmaChat] Re-attaching SSE stream (' + reason + ') from seq=' + _lastSeqSeen);
+      var cursor = _lastSeqSeen > 0 ? _lastSeqSeen : 0;
+      console.warn('[KazmaChat] Re-attaching SSE stream (' + reason + ') from seq=' + cursor);
       noteTurnActivity();
-      _dispatchSse({ last_event_id: _lastSeqSeen });
+      _dispatchSse({ last_event_id: cursor });
     }
     _reopenSseRef = _reopenSse;
 
@@ -2175,19 +2179,19 @@
 
       onApprovalRequired: function(data) {
         if (!_mine()) return;
-        // HITL: graph paused — journal part + one projector paints the card.
+        // HITL: journal part + one projector paints the card.
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
         activeTypingEl = null;
+        pauseForApproval(data);
         applyTurnEvent({
           type: 'hitl',
+          state: 'pending',
           tool: (data && data.tool) || '',
           payload: data || {},
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
         });
-        pauseForApproval(data);
-        renderHitlCard(data);
         refreshSessionsSoon();
       },
 
@@ -4068,11 +4072,7 @@
 
       function submitApproval(action, scope) {
       scope = scope || 'once';
-      var pendingLabel = action === 'deny'
-        ? 'Denying\u2026'
-        : (scope === 'yolo' ? 'YOLO on \u2014 running\u2026'
-          : (scope === 'tool' ? 'Granting tool \u2014 running\u2026' : 'Running approved tool\u2026'));
-      setCardState('pending', pendingLabel);
+      var hitlState = action === 'deny' ? 'denied' : 'approved';
       // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
       tokenAccum = '';
       // RESUME, not a new turn: keep this turn's workbench and its steps.
@@ -4110,10 +4110,14 @@
         currentMsgEl = createAssistantMessage();
       }
 
-      var okLabel = action === 'deny' ? 'Denied \u2717'
-        : (scope === 'yolo' ? 'YOLO on \u2713'
-          : (scope === 'tool' ? 'Tool allowed \u2713' : 'Approved \u2713'));
-      setCardState(action === 'approve' ? 'approved' : 'denied', okLabel);
+      applyTurnEvent({
+        type: 'hitl',
+        state: hitlState,
+        tool: data.tool || '',
+        payload: data,
+        turn_id: _liveTurnId,
+        source: 'approve',
+      });
 
       var approvalUrl = '/api/approve/' + encodeURIComponent(data.thread_id || targetThreadId);
       fetch(approvalUrl, {
@@ -4129,14 +4133,23 @@
         });
       }).then(function(res) {
         if (res.status === 409) {
-          setCardState('error', 'No longer pending');
+          applyTurnEvent({
+            type: 'hitl', state: 'error', tool: data.tool || '',
+            payload: data, turn_id: _liveTurnId, source: 'approve-409',
+          });
           _resyncDelivery('approve-409');
           return;
         }
         if (res.status >= 400 || (res.body && res.body.ok === false)) {
-          setCardState('error', 'Error: ' + truncateStr(String((res.body && (res.body.error || res.body.reason)) || res.status), 120));
+          applyTurnEvent({
+            type: 'hitl', state: 'error', tool: data.tool || '',
+            payload: data, turn_id: _liveTurnId, source: 'approve-error',
+          });
           return;
         }
+        // Decision accepted — the graph is running again. Clear the HITL
+        // wait so a dead tail can re-attach (JSON approve is not an SSE).
+        _awaitingApproval = false;
         _awaitingReply = true;
         if (!activeStream) {
           if (typeof _reopenSseRef === 'function') {
@@ -4145,7 +4158,11 @@
           _resyncDelivery('approve-json');
         }
       }).catch(function(err) {
-        setCardState('error', 'Error: ' + truncateStr(String((err && err.message) || 'Approval failed'), 120));
+        applyTurnEvent({
+          type: 'hitl', state: 'error', tool: data.tool || '',
+          payload: data, turn_id: _liveTurnId, source: 'approve-error',
+        });
+        void err;
       });
     }
 
@@ -5308,19 +5325,21 @@
       }
       if (!card) return;
       card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-      if (state === 'timeout' || state === 'denied') {
-        card.className = 'hitl-approval-card hitl-denied';
+      if (state === 'timeout' || state === 'denied' || state === 'error') {
+        card.className = 'hitl-approval-card hitl-' + (state === 'error' ? 'error' : 'denied');
         var deniedActions = card.querySelector('.hitl-approval-actions');
-        if (deniedActions && !deniedActions.querySelector('.hitl-status')) {
-          deniedActions.innerHTML = '<span class="hitl-status hitl-denied">' +
-            escapeHtml(state === 'timeout'
-              ? 'Approval timed out — continuing without this tool.'
-              : 'Denied') + '</span>';
+        if (deniedActions) {
+          var errLabel = state === 'timeout'
+            ? 'Approval timed out — continuing without this tool.'
+            : (state === 'error' ? 'No longer pending' : 'Denied');
+          deniedActions.innerHTML = '<span class="hitl-status hitl-' +
+            (state === 'error' ? 'error' : 'denied') + '">' +
+            escapeHtml(errLabel) + '</span>';
         }
       } else if (state === 'approved') {
         card.className = 'hitl-approval-card hitl-approved';
         var okActions = card.querySelector('.hitl-approval-actions');
-        if (okActions && !okActions.querySelector('.hitl-status')) {
+        if (okActions) {
           okActions.innerHTML = '<span class="hitl-status hitl-approved">Approved</span>';
         }
       }

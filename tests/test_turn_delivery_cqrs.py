@@ -60,6 +60,29 @@ def test_hitl_pause_is_not_attach_terminal() -> None:
     assert "is_thread_paused" in src
 
 
+def test_approve_registers_resume_before_unpause() -> None:
+    src = _src(_MISC)
+    fn = src.split("async def approve_tool", 1)[1].split("\n    @self.app.", 1)[0]
+    reg = fn.find("register_turn(thread_id, _resume_task)")
+    unpause = fn.find("mark_thread_unpaused(thread_id)")
+    assert reg != -1 and unpause != -1
+    assert reg < unpause, "unpause-before-register closes the attach tail"
+
+
+def test_approve_json_clears_hitl_wait_so_reattach_can_run() -> None:
+    chat = _src(_CHAT_JS)
+    approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
+        "var onceBtn", 1
+    )[0]
+    assert "_awaitingApproval = false" in approve
+    assert "_reopenSseRef('approve-json')" in approve
+    reopen = chat.split("function _reopenSse(reason)", 1)[1].split(
+        "_reopenSseRef = _reopenSse", 1
+    )[0]
+    assert "_awaitingApproval" in reopen
+    assert "_lastSeqSeen <= 0" not in reopen
+
+
 def test_chat_and_dashboard_approve_are_json_fetch() -> None:
     chat = _src(_CHAT_JS)
     approve = chat.split("function submitApproval(action, scope)", 1)[1].split(

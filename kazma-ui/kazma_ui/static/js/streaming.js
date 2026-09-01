@@ -149,6 +149,10 @@ var KazmaStream = (function() {
             } catch (e) { /* never break the stream */ }
             if (callbacks.onEvent) callbacks.onEvent(type, data);
             break;
+          case 'resumed':
+            // Journal-attach handshake. Tokens follow on this same stream.
+            if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'status_update':
           case 'status':
             if (callbacks.onStatus) callbacks.onStatus(data || {});

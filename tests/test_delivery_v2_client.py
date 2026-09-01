@@ -83,7 +83,10 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _reopenSse(" in src
         assert "_reopenSseRef('resync-' + (reason || '?'))" in src
-        assert "last_event_id: _lastSeqSeen" in src
+        assert "last_event_id: cursor" in src
+        assert "_lastSeqSeen" in src.split("function _reopenSse(reason)", 1)[1].split(
+            "_reopenSseRef = _reopenSse", 1
+        )[0]
 
     def test_sse_gap_status_routes_to_resync(self):
         """Journal-gap attach signals status=resync; the SSE client must

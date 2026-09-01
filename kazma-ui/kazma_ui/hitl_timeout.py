@@ -131,7 +131,6 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         except Exception:
             logger.debug("[HITL-WD] timeout frame skipped", exc_info=True)
 
-        mark_thread_unpaused(thread_id)
         # Journal-only resume — do not await the graph on the watchdog tick.
         # invoke_turn still runs inside the streamer so SessionStore gets
         # the continuation (2026-08-31 silent turn b1cb7994e22a).
@@ -148,6 +147,7 @@ async def _auto_deny(graph: Any, thread_id: str, timeout_s: float) -> None:
         _deny_tasks.add(task)
         task.add_done_callback(_deny_tasks.discard)
         register_turn(thread_id, task)
+        mark_thread_unpaused(thread_id)
     except Exception:
         logger.exception("[HITL-WD] auto-deny resume failed for thread=%s", thread_id)
 

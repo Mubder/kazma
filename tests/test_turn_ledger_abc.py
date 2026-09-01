@@ -126,7 +126,7 @@ def test_error_frame_finishes_the_sse_stream() -> None:
     approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
         "var onceBtn", 1
     )[0]
-    assert "setCardState('error'" in approve
+    assert "state: 'error'" in approve
     css = _src(_UI / "static" / "css" / "kazma.css")
     assert ".hitl-approval-card.hitl-error" in css
 

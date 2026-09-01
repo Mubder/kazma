@@ -634,7 +634,6 @@ def register_misc_routes(self: Any) -> None:
                         thread_id,
                     )
 
-                mark_thread_unpaused(thread_id)
                 stamp_hitl_part_state(
                     _resume_session_id,
                     _resume_turn,
@@ -653,7 +652,11 @@ def register_misc_routes(self: Any) -> None:
                         reply_turn_id=_resume_turn,
                     )
                 )
+                # Register BEFORE unpausing. Unpause-then-register left a
+                # window where attach saw not-running and not-paused and
+                # closed the live tail (the 70s-tool-after-Approve class).
                 register_turn(thread_id, _resume_task)
+                mark_thread_unpaused(thread_id)
 
                 def _clear_inflight(t: asyncio.Task, tid: str = thread_id) -> None:
                     _resume_inflight.discard(tid)
