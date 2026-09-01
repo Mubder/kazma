@@ -1266,6 +1266,10 @@
     _clearTurnTimers();
     _isGenerating = false;
     _awaitingApproval = true;
+    // This tab saw the interrupt. Do NOT treat this flag as "already approved"
+    // — _paintHitlFromDoc used to stamp "Approved — running…" on first paint
+    // because pauseForApproval runs before the pending card is created.
+    _serverPaused = true;
     if (activeTypingEl && KS.hideTyping) KS.hideTyping(activeTypingEl);
     activeTypingEl = null;
     _clearStatusStrip();
@@ -5583,19 +5587,23 @@
     if (el) currentMsgEl = el;
     try {
       // A finished turn must not revive a live Approve card on refresh.
-      // pending + generating + not paused = Approve already claimed and the
-      // persist lagged; paint a disabled card, not live buttons.
-      // `_serverGenerating` is THIS session only — newSession/loadSession
-      // reset it so a previous session's post-Approve resync cannot stamp
-      // the next session's pending gate as already approved.
+      // Inflight ONLY when this interrupt was actually claimed (this tab
+      // clicked, or the server gate/persist says so).
+      // The HITL-wait flag is set when the pending card first appears —
+      // using it here stamped "Approved — running…" with no click
+      // (dashboard still had live buttons, 2026-09-01).
+      // A live turn is generating before the interrupt is marked paused;
+      // that pair is also not a claim.
       if (state === 'pending' && hitl.payload && doc.status !== 'done') {
-        var claimedHere = _hitlAlreadyClaimed(hitl) || _awaitingApproval;
+        var gate = _serverHitl ? String(_serverHitl.gate || '') : '';
         var statusInflight = !!(
           _serverHitl
-          && (_serverHitl.state === 'approved' || _serverHitl.state === 'inflight')
+          && (gate === 'inflight'
+            || _serverHitl.state === 'approved'
+            || _serverHitl.state === 'inflight')
           && (!_serverHitl.interrupt_id || !iid || String(_serverHitl.interrupt_id) === iid)
         );
-        if (claimedHere || statusInflight || (_serverGenerating && !_serverPaused)) {
+        if (_hitlAlreadyClaimed(hitl) || statusInflight) {
           state = 'inflight';
         } else {
           renderHitlCard(hitl.payload);
