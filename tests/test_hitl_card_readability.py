@@ -277,6 +277,22 @@ def test_each_hitl_rule_is_defined_once(selector):
     )
 
 
+def test_metric_card_is_defined_once():
+    """L-2: .metric-card fought itself across kazma.css + v5 (v5 loads last).
+
+    HITL selectors stay on their own gate. This one is the dashboard tile.
+    """
+    total = sum(
+        _count_rule(f.read_text(encoding="utf-8"), ".metric-card")
+        for f in CSS_FILES
+        if f.is_file()
+    )
+    assert total == 1, (
+        f".metric-card is defined {total} times across loaded stylesheets; "
+        "v5 must be the single SoT (do not restyle HITL to 'fix' this)"
+    )
+
+
 def test_the_duplicate_counter_actually_catches_a_duplicate():
     """Negative control.
 

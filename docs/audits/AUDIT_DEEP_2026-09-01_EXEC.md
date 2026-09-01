@@ -44,7 +44,11 @@ Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`, `_hitlAlreadyClai
   (stale-PG from cadence, voice safe_error + WS cancel, embedder spawn,
   sqlite off-loop, /documents+/scheduled sensitive, telegram webhook open
   prefix, document/upload rate limits, top_k clamp). **Shipped.**
-- **8** Lows + leftover high (H-7 pin-IP SSRF last).
+- **8** Lows + leftover high: L-1 `/health/details` gated; L-2 `.metric-card`
+  single SoT in v5 (HITL selectors untouched); L-3 workspace Merge/bookmark
+  via kazmaConfirm/Prompt; L-4 x-cloak on listed x-show; L-5 test symlink
+  teardown inside tmp; H-7 pin-IP transport on the **direct** scraping path
+  plus post-connect peer abort (proxy path keeps get_scraping_client). **Shipped.**
 
 Industrial minimum if we stop early: Wave 1 + C-2 + T-4 retarget.
 

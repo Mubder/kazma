@@ -147,22 +147,34 @@ def get_scraping_client(
     timeout: float = 30.0,
     headers: dict[str, str] | None = None,
     rotate_ua: bool = False,
+    pin_hosts: dict[str, str] | None = None,
     **kwargs: Any,
 ) -> httpx.AsyncClient:
     """Build an async httpx client wired to the active proxy + optional UA rotation.
 
     When the proxy provider is unconfigured (the default), this returns a plain
     client — identical behavior to before, so non-users see no change.
+
+    ``pin_hosts`` (audit H-7) is a live hostname→IP map used only on the
+    **direct** path. A configured proxy skips the pin transport so CONNECT
+    still targets the proxy. Callers still run ``assert_peer_public``.
     """
-    return httpx.AsyncClient(
-        **_client_common_kwargs(
-            follow_redirects=follow_redirects,
-            timeout=timeout,
-            headers=headers,
-            rotate_ua=rotate_ua,
-            **kwargs,
-        )
+    common = _client_common_kwargs(
+        follow_redirects=follow_redirects,
+        timeout=timeout,
+        headers=headers,
+        rotate_ua=rotate_ua,
+        **kwargs,
     )
+    if (
+        pin_hosts is not None
+        and "transport" not in common
+        and "proxy" not in common
+    ):
+        from kazma_core.security.ssrf_pin import PinHostAsyncTransport
+
+        common["transport"] = PinHostAsyncTransport(pin_hosts)
+    return httpx.AsyncClient(**common)
 
 
 def get_scraping_client_sync(

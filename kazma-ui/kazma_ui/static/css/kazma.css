@@ -2991,13 +2991,6 @@ details.kazma-working > summary {
   gap: var(--sp-3);
   margin-bottom: var(--sp-5);
 }
-.metric-card {
-  background: var(--tint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: var(--sp-4);
-  text-align: center;
-}
 .metric-value { font-size: 1.75rem; font-weight: 700; margin-bottom: var(--sp-1); }
 .metric-label {
   font-size: 0.7rem;
@@ -4220,15 +4213,6 @@ details.kazma-working > summary {
 .swarm-metrics-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
-.metric-card {
-  background: var(--tint);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px;
-  text-align: center;
-  transition: border-color 0.15s;
-}
-.metric-card:hover { border-color: var(--border-strong); }
 .metric-icon {
   display: flex;
   align-items: center;
@@ -5069,14 +5053,13 @@ canvas { display: block; border-radius: 4px; }
 .icon-chip.green { background: var(--success-subtle); color: var(--success); }
 .icon-chip.amber { background: var(--warning-subtle); color: var(--warning); }
 
-/* Stat tiles lift on hover like bento cards */
+/* Stat tiles lift on hover like bento cards (.metric-card lives in v5) */
 .stat-card,
-.metric-card,
 .provider-card {
   transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 .stat-card:hover,
-.metric-card:hover {
+.provider-card:hover {
   transform: translateY(-4px);
   border-color: var(--border-strong);
   box-shadow: var(--shadow-lg);
@@ -5241,20 +5224,6 @@ body {
   transform: translateY(-2px);
 }
 
-/* Metric cards — clean, professional (no neon glow) */
-.metric-card {
-  background: var(--bg-panel);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  transition: border-color var(--transition), box-shadow var(--transition);
-  position: relative;
-  overflow: hidden;
-}
-.metric-card:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow);
-}
 /* Neutral icon row above metric values — no accent/green “emoji plate” */
 .metric-icon {
   display: flex;

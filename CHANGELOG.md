@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 8 — lows + H-7 pin-IP (2026-09-02)
+
+L-1: `/health/details` is sensitive; `/health/live` and `/health/ready` stay
+public. L-2: standalone `.metric-card` lives only in `kazma.v5.css` (HITL
+duplicate-selector gate unchanged). L-3: workspace Merge PR / bookmark use
+`kazmaConfirm` / `kazmaPrompt`. L-4: `x-cloak` on listed `x-show` in
+base/chat/ide (chat.js untouched). L-5: GC symlink test targets tmp and
+unlinks on teardown. H-7: `PinHostAsyncTransport` on the direct scraping
+client (skipped when a proxy is configured) plus
+`assert_peer_public` after each `read_url` hop.
+
 ## Audit 2026-09-01 Wave 7 — correctness hygiene (2026-09-01)
 
 M-1/M-2: retry-without-tools / response_format and in-band SSE errors

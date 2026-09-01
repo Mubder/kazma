@@ -291,10 +291,19 @@ def test_gc_refuses_symlink_escape(tmp_path):
         os.symlink(outside, link_dir, target_is_directory=True)
     except (OSError, NotImplementedError):
         pytest.skip("symlink creation not permitted on this host")
-    gc = DocumentGarbageCollector(repository=repo, storage=storage, audit=audit, config=cfg)
-    report = gc.collect(dry_run=False)
-    assert secret.is_file()  # never deleted through a symlink
-    assert report.refused_symlinks >= 1
+    try:
+        gc = DocumentGarbageCollector(repository=repo, storage=storage, audit=audit, config=cfg)
+        report = gc.collect(dry_run=False)
+        assert secret.is_file()  # never deleted through a symlink
+        assert report.refused_symlinks >= 1
+    finally:
+        # L-5: never leave a junction/symlink behind in tmp (pytest-of-*
+        # poison). Target is inside tmp_path, not C:\Users.
+        try:
+            if link_dir.is_symlink() or link_dir.exists():
+                link_dir.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def test_gc_tombstoned_document_collected(tmp_path):

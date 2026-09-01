@@ -141,9 +141,9 @@
                 <button type="button" class="search-cancel" @click="$store.search.close()">{{ t('search.cancel') }}</button>
             </div>
             <div class="search-hint">{{ t('search.prompt') }}</div>
-            <div class="search-results" x-show="$store.search.loading || $store.search.results.length || $store.search.searched">
-                <div class="search-loading" x-show="$store.search.loading" x-text="t('search.loading')"></div>
-                <div class="search-no-results"
+            <div class="search-results" x-cloak x-show="$store.search.loading || $store.search.results.length || $store.search.searched">
+                <div class="search-loading" x-cloak x-show="$store.search.loading" x-text="t('search.loading')"></div>
+                <div class="search-no-results" x-cloak
                      x-show="!$store.search.loading && $store.search.searched && !$store.search.results.length"
                      x-text="t('search.no_results')"></div>
                 <template x-for="(r, i) in $store.search.results" :key="r.kind + r.href + i">
@@ -152,7 +152,7 @@
                        @click="$store.search.close()">
                         <span class="search-result-kind" x-text="r.kind === 'session' ? t('search.sessions') : t('search.pages')"></span>
                         <span class="search-result-title" x-text="r.title"></span>
-                        <span class="search-result-sub" x-show="r.subtitle" x-text="r.subtitle"></span>
+                        <span class="search-result-sub" x-cloak x-show="r.subtitle" x-text="r.subtitle"></span>
                     </a>
                 </template>
             </div>

@@ -471,6 +471,7 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/x",
     "/documents",
     "/scheduled",
+    "/health/details",  # leaks model/provider/MCP names (audit L-1)
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
@@ -482,6 +483,7 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/health/live",
     "/health/ready",
     "/health/deep",  # ops canary — bounded work, TTL-cached 30s
+    # /health/details is NOT open — it leaks active model/provider (audit L-1)
     "/api/status",
     "/api/telemetry",
     "/favicon.ico",
