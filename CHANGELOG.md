@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Docs — swarm-orchestration + system map to 2026-09 (2026-09-02)
+
+Swarm guide: FanOut is tri-state; Soul is ConfigStore/`WorkerRegistry` (not
+`agent_evolution.json`); phonebook uses fenced V2 recall; pipeline
+checkpoints register/settle `hitl_gates`; Prometheus is the app `/metrics`,
+not the swarm collector. System map: no `kazma-memory` package; graph split
+modules; `hitl_gates.db` + turn journal; `/health/details` sensitive;
+`/health/deep` open; shell_exec is `to_thread` not asyncio subprocess.
+Phonebook docstring matched the V2 path.
+
 ## Docs — AGENTS.md + architecture.md reflect 2026-09 state (2026-09-02)
 
 AGENTS.md passes A–C: FanOut is tri-state (not first-wins); HITL is three
