@@ -26,6 +26,19 @@ def _src(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def test_command_resume_ignores_own_drive_task() -> None:
+    src = _src(_STREAMING)
+    assert "get_active_turn(thread_id)" in src
+    assert "_running is not _me" in src
+    chat = _src(_CHAT_JS)
+    assert "function _attachJournal(" in chat
+    assert "_reopenSseRef = _attachJournal" in chat
+    status = _src(_INIT)
+    assert '"paused"' in status.split("async def get_session_status", 1)[1].split(
+        "async def delete_session", 1
+    )[0]
+
+
 def test_hard_steer_is_json_journal_resume() -> None:
     src = _src(_INIT)
     fn = src.split("async def steer_chat_turn", 1)[1].split(
@@ -40,7 +53,7 @@ def test_hard_steer_is_json_journal_resume() -> None:
     assert "text/event-stream" not in chat.split("fetch('/api/chat/steer'", 1)[1].split(
         "return;", 1
     )[0]
-    assert "_reopenSse('steer-json')" in chat
+    assert "_attachJournal('steer-json')" in chat
 
 
 def test_approve_route_returns_json_not_sse() -> None:
@@ -93,11 +106,11 @@ def test_approve_json_clears_hitl_wait_so_reattach_can_run() -> None:
     )[0]
     assert "_awaitingApproval = false" in approve
     assert "_reopenSseRef('approve-json')" in approve
-    reopen = chat.split("function _reopenSse(reason)", 1)[1].split(
-        "_reopenSseRef = _reopenSse", 1
+    attach = chat.split("function _attachJournal(reason)", 1)[1].split(
+        "function _defaultAttachCallbacks", 1
     )[0]
-    assert "_awaitingApproval" in reopen
-    assert "_lastSeqSeen <= 0" not in reopen
+    assert "last_event_id: cursor" in attach
+    assert "_lastSeqSeen <= 0" not in attach
 
 
 def test_chat_and_dashboard_approve_are_json_fetch() -> None:

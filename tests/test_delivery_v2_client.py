@@ -81,12 +81,14 @@ class TestV2ArchitecturePresent:
         """2026-08-26: resync-while-generating used to leave NO live transport —
         an undisturbed visible tab painted the reply only on manual refresh."""
         src = _CHAT_JS.read_text(encoding="utf-8")
-        assert "function _reopenSse(" in src
+        assert "function _attachJournal(" in src
         assert "_reopenSseRef('resync-' + (reason || '?'))" in src
         assert "last_event_id: cursor" in src
-        assert "_lastSeqSeen" in src.split("function _reopenSse(reason)", 1)[1].split(
-            "_reopenSseRef = _reopenSse", 1
+        attach = src.split("function _attachJournal(reason)", 1)[1].split(
+            "function _defaultAttachCallbacks", 1
         )[0]
+        assert "_lastSeqSeen" in attach
+        assert "_reopenSseRef = _attachJournal" in src
 
     def test_sse_gap_status_routes_to_resync(self):
         """Journal-gap attach signals status=resync; the SSE client must
