@@ -3040,10 +3040,30 @@
 
   function logProgress(step) {
     if (!step) return;
+    var kind = step.kind || 'status';
+    if (kind === 'plan') {
+      var planDetail = step.detail != null ? String(step.detail) : '';
+      var planTitle = String(step.title || '').trim() || '\u2026';
+      if (planDetail) setPlan(planDetail.split('\n'));
+      else setPlan([planTitle]);
+      return;
+    }
+    if (kind === 'tool') _setCotPhase('act');
+    else if (/synth|compos|writing reply/i.test(String(step.title || ''))) _setCotPhase('write');
+    else _setCotPhase('think');
+    if (window.KazmaTurnDocument && typeof window.KazmaTurnDocument.applyEvent === 'function') {
+      applyTurnEvent({
+        type: 'progress',
+        step: step,
+        source: 'progress',
+        turn_id: _liveTurnId,
+      });
+      return;
+    }
+
     var panel = ensureProgressPanel();
     if (!panel) return;
 
-    var kind = step.kind || 'status';
     var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
 
     // Reactivate panel if a new active step arrives (prevents premature "Done" title during background execution)
@@ -3069,20 +3089,6 @@
       title = _localizeCotTitle(title);
     }
     var detail = step.detail != null ? String(step.detail) : '';
-
-    // Plan lines go to the sticky plan list (not the activity log)
-    if (kind === 'plan') {
-      if (detail) {
-        setPlan(detail.split('\n'));
-      } else {
-        setPlan([title]);
-      }
-      return;
-    }
-
-    if (kind === 'tool') _setCotPhase('act');
-    else if (/synth|compos|writing reply/i.test(rawTitle + ' ' + title)) _setCotPhase('write');
-    else _setCotPhase('think');
 
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
@@ -4727,6 +4733,10 @@
           if (role === 'assistant' && msg.pending && !content) {
             appendMessage('assistant', '⏳ _Previous turn still processing in the background…_', null, msg.ts || msg.timestamp || msg.created_at || null);
           } else {
+            if (role === 'assistant' && window.KazmaTurnDocument && KazmaTurnDocument.hydrateMessage) {
+              msg = KazmaTurnDocument.hydrateMessage(msg);
+              content = msg.content || content;
+            }
             appendMessage(role, content, null, msg.ts || msg.timestamp || msg.created_at || null, {
               activity: (window.KazmaTurnDocument && KazmaTurnDocument.activityForMessage)
                 ? KazmaTurnDocument.activityForMessage(msg)
@@ -5150,6 +5160,48 @@
     return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
   }
 
+  function _syncCotPanel(el, activity, status, meta) {
+    if (!el || !activity || !activity.length) return;
+    meta = meta || {};
+    var terminal = status === 'done' || status === 'paused'
+      || meta.source === 'hydrate' || meta.source === 'resync';
+    var html = _activityRowsHtml(activity);
+    if (!html) return;
+    var tools = (html.match(/data-kind="tool"/g) || []).length;
+    var steps = (html.match(/<li /g) || []).length;
+    _progressToolCount = tools;
+    _progressStepCount = steps;
+    if (terminal) {
+      var existingCot = el.querySelector('.agent-progress');
+      var liveActive = existingCot && existingCot.classList.contains('is-active')
+        && !existingCot.classList.contains('kazma-cot-restored');
+      if (liveActive) return;
+      var cot = _buildRestoredWorkbench(activity);
+      if (!cot) return;
+      if (existingCot) existingCot.replaceWith(cot);
+      else {
+        var tw = el.querySelector('.message-text');
+        if (tw && tw.parentNode) tw.parentNode.insertBefore(cot, tw);
+      }
+      return;
+    }
+    var prev = currentMsgEl;
+    currentMsgEl = el;
+    var panel = ensureProgressPanel();
+    currentMsgEl = prev || el;
+    if (!panel) return;
+    var list = panel.querySelector('.agent-progress-steps');
+    if (!list) return;
+    if (list._kzCotHTML === html) return;
+    list._kzCotHTML = html;
+    list.innerHTML = html;
+    _wireStepToggles(list);
+    var countEl = panel.querySelector('.agent-progress-count');
+    if (countEl) {
+      countEl.textContent = steps + ' ' + (steps === 1 ? ti('step', 'step') : ti('steps', 'steps'));
+    }
+  }
+
   /**
    * Law 3: the only DOM writer for the live assistant bubble + restored CoT.
    * Transports mutate the in-memory TurnDocument; this paints it.
@@ -5198,23 +5250,7 @@
       }
     }
     var activity = TD.activityOf(doc.parts);
-    var terminal = doc.status === 'done' || doc.status === 'paused'
-      || meta.source === 'hydrate' || meta.source === 'resync';
-    if (terminal && activity && activity.length) {
-      var existingCot = el.querySelector('.agent-progress');
-      var liveActive = existingCot && existingCot.classList.contains('is-active')
-        && !existingCot.classList.contains('kazma-cot-restored');
-      if (!liveActive) {
-        var cot = _buildRestoredWorkbench(activity);
-        if (cot) {
-          if (existingCot) existingCot.replaceWith(cot);
-          else {
-            var tw = el.querySelector('.message-text');
-            if (tw && tw.parentNode) tw.parentNode.insertBefore(cot, tw);
-          }
-        }
-      }
-    }
+    _syncCotPanel(el, activity, doc.status, meta);
     if (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done') {
       _awaitingReply = false;
     }

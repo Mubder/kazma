@@ -111,6 +111,47 @@ def test_apply_final_fence_fails_on_synthetic_violation() -> None:
     assert "applyFinalAssistantText" not in _src(_CHAT_JS)
 
 
+def test_live_cot_goes_through_the_document() -> None:
+    chat = _src(_CHAT_JS)
+    log = chat.split("function logProgress(step)", 1)[1].split("\n  function ", 1)[0]
+    assert "applyTurnEvent" in log
+    assert "function _syncCotPanel(el, activity, status, meta)" in chat
+
+
+def test_messages_get_hydrates_legacy_rows() -> None:
+    src = _src(_UI / "sse_chat" / "__init__.py")
+    assert "hydrate_message" in src
+
+
+def test_platform_sync_keeps_parts() -> None:
+    from kazma_gateway.agent_handler.graph import _merge_transcript
+
+    existing = [
+        {
+            "role": "user",
+            "content": "check it",
+        },
+        {
+            "role": "assistant",
+            "content": "The timeout is 300 seconds.",
+            "turn_id": "turn-1",
+            "parts": [
+                {"type": "reasoning", "text": "live API endpoint"},
+                {"type": "text", "text": "The timeout is 300 seconds."},
+            ],
+        },
+    ]
+    converted = [
+        {"role": "user", "content": "check it"},
+        {"role": "assistant", "content": "The timeout is 300 seconds."},
+    ]
+    out = _merge_transcript(existing, converted)
+    asst = [m for m in out if m.get("role") == "assistant"]
+    assert len(asst) == 1
+    assert asst[0]["turn_id"] == "turn-1"
+    assert any(p.get("type") == "reasoning" for p in asst[0]["parts"])
+
+
 def test_core_and_ui_ainvoke_allowlist() -> None:
     repo = _ROOT
 

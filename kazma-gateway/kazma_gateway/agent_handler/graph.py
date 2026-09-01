@@ -127,6 +127,72 @@ def _convert_messages_to_dicts(langgraph_messages) -> list[dict[str, Any]]:
     return dicts
 
 
+_WEB_EXTRAS = (
+    "turn_id",
+    "parts",
+    "activity",
+    "open",
+    "pending",
+    "model",
+    "ts",
+    "tokens",
+    "cost",
+)
+
+
+def _merge_transcript(existing: list, converted: list) -> list:
+    """Checkpoint text for new rows; parts/turn_id from the web row survive.
+
+    A wholesale replace with converted dicts used to strip CoT from a
+    finished Telegram turn the moment it landed in the sidebar.
+    """
+    existing = [m for m in (existing or []) if isinstance(m, dict)]
+    converted = [m for m in (converted or []) if isinstance(m, dict)]
+    by_turn: dict[str, dict[str, Any]] = {}
+    by_key: dict[tuple[Any, str], dict[str, Any]] = {}
+    for m in existing:
+        tid = str(m.get("turn_id") or "")
+        if tid:
+            by_turn[tid] = m
+        by_key[(m.get("role"), str(m.get("content") or ""))] = m
+
+    out: list[dict[str, Any]] = []
+    used_turns: set[str] = set()
+    used_keys: set[tuple[Any, str]] = set()
+    for m in converted:
+        row = dict(m)
+        tid = str(row.get("turn_id") or "")
+        prev = by_turn.get(tid) if tid else None
+        if prev is None:
+            prev = by_key.get((row.get("role"), str(row.get("content") or "")))
+        if prev is not None:
+            for key in _WEB_EXTRAS:
+                if not row.get(key) and prev.get(key) not in (None, "", []):
+                    row[key] = prev[key]
+            prev_tid = str(prev.get("turn_id") or "")
+            if prev_tid:
+                used_turns.add(prev_tid)
+        used_keys.add((row.get("role"), str(row.get("content") or "")))
+        if tid:
+            used_turns.add(tid)
+        out.append(row)
+
+    for m in existing:
+        if m.get("role") != "assistant":
+            continue
+        tid = str(m.get("turn_id") or "")
+        key = (m.get("role"), str(m.get("content") or ""))
+        if tid and tid in used_turns:
+            continue
+        if key in used_keys:
+            continue
+        if m.get("open") or m.get("pending") or m.get("parts") or m.get("activity"):
+            out.append(m)
+            if tid:
+                used_turns.add(tid)
+    return out
+
+
 def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[str, Any], messages: list) -> None:
     """Synchronize platform session to Web UI for seamless season takeover.
 
@@ -141,52 +207,13 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         session = canonical_web_session(thread_id) or store.get_or_create(thread_id)
         session.thread_id = thread_id
         converted = _convert_messages_to_dicts(messages)
-        # A turn that is still in flight has no checkpoint reply yet: its row
-        # exists only in the session store, marked ``open``/``pending`` and
-        # carrying the turn_id its resume needs (kazma_ui.reply_sink).
-        # Replacing the transcript wholesale used to delete it, which both
-        # destroyed the narration the user was watching and left the approval
-        # resume unable to find the turn it was continuing — producing a
-        # second bubble for one question.
-        _in_flight = [
-            m
-            for m in (session.messages or [])
-            if isinstance(m, dict)
-            and m.get("role") == "assistant"
-            and (m.get("open") or m.get("pending"))
-        ]
-
-        def _restore_in_flight() -> None:
-            for m in _in_flight:
-                if not any(
-                    isinstance(x, dict) and x.get("turn_id") == m.get("turn_id")
-                    for x in session.messages
-                ):
-                    session.messages.append(m)
-
+        existing = list(session.messages or [])
         # Prefer richer checkpoint-derived history when available; never wipe
-        # a longer UI transcript with an empty convert.
-        if converted and len(converted) >= len(session.messages):
-            session.messages = converted
-            _restore_in_flight()
-        elif converted and not session.messages:
-            session.messages = converted
-            _restore_in_flight()
-        elif converted:
-            # Merge: keep UI rows, append new tail from platform if missing.
-            # Keyed on the FULL text — an 80-char prefix silently collapsed
-            # two distinct replies that opened the same way (a plan fence, a
-            # greeting) into one.
-            existing_keys = {
-                (m.get("role"), m.get("content") or "")
-                for m in session.messages
-                if isinstance(m, dict)
-            }
-            for m in converted:
-                key = (m.get("role"), m.get("content") or "")
-                if key not in existing_keys:
-                    session.messages.append(m)
-                    existing_keys.add(key)
+        # a longer UI transcript with an empty convert. Extras (parts, turn_id)
+        # always ride over from the web row so a finished platform turn does
+        # not land in the sidebar as text-only.
+        if converted:
+            session.messages = _merge_transcript(existing, converted)
 
         username = metadata.get("username") or metadata.get("display_name") or "user"
         plat = (platform or "chat").capitalize()
@@ -1640,6 +1667,21 @@ def create_graph_handler(
                     msg.context_metadata,
                     result_state.get("messages", []),
                 )
+                try:
+                    from kazma_ui.turn_runtime import close_turn
+
+                    await close_turn(
+                        graph,
+                        config,
+                        thread_id=thread_id,
+                        streamed_text=assistant_text or "",
+                    )
+                except Exception:
+                    logger.debug(
+                        "[agent-handler] complete-path persist skipped thread=%s",
+                        thread_id[:12],
+                        exc_info=True,
+                    )
 
                 # ── Post-turn memory: fire AFTER graph is terminal ──
                 # The memory consolidator (episode mirror, heuristic beliefs,

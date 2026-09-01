@@ -73,6 +73,29 @@ def test_messages_api_forwards_parts_and_derived_activity() -> None:
     assert '"turn_id"' in src or "item[\"turn_id\"]" in src
     assert "_extras" in src
     assert '"parts"' in src
+    assert "hydrate_message" in src
+
+
+def test_hydrate_message_fills_activity_and_turn_id() -> None:
+    from kazma_ui.turn_document import hydrate_message, text_of
+
+    raw = {
+        "role": "assistant",
+        "content": "The timeout is 300 seconds.",
+        "activity": [
+            {
+                "kind": "tool",
+                "title": "file_read",
+                "detail": "hitl.py",
+                "state": "done",
+            }
+        ],
+    }
+    out = hydrate_message(raw)
+    assert out["turn_id"].startswith("legacy-")
+    assert text_of(out["parts"]) == "The timeout is 300 seconds."
+    kinds = {row["kind"] for row in (out.get("activity") or [])}
+    assert "tool" in kinds
 
 
 def test_chat_js_restores_cot_from_parts() -> None:

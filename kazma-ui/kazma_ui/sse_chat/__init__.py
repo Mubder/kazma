@@ -1412,6 +1412,10 @@ def create_sse_chat_router(
                 activity = activity_of(parts)
             if isinstance(activity, list) and activity:
                 item["activity"] = activity
+            if (item.get("role") or "").lower() == "assistant":
+                from kazma_ui.turn_document import hydrate_message
+
+                item = hydrate_message(item)
             payload.append(item)
         if stats:
             return {
