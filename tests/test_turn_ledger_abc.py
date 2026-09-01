@@ -127,6 +127,21 @@ def test_error_frame_finishes_the_sse_stream() -> None:
     assert "hitl-error" in chat
 
 
+def test_collapsed_cot_cannot_eat_the_answer() -> None:
+    chat = _src(_CHAT_JS)
+    assert "function _rescueTurnDom(el)" in chat
+    assert "function _answerFromDoc(TD, doc)" in chat
+    stream = _src(_UI / "static" / "js" / "streaming.js")
+    show = stream.split("function showTyping(el, text)", 1)[1].split("function hideTyping", 1)[0]
+    assert "message-content" in show
+    assert "kz-typing-row" in show
+    hide = stream.split("function hideTyping(el)", 1)[1].split("function toast", 1)[0]
+    assert "display = 'none'" in hide
+    assert "message-content" in hide
+    css = _src(_UI / "static" / "css" / "kazma.css")
+    assert ".message-content > .message-text" in css
+
+
 def test_live_hitl_card_does_not_collapse_into_cot() -> None:
     chat = _src(_CHAT_JS)
     assert "holdOpen" in chat

@@ -2372,6 +2372,11 @@ details.kazma-working > summary {
 .agent-progress.is-collapsed .agent-progress-body {
   display: none;
 }
+/* The answer is a sibling of the workbench, never a child of the
+   collapsible body. Keep it visible when CoT is a one-line summary. */
+.message-content > .message-text {
+  display: block;
+}
 
 /* Turn memory explain panel (fts5 / dense / ppr / KB chips) */
 .agent-memory-explain {

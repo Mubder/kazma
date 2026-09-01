@@ -664,7 +664,23 @@ var KazmaStream = (function() {
   // ── Typing indicator ─────────────────────────────────
   var _typingTimer = null;
   function showTyping(el, text) {
-    if (!el) return;
+    if (!el) return el;
+    // Never wipe .message-content / .message-text — that destroyed the CoT
+    // panel and then hideTyping set display:none on the whole bubble, so the
+    // answer only reappeared when the operator expanded CoT (2026-09-01).
+    if (el.classList && (el.classList.contains('message-content')
+        || el.classList.contains('message-text')
+        || el.classList.contains('agent-progress'))) {
+      var host = el.classList.contains('message-content') ? el : (el.parentNode || el);
+      var existing = host.querySelector && host.querySelector('.kz-typing-row');
+      if (existing) return existing;
+      var row = document.createElement('div');
+      row.className = 'kz-typing-row typing-visible';
+      row.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span> '
+        + (text || 'Thinking') + '...';
+      host.appendChild(row);
+      return row;
+    }
     var span = document.createElement('span');
     span.className = 'typing-dots';
     span.innerHTML = '<span></span><span></span><span></span>';
@@ -673,12 +689,25 @@ var KazmaStream = (function() {
     el.appendChild(document.createTextNode(' ' + (text || 'Thinking') + '...'));
     el.style.display = 'flex';
     el.classList.add('typing-visible');
+    return el;
   }
   function hideTyping(el) {
     if (!el) return;
+    if (_typingTimer) { clearTimeout(_typingTimer); _typingTimer = null; }
+    if (el.classList && el.classList.contains('kz-typing-row')) {
+      if (el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    if (el.classList && (el.classList.contains('message-content')
+        || el.classList.contains('message-text'))) {
+      var row = el.querySelector && el.querySelector('.kz-typing-row');
+      if (row && row.parentNode) row.parentNode.removeChild(row);
+      el.classList.remove('typing-visible');
+      if (el.style.display === 'none' || el.style.display === 'flex') el.style.display = '';
+      return;
+    }
     el.style.display = 'none';
     el.classList.remove('typing-visible');
-    if (_typingTimer) { clearTimeout(_typingTimer); _typingTimer = null; }
   }
 
   // ── Toast notifications ───────────────────────────────
