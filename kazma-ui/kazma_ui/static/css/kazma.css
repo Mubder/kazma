@@ -2599,10 +2599,13 @@ details.kazma-working > summary {
   /* The activity log is reference material, not the message — keep it to a
      glanceable window and scroll the rest. This is the ONLY scroll container
      in the panel; do not add one on .agent-progress-body too or a long turn
-     gets nested scrollbars. */
+     gets nested scrollbars. NO overscroll-behavior here: containing the
+     gesture trapped the mouse wheel inside the (often unscrollable) list, so
+     scrolling with the cursor over the CoT never moved the page. Default
+     chaining — list scrolls while it can, then the page — is the expected
+     chat behavior. */
   max-height: 260px;
   overflow-y: auto;
-  overscroll-behavior: contain;
 }
 .agent-progress-step {
   display: flex;

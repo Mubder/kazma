@@ -219,6 +219,51 @@ def test_live_hitl_card_does_not_collapse_into_cot() -> None:
     assert "approval_timeout" in _src(_STORE_JS)
 
 
+def test_duplicate_terminal_flush_never_wipes_the_reply() -> None:
+    """SSE and WS both deliver a terminal frame; the first done's endTurn
+    zeroes tokenAccum, so the SECOND terminal's flush must not paint "" over
+    the finished reply (2026-09-02: reply vanished at end of stream until a
+    refresh re-painted it)."""
+    chat = _src(_CHAT_JS)
+    live = chat.split("function _paintLiveTextNow(textEl, final)", 1)[1].split("\n  function ", 1)[0]
+    # Guard: an empty accumulator at paint time is always a stale duplicate
+    # terminal — never truth to paint over a finished bubble.
+    assert "if (!String(tokenAccum || '').trim()) return;" in live
+    flush = chat.split("function _flushLiveTextPaint()", 1)[1].split("\n  function ", 1)[0]
+    assert "_liveRenderEl = null" in flush, "flush must release its target before painting"
+    end = chat.split("function endTurn()", 1)[1].split("\n  function ", 1)[0]
+    assert "_liveRenderEl = null" in end, "endTurn must release the live-paint target"
+    # Negative control: the unguarded painter shape (flush straight into the
+    # retained handle with no empty-accumulator check) is exactly the bug.
+    planted = "if (_liveRenderEl) {\n      _paintLiveTextNow(_liveRenderEl, true);"
+    assert planted not in flush
+
+
+def test_terminal_cot_swap_preserves_expansion() -> None:
+    """The turn being read stays open: the terminal restore-swap inherits the
+    live panel's expansion instead of collapsing it (finalizeProgress never
+    collapses; the swap must not smuggle the collapse back in)."""
+    chat = _src(_CHAT_JS)
+    sync = chat.split("function _syncCotPanel(el, activity, status, meta)", 1)[1].split("\n  function ", 1)[0]
+    assert "existingCot && !existingCot.classList.contains('is-collapsed')" in sync
+    assert "cot.classList.remove('is-collapsed')" in sync
+    # Negative: an unconditional collapsed swap is the reported symptom.
+    assert "existingCot.replaceWith(cot);" in sync  # swap still happens…
+    restored = chat.split("function _buildRestoredWorkbench(activity)", 1)[1].split("\n  function ", 1)[0]
+    assert "is-collapsed" in restored  # …but only history builds start collapsed
+
+
+def test_cot_steps_do_not_trap_page_scroll() -> None:
+    """Wheel over the CoT must chain to the page: overscroll-behavior:contain
+    on the (often unscrollable) steps list swallowed every wheel gesture, so
+    scrolling with the cursor over the CoT never moved the page (2026-09-02)."""
+    css = _src(_UI / "static" / "css" / "kazma.css")
+    block = css.split(".agent-progress-steps {", 1)[1].split("}", 1)[0]
+    assert "max-height" in block and "overflow-y: auto" in block
+    # Declaration-shaped check: the word in a comment must not trip the guard.
+    assert "overscroll-behavior:" not in block
+
+
 def test_live_cot_goes_through_the_document() -> None:
     chat = _src(_CHAT_JS)
     log = chat.split("function logProgress(step)", 1)[1].split("\n  function ", 1)[0]

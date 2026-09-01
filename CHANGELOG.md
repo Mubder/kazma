@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Plan saved — Guard / ops alerting cause quality (deferred, 2026-09-02)
+
+Not implemented. Next major sprint: `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`.
+Live trigger was a Docker Desktop / Postgres 503 paged as
+`unreachable: Service Unavailable` because `probe()` discards the 503 JSON.
+Scope when opened: read 503 bodies, collapse restart Telegram, one recovery
+line, one backup success summary + `native_pg_backup` onto `ops_alerts`.
+Do **not** page every background success.
+
 ## Audit 2026-09-01 Wave 8 — lows + H-7 pin-IP (2026-09-02)
 
 L-1: `/health/details` is sensitive; `/health/live` and `/health/ready` stay

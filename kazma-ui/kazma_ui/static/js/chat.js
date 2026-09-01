@@ -1241,6 +1241,9 @@
     // Finalize open assistant bubble so the next token starts a new one.
     currentMsgEl = null;
     tokenAccum = '';
+    // The finished bubble is no longer a live-paint target — a duplicate
+    // terminal frame (second transport's done) must not find it here.
+    _liveRenderEl = null;
     activeStream = null;
     // WS path never hit SSE onDone → session list used to stay stale until F5.
     // Refresh after every completed turn (debounced).
@@ -3863,6 +3866,13 @@
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
     if (textEl.closest && textEl.closest('.message-user')) return;
+    // An EMPTY accumulator at paint time is always a stale duplicate
+    // terminal: the first done's endTurn zeroed tokenAccum, then the SECOND
+    // transport's terminal frame (SSE + WS both deliver done) flushed after
+    // it and painted "" over the finished reply — the answer vanished at the
+    // end of the stream until a refresh re-painted it (2026-09-02). A final
+    // flush may only ever render real accumulated text.
+    if (!String(tokenAccum || '').trim()) return;
     if (final) {
       if (_paintHTML(textEl, _renderReplyHTML(tokenAccum))) {
         if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
@@ -3922,10 +3932,15 @@
    *  done/finally paths). */
   function _flushLiveTextPaint() {
     if (_liveRenderTimer) { clearTimeout(_liveRenderTimer); _liveRenderTimer = null; }
-    if (_liveRenderEl) {
+    // Release the target BEFORE painting: a duplicate terminal (SSE + WS both
+    // deliver done) must find no live-render handle after the first flush, so
+    // a late second flush is a no-op instead of a repaint over a closed turn.
+    var el = _liveRenderEl;
+    _liveRenderEl = null;
+    if (el) {
       _liveRenderLastAt = Date.now();
       _liveRenderDirty = false;
-      _paintLiveTextNow(_liveRenderEl, true);
+      _paintLiveTextNow(el, true);
     }
   }
 
@@ -5592,6 +5607,18 @@
       if (liveActive) return;
       var cot = _buildRestoredWorkbench(activity);
       if (!cot) return;
+      // The turn you are reading stays OPEN: inherit the live panel's
+      // expansion. finalizeProgress deliberately never collapses at the
+      // terminal frame (layout-shift flash) — the restore-swap must not
+      // smuggle the collapse back in. History restores (no live panel) keep
+      // the collapsed one-line summary.
+      if (existingCot && !existingCot.classList.contains('is-collapsed')) {
+        cot.classList.remove('is-collapsed');
+        var cotChev = cot.querySelector('.agent-progress-chevron');
+        if (cotChev) cotChev.textContent = '▾';
+        var cotHead = cot.querySelector('.agent-progress-header');
+        if (cotHead) cotHead.setAttribute('aria-expanded', 'true');
+      }
       if (existingCot) {
         var nestedMsgs = existingCot.querySelectorAll('.message');
         for (var ni = 0; ni < nestedMsgs.length; ni++) {
