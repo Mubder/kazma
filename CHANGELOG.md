@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## HITL approve self-deadlock + refresh had no journal attach (2026-09-01)
+
+Turn `c21fd638cdaf`: JSON approve registered the drive task, then the
+Command path saw *itself* as already running and attached instead of
+`ainvoke` — the graph never left `file_write` HITL. Refresh then called
+a null `_reopenSseRef` (it lived inside `sendMessage`), so the UI looped
+"Kazma is thinking…" with no SSE. Resume ignores its own task; attach
+is module-level and runs on load when `generating` or `paused`.
+
 ## Hard-steer is JSON + journal, not a second graph SSE (2026-09-01)
 
 `/steer!` used the old Approve shape: `StreamingResponse` of

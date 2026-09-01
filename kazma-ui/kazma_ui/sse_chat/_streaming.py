@@ -134,6 +134,7 @@ router = APIRouter(tags=["chat-sse"])
 from kazma_ui.active_turns import (
     DETACHED_TTL_S,
     active_turns,
+    get_active_turn,
     is_turn_running,
     mark_turn_orphaned,
     pump_is_stalled,
@@ -307,15 +308,19 @@ async def _stream_langgraph_events(
 
             if _is_resume:
                 # Guard against double-resume race (e.g. user double-clicks
-                # YOLO / Approve ~2s apart): if a turn is already running on
-                # this thread, reject the second resume so two graphs don't
-                # race on the same checkpoint and corrupt the delivery path.
-                if is_turn_running(thread_id):
-                    # Auto-deny (or a first Approve) already resumed this
-                    # thread. A second Approve used to emit one error frame
-                    # then close — the approve-stream onDone then painted
-                    # "Approved" and no answer (2026-09-01 turn 51c9044d).
-                    # Catch up on the in-flight journal instead.
+                # YOLO / Approve ~2s apart): if a *different* turn is already
+                # running on this thread, catch up on its journal. The drive
+                # task that *is* this coroutine must not count as a duplicate
+                # — that deadlocked JSON approve (turn c21fd638cdaf, 2026-09-01):
+                # register_turn(drive) then Command saw itself running and
+                # attached instead of ainvoke, so the graph never left HITL.
+                _running = get_active_turn(thread_id)
+                _me = asyncio.current_task()
+                if (
+                    _running is not None
+                    and not _running.done()
+                    and _running is not _me
+                ):
                     logger.warning(
                         "[SSE] Duplicate resume — attaching to in-flight "
                         "turn thread=%s", thread_id,

@@ -287,6 +287,127 @@
   // Monotonic per-dispatch epoch: stale SSE dispatches (superseded by an
   // approval resume, cursor re-attach, or abort) must not paint or finalize.
   var _sseEpoch = 0;
+  // Journal cursor + attach live outside sendMessage so a refresh can
+  // re-tail a running turn (loadSession used to call a null _reopenSseRef).
+  var _lastSeqSeen = 0;
+  var _sseAttempts = 0;
+  var _buildSseCallbacks = null;
+
+  function _noteSeq() {
+    if (activeStream && typeof activeStream.lastEventId === 'function') {
+      var sid = Number(activeStream.lastEventId());
+      if (sid > 0) _lastSeqSeen = sid;
+    }
+  }
+
+  function _attachJournal(reason) {
+    if (activeStream) return;
+    if (!chatSessionId) return;
+    var stream = window.KazmaStream;
+    if (!stream || typeof stream.sse !== 'function') return;
+    if (_reopenCount >= _REOPEN_MAX) return;
+    _reopenCount++;
+    var cursor = _lastSeqSeen > 0 ? _lastSeqSeen : 0;
+    console.warn('[KazmaChat] Attaching journal (' + (reason || '?') + ') from seq=' + cursor);
+    try { noteTurnActivity(); } catch (eN) { /* ignore */ }
+    var epoch = ++_sseEpoch;
+    var callbacks = (typeof _buildSseCallbacks === 'function')
+      ? _buildSseCallbacks(epoch)
+      : _defaultAttachCallbacks(epoch);
+    activeStream = stream.sse('/api/chat/stream', {
+      session_id: chatSessionId,
+      last_event_id: cursor,
+      workspace_id: _activeWorkspaceId || '',
+    }, callbacks);
+  }
+  function _defaultAttachCallbacks(epoch) {
+    function _mine() { return epoch === _sseEpoch; }
+    return {
+      onToken: function(data) {
+        if (!_mine()) return;
+        _noteSeq();
+        applyTurnEvent({
+          type: 'token',
+          content: data.content,
+          seq: data.seq,
+          turn_id: data.turn_id || _liveTurnId,
+          source: 'sse',
+        });
+      },
+      onToolCall: function(data) {
+        if (!_mine()) return;
+        var inputs = data.inputs;
+        if (typeof inputs === 'object') {
+          try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
+        }
+        logProgress({
+          kind: 'tool',
+          title: data.tool_name || 'tool',
+          detail: String(inputs || ''),
+          state: 'running',
+        });
+      },
+      onToolResult: function(data) {
+        if (!_mine()) return;
+        logProgress({
+          kind: 'tool',
+          title: data.tool_name || 'tool',
+          detail: String(data.result || ''),
+          state: 'done',
+        });
+      },
+      onStatus: function(data) {
+        if (!_mine()) return;
+        _noteSeq();
+        if ((data && data.status) === 'resync') {
+          _lastSeqSeen = 0;
+          _resyncDelivery('sse-gap');
+        }
+      },
+      onApprovalRequired: function(data) {
+        if (!_mine()) return;
+        if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
+        pauseForApproval(data);
+        applyTurnEvent({
+          type: 'hitl',
+          state: 'pending',
+          tool: (data && data.tool) || '',
+          payload: data || {},
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
+        });
+      },
+      onDone: function(data) {
+        if (!_mine()) return;
+        activeStream = null;
+        if (data && data.content) {
+          applyTurnEvent({
+            type: 'done',
+            content: data.content,
+            seq: data.seq,
+            turn_id: data.turn_id || _liveTurnId,
+            interrupted: !!(data && data.interrupted),
+            source: 'done',
+          });
+        }
+        if (hasInlineApprovalCard() || _awaitingApproval) {
+          refreshSessionsSoon();
+        } else {
+          endTurn();
+        }
+        if (!data && !_awaitingApproval) {
+          setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
+        }
+      },
+      onError: function() {
+        if (!_mine()) return;
+        activeStream = null;
+        if (_awaitingApproval) return;
+        _resyncDelivery('sse-fail');
+      }
+    };
+  }
+  _reopenSseRef = _attachJournal;
   // True once THIS turn painted a real assistant reply — the "No response
   // received." fallback must never fire after a successful paint.
   var _turnPainted = false;
@@ -383,13 +504,14 @@
       var status = pair[0] || {};
       var messages = pair[1] || [];
       var generating = !!status.generating;
+      var paused = !!status.paused;
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
       // Still running server-side → keep waiting honestly AND re-attach a
       // live SSE stream from the journal cursor — but only when the stream
       // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
       // trigger churned connections for no gain.
-      if (generating) {
+      if (generating || paused) {
         if (activeStream) {
           // A live stream owns this turn — NEVER abort it here. Aborting a
           // healthy stream forced a journal-cursor reopen whose replay
@@ -398,14 +520,18 @@
           // post-restart). The live stream IS the delivery path; a genuinely
           // dead stream is handled below (no activeStream → reopen).
           try {
-            _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
+            _setStatusStrip(paused
+              ? ti('waiting_approval', 'Waiting for approval…')
+              : ti('thinking', 'Kazma is thinking…'));
           } catch (e2) { /* ignore */ }
           return;
         }
         _awaitingReply = true;
         noteTurnActivity();
         try {
-          _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
+          _setStatusStrip(paused
+            ? ti('waiting_approval', 'Waiting for approval…')
+            : ti('thinking', 'Kazma is thinking…'));
         } catch (e2) { /* ignore */ }
         if (_reopenSseRef) {
           try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
@@ -1756,7 +1882,7 @@
         if (body && body.mode === 'hard') {
           _awaitingReply = true;
           if (!activeStream) {
-            try { _reopenSse('steer-json'); } catch (eRe) { /* ignore */ }
+            try { _attachJournal('steer-json'); } catch (eRe) { /* ignore */ }
           }
         }
       }).catch(function() { /* best-effort */ });
@@ -1884,6 +2010,7 @@
     _awaitingReply = true;
     // Fresh re-attach budget for this turn (bounded recovery, not a loop).
     _reopenCount = 0;
+    _sseAttempts = 0;
 
     // Hidden-tab UX (P4): permission may only be requested from a user
     // gesture — arm it on send.
@@ -1892,46 +2019,6 @@
         KazmaTurnVisibility.armPermission();
       }
     } catch (e) { /* ignore */ }
-
-    // Graph turns always go over HTTP SSE. The WebSocket is telemetry /
-    // cursor resume only (industry stack part 5). Do not re-route send
-    // through agentStore.sendPrompt — that is a second graph client.
-    // Turn Delivery V2 cursor resume: a stream lost mid-turn (sleep / proxy
-    // cull / hidden-tab freeze) retries ONCE from its last journaled seq
-    // (`last_event_id`); the server replays exactly what was missed. No
-    // pollers — one retry, then reconcile from the durable store.
-    var _sseAttempts = 0;
-    // Last journaled seq seen this session (survives stream-object death so
-    // a resync-triggered re-attach can resume from the right cursor).
-    var _lastSeqSeen = 0;
-    function _noteSeq() {
-      if (activeStream && typeof activeStream.lastEventId === 'function') {
-        var sid = Number(activeStream.lastEventId());
-        if (sid > 0) _lastSeqSeen = sid;
-      }
-    }
-    /**
-     * Re-attach the SSE stream from the journal cursor WITHOUT sending a new
-     * prompt (the server treats last_event_id as attach-only). Delivery rule
-     * (2026-08-26): resync used to leave a generating turn with NO live
-     * transport — an undisturbed visible tab then painted the reply only on
-     * manual refresh.
-     */
-    function _reopenSse(reason) {
-      if (activeStream) return;               // already live
-      if (!_awaitingReply) return;
-      // HITL wait: the graph is paused, not running. Re-attach after the
-      // JSON approve clears _awaitingApproval (the live tail may have died
-      // during the pause — 2026-09-01 70s MCP after Approve).
-      if (_awaitingApproval) return;
-      if (_reopenCount >= _REOPEN_MAX) return; // bounded: gap-attach loops must die out
-      _reopenCount++;
-      var cursor = _lastSeqSeen > 0 ? _lastSeqSeen : 0;
-      console.warn('[KazmaChat] Re-attaching SSE stream (' + reason + ') from seq=' + cursor);
-      noteTurnActivity();
-      _dispatchSse({ last_event_id: cursor });
-    }
-    _reopenSseRef = _reopenSse;
 
     function _dispatchSse(extraBody) {
       if (activeStream) {
@@ -1950,10 +2037,10 @@
         }
       }
       diag('dispatch', { attach: !!(extraBody && extraBody.last_event_id), msgLen: (content || '').length });
-      activeStream = KS.sse('/api/chat/stream', body, buildSseCallbacks(++_sseEpoch));
+      activeStream = KS.sse('/api/chat/stream', body, _buildSseCallbacks(++_sseEpoch));
     }
 
-    function buildSseCallbacks(epoch) {
+    _buildSseCallbacks = function(epoch) {
       // Stale-stream guard: only the CURRENT dispatch may paint tokens,
       // log activity, or run terminal side effects. A superseded stream's
       // late frames (post-approval resume, cursor re-attach, aborted fetch)
@@ -2225,7 +2312,8 @@
           try {
             _setStatusStrip(ti('thinking', 'Kazma is thinking…'));
           } catch (_t) {}
-          _dispatchSse({ last_event_id: Number(lastId) });
+          _lastSeqSeen = Number(lastId);
+          _attachJournal('sse-lost');
           return;
         }
         // A painted reply must not be replaced by the transport error; the
@@ -2253,7 +2341,7 @@
         }
       }
       };
-    }
+    };
 
     // Park the outgoing text BEFORE dispatch: if the POST never reaches the
     // server (restart/down), the next load restores it with a Retry button

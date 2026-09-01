@@ -1148,11 +1148,13 @@ def create_sse_chat_router(
 
         # Check if a detached turn is running for this thread (SSE or WS)
         is_running = thread_id and is_turn_running(thread_id)
+        paused = bool(thread_id) and is_thread_paused(thread_id)
 
         return {
             "session_id": session_id,
             "thread_id": thread_id,
             "generating": bool(is_running),
+            "paused": bool(paused),
         }
 
     @r.delete("/api/chat/sessions/{session_id}")
