@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from kazma_ui.turn_document import (
     activity_of,
+    merge_hitl_part,
     merge_parts,
     parts_from_stream,
     split_stream_and_final,
@@ -88,6 +89,20 @@ def test_merge_hitl_new_interrupt_id_is_a_new_gate() -> None:
     assert len(hitl) == 1
     assert hitl[0]["state"] == "pending"
     assert hitl[0]["interrupt_id"] == "two"
+
+
+def test_merge_hitl_new_tool_without_ids_is_a_new_gate() -> None:
+    """Approve file_write then file_delete in the same turn must not stay approved."""
+    claimed = merge_hitl_part(
+        None,
+        {"type": "hitl", "tool": "file_write", "state": "approved", "payload": {"tool": "file_write"}},
+    )
+    nxt = merge_hitl_part(
+        claimed,
+        {"type": "hitl", "tool": "file_delete", "state": "pending", "payload": {"tool": "file_delete"}},
+    )
+    assert nxt["state"] == "pending"
+    assert nxt["tool"] == "file_delete"
 
 
 def test_merge_hitl_pending_replaces_with_approved() -> None:
