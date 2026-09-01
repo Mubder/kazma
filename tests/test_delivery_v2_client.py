@@ -83,7 +83,10 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _reopenSse(" in src
         assert "_reopenSseRef('resync-' + (reason || '?'))" in src
-        assert "last_event_id: _lastSeqSeen" in src
+        assert "last_event_id: cursor" in src
+        assert "_lastSeqSeen" in src.split("function _reopenSse(reason)", 1)[1].split(
+            "_reopenSseRef = _reopenSse", 1
+        )[0]
 
     def test_sse_gap_status_routes_to_resync(self):
         """Journal-gap attach signals status=resync; the SSE client must
@@ -154,22 +157,21 @@ class TestV2ArchitecturePresent:
         assert "!_turnPainted)" in src  # empty-bubble fallback guard
 
     def test_approve_resume_stream_guards(self):
-        """The HITL approve-resume stream owns the turn: it invalidates the
-        main stream's epoch, marks the turn painted on token paint, its own
-        empty-notice respects _turnPainted, and the next-approval handler
-        no longer eagerly creates a blank bubble (2026-08-26 six-tweet turn:
-        trailing '_No response received.' + empty containers)."""
+        """Approve is a JSON command on the existing journal tail.
+
+        Bumping ``_sseEpoch`` / aborting the live SSE was the dual-tail
+        class (2026-09-01): the approve stream died, the card flipped to
+        Error, and refresh showed a different transcript.
+        """
         src = _CHAT_JS.read_text(encoding="utf-8")
-        # epoch bump before the approve-resume dispatch
-        assert "_sseEpoch++;" in src
-        # approve-resume tokens go through the same TurnDocument projector
-        approve = src.split("onToken: function(tokenData)", 1)[1].split("onToolCall:", 1)[0]
-        assert "applyTurnEvent" in approve
-        # both empty-notice branches are guarded
-        assert src.count("!_turnPainted)") >= 2
-        # no eager blank bubble on the next-approval timeout
-        at2 = src.index("// Another danger tool after grant")
-        assert "createAssistantMessage()" not in src[at2:at2 + 500]
+        approve = src.split("function submitApproval(action, scope)", 1)[1].split(
+            "var onceBtn", 1
+        )[0]
+        assert "_sseEpoch++" not in approve
+        assert "activeStream.abort" not in approve
+        assert "fetch(approvalUrl" in approve
+        assert "beginTurn({ resume: true })" in approve
+        assert src.count("!_turnPainted)") >= 1
 
     def test_build_identity_is_visible(self):
         """The running git commit + start time must be checkable at a glance
@@ -889,18 +891,17 @@ class TestHitlResumeKeepsWorkbench:
         assert "beginTurn({ resume: true })" in approve
         assert "beginTurn();" not in approve
 
-    def test_approve_stream_logs_tools_into_the_workbench(self):
-        """Parity with the main stream: tool activity is workbench rows."""
+    def test_approve_is_json_command_not_a_second_sse(self):
+        """Approve must not open a second graph SSE (2026-09-01 dual-tail)."""
         src = _CHAT_JS.read_text(encoding="utf-8")
         approve = src.split("function submitApproval(action, scope)", 1)[1]
-        approve = approve[: approve.index("onError: function")]
-        assert approve.count("logProgress({") >= 2, "tool call + tool result"
-        # the divergent inline rendering is gone (the swarm badge stays: it
-        # describes work outliving the turn). Match the CODE, not the comment
-        # that explains why it was removed.
+        approve = approve.split("var onceBtn", 1)[0]
+        assert "fetch(approvalUrl" in approve
+        assert "sseFn" not in approve
+        assert "text/event-stream" not in approve
+        assert "beginTurn({ resume: true })" in approve
         assert "box.className = 'tool-call-box'" not in approve
         assert "resultBox.className = 'tool-result-box'" not in approve
-        assert "swarm-bg-badge" in approve
 
 
 class TestComposerFooterRemoved:

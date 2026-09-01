@@ -117,7 +117,8 @@ def _part_key(part: dict[str, Any]) -> tuple[Any, ...]:
     if kind == "status":
         return ("status", str(part.get("title") or ""))
     if kind == "hitl":
-        return ("hitl", str(part.get("tool") or part.get("detail") or ""))
+        # One HITL slot per turn — pending → approved/denied/timeout replaces.
+        return ("hitl",)
     return (kind, repr(part)[:80])
 
 
@@ -164,11 +165,16 @@ def merge_parts(
     out: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
 
-    def _add(part: dict[str, Any]) -> None:
+    def _add(part: dict[str, Any], *, replace: bool = False) -> None:
         if part.get("type") == "text":
             return
         key = _part_key(part)
         if key in seen:
+            if replace and part.get("type") == "hitl":
+                for i, x in enumerate(out):
+                    if _part_key(x) == key:
+                        out[i] = dict(part)
+                        return
             return
         seen.add(key)
         out.append(dict(part))
@@ -176,7 +182,7 @@ def merge_parts(
     for p in existing:
         _add(p)
     for p in incoming:
-        _add(p)
+        _add(p, replace=True)
 
     if (
         old_text

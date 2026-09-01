@@ -92,7 +92,7 @@
         String(part.result || part.detail || '').slice(0, 80);
     }
     if (kind === 'status') return 'status:' + String(part.title || '');
-    if (kind === 'hitl') return 'hitl:' + String(part.tool || part.detail || '');
+    if (kind === 'hitl') return 'hitl';
     return kind + ':' + JSON.stringify(part).slice(0, 80);
   }
 
@@ -129,15 +129,22 @@
     var out = [];
     var seen = {};
 
-    function add(part) {
+    function add(part, replace) {
       if (part.type === 'text') return;
       var key = partKey(part);
-      if (seen[key]) return;
+      if (seen[key]) {
+        if (replace && part.type === 'hitl') {
+          for (var ri = 0; ri < out.length; ri++) {
+            if (partKey(out[ri]) === key) { out[ri] = part; return; }
+          }
+        }
+        return;
+      }
       seen[key] = 1;
       out.push(part);
     }
     for (var i = 0; i < existing.length; i++) add(existing[i]);
-    for (var j = 0; j < incoming.length; j++) add(incoming[j]);
+    for (var j = 0; j < incoming.length; j++) add(incoming[j], true);
 
     if (
       oldText && newText && oldText.trim() !== newText.trim() &&
@@ -302,6 +309,8 @@
       next.parts = mergeParts(next.parts, [{
         type: 'hitl',
         tool: String(ev.tool || (ev.step && ev.step.title) || ''),
+        state: String(ev.state || 'pending'),
+        payload: ev.payload || ev,
       }]);
       next.status = 'paused';
       return next;

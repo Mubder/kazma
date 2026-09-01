@@ -52,10 +52,15 @@ from kazma_ui.sse_chat._persistence import (  # noqa: F401
     _snapshot_paused,
 )
 from kazma_ui.sse_chat._streaming import (  # noqa: F401
+    _drive_graph_to_journal,
     _frame_from_journaled,
     _journal_fast_path,
     _sse_attach_stream,
     _stream_langgraph_events,
+    is_thread_paused,
+    mark_thread_paused,
+    mark_thread_unpaused,
+    stamp_hitl_part_state,
 )
 
 __all__ = ["create_sse_chat_router", "router"]
@@ -975,19 +980,37 @@ def create_sse_chat_router(
             _flushed_at = [0]
 
             try:
-                async for frame in _stream_langgraph_events(
-                    graph=current_graph,
-                    input_state=input_state,
-                    config=graph_config,
-                    thread_id=thread_id,
-                    session_id=session_id,
-                    reply_turn_id=_reply_turn,
-                ):
+                # CQRS: the graph runs in a shielded background task that
+                # journals only. This HTTP body is a journal subscriber —
+                # a 70s MCP call or a dropped TCP cannot kill the turn.
+                _drive = asyncio.create_task(
+                    _drive_graph_to_journal(
+                        current_graph,
+                        input_state,
+                        graph_config,
+                        thread_id=thread_id,
+                        session_id=session_id,
+                        reply_turn_id=_reply_turn,
+                    )
+                )
+                register_turn(thread_id, _drive)
+
+                def _on_drive_done(t: asyncio.Task, tid: str = thread_id) -> None:
+                    unregister_turn(tid, t)
+
+                _drive.add_done_callback(_on_drive_done)
+
+                async for frame in _sse_attach_stream(thread_id, session_id, 0):
                     parsed = _parse_frame(frame)
                     if parsed is None:
                         yield frame
                         continue
                     ev_type, data = parsed
+                    if ev_type in ("status_update", "status") and str(
+                        data.get("status") or ""
+                    ) == "resync":
+                        yield frame
+                        return
 
                     # Accumulate content + record CoT activity
                     if ev_type == "token":
@@ -1064,7 +1087,7 @@ def create_sse_chat_router(
                 # the PREVIOUS turn's answer, silently replacing good history
                 # with a fragment.
                 _persist_now(open_turn=True)
-                yield _sse_frame("error", {"content": "Connection closed"})
+                raise
 
             except Exception as exc:
                 logger.error("SSE generator error: %s", exc, exc_info=True)
@@ -1579,9 +1602,10 @@ def create_sse_chat_router(
           next iteration and folds it into the LLM call. Returns ``{ok: true}``.
         * **hard**: pause the running turn at the next supervisor entry via a
           LangGraph ``interrupt()``, inject the note as a first-class message,
-          and resume. Returns a streaming response (like ``/api/approve``) so
-          the continued turn streams back to the client. If the turn is
-          finalizing and the pause isn't reached within ~12s, demotes to soft.
+          and resume. Returns JSON immediately (same contract as
+          ``POST /api/approve``); tokens arrive on the journal attach. If the
+          turn is finalizing and the pause isn't reached within ~12s, demotes
+          to soft.
 
         Requires an active turn on the thread; otherwise returns
         ``{ok: false, reason: "no_active_task"}``.
@@ -1699,24 +1723,39 @@ def create_sse_chat_router(
             logger.info("[SSE] hard steer demoted to soft thread=%s", thread_id[:12])
             return {"ok": True, "mode": "soft", "demoted": True, "reason": "finalizing"}
 
-        # Resume: drive the graph forward. The supervisor pops the steer,
-        # injects it as a first-class message, and continues. Stream the
-        # continued turn to the client (same shape as /api/approve).
+        # Resume into the journal — same JSON command as /api/approve.
+        # A second graph SSE here is the dual-tail class (client never
+        # consumed the steer body; cancelling it raced the shielded invoke).
         logger.info("[SSE] hard steer resuming thread=%s", thread_id[:12])
         from kazma_core.safety.commitment.resume import build_resume_command
+        from kazma_ui.active_turns import register_turn
+        from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
+        from kazma_ui.sse_chat._streaming import (
+            _drive_graph_to_journal,
+            mark_thread_unpaused,
+        )
 
         resume_input = build_resume_command(action="apply")
-        # Same turn as the steered reply — the answer continues one bubble.
-        from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
-
-        return StreamingResponse(
-            _stream_langgraph_events(
-                graph_inst, resume_input, config,
-                thread_id=thread_id, session_id=session_id,
-                reply_turn_id=_resolve_steer_turn(thread_id, session_id),
-            ),
-            media_type="text/event-stream",
+        _steer_turn = _resolve_steer_turn(thread_id, session_id)
+        _steer_task = asyncio.create_task(
+            _drive_graph_to_journal(
+                graph_inst,
+                resume_input,
+                config,
+                thread_id=thread_id,
+                session_id=session_id,
+                reply_turn_id=_steer_turn,
+            )
         )
+        register_turn(thread_id, _steer_task)
+        mark_thread_unpaused(thread_id)
+        return {
+            "ok": True,
+            "mode": "hard",
+            "thread_id": thread_id,
+            "turn_id": _steer_turn,
+            "running": True,
+        }
 
     # ── Abort: cancel + abandon the running task (/abort) ────────────
     @r.post("/api/chat/abort")

@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Hard-steer is JSON + journal, not a second graph SSE (2026-09-01)
+
+`/steer!` used the old Approve shape: `StreamingResponse` of
+`_stream_langgraph_events` that the client never tailed. The original
+turn also emitted terminal `done` on a hard-steer interrupt, so the
+attach died before resume. Pause is now non-terminal; resume is JSON
+into the same journal.
+
+## Turn Delivery CQRS: journal subscriber, JSON approve (2026-09-01)
+
+Chat HTTP is a journal attach after the graph pump starts — not a
+request-coupled `astream_events` body. `POST /api/approve` returns JSON
+immediately (`409` if the HITL part is no longer pending) and resumes
+into the same journal. HITL pause no longer emits terminal `done`. A
+stale `last_event_id` after process restart is a gap → SessionStore
+resync. Dashboard approve uses the same JSON contract. Class locks:
+no dual SSE, concurrent 409, interrupt not terminal, out-of-bounds
+reattach.
+
 ## Turn ledger P3: one persist path, fences for the rest (2026-09-01)
 
 SSE incremental persist, WS final/incremental persist, pending bubbles,

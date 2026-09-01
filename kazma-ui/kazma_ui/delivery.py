@@ -167,13 +167,20 @@ class TurnJournal:
         Unknown/empty threads yield ``([], False)`` — nothing was missed here.
         """
         with self._lock:
+            after = int(after_seq or 0)
             bucket = self._events.get(thread_id or "")
             if not bucket:
-                return [], False
+                # Cursor into a vanished journal (process restart) — the
+                # client must snapshot-resync from SessionStore, not assume
+                # it is caught up on an empty in-memory log.
+                return [], after > 0
             head = bucket[-1]["seq"]
             first = bucket[0]["seq"]
-            after = int(after_seq or 0)
-            if after >= head:
+            if after > head:
+                # Seq numbers restarted (new process) or the client is
+                # holding a cursor from another generation.
+                return [], True
+            if after == head:
                 return [], False
             if after < first - 1:
                 return [], True
