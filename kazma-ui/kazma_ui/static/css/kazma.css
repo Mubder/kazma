@@ -4924,10 +4924,9 @@ canvas { display: block; border-radius: 4px; }
      panel. See .message-content flex-wrap. */
   width: 100%;
   flex: 1 1 100%;
-  /* margin was a separate rule in kazma.v5.css, which loads second and won.
-     Two files defining one selector is how this card ended up rendering as a
-     mixture of two designs. */
-  margin: 12px 16px;
+  /* Same horizontal inset as .agent-progress (none). 16px left/right
+     shifted the card off the CoT column while width:100% still applied. */
+  margin: 8px 0 12px;
   background: var(--tint, var(--bg-surface));
   /* Amber, not the neutral border this rule used to carry: the card is a
      request for authorisation sitting in a stream of reasoning output, and

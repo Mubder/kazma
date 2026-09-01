@@ -325,6 +325,23 @@ def test_the_args_block_is_bounded_and_scrollable():
     assert "overflow-y" in body, "bounded without scrolling would hide the rest"
 
 
+def test_hitl_card_shares_cot_horizontal_inset():
+    """The inline card sat 16px right of the CoT panel (margin: 12px 16px)."""
+    css = CSS.read_text(encoding="utf-8")
+    card = re.search(r"^\.hitl-approval-card \{(.*?)\}", css, re.MULTILINE | re.DOTALL)
+    cot = re.search(r"^\.agent-progress \{(.*?)\}", css, re.MULTILINE | re.DOTALL)
+    assert card and cot
+    body = card.group(1)
+    margin = re.search(r"margin:\s*([^;]+)", body)
+    assert margin, "hitl-approval-card must set margin"
+    assert "16px" not in margin.group(1), (
+        "horizontal 16px margin shifts the card off the CoT column"
+    )
+    assert re.search(r"\b0\b", margin.group(1)), (
+        "card must use zero left/right margin like .agent-progress"
+    )
+
+
 def test_the_card_still_looks_like_a_warning():
     """It sits in a stream of reasoning output and must stand apart from it."""
     css = CSS.read_text(encoding="utf-8")

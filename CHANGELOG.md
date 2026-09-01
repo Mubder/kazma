@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## HITL Approve cannot make the same card vanish and come back (2026-09-01)
+
+Clicking Allow tool tore down the disabled card (`querySelectorAll` remove)
+then a late `approval_required` / recover painted live buttons again — one
+`file_delete`, three extra green toasts (toast fired before HTTP; grants
+ran before 409). Claimed cards stay; replay/recover cannot re-arm them;
+toast only on 200; grants only after the inflight claim. Inline card
+margin matches the CoT panel (no 16px left shift).
+
 ## HITL leftover painters cannot fail open (2026-09-01)
 
 Dead `checkPendingApprovals` removed from chat load. WS scan and the

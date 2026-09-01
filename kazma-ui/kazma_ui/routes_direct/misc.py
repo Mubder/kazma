@@ -535,40 +535,8 @@ def register_misc_routes(self: Any) -> None:
             except Exception:
                 logger.debug("[HITL] pre-resume state probe failed", exc_info=True)
 
-            # Apply scope grants *before* resume so subsequent danger tools in
-            # later supervisor rounds skip interrupt entirely.
             actor = f"web:{(body.get('session_id') or '')[:12] or 'anon'}"
             grant_info: dict[str, Any] | None = None
-            if approved and scope == "yolo":
-                try:
-                    from kazma_core.safety.yolo import try_enable_yolo
-
-                    grant_info = try_enable_yolo(thread_id, actor=actor)
-                except Exception:
-                    logger.exception("[HITL] failed to enable YOLO scope")
-                    scope = "once"
-            elif approved and scope == "tool":
-                try:
-                    from kazma_core.safety.hitl_grants import grant_tool
-
-                    tools_to_grant: list[str] = []
-                    if pending_tools:
-                        for t in pending_tools:
-                            if isinstance(t, dict) and t.get("name"):
-                                tools_to_grant.append(str(t["name"]))
-                    elif pending_tool_name and " tools" not in pending_tool_name:
-                        tools_to_grant.append(pending_tool_name)
-                    # Client may also pass explicit tool name
-                    explicit = body.get("tool") or body.get("grant_tool")
-                    if explicit:
-                        tools_to_grant.append(str(explicit))
-                    tools_to_grant = list(dict.fromkeys(tools_to_grant))  # dedupe
-                    grant_info = {"tools": []}
-                    for tname in tools_to_grant:
-                        st = grant_tool(thread_id, tname, actor=actor)
-                        grant_info["tools"].append(st)
-                except Exception:
-                    logger.exception("[HITL] failed to apply tool grant")
 
             # Phase 3/§4.3: build the resume Command via the single chokepoint
             # (build_resume_command). Semantic interrupts need {tcid: option_id};
@@ -640,6 +608,38 @@ def register_misc_routes(self: Any) -> None:
                         },
                         status_code=409,
                     )
+
+                # Grants only after the claim. Extra clicks on a stale card
+                # used to write hitl_grant then 409 (cleanup 2026-09-01).
+                if approved and scope == "yolo":
+                    try:
+                        from kazma_core.safety.yolo import try_enable_yolo
+
+                        grant_info = try_enable_yolo(thread_id, actor=actor)
+                    except Exception:
+                        logger.exception("[HITL] failed to enable YOLO scope")
+                        scope = "once"
+                elif approved and scope == "tool":
+                    try:
+                        from kazma_core.safety.hitl_grants import grant_tool
+
+                        tools_to_grant: list[str] = []
+                        if pending_tools:
+                            for t in pending_tools:
+                                if isinstance(t, dict) and t.get("name"):
+                                    tools_to_grant.append(str(t["name"]))
+                        elif pending_tool_name and " tools" not in pending_tool_name:
+                            tools_to_grant.append(pending_tool_name)
+                        explicit = body.get("tool") or body.get("grant_tool")
+                        if explicit:
+                            tools_to_grant.append(str(explicit))
+                        tools_to_grant = list(dict.fromkeys(tools_to_grant))
+                        grant_info = {"tools": []}
+                        for tname in tools_to_grant:
+                            st = grant_tool(thread_id, tname, actor=actor)
+                            grant_info["tools"].append(st)
+                    except Exception:
+                        logger.exception("[HITL] failed to apply tool grant")
 
                 _resume_session_id = ""
                 try:

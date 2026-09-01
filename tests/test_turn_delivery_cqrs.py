@@ -171,6 +171,25 @@ def test_attach_journal_has_inflight_guard() -> None:
     assert "_attachInFlight" in attach
 
 
+def test_hitl_card_is_not_torn_down_after_approve() -> None:
+    chat = _src(_CHAT_JS)
+    render = chat.split("function renderHitlCard(data)", 1)[1].split(
+        "function submitApproval(action, scope)", 1
+    )[0]
+    assert "_hitlAlreadyClaimed" in render
+    assert "_hitlCardIsClaimed(old)" in render
+    assert "messagesEl.querySelectorAll('.hitl-approval-card').forEach" not in render
+    approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
+        "var onceBtn", 1
+    )[0]
+    assert "_awaitingApproval = true" in approve
+    assert "_freezeHitlButtons" in approve
+    before, after = approve.split("Decision accepted", 1)
+    assert "Allowed " not in before
+    assert "Allowed " in after
+    assert "_hitlAlreadyClaimed(data)" in chat.split("onApprovalRequired", 1)[1]
+
+
 def test_ws_hitl_scan_fails_closed() -> None:
     src = _src(_UI / "routes" / "ws_chat.py")
     fn = src.split("async def _scan_and_emit_hitl_interrupt", 1)[1].split(
