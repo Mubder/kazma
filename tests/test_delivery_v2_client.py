@@ -977,3 +977,43 @@ class TestComposerFooterRemoved:
             '[dir="rtl"] .chat-input-area .input-footer',
         ):
             assert sel not in css, f"dead rule left behind: {sel}"
+
+
+class TestGateAuthoritativeFailPosture:
+    """Registry-authoritative status must stop chat from inventing a claim.
+
+    When the server answered with the live-gates list (gates_authoritative)
+    and no row covers a pending hitl part, the card renders LIVE buttons —
+    the legacy leftover-status / old-part inference must not stamp
+    "Approved". Grok 2026-09-01: "I would not trust a claim that chat can no
+    longer invent Approved if the gate list never arrives."
+    """
+
+    def test_server_status_carries_authoritative_flag(self):
+        src = (_UI / "sse_chat" / "__init__.py").read_text(encoding="utf-8")
+        assert '"gates_authoritative": gates_authoritative' in src
+        # Negative control: a read failure must reset the flag, not leave
+        # an authoritative empty list behind.
+        assert "gates_authoritative = False" in src.split("except Exception:")[0] or \
+            "gates_authoritative = False" in src
+
+    def test_client_tracks_and_resets_the_flag(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        assert "_serverGatesAuth = !!status.gates_authoritative;" in src
+        # reset on session switch — a previous session's authority must not
+        # leak into the next session's card painting
+        reset = src.split("function _resetSessionTurnState()", 1)[1][:800]
+        assert "_serverGatesAuth = false;" in reset
+
+    def test_no_row_under_authority_renders_live_buttons(self):
+        src = _CHAT_JS.read_text(encoding="utf-8")
+        body = src.split("function _paintHitlFromDoc", 1)[1]
+        gate_block = body.split("if (_serverGatesAuth && !gateRow)", 1)
+        assert len(gate_block) == 2, "authoritative fail-posture block missing"
+        head = gate_block[1].split("}", 1)[0]
+        assert "renderHitlCard(hitl.payload);" in head
+        assert "return;" in head
+        # Negative control: the block must run BEFORE the legacy inference.
+        legacy_at = body.find("_hitlAlreadyClaimed(hitl) || statusInflight")
+        auth_at = body.find("if (_serverGatesAuth && !gateRow)")
+        assert 0 <= auth_at < legacy_at

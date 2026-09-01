@@ -352,3 +352,27 @@ class TestReAsk:
         third = register_gate(_gate(gid=gid))    # same ask again (poll repeat)
         assert third.gate_id == second.gate_id   # idempotent on the LIVE row
         assert len(pending_gates()) == 1
+
+
+# ── CAS column whitelist ─────────────────────────────────────────────────────
+
+
+class TestCasWhitelist:
+    """The CAS helper interpolates column NAMES into SQL — only a fixed
+    whitelist may pass. Negative control (§28): an unknown key raises."""
+
+    def test_unknown_column_rejected(self):
+        register_gate(_gate(gid="cas-1"))
+        conn = hg._connect()
+        try:
+            with pytest.raises(ValueError, match="illegal column"):
+                hg._cas(conn, "cas-1", "pending", "claimed",
+                        {"decision; DROP TABLE hitl_gates--": "x"})
+        finally:
+            conn.close()
+        assert gate_for("cas-1").state == "pending"  # untouched
+
+    def test_whitelisted_columns_still_work(self):
+        register_gate(_gate(gid="cas-2"))
+        row = claim_gate("cas-2", "approve", "web:test")
+        assert row.state == "claimed" and row.decision == "approve"

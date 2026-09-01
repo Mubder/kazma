@@ -743,9 +743,9 @@ def register_misc_routes(self: Any) -> None:
                     )
                 except Exception:
                     logger.debug("[HITL] hitl journal frame skipped", exc_info=True)
-                # Gate registry dual-write (P1): record the decision (CAS)
-                # and the resume start. Best-effort — legacy stays
-                # authoritative for this response.
+                # Gate registry: record the decision (CAS) and the resume
+                # start. Best-effort — a registry failure never blocks the
+                # approve; drift is recorded by the parity counter.
                 try:
                     from kazma_ui.hitl_gate_bridge import (
                         gate_claimed as _gate_claimed,
