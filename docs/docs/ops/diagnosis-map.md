@@ -519,14 +519,15 @@ visible only on the dashboard, "approve did nothing", or a turn declared
 done while a question was outstanding → `kazma_core/safety/hitl_gates.py`
 (the single lifecycle SoT, `kazma-data/hitl_gates.db`).
 
-- `pending` is the ONLY state that renders live buttons; readers are
-  registry-first (`hitl_thread_status`, `close_turn`,
-  `/api/pending-approvals`, chat.js `_serverGates`).
+- `pending` is the ONLY state that renders live buttons; readers use the
+  registry (`hitl_thread_status`, `close_turn`, `/api/pending-approvals`,
+  chat.js `_serverGates`).
 - A pending row + paused checkpoint ⇒ the turn stays OPEN (silence rule).
+  Paused + no covering row ⇒ backfill from the snapshot and stay open.
   A pending row + NOT paused ⇒ orphan, settled in `close_turn`.
 - Claim races: CAS — one winner, 409 carries the actual state/decision;
   same decision twice is 200.
-- Watch `kazma_hitl_gate_parity_mismatch_total` (must trend to zero) and
-  `kazma_hitl_gate_reconciled_total`.
-- Kill-switch: `KAZMA_GATE_REGISTRY=0` (legacy derivation everywhere).
+- Watch `kazma_hitl_gate_reconciled_total`. Kill-switch
+  `KAZMA_GATE_REGISTRY=0` is a thin execution fallback (live interrupt ⇒
+  pending card), not a second decision author.
 - Full spec: `docs/plans/HITL_GATE_REGISTRY_PLAN.md` + AGENTS.md §30.

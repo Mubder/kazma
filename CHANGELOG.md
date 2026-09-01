@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## HITL Gate Registry P6 — one decision author (2026-09-01)
+
+Dual-run readers are gone. Pending-approvals and the timeout watchdog
+read pending registry rows on the happy path (checkpoint scan is
+kill-switch/outage only). Auto-deny still verifies a live checkpoint
+interrupt before resuming. `close_turn`: paused + no covering row
+backfills from the snapshot and keeps the turn open (unregistered
+pending gate — never "no question"). Chat no longer infers Approved
+from leftover status. Thin fallback (kill-switch / outage): live
+interrupt ⇒ pending card, never a fabricated stamp. Reconcile counters
+(`created_missing` / `orphaned`) stay; dual-answer parity compare on
+the pending list is dropped.
+
 ## HITL Gate Registry — one gate, one row, one truth (2026-09-01)
 
 Gate identity/state was re-derived in three places (hitl_status, close_turn,

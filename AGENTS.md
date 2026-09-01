@@ -1490,16 +1490,19 @@ stamps, second question hidden on the dashboard). Plan SoT:
 mechanisms (graph interrupt, swarm bus, pipeline checkpoints, semantic cards)
 is one row in `kazma-data/hitl_gates.db` with a strict CAS state machine:
 `pending → claimed → resuming → settled` (+ `timeout`/`superseded`/`error`).
-Kill-switch `KAZMA_GATE_REGISTRY=0` reverts every consumer to legacy
-derivation.
+Kill-switch `KAZMA_GATE_REGISTRY=0` degrades to a **thin execution
+fallback**: a live checkpoint interrupt is pending (live card), never an
+inferred Approved stamp. That is not a second decision author.
 
 **A. Decision truth vs execution truth (the split is load-bearing).**
 The registry owns the DECISION (was this gate answered, by whom); the
 LangGraph checkpoint owns EXECUTION (is the graph actually paused). Readers
-consult the registry FIRST (`hitl_thread_status`, `close_turn`,
-`/api/pending-approvals`, chat.js `_serverGates`); the legacy snapshot
-derivation is the DEFINED DEGRADATION PATH when the registry has no rows or
-is unreachable — do not delete it, and do not let it override a live row.
+consult the registry (`hitl_thread_status`, `close_turn`,
+`/api/pending-approvals`, chat.js `_serverGates`). Paused + no covering
+row is an **unregistered pending gate**: backfill from the snapshot and
+keep the turn open — never treat absence as "no question". Auto-deny
+uses the registry for *which* is pending and the checkpoint for *how*
+(stale row must not resume nothing).
 
 **B. Every transition is a single CAS UPDATE.** Zero rows affected ⇒
 `TransitionConflict` carrying the row's actual state — that IS the 409 body.

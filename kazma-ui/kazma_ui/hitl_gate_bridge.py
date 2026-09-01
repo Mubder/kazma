@@ -1,18 +1,15 @@
-"""Write bridge: web HITL sites → the gate registry.
+"""Write + read bridge: web HITL sites ↔ the gate registry.
 
-The registry (`kazma_core.safety.hitl_gates`) is the DECISION-TRUTH store,
-and since the read cutover (P2) the web surfaces read it first:
-``hitl_thread_status``, the pending-approvals list, ``close_turn``'s
-open/closed decision, and the chat client's card painting (via the status
-``gates`` list + ``gates_authoritative`` flag) all treat a registry row as
-the answer. The legacy checkpoint-derived heuristics remain ONLY as the
-degradation path — when the registry is kill-switched off, unreachable, or
-has no row for a pre-registry pause. Parity counters
-(``kazma_hitl_gate_parity_mismatch``) watch the two answers so the legacy
-readers can be deleted once the counter stays flat (P6).
+The registry (`kazma_core.safety.hitl_gates`) is the DECISION-TRUTH store
+(P6). Web readers (`hitl_thread_status`, pending-approvals, ``close_turn``,
+chat via ``gates`` + ``gates_authoritative``) treat a registry row as the
+answer. Kill-switch off or a registry outage degrades to a **thin
+execution fallback**: a live checkpoint interrupt is pending (live card),
+never an inferred Approved stamp. ``created_missing`` / ``orphaned``
+counters remain the residual drift signal.
 
-Every function here is **best-effort and exception-proof**: a registry
-failure logs + increments the parity-mismatch metric and NEVER blocks the
+Every write here is **best-effort and exception-proof**: a registry
+failure logs + increments the mismatch metric and NEVER blocks the
 user-facing action. All entry points are async (`asyncio.to_thread` under
 the hood — §23, the server loop must not block) and no-op instantly when
 the ``KAZMA_GATE_REGISTRY`` kill-switch is off.
@@ -39,6 +36,9 @@ __all__ = [
     "gate_resuming",
     "settle_thread_gates",
     "registry_on",
+    "gate_row_to_pending_item",
+    "pending_items_from_registry",
+    "ensure_paused_gate",
 ]
 
 
@@ -248,6 +248,131 @@ async def gate_claimed_for_thread(
             )
     except Exception:
         logger.warning("[GateBridge] thread claim failed", exc_info=True)
+
+
+def gate_row_to_pending_item(row: Any) -> dict[str, Any]:
+    """Dashboard / timeout card shape from a pending registry row."""
+    payload = row.payload() if hasattr(row, "payload") else {}
+    if not isinstance(payload, dict):
+        payload = {}
+    args = row.args() if hasattr(row, "args") else {}
+    if not isinstance(args, dict):
+        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        if not args and isinstance(payload.get("arguments"), dict):
+            args = payload["arguments"]
+    return {
+        "thread_id": str(getattr(row, "thread_id", "") or ""),
+        "tool_name": str(getattr(row, "tool", "") or payload.get("tool") or ""),
+        "arguments": args,
+        "message": str(getattr(row, "message", "") or payload.get("message") or ""),
+        "yolo_allowed": payload.get("yolo_allowed", True),
+        "interrupt_id": str(getattr(row, "gate_id", "") or ""),
+        "kind": str(getattr(row, "kind", "") or "security"),
+        "items": payload.get("items"),
+    }
+
+
+async def pending_items_from_registry() -> list[dict[str, Any]] | None:
+    """Pending dashboard items from the registry.
+
+    Returns ``None`` when the registry is off or unreadable so the caller
+    can degrade to a checkpoint scan. An empty list means "nothing pending"
+    and is authoritative.
+    """
+    if not registry_on():
+        return None
+    try:
+        from kazma_core.safety.hitl_gates import pending_gates_async
+
+        rows = await pending_gates_async()
+        return [gate_row_to_pending_item(r) for r in rows]
+    except Exception:
+        logger.warning("[GateBridge] pending_gates read failed", exc_info=True)
+        _mismatch("pending_read")
+        return None
+
+
+def _live_row_covers_snapshot(rows: list[Any], snapshot: Any) -> bool:
+    """True when a claimed/resuming row is the leftover of this snapshot pause."""
+    try:
+        from kazma_ui.hitl_status import snapshot_interrupt_id, snapshot_interrupt_payload
+    except Exception:
+        return False
+    iid = snapshot_interrupt_id(snapshot)
+    payload = snapshot_interrupt_payload(snapshot) or {}
+    tool = str(payload.get("tool") or payload.get("tool_name") or "").strip().lower()
+    for row in rows:
+        st = str(getattr(row, "state", "") or "")
+        if st not in ("claimed", "resuming"):
+            continue
+        gid = str(getattr(row, "gate_id", "") or "")
+        alias = str(getattr(row, "alias_id", "") or "")
+        if iid and iid in (gid, alias):
+            return True
+        rtool = str(getattr(row, "tool", "") or "").strip().lower()
+        if tool and rtool and tool == rtool and not iid:
+            return True
+    return False
+
+
+async def ensure_paused_gate(
+    thread_id: str,
+    snapshot: Any,
+    *,
+    session_id: str = "",
+    turn_id: str = "",
+) -> bool:
+    """Paused + no covering pending row ⇒ register from the snapshot.
+
+    Absence of a row for a paused thread is an unregistered pending gate,
+    never "no question" (P6 amendment). Returns True when a pending
+    question exists after this call (existing or just backfilled).
+
+    A claimed/resuming row that matches this snapshot is a leftover of
+    Approve — do not mint a ghost pending card for it.
+    """
+    if not thread_id or not registry_on():
+        return False
+    try:
+        from kazma_core.metrics import record_hitl_gate_reconciled
+        from kazma_core.safety.hitl_gates import live_gates_async
+        from kazma_ui.hitl_status import snapshot_interrupt_payload
+
+        rows = await live_gates_async(thread_id)
+        if any(r.state == "pending" for r in rows):
+            return True
+        if _live_row_covers_snapshot(rows, snapshot):
+            return False
+        payload = snapshot_interrupt_payload(snapshot)
+        if not payload:
+            return False
+        # Leftover checkpoint interrupt of a gate already persisted as
+        # approved is not a new question — do not mint a ghost pending row.
+        try:
+            from kazma_ui.hitl_status import (
+                is_new_gate,
+                persisted_hitl_for_thread,
+            )
+
+            part = persisted_hitl_for_thread(thread_id)
+            st = str((part or {}).get("state") or "").lower()
+            if st in ("approved", "denied", "inflight", "settled") and not is_new_gate(
+                part, snapshot
+            ):
+                return False
+        except Exception:
+            pass
+        if not payload.get("thread_id"):
+            payload = dict(payload)
+            payload["thread_id"] = thread_id
+        await gate_pending_from_payload(
+            payload, session_id=session_id, turn_id=turn_id
+        )
+        record_hitl_gate_reconciled("created_missing")
+        return True
+    except Exception:
+        logger.debug("[GateBridge] ensure_paused_gate skipped", exc_info=True)
+        return False
 
 
 def _mismatch(site: str) -> None:

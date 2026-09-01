@@ -210,7 +210,7 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     assert "_awaitingApproval" not in paint
     assert "_serverGenerating && !_serverPaused" not in paint
     assert "_hitlAlreadyClaimed(hitl)" in paint
-    assert "gate === 'inflight'" in paint or 'gate === "inflight"' in paint
+    assert "statusInflight" not in paint
     assert "renderHitlCard(hitl.payload)" in paint
     status = _src(_INIT)
     sess = status.split("async def get_session_status", 1)[1].split(

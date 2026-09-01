@@ -179,7 +179,13 @@ async def _watchdog_loop(
             if graph is None or checkpointer is None:
                 continue
 
-            pending = await _get_pending_approvals(graph, checkpointer)
+            from kazma_ui.hitl_gate_bridge import pending_items_from_registry
+
+            registry_items = await pending_items_from_registry()
+            if registry_items is not None:
+                pending = registry_items
+            else:
+                pending = await _get_pending_approvals(graph, checkpointer)
             now = time.monotonic()
             current_ids = {str(p.get("thread_id")) for p in pending if p.get("thread_id")}
 
@@ -199,6 +205,26 @@ async def _watchdog_loop(
                 # Expired
                 _first_seen.pop(tid, None)
                 if auto_deny:
+                    # Registry = which is pending; checkpoint = how.
+                    # A stale row must not resume a graph that is not paused.
+                    from kazma_core.safety.commitment.resume import (
+                        read_pending_interrupt,
+                    )
+
+                    graph_cfg = {
+                        "configurable": {
+                            "thread_id": tid,
+                            "checkpoint_ns": "",
+                        }
+                    }
+                    live = await read_pending_interrupt(graph, graph_cfg)
+                    if live is None:
+                        logger.info(
+                            "[HITL-WD] skip auto-deny thread=%s — "
+                            "no live checkpoint interrupt",
+                            tid,
+                        )
+                        continue
                     await _auto_deny(graph, tid, timeout_s)
                 else:
                     logger.warning(

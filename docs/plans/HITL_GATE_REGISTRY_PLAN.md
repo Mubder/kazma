@@ -1,7 +1,8 @@
 # HITL Gate Registry — One Gate, One Row, One Truth
 
-**Status:** SHIPPED 2026-09-01 (all phases P0–P6; legacy derivation retained
-only as the kill-switch/degradation path — see AGENTS.md §30)
+**Status:** P6 shipped 2026-09-01 (registry is the only decision author;
+kill-switch / outage = thin execution fallback — live interrupt ⇒ pending
+card, never inferred Approved). See AGENTS.md §30.
 **Scope ruling (binding):** this is **gate identity for Turn Delivery, not a new
 delivery system**. The registry owns the *decision*; the existing turn story
 paints it. Gate changes surface as `hitl` parts of the SAME TurnDocument via
