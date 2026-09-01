@@ -37,7 +37,14 @@ Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`, `_hitlAlreadyClai
   completion; breaker refresh + durable probe lease; PG metrics SQL-side
   upsert; MCP list/read through scope guard; path-write keywords from
   `side_effects` SoT). **Shipped.**
-- **7–8** Hygiene, SSRF last.
+- **7** Correctness hygiene: M-1/M-2 transient classification; M-4/M-6
+  spawn_background; M-5 Slack private-file prefetch (token stays off graph
+  state); M-7 slack/discord output ids; M-8 full-state fork; M-12 cron
+  timezone; M-13 firing-ledger last_run + plain-log timestamps; M-14 leftover
+  (stale-PG from cadence, voice safe_error + WS cancel, embedder spawn,
+  sqlite off-loop, /documents+/scheduled sensitive, telegram webhook open
+  prefix, document/upload rate limits, top_k clamp). **Shipped.**
+- **8** Lows + leftover high (H-7 pin-IP SSRF last).
 
 Industrial minimum if we stop early: Wave 1 + C-2 + T-4 retarget.
 

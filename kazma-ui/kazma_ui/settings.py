@@ -851,7 +851,9 @@ class SettingsRouterBuilder:
                         category="embedding",
                     )
 
-            loop.create_task(_run())
+            from kazma_core.background import spawn_background
+
+            spawn_background(_run(), name="embedder-rebuild")
             return {"status": "ok", "model": model}
 
         @router.get("/api/settings/embedder/rebuild")

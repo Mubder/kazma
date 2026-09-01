@@ -469,6 +469,8 @@ SENSITIVE_PREFIXES: tuple[str, ...] = (
     "/research",
     "/knowledge",  # Knowledge Library admin shell (audit residual)
     "/x",
+    "/documents",
+    "/scheduled",
 )
 
 #: Exact read-only paths that are always open regardless of secret config.
@@ -511,6 +513,10 @@ ALWAYS_OPEN_PREFIXES: tuple[str, ...] = (
     # Email OAuth: Google/Microsoft redirect with ?code= only (no secret header)
     "/api/email/oauth/gmail/callback",
     "/api/email/oauth/microsoft/callback",
+    # Telegram webhook: Telegram sends X-Telegram-Bot-Api-Secret-Token,
+    # not KAZMA_SECRET. Auth is the Telegram header (adapter fail-closed
+    # without webhook_secret). (audit M-14)
+    "/api/webhooks/telegram",
     # NOTE: there is deliberately no "/api/auth" prefix entry. Every route that
     # must be reachable before login is listed individually in
     # ALWAYS_OPEN_PATHS, so a new /api/auth/* endpoint is gated by default.

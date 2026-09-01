@@ -122,10 +122,23 @@ def _offsite_config() -> dict[str, Any]:
     return cfg
 
 
-#: A Postgres dump older than this counts as stale. The scheduled sweep runs
-#: every ``_BACKUP_EXPORT_INTERVAL_HOURS`` (24) hours, so anything past that
-#: plus a little slack means a run was missed rather than merely pending.
-_PG_DUMP_STALE_HOURS = 26.0
+def _pg_dump_stale_hours() -> float:
+    """Stale threshold = backup cadence + slack (audit M-14).
+
+    Derived live from ``worker_bootstrap._BACKUP_EXPORT_INTERVAL_HOURS`` so a
+    6h loop cannot keep reporting PG "ok" for a day-old dump.
+    """
+    try:
+        from kazma_core.memory.worker_bootstrap import _BACKUP_EXPORT_INTERVAL_HOURS
+
+        return float(_BACKUP_EXPORT_INTERVAL_HOURS) + 2.0
+    except Exception:
+        return 8.0
+
+
+#: Kept as a name the tests/docs already grep. Value is derived; do not
+#: hard-code 26h again.
+_PG_DUMP_STALE_HOURS = _pg_dump_stale_hours()
 
 
 def _pg_dump_state() -> dict[str, Any]:
@@ -165,8 +178,9 @@ def _pg_dump_state() -> dict[str, Any]:
         newest = dumps[-1]
         stat = newest.stat()
         age_h = max(0.0, (time.time() - stat.st_mtime) / 3600.0)
+        stale_h = _pg_dump_stale_hours()
         state.update({
-            "ok": age_h <= _PG_DUMP_STALE_HOURS,
+            "ok": age_h <= stale_h,
             "dump": newest.name,
             "size": stat.st_size,
             "age_hours": round(age_h, 2),
@@ -175,7 +189,7 @@ def _pg_dump_state() -> dict[str, Any]:
         if not state["ok"]:
             state["error"] = (
                 f"newest Postgres dump is {age_h:.1f}h old (stale past "
-                f"{_PG_DUMP_STALE_HOURS:.0f}h) -- the main database is not "
+                f"{stale_h:.0f}h) -- the main database is not "
                 "being dumped on schedule"
             )
     except Exception as exc:  # noqa: BLE001

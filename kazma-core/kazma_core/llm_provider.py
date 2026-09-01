@@ -40,6 +40,37 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _http_status_is_transient(status_code: int | None) -> bool:
+    """True for 429 / 5xx (AGENTS.md §3). None = no HTTP response (network)."""
+    if status_code is None:
+        return True
+    try:
+        sc = int(status_code)
+    except (TypeError, ValueError):
+        return False
+    return sc == 429 or sc >= 500
+
+
+def _inband_stream_error_is_transient(err: Any, msg: str) -> bool:
+    """Classify a LiteLLM-style in-band SSE ``{"error": …}`` (audit M-2)."""
+    if isinstance(err, dict):
+        raw = err.get("status") or err.get("code") or err.get("status_code")
+        try:
+            return _http_status_is_transient(int(raw))
+        except (TypeError, ValueError):
+            raw_s = str(raw or "").lower()
+            if any(tok in raw_s for tok in ("429", "rate", "overloaded", "unavailable", "timeout")):
+                return True
+    low = (msg or "").lower()
+    return any(
+        tok in low
+        for tok in (
+            "429", "rate limit", "overloaded", "timeout",
+            "503", "502", "500", "connection", "temporarily",
+        )
+    )
+
+
 def hoist_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Move system/developer messages to the head of the message list.
 
@@ -569,7 +600,7 @@ class LLMProvider:
                         retry_detail = ""
                     raise LLMError(
                         f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}",
-                        transient=False,
+                        transient=_http_status_is_transient(retry_err.response.status_code),
                     ) from retry_err
                 duration_ms = (time.monotonic() - start) * 1000
                 response = self._parse_response(data, duration_ms)
@@ -620,7 +651,7 @@ class LLMProvider:
                         retry_detail = ""
                     raise LLMError(
                         f"LLM call failed (HTTP {retry_err.response.status_code}): {retry_detail[:300]}",
-                        transient=False,
+                        transient=_http_status_is_transient(retry_err.response.status_code),
                     ) from retry_err
                 duration_ms = (time.monotonic() - start) * 1000
                 response = self._parse_response(data, duration_ms)
@@ -1003,7 +1034,7 @@ class LLMProvider:
                         )
                         raise LLMError(
                             f"LLM stream error: {msg[:300]}",
-                            transient=False,
+                            transient=_inband_stream_error_is_transient(err, msg),
                         )
                     if obj.get("usage"):
                         usage = obj["usage"] if isinstance(obj["usage"], dict) else usage

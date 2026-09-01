@@ -148,6 +148,19 @@ class TestOperatorTimezone:
             2026, 12, 2, 9, 0, tzinfo=UTC
         )
 
+    @requires_tzdb
+    def test_daily_west_of_utc_does_not_skip_local_evening(self, monkeypatch) -> None:
+        """Audit M-12: 01:00Z + America/New_York + 'daily at 10pm' is still tonight.
+
+        ``now.replace(..., tzinfo=tz)`` used to stamp 22:00 on the UTC date
+        (Sept 2 22:00 NY) instead of Sept 1 22:00 NY.
+        """
+        monkeypatch.setenv("KAZMA_TZ", "America/New_York")
+        now = datetime(2026, 9, 2, 1, 0, tzinfo=UTC)  # Sept 1 21:00 EDT
+        result = parse_timing("daily at 10pm", from_time=now)
+        # 22:00 America/New_York on Sept 1 = 02:00Z Sept 2
+        assert result.astimezone(UTC) == datetime(2026, 9, 2, 2, 0, tzinfo=UTC)
+
     def test_invalid_zone_falls_back_to_utc(self, _no_tz_env, monkeypatch) -> None:
         """Unresolvable name never raises — falls back to UTC."""
         monkeypatch.setenv("KAZMA_TZ", "Mars/Olympus_Mons")

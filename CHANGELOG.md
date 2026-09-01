@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 7 — correctness hygiene (2026-09-01)
+
+M-1/M-2: retry-without-tools / response_format and in-band SSE errors
+classify 429/5xx as transient. M-4/M-6: snapshot maintenance and `/kb`
+crawl/refresh use `spawn_background`. M-5: Slack adapter prefetches
+`url_private_download` with the bot token (token never enters graph
+state). M-7: swarm `-> slack:C…` / Discord snowflake. M-8: `/fork`
+persists the full snapshot via `aupdate_state`. M-12: cron
+`astimezone(tz)`. M-13: firing ledger `last_run` + skip unparseable
+plain lines. M-14 leftover: PG-dump stale hours from backup cadence,
+voice `safe_error` + WS utterance cancel, embedder rebuild spawn,
+memory/metrics SQLite off the loop, `/documents` `/scheduled` gated,
+telegram webhook open prefix, document split/fill/index/search and
+chat-upload rate limits, `top_k` clamp. H-7 pin-IP remains Wave 8.
+
 ## Audit 2026-09-01 Wave 6 — swarm reliability (2026-09-01)
 
 H-12: swarm fan-out approvals are tri-state (`True` settles; `False` is a

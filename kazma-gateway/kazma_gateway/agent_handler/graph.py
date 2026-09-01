@@ -2204,14 +2204,20 @@ def create_graph_handler(
             new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
 
             # Override thread identity in the state for the new branch.
+            # Full snapshot (scratchpad, summaries, counters) — not messages
+            # only (audit M-8). chat_id/user_id/message_id stay out of graph
+            # state (AGENTS.md §2). Do not touch active_thread.{sender}.
             state["thread_id"] = new_thread_id
-            gw = state.get("_gateway") or {}
+            gw = dict(state.get("_gateway") or {})
             gw["thread_id"] = new_thread_id
+            gw.pop("chat_id", None)
+            gw.pop("user_id", None)
+            gw.pop("message_id", None)
             state["_gateway"] = gw
 
             # Seed the new thread with the snapshot state.
             new_config = {"configurable": {"thread_id": new_thread_id, "checkpoint_ns": ""}}
-            await graph.aupdate_state(new_config, {"messages": state.get("messages", [])})
+            await graph.aupdate_state(new_config, state)
             logger.info("[agent-handler] /fork seeded new thread=%s from %s iter=%d", new_thread_id, thread_id, iteration)
 
             # Copy platform context so the fork can route replies. Override

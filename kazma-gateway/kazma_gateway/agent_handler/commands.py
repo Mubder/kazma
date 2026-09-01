@@ -839,7 +839,7 @@ async def _try_ide_command(
 # is the latest ProgressUpdate yielded by ``ingest_site``.  The UI's
 # ``kb_api.py`` keeps its own separate registry; this one is purely so a
 # ``/kb status`` reply can read live progress for jobs kicked off from chat.
-import asyncio as _asyncio_kb  # module-private alias to avoid clashing below
+
 
 # Bounded LRU (audit F-14): an unbounded dict kept every chat-initiated crawl
 # resident for the process lifetime. The durable ``kazma_core.stores.kb_jobs``
@@ -1044,7 +1044,9 @@ async def _try_kb_command(
                     f"⚠️ Crawl failed for `{lib_id}`: {exc}",
                 )
 
-        _asyncio_kb.create_task(_run_crawl())
+        from kazma_core.background import spawn_background as _spawn_kb
+
+        _spawn_kb(_run_crawl(), name=f"kb-crawl:{job_id}")
         await _send_model_reply(
             msg, store, manager, thread_id,
             f"🚀 Started crawl of `{url}` into library `{lib_id}` (background).\n"
@@ -1151,7 +1153,9 @@ async def _try_kb_command(
                     f"⚠️ Refresh failed for `{lib_id}`: {exc}",
                 )
 
-        _asyncio_kb.create_task(_run_refresh())
+        from kazma_core.background import spawn_background as _spawn_kb
+
+        _spawn_kb(_run_refresh(), name=f"kb-refresh:{job_id}")
         await _send_model_reply(
             msg, store, manager, thread_id,
             f"🔄 Refreshing `{lib_id}` from `{seed}` (background).\n"

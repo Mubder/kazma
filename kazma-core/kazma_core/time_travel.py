@@ -777,4 +777,6 @@ def start_snapshot_maintenance_loop(
                 logger.warning("[TimeTravel] maintenance loop iteration failed: %s", exc)
             await asyncio.sleep(max(1, interval_hours) * 3600)
 
-    return asyncio.create_task(_loop())
+    from kazma_core.background import spawn_background
+
+    return spawn_background(_loop(), name="snapshot-maintenance")

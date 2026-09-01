@@ -193,6 +193,10 @@ async def handle_voice_websocket(
         logger.debug("[ws-voice] Connection ended: %s", exc)
     finally:
         try:
+            await _cancel_utterance()
+        except Exception:
+            pass
+        try:
             await websocket.close()
         except Exception:
             pass

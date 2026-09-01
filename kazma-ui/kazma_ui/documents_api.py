@@ -449,7 +449,7 @@ def create_documents_router() -> APIRouter:
         except Exception as exc:  # noqa: BLE001
             return _action_error(exc, "pdf_info")
 
-    @router.post("/{document_id}/split")
+    @router.post("/{document_id}/split", dependencies=[Depends(rate_limit("documents", 10))])
     async def split(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
@@ -476,7 +476,7 @@ def create_documents_router() -> APIRouter:
         except Exception as exc:  # noqa: BLE001
             return _action_error(exc, "split")
 
-    @router.post("/{document_id}/fill-form")
+    @router.post("/{document_id}/fill-form", dependencies=[Depends(rate_limit("documents", 10))])
     async def fill_form(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
@@ -652,7 +652,7 @@ def create_documents_router() -> APIRouter:
 
     # ── Knowledge index / search ────────────────────────────────────────
 
-    @router.post("/{document_id}/index")
+    @router.post("/{document_id}/index", dependencies=[Depends(rate_limit("documents", 10))])
     async def index(request: Request, document_id: str, payload: dict[str, Any] = Body(...)) -> Any:
         import asyncio
 
@@ -702,7 +702,7 @@ def create_documents_router() -> APIRouter:
         except Exception as exc:  # noqa: BLE001
             return _error_for(exc, "unindex")
 
-    @router.post("/search")
+    @router.post("/search", dependencies=[Depends(rate_limit("documents", 30))])
     async def search(request: Request, payload: dict[str, Any] = Body(...)) -> Any:
         svc = _svc(request)
         if svc is None:
@@ -710,7 +710,11 @@ def create_documents_router() -> APIRouter:
         tenant, _actor, _ = _resolve_scope(request)
         library_id = str(payload.get("library_id", "")).strip()
         query = str(payload.get("query", "")).strip()
-        top_k = int(payload.get("top_k", 5) or 5)
+        try:
+            top_k = int(payload.get("top_k", 5) or 5)
+        except (TypeError, ValueError):
+            top_k = 5
+        top_k = max(1, min(top_k, 50))
         if not library_id or not query:
             return JSONResponse(
                 status_code=400,
