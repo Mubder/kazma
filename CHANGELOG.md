@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Docs — AGENTS.md + architecture.md reflect 2026-09 state (2026-09-02)
+
+AGENTS.md passes A–C: FanOut is tri-state (not first-wins); HITL is three
+execution paths + one registry; retry/HITL live in `graph_supervisor` /
+`graph_tool_worker` / `graph_respond`; eight memory boot loops and 6h
+backup; `KAZMA_PG_TABLES` points at `pg_backup.py` (H-13 catalog included);
+universal backup checks PG dump freshness; Soul confirm auto-ON in
+production/multi-user. Added §31 Turn Delivery, §32 SSRF pin-IP, §33 ops
+alerting. Slimmed §26–§28 war stories. Root `architecture.md` and
+`docs/docs/guide/architecture.md` match: no `kazma-memory` package, no
+baked line numbers, gate registry + turn journal in the store map.
+
 ## Plan saved — Guard / ops alerting cause quality (deferred, 2026-09-02)
 
 Not implemented. Next major sprint: `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`.

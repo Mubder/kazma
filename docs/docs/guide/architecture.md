@@ -2,9 +2,9 @@
 id: architecture
 title: Architecture
 sidebar_label: Architecture
-description: Kazma Architecture — code-audited reference (unified docs, v0.9+)
+description: Kazma Architecture — code-audited reference (unified docs)
 ---
-> A deep, source-referenced breakdown of the Kazma engine: the supervisor brain, the data path from user intent to tool execution, and the subsystems that make it durable, safe, and multilingual.
+> A deep, source-referenced breakdown of the Kazma engine: the supervisor brain, the data path from user intent to tool execution, and the subsystems that make it durable, safe, and multilingual. Binding invariants live in [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md); this page describes structure. Binding audit: [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md) (waves 0–8 shipped).
 
 ---
 
@@ -47,62 +47,43 @@ kazma-web = "kazma_ui.app:main"
 
 ## 3. The supervisor brain (LangGraph)
 
-The core graph is a **ReAct loop** built in `kazma-core/kazma_core/agent/graph_builder.py`.
+The core graph is a **ReAct loop**. `graph_builder.py` **wires** the nodes;
+the bodies live in split modules. Do not hunt for HITL or retry inside
+`graph_builder.py` — you will miss the gate.
+
+| Node | Module | Role |
+|------|--------|------|
+| Supervisor | `graph_supervisor.py` (`supervisor_node`, `_call_llm_with_retry`) | LLM call + tool routing. Retries **transient** `LLMError` only. |
+| Tool worker | `graph_tool_worker.py` (`tool_worker_node`, `_commitment_resolve_gate`) | Commitment first, then HITL `interrupt()`, then execute. |
+| Respond | `graph_respond.py` (`respond_node`) | Final reply. **Skips synthesis** when `turn_failed` is set. |
+| Wiring | `graph_builder.py` (`build_supervisor_graph`) | Assembles the graph; passes `hitl_config` into the tool-worker closure. |
 
 ### 3.1 Node topology
 
 ```mermaid
 flowchart LR
-    START([user message]) --> SUP[Supervisor Node]
-    SUP -- "LLM calls tools" --> TW[Tool Worker Node]
-    TW -- "tool results" --> AUTH{ContextAuthority<br/>check & enforce}
-    AUTH -- "compact if ≥80%" --> SUP
-    AUTH -- "under threshold" --> SUP
-    SUP -- "no tool calls" --> RESP[Respond Node]
-    RESP --> END([reply / SSE stream])
+    START([user message]) --> SUP[Supervisor]
+    SUP -- "LLM calls tools" --> TW[Tool Worker]
+    TW -- "tool results" --> SUP
+    SUP -- "no tool calls" --> RESP[Respond]
+    RESP --> END([reply / SSE / journal])
     TW -- "danger tool + HITL on" --> INT[LangGraph interrupt]
-    INT -- "approval" --> TW
-    INT -- "denial / timeout" --> RESP
+    INT -- "approve via registry" --> TW
+    INT -- "deny / timeout" --> RESP
 ```
 
-- **Supervisor node** (`graph_builder.py:supervisor_node`) — calls the active LLM with the registered tools and conversation history. Routes based on whether the response contains tool calls.
-- **Tool worker node** (`graph_builder.py:336 tool_worker_node`) — executes pending tool calls. This is where the HITL gate lives: if `hitl_config` is supplied and a tool is on the danger list, the node calls LangGraph `interrupt()` (line 493) and suspends until resumed.
-- **ContextAuthority** (`authority.py:37 check_and_enforce`) — invoked inside the supervisor node (`graph_builder.py:167`) **before** the LLM call. If `should_compact()` returns true (token count ≥ 80% of the window), it summarises and rebuilds the message list.
-- **Respond node** — finalises the assistant reply for streaming.
+- **HITL** is active only when `hitl_config` is passed at **all three** build sites: `agent_runner.get_streaming_graph()`, `agent_runner._ensure_graph`, and `app.py` startup recompile into `_graph_holder`. Live config is `get_hitl_config()`; YAML default timeout is **300s** (`safety.hitl.approval_timeout_seconds`), not 60.
+- **Decision vs execution:** `hitl_gates.db` owns whether the gate was answered; the LangGraph checkpoint owns whether the graph is paused. Web paints from the registry (`chat.js` `_serverGates`). See [AGENTS.md](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §7 + §30 + §31.
+- **Context:** two layers, do not flatten. `ContextAuthority` / `TokenCounter.should_compact` still trips at **80% of the model window**. Independently, **context-integrity trim** fires at `min(24K, window×0.6)` and the summary net runs on every drop of user/assistant turns (AGENTS.md §29). The old “summary at 80% of window” dead band is gone.
+- **Turn Delivery:** the SSE/WS bubble is a **projection** of the turn journal. `close_turn` is the only closer. Token deltas append; only `turn_complete` replaces. Do not restore a second painter.
 
-### 3.2 The ReAct loop in code
+### 3.2 Durable execution
 
-The graph is constructed by `build_supervisor_graph()` (`graph_builder.py:661`). The inner `_tool_worker` closure receives `hitl_config` (line 739) — this threading is what activates the gate. Two real build sites pass it (the third does not — see [Security & Safety](security-and-safety#the-graph-gate)).
-
-```python
-# agent_runner.py — the streaming graph used by the Web UI's SSE endpoint
-def get_streaming_graph(self):
-    hitl_config = {
-        "enabled": self._config.get("safety.hitl.enabled", True),
-        "require_approval_for": self._config.get(
-            "safety.hitl.require_approval_for",
-            DEFAULT_DANGER_TOOLS,
-        ),
-        "approval_timeout_seconds": self._config.get(
-            "safety.hitl.approval_timeout_seconds", 60
-        ),
-    }
-    graph = build_supervisor_graph(
-        model=self.model,
-        tools=self.tools,
-        hitl_config=hitl_config,        # <-- gate active
-        checkpointer=self._checkpointer,
-    )
-    return graph
-```
-
-### 3.3 Durable execution
-
-- **Checkpointer:** `AsyncSqliteSaver` (from `langgraph-checkpoint-sqlite`) on `kazma-data/checkpoints.db` (configured in `kazma-ui/kazma_ui/app.py:724-726`).
-- **Thread identity:** each conversation has a `thread_id` (derived from sender id, e.g. `gw-telegram-12345`, or a fresh UUID4 — see `agent_handler/store.py:34 _resolve_thread`).
-- **Crash recovery:** HITL pauses persist in the checkpointer. On restart, `restore_paused_tasks()` (`swarm/checkpoint_manager.py:182`) reloads paused swarm tasks and re-arms their auto-reject timeouts. Graph-path pauses survive because they live in the checkpointer.
-- **⚠️ Incomplete shutdown (audit C3):** `_on_shutdown()` must drain cron scheduler, swarm `_task_handles`/`stop_all()`, TaskStore, VectorMemory, FTS, and close HTTP pool / gateway. In-flight swarm work and cron LangGraph jobs continue during uvicorn teardown; SQLite/Chroma can corrupt on hard kill. Full remediation: see `kazma-ui/kazma_ui/app.py:_on_shutdown` — must stop cron first, then drain swarm, then close remaining components.
-- **Time travel:** `/replay list | &lt;iter> | compare &lt;a> &lt;b> | clear` (slash command) and `time_travel` config (`kazma.yaml:111-114`, `max_snapshots: 50`).
+- **Checkpointer:** `AsyncSqliteSaver` on `kazma-data/checkpoints.db`, or Postgres `checkpoints*` when `KAZMA_DATABASE_URL` is set (those tables are in `KAZMA_PG_TABLES`).
+- **Thread identity:** `thread_id` from sender (e.g. `gw-telegram-12345`) or UUID — `agent_handler/store.py`. Platform IDs never enter graph state.
+- **Crash recovery:** graph HITL pauses live in the checkpointer; swarm pauses in `CheckpointManager.restore_paused_tasks()`. Registry `boot_sweep()` orphans stale claimed/resuming rows and **never** touches pending (the card must survive restart).
+- **Shutdown:** `_on_shutdown()` must stop cron first, then drain swarm `_task_handles` / `stop_all()`, then close stores / HTTP pool / gateway. Hard-kill can corrupt SQLite.
+- **Time travel:** `/replay` and `/fork` (slash); snapshots in `kazma-data/snapshots.db` (LRU 50 per thread). `/fork` writes a **new** thread and must not overwrite `active_thread.{sender}`.
 
 ---
 
@@ -146,11 +127,13 @@ Key invariants enforced along this path:
 
 | Invariant | Enforced by | Location |
 |---|---|---|
-| Platform IDs never enter graph state | `_PLATFORM_KEYS` frozen set + `_build_initial_state` | `agent_handler/store.py:16,95` |
-| Reply routes back to the correct chat | `_build_target_id(platform, ctx)` | `agent_handler/store.py:146` |
-| Wrong-provider model never hits wrong endpoint | `get_client()` auto-correction | `model_registry.py:275-303` |
-| Danger tools pause, never execute silently | `interrupt()` + `_hitl_approved` flag | `graph_builder.py:483-506` |
-| Swapped provider invalidates stale clients | `set_active_model` clears cache | `model_registry.py:248` |
+| Platform IDs never enter graph state | `_PLATFORM_KEYS` + `_build_initial_state` | `agent_handler/store.py` |
+| Reply routes back to the correct chat | `_build_target_id(platform, ctx)` | `agent_handler/store.py` |
+| Wrong-provider model never hits wrong endpoint | `get_client()` auto-correction | `model_registry.py` |
+| Danger tools pause, never execute silently | `interrupt()` in `graph_tool_worker.py` + registry row | `graph_tool_worker.py`, `hitl_gates.py` |
+| Swapped provider invalidates stale clients | `set_active_model` clears cache | `model_registry.py` |
+| Failed LLM turn is not synthesized | `turn_failed` → `respond_node` skips | `graph_supervisor.py`, `graph_respond.py` |
+| Client does not author HITL state | `_serverGates` / TurnDocument projection | `chat.js`, `turn_runtime.close_turn` |
 
 ---
 
@@ -171,10 +154,10 @@ See [LLM Providers](../reference/llm-providers) for the full list and setup.
 
 ### 5.1 Provider resolution
 
-`ModelRegistry.get_client(model=None)` (`model_registry.py:252`) returns a cached `LLMProvider` for the active profile. The critical safety net:
+`ModelRegistry.get_client(model=None)` returns a cached `LLMProvider` for the active profile. The critical safety net:
 
 ```python
-# model_registry.py:275-303 (paraphrased)
+# model_registry.py (paraphrased)
 if effective_model:
     owner = self.find_provider_for_model(effective_model)
     if owner and owner["name"].lower() != provider_name.lower():
@@ -189,7 +172,7 @@ This is why "never change model without provider" is a hard rule — see [Provid
 
 ### 5.2 The NVIDIA NIM tool-fallback workaround
 
-Some providers (notably NVIDIA NIM) reject tool definitions with `404 "Function not found"`. The client detects this and retries once **without** tools so the caller still gets a text answer (`llm_provider.py:285-300`):
+Some providers (notably NVIDIA NIM) reject tool definitions with `404 "Function not found"`. The client detects this and retries once **without** tools so the caller still gets a text answer:
 
 ```python
 nim_function_not_found = status_code == 404 and "function" in detail_lower
@@ -214,9 +197,9 @@ Token streaming is `LLMProvider.chat_stream()` consumed by `invoke_llm_chat()` (
 
 | Concern | Mechanism | Location |
 |---|---|---|
-| Per-call cost | `(prompt_tokens * in_cost/1M) + (completion_tokens * out_cost/1M)` | `llm_provider.py:411-422` |
+| Per-call cost | `(prompt_tokens * in_cost/1M) + (completion_tokens * out_cost/1M)` | `llm_provider.py` |
 | Cost ceiling | `CostCircuitBreaker` (default $0.50, 5-min silence) — env `KAZMA_MAX_COST`, `KAZMA_SILENCE_WINDOW` | `cost_breaker.py` |
-| Retries | `tenacity`-based decorators, network/timeout only, **no 4xx** | `retry.py:39-109` |
+| Retries | Supervisor: transient `LLMError` only (`graph_supervisor.py`). Provider: 429 + network. Permanent 4xx fail fast. | `graph_supervisor.py`, `llm_provider.py` |
 | Rate-limit (429) handling | Retry-After + 3-attempt exponential backoff; exhausted 429 is `transient=True` + `kind=rate_limit_exhausted` (supervisor skips same-provider re-retry; failover still fires) | `llm_provider.py`, `anthropic_llm.py` |
 
 > The cost breaker is a standalone dataclass; the agent layer must drive it via `record_cost` / `should_halt`. It is not auto-wired into `chat()`.
@@ -250,7 +233,7 @@ First-class inspect-then-propose (`agent/plan_mode.py`). While `/plan` is on for
 
 ## 6. Swarm orchestration (overview)
 
-When the supervisor needs more than one agent, control passes to `SwarmEngine` (`kazma-core/kazma_core/swarm/engine.py:103`). Six dispatch patterns are supported as a `TaskType` enum (`swarm/task.py:65`): `DISPATCH`, `BROADCAST`, `PIPELINE`, `FAN_OUT`, `CONSULT`, `CONDITIONAL`.
+When the supervisor needs more than one agent, control passes to `SwarmEngine` (`kazma-core/kazma_core/swarm/engine.py`). Six dispatch patterns are supported as a `TaskType` enum (`swarm/task.py`): `DISPATCH`, `BROADCAST`, `PIPELINE`, `FAN_OUT`, `CONSULT`, `CONDITIONAL`.
 
 ```mermaid
 flowchart TB
@@ -273,7 +256,7 @@ flowchart TB
     PIPE -.->|hitl_checkpoints| CK[CheckpointManager]
 ```
 
-Handoffs between workers are guarded against infinite recursion: `MAX_HANDOFF_DEPTH = 5` and `MAX_VISITS = 2` (per-worker visit count, not a boolean set) live in `swarm/handoff_guards.py:16-17`. See [Swarm Orchestration](swarm-orchestration) for the full pattern catalog.
+Handoffs between workers are guarded against infinite recursion: `MAX_HANDOFF_DEPTH = 5` and `MAX_VISITS = 2` (per-worker visit count, not a boolean set) live in `swarm/handoff_guards.py`. Swarm FanOut HITL is **tri-state** (`True` settles; `False` is a vote until `expected_voters` or deadline) — not first-boolean-wins. See [Swarm Orchestration](swarm-orchestration) for the full pattern catalog.
 
 The engine also exposes `get_autoscaler()` (lazy) — when a task has no matching registered worker, it auto-spawns one from `swarm_templates.json` and selects the best available model for the task kind. See [Swarm Orchestration §14](swarm-orchestration#14-dynamic-autoscaler--worker-templates).
 
@@ -293,7 +276,7 @@ Kazma's chat memory is the **V2 Cognitive Engine** (bi-temporal belief graph, PP
 
 Write path: `mutate_belief` is the single INSERT choke. Payload-object beliefs also get a hub `related_to` edge (`memory/ego_anchor.py`) so the canvas does not show disconnected concepts. Optional Postgres state mirror receives **tombstones** on invalidate/supersede/clear; optional Neo4j dual-write deletes those edges too.
 
-Schedulers (started from `start_memory_worker()`): 6h `macro_sleep` (decay + ego-anchor backfill + FTS `*_docsize` drift rebuild), 24h backup/export + mirror-drift warning, 24h reconsolidation, 15m commitment GC.
+Schedulers (all started from `start_memory_worker()` — add a new one there or it never runs): 6h `macro_sleep`; **6h** backup/export + `native_pg_backup` (not 24h); 24h reconsolidation; 15m commitment GC (also rides HITL-gate TTL); plus session purge, daily digest, weekly firing ledger, restore drill.
 
 Config: `memory.*` flags use **ConfigStore ← kazma.yaml** (`kazma_core.memory.config`); V2 is on at `memory.v2.use_new_stack: true`. Full details in [Memory & RAG](memory-and-rag). Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md).
 
@@ -341,7 +324,7 @@ Tracing now has two backends: **Langfuse** (primary, **auto-on when keys exist**
 
 ## 10. Cross-cutting data stores
 
-All SQLite stores in Kazma share the same concurrency model, centralized in `config_store.py:apply_sqlite_pragmas()`:
+All SQLite stores in Kazma share the same concurrency model, centralized in `config_store.py` `apply_sqlite_pragmas()`:
 
 ```sql
 PRAGMA journal_mode=WAL;       -- concurrent readers, single writer
@@ -351,14 +334,19 @@ PRAGMA synchronous=NORMAL;     -- WAL-safe, faster than FULL
 
 | Store | Path | Purpose |
 |---|---|---|
-| ConfigStore | `kazma-data/settings.db` | Runtime settings (overrides `kazma.yaml`) |
-| LangGraph checkpointer | `kazma-data/checkpoints.db` | Conversation state, HITL pauses |
+| ConfigStore | `kazma-data/settings.db` | Runtime settings (overrides `kazma.yaml`). Soul deltas: key `self_improvement.agent_evolution` |
+| LangGraph checkpointer | `kazma-data/checkpoints.db` or Postgres `checkpoints*` | Conversation state, HITL **execution** pauses |
+| HITL Gate Registry | `kazma-data/hitl_gates.db` | HITL **decision** truth (CAS). Single-process; not in `KAZMA_PG_TABLES` |
+| Turn journal / artifacts | `kazma-data/` (turn journal + `agent_artifacts.db`) | Turn Delivery SoT; durable proposals |
 | TaskStore | `kazma-data/swarm_tasks.db` | Swarm tasks + worker metrics |
-| Time-travel snapshots | `kazma-data/snapshots.db` | `/replay` history |
+| Time-travel snapshots | `kazma-data/snapshots.db` | `/replay` / `/fork` history |
+| V2 memory (hot) | `kazma-data/memory_state.db` | Beliefs, episodes, entities, PPR |
+| V2 memory (ops) | `kazma-data/memory_ops.db` | Durable queue, audit — do not merge with hot |
+| Cron | `kazma-data/cron.db` | Reminders; `delivery_target` captured at schedule |
 | Hub registry | `~/.kazma/hub/registry.db` | Installed skills |
-| Vector memory | `~/.kazma/vector_memory` | ChromaDB persistent client |
-| Session store (gateway) | configurable | Platform ID ↔ thread_id mapping |
-| Document store | `{documents.storage_root}/documents.db` + CAS tree | Document Intelligence metadata + content-addressed blobs (default under `kazma-data/document-store`) |
+| Vector / KB | `kazma-data/vector_memory`, `kazma_kb_*` | Isolated from chat memory |
+| Session store (gateway) | configurable | Platform ID ↔ thread_id mapping (TTL 300s — not for reminders) |
+| Document store | `{documents.storage_root}/documents.db` + CAS tree | Metadata + blobs; metadata may be Postgres when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres\|auto` |
 
 ### Document Intelligence (subsystem)
 
@@ -366,8 +354,11 @@ Durable document ingest/parse/OCR/index/generate lives under
 `kazma_core/documents/`. **Public durable boundary:** `DocumentIngestionService`
 (Web `/api/documents/*`, tools, gateway `/documents`, TUI). **Execution boundary:**
 `DocumentService` (isolated subprocess parsers). Job claiming can use Postgres
-(`jobs_pg.py`); document **metadata remains SQLite** (single-replica honesty on
-readiness). Full guide: [Document Intelligence](./document-intelligence.md) ·
+(`jobs_pg.py`). Document **metadata** defaults to SQLite and moves to
+`repository_pg.py` when `KAZMA_DOCUMENTS_METADATA_BACKEND=postgres|auto` and
+the pool is up. Readiness must report single-replica whenever the **active**
+metadata backend is SQLite — never claim HA from a path that is not in use.
+Those catalog tables are on `KAZMA_PG_TABLES` (H-13). Full guide: [Document Intelligence](./document-intelligence.md) ·
 [Phase map](./document-phases.md) · [Security](../security/document-security.md).
 
 ---
@@ -389,14 +380,27 @@ Two cross-cutting subsystems sit across the supervisor and the tools:
   durable mutations. Before scheduling/sending/executing/config-changing,
   `authorize_effect` resolves intent against memory and policy; ambiguous acts
   raise a **semantic clarify/confirm** interrupt card on every platform. It runs
-  in `tool_worker_node` before the HITL split so it can rewrite tool args first.
-  Dedicated guide: [Commitment Layer](./commitment-layer).
+  in `graph_tool_worker.tool_worker_node` before the HITL split so it can rewrite
+  tool args first. Dedicated guide: [Commitment Layer](./commitment-layer).
+- **HITL Gate Registry.** One row per ask in `hitl_gates.db` (`pending → claimed
+  → resuming → settled`). Surfaces render; they never mint. Swarm FanOut is
+  tri-state; web `claim_gate` is first-claim 200 / second 409.
+- **Turn Delivery V2.** Journal + `close_turn` are SoT; SSE/WS/`chat.js` project.
+  A pending registry row keeps the turn open. No second painter.
+- **Ops alerting.** Three paths only: Guard Telegram-direct (child is down),
+  `ops_alerts` FanOut (in-app failures), `lifecycle_notifier` (boot/shutdown).
+  Cause-quality for Guard 503 bodies is deferred:
+  [`GUARD_OPS_ALERTING_CAUSE_QUALITY.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md).
+- **SSRF.** Direct scraping pins the validated IP (`PinHostAsyncTransport`);
+  abort if the peer is private. Do not pin through `proxy=`.
 
 ---
 
 ## Documentation Audit Notes
 
-- **Memory (2026-07 cutover):** V2 (bi-temporal beliefs + PPR recall) **is** the single memory stack (per-turn recall, tools, auto-store, compaction). The V1 4-layer RRF adapter was removed; earlier notes referencing `UnifiedMemoryAdapter` / `VectorMemory` are obsolete.
-- **Build-site line numbers refreshed:** AGENTS.md cited "app.py ~line 966" for the startup recompile. The real site is `kazma-ui/kazma_ui/app.py:741-751` inside `_on_startup()` (line 721). `graph_builder.py:966` is an unrelated `aiosqlite.connect`.
-- **`agent_handler` is a package, not a file:** The gateway's `agent_handler.py` was decomposed into the `agent_handler/` package (`store.py`, `graph.py`, `commands.py`, …).
-- **`UnifiedModelRegistry`** is just an alias for `ModelRegistry` (`model_registry.py:950`).
+- **Memory (2026-07 cutover):** V2 (bi-temporal beliefs + PPR recall) **is** the single memory stack. The V1 4-layer RRF adapter was removed; notes referencing `UnifiedMemoryAdapter` / `VectorMemory` as the chat path are obsolete.
+- **Do not pin line numbers in this guide.** Modules move (`graph_tool_worker.py`, `sse_chat/` package, `agent_handler/` package). Name the module; [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) is the invariant list.
+- **`agent_handler` is a package, not a file** (`store.py`, `graph.py`, `commands.py`, …).
+- **`UnifiedModelRegistry`** is an alias for `ModelRegistry`.
+- **`kazma-memory` package does not exist.** Arabic tokenizer is `kazma_core/msa_tokenizer.py`.
+- Binding audit: [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md). Do not follow dump Part 6.

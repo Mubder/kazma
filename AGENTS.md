@@ -6,13 +6,15 @@ Kazma is a multi-platform AI agent framework with a LangGraph supervisor brain,
 swarm orchestration, cross-platform dispatch (Telegram/Discord/Slack/Web/TUI),
 and an OpenAI-compatible LLM provider layer. See `docs/docs/guide/architecture.md`
 (Docusaurus docs under `docs/docs/`) for the full system architecture and
-`CHANGELOG.md` for recent work. Latest production audit:
+`CHANGELOG.md` for recent work. Binding industrial audit (waves 0–8 shipped):
+`docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md`. Historical production audit:
 `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`. System map:
 `docs/ARCHITECTURE_AND_SYSTEM_MAP.md`.
 
 ## Package Scope
 
-All packages are in scope. The four main packages:
+All packages are in scope. There is **no** `kazma-memory` package (retired;
+V2 memory lives in `kazma_core.memory`).
 
 | Package | Path | Purpose |
 |---------|------|---------|
@@ -20,6 +22,8 @@ All packages are in scope. The four main packages:
 | `kazma-gateway` | `kazma-gateway/kazma_gateway/` | Platform adapters (Telegram/Discord/Slack), agent handler, slash commands, `/ide` commands |
 | `kazma-ui` | `kazma-ui/kazma_ui/` | FastAPI web app, IDE page, swarm panel, settings, SSE chat, static JS/CSS |
 | `kazma-tui` | `kazma-tui/kazma_tui/` | Textual-based TUI dashboard + IDE editor screen |
+| `kazma-cli` | `kazma-cli/kazma_cli/` | `kazma` CLI (`serve`, `migrate`, `ask`, ACP) |
+| `kazma-skills` | `kazma-skills/kazma_skills/` | Native skill manifests + implementations |
 
 ## Critical Subsystems (READ BEFORE MODIFYING)
 
@@ -50,10 +54,13 @@ All packages are in scope. The four main packages:
 - `LLMError(..., transient=True/False)` classifies every failure raised by
   `LLMProvider.chat()`. Transient = network (Connect/Timeout/**ReadError**/
   RemoteProtocol) + 429; permanent = 4xx content/schema + UnicodeEncode.
-- The supervisor retry loop (`graph_builder.py:_call_llm_with_retry`) ONLY
+- The supervisor retry loop (`graph_supervisor.py:_call_llm_with_retry`) ONLY
   retries `LLMError` when `transient` is True — permanent errors fail fast.
   `httpx.ReadError` (mid-stream drops) MUST stay transient, or
-  "stopped-thinking" forced-finalization returns.
+  "stopped-thinking" forced-finalization returns. The graph is split:
+  `graph_builder.py` wires nodes; `graph_supervisor.py` is the supervisor
+  LLM call; `graph_tool_worker.py` is HITL + commitment; `graph_respond.py`
+  is `respond_node`. Do not "fix retry" inside `graph_builder.py`.
 - `friendly_llm_error()` prefixes all messages with `⚠️` and gives an
   actionable hint — never change it to return a bare string, or failures
   get mistaken for normal model replies again.
@@ -61,9 +68,10 @@ All packages are in scope. The four main packages:
 **Turn-failure surfacing — never synthesize over a broken turn:**
 - When the supervisor's LLM call fails after retries, it sets
   `SupervisorState.turn_failed=True` + `error_message` (NOT a fake answer).
-- `respond_node` checks `state.get("turn_failed")` and MUST skip its
-  synthesis LLM call when True — synthesizing a plausible answer over a
-  failed turn was the root cause of the "model stopped thinking" symptom.
+- `respond_node` (`graph_respond.py`) checks `state.get("turn_failed")` and
+  MUST skip its synthesis LLM call when True — synthesizing a plausible
+  answer over a failed turn was the root cause of the "model stopped thinking"
+  symptom.
 - Keep the `turn_failed` guard in `respond_node` and the `transient` flag
   on `LLMError`; removing either reintroduces silent forced-finalization.
 
@@ -115,12 +123,17 @@ All packages are in scope. The four main packages:
 - Schema auto-migrates on init (ALTER TABLE for new columns on existing DBs)
 - Worker filter uses `json_each()` not `LIKE` for exact matching
 
-### 7. HITL Approval Gates (3 mechanisms — all must stay wired)
-There are **three independent** HITL mechanisms. Breaking any one creates an
-unattended-danger-tool security gap:
+### 7. HITL Approval Gates (3 execution paths + 1 registry — all must stay wired)
+There are **three independent HITL execution paths** and **one decision
+registry** (§30). Breaking any execution path creates an unattended-danger-tool
+gap. Minting a second gate from `LocalToolRegistry.execute` on the web/chat
+path (H-8) reopens ghost cards. Decision truth = `hitl_gates.db`; execution
+truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
 
 **A. Graph interrupt() — single-agent chat (Web SSE + Telegram/Discord/Slack)**
-- `graph_builder.py:tool_worker_node` calls LangGraph `interrupt()` for danger tools
+- `graph_tool_worker.py:tool_worker_node` calls LangGraph `interrupt()` for
+  danger tools (wired from `graph_builder.py` closures — do not look for the
+  gate body in `graph_builder.py`)
 - Gate is active ONLY when `hitl_config` is passed to `build_supervisor_graph()`
 - Required build sites: `agent_runner.get_streaming_graph()`, `agent_runner._ensure_graph`,
   and `app.py` startup recompile into `_graph_holder`. Omitting HITL on any site =
@@ -142,8 +155,13 @@ unattended-danger-tool security gap:
   multi-operator deployments). The drift warning repeats every 15 min either way.
 - Bus adapters: `TelegramBusAdapter`, `DiscordBusAdapter`, `SlackBusAdapter`
 - App wiring: **one** adapter if only one platform; **`FanOutBusAdapter`** when
-  multiple are configured (first approval wins). NullBus = internal-only /
-  fail-closed danger
+  multiple are configured. Swarm fan-out is **tri-state** (Wave 6 H-12): `True`
+  settles immediately; `False` is a vote until `expected_voters` or the deadline.
+  This is **not** web `claim_gate` (first claim 200, second 409). Do not restore
+  "first boolean / first approval wins" — a Discord Deny used to kill a Telegram
+  Approve. NullBus = internal-only / fail-closed danger
+- H-9: `is_danger_tool()` must call `requires_approval()` (tier floor), not a
+  name list that can un-gate by omission
 - Approval buttons resolve via `handle_callback()` on each adapter
 
 **C. Pipeline checkpoints — swarm PIPELINE tasks** (separate from A and B)
@@ -180,7 +198,7 @@ compatibility. **All public API methods and constructors are unchanged.**
 
 | Module | Responsibility | When to open it |
 |--------|---------------|-----------------|
-| `engine.py` (1366 lines) | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
+| `engine.py` | Dispatch, handoff, task lifecycle, worker registry | Always — the orchestrator |
 | `reliability_registry.py` | Circuit breakers, retries, timeouts, validators, concurrency | Configuring per-worker reliability |
 | `phonebook.py` | WorkerRegistry summon + dispatch_by_name | Topology/DAG worker lookup |
 | `checkpoint_manager.py` | HITL pipeline checkpoint state, timeout auto-reject, persistence | Pipeline pause/resume logic |
@@ -231,7 +249,7 @@ workspace. Three new modules; understanding their interaction is essential.
   markdown block.
 - Injected at THREE sites: main agent init (`agent_runner.py` — NOT
   `graph_builder.py`, which has no env_context reference), per-turn in the SSE
-  chat path (`sse_chat.py`, so workspace switches take effect immediately),
+  chat path (`sse_chat/` package, so workspace switches take effect immediately),
   and into every dispatched worker prompt (`worker.py`).
 - `IdeService.send_to_swarm()` attaches the env block to the task `context` —
   never drop this or workers lose workspace awareness.
@@ -300,8 +318,8 @@ them into every future system prompt. Two invariants must hold:
   AND at apply time (`_auto_apply`/`apply_agent_mutation`) — defense-in-depth.
   Never inject a delta via the old `"Apply these refinements to your behaviour:"`
   framing; always use `format_untrusted_block(evo, source="self_improvement")`.
-- The 3 supervisor injection sites (`agent_runner.py`, `sse_chat.py`, gateway
-  `graph.py`) all use the fence. Keep them in sync if you add a 4th.
+- The 3 supervisor injection sites (`agent_runner.py`, `sse_chat/` package,
+  gateway `graph.py`) all use the fence. Keep them in sync if you add a 4th.
 - Kill-switch `KAZMA_SELF_IMPROVEMENT=0` is checked live (not just at init) on
   both the chat/supervisor path and the swarm worker path.
 
@@ -374,9 +392,9 @@ Dynamic worker creation: when a task with `workers=["auto"]` has no matching
 registered worker, the autoscaler spawns one from `swarm_templates.json` so the
 swarm works with zero pre-registered workers.
 
-- **`engine.get_autoscaler()` (engine.py:163-187) is a lazy singleton.** It loads
+- **`engine.get_autoscaler()` is a lazy singleton.** It loads
   `swarm_templates.json` once on first access. The dispatch fallback that calls
-  `maybe_scale()` is at `dispatch_inner.py:54-62` — it only fires on
+  `maybe_scale()` is in `dispatch_inner.py` — it only fires on
   `NoCapableWorkersError`, never when a named worker is requested or when routing
   succeeds. Do not call `maybe_scale` from elsewhere.
 - **`swarm_templates.json` ships production templates** (coder/researcher/generalist)
@@ -397,36 +415,44 @@ swarm works with zero pre-registered workers.
 ### 15. V2 Memory Worker & Schedulers (`kazma-core/kazma_core/memory/worker_bootstrap.py`)
 
 The V2 cognitive engine has a background maintenance tier: a durable task
-queue drained by a worker, plus FOUR fire-and-forget asyncio scheduler loops.
-These were the subsystem that silently lost its backup/export runs (the
-routines existed but nothing called them) — read this before touching the
-background memory path.
+queue drained by a worker, plus **eight** fire-and-forget asyncio scheduler
+loops started from `start_memory_worker()`. These were the subsystem that
+silently lost its backup/export runs (the routines existed but nothing called
+them) — read this before touching the background memory path.
 
-**A. `start_memory_worker()` is the single boot entry — it starts ALL FOUR
-schedulers.** Called from `app.py` startup (wrapped in try/except so it
-can't block boot). It registers handlers + calls `start_worker()` +
-`_start_macro_sleep_scheduler()` + `_start_backup_export_scheduler()` +
-`_start_reconsolidation_scheduler()` + `_start_commitment_gc_scheduler()`.
-If a new scheduler is added, register/start it HERE or it will never run (the
-exact gap that previously left backups/export inert).
+**A. `start_memory_worker()` is the single boot entry — it starts EVERY
+scheduler.** Called from `app.py` startup (wrapped in try/except so it
+can't block boot). It registers handlers + `start_worker()` + all
+`_start_*_scheduler()` calls in that function. If a new scheduler is added,
+register/start it HERE or it will never run (the exact gap that previously
+left backups/export inert). Current boot list:
 
-**B. Four scheduler loops, distinct cadences (do not collapse them):**
-- **6h `macro_sleep` loop** (`_MACRO_SLEEP_INTERVAL_HOURS = 6`): enqueues a
-  `macro_sleep` task every 6h → decay scoring, tier demotion/promotion,
-  archival (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
-- **24h backup/export loop** (`_BACKUP_EXPORT_INTERVAL_HOURS = 24`): enqueues
-  `native_backup` + `nightly_export` + `native_pg_backup` tasks every 24h →
+- `_start_macro_sleep_scheduler()`
+- `_start_backup_export_scheduler()`
+- `_start_reconsolidation_scheduler()`
+- `_start_commitment_gc_scheduler()`
+- `_start_session_purge_scheduler()`
+- `_start_daily_digest_scheduler()`
+- `_start_firing_ledger_scheduler()`
+- `_start_restore_drill_scheduler()`
+
+**B. Distinct cadences (do not collapse them):**
+- **6h `macro_sleep`:** decay scoring, tier demotion/promotion, archival
+  (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
+- **6h backup/export** (`_BACKUP_EXPORT_INTERVAL_HOURS = 6`, not 24):
+  enqueues `native_backup` + `nightly_export` + `native_pg_backup` →
   native `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML
   dumps (`export.py`) + a filtered `pg_dump` of Kazma's Postgres
   shared-state tables (§21). First sweep 120s after boot. Kept separate
-  from the 6h loop so a slow disk on backup can't stall decay.
-- **24h reconsolidation loop** (`_RECONSOLIDATION_INTERVAL_HOURS = 24`):
-  enqueues `global_reconsolidation` (dedupe + re-embed of beliefs,
-  subject-hash partitioned).
-- **15-min commitment GC loop** (`_COMMITMENT_GC_INTERVAL_MINUTES = 15`):
-  enqueues the commitment-store sweep (TTL expiry + tiered retention, §20).
-All loops only `enqueue_task(...)`; the durable worker drains the actual
-work, so a failed enqueue cannot kill the cadence and a failed handler is
+  from macro_sleep so a slow disk on backup can't stall decay.
+- **24h reconsolidation:** `global_reconsolidation` (dedupe + re-embed of
+  beliefs, subject-hash partitioned).
+- **15-min commitment GC:** TTL expiry + tiered retention (§20). Also
+  rides HITL-gate TTL sweep — no new sweeper loop.
+- **Session purge, daily digest, weekly firing ledger, restore drill:**
+  started here too; do not assume "the four original loops" is the set.
+All `enqueue_task(...)` loops: the durable worker drains the actual work, so
+a failed enqueue cannot kill the cadence and a failed handler is
 retried/bounded by the queue.
 
 **C. Handler registration is idempotent via separate module-level flags.**
@@ -739,7 +765,7 @@ call-site-local normalization.
   not fail a test — it silently returns the platform to blank Arabic PDFs, and
   makes `tests/test_docx_rtl_visual.py` skip instead of run.
 
-**K. Direction is per BLOCK, not per document.**
+**I. Direction is per BLOCK, not per document.**
 `DocProfile.direction` is the *document* base direction — margins, section,
 chrome, gutter. `DocProfile.block_direction(text)` resolves each block on its
 own, and every engine must use it for content: `w:bidi` per paragraph (DOCX),
@@ -781,7 +807,7 @@ with PyMuPDF rather than grepping the source — every defect it covers was
 invisible at the code level and obvious on the page. Do not weaken it to source
 assertions.
 
-**I. Third-party parse egress is opt-in and audited.**
+**K. Third-party parse egress is opt-in and audited.**
 `extract_salvage.try_remote_parse` uploads the ORIGINAL document bytes to
 LlamaParse/Reducto. It requires `documents.security.remote_parse` (default
 **off**); an API key in the environment is not consent. Local Docling salvage
@@ -809,8 +835,8 @@ free-fire the remind/exec classes); the layer kill-switch and
 import-unavailable degradation stay fail-open (treated as layer-off).
 
 **A. Two `authorize_effect` choke points + an independent memory-side gate.**
-- `agent/graph_builder.py:tool_worker_node` — the single-agent chat path; the
-  gate runs BEFORE the security HITL split so it can rewrite args first.
+- `agent/graph_tool_worker.py:tool_worker_node` — the single-agent chat path;
+  the gate runs BEFORE the security HITL split so it can rewrite args first.
 - `agent/tool_registry.py:LocalToolRegistry.execute` — the IDE/swarm path
   (mostly audit-only — remind/cancel_job decisions need graph context — but
   the exec denylist / outbound allowlist / config protected-key resolvers DO
@@ -855,7 +881,8 @@ import-unavailable degradation stay fail-open (treated as layer-off).
 - **Soul confirm gate** (`apply_agent_mutation`/`_auto_apply`): when
   `soul_requires_confirm` is on, soul deltas are held until confirmed via
   `POST /api/commitment/soul/{cid}/confirm`. Mint-wired at both apply callers.
-  Default OFF.
+  Config default is off; **auto-ON in production / multi-user** unless the
+  operator set the key explicitly (`get_commitment_config`).
 - **Fail-open + kill-switch**: `KAZMA_COMMITMENT_ENABLED=0` disables the whole
   layer. Every enforcement layer has its own default-OFF flag. (Engine
   *exceptions* on semantic tools fail closed at both chokes — see the §20
@@ -880,7 +907,7 @@ import-unavailable degradation stay fail-open (treated as layer-off).
   `default_worker_scope()` + `is_act_within_scope()` (the privilege guard).
 - `resume.py` — `build_resume_value()` + `is_semantic_kind()` (maps
   Approve/Deny → option/cancel for semantic interrupts on every platform).
-- `_commitment_resolve_gate()` in `graph_builder.py` — the extracted gate
+- `_commitment_resolve_gate()` in `graph_tool_worker.py` — the extracted gate
   (Phase 2.5 SRP). Called from `tool_worker_node`.
 - **Operator API**: `kazma_ui/commitment_api.py` —
   `GET /api/commitment/soul/pending`, `POST .../{cid}/confirm`, `POST .../{cid}/reject`.
@@ -893,7 +920,8 @@ import-unavailable degradation stay fail-open (treated as layer-off).
 - Kill-switches (all default OFF / layer default ON):
   `KAZMA_COMMITMENT_ENABLED` (layer, default on),
   `KAZMA_COMMITMENT_SWARM_SCOPE_ENFORCE` (default ON since 2026-08-15),
-  `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` (default off),
+  `KAZMA_COMMITMENT_SOUL_REQUIRES_CONFIRM` (default off; auto-ON in
+  production / multi-user unless explicitly set),
   `KAZMA_AUTO_STORE_BELIEFS` (default conservative).
 
 **Tests:** 15+ test files (`tests/test_commitment_*.py` +
@@ -911,24 +939,30 @@ app pointed at the shared `kazma` database dropped Kazma's tables
 scheduled PG backup to restore from.
 
 **A. `KAZMA_PG_TABLES` is the single SoT of which tables Kazma owns.**
-The list (LangGraph `checkpoints*`, `kazma_settings`, `kazma_chat_sessions`,
-`kazma_swarm_tasks`, `kazma_swarm_worker_metrics`, `kazma_platform_users`,
-`kazma_web_sessions`, `document_jobs`, `document_job_events`) drives BOTH
-the nightly dump's `-t` filter AND the boot verification. A new
-shared-state PG table MUST be added here or it silently stops being backed
-up. The dump is deliberately table-filtered — never a whole-DB dump — so a
+The list lives in `kazma_core/db/pg_backup.py` (not here — this file will
+drift). It includes LangGraph `checkpoints*`, shared-state
+(`kazma_settings`, `kazma_chat_sessions`, `kazma_swarm_tasks`,
+`kazma_swarm_worker_metrics`, `kazma_platform_users`, `kazma_web_sessions`),
+document jobs (`document_jobs`, `document_job_events`), **and** the document
+catalog from H-13 (`documents`, `document_blobs`, `document_versions`,
+`document_artifacts`, `document_acl`, `document_tombstones`,
+`document_chunks`, `document_audit_events`). A new shared-state PG table
+MUST be added to that Python list or it silently stops being backed up.
+The dump is deliberately table-filtered — never a whole-DB dump — so a
 shared database neither leaks foreign-app data into Kazma's backups nor
-restores over another app's tables.
+restores over another app's tables. `hitl_gates.db` is SQLite (single-process
+like the turn journal), not this list.
 
-**B. Nightly dump pipeline (24h loop, `worker_bootstrap.py`).**
-The 24h backup/export loop enqueues `native_pg_backup` when
+**B. Dump pipeline (6h loop, `worker_bootstrap.py`).**
+The backup/export loop enqueues `native_pg_backup` when
 `pg_backup_enabled()` (live-checked: Postgres backend + `backups.pg.enabled`
 config + `KAZMA_PG_BACKUP_ENABLED` env kill-switch). The handler
 (`_handle_native_pg_backup`) runs `perform_pg_backup()` in a worker thread:
 dump via `migration/pg_bridge.dump_database(tables=KAZMA_PG_TABLES)` to a
 `.tmp` file, validate the `PGDMP` magic, atomically rename into
 `{kazma-data}/backups/pg/pg_shared_<epoch>.dump`, then prune to
-`backups.pg.retention` (default 7, env `KAZMA_PG_BACKUP_RETENTION`).
+`backups.pg.retention` (default **3** local staging dumps; restic keeps
+history. Env `KAZMA_PG_BACKUP_RETENTION`).
 Failures return False so the durable queue retries (max 3) then
 dead-letters; a failed dump never leaves a valid-looking file behind.
 
@@ -956,9 +990,11 @@ kill-switch `KAZMA_PG_BACKUP_ENABLED=0`. Tests:
 literally everything: every `*.db` in `kazma-data/` (WAL-safe via
 `sqlite3.backup()` API), every non-DB dir (attachments, document-store,
 workspace, exports, vectors — via `_robust_copytree` that skips ephemeral
-files like LibreOffice cache), and the Postgres dump (delegates to
-`pg_backup.perform_pg_backup`). Produces `manifest.json` + retention-capped
-(default 7). Wired into the 24h `native_backup` handler (auto) +
+files like LibreOffice cache). It does **not** run a second `pg_dump`.
+It **records whether `native_pg_backup` is fresh** (`_pg_dump_state`); a
+stale/missing dump is a failed item in the manifest, not `"ok": true`.
+Produces `manifest.json` + retention-capped (default 7). Wired into the
+6h `native_backup` handler (auto) +
 `POST /api/backup/now` (manual, background task) + Settings → Backup tab
 (animated progress bar polling `GET /api/backup/status` every 2s).
 Delete/archive/download: `DELETE /api/backup/{name}`,
@@ -1066,7 +1102,9 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   Firecrawl→Jina→Playwright) built on `proxy.client.get_scraping_client`
   (proxy provider + rotating UA pool); `web_acquire` is the façade
   (`fetch_text`/`search`/`rank_urls`/profiles) used by research pipeline, KB
-  ingest, and readiness.
+  ingest, and readiness. Direct (no-proxy) hops pin the validated IP
+  (`PinHostAsyncTransport`) and abort if the peer is private (§32). Do not
+  pin through `proxy=` — CONNECT would break scraping.
 - `crawl_site(profile=...)` accepts named cap presets (`research_brief` |
   `research_deep` | `kb_site` | `single_page`); explicit args win; hard env
   ceilings (`KAZMA_CRAWL_MAX_PAGES` etc.) still clamp.
@@ -1217,7 +1255,9 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   handlers) or wrap in `asyncio.to_thread`.
 - `asyncio` holds only a WEAK reference to a task, so a discarded
   `create_task(...)` can be garbage-collected mid-run, silently. Use
-  `kazma_core.background.spawn_background(coro, name=…)`.
+  `kazma_core.background.spawn_background(coro, name=…)`. Bare
+  `loop.create_task` in product code (including `ops_alerts._dispatch`)
+  is the same class of bug — prefer `spawn_background`.
 - CI: `test_no_blocking_db_driver_in_async`, `test_no_bare_create_task`.
 
 **F. Errors do not carry internals.**
@@ -1234,161 +1274,59 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   model raw. CI: `test_no_unfenced_web_tool_output`.
 
 **H. One writer for the procedural recorder.**
-- `_record_procedural_outcome` used to spawn a `daemon=True` thread PER TOOL
-  CALL, each opening its own SQLite connection and running the full
-  `ensure_primary_schema` (DDL + FTS5 rebuild probes) before writing one row.
-  Concurrent record threads crashed the interpreter with a Windows access
-  violation whose traceback moved between `_ensure_fts5`,
-  `ensure_primary_schema` and `config_store.get` — which is why it looked
-  like three unrelated bugs and was first mis-diagnosed as a ConfigStore
-  shared-connection problem.
-- Measured on `tests/test_truncation_retry.py`: **4/10 runs crashed before,
-  1/80 after**. Disabling the threads entirely gave 0/10, which is what
-  identified the concurrency between them as the fault. Three narrower
-  hypotheses were tested and are NOT the cause, each still crashing at
-  roughly the same rate: draining the threads at exit, giving ConfigStore a
-  per-thread connection, and serialising `ensure_primary_schema`. Non-daemon
-  threads did not help either, so it is not a teardown race.
-- Now a **single worker thread** drains a bounded queue: exactly one thread
-  ever touches these databases, the schema is ensured once per process
-  instead of once per tool call, the queue drops rather than blocks when
-  full, and `atexit` drains it. Do not reintroduce a thread per call.
-- The residual after that was the actual root cause, and the codebase had
-  already found it once: `reset_config_store()` **closed** the sqlite handle
-  out from under any background reader. Its own docstring named the
-  procedural recorder and said harnesses should pass `close=False` — and not
-  one of the 17 call sites did, so the guidance protected nothing. Closing is
-  now opt-in (`close=False` is the default), and the recorder reads
-  `read_memory_cfg()` on the CALLER's thread so the worker never touches
-  ConfigStore at all and cannot be raced by a reset regardless.
-- General rule this leaves behind: **a default that every caller must
-  override to be safe is the wrong default.** If you add a background reader
-  of a shared store, it must not hold that store across a lifecycle reset.
-- Debugging note: in a faulthandler dump the faulting frame is the least
-  useful part. The signal is which OTHER threads are alive and what they are
-  inside.
+- A thread-per-tool-call used to crash Windows (`AccessViolation` in FTS /
+  schema / ConfigStore — three faces of one race). **One worker thread**
+  now drains a bounded queue; schema is ensured once per process; the queue
+  drops rather than blocks; `atexit` drains it. Do not reintroduce a thread
+  per call. Repro: `tests/test_truncation_retry.py`.
+- `reset_config_store()` must not close the sqlite handle out from under a
+  background reader. Closing is **opt-in** (`close=False` is the default).
+  The recorder reads `read_memory_cfg()` on the caller thread so the worker
+  never touches ConfigStore. **A default every caller must override to be
+  safe is the wrong default.**
 
 
 
 
 ### 27. Backups that report success (2026-08-29)
 
-Three failures found the same day, all the same shape: the system kept
-running, kept logging "complete", and stopped protecting the data. Each
-is now detected in seconds and says what to do. `tests/test_backup_
-silent_failures.py` holds the reproductions.
+A backup that logs "complete" while the offsite copy cannot write is the
+same as no backup. Reproductions: `tests/test_backup_silent_failures.py`.
 
-**A. A Drive remote that reads fast and cannot write at all.**
-- A Google **service account has no Drive storage quota of its own**. It
-  will list a folder shared with it in milliseconds, and fail every upload
-  with `403 storageQuotaExceeded`. Only a Shared Drive escapes this, and
-  Shared Drives need Workspace — a consumer account cannot have one.
-- restic takes a **lock before it will even LIST**, so on such a remote
-  `restic snapshots` does not fail: it retries with exponential backoff
-  for about fifteen minutes and presents as a hang. Two 600-second probes
-  were spent proving "still failing" before the cause was visible.
-- `restic_repo.remote_writable()` now PUTs a probe object before any
-  restic call against an `rclone:` repo (cached 5 min). 900s of silent
-  retrying became a 3.1s error naming the credential. `_run` refuses to
-  invoke restic when it fails and raises `backup.restic_remote_read_only`.
-- Any offsite check that only reads is worthless. Prove the write.
-- **The probe had a hole exactly where it was about to matter.**
-  `remote_writable()` returned `(True, "")` for anything that was not an
-  `rclone:` URL, so an `s3:` repository was assumed writable and never
-  tested. Migrating off Drive to object storage would therefore have carried
-  the same blind spot to the new destination on day one. `s3:` repos are now
-  probed with a SigV4-signed PUT + DELETE built on the standard library — no
-  boto3, because a check that runs when the backup path is already suspect
-  should not depend on anything that path does not already need.
-- The probe writes under the **`locks/` prefix**, and that is not arbitrary.
-  An append-only backup key must still be allowed to delete locks, because
-  restic writes one at the start of every run and removes it at the end; a
-  key with no delete permission at all accumulates stale locks and refuses
-  to back up a few runs later. Probing `locks/` exercises exactly the
-  permission the policy is meant to grant and leaves nothing behind. The
-  matching bucket policy is: `PutObject`/`GetObject`/`ListBucket` on the
-  whole prefix, `DeleteObject` on `locks/*` only.
-- `tests/test_restic_s3_write_probe.py` stands up a local HTTP server that
-  **recomputes the signature the way S3 does** rather than trusting it.
-  Unexercised signing code fails as a 403 against the real bucket and gets
-  blamed on the bucket policy.
+**A. Prove the write.** `restic_repo.remote_writable()` PUTs a probe before
+any restic call. `rclone:` and `s3:` are both probed (`s3:` = stdlib SigV4
+PUT+DELETE under `locks/` — the prefix an append-only key must still be
+allowed to delete). A read-only probe is worthless. `_run` refuses restic
+when the probe fails (`backup.restic_remote_read_only`). Tests:
+`tests/test_restic_s3_write_probe.py`.
 
-**B. A missing passphrase is not a config note.**
-- `ensure_password()` returning empty used to log one INFO line and skip
-  every snapshot. It did that for four hours while backups reported
-  success, because the local dump really had been written.
-- `alert_missing_password()` is critical, and deliberately silent when no
-  repository exists yet — on a fresh install nothing is at stake, and an
-  alert there teaches the operator to ignore the one that matters.
+**B. A missing passphrase is not a config note.** `alert_missing_password()`
+is critical, and silent only when no repository exists yet.
 
 **C. Mechanisms that only speak when they break cannot be told from
-mechanisms that never run.** A successful restic snapshot logged nothing;
-a completed restore logged nothing. Both now log one line, and
-`observability/firing_ledger.py` counts them.
+mechanisms that never run.** Successful restic snapshot + restore each log
+one line. `observability/firing_ledger.py` (`run_weekly_sweep`, started
+from `start_memory_worker`) counts them. `_log_paths()` must read
+**guard.log and kazma.log**; signatures must be copied from the emitting
+line; the sweep must be scheduled (it shipped unscheduled once).
 
-**The firing ledger** (`run_weekly_sweep`, scheduled from the memory
-worker) turns "unproven: N" from a hand-computed number into a measured
-one. Two lessons from its own first day, because it made both mistakes:
-- It read only `kazma.log` and reported ZERO guard restarts on an evening
-  they fired. **The guard logs to its own file on purpose**, so the app's
-  logging config cannot silence it — which is exactly why a ledger that
-  reads one file is worse than none. `_log_paths()` reads all of them.
-- Two of its patterns matched strings that appear nowhere in the codebase.
-  A signature must be copied from the emitting line, not guessed from the
-  mechanism name, or the dial is welded to zero.
-- It shipped unscheduled: it imported, passed its tests, and nothing
-  called it. That is its own finding, happening to itself.
-
-**Chaos injection is only real where it lands.** `InjectionTarget.
-LLM_PROVIDER` is injected INSIDE `resilient_chat`'s attempt loop, not
-around the function: a failure raised outside skips both the retry and
-the failover and proves only that exceptions propagate.
-`ChaosInjectionError` carries `.transient` (408/429/5xx), because the
-retry paths decide by asking, and an injected 503 that claims to be
-permanent skips the very retry it was injected to exercise.
+**Chaos injection is only real where it lands.** `InjectionTarget.LLM_PROVIDER`
+is injected INSIDE `resilient_chat`'s attempt loop. `ChaosInjectionError`
+carries `.transient` (408/429/5xx) so retry/failover actually run.
 
 
 ### 28. A guard nobody has seen fail (2026-08-30)
 
-§27C says a mechanism that only speaks when it breaks cannot be told from
-one that never runs. The same sentence applies to the tests that enforce
-these rules, and it cost a night to learn.
-
-**Every guard test needs a negative control.** Assert it FAILS on a
-synthetic violation, in the same test file, or "passing" means nothing.
-Three examples from one evening, all of which passed while being wrong:
-
-- `test_each_hitl_rule_is_defined_once` read `kazma.css` only. `base.html`
-  loads `kazma.v5.css` **second**, which redefined two of the selectors — so
-  the guard reported "one rule each" while the browser applied three, which
-  is exactly how the card came to render as a mixture of two designs.
-- Its rule counter then matched a **grouped** selector list
-  (`.agent-progress,\n.hitl-approval-card {`) and validated the wrong rule
-  entirely, and missed whole rules written on one line — which is how
-  `kazma.v5.css` had written its duplicate.
-- The heavy-import gate used `ast.walk`, which finds imports inside function
-  bodies. It flagged a correct lazy `import fitz` and so blocked the fix for
-  `generate_pdf` reporting success on PDFs missing 30 of their names. A guard
-  can be wrong in the direction of blocking good work, too.
-
-**Enumerate a guard's inputs from the same source of truth the system
-uses.** The CSS gate now parses `base.html` for its stylesheet list instead
-of hardcoding one; a copied list is a second definition, and second
-definitions drift — which is what the duplicate rules were in the first
-place.
-
-**Prefer measuring behaviour to grepping source.** The layout bug was
-invisible in the CSS and obvious the moment the DOM was rebuilt with the
-live stylesheets and measured in a browser: the reasoning panel at 51px
-beside a 493px card. Pinning `flex: 1 1 100%` looked sufficient and was not
-— against an inline `display:flex` both children still shrank to share the
-line, which only `flex-wrap` fixed, and only the measurement showed it.
-
-The corollary for runtime code: `start_stall_watchdog` shipped without a
-way to stop. Cancelling the heartbeat left the watcher thread reporting an
-ever-growing stall every 30s forever. Nothing found that until a negative
-control — "the kill-switch means no dump is written" — failed for a reason
-that had nothing to do with the kill-switch.
+Every guard test needs a **negative control**: assert it FAILS on a
+synthetic violation in the same file, or "passing" means nothing. Enumerate
+inputs from the **same SoT the system uses** (CSS gate parses `base.html`
+stylesheet list — `kazma.v5.css` loads second and last-wins). Prefer
+measuring behaviour to grepping source. A guard can be wrong in the
+direction of blocking good work (`ast.walk` flagged a correct lazy
+`import fitz`). Runtime corollary: `start_stall_watchdog` must be
+stoppable — cancelling the heartbeat must not leave a thread reporting
+stalls forever. HITL card CSS: do not duplicate selectors in `kazma.css`
+and `kazma.v5.css` (Wave 8 L-2: standalone `.metric-card` lives in v5).
 
 
 ### 29. Context Integrity (2026-08-30 incident hardening)
@@ -1545,6 +1483,79 @@ Tests: `tests/test_hitl_gates.py`, `test_hitl_gate_bridge.py`,
 `test_hitl_gate_read_cutover.py`, `test_hitl_gate_swarm_pipeline.py`,
 `test_hitl_gate_reconciler.py`.
 
+**Collision recipes** (also in `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` —
+keep both in sync):
+
+1. **T-4 / `chat.js`:** scrub stays inside `renderTurn`. No second painter.
+2. **H-8 / `tool_registry.execute`:** apply `rewritten_args`; `clarify`/`confirm`
+   fail closed (“run from chat”). Never mint a second gate row on the web path.
+3. **T-2 pipeline timeout:** finalize the task **and** `settle_gate`.
+4. **H-9 bus:** `is_danger_tool()` → `requires_approval()`. Not FanOut first-wins.
+5. **H-12:** swarm bus tri-state only. Must not retarget web `claim_gate`.
+
+Protected files: `chat.js` (`_paintHitlFromDoc`, `renderTurn`,
+`_hitlAlreadyClaimed`, `_serverGates`), `turn_document.js`,
+`turn_runtime.py` (`close_turn`), `hitl_gates.py`, `hitl_status.py`.
+
+
+### 31. Turn Delivery V2 — journal is SoT, client projects
+
+Web/SSE/WS chat is **event-sourced delivery**, not a second brain.
+Plan: `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md` (P0–P4 shipped).
+HITL sits on this as one projection (§30).
+
+**A. `close_turn` is the only closer.** `kazma_ui/turn_runtime.py:close_turn`
+decides whether a turn is open, waiting on HITL, or done. A pending
+registry row keeps the turn **open**. Absence of a row is an unregistered
+pending gate (backfill), never an inferred Approved stamp. Do not add a
+client-side `forceEndTurn` wall-clock that marks CoT Done while the server
+is still working.
+
+**B. The client projects; it does not author.** `chat.js` paints from the
+TurnDocument / `_serverGates`. Token deltas APPEND; only `turn_complete`
+has replace semantics (§29F duplicated-prefix invariant). Do not restore
+`tokenAccum` dual-paint (T-4).
+
+**C. Catch-up is resume, not replay of deltas.** Refresh / reconnect reads
+the journal + gate status. Do not re-stream content the bubble already
+appended.
+
+**D. Transports are mouths.** SSE (`sse_chat/`), WS (`ws_chat.py`), gateway
+graph (`agent_handler/graph.py`) all close through the same completion
+contract. A new mouth that invents its own “Done” is a delivery bug.
+
+
+### 32. SSRF pin-IP (Wave 8 H-7)
+
+`validate_url` returns the public IPs it resolved. Direct scraping (no
+`proxy=`) uses `PinHostAsyncTransport` (`kazma_core/security/ssrf_pin.py`)
+to connect to the pin while keeping Host + SNI. After every `read_url`
+hop, `assert_peer_public` / `peer_ip_from_response` abort if the peer is
+private (fail closed).
+
+**Do not pin through `proxy=`.** `get_scraping_client` skips the pin
+transport when a proxy is configured — CONNECT would break scraping.
+Peer-private abort still runs. Tests: `tests/test_audit_wave8.py`.
+httpx `>=0.27`.
+
+
+### 33. Ops alerting — three paths, no fourth notifier
+
+| Path | Who | When | Channel |
+|------|-----|------|---------|
+| Guard `Notifier` | Supervisor process, stdlib urllib | Child dead / unhealthy / crash-loop / pause | Telegram-direct — must work when the app cannot |
+| `observability/ops_alerts.alert()` | Inside Kazma | Backup/offsite/restic/MCP/persist/turn-fail | Fan-out bus + Telegram-direct fallback |
+| `lifecycle_notifier` | App boot/shutdown | starting / started / restarted / shutting_down | Same bus |
+
+Cooldown default 900s per key (`KAZMA_OPS_ALERT_COOLDOWN_S`). Never raises.
+Kill-switch `KAZMA_OPS_ALERTS=0` (does not mute lifecycle). Mute theorem:
+60 identical messages = the channel is ignored.
+
+Guard `probe()` currently formats HTTP 503 as `unreachable: Service
+Unavailable` and **discards** the JSON `checks` (live 2026-09-02 Docker
+Desktop / Postgres). Cause-quality + flap control is **deferred**:
+`docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`. Do not invent a fourth
+notifier, mix ops pages into HITL cards, or page every backup success.
 
 ## UI Conventions (Web)
 
@@ -1558,13 +1569,13 @@ Tests: `tests/test_hitl_gates.py`, `test_hitl_gate_bridge.py`,
   `Alpine.store('toast').add(...)`. `streaming.js`'s `KazmaStream.toast`
   delegates to `$store.toast` — there is one toast system.
 - **`x-cloak` is GLOBAL — do not re-introduce the blink.** The rule
-  `[x-cloak] { display: none !important; }` lives once in `kazma.css`. Any
-  `x-show`-gated panel MUST also carry `x-cloak`, or it flashes visible at
-  first paint before Alpine evaluates its `x-show` (the "different section /
-  permissions card blinks then disappears" symptom). Never put `display:flex`
-  (or any `display`) in an inline `style` on an `x-show` element — the inline
-  declaration wins over Alpine's `display:none` toggle; put flex layout in a
-  CSS class instead (see `.system-alerts-banner`).
+  `[x-cloak] { display: none !important; }` lives once in `kazma.css`
+  (`base.html` then loads `kazma.v5.css` — last-wins for overlapping
+  selectors; do not duplicate HITL/card rules). Any `x-show`-gated panel
+  MUST also carry `x-cloak`. Never put `display:flex` (or any `display`) in
+  an inline `style` on an `x-show` element — the inline declaration wins
+  over Alpine's `display:none` toggle; put flex layout in a CSS class
+  instead (see `.system-alerts-banner`).
 - **Responsive grids:** use `class="two-col-grid"` (collapses to one column
   ≤768px via `kazma.css`) on any inline `grid-template-columns:1fr 1fr;` —
   bare inline 2-col grids don't collapse and crush on mobile.
@@ -1619,9 +1630,14 @@ cd 'G:\GitHubRepos\kazma'
 - `docs/ARCHITECTURE_AND_SYSTEM_MAP.md` — Monorepo system map + remediation crosswalk
 - `docs/docs/reference/tools-catalog.md` — Built-in + native tools
 - `docs/docs/ops/production-checklist.md` — Production go-live checklist
+- `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` — Binding industrial audit (waves 0–8 shipped). Do **not** follow dump `AUDIT_DEEP_2026-09-01.md` Part 6 order.
 - `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` — Deep-structure audit (22 findings, change-impact map, CI recovery, Telegram desync §20)
-- `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Latest production audit
+- `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` — Historical production audit (2026-07-21)
 - `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` — Document cert report
+- `docs/plans/HITL_GATE_REGISTRY_PLAN.md` — Gate registry (P6)
+- `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md` — Turn Delivery V2
+- `docs/plans/CONTEXT_INTEGRITY_HARDENING_PLAN.md` — Context integrity
+- `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md` — Deferred Guard/ops alerting sprint
 - `docs/plans/done/DOCS_CONSOLIDATION_PLAN.md` — Docs consolidation plan (completed)
 - `CHANGELOG.md` — Sprint history
 - Live docs only under `docs/docs/` (Docusaurus). Do not resurrect retired `docs-v2` / loose handover trees.

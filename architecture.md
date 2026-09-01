@@ -16,25 +16,30 @@ without searching.
 | Swarm | [`docs/docs/guide/swarm-orchestration.md`](docs/docs/guide/swarm-orchestration.md) |
 | IDE | [`docs/docs/products/ide.md`](docs/docs/products/ide.md) |
 | Production checklist | [`docs/docs/ops/production-checklist.md`](docs/docs/ops/production-checklist.md) |
-| Latest production audit | [`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`](docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md) |
+| Binding industrial audit | [`docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md`](docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md) (waves 0–8 shipped) |
+| Historical production audit | [`docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md`](docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md) |
 | Changelog | [`CHANGELOG.md`](CHANGELOG.md) |
 
 ## Package map (quick)
 
+There is **no** `kazma-memory` package (retired; V2 lives in `kazma_core.memory`).
+
 | Package | Role |
 |---------|------|
-| `kazma-core` | Agent brain, swarm, tools, model registry, vault, IDE service |
+| `kazma-core` | Agent brain, swarm, tools, model registry, vault, IDE service, V2 memory, documents |
 | `kazma-gateway` | Telegram / Discord / Slack adapters + agent handler |
-| `kazma-ui` | FastAPI web UI, SSE chat, settings, IDE page |
+| `kazma-ui` | FastAPI web UI, SSE/WS chat, settings, IDE page, turn journal |
 | `kazma-tui` | Textual dashboard / editor |
-| `kazma-cli` | CLI entrypoints |
+| `kazma-cli` | CLI entrypoints (`kazma serve`, `migrate`, `ask`, ACP) |
 | `kazma-skills` | Skill manifests + native skills |
-| `kazma-memory` | Arabic tokenizer / search helpers |
 
 ## Critical rules (see AGENTS.md)
 
 1. Model + provider always switch together (`model_registry.py`).
 2. Platform IDs never enter LangGraph state (`SessionStore` only).
-3. Three HITL gates: graph interrupt, swarm bus, pipeline checkpoints.
+3. Three HITL **execution** paths (graph interrupt, swarm bus, pipeline checkpoints) + one **registry** (`hitl_gates.db`). Swarm FanOut is tri-state, not first-wins.
 4. IDE mutations go through `LocalToolRegistry` (shared HITL).
 5. ConfigStore singleton via `get_config_store()`; sensitive keys prefer the vault when `KAZMA_VAULT_KEY` is set.
+6. Turn Delivery: `close_turn` is the only closer; the client projects; no second painter (`chat.js`).
+7. Soul deltas live in ConfigStore (not `SOUL.md` / `agent_evolution.json`) and must be prompt-fenced.
+8. Never start/restart the server; operator reload is `kazma_guard.py --reload`.
