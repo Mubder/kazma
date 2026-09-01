@@ -118,6 +118,28 @@ def test_duplicate_resume_attaches_instead_of_dead_ending() -> None:
     assert "Rejecting duplicate resume" not in src
 
 
+def test_new_prompt_stream_subscribes_at_journal_head() -> None:
+    """The journal is per-THREAD and retains the previous turn's frames. A
+    new-prompt stream that replays from 0 re-delivers the old reply's token
+    frames into the fresh turn — the two replies crossed bubbles in chat
+    ("my answer appeared above the previous reply", 2026-09-02). The new
+    prompt path must subscribe at the head captured BEFORE the drive task
+    starts (its frames carry seq > head and arrive via resume ∪ live queue)."""
+    src = _src(_UI / "sse_chat" / "__init__.py")
+    assert "_journal_head = get_turn_broker().head_seq(thread_id)" in src
+    assert "_sse_attach_stream(thread_id, session_id, _journal_head)" in src
+    # Negative: the literal from-0 subscribe on the new-prompt path is the bug.
+    assert "_sse_attach_stream(thread_id, session_id, 0)" not in src
+    # Ordering: the head capture must precede the drive creation.
+    assert src.index("_journal_head = get_turn_broker().head_seq(thread_id)") < src.index(
+        "_drive = asyncio.create_task("
+    )
+    # The broker must expose the head publicly (no private journal reach).
+    delivery = _src(_UI / "delivery.py")
+    broker = delivery.split("class TurnBroker", 1)[1]
+    assert "def head_seq(self, thread_id: str)" in broker
+
+
 def test_error_frame_finishes_the_sse_stream() -> None:
     src = _src(_UI / "static" / "js" / "streaming.js")
     err = src.split("case 'error':", 1)[1].split("case ", 1)[0]
@@ -262,6 +284,25 @@ def test_cot_steps_do_not_trap_page_scroll() -> None:
     assert "max-height" in block and "overflow-y: auto" in block
     # Declaration-shaped check: the word in a comment must not trip the guard.
     assert "overscroll-behavior:" not in block
+
+
+def test_historical_render_never_captures_open_turn_pointer() -> None:
+    """A render targeting a bubble FOLLOWED by a user message is historical:
+    paint it, but never re-pin currentMsgEl. A late hydrate/resync for turn N
+    re-pinned its bubble, and turn N+1's first token painted into that old
+    bubble and re-stamped its turn id — the two replies crossed bubbles
+    ("my new message's answer appeared above the previous reply", 2026-09-02)."""
+    chat = _src(_CHAT_JS)
+    render = chat.split("function renderTurn(doc, meta)", 1)[1].split("\n  function applyTurnEvent", 1)[0]
+    assert "_prevOpenEl" in render
+    assert "message-user" in render
+    assert "if (!_historical) currentMsgEl = el;" in render
+    assert "if (_historical) currentMsgEl = _prevOpenEl;" in render
+    # The open turn's wait/paint flags are off-limits to historical renders.
+    assert "if (!_historical) _turnPainted = true;" in render
+    assert "if (!_historical && (doc.status === 'done'" in render
+    # Negative: unconditional adoption at the head is exactly the bug.
+    assert "\n    currentMsgEl = el;" not in render
 
 
 def test_live_cot_goes_through_the_document() -> None:

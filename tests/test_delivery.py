@@ -195,6 +195,37 @@ class TestRetention:
         assert stats["total_events"] == 1
 
 
+class TestBrokerHeadSeq:
+    """The new-prompt stream subscribes at the journal head (2026-09-02):
+    frames journaled BEFORE a new prompt must never replay into it."""
+
+    def test_head_seq_delegates_to_journal(self) -> None:
+        broker = TurnBroker()
+        assert broker.head_seq("t1") == 0
+
+        async def _emit() -> None:
+            await broker.emit("t1", {"type": "token", "data": {"content": "a"}})
+            await broker.emit("t1", {"type": "done", "data": {"content": "a"}})
+
+        asyncio.run(_emit())
+        assert broker.head_seq("t1") == 2
+
+    def test_subscribe_at_head_replays_nothing_old(self) -> None:
+        """Behavioral core of the crossing fix: a subscriber starting at the
+        captured head sees only frames emitted after it."""
+        journal = TurnJournal()
+        for i in range(3):
+            journal.append("t1", {"type": "token", "data": {"content": f"old-{i}"}})
+        head = journal.head_seq("t1")
+        frames, gap = journal.replay("t1", head)
+        assert not gap
+        assert frames == []
+        # Frames after the head still arrive.
+        journal.append("t1", {"type": "token", "data": {"content": "new"}})
+        frames, gap = journal.replay("t1", head)
+        assert [f["data"]["content"] for f in frames] == ["new"]
+
+
 # ── TurnBroker: fan-out ──────────────────────────────────────────────────
 
 
