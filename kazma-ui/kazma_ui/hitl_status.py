@@ -1,15 +1,13 @@
 """HITL thread status — one answer for every reader.
 
-LangGraph ``interrupt()`` is the execution pause. It is not "the card is
-still live". A resume that has been claimed (``register_turn`` /
-``_resume_inflight``) or a persisted HITL part past ``pending`` means the
-operator already acted. Pending-list, WS scan, and session status must
-agree on that.
+The gate registry owns the DECISION (P6). LangGraph ``interrupt()`` is
+execution pause, not "the card is still live". Pending-list, WS scan, and
+session status must agree.
 
 Statuses:
-  pending  — checkpoint interrupt, nothing claimed, parts missing or pending
-  inflight — resume registered or HITL part is approved/denied/inflight
-  idle     — no live interrupt (settled or never paused)
+  pending  — a live unanswered gate (registry pending, or thin fallback)
+  inflight — claimed/resuming rows, or a leftover interrupt of a claimed resume
+  idle     — no live question
 """
 
 from __future__ import annotations
@@ -165,6 +163,50 @@ def is_new_gate(part: dict[str, Any] | None, snapshot: Any) -> bool:
         return False
 
 
+async def _load_snapshot(
+    thread_id: str,
+    *,
+    graph: Any = None,
+    snapshot: Any = None,
+) -> Any:
+    if snapshot is not None:
+        return snapshot
+    if graph is None:
+        return None
+    try:
+        return await graph.aget_state(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+        )
+    except Exception:
+        logger.debug("[hitl_status] aget_state failed thread=%s", thread_id, exc_info=True)
+        return None
+
+
+async def _thin_execution_status(
+    thread_id: str,
+    *,
+    graph: Any = None,
+    snapshot: Any = None,
+) -> HitlStatus:
+    """Kill-switch / outage / empty-registry fallback.
+
+    A live checkpoint interrupt is pending (live card). Never infer
+    Approved from leftover parts. A claimed resume with the *same*
+    leftover interrupt is inflight; a *different* interrupt is a new
+    question (unregistered second gate).
+    """
+    snap = await _load_snapshot(thread_id, graph=graph, snapshot=snapshot)
+    payload = snapshot_interrupt_payload(snap)
+    if payload is None:
+        return "idle"
+    if not is_resume_claimed(thread_id):
+        return "pending"
+    part = persisted_hitl_for_thread(thread_id)
+    if is_new_gate(part, snap):
+        return "pending"
+    return "inflight"
+
+
 async def hitl_thread_status(
     thread_id: str,
     *,
@@ -173,18 +215,13 @@ async def hitl_thread_status(
 ) -> HitlStatus:
     """Classify a thread as pending / inflight / idle.
 
+    Registry rows are decision truth when the registry is on and readable.
     ``snapshot`` avoids a second ``aget_state`` when the caller already has
-    one (pending-list scan). ``graph`` is used only when snapshot is omitted.
-    Never raises.
+    one. Never raises.
     """
     if not thread_id:
         return "idle"
 
-    # ── Gate registry read cutover (P2) ────────────────────────────────
-    # Decision truth lives in the registry: when it has live rows for this
-    # thread they ARE the answer. No rows ⇒ fall through to the legacy
-    # derivation (pre-registry pauses, registry outage — execution truth
-    # still classifies). Never raises.
     try:
         from kazma_ui.hitl_gate_bridge import registry_on
 
@@ -194,71 +231,18 @@ async def hitl_thread_status(
             from kazma_core.safety.hitl_gates import live_gates
 
             rows = await _aio.to_thread(live_gates, thread_id)
+            if any(r.state == "pending" for r in rows):
+                return "pending"
             if rows:
-                if any(r.state == "pending" for r in rows):
-                    return "pending"
                 return "inflight"
-    except Exception:
-        logger.debug("[hitl_status] registry read failed — legacy path", exc_info=True)
-
-    paused = False
-    try:
-        from kazma_ui.sse_chat._streaming import is_thread_paused
-
-        paused = is_thread_paused(thread_id)
-    except Exception:
-        paused = False
-
-    part = persisted_hitl_for_thread(thread_id)
-    part_state = str((part or {}).get("state") or "").strip().lower()
-
-    # Resume claimed and the graph is not sitting on a (new) interrupt:
-    # leftover checkpoint interrupt is stale. A later danger tool re-pauses
-    # the same drive — that is a real pending card.
-    claimed = is_resume_claimed(thread_id)
-    if claimed and not paused:
-        return "inflight"
-
-    snap = snapshot
-    if snap is None and graph is not None and paused:
-        try:
-            snap = await graph.aget_state(
-                {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+            # Empty registry: unregistered pause or truly idle.
+            return await _thin_execution_status(
+                thread_id, graph=graph, snapshot=snapshot
             )
-        except Exception:
-            logger.debug("[hitl_status] aget_state failed thread=%s", thread_id, exc_info=True)
-            snap = None
+    except Exception:
+        logger.debug("[hitl_status] registry read failed — thin fallback", exc_info=True)
 
-    if claimed and paused and part_state in (
-        "approved",
-        "denied",
-        "inflight",
-    ):
-        # A live interrupt that is a DIFFERENT gate than the claimed part is
-        # a real SECOND question raised by the same resume drive — it must
-        # classify pending or the second card only ever shows on the
-        # dashboard (2026-09-01 incident).
-        if is_new_gate(part, snap):
-            return "pending"
-        return "inflight"
-    if part_state in ("approved", "denied", "inflight") and not paused:
-        return "inflight"
-    if part_state in ("settled", "done", "timeout", "error") and not paused:
-        return "idle"
-
-    if snap is None and graph is not None:
-        try:
-            snap = await graph.aget_state(
-                {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-            )
-        except Exception:
-            logger.debug("[hitl_status] aget_state failed thread=%s", thread_id, exc_info=True)
-            snap = None
-
-    payload = snapshot_interrupt_payload(snap)
-    if payload is None:
-        return "idle"
-    return "pending"
+    return await _thin_execution_status(thread_id, graph=graph, snapshot=snapshot)
 
 
 async def is_truly_pending(

@@ -238,42 +238,17 @@ async def close_turn(
                 claimed = running
         leftover_claimed = False
         new_gate = False
-        if paused and thread_id:
-            try:
-                from kazma_ui.hitl_status import (
-                    is_new_gate,
-                    persisted_hitl_for_thread,
-                )
-
-                part = persisted_hitl_for_thread(thread_id)
-                st = str((part or {}).get("state") or "").lower()
-                leftover_claimed = st in (
-                    "approved",
-                    "denied",
-                    "inflight",
-                    "settled",
-                    "done",
-                )
-                # A live interrupt that is a DIFFERENT gate than the claimed
-                # part is a real SECOND question (write approved → the model
-                # tries a delete). It must keep the turn OPEN — closing here
-                # published the model's pre-pause narration as a fake
-                # wrap-up while the graph was still waiting (2026-09-01).
-                if leftover_claimed and is_new_gate(part, snap):
-                    new_gate = True
-                    leftover_claimed = False
-            except Exception:
-                leftover_claimed = False
-                new_gate = False
-        # ── Gate registry (P2): decision truth for open/closed ────────
-        # A pending registry row while the checkpoint is paused is a live
-        # question — the turn stays OPEN (the silence rule). A pending row
-        # while the checkpoint is NOT paused is an orphan (pre-registration
-        # whose pause never happened, or a cleared checkpoint) — settle it
-        # here, in seconds, not at the next boot sweep.
+        # Gate registry (P6): decision truth for open/closed.
+        # Pending row + paused ⇒ stay OPEN (silence rule).
+        # Paused + no covering row ⇒ backfill from snapshot and stay OPEN
+        # (unregistered pending gate — never "no question").
+        # Pending row + not paused + not running ⇒ orphan-settle in seconds.
         if thread_id:
             try:
-                from kazma_ui.hitl_gate_bridge import registry_on
+                from kazma_ui.hitl_gate_bridge import (
+                    ensure_paused_gate,
+                    registry_on,
+                )
 
                 if registry_on():
                     import asyncio as _aio
@@ -287,7 +262,14 @@ async def close_turn(
                     _pending = [g for g in _rows if g.state == "pending"]
                     if _pending and paused:
                         new_gate = True
-                        leftover_claimed = False
+                    elif paused:
+                        if await ensure_paused_gate(
+                            thread_id,
+                            snap,
+                            session_id=session_id or "",
+                            turn_id=turn_id or "",
+                        ):
+                            new_gate = True
                     elif _pending and not paused and not running:
                         from kazma_core.metrics import (
                             record_hitl_gate_reconciled,
@@ -303,6 +285,8 @@ async def close_turn(
                                 pass
             except Exception:
                 logger.debug("[turn] gate registry check skipped", exc_info=True)
+        if paused and thread_id and not new_gate:
+            leftover_claimed = bool(claimed or running)
         # A leftover checkpoint interrupt after Approve must not re-open
         # the row as pending. A live resume (running/claimed) is the same —
         # unless the pause is a NEW gate (see above), which always wins.

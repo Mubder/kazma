@@ -1,8 +1,8 @@
-"""P2 web read cutover — the gate registry is decision truth for readers.
+"""P6 web read cutover — the gate registry is the only decision author.
 
-Covers: hitl_thread_status registry-first classification (+ legacy
-fallback), close_turn keeping a turn open on a pending gate row, and the
-orphan-settle rule (pending row, checkpoint not paused → settled in place).
+Covers: hitl_thread_status registry classification (+ thin execution
+fallback), close_turn keeping a turn open on a pending gate row,
+paused+no-row backfill, and the orphan-settle rule.
 """
 
 from __future__ import annotations
@@ -175,3 +175,54 @@ async def test_close_turn_no_rows_behaves_legacy(monkeypatch, tmp_path):
     )
     assert ok is True
     assert captured.get("interrupted") in (False, None)
+
+
+async def test_close_turn_paused_no_row_backfills_and_stays_open(monkeypatch, tmp_path):
+    """P6 amendment: paused + no registry row is an unregistered pending
+    gate — register from the snapshot and keep the turn open."""
+    tr, captured = _wire_close_turn(monkeypatch, tmp_path)
+    tid = "t-close-backfill"
+    ok = await tr.close_turn(
+        _G(_PausedSnap()),
+        {"configurable": {"thread_id": tid}},
+        session_id="sess-1",
+        turn_id="turn-4",
+        streamed_text="narration before register",
+    )
+    assert ok is True
+    assert captured.get("interrupted") is True
+    from kazma_core.safety.hitl_gates import live_gates, pending_gates
+
+    pending = pending_gates()
+    assert any(r.thread_id == tid and r.state == "pending" for r in pending)
+    assert live_gates(tid)
+
+
+def test_close_turn_does_not_import_is_new_gate_as_reader() -> None:
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "turn_runtime.py"
+    ).read_text(encoding="utf-8")
+    fn = src.split("async def close_turn", 1)[1].split("async def ", 1)[0]
+    assert "is_new_gate" not in fn
+
+
+def test_pending_approvals_happy_path_is_registry() -> None:
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "routes_direct"
+        / "misc.py"
+    ).read_text(encoding="utf-8")
+    fn = src.split("async def list_pending_approvals", 1)[1].split(
+        "async def clear_pending_approvals_route", 1
+    )[0]
+    assert "pending_items_from_registry" in fn
+    assert fn.find("pending_items_from_registry") < fn.find("_get_pending_approvals")

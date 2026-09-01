@@ -1013,7 +1013,8 @@ class TestGateAuthoritativeFailPosture:
         head = gate_block[1].split("}", 1)[0]
         assert "renderHitlCard(hitl.payload);" in head
         assert "return;" in head
-        # Negative control: the block must run BEFORE the legacy inference.
-        legacy_at = body.find("_hitlAlreadyClaimed(hitl) || statusInflight")
+        # Negative control: the block must run BEFORE leftover-claim inference.
+        legacy_at = body.find("_hitlAlreadyClaimed(hitl)")
         auth_at = body.find("if (_serverGatesAuth && !gateRow)")
         assert 0 <= auth_at < legacy_at
+        assert "statusInflight" not in body.split("function renderTurn", 1)[0]

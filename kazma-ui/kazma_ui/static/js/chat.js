@@ -5678,23 +5678,10 @@
           renderHitlCard(hitl.payload);
           return;
         }
-        var gate = _serverHitl ? String(_serverHitl.gate || '') : '';
-        // A status-based claim requires BOTH interrupt ids present and
-        // equal. An id-less/stale server status (previous gate's
-        // 'approved' part, or the gate-without-part fallback) used to
-        // claim a brand-NEW pending gate here and stamp it
-        // "Approved — running…" with no click — while the dashboard
-        // still had live buttons (2026-09-01). Id-less legacy parts are
-        // covered by _hitlAlreadyClaimed (tool-name claims).
-        var statusInflight = !!(
-          _serverHitl
-          && (gate === 'inflight'
-            || _serverHitl.state === 'approved'
-            || _serverHitl.state === 'inflight')
-          && !!iid && !!_serverHitl.interrupt_id
-          && String(_serverHitl.interrupt_id) === iid
-        );
-        if (_hitlAlreadyClaimed(hitl) || statusInflight) {
+        // Registry did not answer: thin fallback. Never invent Approved
+        // from leftover status. Paint idempotency (_hitlAlreadyClaimed)
+        // still blocks cloning the SAME interrupt's live card.
+        if (_hitlAlreadyClaimed(hitl)) {
           state = 'inflight';
         } else {
           renderHitlCard(hitl.payload);
