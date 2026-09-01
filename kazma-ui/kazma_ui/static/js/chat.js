@@ -5770,7 +5770,19 @@
       el = _assistantBubbleForOpenTurn();
     }
     if (!el) el = createAssistantMessage();
-    currentMsgEl = el;
+    // A bubble FOLLOWED by a user message belongs to a closed historical
+    // turn: paint it, but never let it capture the open-turn pointer. A late
+    // hydrate/resync for the previous turn used to re-pin its bubble as
+    // currentMsgEl; the next turn's first token then painted INTO that old
+    // bubble and re-stamped its turn id — the two replies crossed bubbles,
+    // seen as "my new message's answer appeared above the previous reply"
+    // (2026-09-02).
+    var _prevOpenEl = currentMsgEl;
+    var _historical = false;
+    for (var _sib = el.nextElementSibling; _sib; _sib = _sib.nextElementSibling) {
+      if (_sib.classList && _sib.classList.contains('message-user')) { _historical = true; break; }
+    }
+    if (!_historical) currentMsgEl = el;
     if (turnId) {
       try { el.setAttribute('data-turn-id', turnId); } catch (eAttr) { /* ignore */ }
     }
@@ -5797,7 +5809,9 @@
       }
       try { textEl.setAttribute('data-md', text); } catch (eMd) { /* ignore */ }
       try { textEl.setAttribute('data-final-len', String(display.length)); } catch (eLen) { /* ignore */ }
-      _turnPainted = true;
+      // A historical paint must not mark the CURRENT turn as painted — the
+      // "No response received." fallback keys off this for the live turn.
+      if (!_historical) _turnPainted = true;
     }
     if (doc.model) {
       var metaEl = el.querySelector('.message-meta');
@@ -5809,12 +5823,20 @@
     _syncCotPanel(el, activity, doc.status, meta);
     _paintHitlFromDoc(el, doc);
     _rescueTurnDom(el);
-    if (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done') {
+    // A closed turn's render must not release the OPEN turn's wait state
+    // (a late turn-N hydrate mid-turn-N+1 used to clear _awaitingReply,
+    // disabling the cursor-resume if the live stream then died).
+    if (!_historical && (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done')) {
       _awaitingReply = false;
     }
     if ((meta.source === 'resync' || meta.source === 'hydrate') && !activeStream) {
       currentMsgEl = null;
     }
+    // Interior painters (_syncCotPanel/_paintHitlFromDoc) save/restore
+    // currentMsgEl as `prev || el` — for a historical render that restore
+    // re-pins the old bubble when prev was null. Force the pointer back to
+    // whatever the open turn owned on entry.
+    if (_historical) currentMsgEl = _prevOpenEl;
     scrollToBottom();
   }
 

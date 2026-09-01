@@ -983,6 +983,16 @@ def create_sse_chat_router(
                 # CQRS: the graph runs in a shielded background task that
                 # journals only. This HTTP body is a journal subscriber —
                 # a 70s MCP call or a dropped TCP cannot kill the turn.
+                #
+                # A NEW prompt subscribes at the CURRENT journal head, not 0:
+                # the journal is per-THREAD and retains the previous turn's
+                # frames, so replaying from 0 re-delivered the old reply's
+                # token frames into the fresh turn — the two replies crossed
+                # bubbles in chat ("my answer appeared above the previous
+                # reply", 2026-09-02). Frames the drive emits after this
+                # capture carry seq > head and arrive via resume(head) ∪ the
+                # live queue, deduplicated by seq inside _sse_attach_stream.
+                _journal_head = get_turn_broker().head_seq(thread_id)
                 _drive = asyncio.create_task(
                     _drive_graph_to_journal(
                         current_graph,
@@ -1000,7 +1010,7 @@ def create_sse_chat_router(
 
                 _drive.add_done_callback(_on_drive_done)
 
-                async for frame in _sse_attach_stream(thread_id, session_id, 0):
+                async for frame in _sse_attach_stream(thread_id, session_id, _journal_head):
                     parsed = _parse_frame(frame)
                     if parsed is None:
                         yield frame

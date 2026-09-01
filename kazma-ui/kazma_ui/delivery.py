@@ -340,6 +340,12 @@ class TurnBroker:
 
     # ── Resume / replay ───────────────────────────────────────────
 
+    def head_seq(self, thread_id: str) -> int:
+        """Highest journaled seq for *thread_id* (0 when nothing was ever
+        journaled). Used by the NEW-prompt stream to subscribe at the current
+        head instead of replaying the previous turn's backlog."""
+        return self._journal.head_seq(thread_id)
+
     def resume(
         self, thread_id: str, last_seq: int
     ) -> tuple[list[dict[str, Any]], bool, int]:
