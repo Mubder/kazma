@@ -647,6 +647,61 @@
   }
 
   /**
+   * Collapse pathological assistant-only runs to one evolving row.
+   *
+   * One user turn should produce one assistant reply row. During delivery
+   * glitches (multi-writer or replay drift), SessionStore may accumulate a
+   * chain of consecutive assistant snapshots where each content is a growing
+   * prefix of the next ("Schedule", "Schedule the", ...). Rendering that run
+   * verbatim creates a fake CoT ladder that looks like many answers.
+   *
+   * This reducer keeps distinct assistant replies intact (different text with
+   * no prefix relation) and only merges obviously related snapshots.
+   */
+  function _coalesceAssistantRuns(rows) {
+    if (!Array.isArray(rows) || !rows.length) return rows || [];
+    var out = [];
+    rows.forEach(function(raw) {
+      var msg = raw || {};
+      var role = String(msg.role || '').toLowerCase();
+      if (role !== 'assistant') { out.push(msg); return; }
+      if (!out.length) { out.push(msg); return; }
+      var prev = out[out.length - 1];
+      var prevRole = String((prev && prev.role) || '').toLowerCase();
+      if (prevRole !== 'assistant') { out.push(msg); return; }
+
+      var p = String((prev && prev.content) || '').trim();
+      var c = String(msg.content || '').trim();
+      var sameTurn = !!(prev && prev.turn_id && msg.turn_id
+        && String(prev.turn_id) === String(msg.turn_id));
+      var related = (
+        sameTurn ||
+        !p || !c ||
+        c.indexOf(p) === 0 ||
+        p.indexOf(c) === 0 ||
+        _plainFromMarkdown(p) === _plainFromMarkdown(c)
+      );
+      if (!related) { out.push(msg); return; }
+
+      var merged = {};
+      var k;
+      for (k in prev) if (Object.prototype.hasOwnProperty.call(prev, k)) merged[k] = prev[k];
+      for (k in msg) if (Object.prototype.hasOwnProperty.call(msg, k)) merged[k] = msg[k];
+      // Prefer richer / later payload for related snapshots.
+      if (!c && p) merged.content = prev.content;
+      var prevParts = Array.isArray(prev.parts) ? prev.parts : [];
+      var curParts = Array.isArray(msg.parts) ? msg.parts : [];
+      if (prevParts.length > curParts.length) merged.parts = prevParts;
+      var prevAct = Array.isArray(prev.activity) ? prev.activity : [];
+      var curAct = Array.isArray(msg.activity) ? msg.activity : [];
+      if (prevAct.length > curAct.length) merged.activity = prevAct;
+      if (!msg.turn_id && prev.turn_id) merged.turn_id = prev.turn_id;
+      out[out.length - 1] = merged;
+    });
+    return out;
+  }
+
+  /**
    * Assistant bubble for the open turn: the one after the last user message.
    * NEVER create a second assistant without a new user row (duplicate root cause).
    */
@@ -5091,6 +5146,7 @@
 
         var prevAssistantContent = null;
         var prevUserContent = null;
+        messages = _coalesceAssistantRuns(messages);
         messages.forEach(function(msg) {
           // Only human-visible roles. System injects (self-improvement Soul,
           // knowledge fences, CONTINUITY notes) must never render as "You".

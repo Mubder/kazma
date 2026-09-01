@@ -2,15 +2,15 @@
 id: swarm-orchestration
 title: Swarm Orchestration
 sidebar_label: Swarm Orchestration
-description: Kazma Swarm Orchestration — code-audited reference (unified docs, v0.9+)
+description: Kazma Swarm Orchestration — code-audited reference
 ---
-> The complete swarm system: the engine, six dispatch patterns, aggregation strategies, the reliability layer (circuit breakers, retries, timeouts, validators, concurrency), the worker registry, pipeline checkpoints, and metrics — all source-referenced.
+> The complete swarm system: the engine, six dispatch patterns, aggregation strategies, the reliability layer (circuit breakers, retries, timeouts, validators, concurrency), the worker registry, pipeline checkpoints, HITL bus (tri-state FanOut), and metrics. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §4–§7, §9, §14, §30.
 
 ---
 
 ## 1. The SwarmEngine
 
-`SwarmEngine` (`kazma-core/kazma_core/swarm/engine.py:103`) is the central async orchestrator. A backward-compatible `SwarmManager` façade wraps it (`manager.py:17`, sharing `self._workers = self.engine._workers`).
+`SwarmEngine` (`kazma-core/kazma_core/swarm/engine.py`) is the central async orchestrator. A backward-compatible `SwarmManager` façade wraps it (`manager.py`, sharing `self._workers = self.engine._workers`).
 
 ### 1.0 Platform bus (HITL / progress)
 
@@ -20,9 +20,15 @@ Outbound swarm progress + danger-tool approvals go through `SwarmMessageBus`
 - Every configured platform adapter (Telegram / Discord / Slack) is collected.
 - **One** adapter → wired directly.
 - **Two or more** → wrapped in `FanOutBusAdapter` so stream/report/alert fan
-  out to all platforms, and `request_approval` returns True if **any**
-  platform approves (first yes wins).
+  out to all platforms. `request_approval` is **tri-state** (Wave 6 H-12):
+  `True` settles immediately; `False` is a vote until `expected_voters` (one
+  per adapter) or the deadline. A Discord Deny must not kill a Telegram
+  Approve. This is **not** web `claim_gate` (first claim 200 / second 409).
 - None configured → `NullBusAdapter` (fail-closed for danger tools).
+- Danger tools on this path go through `safety.check()` → register a row in
+  `hitl_gates.db` → bus → claim+settle. H-9: `is_danger_tool()` calls
+  `requires_approval()` (tier floor). Do not mint a second web gate from
+  `LocalToolRegistry.execute` (H-8).
 
 Callback resolution still happens on each platform's own interaction handler
 (`handle_callback`). The bus singleton is process-local (not multi-replica).
@@ -69,26 +75,26 @@ def __init__(
 | `_phonebook` | `WorkerPhonebook` | Topology/DAG worker lookup. |
 | `_sse` | `SseBridge` | SSE event bridge. |
 
-> The constructor signature is unchanged after the P2-1 refactor that split the original 1878-line god class into focused modules. Test fixtures work without modification.
+> Constructor signature is unchanged after the P2-1 split (`reliability_registry.py`, `phonebook.py`, `checkpoint_manager.py`). Test fixtures work without modification. Do not pin `engine.py` line counts — they drift.
 
 ---
 
 ## 2. The six dispatch patterns
 
-`TaskType` enum (`swarm/task.py:65-73`): `DISPATCH`, `BROADCAST`, `PIPELINE`, `FAN_OUT`, `CONSULT`, `CONDITIONAL`. Routing lives in `dispatch_inner.py` (called from `engine.dispatch` → `engine._dispatch_inner`).
+`TaskType` enum (`swarm/task.py`): `DISPATCH`, `BROADCAST`, `PIPELINE`, `FAN_OUT`, `CONSULT`, `CONDITIONAL`. Routing lives in `dispatch_inner.py` (called from `engine.dispatch` → `engine._dispatch_inner`).
 
 | Pattern | Engine entry | Implementing function | Description |
 |---|---|---|---|
-| **dispatch** | `engine.dispatch` (312) → `dispatch_inner` (35) | inline single-worker + optional fallback chain | One worker handles the task. |
-| **broadcast** | `engine.broadcast` (367) | `broadcast.broadcast_task` (`broadcast.py:31`) | All workers receive the same prompt. |
-| **pipeline** | `dispatch_inner.py:72-107` | `patterns.execute_pipeline` (`patterns.py:234`) | Ordered stages sharing a blackboard; supports HITL checkpoints. |
-| **fan_out** | `dispatch_inner.py:109-157` | `patterns.execute_fan_out` (`patterns.py:639`) | Parallel execution with bounded concurrency + aggregation. |
-| **consult** | `dispatch_inner.py:159-201` | `consultation.execute_consult` (`consultation.py:124`) | Parallel opinions + LLM synthesis. |
-| **conditional** | `dispatch_inner.py:203-229` | `patterns.execute_conditional` (`patterns.py:504`) | Router decides which route map entry to dispatch to. |
+| **dispatch** | `engine.dispatch` → `dispatch_inner` | inline single-worker + optional fallback chain | One worker handles the task. |
+| **broadcast** | `engine.broadcast` | `broadcast.broadcast_task` | All workers receive the same prompt. |
+| **pipeline** | `dispatch_inner` | `patterns.execute_pipeline` | Ordered stages sharing a blackboard; supports HITL checkpoints. |
+| **fan_out** | `dispatch_inner` | `patterns.execute_fan_out` | Parallel execution with bounded concurrency + aggregation. |
+| **consult** | `dispatch_inner` | `consultation.execute_consult` | Parallel opinions + LLM synthesis. |
+| **conditional** | `dispatch_inner` | `patterns.execute_conditional` | Router decides which route map entry to dispatch to. |
 
 ### 2.1 Auto-routing
 
-`workers=["auto"]` is resolved in `dispatch_inner.py:44-70` via `engine._routing_engine.route(...)` (UnifiedRouter), with an auto-scaling fallback (lines 53-61) via `engine.get_autoscaler().maybe_scale(...)`.
+`workers=["auto"]` is resolved in `dispatch_inner.py` via `engine._routing_engine.route(...)` (UnifiedRouter). Autoscaler `maybe_scale(...)` fires **only** on `NoCapableWorkersError` — never when a named worker is requested or routing succeeds.
 
 ### 2.2 Pipeline specifics
 
@@ -251,7 +257,7 @@ This avoids substring false-positives (e.g. worker `"a"` matching `"ab"`).
 ## 7. Worker registry & phonebook
 
 - **`WorkerRegistry`** (`swarm/registry.py`) — JSON-backed registry, loaded from `swarm_registry.json` (root) at singleton construction. Each `WorkerEntry` has: `name, expertise, roles, model, provider, worker_type, system_prompt, enabled, tools, metadata`.
-- **`WorkerPhonebook`** (`swarm/phonebook.py:23`) — bypasses the reliability layer for direct summon-and-dispatch from topology/DAG executors. `summon(name)` returns an `InProcessWorker` (legacy TelegramWorker subprocess path removed). `dispatch_by_name` injects episodic memory context from the 4-layer adapter before dispatching.
+- **`WorkerPhonebook`** (`swarm/phonebook.py`) — bypasses the reliability layer for direct summon-and-dispatch from topology/DAG executors. `summon(name)` returns an `InProcessWorker` (legacy TelegramWorker subprocess path removed). `dispatch_by_name` injects V2 `recall.search` hits (strategies + evolution), **prompt-fenced**, off the event loop.
 - **`worker_factory._IN_PROCESS_TYPES`** = `\{"in_process", "telegram_bot"\}` — both resolve to `InProcessWorker`.
 
 > **No predefined role/preset catalog.** Roles are free-form strings. `swarm_registry.json` ships ~57 entries (mostly test fixtures like `a`/`b`/`c` for handoff-cycle tests, plus `primary`/`fallback-alpha`/`fallback-beta` for fallback-chain tests). All have empty `system_prompt`, so `is_generalist` (`registry.py:67-74`) treats them as generalists despite expertise tags.
@@ -269,11 +275,12 @@ A pipeline can pause at configured steps for human approval.
 
 ### 8.1 Flow
 
-1. `SwarmEngine._handle_pipeline_checkpoint` (`engine.py:889`) delegates to `CheckpointManager.handle_pipeline_checkpoint`.
-2. The manager stores state, **arms an auto-reject timeout** if `task.metadata["checkpoint_timeout"] > 0` (lines 96-104), sets task status to `PAUSED`, and persists to SQLite.
-3. Approval: `SwarmEngine.approve_checkpoint` (`engine.py:920-988`) cancels the timeout, sets `checkpoint.status="approved"`, pops the paused entry, and resumes from `next_step = checkpoint.step + 1` via `resume_pipeline(...)`.
-4. Rejection: `SwarmEngine.reject_checkpoint` (`engine.py:990`) delegates to the handler.
-5. **Crash recovery:** `restore_paused_tasks()` (`checkpoint_manager.py:182`) reloads paused tasks from SQLite and **re-arms timeouts** (lines 222-230).
+1. `SwarmEngine._handle_pipeline_checkpoint` delegates to `CheckpointManager.handle_pipeline_checkpoint`, which also `_gate_register_pipeline` (HITL Gate Registry — one row per pause).
+2. The manager stores state, **arms an auto-reject timeout** if `task.metadata["checkpoint_timeout"] > 0`, sets task status to `PAUSED`, and persists to SQLite.
+3. Approval: `SwarmEngine.approve_checkpoint` cancels the timeout, settles the registry row, sets `checkpoint.status="approved"`, pops the paused entry, and resumes from `next_step = checkpoint.step + 1` via `resume_pipeline(...)`.
+4. Rejection: `SwarmEngine.reject_checkpoint` delegates to the handler and settles the gate.
+5. **T-2:** a pipeline timeout must **finalize the task and `settle_gate`**. One without the other leaves a live card or an orphan row.
+6. **Crash recovery:** `restore_paused_tasks()` reloads paused tasks from SQLite and **re-arms timeouts**.
 
 ### 8.2 HTTP endpoints
 
@@ -296,7 +303,7 @@ A pipeline can pause at configured steps for human approval.
 
 Flushes to `TaskStore.record_worker_metric` on every record. Exposed via REST at `GET /api/swarm/workers/\{name\}/metrics`.
 
-> **No Prometheus.** The swarm has no `prometheus_client` dependency, no `/metrics` endpoint. Metrics are custom in-memory + SQLite only. See [Architecture → Observability](architecture#9-observability-current-state).
+Swarm worker metrics are this collector (in-memory + SQLite / Postgres upsert). The **app** still exposes Prometheus at `GET /metrics` (`kazma_ui/metrics.py`) for other counters (HITL gates, commitment, context trims). Do not conflate the two. See [Architecture → Observability](architecture#9-observability-current-state).
 
 ---
 
@@ -308,14 +315,14 @@ Flushes to `TaskStore.record_worker_metric` on every record. Exposed via REST at
 
 ## 11. Self-improvement engine (feedback loop)
 
-The self-improvement skill (`skills/self_improvement.py`) learns from outcomes **Kazma-wide**:
+The self-improvement skill (`skills/self_improvement.py`) learns from outcomes **Kazma-wide**. There is **no** `SOUL.md` file and **no** live `agent_evolution.json` (that file is migrated once into ConfigStore and renamed `.migrated`).
 
 | Surface | Hook | Where Soul is stored |
 |---------|------|----------------------|
-| **Chat** (Web SSE, Telegram/Discord/Slack gateway) | After each completed turn (skips HITL pauses) | `data_dir()/agent_evolution.json` → injected every turn as a system message |
-| **Swarm** (pipeline / fan-out / conditional) | `_run_self_improvement` after pattern completion | `WorkerRegistry` `system_prompt` (+ optional memory `log_evolution`) |
+| **Chat** (Web SSE, Telegram/Discord/Slack gateway) | After each completed turn (skips HITL pauses) | ConfigStore key `self_improvement.agent_evolution` (`{"agents": {supervisor: {soul, history}}}`) |
+| **Swarm** (pipeline / fan-out / conditional) | `_run_self_improvement` after pattern completion | `WorkerRegistry` `system_prompt` (capped `[SelfImprovement]` blocks) |
 
-Kill-switch: `KAZMA_SELF_IMPROVEMENT=0` (or `false` / `off`).
+Kill-switch: `KAZMA_SELF_IMPROVEMENT=0` (checked live). Every injected delta is wrapped in `format_untrusted_block(source="self_improvement")` and rejected if `is_override_delta`. Soul confirm auto-ON in production / multi-user (`POST /api/commitment/soul/{cid}/confirm`).
 
 ### 11.1 The feedback loop
 
@@ -328,8 +335,7 @@ flowchart LR
     S --> AA[apply mutation]
     F --> AA
     AA --> CP[_cap_evolution_prompt]
-    CP --> WR[WorkerRegistry OR agent_evolution.json]
-    AA --> LE[optional adapter.log_evolution for swarm]
+    CP --> WR[WorkerRegistry OR ConfigStore]
 ```
 
 ### 11.2 How it works (swarm)
@@ -337,16 +343,15 @@ flowchart LR
 1. **Hook fires** after every pipeline, fan-out, and conditional pattern completion (`patterns.py:_run_self_improvement`).
 2. **Each worker is analyzed** against only its own result (not all stages).
 3. The **Meta-Refiner LLM** generates a 2-3 sentence delta (reinforcement for success, correction for failure). WorkerResult `status=error` counts as failure.
-4. The delta is **auto-applied** to the worker's system prompt via `_cap_evolution_prompt` (max 12 blocks, 8000 chars).
-5. The applied delta is **persisted** to the 4-layer memory adapter via `adapter.log_evolution()` when available.
-6. On future dispatches, the updated worker Soul is used automatically.
+4. The delta is **auto-applied** to the worker's system prompt via `_cap_evolution_prompt` (max 12 blocks, 8000 chars) unless the soul-confirm gate holds it.
+5. On future dispatches, the updated worker Soul is used automatically.
 
 ### 11.2b How it works (chat)
 
 1. After Web SSE `done` (not interrupted) or gateway graph completion, `schedule_chat_self_improvement` runs in the background.
 2. Outcome: success unless empty/⚠️/error-looking reply.
-3. Delta is capped and stored under agent id `supervisor` in `agent_evolution.json`.
-4. Next turn: SSE and gateway inject the Soul block as a system message (no graph rebuild required).
+3. Delta is capped and stored under agent id `supervisor` in ConfigStore.
+4. Next turn: `agent_runner`, `sse_chat/`, and gateway `graph.py` inject the Soul block as a **fenced** system message (no graph rebuild required).
 
 ### 11.3 Status tracking
 
@@ -409,5 +414,7 @@ so the swarm works with zero pre-registered workers.
 
 - **`reliability_registry.py` is config-only.** The half-open `_probe_in_flight` logic lives on the `CircuitBreaker` dataclass in `reliability.py`. Anyone modifying breaker semantics must edit `reliability.py`, not the registry.
 - **Symbol `_MAX_VISITS` vs `MAX_VISITS`:** the engine docstring uses the underscored form, but the exported constant is `MAX_VISITS`. Same value (2).
-- **`swarm_registry.json` is mostly test fixtures.** Do not assume the shipped workers are production-grade — they have empty `system_prompt` fields.
-- **Prometheus is absent.** Anyone planning to scrape Kazma with Prometheus needs to add that integration; it does not exist today.
+- **`swarm_registry.json` is mostly test fixtures.** Do not assume the shipped workers are production-grade — they have empty `system_prompt` fields. Production templates are `swarm_templates.json` (autoscaler).
+- **Prometheus exists on the app** (`GET /metrics`). Swarm `MetricsCollector` is a separate SQLite snapshot — not a second Prom registry.
+- **Soul is ConfigStore / WorkerRegistry**, never `agent_evolution.json` and never a markdown `SOUL.md`.
+- Binding HITL rules: AGENTS.md §7 (tri-state FanOut), §30 (registry), collision H-8/H-9/H-12/T-2.

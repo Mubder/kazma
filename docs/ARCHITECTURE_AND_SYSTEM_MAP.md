@@ -1,13 +1,11 @@
 # Kazma — Architecture & System Map
 
-**Single source of truth for system architecture**  
-**Version:** 0.10.x (one-brain mouths + audit F remaining: soft-nav inspectors, swarm notify hook)  
-**Date:** 2026-08-19 (July 21 production audit is historical, not current SoT)  
-**Latest deep audit:** `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` (22 findings, full change-impact map, CI recovery §13–§19, Telegram desync §20)  
-**Industry stack audit:** `docs/audits/AUDIT_INDUSTRY_STACK_2026-08-25.md` (keep/upgrade/replace vs 2026 world-class agents; frozen stack so we do not rebuild layers; parts 1–8 done 2026-08-25)  
-**Companion docs:** `docs/docs/ops/diagnosis-map.md` (**X↔Y multi-path diagnosis**),  
-`docs/audits/REPO_CLEANUP_PLAN.md`, `docs/audits/archive/REMEDIATION_PLAN_2026-07-21.md`,  
-`docs/docs/ops/*`, `AGENTS.md`
+**Map of production-wired modules** (invariants live in `AGENTS.md`)  
+**Version:** 0.10.x  
+**Date:** 2026-09-02  
+**Binding industrial audit:** `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` (waves 0–8 shipped — do **not** follow dump Part 6)  
+**Earlier deep audits:** `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md`, `docs/audits/AUDIT_INDUSTRY_STACK_2026-08-25.md`  
+**Companion docs:** `docs/docs/ops/diagnosis-map.md`, `docs/docs/guide/architecture.md`, `AGENTS.md`
 
 **Honesty note:** This map prioritizes **production-wired paths** and catalogs **all source modules** under main packages. Generated artifacts (`docs/node_modules`, `docs/build`, `__pycache__`, `.venv`) are excluded. Library-only modules are labeled **[LIBRARY]**.
 
@@ -17,7 +15,7 @@
 
 ### Philosophy
 
-Kazma is a **multi-platform autonomous agent framework**: one **LangGraph supervisor brain**, many **mouths** (Telegram/Discord/Slack/Web/TUI/`kazma ask`/`kazma acp`), one **IDE/tool execution layer**, and optional **swarm multi-worker orchestration**. Platform IDs never enter LangGraph state. Danger tools require **HITL** (graph interrupt, swarm bus, or pipeline checkpoint). Config is runtime-mutable via **ConfigStore** (SQLite or Postgres).
+Kazma is a **multi-platform autonomous agent framework**: one **LangGraph supervisor brain**, many **mouths** (Telegram/Discord/Slack/Web/TUI/`kazma ask`/`kazma acp`), one **IDE/tool execution layer**, and optional **swarm multi-worker orchestration**. Platform IDs never enter LangGraph state. Danger tools require **HITL** (three execution paths: graph interrupt, swarm bus, pipeline checkpoint) plus one **gate registry** (`hitl_gates.db`). Swarm FanOut is **tri-state**, not first-wins. Config is runtime-mutable via **ConfigStore** (SQLite or Postgres). There is **no** `kazma-memory` package.
 
 ### Runtime requirements
 
@@ -62,9 +60,10 @@ Kazma is a **multi-platform autonomous agent framework**: one **LangGraph superv
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ AGENT BRAIN                                                                  │
-│  KazmaAgent / agent_runner  →  build_supervisor_graph (LangGraph)            │
+│  KazmaAgent / agent_runner  →  build_supervisor_graph (wires nodes)          │
+│  graph_supervisor / graph_tool_worker / graph_respond                        │
 │  Checkpointer: AsyncSqliteSaver | AsyncPostgresSaver                         │
-│  Interrupt HITL (danger tools) · turn_input · context compaction             │
+│  Interrupt HITL + hitl_gates.db · turn_input · context integrity trim        │
 │  SubAgentManager → build_child_graph (auto-deny danger)                      │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │
@@ -81,16 +80,17 @@ Kazma is a **multi-platform autonomous agent framework**: one **LangGraph superv
 │ SWARM ENGINE                                                                 │
 │  dispatch / broadcast / pipeline / fanout / consult                          │
 │  handoff_guards (depth 5, visits 2) · ReliabilityRegistry (breakers/retry)  │
-│  Bus adapters (Telegram>Discord>Slack) · NullBus fail-closed                 │
+│  FanOutBus tri-state HITL · NullBus fail-closed                              │
 │  TaskStore (SQLite|Postgres) · SSE bridge · checkpoint_manager               │
 └───────────────────────────────┬──────────────────────────────────────────────┘
                                 │
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ DATASTORES                                                                   │
-│  ConfigStore (settings / vault refs)  ·  SessionManager  ·  checkpoints      │
-│  TaskStore  ·  cron.db  ·  FTS5 memory  ·  VectorMemory/Chroma               │
-│  WorkspaceStore  ·  optional Postgres pool (multi-replica shared state)      │
+│  ConfigStore (settings / vault / Soul) · SessionManager · checkpoints        │
+│  hitl_gates.db · turn journal / agent_artifacts.db                           │
+│  TaskStore · cron.db · memory_state.db + memory_ops.db (split, do not merge) │
+│  WorkspaceStore · optional Postgres (KAZMA_PG_TABLES, not whole-DB)          │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -122,7 +122,6 @@ kazma/
 ├── kazma-tui/               # Textual dashboard/IDE
 ├── kazma-cli/               # `kazma` CLI
 ├── kazma-skills/            # Native skill packages + YAML manifests
-├── kazma-memory/            # Shared search/tokenizer backend
 ├── kazma-data/              # Runtime DBs (local; do not commit secrets)
 └── kubernetes/              # Sample manifests
 ```
@@ -182,12 +181,16 @@ kazma/
 | `tracing.py` | Langfuse/tracer integration |
 | `url_utils.py` | URL helpers |
 | **agent/** | |
-| `agent/graph_builder.py` | LangGraph supervisor + tool_worker + interrupt HITL |
+| `agent/graph_builder.py` | Wires the graph; does **not** contain HITL/retry bodies |
+| `agent/graph_supervisor.py` | Supervisor node + `_call_llm_with_retry` (transient only) |
+| `agent/graph_tool_worker.py` | Commitment gate + HITL `interrupt()` + execute |
+| `agent/graph_respond.py` | Respond node; skips synthesis on `turn_failed` |
 | `agent/hitl_supersede.py` | Cancel pending HITL on new turn |
+| `agent/artifacts.py` | Durable proposals/scratchpad (not graph state) |
 | `agent/nonstop.py` | NonStopConfig schema & settings layer |
 | `agent/pipeline_schema.py` | Pipeline-related schemas |
 | `agent/resilient_chat.py` | Resilient chat wrapper with retries, failover & ledger |
-| `agent/state.py` | Supervisor state / NodeName |
+| `agent/state.py` | Supervisor state / NodeName; scratchpad merge reducer |
 | `agent/sub_agent.py` | SubAgentManager spawn + auto_deny HITL |
 | `agent/supervisor_watchdog.py` | Supervised execution envelope & stall watchdog |
 | `agent/tool_registry.py` | LocalToolRegistry SoT + built-in tools (`file_append`) |
@@ -200,11 +203,11 @@ kazma/
 | **hub/** | Skill hub API/CLI/registry/validator |
 | **ide/** | IdeService, env_context, workspace_scope |
 | **mcp/** | AsyncMCPManager + UnifiedToolExecutor + classify_mcp_tool |
-| **memory/** | VectorMemory, FTS5, auto_store, health |
+| **memory/** | V2 cognitive engine (`recall.py`, `memory_state.db` / `memory_ops.db`, `worker_bootstrap.py` — eight schedulers) |
 | **models/** | Provider discovery (SSRF-guarded), model router |
-| **observability/** | Alerts |
-| **safety/** | hitl, hitl_grants, yolo |
-| **security/** | ssrf, vault, web_sessions, platform_rbac, oidc + offline scanners **[LIBRARY]** |
+| **observability/** | `ops_alerts`, daily digest, firing ledger |
+| **safety/** | hitl, `hitl_gates.py`, commitment/, yolo, prompt_fence |
+| **security/** | ssrf, `ssrf_pin.py` (pin-IP), vault, web_sessions, platform_rbac, oidc |
 | **stores/** | workspaces, bookmarks |
 | **swarm/** | Full orchestration (see §3.3) |
 | **system/** | installer, maintenance, runtime_manager |
@@ -221,7 +224,9 @@ kazma/
 | `auth.py` | Secret/session/API-token auth, tenant middleware, RBAC path gates |
 | `saas_api.py` | Multi-user + tenants admin API |
 | `session_manager.py` | Chat sessions (SQLite\|Postgres) |
-| `sse_chat.py` | Primary SSE chat stream + YOLO intercept + HITL frames |
+| `sse_chat/` | Primary SSE chat stream + YOLO intercept + HITL frames (package) |
+| `turn_runtime.py` / `turn_document.py` | Turn Delivery V2 — `close_turn` is the only closer |
+| `hitl_status.py` / `hitl_gate_bridge.py` | Gate registry readers for Web |
 | `sse_utils.py` | SSE framing helpers |
 | `chat.py` | Chat page + WebSocket chat path |
 | `ide_api.py` | `/api/ide/*` file/run/git/swarm |
@@ -232,7 +237,7 @@ kazma/
 | `swarm_sse.py` | Swarm task event streams |
 | `agents.py` / `mcp_ui.py` / `skills_ui.py` | Feature pages + APIs |
 | `providers.py` / `models_route.py` / `models.py` | Provider/model management UI |
-| `health.py` | live/ready/details probes |
+| `health.py` | live/ready public; `/health/details` **sensitive** (L-1) |
 | `metrics.py` | Prometheus metrics |
 | `routes_direct.py` | Login, approve, system, gateway wiring, OIDC, many APIs |
 | `routes_voice.py` / `routes_voice_ws.py` | STT/TTS REST + WS |
@@ -267,15 +272,15 @@ kazma/
 | `swarm_notify.py` | Opt-in Telegram notify (`maybe_notify_dispatch` when `SWARM_BOT_TOKEN` is set) |
 | `telegram_format.py` / `typing_keepalive.py` / `rate_feedback.py` | Platform UX helpers |
 
-### 2.5 Packages: CLI, TUI, skills, memory
+### 2.5 Packages: CLI, TUI, skills
 
-**`kazma-cli`:** `main` (serve/wizard/status), `gateway`, `swarm`, `update`, `project`, `completions`, `banner`.
+**`kazma-cli`:** `main` (serve/wizard/status), `gateway`, `swarm`, `update`, `project`, `completions`, `banner`, `migrate`.
 
 **`kazma-tui`:** Textual app, chat/dashboard/editor/files/swarm screens, widgets (HITL modal, palette, toasts).
 
 **`kazma-skills/native/*`:** Packaged skills (git, cron, crawler, vault, health, code-review, …) + YAML manifests.
 
-**`kazma-memory`:** Shared Arabic tokenizer + search backend used by core memory layers.
+**No `kazma-memory` package.** Arabic tokenizer is `kazma_core/msa_tokenizer.py`; V2 memory is `kazma_core.memory`.
 
 ### 2.6 Scripts & deploy
 
@@ -295,10 +300,10 @@ kazma/
 
 | Concern | Location | Behavior |
 |---------|----------|----------|
-| Graph build | `agent/graph_builder.py` | Supervisor ↔ tool_worker ↔ respond; max tool iterations |
-| HITL interrupt | `tool_worker_node` + `hitl_config` | Danger tools `interrupt()`; batch combined card |
-| Resume | `POST /api/approve/{thread_id}`, gateway `/hitl` | `Command(resume=…)` |
-| Double-gate prevent | `_hitl_approved_ctx` ContextVar only | LLM cannot inject approval |
+| Graph build | `graph_builder.py` wires; bodies in `graph_supervisor` / `graph_tool_worker` / `graph_respond` | ReAct loop; max tool iterations |
+| HITL interrupt | `graph_tool_worker.tool_worker_node` + `hitl_config` | Danger tools `interrupt()`; registry row in `hitl_gates.db` |
+| Resume | `POST /api/approve/{thread_id}`, gateway `/hitl` | Claim registry + `Command(resume=…)` |
+| Double-gate prevent | `_hitl_approved_ctx` ContextVar | `execute()` must not mint a second web gate (H-8) |
 | Turn assembly | `turn_input.py` | Checkpointer history + user message |
 | Sub-agents | `sub_agent.py` + `build_child_graph` | Auto-deny danger, timeout, tool filter |
 | Persistence | `agent_runner` / `stores/checkpoint.py` | SQLite or AsyncPostgresSaver |
@@ -312,7 +317,7 @@ kazma/
 | MCP | `mcp/manager.py` | `force_danger=True`; prod HITL for non-allowlist |
 | Swarm shell | `tools/registry.py` ShellTool | Stricter binary allowlist |
 | code_exec | `tools/code_exec.py` | Docker network=none preferred; import blocklist local |
-| shell_exec | tool_registry | shlex + create_subprocess_exec; env scrub; path policy; no interpreters |
+| shell_exec | tool_registry | shlex + `asyncio.to_thread(subprocess…)` (Windows SelectorEventLoop — never bare `create_subprocess_exec`); `_EXEC_CAPABLE_ARGS`; env scrub; HITL |
 | IDE | `ide/service.py` | All mutations via registry execute |
 
 **Danger SoT:** `safety/hitl.CANONICAL_DANGER_TOOLS` → swarm `_EXTENDED_DANGER`.
@@ -329,32 +334,40 @@ kazma/
 | Persistence | `task_store.py` (SQLite\|Postgres) |
 | Lifecycle | `task_lifecycle.py`, `task_control.py` |
 | HITL pipeline | `checkpoint.py`, `checkpoint_manager.py` |
-| Bus | `bus.py` + platform adapters |
-| Autoscaler | `autoscaler.py` |
-| Memory layers | `swarm/memory/*` |
+| Bus | `bus.py` + platform adapters; FanOut **tri-state** HITL |
+| Autoscaler | `autoscaler.py` (`maybe_scale` only on `NoCapableWorkersError`) |
+| Gate registry | `checkpoint_manager._gate_register_pipeline` / `_gate_settle_pipeline` |
+| Memory | V2 `recall.search` via phonebook (fenced); not a 4-layer adapter |
 
 ### 3.4 Event Bus & Background Services
 
 | Service | Module | Cycle |
 |---------|--------|-------|
-| Swarm message bus | `swarm/bus.py` | Pub approval/report/alerts |
-| Cron scheduler | `cron/scheduler.py` | Poll interval, max concurrent, stale RUNNING recovery, shutdown-aware |
+| Swarm message bus | `swarm/bus.py` | Pub approval/report/alerts; FanOut tri-state |
+| Cron scheduler | `cron/scheduler.py` | Must have `graph_builder=`; `delivery_target` at schedule time |
+| Memory worker | `memory/worker_bootstrap.py` | Eight schedulers (6h backup, 6h sleep, 24h reconsolidation, 15m GC, digest, ledger, drill, session purge) |
 | SSE telemetry | `telemetry_route.py` | Stream until `is_shutting_down` |
-| SSE chat | `sse_chat.py` | Per-turn stream |
+| SSE chat | `sse_chat/` package | Per-turn stream; journal projection |
 | Swarm SSE | `swarm_sse.py` / panel | Task events |
 | Gateway queue | `gateway.py` | Adapter inbound → handler |
+| Ops alerts | `observability/ops_alerts.py` | In-app FanOut + Telegram-direct; Guard is a separate process |
 | Shutdown signal | `shutdown.py` | Global flag for loops |
 
 ### 3.5 Memory & Persistence
 
 | Store | Backend | Notes |
 |-------|---------|-------|
-| ConfigStore | SQLite WAL / Postgres `kazma_settings` | Vault refs for secrets |
+| ConfigStore | SQLite WAL / Postgres `kazma_settings` | Vault refs; Soul key `self_improvement.agent_evolution` |
 | SessionManager | SQLite / `kazma_chat_sessions` | LRU warm cache + lock |
 | TaskStore | SQLite / Postgres tables | WAL + json_each workers filter |
-| Checkpoints | aiosqlite / AsyncPostgresSaver | Thread isolation |
-| FTS5 | SQLite + lock | Keyword memory |
-| VectorMemory | Chroma PersistentClient | Optional `[rag]` |
+| Checkpoints | aiosqlite / AsyncPostgresSaver | HITL **execution** truth |
+| HITL gates | `hitl_gates.db` (SQLite WAL) | HITL **decision** truth; single-process |
+| Artifacts | `agent_artifacts.db` | Durable proposals; graph is read-through |
+| V2 memory hot | `memory_state.db` | Beliefs, episodes, entities — do not merge with ops |
+| V2 memory ops | `memory_ops.db` | Durable queue + audit |
+| Cron | `cron.db` | Reminders; not SessionStore at fire time |
+| FTS5 | SQLite + lock | Keyword memory (V2) |
+| Vector / KB | sqlite-vec / pgvector / Chroma optional | Isolated from chat recall |
 | WorkspaceStore | SQLite | Repo identity columns |
 
 ### 3.6 Web Gateway, IDE & UI
@@ -363,11 +376,11 @@ kazma/
 |---------|------|
 | App factory | FastAPI + lifespan shutdown drain |
 | Auth | Secret / opaque session / API token / OIDC |
-| Chat | SSE primary (`/api/chat/stream`), WS legacy |
+| Chat | SSE primary (`/api/chat/stream`); WS graph off unless `KAZMA_WS_GRAPH=1`; client **projects** TurnDocument |
 | IDE | `/ide` page + `/api/ide/*` + Monaco `ide.js` |
 | Swarm panel | `/swarm` + `/api/swarm/*` |
-| Settings | Alpine + masked secrets + SaaS user admin |
-| Health | `/health`, `/health/live`, `/health/ready` |
+| Settings | Alpine + `mask_deep` + `kazmaConfirm`/`kazmaPrompt` |
+| Health | `/health/live` + `/health/ready` public; `/health/details` **auth** (L-1); `/health/deep` canary |
 
 ---
 
@@ -382,7 +395,8 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | GET | `/health` | Open | — | Basic health (`routes_direct`) |
 | GET | `/health/live` | Open | — | LB liveness (`health.py`) |
 | GET | `/health/ready` | Open | — | Readiness + DB ping (`health.py`) |
-| GET | `/health/details` | Open* | — | Debug details (`health.py`) |
+| GET | `/health/details` | Secret | — | Debug details — **not public** (Wave 8 L-1; leaks model/MCP) (`health.py`) |
+| GET | `/health/deep` | Open | — | Real roundtrip canary, TTL 30s (`health.py`) |
 | GET | `/api/status` | Open | — | App status |
 | GET | `/api/telemetry` | Open | — | Light telemetry |
 | GET | `/login` | Open | — | Multi-mode login page |
@@ -410,7 +424,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | GET | `/`, `/chat`, `/ide`, `/swarm`, … | Pages: shells open; data via API | — | SPA-like pages |
 | GET | `/settings`, `/dashboard` | Secret (HTML gated) | — | Admin pages |
 
-\*Prefer not exposing details publicly in production reverse proxies.
+`/health/details` is in `SENSITIVE_PREFIXES`. `/health/live` and `/health/ready` stay public.
 
 ### 4.2 Tools & CLI Matrix
 
@@ -424,7 +438,7 @@ Auth scope: **Open** = always open; **Secret** = KAZMA_SECRET / session / token 
 | `config_read` / `config_save` | Local | secrets masked / blocked sensitive | ConfigStore | `tool_registry` |
 | `spawn_agent` / `spawn_agents` | Local | **danger** (swarm extended) | SubAgentManager | `tool_registry` / `sub_agent` |
 | `current_datetime` / `context_info` | Local | safe | — | `tool_registry` |
-| `read_url` / `web_search` | Local tools pkg | SSRF guarded | `validate_url` | `tools/read_url` etc. |
+| `read_url` / `web_search` | Local tools pkg | SSRF + pin-IP | `validate_url` + `PinHostAsyncTransport` (no proxy); `assert_peer_public` | `tools/read_url`, `security/ssrf_pin.py` |
 | MCP tools (dynamic) | MCP | danger/unknown force HITL; prod non-allowlist HITL | MCP server process | `mcp/manager` |
 | `kazma serve` | CLI | — | Auth required non-loopback | `kazma_cli/main` |
 | `kazma gateway *` | CLI | — | HTTP to UI | `gateway.py` |
@@ -562,14 +576,15 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 |--------------|-------------------|
 | Command Center / swarm live | `swarm.html`, `swarm.js`, `swarm_panel/*`, `swarm_sse.py` |
 | IDE Monaco editor | `ide.html`, `ide.js`, `ide_api.py`, `ide/service.py`, `tools/file_apply_patch.py` |
-| SSE streaming chat | `sse_chat.py`, `streaming.js` |
+| SSE streaming chat | `sse_chat/` package, `chat.js` projector, `turn_runtime.close_turn` |
+| HITL Gate Registry | `safety/hitl_gates.py`, `hitl_status.py`, `chat.js` `_serverGates` |
 | WebSocket voice | `routes_voice_ws.py`, `voice.js` |
 | Document Intelligence | `documents/*`, `documents_api.py`, `documents.html`/`js`, gateway `/documents`, `document_platform` skill, TUI `DocumentsPanel`, `scripts/certify_documents.py` |
 | Guardian health | `health.py`, cron, circuit breakers, cost_breaker |
 | Cultural/Arabic | dialect, tokenizers, i18n ar, tone/pacing, majlis library |
 | Multi-agent | SwarmEngine live; `delegation/*` library-only |
 | SaaS multi-user | login multi-mode, `/api/saas`, header principal |
-| Postgres multi-replica | `db/*`, dual stores, HA compose; document **jobs** optional PG (`jobs_pg.py`) |
+| Postgres multi-replica | `db/*`, dual stores, HA compose; document jobs + catalog on `KAZMA_PG_TABLES` when that backend is in use |
 
 ---
 
@@ -577,20 +592,18 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 
 | Doc | Role |
 |-----|------|
-| `docs/audits/REPO_CLEANUP_PLAN.md` | Hygiene matrix |
-| `docs/audits/REMEDIATION_PLAN_2026-07-21.md` | WP checklist (complete) |
-| `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` | Security audit + remediation footer |
+| `AGENTS.md` | Build contract (invariants §1–§33) |
+| `docs/docs/guide/architecture.md` | Narrative architecture |
+| `docs/docs/guide/swarm-orchestration.md` | Swarm patterns + HITL bus |
+| `docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md` | Binding industrial audit (waves 0–8) |
+| `docs/audits/AUDIT_DEEP_STRUCTURE_2026-08-19.md` | Deep-structure audit |
+| `docs/audits/AUDIT_PRODUCTION_READINESS_2026-07-21.md` | Historical production audit |
 | `docs/audits/AUDIT_DOCUMENT_CERTIFICATION.md` | Document Intelligence cert report |
 | `docs/docs/guide/document-intelligence.md` | Document product guide |
-| `docs/docs/guide/document-phases.md` | Document phases 0–10 |
-| `docs/plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md` | Document docs remediation goal |
 | `docs/audits/UNWIRED_INVENTORY.md` | Library-only packages |
-| `docs/ops/SAAS_AND_POSTGRES.md` | Cutover guide |
-| `docs/ops/DISASTER_RECOVERY.md` | DR runbook |
-| `docs/ops/MULTI_REGION.md` | Multi-replica ops |
-| `docs/ops/OIDC_IDP_SETUP.md` | IdP setup |
-| `AGENTS.md` | Agent coding critical rules |
+| `docs/docs/ops/diagnosis-map.md` | Multi-path diagnosis |
+| `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md` | Deferred Guard/ops alerting |
 
 ---
 
-*Generated 2026-07-21 as monorepo SoT architecture map. Update when dual systems are archived or new packages are added.*
+*Refreshed 2026-09-02. Invariants live in `AGENTS.md`; this file is the module map. Do not list a `kazma-memory` package.*

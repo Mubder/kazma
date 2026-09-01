@@ -64,8 +64,8 @@ class WorkerPhonebook:
         """Summon a worker by name and dispatch a task with episodic memory context.
 
         Injects both:
-        1. Past successful strategies from the 4-layer memory adapter.
-        2. Past evolution learnings (SoulEvolution entries) specific to this worker.
+        1. Past successful strategies from V2 `recall.search` (fenced).
+        2. Past evolution learnings specific to this worker (fenced).
         """
         worker = self.summon(worker_name)
         if worker is None:

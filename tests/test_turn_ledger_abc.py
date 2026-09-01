@@ -140,6 +140,23 @@ def test_new_prompt_stream_subscribes_at_journal_head() -> None:
     assert "def head_seq(self, thread_id: str)" in broker
 
 
+def test_assistant_snapshot_runs_are_coalesced_before_render() -> None:
+    """A single turn must not render as a ladder of assistant snapshots.
+
+    Regression shape (2026-09-02): consecutive assistant rows carried
+    incremental prefixes ("Schedule", "Schedule the", ...) and rendered as many
+    CoT bubbles. Both API payload and chat renderer now coalesce related runs.
+    """
+    chat = _src(_CHAT_JS)
+    assert "function _coalesceAssistantRuns(rows)" in chat
+    assert "messages = _coalesceAssistantRuns(messages);" in chat
+    # Negative control: plain identical-only collapse misses prefix ladders.
+    assert "prevAssistantContent === _cTrim" in chat
+    sse = _src(_UI / "sse_chat" / "__init__.py")
+    assert "def _coalesce_assistant_runs(" in sse
+    assert "payload = _coalesce_assistant_runs(payload)" in sse
+
+
 def test_error_frame_finishes_the_sse_stream() -> None:
     src = _src(_UI / "static" / "js" / "streaming.js")
     err = src.split("case 'error':", 1)[1].split("case ", 1)[0]
