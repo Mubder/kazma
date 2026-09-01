@@ -535,6 +535,7 @@
       _serverPaused = paused;
       _serverHitl = (status.hitl && typeof status.hitl === 'object') ? status.hitl : null;
       _serverGates = Array.isArray(status.gates) ? status.gates : [];
+      _serverGatesAuth = !!status.gates_authoritative;
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
       // Still running server-side → keep waiting honestly AND re-attach a
@@ -951,6 +952,7 @@
   var _serverPaused = false;
   var _serverHitl = null;
   var _serverGates = [];
+  var _serverGatesAuth = false;
   var _attachInFlight = false;
 
   /** Drop HITL/turn client leftovers when switching sessions.
@@ -964,6 +966,7 @@
     _serverPaused = false;
     _serverHitl = null;
     _serverGates = [];
+    _serverGatesAuth = false;
     _lastInterruptedThreadId = '';
     _awaitingApproval = false;
     _clearStoreApproval();
@@ -5665,6 +5668,16 @@
       // A live turn is generating before the interrupt is marked paused;
       // that pair is also not a claim.
       if (state === 'pending' && hitl.payload && doc.status !== 'done') {
+        // Registry-authoritative fail posture: the server answered with the
+        // live-gates list and NO row covers this interrupt. Without registry
+        // evidence of a claim, chat must never invent "Approved" from
+        // leftover status or old parts — render live buttons. A stale click
+        // is recoverable (the server re-verifies and answers "no longer
+        // pending"); a fabricated Approved stamp is the incident.
+        if (_serverGatesAuth && !gateRow) {
+          renderHitlCard(hitl.payload);
+          return;
+        }
         var gate = _serverHitl ? String(_serverHitl.gate || '') : '';
         // A status-based claim requires BOTH interrupt ids present and
         // equal. An id-less/stale server status (previous gate's

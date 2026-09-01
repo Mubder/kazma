@@ -1,15 +1,21 @@
-"""Dual-write bridge: web HITL sites → the gate registry (P1 of the plan).
+"""Write bridge: web HITL sites → the gate registry.
 
-The registry (`kazma_core.safety.hitl_gates`) is the decision-truth store;
-during dual-write the LEGACY derivation stays authoritative for every user
-response, and this bridge records the same lifecycle into the registry so
-parity can be watched before the read cutover (P2).
+The registry (`kazma_core.safety.hitl_gates`) is the DECISION-TRUTH store,
+and since the read cutover (P2) the web surfaces read it first:
+``hitl_thread_status``, the pending-approvals list, ``close_turn``'s
+open/closed decision, and the chat client's card painting (via the status
+``gates`` list + ``gates_authoritative`` flag) all treat a registry row as
+the answer. The legacy checkpoint-derived heuristics remain ONLY as the
+degradation path — when the registry is kill-switched off, unreachable, or
+has no row for a pre-registry pause. Parity counters
+(``kazma_hitl_gate_parity_mismatch``) watch the two answers so the legacy
+readers can be deleted once the counter stays flat (P6).
 
 Every function here is **best-effort and exception-proof**: a registry
-failure logs + increments the parity-mismatch metric and NEVER changes what
-the user sees. All entry points are async (`asyncio.to_thread` under the
-hood — §23, the server loop must not block) and no-op instantly when the
-``KAZMA_GATE_REGISTRY`` kill-switch is off.
+failure logs + increments the parity-mismatch metric and NEVER blocks the
+user-facing action. All entry points are async (`asyncio.to_thread` under
+the hood — §23, the server loop must not block) and no-op instantly when
+the ``KAZMA_GATE_REGISTRY`` kill-switch is off.
 
 Alias convergence (two-id rule): both this bridge and any pre-pause
 registration compute the SAME deterministic alias via
@@ -95,7 +101,7 @@ async def gate_pending_from_payload(
         created = await register_gate_async(row)
         record_hitl_gate(created.state, mechanism)
     except Exception:
-        logger.warning("[GateBridge] register failed (legacy unaffected)", exc_info=True)
+        logger.warning("[GateBridge] register failed (user action unaffected)", exc_info=True)
         _mismatch("register")
 
 
@@ -145,15 +151,17 @@ async def gate_claimed(
             claimed = await claim_gate_async(row.gate_id, decision, actor)
             record_hitl_gate(claimed.state, claimed.mechanism)
         except TransitionConflict as tc:
-            # Legacy allowed this decision but the registry disagrees —
-            # exactly the signal the parity counter exists for.
+            # The endpoint verified a real pending interrupt but the
+            # registry disagrees — exactly the drift the parity counter
+            # exists for. The claim proceeds (the checkpoint interrupt is
+            # execution truth); the mismatch is recorded, not hidden.
             logger.warning(
                 "[GateBridge] claim conflict gate=%s expected=pending actual=%s "
-                "(legacy authoritative in P1)", row.gate_id, tc.actual,
+                "(parity mismatch recorded)", row.gate_id, tc.actual,
             )
             _mismatch("claim")
     except Exception:
-        logger.warning("[GateBridge] claim failed (legacy unaffected)", exc_info=True)
+        logger.warning("[GateBridge] claim failed (user action unaffected)", exc_info=True)
         _mismatch("claim")
 
 

@@ -1190,7 +1190,11 @@ def create_sse_chat_router(
         # ── Gate registry (P2): the live-gates list rides along so the
         # client renders decision truth (one entry per gate — a second
         # pending question is naturally visible next to the claimed first).
+        # ``gates_authoritative`` tells the client the registry answered:
+        # only then may it treat the LIST (including an empty list) as
+        # truth. A read failure must not look like "no live gates".
         gates: list[dict[str, Any]] = []
+        gates_authoritative = False
         if thread_id:
             try:
                 from kazma_ui.hitl_gate_bridge import registry_on
@@ -1210,8 +1214,10 @@ def create_sse_chat_router(
                         }
                         for g in await live_gates_async(thread_id)
                     ]
+                    gates_authoritative = True
             except Exception:
                 gates = []
+                gates_authoritative = False
 
         return {
             "session_id": session_id,
@@ -1220,6 +1226,7 @@ def create_sse_chat_router(
             "paused": bool(paused),
             "hitl": hitl,
             "gates": gates,
+            "gates_authoritative": gates_authoritative,
         }
 
     @r.delete("/api/chat/sessions/{session_id}")

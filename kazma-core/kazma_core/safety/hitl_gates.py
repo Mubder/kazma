@@ -451,6 +451,14 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
     return gate
 
 
+# Columns _cas may set — the CAS helper interpolates COLUMN NAMES into SQL
+# (values are always bound parameters); a whitelist keeps a future caller from
+# ever turning a payload key into SQL.
+_CAS_COLUMNS = frozenset(
+    {"decision", "actor", "claimed_at", "settled_at", "message", "supersedes"}
+)
+
+
 def _cas(
     conn: sqlite3.Connection,
     gate_id: str,
@@ -458,6 +466,9 @@ def _cas(
     to_state: str,
     sets: dict[str, Any],
 ) -> bool:
+    bad = set(sets) - _CAS_COLUMNS
+    if bad:
+        raise ValueError(f"_cas: illegal column(s) {sorted(bad)}")
     cols = "".join(f", {k} = ?" for k in sets)
     sql = f"UPDATE hitl_gates SET state = ?{cols} WHERE gate_id = ? AND state = ?"
     cur = conn.execute(sql, (to_state, *sets.values(), gate_id, from_state))
