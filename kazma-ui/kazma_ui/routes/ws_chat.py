@@ -420,6 +420,37 @@ def create_ws_chat_router(
                     for intr in getattr(task, "interrupts", []) or []:
                         payload = _extract_hitl_payload(intr)
                         if payload:
+                            iid = ""
+                            try:
+                                from kazma_ui.hitl_status import (
+                                    persisted_hitl_for_thread,
+                                )
+                                from kazma_ui.turn_document import assign_interrupt_id
+
+                                part = persisted_hitl_for_thread(thread_id)
+                                stored = ""
+                                if isinstance(part, dict):
+                                    stored = str(
+                                        part.get("interrupt_id")
+                                        or (part.get("payload") or {}).get(
+                                            "interrupt_id"
+                                        )
+                                        or ""
+                                    )
+                                if stored:
+                                    payload["interrupt_id"] = stored
+                                    iid = stored
+                                else:
+                                    iid = assign_interrupt_id(
+                                        payload,
+                                        thread_id=thread_id,
+                                        interrupt=intr,
+                                    )
+                            except Exception:
+                                logger.debug(
+                                    "[WS-Chat] interrupt_id stamp skipped",
+                                    exc_info=True,
+                                )
                             approval_ev = EventBridge.create_approval_event(
                                 thread_id=thread_id,
                                 tool_name=payload.get("tool", ""),
@@ -428,6 +459,8 @@ def create_ws_chat_router(
                                 tools=payload.get("tools"),
                                 kind=payload.get("kind"),
                                 items=payload.get("items"),
+                                interrupt_id=iid or None,
+                                yolo_allowed=payload.get("yolo_allowed"),
                             )
                             await websocket.send_json(approval_ev.to_dict())
                             logger.info(
