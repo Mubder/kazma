@@ -2373,8 +2373,10 @@ details.kazma-working > summary {
   display: none;
 }
 /* The answer is a sibling of the workbench, never a child of the
-   collapsible body. Keep it visible when CoT is a one-line summary. */
-.message-content > .message-text {
+   collapsible body. Keep it visible when CoT is a one-line summary.
+   Assistant-only: the unscoped rule also hit .message-user and could
+   collapse the sent You bubble (2026-09-01). */
+.message-assistant > .message-content > .message-text {
   display: block;
 }
 

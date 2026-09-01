@@ -878,6 +878,26 @@
     } catch (e) { /* store not ready */ }
   }
 
+  function _directChildByClass(parent, cls) {
+    if (!parent || !parent.children) return null;
+    for (var i = 0; i < parent.children.length; i++) {
+      if (parent.children[i].classList && parent.children[i].classList.contains(cls)) {
+        return parent.children[i];
+      }
+    }
+    return null;
+  }
+
+  function _isUserBubble(el) {
+    return !!(el && el.classList && el.classList.contains('message-user'));
+  }
+
+  function _bubbleContent(el) {
+    if (!el) return null;
+    if (el.classList && el.classList.contains('message-content')) return el;
+    return _directChildByClass(el, 'message-content');
+  }
+
   /**
    * Collapse every FINISHED workbench to its one-line summary.
    *
@@ -943,6 +963,19 @@
       _planItems = [];
       _planParsedFromText = false;
       _lastTurnStats = null;
+      // Drop the previous turn's 'live' document. Otherwise the first
+      // logProgress merges into leftover parts and _answerFromDoc paints
+      // yesterday's reasoning over this turn's bubble — and if that node
+      // is the You row, the sent text vanishes from the chip (2026-09-01).
+      try {
+        if (window.KazmaTurnDocument && typeof KazmaTurnDocument.empty === 'function') {
+          _docs.live = KazmaTurnDocument.empty('live');
+        } else {
+          delete _docs.live;
+        }
+      } catch (eLive) {
+        try { delete _docs.live; } catch (eDel) { /* ignore */ }
+      }
       logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     }
     if (inputEl) {
@@ -2479,17 +2512,12 @@
   }
 
   function ensureProgressPanel() {
+    if (_isUserBubble(currentMsgEl)) currentMsgEl = null;
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     _rescueTurnDom(currentMsgEl);
-    var content = currentMsgEl.querySelector('.message-content');
+    var content = _bubbleContent(currentMsgEl);
     if (!content) return null;
-    var panel = null;
-    for (var pi = 0; pi < content.children.length; pi++) {
-      if (content.children[pi].classList && content.children[pi].classList.contains('agent-progress')) {
-        panel = content.children[pi];
-        break;
-      }
-    }
+    var panel = _directChildByClass(content, 'agent-progress');
     if (panel) {
       _progressEl = panel;
       return panel;
@@ -2537,13 +2565,7 @@
         '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
         '<ul class="agent-progress-steps" role="log" aria-live="polite"></ul>' +
       '</div>';
-    var textEl = null;
-    for (var ti = 0; ti < content.children.length; ti++) {
-      if (content.children[ti].classList && content.children[ti].classList.contains('message-text')) {
-        textEl = content.children[ti];
-        break;
-      }
-    }
+    var textEl = _directChildByClass(content, 'message-text');
     if (textEl) content.insertBefore(panel, textEl);
     else content.appendChild(panel);
     var header = panel.querySelector('.agent-progress-header');
@@ -3623,6 +3645,7 @@
    */
   function _paintHTML(textEl, html) {
     if (!textEl) return false;
+    if (textEl.closest && textEl.closest('.message-user')) return false;
     // Compare against the SOURCE string we last wrote, not textEl.innerHTML:
     // reading innerHTML returns the browser's re-serialization of the DOM
     // (attribute order, entity and void-tag normalisation), which routinely
@@ -3636,6 +3659,7 @@
 
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
+    if (textEl.closest && textEl.closest('.message-user')) return;
     if (final) {
       if (_paintHTML(textEl, _renderReplyHTML(tokenAccum))) {
         if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
@@ -3670,6 +3694,7 @@
 
   function _scheduleLiveTextPaint(textEl) {
     if (!textEl) return;
+    if (textEl.closest && textEl.closest('.message-user')) return;
     _liveRenderEl = textEl;
     var since = Date.now() - _liveRenderLastAt;
     if (since >= _LIVE_RENDER_MIN_MS) {
@@ -5234,24 +5259,22 @@
   function _rescueTurnDom(el) {
     // Collapsed CoT must never own the answer. If .message-text (or the HITL
     // card) landed inside .agent-progress-body, expanding CoT was the only
-    // way to see the reply (2026-09-01).
-    if (!el) return;
-    var content = el.querySelector ? el.querySelector('.message-content') : null;
+    // way to see the reply (2026-09-01). Never lift nodes out of a nested
+    // .message — that emptied the You bubble after send.
+    if (!el || _isUserBubble(el)) return;
+    var content = _bubbleContent(el);
     if (!content) return;
-    var panel = null;
-    var kids = content.children;
+    var panel = _directChildByClass(content, 'agent-progress');
     var i;
-    for (i = 0; i < kids.length; i++) {
-      if (kids[i].classList && kids[i].classList.contains('agent-progress')) {
-        panel = kids[i];
-        break;
-      }
-    }
     if (panel) {
-      var trapped = panel.querySelectorAll('.message-text, .hitl-approval-card, .message-meta, .message-actions');
+      var body = panel.querySelector('.agent-progress-body') || panel;
+      var trapped = body.querySelectorAll('.message-text, .hitl-approval-card, .message-meta, .message-actions');
       var anchor = panel.nextSibling;
       for (i = 0; i < trapped.length; i++) {
-        content.insertBefore(trapped[i], anchor);
+        var node = trapped[i];
+        var owner = node.closest ? node.closest('.message') : null;
+        if (owner && owner !== el) continue;
+        content.insertBefore(node, anchor);
       }
     }
     for (i = 0; i < content.children.length; i++) {
@@ -5284,6 +5307,7 @@
 
   function _syncCotPanel(el, activity, status, meta) {
     if (!el || !activity || !activity.length) return;
+    if (_isUserBubble(el)) return;
     meta = meta || {};
     var hitlLive = false;
     try {
@@ -5300,30 +5324,21 @@
     _progressStepCount = steps;
     _rescueTurnDom(el);
     if (terminal) {
-      var existingCot = null;
-      var ckids = (el.querySelector('.message-content') || el).children;
-      for (var ci = 0; ci < ckids.length; ci++) {
-        if (ckids[ci].classList && ckids[ci].classList.contains('agent-progress')) {
-          existingCot = ckids[ci];
-          break;
-        }
-      }
+      var contentHost = _bubbleContent(el) || el;
+      var existingCot = _directChildByClass(contentHost, 'agent-progress');
       var liveActive = existingCot && existingCot.classList.contains('is-active')
         && !existingCot.classList.contains('kazma-cot-restored');
       if (liveActive) return;
       var cot = _buildRestoredWorkbench(activity);
       if (!cot) return;
-      if (existingCot) existingCot.replaceWith(cot);
-      else {
-        var contentHost = el.querySelector('.message-content') || el;
-        var tw = null;
-        var tKids = contentHost.children;
-        for (var ti = 0; ti < tKids.length; ti++) {
-          if (tKids[ti].classList && tKids[ti].classList.contains('message-text')) {
-            tw = tKids[ti];
-            break;
-          }
+      if (existingCot) {
+        var nestedMsgs = existingCot.querySelectorAll('.message');
+        for (var ni = 0; ni < nestedMsgs.length; ni++) {
+          contentHost.insertBefore(nestedMsgs[ni], existingCot);
         }
+        existingCot.replaceWith(cot);
+      } else {
+        var tw = _directChildByClass(contentHost, 'message-text');
         if (tw) contentHost.insertBefore(cot, tw);
         else contentHost.appendChild(cot);
       }
@@ -5368,6 +5383,10 @@
       } catch (eSel) { el = null; }
     }
     if (!el) el = currentMsgEl || _assistantBubbleForOpenTurn();
+    if (_isUserBubble(el) || _isUserBubble(currentMsgEl)) {
+      currentMsgEl = null;
+      el = _assistantBubbleForOpenTurn();
+    }
     if (!el) el = createAssistantMessage();
     currentMsgEl = el;
     if (turnId) {
@@ -5376,15 +5395,12 @@
     _rescueTurnDom(el);
     var text = _answerFromDoc(TD, doc);
     if (text) tokenAccum = text;
-    var textEl = null;
-    var host = el.querySelector('.message-content') || el;
-    for (var hi = 0; hi < host.children.length; hi++) {
-      if (host.children[hi].classList && host.children[hi].classList.contains('message-text')) {
-        textEl = host.children[hi];
-        break;
-      }
+    var host = _bubbleContent(el) || el;
+    var textEl = _directChildByClass(host, 'message-text');
+    if (!textEl) {
+      var fallback = el.querySelector('.message-text');
+      if (fallback && !(fallback.closest && fallback.closest('.message-user'))) textEl = fallback;
     }
-    if (!textEl) textEl = el.querySelector('.message-text');
     if (textEl && text) {
       tryIngestPlanFromText(text);
       var display = _scrubDsml(stripPlanFenceForDisplay(text));
