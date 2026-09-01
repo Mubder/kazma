@@ -231,12 +231,16 @@
     } catch (e) { /* ignore malformed URLs */ }
     if (initialSessionId) {
       chatSessionId = initialSessionId;
-      // loadSession is in-flight-guarded and loadModels() below triggers
-      // the load for the same saved id — the old +100ms duplicate schedule
-      // caused a double fetch/render flicker on every boot (audit P1-6).
-      // Turn Delivery V2: reconcile with server truth (a turn may have
-      // finished or still be running while the page was closed).
-      _resyncDelivery('init');
+      // Persist so loadModels()'s loadSession(savedSid) honors a ?s= param
+      // that differs from the last saved session.
+      persistSessionId();
+      // ONE boot painter: loadSession (via loadModels below) renders the
+      // transcript and ends with the 'load' resync. The old extra boot-time
+      // init resync here raced it — its journal attach painted
+      // the final reply first, then loadSession's innerHTML wipe erased it
+      // for the fetch duration before the transcript repainted it (the
+      // "reply appears → vanishes 1-2s → reappears" refresh flicker,
+      // 2026-09-01). Reconciliation still happens, just after render.
     }
 
     // Load available models for the model selector
@@ -5008,6 +5012,10 @@
       try { activeStream.abort(); } catch (e) {}
       activeStream = null;
     }
+    // Invalidate any resync/journal-attach dispatched BEFORE this load —
+    // their epoch check (_mine / epochAtFetch) makes them no-ops so a stale
+    // painter can never draw into (or under) the transcript this load renders.
+    _sseEpoch++;
     endTurn();
     _resetSessionTurnState();
 
