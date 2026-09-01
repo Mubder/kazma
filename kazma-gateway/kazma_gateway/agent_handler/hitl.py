@@ -641,6 +641,21 @@ async def _handle_hitl_resume(
                 "[HITL] Resume: thread=%s approved=%s action=%s",
                 target_thread, approved, action,
             )
+            # Gate registry (P3): record the decision through the same CAS
+            # choke every surface uses. Best-effort — the platform reply
+            # below stays authoritative until P6.
+            try:
+                from kazma_ui.hitl_gate_bridge import gate_claimed_for_thread
+
+                await gate_claimed_for_thread(
+                    target_thread,
+                    "approve" if approved else "deny",
+                    f"{msg.platform}:{msg.sender_id or 'unknown'}",
+                    tool=str(pending.get("tool") or "") if isinstance(pending, dict) else "",
+                    payload=pending if isinstance(pending, dict) else None,
+                )
+            except Exception:
+                logger.debug("[HITL] gate claim skipped", exc_info=True)
             # Mark successful resume so a late second callback stays quiet.
             try:
                 from kazma_core.config_store import get_config_store
@@ -713,6 +728,22 @@ async def _handle_hitl_resume(
             # continuing." while the graph is actually still paused on
             # another tool, so the agent appears to "do nothing".
             chained = await _check_graph_interrupt(graph, resume_config)
+            # Gate registry (P3): the resume reached a terminal or a new
+            # pause — settle the claimed gate; register the chained one so
+            # every surface shows the second question immediately.
+            try:
+                from kazma_ui.hitl_gate_bridge import (
+                    gate_pending_from_payload,
+                    settle_thread_gates,
+                )
+
+                await settle_thread_gates(target_thread)
+                if isinstance(chained, dict):
+                    _chained_payload = dict(chained)
+                    _chained_payload["thread_id"] = target_thread
+                    await gate_pending_from_payload(_chained_payload)
+            except Exception:
+                logger.debug("[HITL] gate settle/chain skipped", exc_info=True)
 
         from .graph import _prepare_tg_outbound
 

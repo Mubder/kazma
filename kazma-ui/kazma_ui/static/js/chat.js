@@ -530,6 +530,7 @@
       _serverGenerating = generating;
       _serverPaused = paused;
       _serverHitl = (status.hitl && typeof status.hitl === 'object') ? status.hitl : null;
+      _serverGates = Array.isArray(status.gates) ? status.gates : [];
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
 
       // Still running server-side → keep waiting honestly AND re-attach a
@@ -945,6 +946,7 @@
   var _serverGenerating = false;
   var _serverPaused = false;
   var _serverHitl = null;
+  var _serverGates = [];
   var _attachInFlight = false;
 
   /** Drop HITL/turn client leftovers when switching sessions.
@@ -957,6 +959,7 @@
     _serverGenerating = false;
     _serverPaused = false;
     _serverHitl = null;
+    _serverGates = [];
     _lastInterruptedThreadId = '';
     _awaitingApproval = false;
     _clearStoreApproval();
@@ -4123,7 +4126,10 @@
             if (candidates[c] && String(p.thread_id || '') === candidates[c]) { hit = p; break; }
           }
         }
-        if (!hit && pending.length === 1) hit = pending[0];
+        // Single-operator fallback: adopt the only pending entry ONLY when
+        // this chat's own status says it is paused — otherwise a fresh chat
+        // adopts another chat's pause and wears its state (2026-09-01).
+        if (!hit && pending.length === 1 && _serverPaused) hit = pending[0];
         if (!hit) return;
         console.warn('[KazmaChat] Recovering missed approval card for thread=' + hit.thread_id);
         applyTurnEvent({
@@ -5619,9 +5625,29 @@
     if (!hitl) return;
     var state = String(hitl.state || 'pending');
     var iid = _hitlInterruptIdOf(hitl);
+    // ── Gate registry (P2): a live gate row is DECISION TRUTH and overrides
+    // any stale part stamp. `pending` means nobody has clicked — the card
+    // renders live buttons no matter what an old part claims (kills the
+    // pre-approved stamp). `claimed`/`resuming` means the decision is made.
+    var gateRow = null;
+    if (iid && _serverGates && _serverGates.length) {
+      for (var gi = 0; gi < _serverGates.length; gi++) {
+        if (String(_serverGates[gi].gate_id || '') === String(iid)) {
+          gateRow = _serverGates[gi];
+          break;
+        }
+      }
+    }
     var prev = currentMsgEl;
     if (el) currentMsgEl = el;
     try {
+      if (gateRow && gateRow.state === 'pending' && hitl.payload && doc.status !== 'done') {
+        renderHitlCard(hitl.payload);
+        return;
+      }
+      if (gateRow && (gateRow.state === 'claimed' || gateRow.state === 'resuming')) {
+        if (state === 'pending') state = 'inflight';
+      }
       // A finished turn must not revive a live Approve card on refresh.
       // Inflight ONLY when this interrupt was actually claimed (this tab
       // clicked, or the server gate/persist says so).
@@ -5632,12 +5658,20 @@
       // that pair is also not a claim.
       if (state === 'pending' && hitl.payload && doc.status !== 'done') {
         var gate = _serverHitl ? String(_serverHitl.gate || '') : '';
+        // A status-based claim requires BOTH interrupt ids present and
+        // equal. An id-less/stale server status (previous gate's
+        // 'approved' part, or the gate-without-part fallback) used to
+        // claim a brand-NEW pending gate here and stamp it
+        // "Approved — running…" with no click — while the dashboard
+        // still had live buttons (2026-09-01). Id-less legacy parts are
+        // covered by _hitlAlreadyClaimed (tool-name claims).
         var statusInflight = !!(
           _serverHitl
           && (gate === 'inflight'
             || _serverHitl.state === 'approved'
             || _serverHitl.state === 'inflight')
-          && (!_serverHitl.interrupt_id || !iid || String(_serverHitl.interrupt_id) === iid)
+          && !!iid && !!_serverHitl.interrupt_id
+          && String(_serverHitl.interrupt_id) === iid
         );
         if (_hitlAlreadyClaimed(hitl) || statusInflight) {
           state = 'inflight';

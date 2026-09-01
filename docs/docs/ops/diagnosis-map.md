@@ -510,3 +510,23 @@ Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document
 - `agent/intent/entities.py` — file resolution
 - `agent/intent/classify.py` — single entry point
 - `agent/intent/handlers/` — execute handlers (document, research, composer)
+
+## HITL gate registry (2026-09-01)
+
+**Symptom → first place to look.** Ghost/duplicate approval cards, a card
+pre-stamped "Approved — running" with no click, a second danger question
+visible only on the dashboard, "approve did nothing", or a turn declared
+done while a question was outstanding → `kazma_core/safety/hitl_gates.py`
+(the single lifecycle SoT, `kazma-data/hitl_gates.db`).
+
+- `pending` is the ONLY state that renders live buttons; readers are
+  registry-first (`hitl_thread_status`, `close_turn`,
+  `/api/pending-approvals`, chat.js `_serverGates`).
+- A pending row + paused checkpoint ⇒ the turn stays OPEN (silence rule).
+  A pending row + NOT paused ⇒ orphan, settled in `close_turn`.
+- Claim races: CAS — one winner, 409 carries the actual state/decision;
+  same decision twice is 200.
+- Watch `kazma_hitl_gate_parity_mismatch_total` (must trend to zero) and
+  `kazma_hitl_gate_reconciled_total`.
+- Kill-switch: `KAZMA_GATE_REGISTRY=0` (legacy derivation everywhere).
+- Full spec: `docs/plans/HITL_GATE_REGISTRY_PLAN.md` + AGENTS.md §30.

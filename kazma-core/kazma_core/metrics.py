@@ -21,6 +21,9 @@ __all__ = [
     "record_swarm_handoff",
     "record_delivery_event",
     "record_delivery_replay",
+    "record_hitl_gate",
+    "record_hitl_gate_parity_mismatch",
+    "record_hitl_gate_reconciled",
 ]
 
 logger = logging.getLogger(__name__)
@@ -127,6 +130,27 @@ if _PROMETHEUS_AVAILABLE:
         "kazma_llm_latency_seconds",
         "LLM call latency distribution",
     )
+
+    # HITL Gate Registry (safety/hitl_gates.py — one gate, one row, one truth).
+    # transitions counts every state change per mechanism; parity_mismatch is
+    # THE dual-write health signal (registry answer ≠ legacy answer on a
+    # status/pending read) — it must trend to zero before legacy readers are
+    # deleted; reconciled counts reconciler actions by kind.
+    HITL_GATES_TOTAL = Counter(
+        "kazma_hitl_gates_total",
+        "HITL gate registry transitions",
+        ["state", "mechanism"],
+    )
+    HITL_GATE_PARITY_MISMATCH_TOTAL = Counter(
+        "kazma_hitl_gate_parity_mismatch_total",
+        "Dual-write parity mismatches between gate registry and legacy derivation",
+        ["site"],
+    )
+    HITL_GATE_RECONCILED_TOTAL = Counter(
+        "kazma_hitl_gate_reconciled_total",
+        "Gate reconciler convergence actions",
+        ["action"],  # created_missing | orphaned | superseded
+    )
 else:
     # Stub objects for type checking
     LLM_CALLS_TOTAL = None
@@ -143,6 +167,9 @@ else:
     DELIVERY_SEQ_GAPS_TOTAL = None
     CONTEXT_TRIMS_TOTAL = None
     CONTEXT_TRIM_DROPPED_MESSAGES_TOTAL = None
+    HITL_GATES_TOTAL = None
+    HITL_GATE_PARITY_MISMATCH_TOTAL = None
+    HITL_GATE_RECONCILED_TOTAL = None
 
 
 # ── Metrics Endpoint ───────────────────────────────────────────────────
@@ -196,6 +223,29 @@ def record_long_task(kind: str) -> None:
         return
     label = (kind or "unknown")[:64]
     LONG_TASK_EVENTS_TOTAL.labels(kind=label).inc()
+
+
+def record_hitl_gate(state: str, mechanism: str = "graph") -> None:
+    """Record a HITL gate registry transition. No-op without prometheus."""
+    if not _PROMETHEUS_AVAILABLE or HITL_GATES_TOTAL is None:
+        return
+    HITL_GATES_TOTAL.labels(
+        state=(state or "unknown")[:32], mechanism=(mechanism or "graph")[:32]
+    ).inc()
+
+
+def record_hitl_gate_parity_mismatch(site: str) -> None:
+    """Record a registry-vs-legacy parity mismatch (dual-write health)."""
+    if not _PROMETHEUS_AVAILABLE or HITL_GATE_PARITY_MISMATCH_TOTAL is None:
+        return
+    HITL_GATE_PARITY_MISMATCH_TOTAL.labels(site=(site or "unknown")[:48]).inc()
+
+
+def record_hitl_gate_reconciled(action: str) -> None:
+    """Record a gate reconciler convergence action."""
+    if not _PROMETHEUS_AVAILABLE or HITL_GATE_RECONCILED_TOTAL is None:
+        return
+    HITL_GATE_RECONCILED_TOTAL.labels(action=(action or "unknown")[:32]).inc()
 
 
 def record_commitment_terminal(decision: str) -> None:
