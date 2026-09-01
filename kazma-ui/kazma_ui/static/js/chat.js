@@ -371,6 +371,7 @@
       },
       onApprovalRequired: function(data) {
         if (!_mine()) return;
+        if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         pauseForApproval(data);
         applyTurnEvent({
@@ -2301,6 +2302,7 @@
       onApprovalRequired: function(data) {
         if (!_mine()) return;
         // HITL: journal part + one projector paints the card.
+        if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
         activeTypingEl = null;
@@ -2319,6 +2321,7 @@
       onHitl: function(data) {
         if (!_mine()) return;
         var st = String((data && data.state) || 'pending');
+        if (st === 'pending' && _hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         if (st === 'pending') {
           _clearStatusStrip();
@@ -3965,6 +3968,44 @@
     return false;
   }
 
+  function _hitlInterruptIdOf(data) {
+    data = data || {};
+    return String(data.interrupt_id || (data.payload && data.payload.interrupt_id) || '');
+  }
+
+  function _hitlCardIsClaimed(card) {
+    if (!card || !card.classList) return false;
+    return card.classList.contains('hitl-approved')
+      || card.classList.contains('hitl-denied')
+      || card.classList.contains('hitl-error');
+  }
+
+  function _hitlAlreadyClaimed(data) {
+    var iid = _hitlInterruptIdOf(data);
+    var part = _openHitlPart();
+    if (part) {
+      var st = String(part.state || 'pending');
+      var pid = _hitlInterruptIdOf(part);
+      if (st !== 'pending' && (!iid || !pid || iid === pid)) return true;
+    }
+    if (messagesEl) {
+      var cards = messagesEl.querySelectorAll('.hitl-approval-card');
+      for (var i = 0; i < cards.length; i++) {
+        if (!_hitlCardIsClaimed(cards[i])) continue;
+        if (!iid) return true;
+        if (String(cards[i].getAttribute('data-interrupt-id') || '') === iid) return true;
+      }
+    }
+    return false;
+  }
+
+  function _freezeHitlButtons() {
+    if (!messagesEl) return;
+    messagesEl.querySelectorAll('.hitl-approval-card button').forEach(function(b) {
+      b.disabled = true;
+    });
+  }
+
   /** Hide the chat.html bottom Alpine approval card (driven by the store). */
   function _clearStoreApproval() {
     try {
@@ -3994,6 +4035,7 @@
 
   function recoverMissedApproval() {
     if (hasInlineApprovalCard() || _awaitingApproval) return;
+    if (_hitlAlreadyClaimed(null)) return;
     if (_serverGenerating && !_serverPaused) return;
     var existing = _openHitlPart();
     if (existing && String(existing.state || 'pending') !== 'pending') return;
@@ -4047,6 +4089,7 @@
     // used to live in the WS store (skip when SSE is live) — but when the
     // SSE frame was late/lost NO card appeared at all and the paused turn
     // went completely silent (2026-08-26 X-post incident).
+    if (_hitlAlreadyClaimed(data)) return;
     if (hasInlineApprovalCard()) return;
     pauseForApproval(data);
     // The inline card is the primary approval UI. Hide the bottom Alpine card
@@ -4055,17 +4098,17 @@
     // one lower). The store fields submitApproval needs are set by the inline
     // card's own handlers.
     _clearStoreApproval();
-    // Replace stale/disabled cards instead of stacking another YOLO view
-    // after reconnect (hasInlineApprovalCard ignores disabled buttons).
-    if (messagesEl) {
-      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(old) {
-        old.remove();
-      });
-    }
     var targetThreadId = data.thread_id || chatSessionId || '';
     if (!currentMsgEl) currentMsgEl = createAssistantMessage();
     var content = currentMsgEl.querySelector('.message-content');
     if (!content) return;
+    // Never strip a claimed card (Approved/Denied) — that is the
+    // disappear-then-live-again loop (cleanup 2026-09-01). Only replace
+    // unclaimed pending cards in THIS bubble.
+    content.querySelectorAll('.hitl-approval-card').forEach(function(old) {
+      if (_hitlCardIsClaimed(old)) return;
+      old.remove();
+    });
 
     // Phase 3: semantic clarify/confirm → render per-option buttons instead of
     // the generic Approve/Deny. The data carries kind + items[0].options from
@@ -4183,6 +4226,10 @@
 
     var card = document.createElement('div');
     card.className = 'hitl-approval-card';
+    var cardIid = _hitlInterruptIdOf(data);
+    if (cardIid) {
+      try { card.setAttribute('data-interrupt-id', cardIid); } catch (eAttr) { /* ignore */ }
+    }
     // Server marks always-HITL batches (X ToU fail-safes) yolo_allowed=false —
     // offering a YOLO button there reads as "approve once" when it re-prompts.
     var yoloOk = data.yolo_allowed !== false;
@@ -4259,6 +4306,14 @@
       tokenAccum = '';
       // RESUME, not a new turn: keep this turn's workbench and its steps.
       beginTurn({ resume: true });
+      // beginTurn clears the HITL wait; keep recover/replay from re-arming
+      // this card while the JSON approve is in flight.
+      _awaitingApproval = true;
+      _freezeHitlButtons();
+      setCardState('approved', scope === 'yolo'
+        ? ti('yolo_on', 'YOLO on ✓')
+        : (scope === 'tool' ? ti('tool_allowed', 'Tool allowed ✓')
+          : ti('approved', 'Approved ✓')));
       // Record the decision itself so the log reads as one continuous story
       // (…tool proposed → you approved → tool ran → answer) instead of
       // restarting at "Thinking…".
@@ -4275,12 +4330,8 @@
       // Approve is a JSON command. The live tail is the existing chat SSE
       // (or a journal re-attach). A second graph SSE is how "Error: network
       // error" + leftover Thinking + refresh drift happened (2026-09-01).
-      if (scope === 'yolo' && KS.toast) {
-        KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
-      }
-      if (scope === 'tool' && KS.toast) {
-        KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
-      }
+      // Toast only after HTTP 200 — a 409 used to flash green "Allowed…"
+      // while the same card came back live (cleanup 2026-09-01).
       var payload = {
         action: action,
         scope: scope,
@@ -4351,6 +4402,12 @@
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
         _awaitingApproval = false;
         _awaitingReply = true;
+        if (scope === 'yolo' && KS.toast) {
+          KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
+        }
+        if (scope === 'tool' && KS.toast) {
+          KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
+        }
         if (!activeStream) {
           if (typeof _reopenSseRef === 'function') {
             try { _reopenSseRef('approve-json'); } catch (eRe) { /* ignore */ }
