@@ -72,6 +72,18 @@ def _interrupt_id_of(part: dict[str, Any] | None) -> str:
     return ""
 
 
+def _hitl_tool_of(part: dict[str, Any] | None) -> str:
+    if not isinstance(part, dict):
+        return ""
+    raw = str(part.get("tool") or part.get("tool_name") or "").strip()
+    if raw:
+        return raw
+    payload = part.get("payload")
+    if isinstance(payload, dict):
+        return str(payload.get("tool") or payload.get("tool_name") or "").strip()
+    return ""
+
+
 def make_interrupt_id(
     *,
     thread_id: str = "",
@@ -140,8 +152,10 @@ def merge_hitl_part(
     """One HITL slot: newer rank wins; pending never overwrites a claim.
 
     A *different* ``interrupt_id`` is a new gate (second danger tool) and
-    replaces the slot. Missing ids compare as the same slot so a stamp
-    without an id still advances pending → approved.
+    replaces the slot. A *different tool name* is also a new gate — after
+    Approve of ``file_write`` the same turn can interrupt on ``file_delete``.
+    Missing ids on the *same* tool still compare as one slot so a stamp
+    without an id advances pending → approved.
     """
     if not isinstance(incoming, dict):
         return dict(existing) if isinstance(existing, dict) else {}
@@ -153,6 +167,12 @@ def merge_hitl_part(
     old_id = _interrupt_id_of(existing)
     new_id = _interrupt_id_of(incoming)
     if old_id and new_id and old_id != new_id:
+        out = dict(incoming)
+        out["type"] = "hitl"
+        return out
+    old_tool = _hitl_tool_of(existing)
+    new_tool = _hitl_tool_of(incoming)
+    if old_tool and new_tool and old_tool != new_tool:
         out = dict(incoming)
         out["type"] = "hitl"
         return out

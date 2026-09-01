@@ -228,6 +228,15 @@ def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     )[0]
     assert "if (!iid) return true" not in claimed
     assert "iid === cid" in claimed
+    assert "host.contains" not in claimed
+    assert "tool === ctool" in claimed
+    find = chat.split("function _findHitlCard", 1)[1].split(
+        "function _notifyHitlResolved", 1
+    )[0]
+    assert "return null" in find
+    assert "kazma:hitl-resolved" in chat
+    dash = _src(_UI / "static" / "js" / "hitl_approval.js")
+    assert "kazma:hitl-resolved" in dash
     paint = chat.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
         "function renderTurn(doc, meta)", 1
     )[0]

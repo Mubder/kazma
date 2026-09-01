@@ -3992,6 +3992,15 @@
     return String(data.interrupt_id || (data.payload && data.payload.interrupt_id) || '');
   }
 
+  function _hitlToolOf(data) {
+    data = data || {};
+    return String(
+      data.tool || data.tool_name
+      || (data.payload && (data.payload.tool || data.payload.tool_name))
+      || ''
+    ).trim();
+  }
+
   function _hitlCardIsClaimed(card) {
     if (!card || !card.classList) return false;
     return card.classList.contains('hitl-approved')
@@ -4001,30 +4010,31 @@
 
   function _hitlAlreadyClaimed(data) {
     var iid = _hitlInterruptIdOf(data);
+    var tool = _hitlToolOf(data);
     var part = _openHitlPart();
     if (part) {
       var st = String(part.state || 'pending');
       var pid = _hitlInterruptIdOf(part);
-      // Same interrupt only. An empty incoming id must NOT match a leftover
-      // claimed part from another turn/session — that painted a new gate as
-      // already approved (2026-09-01).
-      if (st !== 'pending' && pid && (!iid || iid === pid)) return true;
+      var ptool = _hitlToolOf(part);
+      if (st !== 'pending') {
+        if (iid && pid && iid === pid) return true;
+        if (!iid && !pid && tool && ptool && tool === ptool) return true;
+      }
     }
-    var host = currentMsgEl;
     if (messagesEl) {
       var cards = messagesEl.querySelectorAll('.hitl-approval-card');
       for (var i = 0; i < cards.length; i++) {
         if (!_hitlCardIsClaimed(cards[i])) continue;
         var cid = String(cards[i].getAttribute('data-interrupt-id') || '');
         if (iid && cid && iid === cid) return true;
-        // Same bubble, missing id on either side: this is the card we claimed.
-        if (host && host.contains && host.contains(cards[i]) && (!iid || !cid)) return true;
+        var ctool = String(cards[i].getAttribute('data-tool') || '');
+        if (!iid && !cid && tool && ctool && tool === ctool) return true;
       }
     }
     return false;
   }
 
-  /** Existing HITL card for this interrupt, else the card already in *host*. */
+  /** Existing HITL card for this interrupt. Never reuse a claimed card for a new gate. */
   function _findHitlCard(interruptId, host) {
     interruptId = String(interruptId || '');
     var cards = messagesEl ? messagesEl.querySelectorAll('.hitl-approval-card') : [];
@@ -4035,12 +4045,24 @@
           return cards[i];
         }
       }
+      return null;
     }
-    if (host && host.querySelector) {
-      var local = host.querySelector('.hitl-approval-card');
-      if (local) return local;
+    if (host && host.querySelectorAll) {
+      var locals = host.querySelectorAll('.hitl-approval-card');
+      for (i = 0; i < locals.length; i++) {
+        if (!_hitlCardIsClaimed(locals[i])) return locals[i];
+      }
     }
     return null;
+  }
+
+  function _notifyHitlResolved(detail) {
+    try {
+      window.dispatchEvent(new CustomEvent('kazma:hitl-resolved', { detail: detail || {} }));
+    } catch (eEv) { /* ignore */ }
+    try {
+      localStorage.setItem('kazma:hitl-resolved', String(Date.now()));
+    } catch (eLs) { /* ignore */ }
   }
 
   function _freezeHitlButtons() {
@@ -4278,6 +4300,10 @@
     if (cardIid) {
       try { card.setAttribute('data-interrupt-id', cardIid); } catch (eAttr) { /* ignore */ }
     }
+    var cardTool = _hitlToolOf(data);
+    if (cardTool) {
+      try { card.setAttribute('data-tool', cardTool); } catch (eTool) { /* ignore */ }
+    }
     // Server marks always-HITL batches (X ToU fail-safes) yolo_allowed=false —
     // offering a YOLO button there reads as "approve once" when it re-prompts.
     var yoloOk = data.yolo_allowed !== false;
@@ -4428,6 +4454,11 @@
             });
             _awaitingApproval = false;
             _awaitingReply = true;
+            _notifyHitlResolved({
+              thread_id: data.thread_id || targetThreadId,
+              tool: data.tool || '',
+              interrupt_id: data.interrupt_id || '',
+            });
             if (!activeStream && typeof _reopenSseRef === 'function') {
               try { _reopenSseRef('approve-409'); } catch (eRe) { /* ignore */ }
             }
@@ -4451,6 +4482,11 @@
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
         _awaitingApproval = false;
         _awaitingReply = true;
+        _notifyHitlResolved({
+          thread_id: data.thread_id || targetThreadId,
+          tool: data.tool || '',
+          interrupt_id: data.interrupt_id || '',
+        });
         if (scope === 'yolo' && KS.toast) {
           KS.toast('YOLO on for this session \u2014 danger tools auto-approved', 'warning', 4000);
         }

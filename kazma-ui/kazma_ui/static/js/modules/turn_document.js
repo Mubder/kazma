@@ -126,6 +126,16 @@
     return '';
   }
 
+  function hitlToolOf(part) {
+    if (!part || typeof part !== 'object') return '';
+    var t = String(part.tool || part.tool_name || '').trim();
+    if (t) return t;
+    if (part.payload && typeof part.payload === 'object') {
+      return String(part.payload.tool || part.payload.tool_name || '').trim();
+    }
+    return '';
+  }
+
   function mergeHitlPart(existing, incoming) {
     if (!incoming || typeof incoming !== 'object') {
       return existing && typeof existing === 'object' ? existing : {};
@@ -149,6 +159,17 @@
       }
       nextGate.type = 'hitl';
       return nextGate;
+    }
+    var oldTool = hitlToolOf(existing);
+    var newTool = hitlToolOf(incoming);
+    if (oldTool && newTool && oldTool !== newTool) {
+      var toolGate = {};
+      var tk;
+      for (tk in incoming) {
+        if (Object.prototype.hasOwnProperty.call(incoming, tk)) toolGate[tk] = incoming[tk];
+      }
+      toolGate.type = 'hitl';
+      return toolGate;
     }
     if (hitlRank(incoming.state) < hitlRank(existing.state)) return existing;
     var out = {};

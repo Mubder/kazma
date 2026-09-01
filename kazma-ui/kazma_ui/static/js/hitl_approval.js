@@ -320,6 +320,22 @@
     }
   }
 
+  function _bindHitlResolvedRefresh() {
+    if (window.__kazmaHitlResolvedBound) return;
+    window.__kazmaHitlResolvedBound = true;
+    try {
+      window.addEventListener('kazma:hitl-resolved', function () {
+        refreshPending();
+      });
+    } catch (eEv) { /* ignore */ }
+    try {
+      window.addEventListener('storage', function (ev) {
+        if (ev && ev.key === 'kazma:hitl-resolved') refreshPending();
+      });
+    } catch (eSt) { /* ignore */ }
+  }
+  _bindHitlResolvedRefresh();
+
   async function refreshPending() {
     try {
       var resp = await fetch('/api/pending-approvals', { credentials: 'same-origin' });
