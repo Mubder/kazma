@@ -2,198 +2,157 @@
 id: security-and-safety
 title: Security & Safety
 sidebar_label: Security & Safety
-description: Kazma Security & Safety — code-audited reference (unified docs, v0.9+)
+description: Kazma Security & Safety — code-audited reference
 ---
-> Kazma's safety model in full: the **three independent HITL gates**, the three danger-tool lists, fail-closed behavior everywhere, cryptographic integrity (HMAC skills, Ed25519 delegation), and hardening recommendations. Every claim is source-referenced.
+> Kazma's safety model: **three HITL execution paths + one gate registry**, default-deny tool tiers, fail-closed bus, CSRF / trusted-proxy, SSRF pin-IP, HMAC skills, and hardening. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §7, §26, §30–§32.
 
 **Also see:** [Document security](../security/document-security) — hostile intake,
 sandbox, fencing, malware scan, redaction model for Document Intelligence.
 
 ---
 
-## 1. The three HITL gates (and why there are three)
+## 1. Three HITL execution paths + one registry
 
-Kazma has **three independent** Human-in-the-Loop mechanisms. Each covers a different execution path. Breaking any one creates an unattended-danger-tool security gap.
+Kazma has **three independent HITL execution paths**. Each covers a different
+tool-running path. Breaking any one creates an unattended-danger-tool gap.
+**Decision truth** is a fourth piece: the HITL Gate Registry
+(`kazma-data/hitl_gates.db`). Execution truth remains the LangGraph
+checkpoint (or pipeline SQLite). Surfaces **render**; they never infer
+Approved from a missing row.
 
 ```mermaid
 flowchart TB
-    subgraph "Gate A: Graph interrupt (single-agent chat)"
-        A1[tool_worker_node] -->|danger tool + hitl_config| A2[interrupt]
-        A2 -->|resume Command| A3[execute with _hitl_approved=True]
+    subgraph "Path A: Graph interrupt (single-agent chat)"
+        A1[graph_tool_worker.tool_worker_node] -->|danger + hitl_config| A2[interrupt]
+        A2 --> REG[hitl_gates.db CAS]
+        REG -->|resume Command| A3[execute with _hitl_approved]
     end
-    subgraph "Gate B: Swarm bus (/swarm dispatch)"
-        B1[ToolRegistry.execute] --> B2[SafetyMiddleware.check]
-        B2 -->|danger tool| B3[bus.request_approval]
-        B3 -->|adapter callback| B4[approve/reject]
+    subgraph "Path B: Swarm bus (/swarm + IDE execute)"
+        B1[LocalToolRegistry.execute] --> B2[SafetyMiddleware.check]
+        B2 -->|register_gate| REG
+        B2 --> B3[bus.request_approval]
+        B3 -->|FanOut tri-state| B4[claim + settle]
     end
-    subgraph "Gate C: Pipeline checkpoints"
-        C1[pipeline at hitl step] --> C2[CheckpointManager pause]
-        C2 -->|auto-reject timeout| C3[reject]
+    subgraph "Path C: Pipeline checkpoints"
+        C1[pipeline HITL step] --> C2[CheckpointManager]
+        C2 --> REG
         C2 -->|approve_checkpoint| C4[resume_pipeline]
     end
 ```
 
-| Gate | Path | Where it lives | Approval surface |
-|---|---|---|---|
-| **A** | Single-agent chat (Web/Telegram/Discord/Slack) | `agent/graph_builder.py` | `POST /api/approve/\{thread_id\}` or `/hitl approve\|deny` |
-| **B** | `/swarm` dispatch | `swarm/safety.py` + `tool_registry.py` | Bus adapter buttons (Telegram/Discord/Slack) |
-| **C** | Swarm PIPELINE tasks | `swarm/checkpoint.py` + `checkpoint_manager.py` | `POST /api/swarm/tasks/\{id\}/approve` |
+| Path | Where it lives | Approval surface |
+|---|---|---|
+| **A** | `agent/graph_tool_worker.py` (wired from `graph_builder.py`) | `POST /api/approve/{thread_id}` (`routes_direct/misc.py`) or gateway `/hitl approve\|deny` |
+| **B** | `swarm/safety.py` + `tool_registry.py` | Bus adapter buttons (Telegram / Discord / Slack) |
+| **C** | `swarm/checkpoint_manager.py` | `POST /api/swarm/tasks/{id}/approve` |
 
-**Tool hooks are not a fourth HITL gate.** PreToolUse / PostToolUse (`agent/tool_hooks.py`) let an operator script deny or rewrite a call, or append a note after. They run on the same `execute()` path. They **cannot** auto-approve a danger tool, skip commitment, or replace the YAML allowlist. A broken hook fail-opens (the tool still runs). Kill-switch: `KAZMA_TOOL_HOOKS=0`.
+**Not extra HITL gates:**
 
-**Plan mode is not a HITL bypass.** `/plan on` *removes* write/exec tools. `/plan go` returns them; danger tools still need approval.
+- **Tool hooks** (`agent/tool_hooks.py`) — cannot auto-approve danger, skip commitment, or replace the YAML list. Broken hook fail-opens. `KAZMA_TOOL_HOOKS=0`.
+- **Plan mode** — `/plan on` *removes* write/exec tools. `/plan go` returns them; danger still needs approval.
+- **Commitment clarify/confirm** — same interrupt bus, different `kind` (below).
 
 ---
-## Critical: All three build sites now pass `hitl_config`
 
-**Important:** The gate was historically dormant at one build site, but per the July 2026 remediation (audit P0 fix), **all three** build sites now pass `hitl_config`:
+## Critical: `hitl_config` at every resumable graph
 
-| Build site | File:line | Passes `hitl_config`? |
+The gate is active only when `hitl_config` is passed to `build_supervisor_graph()`. Live reader: `get_hitl_config()`. YAML timeout default is **300s**.
+
+| Build site | HITL? | Notes |
 |---|---|---|
-| `KazmaAgent.get_streaming_graph()` | `agent_runner.py:530-539` | ✅ Active (SSE chat path) |
-| `KazmaAgent._ensure_graph()` | `agent_runner.py:566-576` | ✅ Active (run path) |
-| `app.py` startup recompile | `kazma-ui/kazma_ui/app.py:741-751` | ✅ Active |
-| `create_supervisor_graph()` factory | `graph_builder.py:974-985` | ⚠️ Dormant (CLI/3rd-party entry — does not pass `hitl_config`) |
+| `KazmaAgent._ensure_graph()` | ✅ | Run path; checkpointer so `interrupt()` can resume |
+| `app.py` startup recompile into `_graph_holder` | ✅ | **SSE SoT** — checkpointer + HITL. Omitting it = dormant Web gate |
+| `KazmaAgent.get_streaming_graph()` | ⚠️ `auto_deny` | Cached **without** a checkpointer (sync). Voice/boot-window consumers cannot resume `interrupt()`, so danger tools **deny** instead of minting an unresumable pause |
 
-> **Previously inaccurate:** older notes cited "app.py ~line 966" as the startup recompile. That is **incorrect** — `graph_builder.py:966` is an unrelated `aiosqlite.connect` inside `create_supervisor_app()`, which does *not* pass `hitl_config`. The real startup recompile is at `kazma-ui/kazma_ui/app.py:741-751`.
+There is **no** `create_supervisor_graph()` factory. Do not pin `app.py` line numbers.
 
-## 2. Gate A — the graph gate (single-agent chat) {#the-graph-gate}
+**H-8:** `LocalToolRegistry.execute` on the web/chat path must **not** mint a second gate. Graph ContextVars (`_graph_hitl_gate_ctx` / `_hitl_approved_ctx`) skip the bus re-prompt. Clarify/confirm from `execute()` fail closed (“run from chat”).
+
+---
+
+## 2. Path A — the graph gate (single-agent chat) {#the-graph-gate}
 
 ### 2.1 How it works
 
-`tool_worker_node` (`graph_builder.py:336`) is where the gate lives. When `hitl_config` is supplied:
+`tool_worker_node` lives in **`graph_tool_worker.py`**, not `graph_builder.py`. When `hitl_config` is supplied:
 
-1. Each pending tool call is tested with `requires_approval(tc["name"], hitl_config)` (imported from `kazma_core.safety.hitl`, line 356). Tools split into `safe_tools` / `danger_tools` (lines 418-429).
-2. For each danger tool, an `approval_input` dict is built (`type: "hitl_approval"`, tool name, args, message) and **`interrupt(approval_input)`** is called (line 493) — the graph **suspends**.
-3. On approval, the tool call is copied and **`approved_tc_args["_hitl_approved"] = True`** is injected (lines 495-503) so `tool_registry.execute()` skips the redundant bus check.
-4. On denial, a `ToolResult` with `is_error=True` is returned via `_denied_result` (lines 467-475).
+1. Commitment `authorize_effect` runs **first** (may rewrite args or raise a semantic card).
+2. Each tool is tested with `requires_approval(name, hitl_config)` (`safety/hitl.py`). Unclassified tools are **gated** (`TOOL_TIERS`; default-deny F-04).
+3. Danger tools call LangGraph **`interrupt()`** — the graph suspends. A registry row is registered (`pending`).
+4. On approval, `_hitl_approved` is injected so `execute()` does not re-prompt the bus. The registry **claims** then **settles**.
+5. On denial, a `ToolResult` with `is_error=True` is returned.
 
-> **Dormant by default:** if `hitl_config` is falsy, **all** tools go to `safe_tools` (line 429). The gate is only active when `hitl_config` is passed to `build_supervisor_graph()`.
+If `hitl_config` is falsy, **all** tools skip this gate. That is why every resumable build site must pass it.
 
-### ⚠️ Auth warning: `KAZMA_SECRET` and session cookies
+Web paints from `_serverGates` / TurnDocument (`chat.js`). `close_turn` keeps the turn **open** while a pending row exists. Absence of a row is an unregistered pending gate (backfill), never an inferred Approved stamp.
 
-**Never rely on cookie-based `KAZMA_SECRET` for multi-user safety.** The session cookie `Set-Cookie: kazma-secret=<KAZMA_SECRET>` stores the raw shared secret:
+### Auth: `KAZMA_SECRET` vs opaque sessions
 
-- **Cookie theft = permanent admin** until `KAZMA_SECRET` is rotated in the environment for all clients
-- **No session table** exists for revocation
-- **No per-user identity** — the secret is shared across all operators
+**Never rely on cookie-based `KAZMA_SECRET` for multi-user safety.** A `kazma-secret=<KAZMA_SECRET>` cookie is the raw shared secret: theft = admin until rotation; no revocation table; no per-user identity.
 
-**Remediation:** Use opaque server-side sessions (`kazma-session` random ID → hashed row + expiry). Keep `KAZMA_SECRET` only for machine-to-machine header auth. If `KAZMA_SECRET` is unset, `get_kazma_secret()` may return `""` and approval endpoints become **unauthenticated** — always set `KAZMA_SECRET` for any non-localhost deployment.
+**Use** opaque server-side sessions (`kazma-session` random ID → hashed row + expiry). Keep `KAZMA_SECRET` for machine-to-machine header auth. If unset, `get_kazma_secret()` may return `""` and approval endpoints become **unauthenticated** — always set it off localhost.
 
----
+Behind a reverse proxy, **peer address is not a credential**. Set `KAZMA_TRUSTED_PROXIES`. Honour `X-Forwarded-*` only from those addresses. An undeclared proxy latches `undeclared_proxy_detected()` and **revokes peer trust** for the process (AGENTS.md §26A). Rate limit / login throttle must use `auth.client_address(request)`, never `request.client.host`.
 
-## 2. Gate A — the graph gate (single-agent chat) {#the-graph-gate}
+### 2.2 Resume
 
-### 2.1 How it works
+`POST /api/approve/{thread_id}` (`kazma_ui/routes_direct/misc.py` `approve_tool`) — not `app.py`. Claims the registry row, then `graph.ainvoke(Command(resume=…), config)`. Ownership mismatch → **403**. WS `approve_tool` is off unless `KAZMA_WS_GRAPH=1`.
 
-`tool_worker_node` (`graph_builder.py:336`) is where the gate lives. When `hitl_config` is supplied:
-
-1. Each pending tool call is tested with `requires_approval(tc["name"], hitl_config)` (imported from `kazma_core.safety.hitl`, line 356). Tools split into `safe_tools` / `danger_tools` (lines 418-429).
-2. For each danger tool, an `approval_input` dict is built (`type: "hitl_approval"`, tool name, args, message) and **`interrupt(approval_input)`** is called (line 493) — the graph **suspends**.
-3. On approval, the tool call is copied and **`approved_tc_args["_hitl_approved"] = True`** is injected (lines 495-503) so `tool_registry.execute()` skips the redundant bus check.
-4. On denial, a `ToolResult` with `is_error=True` is returned via `_denied_result` (lines 467-475).
-
-> **Dormant by default:** if `hitl_config` is falsy, **all** tools go to `safe_tools` (line 429). The gate is only active when `hitl_config` is passed to `build_supervisor_graph()`.
-
-### 2.2 The build sites that activate the gate
-
-`hitl_config` must be passed at build time. There are **three** build sites; two pass it (active), one does not (dormant):
-
-| Build site | File:line | Passes `hitl_config`? |
-|---|---|---|
-| `KazmaAgent.get_streaming_graph()` | `agent_runner.py:530-539` | ✅ Active (SSE chat path) |
-| `KazmaAgent._ensure_graph()` | `agent_runner.py:566-576` | ✅ Active (run path) |
-| `app.py` startup recompile | `kazma-ui/kazma_ui/app.py:741-751` | ✅ Active |
-| `create_supervisor_graph()` factory | `graph_builder.py:974-985` | ❌ Dormant (CLI/3rd-party entry) |
-
-> **AGENTS.md line-number correction:** older notes cite "app.py ~line 966". That is **inaccurate** — `graph_builder.py:966` is an unrelated `aiosqlite.connect` inside `create_supervisor_app()`, which does *not* pass `hitl_config`. The real startup recompile is at `kazma-ui/kazma_ui/app.py:741-751`.
-
-### 2.3 Resume mechanism
-
-The graph resumes via LangGraph `Command(resume=...)`. The approval endpoint is `POST /api/approve/\{thread_id\}` in `kazma-ui/kazma_ui/routes_direct.py:454` (function `approve_tool`, line 455) — **not** in `app.py`:
-
-```python
-# routes_direct.py:525-532
-from langgraph.types import Command
-resume_value = {"approved": approved, "reason": body.get("reason", "")}
-graph_ref.ainvoke(Command(resume=resume_value), config=config)
-```
-
-Security on this endpoint:
-
-- When `KAZMA_SECRET` is set, requires `X-Kazma-Secret` header (or cookie) matched via `secrets.compare_digest` (lines 456-465).
-- **Ownership enforcement** (lines 480-522): resolves the owner across platforms (`sender_id`/`owner`/`session_id`/`user_id`) and rejects cross-user approvals with **403**.
-
-### 2.4 Persistence
-
-Paused turns persist in the **checkpointer** (SQLite WAL) — they survive restarts.
+Paused turns persist in the **checkpointer**. Registry `boot_sweep()` orphans stale claimed/resuming rows and **never** touches pending (the card must survive restart).
 
 ---
 
-## 3. Gate B — the swarm bus gate (`/swarm` dispatch) {#the-swarm-bus-gate}
+## 3. Path B — the swarm bus gate (`/swarm` + IDE) {#the-swarm-bus-gate}
 
-### 3.1 The execution path
+### 3.1 Execution path
 
-`ToolRegistry.execute()` (`tool_registry.py:335`):
+`LocalToolRegistry.execute()`:
 
-1. Pops `_hitl_approved` from args (line 349).
-2. If **not** already approved, gets `get_safety()` (line 395).
-3. For danger tools (`safety.is_danger_tool(tool_name)`, line 397), calls `await safety.check(...)` (lines 400-405).
-4. If not approved → returns `is_error=True` "denied by HITL approval gate" (lines 406-410).
-5. **Fail-closed:** any exception in the safety check returns `is_error=True` "blocked — SafetyMiddleware unavailable" (lines 411-417).
+1. Pops `_hitl_approved`.
+2. If not already approved, `get_safety()`.
+3. `is_danger_tool(name)` **must** call `requires_approval()` (H-9 — tier floor, not a name list that can un-gate by omission).
+4. `await safety.check(...)`. Denied → `is_error=True`.
+5. **Fail-closed:** any exception in the safety check → blocked.
 
 ### 3.2 SafetyMiddleware
 
-`swarm/safety.py` — class `SafetyMiddleware` (line 47). (There is **no** class named `SafetyGate` or `SafetyChecker` anywhere — that naming in some older docs is inaccurate.)
+`swarm/safety.py` — class `SafetyMiddleware` (not `SafetyGate` / `SafetyChecker`).
 
 | Method | Behavior |
 |---|---|
-| `check()` (async, line 106) | For danger tools: if `NullBusAdapter` active and `allow_headless_danger=False` → reject (lines 147-160); otherwise `bus.request_approval(...)` and await (lines 162-177). |
-| `check_sync()` (line 179) | **Fail-closed by default.** NullBusAdapter + `allow_headless_danger=False` → returns `False` (lines 200-209). Even with a real adapter, the sync path cannot wait → blocks. Any bus exception → fail-closed unless `allow_headless_danger=True` (lines 214-223). |
-| `is_danger_tool` / `is_sensitive_read` | lines 96, 100. |
-| `add_danger_tool` / `remove_danger_tool` | lines 86-94. |
+| `check()` (async) | Danger tools: NullBus + `allow_headless_danger=False` → reject; else `bus.request_approval` |
+| `check_sync()` | **Fail-closed.** Sync path cannot wait on a bus; blocks unless headless escape |
+| `is_danger_tool` | Classification via `requires_approval` / `TOOL_TIERS` / `ALWAYS_HITL_TOOLS` |
 
-The `allow_headless_danger: bool = False` constructor flag (line 70) is the **test/dev escape hatch**. Default is fail-closed.
+`allow_headless_danger=False` is the default. Tests/dev set it true. Do not in production.
 
-### 3.3 Bus adapters & singleton priority {#bus-adapter-priority}
+Danger list: `_EXTENDED_DANGER = list(CANONICAL_DANGER_TOOLS)` — **not** a second SoT. Spawn tools only if they are on CANONICAL.
 
-Bus adapters (all subclass `BusAdapter`, ABC at `swarm/bus.py:66`):
+### 3.3 Bus adapters {#bus-adapter-priority}
 
-| Adapter | Location |
-|---|---|
-| `TelegramBusAdapter` | `kazma-gateway/kazma_gateway/adapters/telegram_bus.py:58` |
-| `DiscordBusAdapter` | `adapters/discord_bus.py:31` |
-| `SlackBusAdapter` | `adapters/slack_bus.py:31` |
+`TelegramBusAdapter` / `DiscordBusAdapter` / `SlackBusAdapter`. Process-local singleton `get_message_bus()`.
 
-The bus is a **module singleton** (`get_message_bus()`, `bus.py:282-287`). **Only one adapter is active at a time.** Priority wiring in `kazma-ui/kazma_ui/app.py:506-556`:
+**App wiring (`app.py`):** collect every configured platform. **One** → that adapter. **Two or more** → `FanOutBusAdapter`. **None** → `NullBusAdapter` (fail-closed danger).
 
-- Telegram tried first (`_bus_wired = True` at line 516).
-- Discord only `if not _bus_wired` (line 524).
-- Slack only `if not _bus_wired` (line 540).
+FanOut `request_approval` is **tri-state** (Wave 6 H-12): `True` settles; `False` is a vote until `expected_voters` or the deadline. A Discord Deny must not kill a Telegram Approve. This is **not** web `claim_gate` (first claim 200 / second 409).
 
-**Priority: Telegram > Discord > Slack.**
+Pytest skips real adapters (`_skip_real_adapters`).
 
-A `pytest` guard (line 504) deliberately skips wiring real adapters under tests.
+### 3.4 Callbacks
 
-### 3.4 Approval callback resolution
-
-Each adapter's `handle_callback()` parses the platform callback id and resolves an `asyncio.Event`:
-
-- Telegram: `swarm_approve_&lt;task_id>` / `swarm_reject_&lt;task_id>` (`telegram_bus.py:302-333`).
-- Discord: components v2 buttons (`discord_bus.py:238`).
-- Slack: interactive callback (`slack_bus.py:270`).
+Each adapter `handle_callback()` resolves the platform button onto the shared approval. Telegram `swarm_approve_<task_id>` / `swarm_reject_<task_id>`; Discord components; Slack interactive.
 
 ---
 
-## 4. Gate C — pipeline checkpoints
+## 4. Path C — pipeline checkpoints
 
-Documented in [Swarm Orchestration → Pipeline checkpoints](swarm-orchestration#8-pipeline-checkpoints-hitl). Summary:
+See [Swarm Orchestration → Pipeline checkpoints](swarm-orchestration#8-pipeline-checkpoints-hitl).
 
-- `_handle_pipeline_checkpoint` (`engine.py:889`) → `CheckpointManager.handle_pipeline_checkpoint`.
-- Auto-reject timeout armed if `checkpoint_timeout > 0`.
-- `approve_checkpoint` (`engine.py:920`) / `reject_checkpoint` (`engine.py:990`).
+- `CheckpointManager.handle_pipeline_checkpoint` also `_gate_register_pipeline`.
+- Auto-reject timeout if `checkpoint_timeout > 0`.
+- Approve / reject **settle** the registry row. **T-2:** timeout must finalize the task **and** `settle_gate`.
 - `restore_paused_tasks()` re-arms timeouts after restart.
-- Endpoints: `POST /api/swarm/tasks/\{id\}/approve` / `/reject` (`routes_tasks.py:612, 657`).
+- Endpoints: `POST /api/swarm/tasks/{id}/approve` / `/reject`.
 
 ---
 
@@ -231,11 +190,11 @@ kill-switches are documented in the dedicated guide:
 
 ---
 
-## 5. Danger-tool lists (three of them) {#danger-tool-lists-three-of-them}
+## 5. Danger-tool lists {#danger-tool-lists-three-of-them}
 
-The three gates use **different** danger-tool lists. This is deliberate (each path has different semantics) but easy to get wrong.
+Canonical + YAML + Settings must stay one **set**. Swarm `_EXTENDED_DANGER` is a copy of CANONICAL. MCP is pattern-based (unknown → danger). `TOOL_TIERS` is the floor for anything registered.
 
-### 5.1 Gate A (graph) — `kazma.yaml safety.hitl.require_approval_for`
+### 5.1 Path A (graph) — `kazma.yaml safety.hitl.require_approval_for`
 
 Default (`kazma.yaml` `safety.hitl.require_approval_for`, must match `CANONICAL_DANGER_TOOLS`): includes `file_write`, `file_apply_patch`, `file_delete`, `shell_exec`, `code_exec`, `python_exec`, `computer_use`, git/GitHub mutators, vault, installers, email send/delete, `request_path_access`, `x_post`, `x_delete_post`, `x_schedule_post`, `x_cancel_scheduled_post`. Parity-tested.
 
@@ -257,13 +216,13 @@ Code fallback if unset: `DEFAULT_DANGER_TOOLS = ["file_write", "file_delete", "s
 > `KAZMA_HITL_CANONICAL_FLOOR=1`, which unions the canonical danger tools
 > back into the effective list so narrowing below them is impossible.
 
-### 5.2 Gate B (swarm bus) — `_EXTENDED_DANGER`
+### 5.2 Path B (swarm bus) — `_EXTENDED_DANGER`
 
-`swarm/safety.py:23-31`: `DEFAULT_DANGER_TOOLS` (file_write, file_delete, shell_exec, vault_retrieve, vault_delete) **+** `python_exec`, `code_exec`, `spawn_agent`, `spawn_agents`, `schedule_task`, `cancel_scheduled`, `run_tests` (MCP IDE test runner).
+`_EXTENDED_DANGER = list(CANONICAL_DANGER_TOOLS)` — a materialized copy because CANONICAL is a tuple. **Same contents.** Adding a danger tool means CANONICAL **and** `kazma.yaml` (parity tests compare sets). Spawn tools only if they are on CANONICAL.
 
-Plus `_SENSITIVE_READS = ["sqlite_query", "file_search"]` (lines 34-37) — allowed but **logged**.
+Plus `_SENSITIVE_READS = ["sqlite_query", "file_search"]` — allowed but **logged**.
 
-### 5.3 Gate C / MCP — `classify_mcp_tool()`
+### 5.3 MCP — `classify_mcp_tool()`
 
 `mcp/manager.py:71-88` — dynamic name-pattern matching (MCP tools are runtime-discovered):
 
@@ -271,7 +230,7 @@ Plus `_SENSITIVE_READS = ["sqlite_query", "file_search"]` (lines 34-37) — allo
 - **safe** if any of: `read, list, search, get, info, status, check, describe, query, count, exists, help`.
 - **unknown** otherwise.
 
-> **Unknown defaults to danger.** `UnifiedToolExecutor.execute()` (`manager.py:725-727`) requires approval for **both** `danger` and `unknown`. Never weaken this.
+> **Unknown defaults to danger.** `UnifiedToolExecutor.execute()` requires approval for **both** `danger` and `unknown`. Never weaken this. Local tools: `requires_approval()` ends on `TOOL_TIERS` — an unclassified registered tool is gated (F-04). Add a tier (`read` / `write` / `danger`) when you register a tool.
 
 ---
 
@@ -296,7 +255,7 @@ This is inter-agent delegation — unrelated to MCP or skills.
 
 ### 6.3 HITL endpoint secret
 
-`POST /api/approve/\{thread_id\}` is protected by `KAZMA_SECRET` (header/cookie, `secrets.compare_digest`). The auto-generation path: `get_kazma_secret()` (`config_store.py:36-77`) resolves env `KAZMA_SECRET` → `KAZMA_AUTH_DISABLED` → pytest skip → DB `security.secret` → auto-generate `secrets.token_hex(16)`.
+`POST /api/approve/{thread_id}` is protected by session / `KAZMA_SECRET` (`secrets.compare_digest`). `get_kazma_secret()` resolves env → `KAZMA_AUTH_DISABLED` → pytest skip → DB `security.secret` → auto-generate. Off localhost, always set `KAZMA_SECRET`.
 
 ---
 
@@ -365,20 +324,43 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 2. **Run stdio MCP servers in a sandbox.** The stdio transport has no auth and inherits the process environment.
 3. **Prefer SSE MCP with bearer auth** for any remote MCP server.
 4. **Sign all skills** (`kazma hub sign`) and keep `KAZMA_SECRET` consistent across load — signature verification fails otherwise.
-5. **Keep all three HITL gates active.** Do not pass `hitl_config=None` on a production build site.
+5. **Keep all three HITL execution paths + the registry active.** Do not pass `hitl_config=None` on a resumable production graph. Do not mint a second web gate from `execute()`.
 6. **Do not set `allow_headless_danger=True` in production.** It's the test/dev escape hatch.
 7. **Run as the non-root `kazma` user** in Docker (the Dockerfile already does this).
 8. **Bind `127.0.0.1`** unless you have a reverse proxy + `KAZMA_SECRET` in place.
 9. **Multi-operator: set platform allowlists + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1`** (2026-08-19) — by default the Telegram/Discord/Slack adapters run allow-all for backward compatibility with single-operator installs; strict mode fails closed on an empty allowlist.
 10. **Set `KAZMA_HITL_CANONICAL_FLOOR=1`** on strict deployments so the danger-tool approval list cannot be narrowed below the canonical set.
+11. **Set `KAZMA_TRUSTED_PROXIES`** when behind nginx/Caddy/Docker. Peer `127.0.0.1` is not a credential.
+12. **Do not pin scraping through `proxy=`.** Direct hops use `PinHostAsyncTransport`; peer-private abort always.
+
+---
+
+## Default-deny, CSRF, SSRF (2026-08-29 / Wave 8)
+
+These sit **beside** HITL, not inside it.
+
+| Rule | Where |
+|------|--------|
+| Unclassified tool is gated | `requires_approval()` → `TOOL_TIERS` (deny wins) |
+| Allowlisting a binary is not allowlisting what it runs | `shell_exec` `_EXEC_CAPABLE_ARGS` (`find -exec`, `git -c`, …) |
+| Secret masking recurses | `settings.mask_deep()` — lists and JSON strings too |
+| CSRF | `csrf.py`: non-GET `/api/*` mismatched Origin/Referer host → 403. Use `request.url.hostname` (Starlette has no `.host`) |
+| `/health/details` is sensitive | L-1; `/health/live` and `/health/ready` stay public |
+| SSRF pin-IP | `validate_url` returns public IPs; `PinHostAsyncTransport` when no proxy; `assert_peer_public` after each hop |
+| Errors | API `safe_error` / `validation_error`; no internals in 4xx/5xx bodies |
+| Fenced tool output | Fetched pages / search / MCP resources go through `prompt_fence` |
+
+CI: `tests/test_audit_2026_08_29_regressions.py`, `tests/test_audit_wave8.py`, `test_every_registered_tool_has_a_tier`.
 
 ---
 
 ## Documentation Audit Notes
 
-- **Class name:** the swarm safety class is `SafetyMiddleware`, not `SafetyGate`/`SafetyChecker`. Updated throughout.
-- **Approval endpoint location:** `POST /api/approve/\{thread_id\}` is in `routes_direct.py:454`, **not** `app.py`.
-- **App.py build site line number:** the startup recompile is at `kazma-ui/kazma_ui/app.py:741-751`, not ~966.
-- **"Trust tiers" do not exist** as a security feature — only a boolean `certified` flag and an unused `trust: trusted` config string.
-- **MCP stdio has no auth.** Documented explicitly; plan sandboxing accordingly.
-- **Three distinct danger lists** must stay synchronized with intent. Adding a new danger tool to Gate A (`kazma.yaml`) does **not** add it to Gate B (`_EXTENDED_DANGER`) or Gate C (pattern-based).
+- **Class name:** swarm safety is `SafetyMiddleware`, not `SafetyGate`/`SafetyChecker`.
+- **Approve endpoint:** `routes_direct/misc.py` `approve_tool`, not `app.py`.
+- **Do not pin line numbers.** `tool_worker_node` is `graph_tool_worker.py`; SSE SoT is the app.py recompile, not `get_streaming_graph()` (that path is checkpointer-less `auto_deny`).
+- **FanOut, not Telegram-only.** Multiple platforms → `FanOutBusAdapter` tri-state.
+- **`_EXTENDED_DANGER` is CANONICAL**, not a longer private list. MCP `classify_mcp_tool` remains pattern-based (unknown → danger).
+- **"Trust tiers" do not exist** as a product feature — boolean `certified` plus unused `trust: trusted`.
+- **MCP stdio has no auth.** Sandbox accordingly.
+- Binding audit: [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md).

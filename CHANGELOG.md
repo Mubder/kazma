@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Docs — security-and-safety + memory-and-rag to 2026-09 (2026-09-02)
+
+HITL is three execution paths + registry; tool_worker is
+`graph_tool_worker.py`; SSE SoT is the app.py recompile (`get_streaming_graph`
+is checkpointer-less auto_deny); FanOut tri-state not Telegram-only;
+`_EXTENDED_DANGER` is CANONICAL; default-deny tiers, CSRF, trusted proxies,
+SSRF pin, `/health/details` sensitive. Memory backup cadence is 6h; eight
+boot loops; source-trust on `user_explicit` beliefs. SafetyMiddleware
+docstring matches tri-state FanOut.
+
 ## Docs — swarm-orchestration + system map to 2026-09 (2026-09-02)
 
 Swarm guide: FanOut is tri-state; Soul is ConfigStore/`WorkerRegistry` (not
