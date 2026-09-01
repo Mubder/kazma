@@ -24,6 +24,7 @@ HitlStatus = Literal["pending", "inflight", "idle"]
 __all__ = [
     "hitl_thread_status",
     "is_resume_claimed",
+    "is_truly_pending",
     "persisted_hitl_for_thread",
     "snapshot_interrupt_payload",
 ]
@@ -162,3 +163,23 @@ async def hitl_thread_status(
     if payload is None:
         return "idle"
     return "pending"
+
+
+async def is_truly_pending(
+    thread_id: str,
+    *,
+    graph: Any = None,
+    snapshot: Any = None,
+) -> bool:
+    """True only for a live unclaimed interrupt. Errors are not pending."""
+    try:
+        return await hitl_thread_status(
+            thread_id, graph=graph, snapshot=snapshot
+        ) == "pending"
+    except Exception:
+        logger.debug(
+            "[hitl_status] is_truly_pending failed thread=%s",
+            thread_id,
+            exc_info=True,
+        )
+        return False

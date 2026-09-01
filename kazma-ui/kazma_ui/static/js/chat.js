@@ -5092,49 +5092,6 @@
     }).catch(function() {});
   }
 
-  function checkPendingApprovals() {
-    if (!chatSessionId) return;
-    if (_serverGenerating && !_serverPaused) return;
-    if (hasInlineApprovalCard() || _awaitingApproval) return;
-    var existingHitl = _openHitlPart();
-    if (existingHitl && String(existingHitl.state || '') !== 'pending') return;
-    // Resolve LangGraph thread_id from the sidebar session list (web sessions
-    // use session_id ≠ thread_id — matching only session_id missed approvals).
-    var threadId = '';
-    try {
-      var listed = sessions.find(function(s) { return s.session_id === chatSessionId; });
-      if (listed && listed.thread_id) threadId = listed.thread_id;
-    } catch (e) {}
-
-    fetch('/api/pending-approvals', { credentials: 'same-origin' })
-      .then(function(res) { return res.ok ? res.json() : null; })
-      .then(function(data) {
-        if (!data || !Array.isArray(data.pending)) return;
-        for (var i = 0; i < data.pending.length; i++) {
-          var item = data.pending[i];
-          var match =
-            item.thread_id === chatSessionId ||
-            item.session_id === chatSessionId ||
-            (threadId && item.thread_id === threadId);
-          if (match) {
-            if (!hasInlineApprovalCard()) {
-              item.tool = item.tool || item.tool_name;
-              item.args = item.args || item.arguments;
-              applyTurnEvent({
-                type: 'hitl',
-                state: 'pending',
-                tool: item.tool,
-                payload: item,
-                turn_id: _liveTurnId,
-                source: 'pending-list',
-              });
-            }
-            break;
-          }
-        }
-      }).catch(function() {});
-  }
-
   function newSession() {
     if (activeStream) {
       try { activeStream.abort(); } catch (e) {}

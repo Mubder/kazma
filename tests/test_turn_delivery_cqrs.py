@@ -145,10 +145,11 @@ def test_load_session_paints_hitl_from_parts() -> None:
     chat = _src(_CHAT_JS)
     assert "function _paintHitlFromDoc(el, doc)" in chat
     load = chat.split("function loadSession(sessionId)", 1)[1].split(
-        "function checkPendingApprovals", 1
+        "function newSession", 1
     )[0]
     assert "_paintHitlFromDoc" in load
-    assert "checkPendingApprovals()" not in load
+    assert "checkPendingApprovals" not in chat
+    assert "source: 'pending-list'" not in chat
 
 
 def test_hitl_projector_is_monotonic() -> None:
@@ -168,6 +169,16 @@ def test_attach_journal_has_inflight_guard() -> None:
         "function _defaultAttachCallbacks", 1
     )[0]
     assert "_attachInFlight" in attach
+
+
+def test_ws_hitl_scan_fails_closed() -> None:
+    src = _src(_UI / "routes" / "ws_chat.py")
+    fn = src.split("async def _scan_and_emit_hitl_interrupt", 1)[1].split(
+        "async def _emit_context_compacted", 1
+    )[0]
+    assert "is_truly_pending" in fn
+    except_block = fn.split("except Exception:", 1)[1]
+    assert "return False" in except_block.split("try:", 1)[0]
 
 
 def test_approve_409_running_is_not_error() -> None:

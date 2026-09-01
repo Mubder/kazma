@@ -406,13 +406,13 @@ def create_ws_chat_router(
     ) -> bool:
         """Scan graph snapshot for pending interrupts and send approval event if found."""
         try:
-            from kazma_ui.hitl_status import hitl_thread_status
+            from kazma_ui.hitl_status import is_truly_pending
 
-            status = await hitl_thread_status(thread_id, graph=graph_inst)
-            if status != "pending":
+            if not await is_truly_pending(thread_id, graph=graph_inst):
                 return False
         except Exception:
-            logger.debug("[WS-Chat] HITL status check skipped", exc_info=True)
+            logger.debug("[WS-Chat] HITL status check failed closed", exc_info=True)
+            return False
         try:
             snapshot = await graph_inst.aget_state(config)
             if snapshot is not None and getattr(snapshot, "next", None):
