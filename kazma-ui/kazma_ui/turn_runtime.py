@@ -238,6 +238,7 @@ async def close_turn(
                 claimed = running
         leftover_claimed = False
         new_gate = False
+        registry_answered = False
         # Gate registry (P6): decision truth for open/closed.
         # Pending row + paused ⇒ stay OPEN (silence rule).
         # Paused + no covering row ⇒ backfill from snapshot and stay OPEN
@@ -283,8 +284,23 @@ async def close_turn(
                                 record_hitl_gate_reconciled("orphaned")
                             except Exception:
                                 pass
+                    registry_answered = True
             except Exception:
                 logger.debug("[turn] gate registry check skipped", exc_info=True)
+        if paused and thread_id and not new_gate and not registry_answered:
+            # Thin execution fallback (kill-switch / registry outage): ask
+            # the ONE status helper instead of re-deriving. A live
+            # unanswered interrupt — including a NEW second gate raised
+            # after Approve — classifies "pending" and must keep the turn
+            # open, or the write→delete fake wrap-up returns in degraded
+            # mode (2026-09-01 incident class).
+            try:
+                from kazma_ui.hitl_status import hitl_thread_status
+
+                if await hitl_thread_status(thread_id, snapshot=snap) == "pending":
+                    new_gate = True
+            except Exception:
+                logger.debug("[turn] thin fallback status skipped", exc_info=True)
         if paused and thread_id and not new_gate:
             leftover_claimed = bool(claimed or running)
         # A leftover checkpoint interrupt after Approve must not re-open
