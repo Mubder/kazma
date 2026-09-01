@@ -226,3 +226,54 @@ def test_pending_approvals_happy_path_is_registry() -> None:
     )[0]
     assert "pending_items_from_registry" in fn
     assert fn.find("pending_items_from_registry") < fn.find("_get_pending_approvals")
+
+
+async def test_close_turn_registry_off_second_gate_stays_open(monkeypatch, tmp_path):
+    """Thin fallback negative control: kill-switch OFF, resume claimed, and
+    the pause is a NEW gate (write approved -> delete asks). The degraded
+    path must route through hitl_thread_status and keep the turn OPEN —
+    closing it published the fake wrap-up (2026-09-01 incident class)."""
+    monkeypatch.setenv("KAZMA_GATE_REGISTRY", "0")
+    tr, captured = _wire_close_turn(monkeypatch, tmp_path)
+    import kazma_ui.hitl_status as hs
+
+    monkeypatch.setattr(hs, "is_resume_claimed", lambda t: True)
+    monkeypatch.setattr(
+        hs,
+        "persisted_hitl_for_thread",
+        lambda t: {"state": "approved", "tool": "file_write", "interrupt_id": "w1"},
+    )
+    ok = await tr.close_turn(
+        _G(_PausedSnap()),  # live interrupt: file_delete — a DIFFERENT gate
+        {"configurable": {"thread_id": "t-close-thin"}},
+        session_id="sess-1",
+        turn_id="turn-5",
+        streamed_text="pre-pause narration",
+    )
+    assert ok is True
+    assert captured.get("interrupted") is True
+
+
+async def test_close_turn_registry_off_leftover_same_gate_closes(monkeypatch, tmp_path):
+    """Negative control for the control: same leftover interrupt after
+    Approve (SAME gate) must still close — the fallback must not hold every
+    post-approve turn open forever."""
+    monkeypatch.setenv("KAZMA_GATE_REGISTRY", "0")
+    tr, captured = _wire_close_turn(monkeypatch, tmp_path)
+    import kazma_ui.hitl_status as hs
+
+    monkeypatch.setattr(hs, "is_resume_claimed", lambda t: True)
+    monkeypatch.setattr(
+        hs,
+        "persisted_hitl_for_thread",
+        lambda t: {"state": "approved", "tool": "file_delete", "interrupt_id": ""},
+    )
+    ok = await tr.close_turn(
+        _G(_PausedSnap()),  # live interrupt: file_delete — the SAME gate
+        {"configurable": {"thread_id": "t-close-thin2"}},
+        session_id="sess-1",
+        turn_id="turn-6",
+        streamed_text="the actual answer",
+    )
+    assert ok is True
+    assert captured.get("interrupted") in (False, None)
