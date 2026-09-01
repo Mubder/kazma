@@ -209,6 +209,42 @@ def _sync_platform_session_to_web(thread_id: str, platform: str, metadata: dict[
         logger.debug("[agent-handler] Failed to sync session to Web UI: %s", exc)
 
 
+async def _persist_hitl_pause(
+    graph: Any,
+    config: dict[str, Any],
+    *,
+    thread_id: str,
+    platform: str,
+    metadata: dict[str, Any],
+    messages: list,
+    streamed_text: str = "",
+) -> None:
+    """Bind the platform season and persist open narration on HITL pause.
+
+    Resume already runs through ``invoke_turn``. Pause used to return after
+    the approval prompt with nothing written, so a web takeover (or a later
+    approve with no session) lost the pre-approval notes. Does not put
+    ``chat_id`` into graph state (AGENTS.md §2).
+    """
+    _sync_platform_session_to_web(thread_id, platform, metadata, messages)
+    try:
+        from kazma_ui.turn_runtime import close_turn
+
+        await close_turn(
+            graph,
+            config,
+            thread_id=thread_id,
+            interrupted=True,
+            streamed_text=streamed_text or "",
+        )
+    except Exception:
+        logger.debug(
+            "[agent-handler] HITL pause persist skipped thread=%s",
+            thread_id[:12],
+            exc_info=True,
+        )
+
+
 def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Repair incomplete tool-call chains in the loaded checkpoint history.
 
@@ -1463,6 +1499,15 @@ def create_graph_handler(
                         # Same exit as a sent card: the graph is paused on the
                         # interrupt either way and resumes on /hitl. Only the
                         # notification is withheld, never the gate.
+                        await _persist_hitl_pause(
+                            graph,
+                            config,
+                            thread_id=thread_id,
+                            platform=msg.platform,
+                            metadata=msg.context_metadata,
+                            messages=result_state.get("messages", []),
+                            streamed_text=_turn.text or "",
+                        )
                         return
                     prompt = _build_approval_prompt(
                         hitl_payload, thread_id, platform=msg.platform
@@ -1487,6 +1532,15 @@ def create_graph_handler(
                     logger.info(
                         "[agent-handler] HITL interrupt surfaced: thread=%s tool=%s",
                         thread_id, hitl_payload.get("tool"),
+                    )
+                    await _persist_hitl_pause(
+                        graph,
+                        config,
+                        thread_id=thread_id,
+                        platform=msg.platform,
+                        metadata=msg.context_metadata,
+                        messages=result_state.get("messages", []),
+                        streamed_text=_turn.text or "",
                     )
                     return  # graph paused; resume on /hitl response
 

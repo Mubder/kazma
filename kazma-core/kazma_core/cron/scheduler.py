@@ -837,18 +837,19 @@ class CronScheduler:
                 ],
             }
 
-            result = await asyncio.wait_for(
-                graph.ainvoke(state, config=config),
+            from kazma_core.agent.turn import run_agent_turn
+
+            _turn = await asyncio.wait_for(
+                run_agent_turn(
+                    graph=graph,
+                    thread_id=str(config["configurable"]["thread_id"]),
+                    state=state,
+                    config=config,
+                    persist=False,
+                ),
                 timeout=120.0,
             )
-
-            # Extract summary
-            messages = result.get("messages", [])
-            summary = ""
-            for msg in reversed(messages):
-                if isinstance(msg, dict) and msg.get("role") == "assistant":
-                    summary = str(msg.get("content", ""))[:2000]
-                    break
+            summary = (_turn.text or "")[:2000]
 
             await self._store.update_status(job.job_id, JobStatus.DONE)
             await self._store.update_result(job.job_id, summary)

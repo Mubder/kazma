@@ -132,19 +132,23 @@ class SubAgentManager:
                     ],
                 }
 
-                # Run with timeout
-                result = await asyncio.wait_for(
-                    child_graph.ainvoke(initial_state, config=config),
+                # Run with timeout. persist=False: child threads are not
+                # chat sessions; the parent records the summary.
+                from kazma_core.agent.turn import run_agent_turn
+
+                _turn = await asyncio.wait_for(
+                    run_agent_turn(
+                        graph=child_graph,
+                        thread_id=task_id,
+                        state=initial_state,
+                        config=config,
+                        persist=False,
+                    ),
                     timeout=timeout,
                 )
-
-                # Extract summary from last assistant message
+                result = _turn.state or {}
+                summary = (_turn.text or "")[:2000]
                 messages = result.get("messages", [])
-                summary = ""
-                for msg in reversed(messages):
-                    if isinstance(msg, dict) and msg.get("role") == "assistant":
-                        summary = str(msg.get("content", ""))[:2000]
-                        break
 
                 # Extract artifacts (files created, etc.)
                 artifacts = []

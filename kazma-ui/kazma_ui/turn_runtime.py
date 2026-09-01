@@ -20,6 +20,7 @@ from typing import Any
 __all__ = [
     "astream_events",
     "close_turn",
+    "ensure_session_for_thread",
     "invoke_turn",
     "persist_reply",
     "resolve_session_id",
@@ -51,6 +52,38 @@ def resolve_session_id(thread_id: str, session_id: str = "") -> str:
     except Exception:
         logger.debug(
             "[turn_runtime] session lookup failed thread=%s",
+            thread_id[:12],
+            exc_info=True,
+        )
+        return ""
+
+
+def ensure_session_for_thread(thread_id: str) -> str:
+    """Mint or bind a web session for *thread_id*. Never raises.
+
+    Used by HITL approve-resume when no sidebar row exists yet (Telegram
+    pause, watchdog auto-deny, a thread the web UI has never opened).
+    ``canonical_web_session`` prefers a named season; otherwise
+    ``get_or_create`` mints one and we bind ``thread_id`` so later
+    ``get_by_thread_id`` / ``persist_reply`` resolve.
+    """
+    if not thread_id:
+        return ""
+    try:
+        from kazma_core.sessions.directory import canonical_web_session
+        from kazma_ui.session_manager import get_session_manager
+
+        store = get_session_manager()
+        session = canonical_web_session(thread_id) or store.get_or_create(thread_id)
+        if session is None:
+            return ""
+        if str(getattr(session, "thread_id", "") or "") != thread_id:
+            session.thread_id = thread_id
+            store.put(session)
+        return str(getattr(session, "session_id", "") or "")
+    except Exception:
+        logger.debug(
+            "[turn_runtime] session mint failed thread=%s",
             thread_id[:12],
             exc_info=True,
         )

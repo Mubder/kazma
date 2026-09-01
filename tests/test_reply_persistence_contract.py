@@ -132,7 +132,7 @@ def test_streamer_persists_before_announcing_completion():
     from kazma_ui import sse_chat
 
     src = inspect.getsource(sse_chat._stream_langgraph_events)
-    persist_at = src.index("_persist_turn_reply(")
+    persist_at = src.index("persist_reply(")
     done_at = src.index('emit_j("done"')
     assert persist_at < done_at, (
         "the reply must be stored before the client is told the turn is over"
@@ -235,5 +235,6 @@ def test_no_80_char_working_notes_floor() -> None:
         / "chat.js"
     ).read_text(encoding="utf-8")
     assert "workingProse.length > 80" not in chat
+    assert "kazma-working" not in chat
     assert "logProgress({" in chat
-    assert "working_notes" in chat
+    assert "function renderTurn(doc, meta)" in chat

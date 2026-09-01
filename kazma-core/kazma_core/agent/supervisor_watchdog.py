@@ -128,11 +128,12 @@ def _reflection_text(incident: str, attempt: int, max_attempts: int) -> str:
 
 async def supervised_invoke(
     graph: Any,
-    initial_state: dict[str, Any],
+    initial_state: dict[str, Any] | None,
     config: dict[str, Any],
     *,
     nonstop_config: Any,
     turn_timeout: float,
+    invoke_fn: Any,
 ) -> dict[str, Any]:
     """Invoke *graph* under the self-healing envelope.
 
@@ -140,10 +141,12 @@ async def supervised_invoke(
         graph:          Compiled LangGraph with a checkpointer (required for
                         resume; without one the first failure propagates).
         initial_state:  Full input state for the FIRST attempt. Retries resume
-                        from the checkpoint via ``ainvoke(None, config)``.
+                        from the checkpoint via ``invoke_fn(graph, None, config)``.
         config:         LangGraph config (must carry ``configurable.thread_id``).
         nonstop_config: :class:`NonStopConfig` snapshot.
         turn_timeout:   Per-attempt wall-clock ceiling (seconds; <=0 disables).
+        invoke_fn:      Async ``(graph, state, config) -> state``. The only
+                        ``graph.ainvoke`` lives in ``kazma_core.agent.turn``.
 
     Returns the terminal graph state, or raises the final exception after the
     recovery budget is exhausted.
@@ -176,7 +179,7 @@ async def supervised_invoke(
         # coarse enough to stay cheap on healthy turns.
         poll_s = 5.0 if stall_s <= 0 else max(0.1, min(5.0, stall_s / 2.0))
         invoke_task: asyncio.Task = asyncio.create_task(
-            graph.ainvoke(state_input, config),
+            invoke_fn(graph, state_input, config),
             name=f"supervised-invoke-{thread_id[:8]}",
         )
         try:

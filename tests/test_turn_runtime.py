@@ -28,8 +28,12 @@ FINAL = (
 
 _UI = Path(__file__).resolve().parents[1] / "kazma-ui" / "kazma_ui"
 _GW = Path(__file__).resolve().parents[1] / "kazma-gateway" / "kazma_gateway"
+_CORE = Path(__file__).resolve().parents[1] / "kazma-core" / "kazma_core"
 _ALLOWED_INVOKE = {
     "kazma-ui/kazma_ui/turn_runtime.py",
+}
+_ALLOWED_CORE_INVOKE = {
+    "kazma-core/kazma_core/agent/turn.py",
 }
 
 
@@ -220,4 +224,26 @@ def test_ui_and_gateway_ainvoke_only_in_turn_runtime() -> None:
         "kazma_ui.turn_runtime (HITL auto-deny silently dropped finals when "
         "it called ainvoke with no persist). Offenders:\n  "
         + "\n  ".join(offenders)
+    )
+
+
+def test_core_ainvoke_only_in_turn_py() -> None:
+    """kazma_core production code may only call graph.ainvoke in turn.py."""
+    offenders: list[str] = []
+    repo = Path(__file__).resolve().parents[1]
+    for path in _CORE.rglob("*.py"):
+        if "__pycache__" in path.parts or "kazma_core_tests" in path.parts:
+            continue
+        rel = path.relative_to(repo).as_posix()
+        if rel in _ALLOWED_CORE_INVOKE:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for lineno in _graph_invoke_calls(tree):
+            offenders.append(f"{rel}:{lineno}")
+    assert not offenders, (
+        "graph.ainvoke in kazma_core must live in agent/turn.py so every "
+        "mouth runs the closer. Offenders:\n  " + "\n  ".join(offenders)
     )

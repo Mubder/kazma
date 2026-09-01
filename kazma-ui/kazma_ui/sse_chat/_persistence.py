@@ -55,47 +55,6 @@ _active_turns = active_turns  # type: ignore[name-defined]
 
 
 
-def _persist_turn_reply(
-    session_id: str,
-    reply_turn_id: str,
-    content: str,
-    *,
-    interrupted: bool = False,
-    pending: bool = False,
-    open_turn: bool | None = None,
-    thread_id: str = "",
-    model: str = "",
-    tokens: int | None = None,
-    cost: float | None = None,
-    activity: list[dict[str, Any]] | None = None,
-    parts: list[dict[str, Any]] | None = None,
-    streamed_text: str = "",
-    allow_shrink: bool | None = None,
-) -> bool:
-    """Write this turn's reply through the sink. Never raises.
-
-    Delegates to ``turn_runtime.persist_reply`` so HTTP generators and
-    headless finishers (HITL auto-deny) share one writer.
-    """
-    from kazma_ui.turn_runtime import persist_reply
-
-    return persist_reply(
-        session_id,
-        reply_turn_id,
-        content,
-        interrupted=interrupted,
-        pending=pending,
-        open_turn=open_turn,
-        thread_id=thread_id,
-        model=model,
-        tokens=tokens,
-        cost=cost,
-        activity=activity,
-        parts=parts,
-        streamed_text=streamed_text,
-        allow_shrink=allow_shrink,
-    )
-
 def _snapshot_paused(snap: Any) -> bool:
     """True when the graph snapshot is parked on a pending interrupt.
 
