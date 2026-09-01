@@ -149,8 +149,36 @@ def test_collapsed_cot_cannot_eat_the_answer() -> None:
     hide = stream.split("function hideTyping(el)", 1)[1].split("function toast", 1)[0]
     assert "display = 'none'" in hide
     assert "message-content" in hide
+    assert "message-user" in hide
     css = _src(_UI / "static" / "css" / "kazma.css")
-    assert ".message-content > .message-text" in css
+    assert ".message-assistant > .message-content > .message-text" in css
+    # Negative: the unscoped rule hid/restyled the You bubble after send.
+    unscoped = [ln for ln in css.splitlines() if ln.strip() == ".message-content > .message-text {"]
+    assert unscoped == []
+
+
+def test_user_bubble_survives_cot_rescue() -> None:
+    """CoT rescue/paint must never empty the sent You row (2026-09-01)."""
+    chat = _src(_CHAT_JS)
+    rescue = chat.split("function _rescueTurnDom(el)", 1)[1].split("\n  function ", 1)[0]
+    assert "_isUserBubble(el)" in rescue
+    assert "owner !== el" in rescue
+    paint = chat.split("function _paintHTML(textEl, html)", 1)[1].split("\n  function ", 1)[0]
+    assert "closest('.message-user')" in paint
+    live = chat.split("function _paintLiveTextNow(textEl, final)", 1)[1].split("\n  function ", 1)[0]
+    assert "closest('.message-user')" in live
+    begin = chat.split("function beginTurn(opts)", 1)[1].split("\n  function ", 1)[0]
+    assert "_docs.live" in begin
+    render = chat.split("function renderTurn(doc, meta)", 1)[1].split("\n  function applyTurnEvent", 1)[0]
+    assert "_isUserBubble(el)" in render
+    # Negative: a rescue that lifts every .message-text under the panel
+    # without an owner check is exactly the You-bubble-emptying bug.
+    planted = (
+        "var trapped = panel.querySelectorAll('.message-text, .hitl-approval-card');\n"
+        "content.insertBefore(trapped[i], anchor);\n"
+    )
+    assert "owner !== el" not in planted
+    assert "owner !== el" in rescue
 
 
 def test_live_hitl_card_does_not_collapse_into_cot() -> None:

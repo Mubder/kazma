@@ -668,6 +668,7 @@ var KazmaStream = (function() {
     // Never wipe .message-content / .message-text — that destroyed the CoT
     // panel and then hideTyping set display:none on the whole bubble, so the
     // answer only reappeared when the operator expanded CoT (2026-09-01).
+    if (el.closest && el.closest('.message-user')) return el;
     if (el.classList && (el.classList.contains('message-content')
         || el.classList.contains('message-text')
         || el.classList.contains('agent-progress'))) {
@@ -696,6 +697,11 @@ var KazmaStream = (function() {
     if (_typingTimer) { clearTimeout(_typingTimer); _typingTimer = null; }
     if (el.classList && el.classList.contains('kz-typing-row')) {
       if (el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    if (el.closest && el.closest('.message-user')) {
+      var urow = el.querySelector && el.querySelector('.kz-typing-row');
+      if (urow && urow.parentNode) urow.parentNode.removeChild(urow);
       return;
     }
     if (el.classList && (el.classList.contains('message-content')
