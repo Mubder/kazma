@@ -593,6 +593,21 @@ async def tool_worker_node(
         # interrupt() is the sole gate for single-agent chat. Restored in
         # the finally below.
         _graph_gate_token = None
+        # Live-read HITL policy when this graph was compiled WITH a gate
+        # (audit M-3). A compile-time None still means "this path has no
+        # HITL" (child graphs without a checkpointer). Do not invent a gate
+        # on those paths. When a snapshot was passed, Settings changes to
+        # enabled / require_approval_for apply this turn.
+        if hitl_config is not None:
+            try:
+                from kazma_core.safety.hitl import get_hitl_config as _live_hitl
+
+                _live = _live_hitl({})
+                if isinstance(_live, dict) and _live:
+                    hitl_config = _live
+            except Exception:
+                logger.debug("[ToolWorker] live HITL config read failed", exc_info=True)
+
         # Truthiness fix (audit F9): ``{"enabled": False}`` is a truthy dict
         # but a DISABLED gate. Treating it as active (a) set the gate
         # ContextVar, suppressing the registry-level SwarmMessageBus gate

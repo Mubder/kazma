@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Audit 2026-09-01 Wave 4 — HITL-adjacent, registry-safe (2026-09-01)
+
+H-9: swarm `is_danger_tool()` uses TOOL_TIERS danger floor + list ADDS
+(Settings cannot un-gate `shell_exec`). M-3: `tool_worker_node` live-reads
+`get_hitl_config()` when the graph was compiled with HITL (None stays
+no-gate). H-8: `LocalToolRegistry.execute` applies `rewritten_args` and
+fail-closes clarify/confirm with "run from chat" — no second gate row.
+T-2: checkpoint timeout no longer cancels itself; claim-before-await
+(`pending → approving|rejecting`) plus settle_gate on reject still runs.
+
 ## Audit 2026-09-01 Wave 2–3 — honest suite + importer atomicity (2026-09-01)
 
 T-6: skip `shell_exec` timeout when `sleep` is not on PATH (do not call

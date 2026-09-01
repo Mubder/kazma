@@ -497,6 +497,26 @@ class LocalToolRegistry:
             )
             if _dec.decision == "deny":
                 return {"content": f"[commitment] blocked: {_dec.reason}", "is_error": True}
+            if _dec.decision in ("clarify", "confirm"):
+                # execute() has no graph interrupt context. Routing to the
+                # bus AND interrupt() would mint a second gate row (audit
+                # H-8 collision recipe). Fail closed — run it from chat.
+                q = (
+                    getattr(_dec, "clarify_question", None)
+                    or _dec.reason
+                    or "needs a decision"
+                )
+                return {
+                    "content": (
+                        f"[commitment] {_dec.decision} required for {tool_name}: {q}. "
+                        "Run this from chat so the interrupt card can collect the answer."
+                    ),
+                    "is_error": True,
+                }
+            if _dec.decision == "allow" and getattr(_dec, "rewritten_args", None):
+                arguments = dict(_dec.rewritten_args)
+                if isinstance(arguments, dict):
+                    arguments = filter_tool_arguments(arguments, tool.input_schema)
         except Exception:
             logger.debug("[ToolRegistry] authorize_effect choke failed", exc_info=True)
             try:

@@ -132,13 +132,28 @@ class SafetyMiddleware:
         logger.info("[Safety] Removed danger-tier tool: %s", tool_name)
 
     def is_danger_tool(self, tool_name: str) -> bool:
-        """Check if a tool requires approval."""
-        try:
-            from kazma_core.safety.hitl import get_hitl_config
+        """Whether the swarm bus must gate this tool.
 
+        Settings ``require_approval_for`` ADDS to the floor; it cannot un-gate
+        a ``danger``/``unsafe`` TOOL_TIERS classification (audit H-9 / §26B).
+        YOLO/grants are applied in :meth:`check`, not here — this is
+        classification, not a skip.
+        """
+        try:
+            from kazma_core.safety.hitl import (
+                ALWAYS_HITL_TOOLS,
+                get_hitl_config,
+                get_tool_tier,
+            )
+
+            if tool_name in ALWAYS_HITL_TOOLS:
+                return True
             hitl_cfg = get_hitl_config({})
-            danger = hitl_cfg.get("require_approval_for", self._danger_tools)
-            return tool_name in danger
+            listed = set(hitl_cfg.get("require_approval_for") or ())
+            listed |= set(self._danger_tools)
+            if tool_name in listed:
+                return True
+            return get_tool_tier(tool_name) in ("danger", "unsafe")
         except Exception:
             return tool_name in self._danger_tools
 
