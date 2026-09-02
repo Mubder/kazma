@@ -756,6 +756,21 @@ async def _stream_langgraph_events(
                                     ),
                                 }
                                 try:
+                                    from kazma_core.safety.hitl import (
+                                        approval_deadline_from,
+                                    )
+
+                                    _deadline = approval_deadline_from()
+                                    if _deadline:
+                                        _hitl_payload_saved[
+                                            "approval_deadline"
+                                        ] = _deadline
+                                except Exception:
+                                    logger.debug(
+                                        "[SSE] approval deadline stamp skipped",
+                                        exc_info=True,
+                                    )
+                                try:
                                     from kazma_ui.turn_document import (
                                         assign_interrupt_id,
                                     )

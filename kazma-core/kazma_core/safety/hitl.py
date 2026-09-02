@@ -25,6 +25,7 @@ __all__ = [
     "DEFAULT_APPROVAL_TIMEOUT_SECONDS",
     "DEFAULT_DANGER_TOOLS",
     "TOOL_TIERS",
+    "approval_deadline_from",
     "get_hitl_config",
     "get_tool_tier",
     "requires_approval",
@@ -505,6 +506,28 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
         "approval_timeout_seconds": approval_timeout_seconds,
         "auto_deny_on_timeout": auto_deny_on_timeout,
     }
+
+
+def approval_deadline_from(created_at: float | None = None) -> float | None:
+    """Epoch seconds when an unattended approval auto-denies (watchdog).
+
+    Stamp onto approval payloads/cards so surfaces can show a countdown
+    instead of a silent 300s drop (2026-09-02). ``created_at`` is when the
+    pause was minted (defaults to now — the SSE interrupt scan calls it at
+    the pause moment; registry-derived callers pass the gate row's
+    ``created_at``). Returns None when the timeout is disabled (<= 0) or
+    the config cannot be read — a card without a deadline simply shows no
+    countdown, never a wrong one.
+    """
+    try:
+        cfg = get_hitl_config()
+        timeout_s = float(cfg.get("approval_timeout_seconds", 300) or 0)
+    except Exception:
+        return None
+    if timeout_s <= 0:
+        return None
+    base = created_at if created_at is not None else time.time()
+    return base + timeout_s
 
 
 def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:

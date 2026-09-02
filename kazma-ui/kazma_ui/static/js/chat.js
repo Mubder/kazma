@@ -4148,7 +4148,8 @@
           if (!btns[i].disabled) live = true;
         }
         if (!live) return;
-        btns.forEach(function(b) { b.disabled = true; });
+        _stopHitlCountdown(card);
+        btns.forEach(function (b) { b.disabled = true; });
         card.className = 'hitl-approval-card hitl-denied';
         var actions = card.querySelector('.hitl-approval-actions');
         if (actions) {
@@ -4350,6 +4351,7 @@
       yolo_allowed: p.yolo_allowed !== false,
       interrupt_id: p.interrupt_id || g.gate_id || '',
       items: p.items || null,
+      approval_deadline: g.approval_deadline || p.approval_deadline || 0,
     };
   }
 
@@ -4422,6 +4424,7 @@
         if (!btns[i].disabled) { live = true; break; }
       }
       if (!live) return;
+      _stopHitlCountdown(card);
       btns.forEach(function (b) { b.disabled = true; });
       card.className = 'hitl-approval-card hitl-denied';
       var actions = card.querySelector('.hitl-approval-actions');
@@ -4539,6 +4542,51 @@
     try { host.appendChild(card); } catch (eAppend) { /* ignore */ }
   }
 
+  /** Countdown surface (2026-09-02): an unattended approval auto-denies at
+   *  the watchdog deadline (server-stamped approval_deadline, epoch s).
+   *  Show it counting down instead of silently dropping the card at 300s. */
+  function _stopHitlCountdown(card) {
+    if (card && card.__cdTimer) {
+      try { clearInterval(card.__cdTimer); } catch (eT) { /* ignore */ }
+      card.__cdTimer = null;
+    }
+  }
+
+  function _hitlDeadlineOf(data) {
+    var d = data || {};
+    var dl = Number(d.approval_deadline || (d.payload && d.payload.approval_deadline) || 0);
+    return dl > 0 ? dl : 0;
+  }
+
+  function _attachHitlCountdown(card, data) {
+    if (!card) return;
+    var dl = _hitlDeadlineOf(data);
+    if (!dl) return;
+    var row = document.createElement('div');
+    row.className = 'hitl-countdown';
+    var host = card.querySelector('.hitl-approval-body') || card;
+    host.appendChild(row);
+    var paint = function () {
+      if (!card.isConnected) { _stopHitlCountdown(card); return; }
+      var left = Math.floor(dl - Date.now() / 1000);
+      if (left <= 0) {
+        _stopHitlCountdown(card);
+        card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+        card.className = 'hitl-approval-card hitl-denied';
+        var act = card.querySelector('.hitl-approval-actions');
+        if (act) act.innerHTML = '<span class="hitl-status hitl-denied">' +
+          escapeHtml(ti('approval_expired', 'Approval timed out — continuing without this tool.')) + '</span>';
+        row.textContent = '';
+        return;
+      }
+      var m = Math.floor(left / 60);
+      var s = left % 60;
+      row.textContent = '⏳ ' + ti('auto_deny_in', 'Auto-denies if unanswered in') + ' ' + m + ':' + (s < 10 ? '0' : '') + s;
+    };
+    paint();
+    card.__cdTimer = setInterval(paint, 1000);
+  }
+
   function renderHitlCard(data, opts) {
     if (!data) return;
     var lockComposer = !(opts && opts.lock === false);
@@ -4629,6 +4677,7 @@
           }).join('') +
         '</div>';
       _placeHitlCard(content, _semCard);
+      _attachHitlCountdown(_semCard, data);
       if (hasInlineApprovalCard()) _clearStoreApproval();
       else _showStoreApproval(data);
       scrollToBottom();
@@ -4772,11 +4821,13 @@
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
     _placeHitlCard(content, card);
+    _attachHitlCountdown(card, data);
     if (hasInlineApprovalCard()) _clearStoreApproval();
     else _showStoreApproval(data);
     scrollToBottom();
 
     function setCardState(state, label) {
+      _stopHitlCountdown(card);
       card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
       card.className = 'hitl-approval-card hitl-' + state;
       var actions = card.querySelector('.hitl-approval-actions');

@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Feature — approval cards count down to the auto-deny deadline (2026-09-02)
+
+Unattended approval cards used to sit silently for 300s and then vanish
+into a watchdog deny — twice in one evening for a live operator. The
+watchdog deadline is now a first-class surface: ``approval_deadline_from``
+(``created_at + approval_timeout_seconds`` from live config; ``None``
+when the timeout is disabled) is stamped on the SSE ``approval_required``
+payload, the session-status ``gates`` list, and pending-approval items,
+and the chat card renders a live "⏳ Auto-denies if unanswered in M:SS"
+countdown. At zero the card stamps itself "Approval timed out"; every
+claim path (approve/deny, timeout frame, registry reconcile) stops the
+ticker. Architecture docs now state the approval-card delivery facts
+(no web-chat rate limit; proposal-backed posts always surface; the
+gateway burst limit is exec-retry-only).
+
 ## Fix — M-3 live HITL read merged, not replaced (auto_deny survived) (2026-09-02)
 
 The two long-failing ``TestToolWorkerUnbackedGate`` tests were catching a

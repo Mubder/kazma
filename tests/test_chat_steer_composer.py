@@ -289,6 +289,34 @@ def test_reconcile_is_positive_id_only_and_semantic_card_carries_iid() -> None:
     assert "if (pendingIids[cid]) return;" in reconcile
 
 
+def test_approval_cards_count_down_to_watchdog_deadline() -> None:
+    """2026-09-02: unattended cards died silently at 300s. The server stamps
+    approval_deadline (SSE payload / status gates / pending items) and the
+    card counts down, stamps itself timed-out at zero, and every claim path
+    stops the ticker."""
+    js = _js()
+    assert "function _attachHitlCountdown(card, data)" in js
+    assert "function _stopHitlCountdown(card)" in js
+    rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
+        "function setCardState(state, label)", 1
+    )[0]
+    # Both card branches attach the countdown (semantic + security)…
+    assert "_attachHitlCountdown(_semCard, data);" in rhc
+    assert "_attachHitlCountdown(card, data);" in rhc
+    # …the deadline flows through the gates payload projection…
+    payload = js.split("function _payloadFromGate(g)", 1)[1].split(
+        "function _paintLiveGates()", 1
+    )[0]
+    assert "approval_deadline" in payload
+    # …zero stamps the card timed-out…
+    cd = js.split("function _attachHitlCountdown(card, data)", 1)[1].split(
+        "function renderHitlCard(data, opts)", 1
+    )[0]
+    assert "Approval timed out" in cd
+    # …and every claim/timeout/reconcile path stops the ticker.
+    assert js.count("_stopHitlCountdown(") >= 4
+
+
 def test_steer_body_strips_placeholder() -> None:
     js = _js()
     assert "/^<[^>]+>$/.test(rest)" in js

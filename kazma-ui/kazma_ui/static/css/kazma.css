@@ -1855,6 +1855,13 @@ tbody tr:last-child td {
 .hitl-status.hitl-approved { color: var(--success); }
 .hitl-status.hitl-denied { color: var(--danger); }
 .hitl-status.hitl-error { color: var(--danger); }
+/* Countdown to the watchdog auto-deny (server-stamped deadline). */
+.hitl-countdown {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--warning, #f59e0b);
+}
 
 /* Old opaque top-bar .chat-model-bar / .chat-input-area rules removed —
    v5 owns both (composer dock + glassy bar); the old block was dead for
