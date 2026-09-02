@@ -721,10 +721,23 @@ def create_sse_chat_router(
         # If user sent a new message while HITL is waiting, auto-deny so
         # tool chains close cleanly (no silent supersede / amnesia).
         try:
+            # A new stream is a new turn. Preserve the interrupt only when
+            # a live unanswered gate is still pending (the client should
+            # have steered). After /abort the gate is settled and the
+            # leftover checkpoint interrupt must be denied so the prompt
+            # is not swallowed as /steer.
+            _hitl_now = "idle"
+            try:
+                from kazma_ui.hitl_status import hitl_thread_status as _hitl_status
+
+                _hitl_now = await _hitl_status(thread_id, graph=current_graph)
+            except Exception:
+                _hitl_now = "idle"
             cancelled = await cancel_pending_hitl(
                 current_graph,
                 graph_config,
                 reason="superseded by new user message",
+                auto_deny=_hitl_now != "pending",
             )
             if cancelled:
                 logger.info(
@@ -1228,6 +1241,14 @@ def create_sse_chat_router(
             except Exception:
                 gates = []
                 gates_authoritative = False
+
+        # In-memory `_paused_threads` dies on restart. A durable pending
+        # gate (or hitl_thread_status=pending) is still a live question.
+        if not paused:
+            if any(str(g.get("state") or "") == "pending" for g in gates):
+                paused = True
+            elif isinstance(hitl, dict) and str(hitl.get("gate") or "") == "pending":
+                paused = True
 
         return {
             "session_id": session_id,
@@ -1952,6 +1973,12 @@ def create_sse_chat_router(
                 "task_status": "abandoned",
                 "auto_continue": False,
             })
+            try:
+                from kazma_ui.hitl_gate_bridge import abort_thread_hitl
+
+                await abort_thread_hitl(thread_id, session_id=session_id)
+            except Exception:
+                logger.debug("[SSE] abort HITL release skipped", exc_info=True)
             logger.info(
                 "[SSE] Abort thread=%s cancelled=%s marker_written=True",
                 thread_id[:12], cancelled,

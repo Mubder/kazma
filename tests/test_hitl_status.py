@@ -29,9 +29,16 @@ class _Task:
 
 
 class _Snap:
-    def __init__(self, *, nxt: tuple[str, ...] = ("tool_worker",), tasks: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        nxt: tuple[str, ...] = ("tool_worker",),
+        tasks: list[Any] | None = None,
+        values: dict[str, Any] | None = None,
+    ) -> None:
         self.next = nxt
         self.tasks = tasks or []
+        self.values = values or {}
 
 
 class _Graph:
@@ -78,6 +85,22 @@ async def test_running_resume_is_inflight_even_with_interrupt() -> None:
 async def test_no_interrupt_is_idle() -> None:
     snap = _Snap(nxt=(), tasks=[])
     status = await hitl_thread_status("t-idle", graph=_Graph(snap), snapshot=snap)
+    assert status == "idle"
+
+
+@pytest.mark.asyncio
+async def test_abandoned_leftover_interrupt_is_idle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """/abort wrote abandoned; leftover interrupt() is not a live card."""
+    monkeypatch.setattr("kazma_ui.hitl_gate_bridge.registry_on", lambda: False)
+    snap = _Snap(
+        tasks=[_Task([_Interrupt({
+            "type": "hitl_approval",
+            "tool": "schedule_task",
+            "args": {},
+        })])],
+        values={"task_status": "abandoned"},
+    )
+    status = await hitl_thread_status("t-aborted", graph=_Graph(snap), snapshot=snap)
     assert status == "idle"
 
 

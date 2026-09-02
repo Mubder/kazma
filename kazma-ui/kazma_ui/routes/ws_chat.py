@@ -1056,6 +1056,12 @@ def create_ws_chat_router(
                             "task_status": "abandoned",
                             "auto_continue": False,
                         })
+                        try:
+                            from kazma_ui.hitl_gate_bridge import abort_thread_hitl
+
+                            await abort_thread_hitl(thread_id, session_id=session_id)
+                        except Exception:
+                            logger.debug("[WS-Chat] abort HITL release skipped", exc_info=True)
                         logger.info(
                             "[WS-Chat] Abort thread=%s cancelled=%s",
                             thread_id[:12], _ab_task is not None,

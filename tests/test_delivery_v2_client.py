@@ -572,7 +572,7 @@ class TestResyncFragmentationFixes:
 
     def test_resync_never_aborts_a_live_stream(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        generating = src.split("if (generating || paused) {", 1)[1].split(
+        generating = src.split("if (generating || liveHitl) {", 1)[1].split(
             "return;\n      }", 1
         )[0]
         # The generating branch must early-return while a stream is live…
@@ -1010,9 +1010,9 @@ class TestGateAuthoritativeFailPosture:
         body = src.split("function _paintHitlFromDoc", 1)[1]
         gate_block = body.split("if (_serverGatesAuth && !gateRow)", 1)
         assert len(gate_block) == 2, "authoritative fail-posture block missing"
-        head = gate_block[1].split("}", 1)[0]
-        assert "renderHitlCard(hitl.payload);" in head
-        assert "return;" in head
+        head = gate_block[1].split("return;", 1)[0]
+        assert "renderHitlCard(hitl.payload, { lock: false })" in head
+        assert "lock: false" in head
         # Negative control: the block must run BEFORE leftover-claim inference.
         legacy_at = body.find("_hitlAlreadyClaimed(hitl)")
         auth_at = body.find("if (_serverGatesAuth && !gateRow)")
