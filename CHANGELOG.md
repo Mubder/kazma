@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## Fix — CoT ladder mint + Cancel-only remind card (2026-09-02)
+
+Live CoT hops were calling `createAssistantMessage()` whenever
+`currentMsgEl` was null (Claude's historical-render left it null), stacking
+one bubble per plan token. All live paths now pin
+`_assistantBubbleForOpenTurn()`. Remind clarify with no actionable dates is
+**deny** (model asks in the reply) instead of a Cancel-only interrupt that
+parks the turn. Semantic card sends `interrupt_id` and recovers from 409.
+
+## Docs — production-checklist + recent-features to 2026-09 (2026-09-02)
+
+Checklist: `/health/live`+`ready` vs details/deep; trusted proxies; CSRF;
+TOOL_TIERS; pin-IP; 6h backup; gate registry; FanOut tri-state; guard
+`--reload`. Recent features: September Turn Delivery / HITL registry / SSRF
+/ context integrity; backup cadence 6h; PG staging retention 3.
+
+## Docs — commitment-layer + diagnosis-map to 2026-09 (2026-09-02)
+
+Commitment: exceptions on semantic tools fail closed; swarm scope default ON;
+Soul confirm auto-ON in production; Soul is ConfigStore not a JSON file;
+proposal-backed posts; H-8 on `execute()`. Diagnosis map: FanOut tri-state,
+gate registry, `close_turn`, `graph_tool_worker`, streaming graph auto_deny,
+V2 recall, pin-IP, shift_explicit vs inferred.
+
+## Docs — security-and-safety + memory-and-rag to 2026-09 (2026-09-02)
+
+HITL is three execution paths + registry; tool_worker is
+`graph_tool_worker.py`; SSE SoT is the app.py recompile (`get_streaming_graph`
+is checkpointer-less auto_deny); FanOut tri-state not Telegram-only;
+`_EXTENDED_DANGER` is CANONICAL; default-deny tiers, CSRF, trusted proxies,
+SSRF pin, `/health/details` sensitive. Memory backup cadence is 6h; eight
+boot loops; source-trust on `user_explicit` beliefs. SafetyMiddleware
+docstring matches tri-state FanOut.
+
 ## Docs — swarm-orchestration + system map to 2026-09 (2026-09-02)
 
 Swarm guide: FanOut is tri-state; Soul is ConfigStore/`WorkerRegistry` (not

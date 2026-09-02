@@ -9,8 +9,10 @@ and ``kazma.yaml`` ``safety.hitl.require_approval_for``). Spawn tools are only
 gated if they appear on that list.
 
 Bus topology (app wiring): one adapter, or ``FanOutBusAdapter`` when multiple
-platforms are configured (first approval wins). NullBus is fail-closed for
-danger tools unless headless escape is enabled.
+platforms are configured. Swarm FanOut is tri-state (``True`` settles;
+``False`` is a vote until ``expected_voters`` or the deadline) — not first
+boolean wins. NullBus is fail-closed for danger tools unless headless
+escape is enabled.
 """
 
 from __future__ import annotations

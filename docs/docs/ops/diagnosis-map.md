@@ -32,9 +32,10 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 1. Platform IDs never enter LangGraph state (gateway restores them on reply).  
 2. Model **and** provider switch together (`model_registry`).  
-3. Danger tools always pass **one of** the three HITL mechanisms.  
-4. Workspace root has **one** resolver: `file_write._get_workspace()`.  
-5. Runtime settings SoT is **ConfigStore** (`get_config_store()`), not ad-hoc files.
+3. Danger tools pass **one of** three HITL **execution** paths; **decision** truth is `hitl_gates.db`. Swarm FanOut is **tri-state**, not first-wins.  
+4. Workspace root has **one** resolver: `workspace.binding.resolve_active_root()` (also `file_write._get_workspace`).  
+5. Runtime settings SoT is **ConfigStore** (`get_config_store()`), not ad-hoc files.  
+6. Turn Delivery: `close_turn` is the only closer; the client **projects**. No second painter.
 
 ---
 
@@ -45,20 +46,21 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Web UI stuck on **Stop** / Enter dead | `chat.js` turn machine + `agentStore` `idle`/`stream_end` | Prefer WS vs SSE path; missing end event | §2 Chat transports |
 | YOLO “on” but still asks approval | `thread_id` ContextVar vs session_id | WS resume uses `ainvoke` + `enable_yolo(thread)` | §2, §4 HITL A |
 | Danger tools run with **no** prompt | Which **graph** is live (`_graph_holder` recompiled?) | `hitl_config` omitted at a build site | §3 Graph build |
-| Approve button does nothing | Resume **thread_id** matches interrupt | Checkpointer present; `Command(resume=…)` | §4 HITL A |
-| Double approval / hang after Approve | `_graph_hitl_gate_ctx` / `_hitl_approved_ctx` | Bus should skip when graph already approved | §4 double-gate |
+| Approve button does nothing | Resume **thread_id** matches interrupt; registry **claim** 409? | Checkpointer present; `Command(resume=…)`; `hitl_gates.db` row state | §4 HITL A, gate registry |
+| Ghost / pre-stamped **Approved** card / second question only on dashboard | `hitl_gates.py` — `pending` is the only live-button state | `close_turn` + `_serverGates`; never infer Approved from a missing row | Gate registry (bottom) |
+| Double approval / hang after Approve | `_graph_hitl_gate_ctx` / `_hitl_approved_ctx` | Bus should skip when graph already approved; **H-8** no second gate from `execute()` | §4 double-gate |
 | IDE write **denied by HITL** | IDE uses **bus** (HITL B), not graph interrupt | NullBus fail-closed without platform bus | §4 B, §7 Tools |
 | Settings toggle has **no effect** | Key names: YAML nested vs ConfigStore flat | Consumer function actually reads the key | §6 Config layers |
 | Wrong model / 401 after switch | All **three** `model_registry` entry points | Provider class branch (not generic Bearer) | §5 Providers |
 | File tools “outside workspace” | `_get_workspace()` precedence only | Do not reimplement in IdeService | §8 Workspace |
-| Memory forgets / search ≠ chat recall | UnifiedMemoryAdapter vs VectorMemory fallback | per-turn RAG flag | §9 Memory |
+| Memory forgets / search ≠ chat recall | `recall()` empty / FTS drift / embedder down | Dashboard V2 health; `fts_health`; not a V1 adapter | §9 Memory |
 | Empty `web_search` | SearXNG URL + JSON format | Backend chain notes in tool output | §10 Research |
-| Thin `read_url` / bot wall | Recovery cascade Firecrawl→Jina→Playwright | Keys / `KAZMA_JINA_READER=0` | §10 Research |
+| Thin `read_url` / bot wall | Recovery cascade Firecrawl→Jina→Playwright | Keys / `KAZMA_JINA_READER=0`; pin-IP when no proxy | §10 Research |
 | Stale KB hits after docs shrink | Smart re-index: page hash skip vs purge-on-change; gone-URL prune | `KnowledgeIndex.index` / `purge_source` / site prune | §10 Knowledge |
 | KB inject empty / wrong tenant | `list_auto_inject_libraries` + `kb_mode=inject` federated RRF | `KAZMA_KB_AUTO_INJECT`, smart search, archive flag | §10 Knowledge |
 | Swarm task stuck “paused” | HITL C checkpoint manager | Not A or B | §4 C |
-| Agent **resumes old task** after subject change | intent classifier `shift` vs `continue`; `task_status` superseded? | `agent.topic_drift.threshold` too **high** (missed shift) | §9 turn focus |
-| Agent **abandons** legit multi-step task mid-flow | `shift` fired on a real continuation | `agent.topic_drift.threshold` too **low** (false shift) | §9 turn focus |
+| Agent **resumes old task** after subject change | `shift_explicit` vs `shift_inferred`; `task_status` superseded? | Only **explicit** pivot disarms recall; inferred re-ranks | §9 turn focus, AGENTS.md §29 |
+| Agent **abandons** legit multi-step task mid-flow | `shift_inferred` on an interrogative check-in | Check-ins (EN + AR شنو/وش/…) must never classify as drift | §9 turn focus |
 | `/replay` empty on one channel | `snapshot_recorder` at **all** graph build sites | Capture in supervisor node | §3 Time travel |
 | Session in sidebar only after F5 | WS must refresh/upsert sessions like SSE | SessionManager shared? | §2 Sessions |
 | Telegram: **approval expired after final answer** | Duplicate/late `approve_task` callback after resume | Soft message / debounce in `hitl.py` — work usually already ran | §4 HITL A |
@@ -78,7 +80,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 | Matter | Related to |
 |--------|------------|
-| Browser chat | **SSE graph** (`sse_chat.py` + `static/js/chat.js`) + **WS telemetry** (`routes/ws_chat.py`) |
+| Browser chat | **SSE graph** (`sse_chat/` package + `static/js/chat.js` projector) + **WS telemetry** (`routes/ws_chat.py`) |
 | Preferred transport | **SSE** for turns and HITL. WS is cursor resume / live frames. |
 | WS graph escape hatch | `KAZMA_WS_GRAPH=1` restores `send_prompt` / `approve_tool` (debug) |
 | Session store | **One** `SessionManager` / `chat_sessions.db` for both |
@@ -110,9 +112,11 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 ### Key files
 
-- `kazma-ui/kazma_ui/sse_chat.py`  
+- `kazma-ui/kazma_ui/sse_chat/` (package)  
+- `kazma-ui/kazma_ui/turn_runtime.py` (`close_turn`)  
 - `kazma-ui/kazma_ui/routes/ws_chat.py`  
-- `kazma-ui/kazma_ui/static/js/chat.js`  
+- `kazma-ui/kazma_ui/static/js/chat.js` (`renderTurn`, `_paintHitlFromDoc`, `_serverGates`)  
+- `kazma-ui/kazma_ui/static/js/modules/turn_document.js`  
 - `kazma-ui/kazma_ui/static/js/stores/agentStore.js`  
 - `kazma-ui/kazma_ui/session_manager.py`  
 - `kazma-ui/kazma_ui/app.py` (mounts both routers + `_graph_holder`)
@@ -125,7 +129,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 | Site | hitl_config | checkpointer | snapshot_recorder | Used by |
 |------|-------------|--------------|-------------------|---------|
-| `agent_runner.get_streaming_graph` | yes | **no** (bootstrap) | yes | Early holder before recompile |
+| `agent_runner.get_streaming_graph` | yes + **`auto_deny`** | **no** (sync, checkpointer-less) | yes | Voice / boot-window only — cannot resume `interrupt()` |
 | `agent_runner._ensure_graph` | yes | yes | yes | CLI / agent `run()` |
 | `app.py` startup recompile | yes (or None if disabled) | yes (`checkpoints.db`) | reuse agent’s | Live Web SSE/WS |
 | `build_child_graph` / sub-agent | auto-deny danger | no | yes | Child agents |
@@ -139,20 +143,22 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 
 ### Related
 
-- `kazma-core/kazma_core/agent/graph_builder.py`  
+- `kazma-core/kazma_core/agent/graph_builder.py` (wires)  
+- `kazma-core/kazma_core/agent/graph_supervisor.py` / `graph_tool_worker.py` / `graph_respond.py`  
 - `kazma-core/kazma_core/agent_runner.py`  
 - `kazma-ui/kazma_ui/app.py`  
 - `kazma-core/kazma_core/time_travel.py`
 
 ---
 
-## 4. HITL — three mechanisms (do not conflate)
+## 4. HITL — three execution paths + one registry (do not conflate)
 
 | Mechanism | When | Gate location | Resume |
 |-----------|------|---------------|--------|
-| **A. Graph interrupt** | Single-agent chat danger tools | `graph_builder` tool worker | HTTP approve / WS approve / gateway slash |
+| **A. Graph interrupt** | Single-agent chat danger tools | `graph_tool_worker.tool_worker_node` | HTTP approve / gateway slash (WS off unless `KAZMA_WS_GRAPH=1`) |
 | **B. Swarm bus** | Swarm tools + **IDE** `LocalToolRegistry.execute` | `tool_registry.execute` → `SafetyMiddleware` | Platform buttons / bus callbacks |
-| **C. Pipeline checkpoint** | Swarm PIPELINE tasks | `checkpoint_manager` | `approve_checkpoint` |
+| **C. Pipeline checkpoint** | Swarm PIPELINE tasks | `checkpoint_manager` (+ `_gate_register_pipeline`) | `approve_checkpoint` + `settle_gate` |
+| **Registry** | All of the above | `hitl_gates.db` CAS | Decision truth; checkpoint is execution truth |
 
 ### Double-gate (A then B)
 
@@ -172,13 +178,14 @@ After graph Approve, ContextVars prevent a second bus prompt. Breaking this = ha
 
 - 0 platforms → `NullBusAdapter` (danger **fail-closed** unless headless).  
 - 1 platform → that adapter.  
-- 2+ platforms → **`FanOutBusAdapter`** (first approval wins).
+- 2+ platforms → **`FanOutBusAdapter`** (**tri-state**: `True` settles; `False` is a vote until `expected_voters` or deadline — not first-boolean-wins; not web `claim_gate`).
 
 ### Related files
 
 - `safety/hitl.py`, `safety/yolo.py`, `safety/hitl_grants.py`  
-- `agent/tool_registry.py`, `agent/graph_builder.py`  
+- `agent/tool_registry.py`, `agent/graph_tool_worker.py`  
 - `swarm/safety.py`, `swarm/bus.py`, `swarm/checkpoint_manager.py`  
+- `safety/hitl_gates.py`, `kazma_ui/turn_runtime.py`, `chat.js` `_serverGates`  
 - Gateway `*_bus.py` adapters  
 
 ---
@@ -324,7 +331,7 @@ Audit: [`AUDIT_MEMORY_SYSTEM_2026-08-24.md`](https://github.com/Mubder/kazma/blo
 | Element | Cascade / order | Config |
 |---------|-----------------|--------|
 | `web_search` | SearXNG → DDG → Bing → Wikipedia | `KAZMA_SEARXNG_URL`, ConfigStore `search.searxng_url`, compose profile `search` :8088 |
-| `read_url` / KB ingest | optional pre-backends → httpx → **recovery** Firecrawl → Jina → Playwright | `KAZMA_FETCH_BACKEND`, `KAZMA_FIRECRAWL_*`, `KAZMA_JINA_READER` (`0` = never) |
+| `read_url` / KB ingest | SSRF-validate → Firecrawl → Jina (opt-in) → httpx (pin-IP if no proxy) → recovery Firecrawl→Jina→Playwright | `KAZMA_FETCH_BACKEND`, `KAZMA_FIRECRAWL_*`, `KAZMA_JINA_READER` (`1` to opt in); never pin through `proxy=` |
 
 KB ingest and research use **`kazma_core.web_acquire`** (`fetch_text` / `search` / `crawl` profiles) over the shared recovery ladder in `read_url` — one I/O stack, product sinks stay separate.
 
@@ -411,6 +418,9 @@ When you **merge** two paths into one, add a test that would have failed under t
 | 2026-07 | WS recursion_limit=100 | Keep aligned with SSE/gateway |
 | 2026-07 | Settings `require_approval_for` → `get_hitl_config` | Do not re-dead the Settings control plane |
 | 2026-07 | Hard-page recovery shared by KB | Keep fetch in `read_url._fetch_full_text` |
+| 2026-09 | HITL Gate Registry | Decision = `hitl_gates.db`; execution = checkpoint. No inferred Approved |
+| 2026-09 | FanOut tri-state | Do not restore first-boolean-wins; web `claim_gate` stays 200/409 |
+| 2026-09 | Turn Delivery V2 | `close_turn` only closer; no second `chat.js` painter |
 
 ---
 
@@ -438,11 +448,11 @@ When you **merge** two paths into one, add a test that would have failed under t
 
 | If you touch… | Also check… |
 |---------------|-------------|
-| `sse_chat.py` | `ws_chat.py`, `chat.js`, turn end events |
+| `sse_chat/` | `ws_chat.py`, `chat.js` projector, `turn_runtime.close_turn` |
 | `long_task.py` / recursion | gateway, SSE, WS, agent_runner `recursion_limit` sites |
 | HITL stale approve message | `hitl.py` debounce + soft copy; not “nothing executed” after success |
 | `ws_chat.py` | same + YOLO ContextVar thread bind |
-| `graph_builder.py` HITL | all build sites, double-gate ContextVars |
+| `graph_tool_worker.py` HITL | all build sites, double-gate ContextVars, `hitl_gates.py` |
 | `tool_registry.execute` | IDE service, swarm safety, MCP executor |
 | `model_registry` one method | the other two methods + provider classes |
 | `file_write._get_workspace` | IdeService, env_context, workspace_scope |
@@ -450,11 +460,11 @@ When you **merge** two paths into one, add a test that would have failed under t
 | `ConfigStore` safety keys | `get_hitl_config`, SettingsManager flat keys |
 | `build_env_context` | agent_runner, SSE, WS, worker dispatch |
 | Soul / self_improvement | all inject sites + prompt_fence |
-| Swarm bus adapter | FanOut vs Null, IDE fail-closed UX |
+| Swarm bus adapter | FanOut **tri-state** vs Null, IDE fail-closed UX |
 | `read_url` recovery | knowledge_ingest, crawl, web_research |
 | Document durable path | Web API, tools, gateway `/documents`, TUI — all → `DocumentIngestionService` only |
 | Document parse execution | `DocumentService` (workers + chat transient attachments) — never import `documents.parsers` from gateway/UI |
-| Document jobs vs metadata | `jobs_pg` multi-replica; `repository_pg` optional; GC SQLite SQL only |
+| Document jobs vs metadata | `jobs_pg` multi-replica; `repository_pg` optional; GC is backend-agnostic (`repository.gc_mark`) |
 | Document danger-ish redaction | UI `kazmaConfirm` only; API/tools ACL still apply |
 
 ### Document Intelligence symptoms

@@ -7,7 +7,11 @@ description: Go-live checklist for single-node and multi-user Kazma deployments
 
 # Production checklist
 
-Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (Phases 0–4 shipped in code).
+Use this before exposing Kazma beyond loopback. Aligns with
+[`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md)
+(waves 0–8 shipped) and the historical
+[`REMEDIATION_PLAN_2026-07-21.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/archive/REMEDIATION_PLAN_2026-07-21.md)
+(Phases 0–4). Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md).
 
 **Feature smoke (research / KB / proxy / memory explain):** see [Smoke test matrix](./smoke-matrix) — run after related deploys.
 
@@ -18,14 +22,17 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] Non-loopback bind fails closed without secret (CLI / serve)
 - [ ] `KAZMA_PRODUCTION=1`
 - [ ] `KAZMA_VAULT_KEY` set
-- [ ] Healthcheck uses `/health` (or live/ready as documented)
+- [ ] Healthcheck uses **`/health/live`** (process) and **`/health/ready`** (critical deps). `/health/details` is **auth** (leaks model/MCP). Poll **`/health/deep`** as the silent-no-op canary (open, TTL 30s)
 
 ## P0 — Lifecycle & fail-closed
 
 - [ ] Graceful shutdown drains swarm/cron (no orphan tasks)
 - [ ] NullBus denies danger tools (no headless auto-approve)
 - [ ] YOLO disabled unless `KAZMA_ALLOW_YOLO=1` (avoid in real prod)
-- [ ] Circuit breaker half-open probe semantics intact
+- [ ] Circuit breaker half-open probe semantics intact (`_probe_in_flight`)
+- [ ] Deploy via **`kazma_guard.py --reload`** — never hand-kill python/uvicorn (the guard respawns the old port holder)
+- [ ] Behind nginx/Caddy/Docker: **`KAZMA_TRUSTED_PROXIES`** set; peer `127.0.0.1` is not a credential
+- [ ] CSRF on: mismatched Origin/Referer host → 403 on non-GET `/api/*`
 
 ## P1 — Security depth
 
@@ -41,6 +48,9 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] Multi-operator: platform allowlists set + `KAZMA_GATEWAY_STRICT_ALLOWLIST=1` (2026-08-19; adapters otherwise run allow-all for backward compat)
 - [ ] `KAZMA_HITL_CANONICAL_FLOOR=1` on strict deployments (danger list cannot narrow below canonical; 2026-08-19)
 - [ ] Offsite/cloud-sync backups verify TLS (WebDAV default ON since 2026-08-19; `backups.offsite.webdav.tls_verify=false` only for self-signed labs)
+- [ ] Offsite restic: **write probe** succeeds (`rclone:` and `s3:` — a read-only remote is a failed backup)
+- [ ] New tools have a **`TOOL_TIERS`** entry (`read` / `write` / `danger`); unclassified = gated
+- [ ] Scraping: pin-IP on the direct path; do not pin through `proxy=`
 
 ## Multi-user / multi-replica (if applicable)
 
@@ -51,6 +61,7 @@ Use this before exposing Kazma beyond loopback. Aligns with `docs/audits/REMEDIA
 - [ ] HA compose / LB only if Postgres shared state verified
 - [ ] Memory: `KAZMA_MEMORY_ENFORCE_TENANT=1` when more than one tenant exists
 - [ ] Before `KAZMA_MEMORY_STATE_ROLE=primary`: `python scripts/reconcile_memory_mirror.py --dry-run` is clean (no dead-in-mirror rows)
+- [ ] Document catalog tables are on `KAZMA_PG_TABLES` when metadata backend is Postgres (H-13)
 
 ## Document Intelligence (if enabled)
 
@@ -79,7 +90,11 @@ Guide: [Document Intelligence](../guide/document-intelligence) · Ops: [Document
 & .venv\Scripts\python.exe scripts\smoke_production.py --base http://127.0.0.1:9090 --secret $env:KAZMA_SECRET
 # Document platform (optional but recommended when documents.enabled):
 & .venv\Scripts\python.exe scripts\certify_documents.py
+# Optional industry smoke (HITL card, health/deep):
+# scripts\industry_smoke.ps1
 ```
+
+Confirm `GET /health/deep` is 200 after reload. HITL: one Approve card, second click **409**.
 
 Also run document rows in the [Smoke matrix](./smoke-matrix).
 
@@ -100,3 +115,19 @@ Also run document rows in the [Smoke matrix](./smoke-matrix).
 - [ ] **Flags**: `swarm_scope_enforce` defaults **ON** (workers capped at HIGH since 2026-08-15); `enforce_unknown_mutators` defaults **ON**; `soul_requires_confirm` defaults OFF on a lab and auto-ON in production / multi-user — operators toggle via ConfigStore / env
 - [ ] **Metrics endpoint**: `GET /metrics` shows `kazma_commitment_decisions_total{decision=...}` + `kazma_commitment_pending`
 - [ ] **Soul confirm queue**: `GET /api/commitment/soul/pending` lists held deltas; `POST /api/commitment/soul/{cid}/confirm` approves
+- [ ] Semantic-tool **exceptions fail closed** (kill-switch still fail-open)
+
+## HITL Gate Registry & Turn Delivery
+
+- [ ] `kazma-data/hitl_gates.db` is writing rows (`pending → claimed → settled`)
+- [ ] Web paints from `_serverGates` — no ghost Approved stamp; second claim is **409**
+- [ ] Swarm FanOut (2+ platforms) is **tri-state** (Deny is a vote, not an instant settle)
+- [ ] `KAZMA_GATE_REGISTRY=0` is **not** set in prod (thin execution fallback only)
+- [ ] `close_turn` keeps the turn open while a pending row exists
+
+## Backup & ops alerting
+
+- [ ] Universal + `native_pg_backup` cadence is **6h** (not 24h); local PG staging retention default **3** (restic keeps history)
+- [ ] Universal backup **checks** PG dump freshness — a missing/stale dump is not `"ok": true`
+- [ ] `ops_alerts` reach Telegram (and FanOut if Discord/Slack configured); kill-switch `KAZMA_OPS_ALERTS=0` only during a noisy incident
+- [ ] Guard Telegram is separate (child-down). 503 cause-quality (`database: …` vs `Service Unavailable`) is **deferred**: [`GUARD_OPS_ALERTING_CAUSE_QUALITY.md`](https://github.com/Mubder/kazma/blob/main/docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md)

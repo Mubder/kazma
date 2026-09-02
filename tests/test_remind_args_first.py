@@ -112,7 +112,8 @@ def test_no_memory_absolute_timing_allows(ops_db):
 
 def test_conflicting_timing_does_not_short_circuit(ops_db):
     """CoPilot guard preserved: a timing that contradicts a belief must NOT be
-    auto-allowed by the args-first path — it falls through to clarify."""
+    auto-allowed by the args-first path. Chat text 'yes' has no time options,
+    so this is deny (not a Cancel-only card) — still not an allow."""
     d = authorize_effect(
         "schedule_task",
         {"timing": "2026-09-15T00:00:00+00:00", "prompt": "x"},  # far from GROK Aug 15
@@ -120,7 +121,9 @@ def test_conflicting_timing_does_not_short_circuit(ops_db):
         request_at=REQUEST_AT, memory_beliefs=GROK,
         thread_id="t-args-3", turn_id="turn1",
     )
-    assert d.decision == "clarify", "conflicting timing must clarify (CoPilot guard)"
+    assert d.decision != "allow", "conflicting timing must not allow (CoPilot guard)"
+    if d.decision == "clarify":
+        assert d.options and any(o.get("id") != "cancel" for o in d.options)
 
 
 def test_relative_timing_falls_through_to_chat(ops_db):
@@ -236,4 +239,24 @@ def test_conflicting_absolute_timing_still_guarded(ops_db):
         request_at=REQUEST_AT_0816, memory_beliefs=TZ_BELIEFS,
         thread_id="t-0816-3", turn_id="turn1",
     )
-    assert d.decision == "clarify", "conflicting absolute timing must clarify"
+    assert d.decision != "allow", "conflicting absolute timing must not allow"
+    if d.decision == "clarify":
+        assert d.options and any(o.get("id") != "cancel" for o in d.options)
+
+
+def test_missing_time_is_deny_not_cancel_only_card(ops_db):
+    """No parseable time in chat AND no absolute args.timing is a missing slot.
+
+    A clarify interrupt with only Cancel parks the turn: no date to pick, no
+    assistant reply (2026-09-02). Deny so the model asks in the final reply.
+    """
+    d = authorize_effect(
+        "schedule_task",
+        {"prompt": "the weekly reset"},
+        user_text="schedule them all",
+        request_at=REQUEST_AT, memory_beliefs=[],
+        thread_id="t-no-time", turn_id="turn1",
+    )
+    assert d.decision == "deny"
+    assert "ask when to fire" in (d.reason or "").lower() or "no time" in (d.reason or "").lower()
+    assert not d.options

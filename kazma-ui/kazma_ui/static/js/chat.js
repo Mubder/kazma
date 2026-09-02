@@ -720,6 +720,14 @@
     return createAssistantMessage();
   }
 
+  /** Pin the open-turn assistant. NEVER `createAssistantMessage()` from
+   *  progress/HITL/token paths — that minted the CoT ladder (one bubble per
+   *  plan hop) after currentMsgEl was left null by historical-render. */
+  function _pinLiveAssistantBubble() {
+    currentMsgEl = _assistantBubbleForOpenTurn();
+    return currentMsgEl;
+  }
+
   // ── Slash commands (catalog lives in chat_slash.js) ───────────
   var SLASH_COMMANDS = window.KAZMA_SLASH_COMMANDS || [
     { cmd: '/help', desc: 'List available slash commands' },
@@ -2192,7 +2200,7 @@
       onToolCall: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+        _pinLiveAssistantBubble();
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
           try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
@@ -2315,7 +2323,7 @@
             && !_turnPainted) {
           diag('empty-terminal');
           dumpDiagnostics();
-          currentMsgEl = createAssistantMessage();
+          _pinLiveAssistantBubble();
           var emptyEl = currentMsgEl.querySelector('.message-text');
           if (emptyEl) {
             var retryHtml = '';
@@ -2468,7 +2476,7 @@
         // turn may have completed server-side and be durable already).
         _clearStatusStrip();
         activeTypingEl = null;
-        if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+        _pinLiveAssistantBubble();
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
           '<br><button class="btn btn-sm btn-danger" onclick="window.KazmaChat.retry()">Retry</button></div>';
@@ -2774,7 +2782,7 @@
 
   function ensureProgressPanel() {
     if (_isUserBubble(currentMsgEl)) currentMsgEl = null;
-    if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+    _pinLiveAssistantBubble();
     _rescueTurnDom(currentMsgEl);
     var content = _bubbleContent(currentMsgEl);
     if (!content) return null;
@@ -4252,7 +4260,7 @@
     // card's own handlers.
     _clearStoreApproval();
     var targetThreadId = data.thread_id || chatSessionId || '';
-    if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+    _pinLiveAssistantBubble();
     var content = currentMsgEl.querySelector('.message-content');
     if (!content) return;
     // Never strip a claimed card (Approved/Denied) — that is the
@@ -4298,7 +4306,9 @@
           // security card: keep the workbench and its steps.
           beginTurn({ resume: true });
           var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once',
-                          session_id: chatSessionId || '', choices: {} };
+                          session_id: chatSessionId || '',
+                          interrupt_id: data.interrupt_id || '',
+                          choices: {} };
           payload.choices[_semTcid] = optId;
           fetch('/api/approve/' + encodeURIComponent(data.thread_id || targetThreadId), {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4309,8 +4319,17 @@
               return { status: r.status, body: body || {} };
             }).catch(function() { return { status: r.status, body: {} }; });
           }).then(function(res) {
+            if (res.status === 409) {
+              _awaitingApproval = false;
+              if (act) act.innerHTML = '<span class="hitl-status">Already resolved</span>';
+              if (!activeStream && typeof _reopenSseRef === 'function') {
+                try { _reopenSseRef('approve-409'); } catch (eRe) { /* ignore */ }
+              }
+              return;
+            }
             if (res.status >= 400 || (res.body && res.body.ok === false)) {
               if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
+              _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
               return;
             }
             _awaitingApproval = false;
@@ -4320,6 +4339,7 @@
             }
           }).catch(function() {
             if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
+            _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
           });
         });
       });
@@ -4437,7 +4457,7 @@
 
     function appendAssistantText(text) {
       if (!text) return;
-      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      _pinLiveAssistantBubble();
       var textEl = currentMsgEl.querySelector('.message-text');
       if (!textEl) {
         textEl = document.createElement('div');
@@ -4498,9 +4518,7 @@
         interrupt_id: data.interrupt_id || '',
       };
 
-      if (!currentMsgEl) {
-        currentMsgEl = createAssistantMessage();
-      }
+      _pinLiveAssistantBubble();
 
       applyTurnEvent({
         type: 'hitl',
@@ -5825,7 +5843,7 @@
       currentMsgEl = null;
       el = _assistantBubbleForOpenTurn();
     }
-    if (!el) el = createAssistantMessage();
+    if (!el) el = _assistantBubbleForOpenTurn();
     // A bubble FOLLOWED by a user message belongs to a closed historical
     // turn: paint it, but never let it capture the open-turn pointer. A late
     // hydrate/resync for the previous turn used to re-pin its bubble as
@@ -6049,7 +6067,7 @@
       _clearStatusStrip();
       activeTypingEl = null;
       logProgress({ kind: 'error', title: ti('error', 'Error'), detail: String(errMsg || ''), state: 'failed' });
-      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      _pinLiveAssistantBubble();
       var textEl = currentMsgEl.querySelector('.message-text');
       if (textEl) textEl.innerHTML = '<div class="error-message" style="display:flex;align-items:flex-start;gap:6px;">' +
         (window.KazmaIcons ? KazmaIcons.span('alert') : '') + escapeHtml(errMsg) + '</div>';
@@ -6067,7 +6085,7 @@
     },
     onStreamToken: function(content) {
       _clearStatusStrip();
-      if (!currentMsgEl) currentMsgEl = createAssistantMessage();
+      _pinLiveAssistantBubble();
       tokenAccum += content;
       tryIngestPlanFromText(tokenAccum);
       var textEl = currentMsgEl.querySelector('.message-text');

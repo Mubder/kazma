@@ -2,7 +2,7 @@
 id: recent-features
 title: Recent features guide
 sidebar_label: Recent features
-description: Operator guide for deep research, KB hardening, proxy coverage, memory explain, /memory admin, and the 2026-08-24 memory audit fixes
+description: Operator guide for recent Kazma features — Turn Delivery, HITL registry, research, KB, memory, documents, X Studio
 ---
 
 # Recent features guide
@@ -11,6 +11,15 @@ This page is the **operator-facing tour** of the features landed in the
 research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
+
+**New in 2026-09-01/02:** Turn Delivery V2 (journal + `close_turn`; the chat
+bubble **projects**). HITL Gate Registry (`hitl_gates.db` — one card, one
+row, 409 on a second Approve). Industrial audit waves 0–8 shipped
+([exec](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md)).
+SSRF pin-IP on direct scraping. Context integrity (scratchpad merge, stored
+proposals, trim summary net, `shift_explicit` vs inferred). FanOut HITL is
+**tri-state**. Reload: `kazma_guard.py --reload`. Guard 503 cause-quality is
+[deferred](https://github.com/Mubder/kazma/blob/main/docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md).
 
 **New in 2026-08-31:** [X Studio](./x-publisher) (`/x`) is the compose and
 plan surface (Post now, Schedule, reschedule, threads, delete, saved
@@ -34,10 +43,13 @@ resolution + git-write blast radius), transcript recall fallback
 
 ---
 
-## What's new — reliability & ecosystem (August 2026)
+## What's new — reliability & ecosystem (August–September 2026)
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Turn Delivery + HITL registry (2026-09)** | Chat journal is SoT; `close_turn` is the only closer; client projects. One HITL row in `hitl_gates.db` (`pending` = live buttons; second claim **409**). FanOut is tri-state. | [Security](./security-and-safety); [Diagnosis map](../ops/diagnosis-map); AGENTS.md §30–§31 |
+| **SSRF pin-IP (Wave 8)** | Direct scrape connects to the validated public IP; private peer abort. Skip pin when a proxy is set. | [Security](./security-and-safety); `KAZMA_JINA_READER=1` still opt-in |
+| **Context integrity (2026-08-30)** | Scratchpad merges; drafts live in `agent_artifacts.db`; trim always summarizes dropped turns; only an **explicit** topic pivot disarms recall. | [Memory](./memory-and-rag); AGENTS.md §29 |
 | **X Studio (2026-08-31)** | First-class `/x` composer + X-only planner. Post now / Schedule / reschedule / thread hops / delete. Saved drafts stamp `proposal_id` (stored text wins). Chat `x_post` stays always-HITL. **All clocks** → `/scheduled` (mixed cron + X). | [X publisher](./x-publisher); sidebar → X Studio |
 | **Brand type + mark (2026-08-31)** | IBM Plex Sans / IBM Plex Sans Arabic across UI, docs, and generated documents (Amiri naskh fallback). Letterhead K is logo, favicon, avatar. PPTX/XLSX no longer hard-code Calibri. | [Arabic & cultural](./arabic-cultural-features); [Document rendering](./document-rendering) |
 | **Guard reload + stall fixes (2026-08-31)** | `--reload` stops the recorded child and port holder, skips crash backoff, waits the boot budget, kicks `KazmaAgent` only if the watcher is dead. `file_search` off the event loop. File-tool results capped at 32k. Plan-only hops stay out of the chat transcript. | `python scripts/service/kazma_guard.py --reload`; [Deployment](./deployment) |
@@ -57,8 +69,8 @@ resolution + git-write blast radius), transcript recall fallback
 | **Monaco + apply-patch (2026-08-25)** | `/ide` uses the VS Code Monaco engine (textarea fallback). Agent edits use `file_apply_patch` (HITL) instead of rewriting whole files. | `/ide`; [IDE](../products/ide); [Tools catalog](../reference/tools-catalog) |
 | **pgvector memory search (2026-08-25)** | When Postgres is on, dense recall uses pgvector (auto). Postgres-primary is ILIKE + vector RRF, not ILIKE-only. `KAZMA_PGVECTOR=0` keeps sqlite-vec. | Settings → Memory; [Memory & RAG](./memory-and-rag); [Postgres & SaaS](../ops/postgres-and-saas) |
 | **Memory system audit (2026-08-24)** | Ego-graph hub anchors (no more floating concept nodes), PG-mirror tombstones + `scripts/reconcile_memory_mirror.py`, tenant-scoped graph-clear (no all-tenants wipe), FTS drift rebuild on the 6h sweep, merge-ledger archive, Ungroup, honest truncation banner | `/memory`; restart after `git pull` |
-| **Universal backup** | One unified backup of ALL data: every SQLite DB (WAL-safe), all assets (document-store, workspace, attachments, vectors), and Postgres — with auto (24h) + manual triggers, progress bar, and delete/archive/download | Settings → **Backup tab**; `POST /api/backup/now` |
-| **Postgres backup** | Nightly automatic `pg_dump` of Kazma's tables (atomic, validated, 7-day retention) + boot-time schema verification + one-command restore | `kazma-data/backups/pg/`; `python scripts/pg_backup.py backup\|restore --latest\|list` |
+| **Universal backup** | One unified backup of ALL data: every SQLite DB (WAL-safe), all assets (document-store, workspace, attachments, vectors). Auto **6h** + manual; **checks** PG dump freshness (does not dump twice). Progress bar, delete/archive/download | Settings → **Backup tab**; `POST /api/backup/now` |
+| **Postgres backup** | Automatic `pg_dump` of `KAZMA_PG_TABLES` (atomic, validated; local staging retention **3**, restic keeps history) + boot-time schema verification + one-command restore | `kazma-data/backups/pg/`; `python scripts/pg_backup.py backup\|restore --latest\|list` |
 | **Agent Skills marketplace** | Browse/install the open `agentskills.io` ecosystem (GitHub `topic:agent-skills`) from the UI; the agent can `search_agent_skills` + `install_agent_skill` | `/skills` → Marketplace tab |
 | **Bundled starter skills** | 3 Kazma-native skills ship in-tree (release-notes, conventional-commits, ui-conventions), checksum-verified | `/skills` (scope: bundled) |
 | **Windows tool fixes** | Browser tools, `shell_exec`, telemetry, Ollama pull, runtime installs now actually work on Windows (selector-loop subprocess trap fixed) | transparent — tools that silently did nothing now run |
@@ -97,10 +109,11 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 | Memory admin | Graph dedupe, rename, list↔graph, belief edit, hub brand, Group/Ungroup, truncation honesty | `/memory` |
 | Memory explain | Channel chips on chat turns + Dashboard probe | Settings → Memory → Explain recall |
 | Golden eval | Offline recall regression | Dashboard → Run golden eval |
-| Topic-shift focus | Agent soft-resets focus when user changes subject; tunable drift threshold | Settings → `agent.topic_drift.*` |
+| Topic-shift focus | **Explicit** pivot disarms recall; inferred drift only re-ranks. Interrogative check-ins never count as drift | Settings → `agent.topic_drift.*`; AGENTS.md §29 |
 | Non-Stop & Self-Healing | Supervisor watchdog, model failover chain, call ledger, orphan recovery, HITL timeout | Settings → Agent → Non-Stop Execution |
 | Scraper Hardening | Size caps (5MB default), 5xx retry backoff, robots.txt compliance | `read_url`, `crawl_site`, `KAZMA_FETCH_MAX_BYTES` |
 | Truncation Auto-Retry | Double max_tokens on length truncation + `file_append` chunk tool | `llm_provider`, `LocalToolRegistry` |
+| **Turn Delivery / HITL registry** | Journal + `close_turn`; one gate row; 409 on second Approve | [Security](./security-and-safety) · [Diagnosis](../ops/diagnosis-map) |
 | **Commitment Layer** | Resolve-before-act gate; semantic clarify/confirm cards; exec denylist; modes + kill-switches | [Commitment Layer](./commitment-layer) |
 | **Steer / Abort** | `/steer` (soft), `/steer!` (pause+inject), `/abort` for a running task | [Slash commands](../reference/slash-commands#-running-task-commands) |
 | **Path grants** | Outside-workspace access by permission (session grant or durable `extra_roots`) | [IDE → Path grants](../products/ide#path-grants-outside-workspace-access) |
@@ -108,9 +121,29 @@ detail in `CHANGELOG.md` and `AGENTS.md` §21–§23. Audit:
 
 ---
 
-## 0. Latest shipping (2026-08)
+## 0. Latest shipping (2026-09, then 2026-08)
 
-The most recent tranche — beyond the items in the table above:
+**September 2026 (industrial audit waves 0–8):**
+
+- **Turn Delivery V2** — event-sourced chat: journal + `close_turn`. Token
+  deltas append; only `turn_complete` replaces. Do not restore a second
+  painter in `chat.js`.
+- **HITL Gate Registry** — `hitl_gates.db` CAS (`pending → claimed →
+  settled`). Ghost / pre-stamped Approved cards were the incident class.
+  Kill-switch `KAZMA_GATE_REGISTRY=0` is a thin execution fallback, not a
+  second author. [Security](./security-and-safety) · AGENTS.md §30.
+- **FanOut tri-state** — with 2+ chat platforms, a Deny is a vote until
+  `expected_voters` or the deadline. Web first-claim stays 200/409.
+- **SSRF pin-IP** — direct scraping pins the public IP; abort if the peer is
+  private. Do not pin through `proxy=`.
+- **Context integrity** — scratchpad merge reducer; durable proposals;
+  summary net on every trim; `shift_explicit` vs `shift_inferred`.
+- **Docs pass** — `AGENTS.md`, architecture, swarm, system map, security,
+  memory, commitment, diagnosis, this page, production checklist.
+- Guard 503 still says `unreachable: Service Unavailable` (Docker/Postgres).
+  Deferred: [Guard/ops alerting](https://github.com/Mubder/kazma/blob/main/docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md).
+
+The August tranche — beyond the items in the table above:
 
 - **X Studio (`/x`)** — compose, schedule, reschedule, thread hops, delete a
   live tweet, load a saved draft. Chat `x_post` stays always-HITL; the Web
@@ -514,8 +547,16 @@ Full tables: [API routes](../reference/api-routes).
 
 ## 8. Verify after upgrade
 
-Use the checkbox matrix: **[Smoke matrix](../ops/smoke-matrix)**  
-(Production go-live still uses [Production checklist](../ops/production-checklist).)
+Operator reload (do **not** kill python/uvicorn):
+
+```powershell
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
+& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
+```
+
+Then: `GET /health/deep` 200; HITL one-card Approve + 409 on the second click;
+[Smoke matrix](../ops/smoke-matrix). Production go-live:
+[Production checklist](../ops/production-checklist).
 
 ---
 
@@ -528,3 +569,5 @@ Use the checkbox matrix: **[Smoke matrix](../ops/smoke-matrix)**
 | V2 + inject operator path | [Memory best path](./memory-best-path) |
 | Web surfaces | [Web UI](../products/web-ui) |
 | Multi-path debugging | [Diagnosis map](../ops/diagnosis-map) |
+| Build contract | [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) (§30–§33) |
+| Industrial audit | [`AUDIT_DEEP_2026-09-01_EXEC.md`](https://github.com/Mubder/kazma/blob/main/docs/audits/AUDIT_DEEP_2026-09-01_EXEC.md) |

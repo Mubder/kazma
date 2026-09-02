@@ -2,10 +2,10 @@
 id: memory-and-rag
 title: Memory & RAG
 sidebar_label: Memory & RAG
-description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, /memory admin, ego-graph anchoring, optional Neo4j/Postgres adapters (2026-08)
+description: Kazma V2 cognitive memory — beliefs, episodes, KB inject, /memory admin, ego-graph anchoring, optional Neo4j/Postgres adapters
 ---
 
-> **Live SoT (2026-08).** V2 is the **only** chat memory stack.
+> **Live SoT (2026-09).** V2 is the **only** chat memory stack. Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §15, §20 (source-trust), §29 (context integrity / shift).
 >
 > - **Personal memory** — bi-temporal beliefs, 4-tier episodes, PPR, FTS5 + dense (sqlite-vec on one node; **pgvector** when Postgres is on), durable queue.
 > - **Knowledge Library** — separate store; **product merge** via labeled inject + federated search (not one table).
@@ -96,7 +96,7 @@ database.
 ### Post-turn
 
 - Mirror working/recall episode  
-- Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`  
+- Heuristic (+ optional LLM queue) belief extraction → `mutate_belief`. A `user_explicit` functional belief **cannot** be superseded by `llm_inferred` / `system_tool` (commitment source-trust gate in `_mutate_functional`; independent of `authorize_effect`).  
 - Hygiene rejects stack/version subjects (e.g. `kazma_v2_4_0` mistaken for product version)  
 - Dual-write: optional Postgres state mirror + Neo4j edge upsert  
 - **Ego-graph anchor** — every non-hub subject that does not already reach `user` gets `user → related_to → <subject>` at write time (payload leaves **and** floating entity clusters). Payload objects (`fully_clean`, paths) are **not** minted as concept entities (that mint used to skip the hub edge). Idempotent backfill on the 6h sweep.  
@@ -104,18 +104,21 @@ database.
 
 ### Schedulers (`worker_bootstrap`)
 
+**All loops start from `start_memory_worker()`** — add a new one there or it never runs (the gap that once left backups inert). Current boot list is **eight** loops.
+
 | Cadence | Work |
 |---------|------|
 | ~6h | `macro_sleep` (decay / tier moves) + ego-anchor backfill + FTS drift COUNT (`*_docsize` vs base; rebuild on mismatch) |
-| ~24h | native backup + JSONL/GraphML/episodes/merges/audit export + mirror-drift warning |
+| **~6h** (not 24h) | `native_backup` + JSONL/GraphML/episodes/merges/audit export + `native_pg_backup` + mirror-drift warning. Universal backup **checks** PG dump freshness; it does not dump twice. |
 | ~24h | `global_reconsolidation` (dedupe + re-embed; **partitioned** for large corpora; recomputes entity counts) |
-| ~15m | commitment GC |
+| ~15m | commitment GC (TTL + soul-pending) **and** HITL-gate TTL sweep — no extra sweeper |
+| (also from this boot) | session purge, daily digest, weekly firing ledger, restore drill |
 
 Huge corpus: subject-hash partitions + chained queue tasks (see `global_reconsolidation.py`).
 
-Nightly export writes `kazma_beliefs_latest.jsonl`, GraphML, plus episodes, `beliefs_archive`, `entity_merges` (+ archive), and `memory_audit_log` (per-tenant filenames when not `default`). Native `.db` backups remain the restore SoT.
+Export writes `kazma_beliefs_latest.jsonl`, GraphML, plus episodes, `beliefs_archive`, `entity_merges` (+ archive), and `memory_audit_log` (per-tenant filenames when not `default`). Native `.db` backups remain the restore SoT.
 
-Postgres mirror drift (dead facts still live in `kazma_beliefs`): the 24h handler logs a warning. Reconcile with:
+Postgres mirror drift (dead facts still live in `kazma_beliefs`): the backup handler logs a warning. Reconcile with:
 
 ```bash
 python scripts/reconcile_memory_mirror.py --dry-run
@@ -281,7 +284,7 @@ not a hardcoded “You”.
 | `memory/backends.py` | Vector / state / graph factory; pgvector auto-select; env Neo4j defaults |
 | `memory/federated_search.py` | Memory + KB labeled search |
 | `memory/global_reconsolidation.py` | Dedup + re-embed (partitioned) |
-| `memory/worker_bootstrap.py` | Queue handlers + schedulers |
+| `memory/worker_bootstrap.py` | Queue handlers + **eight** schedulers (single boot entry) |
 | `memory/v2_health.py` / `health.py` | Health APIs for Dashboard / Packages |
 | `kazma_ui/memory_api.py` | `/memory` admin routes (rename, edit, merge, hygiene) |
 | `kazma_ui/static/js/memory_console.js` | V2 canvas + inspect rename |
@@ -330,7 +333,8 @@ danger tools, no permissions. Suppressed-recall turns skip it too.
 ## Related
 
 - [Memory best path](./memory-best-path.md) — operator checklist  
-- [Architecture](./architecture.md) · [Knowledge Library](./knowledge-library.md)  
+- [Architecture](./architecture.md) · [Knowledge Library](./knowledge-library.md) · [Commitment Layer](./commitment-layer.md)  
 - [Diagnosis map](../ops/diagnosis-map.md)  
 - Plan: `docs/plans/MEMORY_REMAINING.md`  
-- Audit: `docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md` (M-01..M-17 closed)
+- Audit: `docs/audits/AUDIT_MEMORY_SYSTEM_2026-08-24.md` (M-01..M-17 closed)  
+- Invariants: [`AGENTS.md`](https://github.com/Mubder/kazma/blob/main/AGENTS.md) §15 (schedulers), §20 (source-trust), §29 (trim / shift / scratchpad)
