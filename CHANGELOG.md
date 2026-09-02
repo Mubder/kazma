@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Fix — Kazma self-audit findings: PBKDF2 alignment + doc drift (2026-09-02)
+
+Fixes the three verified findings from Kazma's internal read-only audit
+(report fact-checked against the code first — all three confirmed real):
+
+- ``platform_rbac`` login-password hashing now uses 600,000 PBKDF2-SHA256
+  iterations, aligned with the vault and OWASP guidance. The hash format
+  encodes the iteration count (``pbkdf2_sha256$<iter>$<salt>$<digest>``);
+  legacy 3-field hashes (implicit 200k) still verify and are silently
+  re-hashed at 600k on the next successful login — no user is locked out.
+- SECURITY.md "Supported Versions" refreshed from the stale 0.6.x table
+  to 0.10.x (the shipped version).
+- Telegram adapter docstring no longer claims "empty = allow all" — the
+  allowlist is fail-closed (empty + ``allow_all=False`` rejects everyone);
+  the doc now matches the code.
+
 ## Fix — audit round: semantic cards carry their interrupt id; reconcile never guesses (2026-09-02)
 
 Full audit of the HITL chain (registry lifecycle, approve endpoint,

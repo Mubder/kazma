@@ -92,7 +92,10 @@ class TelegramAdapter(BaseAdapter):
 
     Args:
         token:          Telegram Bot API token.
-        allowed_users:  Optional whitelist of user IDs (empty = allow all).
+        allowed_users:  Whitelist of user IDs. Fail-closed: empty with
+                        ``allow_all=False`` (the default) rejects everyone —
+                        configure the list in Settings or pass
+                        ``allow_all=True`` to accept from all users.
         parse_mode:     Default parse_mode for outbound messages.
         poll_timeout:   Long-poll timeout in seconds for getUpdates (default 5).
         voice_enabled:  Whether to transcribe voice messages (default False).
