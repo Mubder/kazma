@@ -51,13 +51,25 @@ _DEEP_RE = re.compile(
     re.I,
 )
 
-_RESEARCH_RE = re.compile(
-    r"\b("
-    r"research|investigate|look\s+up|find\s+out|what\s+do\s+sources|"
-    r"survey|literature|compare\s+vendors|market\s+analysis"
-    r")\b",
-    re.I,
+# Non-deep research as an *ask* at the start of the utterance, not a
+# mention in product copy ("runs research", "research on demand").
+_RESEARCH_ASK_RE = re.compile(
+    r"(?is)\A(?:please\s+|can\s+you\s+|could\s+you\s+)?"
+    r"(?:research|investigate|look\s+up|find\s+out)\b"
+    r"|\b(?:what\s+do\s+sources|survey|literature|compare\s+vendors|"
+    r"market\s+analysis)\b",
 )
+
+
+def _opening_window(text: str) -> str:
+    """First-line / first-ask slice. Mentions deeper in a paste are ignored."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    first = t.split("\n", 1)[0].strip()
+    if len(first) <= 220:
+        return first
+    return t[:180]
 
 _ACQUIRE_TOOLS = frozenset(
     {
@@ -108,7 +120,20 @@ _TOPIC_STRIP = re.compile(
 
 
 def is_deep_research_intent(text: str) -> bool:
-    return bool(text and _DEEP_RE.search(text))
+    """True when the user is *asking* for deep research, not mentioning it.
+
+    Intent execute auto-starts ``start_deep_research`` at confidence 0.86.
+    A pasted Telegram reminder that listed "deep research on demand" as a
+    product bullet was treated as that ask (2026-09-02) and burned a real
+    8-source pipeline on the alert text. Only the opening ask (or an
+    explicit ``/research`` line) counts.
+    """
+    t = (text or "").strip()
+    if not t:
+        return False
+    if re.search(r"(?m)^\s*/research(\s+deep)?\b", t, re.I):
+        return True
+    return bool(_DEEP_RE.search(_opening_window(t)))
 
 
 def is_research_intent(text: str) -> bool:
@@ -116,7 +141,7 @@ def is_research_intent(text: str) -> bool:
         return False
     if is_deep_research_intent(text):
         return True
-    return bool(_RESEARCH_RE.search(text))
+    return bool(_RESEARCH_ASK_RE.search(_opening_window(text)))
 
 
 def soft_min_sources() -> int:

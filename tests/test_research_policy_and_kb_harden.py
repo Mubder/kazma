@@ -24,6 +24,37 @@ def test_deep_intent_and_nudge():
 
     assert is_deep_research_intent("Please research thoroughly the X market")
     assert not is_deep_research_intent("what is 2+2")
+    # 2026-09-02: pasted Telegram reminder listed "deep research on demand"
+    # as a product bullet — that is not a request to run the pipeline.
+    pasted_alert = (
+        "✅ **Kazma test — delivered successfully.**\n\n"
+        "If you're reading this, the scheduled delivery works end-to-end:\n\n"
+        "- **What fired:** The test reminder scheduled for Kazma "
+        "(your AI supervisor).\n"
+        "- **Fired at:** 03:39 UTC / 06:39 Kuwait time.\n"
+        "- **What it proves:** The full loop is working.\n\n"
+        "Kazma is live for:\n"
+        "- ⏰ **Reset reminders**\n"
+        "- 🔍 **Code audits** — on request\n"
+        "- 🧠 **Research runs** — deep research on demand\n"
+        "- 🔔 **Alerts** — straight to your Telegram\n"
+    )
+    assert not is_deep_research_intent(pasted_alert)
+    from kazma_core.agent.research_policy import is_research_intent
+
+    assert not is_research_intent(pasted_alert)
+    assert is_deep_research_intent("deep research on fusion energy")
+    assert is_deep_research_intent("/research deep solid-state batteries")
+    # Phrase buried after the opening window is incidental copy, not an ask.
+    buried = ("padding. " * 40) + "\n- 🧠 Research runs — deep research on demand"
+    assert not is_deep_research_intent(buried)
+
+    from kazma_core.agent.intent.heuristics import detect_acts
+    from kazma_core.agent.intent.types import ActKind
+
+    kinds = {a.kind for a in detect_acts(pasted_alert)}
+    assert ActKind.RESEARCH_DEEP not in kinds
+    assert ActKind.RESEARCH not in kinds
 
     msgs = [{"role": "user", "content": "Deep research on solid state batteries"}]
     nudge = should_nudge_more_sources(msgs, ["web_search"], already_nudged=False)
