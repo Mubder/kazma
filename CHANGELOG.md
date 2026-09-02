@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Fix — Web cron alerts Telegram; mid-turn send retires old stream (2026-09-02)
+
+Web-booked reminders fired on time then dropped: `_deliver` had
+`delivery_target=""` (SSE/WS never stamped `_gateway`; `/scheduled` hardcoded
+empty). Jobs now capture operator Telegram (`swarm_chat_id` / first
+`allowed_users`) at booking and fail closed if none exists. Tool JSON includes
+Kuwait-local fire time, not UTC-only. Mid-turn send bumps `_sseEpoch` and
+retires the old `turn_id` so leftover SSE/WS tokens cannot keep painting the
+first bubble or duplicate into the new reply.
+
 ## Fix — schedule_task 5m/288h is native from-now (2026-09-02)
 
 Compact ``Nm``/``Nh`` in ``args.timing`` is the scheduler's advertised API.

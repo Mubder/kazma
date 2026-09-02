@@ -201,12 +201,32 @@ def create_scheduled_router(agent: Any, templates: Jinja2Templates) -> APIRouter
         if sched is None:
             return JSONResponse({"ok": False, "error": "Cron scheduler not initialized."}, status_code=503)
         try:
+            from kazma_core.tools.send_message import resolve_delivery_target
+
+            delivery_target = resolve_delivery_target()
+            if not delivery_target:
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": (
+                            "Cannot schedule: no delivery address. Set "
+                            "connectors.telegram.swarm_chat_id or allowed_users "
+                            "so a Web-booked reminder can alert you on Telegram."
+                        ),
+                    },
+                    status_code=400,
+                )
+            platform = (
+                delivery_target.split(":", 1)[0]
+                if ":" in delivery_target
+                else "telegram"
+            )
             result = await sched.schedule(
                 timing=body.timing.strip(),
                 prompt=body.prompt.strip(),
-                platform="web",
+                platform=platform,
                 thread_id="",
-                delivery_target="",
+                delivery_target=delivery_target,
             )
             return JSONResponse({"ok": True, **result})
         except ValueError as exc:

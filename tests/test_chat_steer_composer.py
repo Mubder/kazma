@@ -65,6 +65,40 @@ def test_followup_supersedes_instead_of_wait() -> None:
     assert "cancel_turn(thread_id)" in sse
 
 
+def test_abort_generation_retires_live_turn_before_stop_wait() -> None:
+    """Mid-turn send must not keep painting the first bubble.
+
+    abortThenSend waits up to 1.5s for POST /stop. If `_sseEpoch` stays
+    current and `_liveTurnId` follows the old turn, old tokens write into
+    bubble 1 and old `done` without turn_id dumps into the new reply.
+    """
+    js = _js()
+    abort = js.split("function abortGeneration(opts)", 1)[1].split(
+        "function abortThenSend", 1
+    )[0]
+    assert "_sseEpoch++" in abort
+    assert "_retireLiveTurn()" in abort
+    assert abort.find("_sseEpoch++") < abort.find("fetch('/api/chat/stop'")
+    assert "function _retireLiveTurn()" in js
+    apply = js.split("function applyTurnEvent(ev)", 1)[1].split(
+        "function destroyChatMouth", 1
+    )[0]
+    assert "_isRetiredTurn" in apply
+    assert "_supersededLive" in apply
+    assert "src === 'ws'" in apply
+    store = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "static"
+        / "js"
+        / "stores"
+        / "agentStore.js"
+    ).read_text(encoding="utf-8")
+    assert "_isSupersededFrame" in store
+    assert "must not resurrect" in store
+
+
 def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> None:
     js = _js()
     assert "thread_id: currentThreadId()" in js

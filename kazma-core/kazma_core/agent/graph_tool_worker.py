@@ -562,15 +562,22 @@ async def tool_worker_node(
     # was booked from, even after the SessionStore row is TTL-evicted.
     from kazma_core.tools.send_message import (
         get_current_delivery_target,
+        is_valid_delivery_target,
         reset_current_delivery_target,
+        resolve_delivery_target,
         set_current_delivery_target,
     )
 
     _delivery_token = None
-    if not get_current_delivery_target():
+    if not is_valid_delivery_target(get_current_delivery_target()):
         _gw = state.get("_gateway") or {}
         _delivery = _gw.get("delivery_target") if isinstance(_gw, dict) else None
-        if _delivery:
+        if not is_valid_delivery_target(_delivery):
+            try:
+                _delivery = resolve_delivery_target()
+            except Exception:
+                _delivery = None
+        if is_valid_delivery_target(_delivery):
             _delivery_token = set_current_delivery_target(str(_delivery))
 
     # Phase 2.5: the semantic commitment gate is extracted to

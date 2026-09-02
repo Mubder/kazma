@@ -7,6 +7,7 @@ tenant-agnostic happy paths, and the same-origin CSRF guard on mutations.
 from __future__ import annotations
 
 from pathlib import Path
+import importlib
 
 import pytest
 from fastapi import FastAPI
@@ -38,7 +39,11 @@ class _FakeScheduler:
             "created_at": "", "next_run": next_run, "last_result": None,
             "tenant_id": "default", "delivery_target": delivery_target,
         }
-        return {"job_id": job_id, "timing": timing, "next_run": next_run, "status": "scheduled"}
+        return {
+            "job_id": job_id, "timing": timing, "next_run": next_run,
+            "status": "scheduled", "delivery_target": delivery_target,
+            "platform": platform,
+        }
 
     async def list_jobs(self):
         return list(self.jobs.values())
@@ -78,8 +83,20 @@ def x_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return store
 
 
+def _sm_mod():
+    """The send_message MODULE — package attr of that name is the function."""
+    return importlib.import_module("kazma_core.tools.send_message")
+
+
 @pytest.fixture()
-def client(cron_scheduler, x_store):
+def telegram_delivery(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        _sm_mod(), "resolve_delivery_target", lambda: "telegram:1804015016"
+    )
+
+
+@pytest.fixture()
+def client(cron_scheduler, x_store, telegram_delivery):
     from kazma_ui.scheduled_api import create_scheduled_router
 
     app = FastAPI()
@@ -135,7 +152,10 @@ def test_list_tasks_aggregates_cron_and_x(client, cron_scheduler, x_store) -> No
 def test_cron_create_edit_delete(client) -> None:
     created = client.post("/api/scheduled/cron", json={"timing": "1h", "prompt": "do it"}, headers=_CSRF)
     assert created.status_code == 200, created.text
-    job_id = created.json()["job_id"]
+    body = created.json()
+    job_id = body["job_id"]
+    assert body["delivery_target"] == "telegram:1804015016"
+    assert body["platform"] == "telegram"
 
     edited = client.put(f"/api/scheduled/cron/{job_id}", json={"prompt": "edited prompt"}, headers=_CSRF)
     assert edited.status_code == 200, edited.text
@@ -176,6 +196,31 @@ def test_csrf_blocks_mutation_without_header(client) -> None:
 def test_cron_create_rejects_bad_timing(client) -> None:
     resp = client.post("/api/scheduled/cron", json={"timing": "nonsense", "prompt": "x"}, headers=_CSRF)
     assert resp.status_code == 400
+
+
+def test_cron_create_fails_closed_without_delivery_target(
+    cron_scheduler, x_store, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Web cron create used to hardcode delivery_target="" — fire then drop."""
+    monkeypatch.setattr(_sm_mod(), "resolve_delivery_target", lambda: "")
+    from kazma_ui.scheduled_api import create_scheduled_router
+
+    app = FastAPI()
+    templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+    class _FakeAgent:
+        config = {}
+
+    app.include_router(create_scheduled_router(_FakeAgent(), templates))
+    with TestClient(app) as c:
+        resp = c.post(
+            "/api/scheduled/cron",
+            json={"timing": "1h", "prompt": "x"},
+            headers=_CSRF,
+        )
+    assert resp.status_code == 400
+    assert "delivery" in resp.json()["error"].lower()
+    assert cron_scheduler.jobs == {}
 
 
 def test_x_reschedule_and_delete(client, x_store) -> None:
