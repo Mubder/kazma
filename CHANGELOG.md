@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fix — schedule_task 5m/288h is native from-now (2026-09-02)
+
+Compact ``Nm``/``Nh`` in ``args.timing`` is the scheduler's advertised API.
+The gate now allow+rewrites it to ISO even when a reset belief is "nearby".
+Empty timing still denies (model asks in chat). Conflicting absolute ISO
+still does not auto-allow.
+
 ## Fix — CoT ladder mint + Cancel-only remind card (2026-09-02)
 
 Live CoT hops were calling `createAssistantMessage()` whenever

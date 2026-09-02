@@ -325,7 +325,8 @@ def _resolve_remind_act(
       * balanced    — resolve_remind's decision stands (default).
     """
     # Lazy imports (store → paths; relative_time is standalone).
-    from .relative_time import parse_absolute_timing, resolve_remind as _resolve
+    from .relative_time import compact_relative_delta, parse_absolute_timing
+    from .relative_time import resolve_remind as _resolve
     from .relative_time import validate_timing_against_memory
     from .store import Commitment, create_commitment
 
@@ -346,6 +347,41 @@ def _resolve_remind_act(
     # falls through to chat-text resolution.
     _timing_arg = str((args or {}).get("timing") or "").strip()
     _consistency = "not_absolute"
+
+    # Scheduler-native compact delay ("5m", "288m", "119h") is the tool's
+    # advertised API: explicit from-now, not an invented event date. Nearby
+    # memory events must NOT turn this into "no time expression" / deny —
+    # that parked every reschedule (2026-09-02). CoPilot guard stays on
+    # conflicting *absolute* ISO dates below.
+    if _timing_arg and mode != "strict":
+        _delta = compact_relative_delta(_timing_arg)
+        if _delta is not None:
+            _fire = request_at + _delta
+            _rewritten = dict(args)
+            _rewritten["timing"] = _fire.isoformat()
+            req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
+            _c = Commitment(
+                thread_id=thread_id or "", turn_id=turn_id, act="remind",
+                tool_name=tool_name, goal_text=(user_text or "")[:200],
+                args_digest=_args_digest(args), request_at=req_ts, tenant_id=tenant_id,
+                slots={"fire_at": _fire.isoformat(), "anchor": "request_at"},
+                conflicts=[], confidence=1.0,
+            )
+            _c.status = "ready"
+            _c.policy_decision = "allow"
+            _cid = create_commitment(_c, cfg=cfg)
+            logger.info(
+                "[commitment] allow+rewrite (compact timing) %s fire_at=%s "
+                "delta=%s cid=%s source=%s",
+                tool_name, _fire.isoformat(), _delta, _cid, source,
+            )
+            return EffectDecision(
+                decision="allow",
+                reason=f"scheduler-native timing {_timing_arg!r} → request_at + {_delta}",
+                profile=profile, audit=audit, commitment_id=_cid,
+                rewritten_args=_rewritten,
+            )
+
     if _timing_arg and mode != "strict":
         _consistency, _matched = validate_timing_against_memory(_timing_arg, memory_beliefs)
         _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
