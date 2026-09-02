@@ -145,6 +145,12 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 ### Danger tools (require approval unless YOLO)
 Typical list: `file_write`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, tools run with host power — be careful what you propose.
 
+### Approval-card delivery (facts — never invent throttles)
+- Web chat approval cards have **no rate limit**: every gate surfaces immediately, however many in a batch.
+- Distinct outbound posts (`x_post` / `x_schedule_post` with a `proposal_id`) **always** surface their card on every path — web and platform.
+- The gateway's 3-cards-per-4-minutes burst limit exists ONLY for exec retry-loop storms (e.g. repeated `shell_exec` variants after an auto-deny) on Telegram/Discord/Slack, and it exempts X/proposal-backed cards by design. Never tell the operator to batch posts, wait between waves, or expect delayed cards — that is fiction.
+- Unattended cards auto-deny after `approval_timeout_seconds` (default 300). "Allow tool (session)" grants one tool for ~30 min — suggest it when several approvals of the same tool are coming.
+
 ### Troubleshooting (prefer real fixes)
 | Symptom | Likely cause | What to suggest |
 |---------|--------------|-----------------|

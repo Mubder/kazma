@@ -68,10 +68,19 @@ async def x_status() -> str:
         return f"Error reading X status: {exc}"
 
 
-async def x_post(text: str, reply_to_id: str = "") -> str:
-    """Post one tweet via official X API v2. HITL is mandatory outside this function."""
+async def x_post(text: str, reply_to_id: str = "", proposal_id: str = "") -> str:
+    """Post one tweet via official X API v2. HITL is mandatory outside this function.
+
+    ``proposal_id`` is REQUIRED by the commitment gate (S1-3): the text
+    posted is rewritten from the stored proposal item, so approval resolves
+    a durable id — not the model's memory. Workflow: (1) persist drafts with
+    ``save_proposal(kind, items)``, (2) call this ONCE PER ITEM with that
+    item's proposal_id. One call must not fan out to multiple drafts.
+    """
     ok, payload = await publish_x_post(text=text, reply_to_id=reply_to_id or "")
     payload["ok"] = ok
+    if proposal_id:
+        payload["proposal_id"] = proposal_id
     return _json(payload)
 
 
@@ -115,17 +124,27 @@ def _booking_identity() -> tuple[str, str, str]:
     return tenant_id, thread_id, delivery_target
 
 
-async def x_schedule_post(text: str, when: str, reply_to_id: str = "") -> str:
+async def x_schedule_post(
+    text: str,
+    when: str,
+    reply_to_id: str = "",
+    proposal_id: str = "",
+) -> str:
     """Schedule a tweet to be posted automatically at a future time.
 
     HITL approval is required at booking. Kazma stores the draft and publishes
     it at the appointed time (X has no native post scheduling). The post only
     fires while the Kazma server is running.
 
+    ``proposal_id`` is REQUIRED by the commitment gate: the scheduled text is
+    rewritten from the stored proposal item. Persist drafts with
+    ``save_proposal(kind, items)`` first, then book ONE call per item.
+
     Args:
         text: The exact tweet text to publish.
         when: When to post: '5m', '1h', 'daily at 9am', or an ISO timestamp.
         reply_to_id: Optional tweet id to reply to (thread).
+        proposal_id: The saved proposal item id (from save_proposal).
 
     Returns:
         JSON with the scheduled post id, text and fire time.
