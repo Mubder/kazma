@@ -394,6 +394,27 @@ async def _stream_langgraph_events(
                 _resume_task.add_done_callback(_on_resume_done)
                 # shield: cancelling this generator (client left) must not
                 # cancel the graph run it detached.
+                #
+                # Heartbeat while the resumed graph runs: ainvoke journals
+                # NOTHING until close_turn, so the Live Task Card would show
+                # dead air for the whole resumed execution — the exact
+                # "is it hung?" blind spot after an approve (2026-09-03).
+                # Journaled heartbeats prove liveness to every attached
+                # surface (broker fan-out), not just this HTTP body.
+                while not _resume_task.done():
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(_resume_task), timeout=8.0
+                        )
+                        break
+                    except TimeoutError:
+                        yield ": keepalive\n\n"
+                        yield await emit_j("turn_heartbeat", {
+                            "phase": "resuming",
+                            "current": "",
+                            "step": 0,
+                            "elapsed_s": round(time.monotonic() - turn_start, 1),
+                        })
                 await asyncio.shield(_resume_task)
             else:
                 # Wrap astream_events with a keepalive generator so long LLM
@@ -495,6 +516,13 @@ async def _stream_langgraph_events(
 
                 stream_error: str | None = None
                 _stream_completed = False
+                # ── Live Task Card heartbeat: phase tracking ──────────────
+                # The merged indicator surface needs WHAT the turn is doing
+                # and THAT it is alive during long tool/LLM calls, which
+                # produce no other journaled frames. Phase is derived from
+                # the events already consumed here; the 10s queue-silence
+                # branch below journals a turn_heartbeat carrying it.
+                _hb: dict[str, Any] = {"phase": "llm", "current": "", "step": 0}
 
                 try:
                     while True:
@@ -507,9 +535,17 @@ async def _stream_langgraph_events(
                         try:
                             event = await asyncio.wait_for(_event_queue.get(), timeout=10.0)
                         except TimeoutError:
-                            # No event in 10s — send keepalive to hold the
-                            # connection open during long LLM processing.
+                            # No event in 10s — hold the HTTP body AND journal
+                            # a heartbeat so every surface (live card, journal
+                            # attach, refresh replay) can prove the turn is
+                            # alive and what phase it is in.
                             yield ": keepalive\n\n"
+                            yield await emit_j("turn_heartbeat", {
+                                "phase": _hb["phase"],
+                                "current": _hb["current"],
+                                "step": _hb["step"],
+                                "elapsed_s": round(time.monotonic() - turn_start, 1),
+                            })
                             continue
                         if event is None:
                             _stream_completed = True
@@ -525,6 +561,14 @@ async def _stream_langgraph_events(
                         kind = event.get("event", "")
                         data = event.get("data", {})
                         name = event.get("name", "")
+                        # LangGraph stamps langgraph_step on node events —
+                        # the Live Task Card's "step N" counter.
+                        _md = event.get("metadata")
+                        if isinstance(_md, dict) and _md.get("langgraph_step") is not None:
+                            try:
+                                _hb["step"] = int(_md["langgraph_step"])
+                            except (TypeError, ValueError):
+                                pass
 
                         # ── on_chat_model_stream: LLM token delta ──────────────
                         if kind == "on_chat_model_stream":
@@ -560,9 +604,13 @@ async def _stream_langgraph_events(
                         # ── on_chat_model_start: a new LLM invocation ────────
                         elif kind == "on_chat_model_start":
                             _first_token_of_model_call = True
+                            _hb["phase"] = "llm"
+                            _hb["current"] = ""
 
                         # ── on_chat_model_end: LLM finished — extract usage ────
                         elif kind == "on_chat_model_end":
+                            _hb["phase"] = "supervisor"
+                            _hb["current"] = ""
                             output = data.get("output", {})
                             if hasattr(output, "usage_metadata"):
                                 usage = output.usage_metadata or {}
@@ -576,6 +624,8 @@ async def _stream_langgraph_events(
 
                         # ── on_tool_start: tool execution beginning ────────────
                         elif kind == "on_tool_start":
+                            _hb["phase"] = "tool"
+                            _hb["current"] = str(name)
                             inputs = data.get("input", {})
                             if isinstance(inputs, dict) and "input" in inputs:
                                 inputs = inputs["input"]
@@ -591,6 +641,8 @@ async def _stream_langgraph_events(
 
                         # ── on_tool_end: tool execution finished ───────────────
                         elif kind == "on_tool_end":
+                            _hb["phase"] = "supervisor"
+                            _hb["current"] = ""
                             output = data.get("output", "")
                             if hasattr(output, "content"):
                                 output = output.content

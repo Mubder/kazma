@@ -343,6 +343,7 @@
       onToken: function(data) {
         if (!_mine()) return;
         _noteSeq();
+        _taskCardEvent({ t: 'token' });
         applyTurnEvent({
           type: 'token',
           content: data.content,
@@ -353,6 +354,7 @@
       },
       onToolCall: function(data) {
         if (!_mine()) return;
+        _taskCardEvent({ t: 'tool', name: data.tool_name || 'tool' });
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
           try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
@@ -366,6 +368,7 @@
       },
       onToolResult: function(data) {
         if (!_mine()) return;
+        _taskCardEvent({ t: 'tool_end', name: data.tool_name || 'tool' });
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
@@ -380,6 +383,18 @@
           _lastSeqSeen = 0;
           _resyncDelivery('sse-gap');
         }
+      },
+      onHeartbeat: function(data) {
+        // Journaled liveness frame — not epoch-gated (same rule as HITL):
+        // a superseded stream's graph is the live graph.
+        _noteSeq();
+        _taskCardEvent({
+          t: 'hb',
+          phase: (data && data.phase) || '',
+          current: (data && data.current) || '',
+          step: (data && data.step) || 0,
+          elapsed_s: (data && data.elapsed_s) || 0,
+        });
       },
       onApprovalRequired: function(data) {
         // HITL is not epoch-gated: a superseded stream's approval is still
@@ -1156,15 +1171,257 @@
   }
 
   /**
-   * Single owner of the top status strip (#thinking-indicator): the Alpine
-   * store (isThinking + statusMessage). The old imperative
-   * KS.showTyping/hideTyping inline styles fought Alpine's x-show over the
-   * same element — combined with beginTurn never setting the store flag,
-   * the strip appeared only when WS frames happened to arrive and vanished
-   * mid-turn on idle/approval frames (the intermittent "no status bar",
-   * 2026-08-26).
+   * ── Live Task Card (2026-09-03) ─────────────────────────────────────
+   * The ONE turn-state surface, merged from the retired status strip and
+   * the live in-bubble CoT panel. Single writer: _taskCardEvent — every
+   * other helper (_setStatusStrip, SSE/WS callbacks, pauseForApproval,
+   * endTurn) dispatches through it, so two surfaces can never disagree
+   * again (the frozen-thinking / blank-while-paused bug class).
+   *
+   * Header: phase icon + label + elapsed + step, e.g.
+   *   ⚙ file_search · 42s · step 23   /  🧠 Thinking · 12s
+   *   ⏳ Awaiting approval · 3:12 left (server-stamped watchdog deadline)
+   *   ⚠ No signal 20s — checking…      (heartbeat gap → amber + resync)
+   * Body (collapsed default): compact step list from the TurnDocument,
+   * reasoning clamped to 2 lines, 50-row cap.
+   * Lifecycle: docked here while the turn runs; on done the summary
+   * finalizes into the transcript bubble (existing restored-workbench
+   * path) and the card unmounts.
    */
+  var _tc = {
+    el: null, header: null, label: null, meta: null, stallEl: null,
+    chevron: null, body: null, stepsEl: null,
+    visible: false, phase: 'idle', current: '', step: 0,
+    turnStart: 0, elapsedS: 0, lastSignal: 0, deadline: 0,
+    stalled: false, stallResynced: false, open: false,
+    tickTimer: null, doneTimer: null, textOverride: '',
+  };
+
+  function _tcMount() {
+    if (_tc.el) return _tc.el;
+    _tc.el = document.getElementById('live-task-card');
+    if (!_tc.el) return null;
+    _tc.header = _tc.el.querySelector('.live-task-header');
+    _tc.label = _tc.el.querySelector('.live-task-label');
+    _tc.meta = _tc.el.querySelector('.live-task-meta');
+    _tc.stallEl = _tc.el.querySelector('.live-task-stall');
+    _tc.chevron = _tc.el.querySelector('.live-task-chevron');
+    _tc.body = _tc.el.querySelector('.live-task-body');
+    _tc.stepsEl = _tc.el.querySelector('.live-task-steps');
+    _tc.header.addEventListener('click', function () {
+      _tc.open = !_tc.open;
+      _tcRender();
+    });
+    return _tc.el;
+  }
+
+  function _tcPhaseIcon(phase) {
+    if (phase === 'tool') return '⚙';
+    if (phase === 'awaiting') return '⏳';
+    if (phase === 'resuming') return '↻';
+    if (phase === 'done') return '✓';
+    if (phase === 'error') return '✕';
+    return '🧠'; // llm / supervisor / thinking
+  }
+
+  function _tcPhaseLabel() {
+    if (_tc.textOverride) return _tc.textOverride;
+    switch (_tc.phase) {
+      case 'tool': return ti('task_running_tool', 'Running') + ' ' + _tc.current;
+      case 'awaiting': return ti('task_awaiting', 'Awaiting your approval');
+      case 'resuming': return ti('task_resuming', 'Resuming after approval');
+      case 'done': return ti('task_done', 'Done');
+      case 'error': return ti('task_error', 'Turn failed');
+      case 'llm': return ti('task_thinking', 'Thinking');
+      default: return ti('thinking', 'Kazma is thinking\u2026');
+    }
+  }
+
+  function _tcFmtMMSS(s) {
+    s = Math.max(0, Math.floor(s));
+    var m = Math.floor(s / 60);
+    var r = s % 60;
+    return m + ':' + (r < 10 ? '0' : '') + r;
+  }
+
+  function _tcRender() {
+    if (!_tcMount() || !_tc.visible) return;
+    _tc.label.textContent = _tcPhaseIcon(_tc.phase) + '  ' + _tcPhaseLabel();
+    var bits = [];
+    if (_tc.phase === 'awaiting' && _tc.deadline) {
+      var left = Math.floor(_tc.deadline - Date.now() / 1000);
+      bits.push('⏳ ' + (left > 0
+        ? ti('auto_deny_in', 'auto-denies in') + ' ' + _tcFmtMMSS(left)
+        : ti('approval_expired_short', 'expired')));
+    } else if (_tc.phase !== 'done' && _tc.phase !== 'error') {
+      if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
+      if (_tc.step > 0) bits.push(ti('task_step', 'step') + ' ' + _tc.step);
+    }
+    _tc.meta.textContent = bits.join(' · ');
+    _tc.stallEl.hidden = !_tc.stalled;
+    if (_tc.stalled) {
+      _tc.stallEl.textContent = '⚠ ' + ti('task_no_signal', 'no signal') + ' ' +
+        Math.floor((Date.now() - _tc.lastSignal) / 1000) + 's — ' +
+        ti('task_checking', 'checking…');
+    }
+    _tc.chevron.textContent = _tc.open ? '▾' : '▸';
+    _tc.header.setAttribute('aria-expanded', _tc.open ? 'true' : 'false');
+    _tc.body.hidden = !_tc.open;
+    _tc.el.className = 'live-task-card' +
+      (_tc.phase === 'awaiting' ? ' is-awaiting' : '') +
+      (_tc.stalled ? ' is-stalled' : '') +
+      (_tc.phase === 'done' ? ' is-done' : '') +
+      (_tc.phase === 'error' ? ' is-error' : '') +
+      (_tc.open ? ' is-open' : '');
+    _tc.el.hidden = false;
+  }
+
+  function _tcTick() {
+    if (!_tc.visible) return;
+    // Elapsed: server heartbeats are authoritative; local clock fills gaps.
+    if (Date.now() - _tc.lastSignal < 2500) {
+      if (_tc.turnStart) _tc.elapsedS = (Date.now() - _tc.turnStart) / 1000;
+    }
+    // Stalled honesty: heartbeats arrive every ~8-10s during silence; a
+    // 20s gap means the JOURNAL went quiet — surface it and reconcile once.
+    if (_tc.phase !== 'awaiting' && _tc.phase !== 'done' &&
+        _tc.lastSignal && Date.now() - _tc.lastSignal > 20000) {
+      if (!_tc.stalled) {
+        _tc.stalled = true;
+        _tc.stallResynced = false;
+      }
+      if (!_tc.stallResynced) {
+        _tc.stallResynced = true;
+        try { _resyncDelivery('heartbeat-gap'); } catch (eR) { /* ignore */ }
+      }
+      _tcRender();
+    } else if (_tc.stalled) {
+      _tc.stalled = false;
+      _tcRender();
+    } else {
+      _tcRender();
+    }
+    if (_tc.phase === 'awaiting' && _tc.deadline) _tcRender();
+  }
+
+  function _tcStepsFromDoc() {
+    if (!_tc.stepsEl) return;
+    var doc = _docs[_liveTurnId] || null;
+    var rows = (window.KazmaTurnDocument && doc && KazmaTurnDocument.activityOf)
+      ? KazmaTurnDocument.activityOf(doc.parts || [])
+      : [];
+    if (!rows.length) return;
+    // Newest last (chronological); cap 50 live rows.
+    rows = rows.slice(-50);
+    var html = '';
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i] || {};
+      var cls = 'live-task-step kind-' + (r.kind || 'status') +
+        ' state-' + (r.state || 'done');
+      html += '<li class="' + cls + '" title="' + escapeHtml(truncateStr(String(r.detail || ''), 300)) + '">' +
+        '<span class="live-task-step-title">' + escapeHtml(truncateStr(String(r.title || ''), 120)) + '</span>' +
+        '<span class="live-task-step-detail">' + escapeHtml(truncateStr(String(r.detail || ''), 400)) + '</span>' +
+        '</li>';
+    }
+    _tc.stepsEl.innerHTML = html;
+  }
+
+  /**
+   * The single writer. Events:
+   *  begin | token | tool{name} | tool_end{name} | hb{phase,current,step,elapsed_s}
+   *  status{status,message} | text{msg} | approval{deadline} | resuming
+   *  done{ok} | error{msg} | doc
+   */
+  function _taskCardEvent(ev) {
+    ev = ev || {};
+    if (!_tcMount()) return;
+    var now = Date.now();
+    switch (ev.t) {
+      case 'begin':
+        _tc.visible = true;
+        _tc.phase = 'llm';
+        _tc.current = '';
+        _tc.step = 0;
+        _tc.elapsedS = 0;
+        _tc.turnStart = now;
+        _tc.deadline = 0;
+        _tc.stalled = false;
+        _tc.stallResynced = false;
+        _tc.textOverride = '';
+        _tc.lastSignal = now;
+        if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
+        if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
+        break;
+      case 'token':
+      case 'tool':
+      case 'tool_end':
+      case 'status':
+      case 'hb':
+        _tc.lastSignal = now;
+        if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
+        if (!_tc.visible) { _tc.visible = true; if (!_tc.turnStart) _tc.turnStart = now; }
+        if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
+        break;
+      default:
+        break;
+    }
+    if (ev.t === 'tool') { _tc.phase = 'tool'; _tc.current = String(ev.name || ''); _tc.step += 1; _tc.textOverride = ''; }
+    if (ev.t === 'tool_end') { if (_tc.phase === 'tool') { _tc.phase = 'supervisor'; _tc.current = ''; } }
+    if (ev.t === 'token') { if (_tc.phase !== 'awaiting') { _tc.phase = 'llm'; _tc.current = ''; } }
+    if (ev.t === 'hb') {
+      _tc.phase = String(ev.phase || _tc.phase);
+      _tc.current = String(ev.current || '');
+      if (ev.step) _tc.step = Math.max(_tc.step, parseInt(ev.step, 10) || 0);
+      if (ev.elapsed_s) _tc.elapsedS = Number(ev.elapsed_s) || _tc.elapsedS;
+      if (_tc.phase !== 'awaiting') _tc.textOverride = '';
+    }
+    if (ev.t === 'status') {
+      var st = String(ev.status || '');
+      if (st === 'synthesizing') { _tc.phase = 'llm'; _tc.textOverride = ti('task_writing', 'Writing the reply…'); }
+      else if (st === 'routing_node') { _tc.textOverride = String(ev.message || ''); }
+      else if (st === 'paused_for_approval') { /* approval event handles it */ }
+      else if (ev.message) { _tc.textOverride = String(ev.message); }
+    }
+    if (ev.t === 'text' && ev.msg) _tc.textOverride = String(ev.msg);
+    if (ev.t === 'approval') {
+      _tc.visible = true;
+      _tc.phase = 'awaiting';
+      _tc.deadline = Number(ev.deadline || 0);
+      _tc.textOverride = '';
+      _tc.lastSignal = now;
+      if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
+    }
+    if (ev.t === 'resuming') {
+      _tc.phase = 'resuming';
+      _tc.deadline = 0;
+      _tc.lastSignal = now;
+    }
+    if (ev.t === 'doc') { if (_tc.visible) _tcStepsFromDoc(); return; }
+    if (ev.t === 'done' || ev.t === 'error') {
+      _tc.phase = ev.t === 'error' ? 'error' : 'done';
+      _tc.deadline = 0;
+      _tc.stalled = false;
+      _tc.textOverride = ev.msg ? String(ev.msg) : '';
+      _tcRender();
+      // Bubble carries the durable summary now — card retires shortly.
+      if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
+      var hideMs = ev.t === 'error' ? 4000 : 1600;
+      if (_tc.doneTimer) clearTimeout(_tc.doneTimer);
+      _tc.doneTimer = setTimeout(function () {
+        _tc.visible = false;
+        _tc.el.hidden = true;
+        _tc.doneTimer = null;
+      }, hideMs);
+      return;
+    }
+    _tcRender();
+    if (_tc.open) _tcStepsFromDoc();
+  }
+
+  /** Legacy strip call sites route here — one surface, one writer. */
   function _setStatusStrip(msg) {
+    _taskCardEvent({ t: 'text', msg: msg });
+    // Store flag kept for WS liveness logic; it no longer owns any DOM.
     try {
       if (window.Alpine && Alpine.store && Alpine.store('agent')) {
         var st = Alpine.store('agent');
@@ -1174,6 +1431,7 @@
     } catch (e) { /* store not ready */ }
   }
   function _clearStatusStrip() {
+    _taskCardEvent({ t: 'text', msg: '' });
     try {
       if (window.Alpine && Alpine.store && Alpine.store('agent')) {
         Alpine.store('agent').isThinking = false;
@@ -1248,6 +1506,8 @@
     _serverActivitySeen = false;
     // Status strip shows the instant ANY turn starts (SSE, WS, or
     // approve-resume) — no longer dependent on WS frames arriving.
+    // A resume is not a new card epoch (keeps elapsed/step).
+    _taskCardEvent(resume ? { t: 'resuming' } : { t: 'begin' });
     _setStatusStrip(ti('thinking', 'Kazma is thinking\u2026'));
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
@@ -1328,6 +1588,7 @@
     } catch (e) { /* store not ready */ }
     // Honest summary: a turn that delivered no reply must not claim "Done".
     finalizeProgress(_turnPainted ? true : 'empty');
+    _taskCardEvent({ t: 'done', ok: !!_turnPainted });
     if (activeTypingEl && KS.hideTyping) {
       KS.hideTyping(activeTypingEl);
     }
@@ -1378,6 +1639,7 @@
    * Always clears Stop + Alpine thinking even if the server never sent idle.
    */
   function forceEndTurn() {
+    _taskCardEvent({ t: 'done' });
     try {
       if (window.Alpine && Alpine.store && Alpine.store('agent')) {
         var store = Alpine.store('agent');
@@ -1409,6 +1671,10 @@
     if (activeTypingEl && KS.hideTyping) KS.hideTyping(activeTypingEl);
     activeTypingEl = null;
     _clearStatusStrip();
+    // The card is the ONE surface while paused: it shows the awaiting
+    // phase + the watchdog countdown (pause used to blank the strip and
+    // leave dead air when the inline card was late — 2026-09-03).
+    _taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) });
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
@@ -2276,6 +2542,7 @@
         if (!_mine()) return;
         noteTurnActivity();
         _noteSeq();
+        _taskCardEvent({ t: 'token' });
         _outboxClear();  // first streamed token = the server received the send
         // NOTE: do NOT clear the status strip per token. The strip sits
         // IN-FLOW between transcript and composer — every hide/show shifts
@@ -2300,6 +2567,7 @@
       onToolCall: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
+        _taskCardEvent({ t: 'tool', name: data.tool_name || 'tool' });
         _pinLiveAssistantBubble();
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
@@ -2316,6 +2584,7 @@
       onToolResult: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
+        _taskCardEvent({ t: 'tool_end', name: data.tool_name || 'tool' });
         if (!currentMsgEl) return;
         var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
         logProgress({
@@ -2363,24 +2632,42 @@
             : (status === 'routing_node'
               ? tiFmt('routing', 'Routing: {node}', { node: (data && data.active_node) || 'Supervisor' })
               : (data.message || ti('thinking', 'Kazma is thinking\u2026')));
+          _taskCardEvent({
+            t: 'status',
+            status: status,
+            message: (data && data.message) || title,
+          });
           logProgress({
             kind: 'status',
             title: title,
             detail: (data && data.message && status !== 'thinking') ? data.message : '',
             state: 'running',
           });
-          if (typingEl && KS.showTyping) {
-            try { _setStatusStrip(title); } catch (e) { /* ignore */ }
-          }
         } else if (status === 'paused_for_approval' || status === 'idle') {
           // HITL / idle handled by other callbacks
         } else {
+          _taskCardEvent({ t: 'status', status: status, message: String(data.message || status) });
           logProgress({
             kind: 'status',
             title: String(data.message || status),
             state: 'running',
           });
         }
+      },
+
+      onHeartbeat: function(data) {
+        // Journaled liveness: proves the turn is alive during long tool/LLM
+        // phases and carries phase/tool/step. Not epoch-gated — a
+        // superseded stream's graph is the live graph (same rule as HITL).
+        noteTurnActivity();
+        _noteSeq();
+        _taskCardEvent({
+          t: 'hb',
+          phase: (data && data.phase) || '',
+          current: (data && data.current) || '',
+          step: (data && data.step) || 0,
+          elapsed_s: (data && data.elapsed_s) || 0,
+        });
       },
 
       onDone: function(data) {
@@ -2574,6 +2861,7 @@
         // Final failure: surface it, then reconcile with server truth (the
         // turn may have completed server-side and be durable already).
         _clearStatusStrip();
+        _taskCardEvent({ t: 'error', msg: String(msg || '') });
         activeTypingEl = null;
         _pinLiveAssistantBubble();
         var textEl = currentMsgEl.querySelector('.message-text');
@@ -6101,6 +6389,20 @@
     }
     var prev = currentMsgEl;
     currentMsgEl = el;
+    // LIVE turn: the docked Live Task Card owns the live view (header +
+    // expandable compact steps). No in-bubble live panel is created — the
+    // terminal branch above swaps in the durable one-line summary when the
+    // turn ends. A live panel that already exists (hydrate-hold, legacy
+    // paint) is left untouched; the terminal swap replaces it.
+    _progressToolCount = tools;
+    _progressStepCount = steps;
+    _taskCardEvent({ t: 'doc' });
+    var existingLive = _directChildByClass(_bubbleContent(el) || el, 'agent-progress');
+    if (!(existingLive && existingLive.classList.contains('is-active')
+          && !existingLive.classList.contains('kazma-cot-restored'))) {
+      currentMsgEl = prev || el;
+      return;
+    }
     var panel = ensureProgressPanel();
     currentMsgEl = prev || el;
     if (!panel) return;
@@ -6358,6 +6660,8 @@
     retry: retry,
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
+    /** Live Task Card single-writer dispatch (WS store + SSE both feed it). */
+    taskCard: _taskCardEvent,
     _hitlApproval: renderHitlCard,
     markApprovalTimedOut: markApprovalTimedOut,
     hasInlineApprovalCard: hasInlineApprovalCard,

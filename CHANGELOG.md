@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Feature — Live Task Card: one merged turn-state surface (2026-09-03)
+
+The user could not tell a working turn from a hung one: during long
+tool/LLM calls the SSE path journaled NOTHING (only invisible keepalive
+comments), the status strip had ~15 scattered writers across two
+transports that fought each other (frozen "thinking…" while idle, blank
+while paused), and the CoT workbench was a huge always-expanded list.
+
+**Server — journaled ``turn_heartbeat`` frames.** The streaming loop now
+tracks the live phase (tool + name / llm / supervisor + langgraph step)
+and, on 10s of queue silence, journals a ``turn_heartbeat`` frame with
+phase/current/step/elapsed instead of only a keepalive comment — visible
+to the live card, journal attach, and refresh replay alike. The
+Command-resume path (post-approve) journaled nothing until close_turn;
+it now heartbeats (phase ``resuming``) every ~8s while the graph runs.
+
+**Client — the Live Task Card** (``#live-task-card``, docked where the
+strip was). ONE writer (``_taskCardEvent``) fed by SSE, WS, heartbeats,
+and HITL: header shows ``⚙ file_search · 42s · step 23`` /
+``🧠 Thinking · 12s`` / ``⏳ Awaiting approval · 3:12 left`` (watchdog
+deadline countdown); a >20s signal gap shows amber ``⚠ no signal —
+checking…`` and fires one resync (honest stalled detection). Body
+(expand-on-click, collapsed default): compact steps from the
+TurnDocument, reasoning clamped to 2 lines, 50-row cap. The retired
+strip and the live in-bubble workbench are gone — the turn finalizes
+into the transcript bubble via the existing summary path and the card
+retires. ``_setStatusStrip``/``_clearStatusStrip`` now delegate to the
+card, so every legacy call site drives the one surface.
+
 ## Feature — approval cards count down to the auto-deny deadline (2026-09-02)
 
 Unattended approval cards used to sit silently for 300s and then vanish

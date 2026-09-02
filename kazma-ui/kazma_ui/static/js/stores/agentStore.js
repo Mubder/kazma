@@ -179,6 +179,14 @@ function registerAgentStore() {
       const chat = this._chat();
       if (chat && typeof chat.logProgress === 'function') chat.logProgress(step);
     },
+    /** Live Task Card (2026-09-03): WS frames feed the SAME single-writer
+     *  card the SSE path uses — one indicator surface, one owner. */
+    _taskCard(ev) {
+      try {
+        const chat = window.KazmaChat;
+        if (chat && typeof chat.taskCard === 'function') chat.taskCard(ev);
+      } catch (e) { /* never break a frame on the indicator */ }
+    },
     _beginTurn() {
       this._turnActive = true;
       this.isThinking = true;
@@ -911,6 +919,7 @@ function registerAgentStore() {
               ? String(data.message)
               : _ti('thinking', 'Kazma is thinking…');
             this.statusMessage += _budgetSuffix(data, frame);
+            this._taskCard({ t: 'status', status: 'thinking', message: this.statusMessage });
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
             this._progress({
               kind: 'status',
@@ -926,6 +935,7 @@ function registerAgentStore() {
             this.activeNode = frame.active_node || data.active_node || 'Supervisor';
             this.statusMessage = _tiFmt('routing', 'Routing: {node}', { node: this.activeNode })
               + _budgetSuffix(data, frame);
+            this._taskCard({ t: 'status', status: 'routing_node', message: this.statusMessage });
             this._progress({
               kind: 'plan',
               title: _tiFmt('routing_arrow', 'Routing → {node}', { node: this.activeNode })
@@ -941,6 +951,7 @@ function registerAgentStore() {
             this.isThinking = true;
             this._turnActive = true;
             this.statusMessage = _ti('synthesizing', 'Composing response…');
+            this._taskCard({ t: 'status', status: 'synthesizing', message: this.statusMessage });
             this._progress({
               kind: 'status',
               title: _ti('synthesizing', 'Composing response…'),
@@ -988,6 +999,9 @@ function registerAgentStore() {
           this._turnActive = true;
           const toolStatus = frame.status || data.status || 'tool_running';
           const tName = frame.tool_name || data.tool_name || 'tool';
+          this._taskCard(toolStatus === 'tool_running' || toolStatus === 'running'
+            ? { t: 'tool', name: tName }
+            : { t: 'tool_end', name: tName });
           if (type === 'tool_start' || toolStatus === 'tool_running') {
             this.activeTool = {
               name: tName,
@@ -1180,6 +1194,7 @@ function registerAgentStore() {
           this._turnActive = true;
           const text = frame.content || data.content;
           if (!text) break;
+          this._taskCard({ t: 'token' });
           const isFull = !!(data && data.full) || !!(frame && frame.full);
           this._applyTurnEvent({
             type: type === 'llm_delta' ? 'llm_delta' : 'token',

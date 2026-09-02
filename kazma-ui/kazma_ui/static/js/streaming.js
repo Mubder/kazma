@@ -158,6 +158,14 @@ var KazmaStream = (function() {
             if (callbacks.onStatus) callbacks.onStatus(data || {});
             else if (callbacks.onEvent) callbacks.onEvent(type, data);
             break;
+          case 'turn_heartbeat':
+            // Live Task Card liveness: journaled every ~8-10s of stream
+            // silence with the current phase/tool/step — the "is it hung?"
+            // signal. Data shape: {phase, current, step, elapsed_s, seq}.
+            if (callbacks.onHeartbeat) callbacks.onHeartbeat(data || {});
+            else if (callbacks.onStatus) callbacks.onStatus({ status: 'thinking', heartbeat: data || {} });
+            else if (callbacks.onEvent) callbacks.onEvent(type, data);
+            break;
           case 'approval_required':
             if (callbacks.onApprovalRequired) callbacks.onApprovalRequired(data);
             break;

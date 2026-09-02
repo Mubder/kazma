@@ -348,3 +348,57 @@ def test_supervisor_steer_tid_falls_back_to_context() -> None:
     # Fallback sits in the steer gate, not some unrelated HITL import.
     idx = gb.index("_steer_tid = str(state.get(\"thread_id\") or \"\")")
     assert "get_current_thread_id" in gb[idx : idx + 400]
+
+
+def test_live_task_card_single_writer_and_liveness() -> None:
+    """2026-09-03: the merged Live Task Card is the ONE turn-state surface.
+    Single-writer (_taskCardEvent), heartbeat-fed, stalled-honest, and the
+    retired strip delegates to it instead of fighting it."""
+    js = _js()
+    assert "function _taskCardEvent(ev)" in js
+    assert "id=\"live-task-card\"" in (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
+    ).read_text(encoding="utf-8")
+    # Legacy strip delegates to the card — one surface, one writer.
+    strip = js.split("function _setStatusStrip(msg)", 1)[1].split(
+        "function _clearStatusStrip()", 1
+    )[0]
+    assert "_taskCardEvent({ t: 'text', msg: msg })" in strip
+    # Heartbeats feed the card from BOTH SSE callback builders and the
+    # WS store; pause shows awaiting + the watchdog countdown.
+    assert js.count("t: 'hb'") >= 2
+    assert "taskCard: _taskCardEvent" in js
+    assert "_taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) })" in js
+    # Stalled honesty: 20s signal gap → amber warning + one resync.
+    tc = js.split("function _tcTick()", 1)[1].split("function _tcStepsFromDoc()", 1)[0]
+    assert "> 20000" in tc
+    assert "_resyncDelivery('heartbeat-gap')" in tc
+    # Compact body: doc-fed steps, 50-row cap, 2-line clamp is CSS.
+    steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
+        "The single writer", 1
+    )[0]
+    assert "rows.slice(-50)" in steps
+    # Live turns no longer build an in-bubble workbench — the terminal
+    # branch swaps in the durable summary when the turn ends.
+    cot = js.split("function _syncCotPanel(el, activity, status, meta)", 1)[1].split(
+        "function _paintHitlFromDoc(el, doc)", 1
+    )[0]
+    assert "_taskCardEvent({ t: 'doc' })" in cot
+
+
+def test_ws_store_feeds_task_card() -> None:
+    store = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js"
+    ).read_text(encoding="utf-8")
+    assert "_taskCard(ev)" in store
+    assert "chat.taskCard(ev)" in store
+    for needle in (
+        "{ t: 'status', status: 'thinking'",
+        "{ t: 'status', status: 'routing_node'",
+        "{ t: 'status', status: 'synthesizing'",
+        "{ t: 'token' }",
+        "{ t: 'tool', name: tName }",
+    ):
+        assert needle in store, needle

@@ -356,3 +356,46 @@ async def test_concurrent_resume_claim_conflicts() -> None:
         assert results.count("conflict") == 1
     finally:
         misc_mod._resume_inflight.discard(tid)
+
+
+def test_stream_silence_journals_turn_heartbeats() -> None:
+    """2026-09-03: during long tool/LLM calls the SSE path previously
+    journaled NOTHING (only invisible keepalive comments) — the client's
+    one indicator surface could not tell "working" from "hung", and the
+    Command-resume path journaled nothing until close_turn. Silence must
+    now emit JOURNALED turn_heartbeat frames carrying the live phase."""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "sse_chat" / "_streaming.py"
+    ).read_text(encoding="utf-8")
+
+    # Streaming loop: 10s queue silence → keepalive AND a journaled
+    # turn_heartbeat with phase/current/step/elapsed.
+    loop = src.split(
+        '_hb: dict[str, Any] = {"phase": "llm", "current": "", "step": 0}', 1
+    )[1].split("finally:", 1)[0]
+    assert 'yield ": keepalive' in loop  # raw source holds the literal \n\n
+    assert 'emit_j("turn_heartbeat"' in loop
+    for key in ('"phase"', '"current"', '"step"', '"elapsed_s"'):
+        assert key in loop
+
+    # Phase is tracked at every boundary the events already carry.
+    assert src.count('_hb["phase"] = "tool"') >= 1
+    assert src.count('_hb["phase"] = "llm"') >= 1
+    assert src.count('_hb["phase"] = "supervisor"') >= 2
+
+    # Command-resume (the post-approve path): ainvoke journals nothing
+    # until close_turn — the resume loop must heartbeat too.
+    resume = src.split("Heartbeat while the resumed graph runs", 1)[1][:900]
+    assert 'emit_j("turn_heartbeat"' in resume
+    assert '"phase": "resuming"' in resume
+
+    # The client dispatches the frame to a dedicated handler on both the
+    # send and attach callback builders, and the WS store feeds the same
+    # card (checked in test_chat_steer_composer).
+    js = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "streaming.js"
+    ).read_text(encoding="utf-8")
+    assert "case 'turn_heartbeat':" in js
+    assert "callbacks.onHeartbeat" in js

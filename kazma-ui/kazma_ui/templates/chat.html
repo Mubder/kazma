@@ -80,15 +80,26 @@
       </div>
     </div>
 
-    <!-- Live status strip (detailed steps live in the message progress panel) -->
-    <div id="thinking-indicator" class="thinking-indicator" x-data x-cloak
-         :class="{ 'is-on': $store.agent && $store.agent.isThinking }">
-      <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      <span class="thinking-text"
-            x-text="($store.agent && $store.agent.statusMessage) || '{{ t('chat.thinking') }}'"></span>
-      <span class="thinking-node" x-cloak x-show="$store.agent && $store.agent.activeNode"
-            x-text="$store.agent && $store.agent.activeNode ? ('· ' + $store.agent.activeNode) : ''"></span>
+    <!-- Live Task Card — the ONE turn-state surface: merged live indicator
+         (phase · elapsed · step · liveness · approval countdown) + compact
+         expandable step list. Owned by chat.js _TaskCard; Alpine never
+         writes here. Finalizes into the turn's transcript bubble on done. -->
+    <div id="live-task-card" class="live-task-card" hidden>
+      <button type="button" class="live-task-header" aria-expanded="false" aria-controls="live-task-body">
+        <span class="live-task-phase" aria-hidden="true">●</span>
+        <span class="live-task-label">{{ t('chat.thinking') }}</span>
+        <span class="live-task-meta" aria-hidden="true"></span>
+        <span class="live-task-stall" hidden></span>
+        <span class="live-task-chevron" aria-hidden="true">▸</span>
+      </button>
+      <div id="live-task-body" class="live-task-body" hidden>
+        <ul class="live-task-steps" role="log" aria-live="polite"></ul>
+      </div>
     </div>
+
+    <!-- Retired strip (2026-09-03): the Live Task Card replaced it. Kept as
+         an inert hidden element for legacy references (typingEl cache). -->
+    <div id="thinking-indicator" class="thinking-indicator" hidden></div>
 
     <!-- Chat Input Area -->
     <div class="chat-input-area" id="chat-input-area">
