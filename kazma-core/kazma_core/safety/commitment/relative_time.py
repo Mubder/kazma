@@ -46,6 +46,7 @@ __all__ = [
     "normalize_digits",
     "parse_belief_date",
     "parse_absolute_timing",
+    "compact_relative_delta",
     "validate_timing_against_memory",
 ]
 
@@ -322,6 +323,26 @@ def parse_absolute_timing(timing: str) -> datetime | None:
         except ValueError:
             continue
     return None
+
+
+# Same form cron.scheduler.parse_timing accepts for relative delays.
+_RE_NATIVE_COMPACT = re.compile(r"^(\d+)\s*(m|h)$", re.IGNORECASE)
+
+
+def compact_relative_delta(timing: str) -> timedelta | None:
+    """Return the delay for scheduler-native ``5m`` / ``2h``, else None.
+
+    This is the format ``schedule_task`` advertises. It is an explicit
+    from-now delay, not an invented calendar date (the CoPilot class).
+    """
+    raw = normalize_digits((timing or "").strip())
+    m = _RE_NATIVE_COMPACT.fullmatch(raw)
+    if not m:
+        return None
+    n = int(m.group(1))
+    if n < 0:
+        return None
+    return timedelta(minutes=n) if m.group(2).lower() == "m" else timedelta(hours=n)
 
 
 def validate_timing_against_memory(

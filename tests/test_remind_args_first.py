@@ -19,7 +19,9 @@ import pytest
 
 from kazma_core.safety.commitment import authorize_effect
 from kazma_core.safety.commitment.relative_time import (
+    compact_relative_delta,
     parse_absolute_timing,
+    parse_time_expressions,
     validate_timing_against_memory,
 )
 
@@ -214,9 +216,8 @@ def test_compact_shorthand_parses():
 
 
 def test_compact_timing_arg_resolves_without_chat_time_words(ops_db):
-    """'1386m' as args.timing with no time words in chat: the gate falls back
-    to the timing arg. A nearby tz-qualified belief makes it an actionable
-    clarify (options) rather than 'no time expression found'."""
+    """Scheduler-native '1386m' in args.timing is an explicit from-now delay.
+    Nearby reset beliefs must not deny or Cancel-only-card it (2026-09-02)."""
     d = authorize_effect(
         "schedule_task",
         {"timing": "1386m", "prompt": "grok reset ping"},
@@ -224,9 +225,9 @@ def test_compact_timing_arg_resolves_without_chat_time_words(ops_db):
         request_at=REQUEST_AT_0816, memory_beliefs=TZ_BELIEFS,
         thread_id="t-0816-2", turn_id="turn1",
     )
-    assert d.decision == "clarify"
-    assert "no time expression" not in (d.reason or "")
-    assert d.options, "clarify must carry actionable options"
+    assert d.decision == "allow", f"got {d.decision}: {d.reason}"
+    assert d.rewritten_args is not None
+    assert "T" in d.rewritten_args["timing"]
 
 
 def test_conflicting_absolute_timing_still_guarded(ops_db):
@@ -242,6 +243,28 @@ def test_conflicting_absolute_timing_still_guarded(ops_db):
     assert d.decision != "allow", "conflicting absolute timing must not allow"
     if d.decision == "clarify":
         assert d.options and any(o.get("id") != "cancel" for o in d.options)
+
+
+def test_compact_relative_delta():
+    assert compact_relative_delta("5m") is not None
+    assert compact_relative_delta("5m").total_seconds() == 300
+    assert compact_relative_delta("119h").total_seconds() == 119 * 3600
+    assert compact_relative_delta("in 5m") is None
+    assert compact_relative_delta("2026-09-02T00:00:00+00:00") is None
+
+
+def test_compact_5m_allows_even_with_nearby_reset(ops_db):
+    """The live reschedule: timing='5m' plus a reset later today used to
+    nearby-clarify then deny as 'no time expression'. Native compact must allow."""
+    d = authorize_effect(
+        "schedule_task",
+        {"timing": "5m", "prompt": "TEST SCHEDULE"},
+        user_text="reschedule them all",
+        request_at=REQUEST_AT_0816, memory_beliefs=TZ_BELIEFS,
+        thread_id="t-5m", turn_id="turn1",
+    )
+    assert d.decision == "allow", f"got {d.decision}: {d.reason}"
+    assert d.rewritten_args["timing"].startswith("2026-08-16")
 
 
 def test_missing_time_is_deny_not_cancel_only_card(ops_db):
