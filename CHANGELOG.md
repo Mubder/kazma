@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — chained HITL cards stack in approval order (2026-09-02)
+
+After Approve on ``cancel_scheduled``, the next ``schedule_task`` card
+painted *above* it because new cards were inserted right under the CoT
+panel. They now append after the last card in the bubble.
+
 ## Fix — pasted alert mentioning "deep research" must not start a pipeline (2026-09-02)
 
 Intent execute auto-starts ``start_deep_research`` when
