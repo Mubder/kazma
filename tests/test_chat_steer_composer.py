@@ -124,6 +124,7 @@ def test_chained_hitl_card_appends_below_previous() -> None:
     )[0]
     assert "lastCard" in place
     assert "insertBefore(card, after.nextSibling)" in place
+    assert "_hitlHostContent" in place
     # The old first-interrupt slot (right under CoT) is what stacked
     # schedule_task above cancel_scheduled.
     assert "insertBefore(card, progress.nextSibling)" not in js
@@ -131,6 +132,39 @@ def test_chained_hitl_card_appends_below_previous() -> None:
         "function _answerFromDoc", 1
     )[0]
     assert "cursor.nextSibling" in rescue
+    assert "hitl-approval-card" in rescue
+    assert "function _hitlCardIsTrapped(card)" in js
+    has_inline = js.split("function hasInlineApprovalCard()", 1)[1].split(
+        "function _hitlInterruptIdOf", 1
+    )[0]
+    assert "_hitlCardIsTrapped" in has_inline
+    pin = js.split("function _assistantBubbleForOpenTurn()", 1)[1].split(
+        "function _pinLiveAssistantBubble", 1
+    )[0]
+    assert "closest('.agent-progress')" in pin
+
+
+def test_place_hitl_card_dom_harness_under_node() -> None:
+    """Placement must actually run, not just grep: card after CoT, never in it."""
+    import shutil
+    import subprocess
+
+    if shutil.which("node") is None:
+        import pytest
+
+        pytest.skip("node not available")
+    harness = (
+        Path(__file__).resolve().parent / "js" / "test_place_hitl_card.js"
+    )
+    proc = subprocess.run(
+        ["node", str(harness)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "FAIL" not in proc.stdout
 
 
 def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> None:

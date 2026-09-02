@@ -736,6 +736,10 @@
     var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
     var lastAsstAfterUser = null;
     for (var i = 0; i < msgs.length; i++) {
+      // CoT can swallow a nested .message; that node is not the open turn.
+      // Pinning it put the HITL card inside overflow:hidden / collapsed body
+      // so the dashboard listed the gate and chat looked empty (2026-09-02).
+      if (msgs[i].closest && msgs[i].closest('.agent-progress')) continue;
       if (msgs[i].classList.contains('message-user')) {
         lastAsstAfterUser = null;
       } else if (msgs[i].classList.contains('message-assistant')) {
@@ -4167,10 +4171,47 @@
     diag('hitl-released', reason || '');
   }
 
+  function _hitlCardIsTrapped(card) {
+    if (!card || !card.closest) return false;
+    return !!card.closest('.agent-progress');
+  }
+
+  function _outerAssistantBubble(el) {
+    if (!el) return null;
+    var n = el;
+    var found = null;
+    while (n && n !== messagesEl) {
+      if (n.classList && n.classList.contains('message-assistant')) {
+        var parent = n.parentElement || n.parentNode;
+        var insideCot = parent && parent.closest ? parent.closest('.agent-progress') : null;
+        if (!insideCot) found = n;
+      }
+      n = n.parentElement || n.parentNode;
+    }
+    return found;
+  }
+
+  function _hitlHostContent(el) {
+    var bubble = _outerAssistantBubble(el) || el;
+    var content = _bubbleContent(bubble);
+    if (content && !_hitlCardIsTrapped(content)) return content;
+    if (!bubble || !bubble.querySelectorAll) return content;
+    var all = bubble.querySelectorAll('.message-content');
+    var i;
+    for (i = 0; i < all.length; i++) {
+      if (!_hitlCardIsTrapped(all[i])) return all[i];
+    }
+    return content;
+  }
+
   function hasInlineApprovalCard() {
     if (!messagesEl) return false;
     var cards = messagesEl.querySelectorAll('.hitl-approval-card');
     for (var i = 0; i < cards.length; i++) {
+      // A card inside CoT is not an inline approval — overflow:hidden and
+      // the collapsed body hide it, but enabled buttons still match, which
+      // blocked render + recoverMissedApproval (dashboard-only, 2026-09-02).
+      if (_hitlCardIsTrapped(cards[i])) continue;
       var btns = cards[i].querySelectorAll('button');
       for (var j = 0; j < btns.length; j++) {
         if (!btns[j].disabled) return true;
@@ -4347,26 +4388,35 @@
 
   /** Chronological HITL cards: a later interrupt must sit BELOW the card
    *  already approved in this bubble. Inserting after `.agent-progress`
-   *  put schedule_task above cancel_scheduled (2026-09-02). */
+   *  put schedule_task above cancel_scheduled (2026-09-02). Always a
+   *  direct child of the outer `.message-content` — never inside CoT. */
   function _placeHitlCard(content, card) {
-    if (!content || !card) return;
-    var kids = content.children;
+    if (!card) return;
+    var host = _hitlHostContent(content) || content;
+    if (!host) return;
+    var kids = host.children;
     var lastCard = null;
     var progress = null;
     var i;
     for (i = 0; i < kids.length; i++) {
-      if (!kids[i].classList) continue;
+      if (!kids[i].classList || kids[i] === card) continue;
       if (kids[i].classList.contains('hitl-approval-card')) lastCard = kids[i];
       else if (!progress && kids[i].classList.contains('agent-progress')) progress = kids[i];
     }
+    if (progress) progress.classList.remove('is-collapsed');
+    try {
+      var nested = host.querySelectorAll ? host.querySelectorAll('.agent-progress.is-collapsed') : [];
+      for (i = 0; i < nested.length; i++) nested[i].classList.remove('is-collapsed');
+    } catch (eOpen) { /* ignore */ }
     var after = lastCard || progress;
-    if (after && after.parentNode === content) {
-      if (progress) progress.classList.remove('is-collapsed');
-      if (after.nextSibling) content.insertBefore(card, after.nextSibling);
-      else content.appendChild(card);
-      return;
-    }
-    content.appendChild(card);
+    try {
+      if (after && after.parentNode === host && after !== card) {
+        if (after.nextSibling) host.insertBefore(card, after.nextSibling);
+        else host.appendChild(card);
+        return;
+      }
+    } catch (ePlace) { /* fall through to append */ }
+    try { host.appendChild(card); } catch (eAppend) { /* ignore */ }
   }
 
   function renderHitlCard(data, opts) {
@@ -4379,11 +4429,6 @@
     // SSE frame was late/lost NO card appeared at all and the paused turn
     // went completely silent (2026-08-26 X-post incident).
     if (_hitlAlreadyClaimed(data)) return;
-    if (hasInlineApprovalCard()) return;
-    // Never clone a card that is already on this bubble or this interrupt —
-    // Approve used to mint a second card beside the claimed one (refresh
-    // then showed one, because persist has a single HITL part).
-    if (_findHitlCard(_hitlInterruptIdOf(data), currentMsgEl)) return;
     if (lockComposer) pauseForApproval(data);
     // The inline card is the primary approval UI. Hide the bottom Alpine card
     // (driven by $store.agent.pendingApproval) so the same approval is never
@@ -4393,15 +4438,29 @@
     _clearStoreApproval();
     var targetThreadId = data.thread_id || chatSessionId || '';
     _pinLiveAssistantBubble();
-    var content = currentMsgEl.querySelector('.message-content');
+    var content = _hitlHostContent(currentMsgEl);
     if (!content) return;
+    var iid = _hitlInterruptIdOf(data);
+    var existing = _findHitlCard(iid, currentMsgEl);
+    if (existing && !_hitlCardIsTrapped(existing)) return;
+    if (existing && _hitlCardIsTrapped(existing)) _placeHitlCard(content, existing);
+    var scope = _outerAssistantBubble(currentMsgEl) || content;
     // Never strip a claimed card (Approved/Denied) — that is the
-    // disappear-then-live-again loop (cleanup 2026-09-01). Only replace
-    // unclaimed pending cards in THIS bubble.
-    content.querySelectorAll('.hitl-approval-card').forEach(function(old) {
-      if (_hitlCardIsClaimed(old)) return;
+    // disappear-then-live-again loop (cleanup 2026-09-01). Lift trapped
+    // cards for this interrupt; drop other unclaimed pending cards.
+    (scope.querySelectorAll ? scope.querySelectorAll('.hitl-approval-card') : []).forEach(function(old) {
+      if (_hitlCardIsClaimed(old)) {
+        if (_hitlCardIsTrapped(old)) _placeHitlCard(content, old);
+        return;
+      }
+      var oid = String(old.getAttribute('data-interrupt-id') || '');
+      if (iid && oid && oid === iid) {
+        _placeHitlCard(content, old);
+        return;
+      }
       old.remove();
     });
+    if (hasInlineApprovalCard()) return;
 
     // Phase 3: semantic clarify/confirm → render per-option buttons instead of
     // the generic Approve/Deny. The data carries kind + items[0].options from
@@ -5744,7 +5803,11 @@
       for (i = 0; i < trapped.length; i++) {
         var node = trapped[i];
         var owner = node.closest ? node.closest('.message') : null;
-        if (owner && owner !== el) continue;
+        if (owner && owner !== el) {
+          // Nested You-bubble text must stay put (lifting emptied it).
+          // HITL cards are the exception: they are the live approval UI.
+          if (!node.classList || !node.classList.contains('hitl-approval-card')) continue;
+        }
         // Same-anchor insertBefore reverses the node list (later cards
         // would land above earlier ones). Walk the cursor forward.
         content.insertBefore(node, cursor.nextSibling);
@@ -5785,7 +5848,7 @@
     meta = meta || {};
     var hitlLive = false;
     try {
-      hitlLive = !!(el.querySelector('.hitl-approval-card button:not([disabled])'));
+      hitlLive = !!(el.querySelector('.message-content > .hitl-approval-card button:not([disabled])'));
     } catch (eHitl) { hitlLive = false; }
     var holdOpen = hitlLive || _awaitingApproval;
     var terminal = !holdOpen && (status === 'done' || status === 'paused'
@@ -5821,6 +5884,12 @@
         var nestedMsgs = existingCot.querySelectorAll('.message');
         for (var ni = 0; ni < nestedMsgs.length; ni++) {
           contentHost.insertBefore(nestedMsgs[ni], existingCot);
+        }
+        var cotHitl = existingCot.querySelectorAll('.hitl-approval-card');
+        var hitlAnchor = existingCot.nextSibling;
+        for (var chi = 0; chi < cotHitl.length; chi++) {
+          if (hitlAnchor) contentHost.insertBefore(cotHitl[chi], hitlAnchor);
+          else contentHost.appendChild(cotHitl[chi]);
         }
         existingCot.replaceWith(cot);
       } else {

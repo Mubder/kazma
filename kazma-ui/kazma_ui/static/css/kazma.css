@@ -2379,6 +2379,11 @@ details.kazma-working > summary {
 .message-assistant > .message-content > .message-text {
   display: block;
 }
+.message-assistant > .message-content > .hitl-approval-card {
+  display: block;
+  position: relative;
+  z-index: 2;
+}
 
 /* Turn memory explain panel (fts5 / dense / ppr / KB chips) */
 .agent-memory-explain {

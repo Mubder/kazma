@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Fix — HITL card visible in chat, not only on the dashboard (2026-09-02)
+
+After the chained-card stacking change, a live approval could land inside
+the CoT panel (``overflow: hidden`` / collapsed body). Enabled buttons
+there made ``hasInlineApprovalCard()`` true, so paint and
+``recoverMissedApproval`` no-oped while Dashboard still listed the gate.
+Cards are pinned to the outer bubble, trapped ones are lifted, and CoT
+descendants no longer count as an inline card.
+
 ## Fix — chained HITL cards stack in approval order (2026-09-02)
 
 After Approve on ``cancel_scheduled``, the next ``schedule_task`` card
