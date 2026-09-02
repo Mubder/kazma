@@ -443,7 +443,7 @@ class TestUIAuditPhase3Fixes:
     def test_remembered_thread_preferred_in_recovery(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "var _lastInterruptedThreadId = '';" in src
-        assert "var candidates = [_lastInterruptedThreadId, chatSessionId || ''];" in src
+        assert "var candidates = [_lastInterruptedThreadId, _serverThreadId || '', chatSessionId || ''];" in src
         assert "_lastInterruptedThreadId = String(data.thread_id);" in src
 
     def test_importmap_covers_all_modules(self):

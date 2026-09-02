@@ -1000,6 +1000,7 @@ def create_sse_chat_router(
             turn_usage: dict[str, Any] = {}
             # Chars already flushed to the store by _persist_now.
             _flushed_at = [0]
+            _hitl_frame_payload: dict[str, Any] | None = None
 
             try:
                 # CQRS: the graph runs in a shielded background task that
@@ -1060,6 +1061,11 @@ def create_sse_chat_router(
                             _persist_now()
                     elif ev_type in ("tool_call", "tool_result", "status_update"):
                         _record_activity(ev_type, data)
+                    elif ev_type in ("approval_required", "hitl"):
+                        if isinstance(data, dict):
+                            _hitl_frame_payload = data
+                            if str(data.get("state") or "pending") == "pending":
+                                turn_usage["interrupted"] = True
                     elif ev_type in ("done", "turn_complete"):
                         if data.get("tokens") is not None:
                             turn_usage["tokens"] = data.get("tokens")
@@ -1084,13 +1090,22 @@ def create_sse_chat_router(
                 # SAME row. Streamed notes stay in ``reasoning``; the hop
                 # in ``text``.
                 done_body = str(temp_assistant_msg.get("content") or "") or content_acc
-                if done_body or activity_log:
+                if done_body or activity_log or _hitl_frame_payload:
                     from kazma_ui.turn_document import activity_of, parts_from_stream, text_of
+                    from kazma_ui.sse_chat._streaming import _hitl_persist_parts
 
-                    parts = parts_from_stream(
-                        streamed=content_acc,
-                        final=done_body,
-                        activity=activity_log or None,
+                    parts = (
+                        _hitl_persist_parts(
+                            done_body or content_acc,
+                            bool(turn_usage.get("interrupted")),
+                            _hitl_frame_payload,
+                        )
+                        if _hitl_frame_payload
+                        else parts_from_stream(
+                            streamed=content_acc,
+                            final=done_body,
+                            activity=activity_log or None,
+                        )
                     )
                     _persist_reply(
                         session_id,

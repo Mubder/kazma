@@ -382,7 +382,8 @@
         }
       },
       onApprovalRequired: function(data) {
-        if (!_mine()) return;
+        // HITL is not epoch-gated: a superseded stream's approval is still
+        // the live question. Dropping it left the card only on Dashboard.
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         pauseForApproval(data);
@@ -397,8 +398,10 @@
         });
       },
       onHitl: function(data) {
-        if (!_mine()) return;
         var st = String((data && data.state) || 'pending');
+        if (st === 'pending' && _hitlAlreadyClaimed(data)) return;
+        if (st !== 'pending' && !_mine()) return;
+        if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         if (st === 'pending') pauseForApproval(data);
         else _awaitingApproval = false;
         applyTurnEvent({
@@ -544,6 +547,7 @@
       _serverHitl = (status.hitl && typeof status.hitl === 'object') ? status.hitl : null;
       _serverGates = Array.isArray(status.gates) ? status.gates : [];
       _serverGatesAuth = !!status.gates_authoritative;
+      _serverThreadId = String(status.thread_id || '');
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
       var pendingGate = false;
       if (_serverGates && _serverGates.length) {
@@ -561,6 +565,7 @@
       }
       if (liveHitl && !_awaitingApproval) pauseForApproval(_serverHitl);
       if (liveHitl && !hasInlineApprovalCard()) {
+        _paintLiveGates();
         setTimeout(recoverMissedApproval, 0);
       }
 
@@ -1046,6 +1051,7 @@
   var _serverHitl = null;
   var _serverGates = [];
   var _serverGatesAuth = false;
+  var _serverThreadId = '';
   var _attachInFlight = false;
 
   /** Drop HITL/turn client leftovers when switching sessions.
@@ -1079,6 +1085,7 @@
     _serverHitl = null;
     _serverGates = [];
     _serverGatesAuth = false;
+    _serverThreadId = '';
     _lastInterruptedThreadId = '';
     _awaitingApproval = false;
     _clearStoreApproval();
@@ -2467,7 +2474,7 @@
         // Truncated stream (no terminal frame): reconcile with durable
         // truth after the lock settles — paints the persisted reply when
         // the turn already finished, re-attaches when still generating.
-        if (truncated && !_awaitingApproval) {
+        if (truncated && (!hasInlineApprovalCard())) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
         // Interrupted (HITL) turn with no rendered card anywhere = silently
@@ -2483,7 +2490,7 @@
       },
 
       onApprovalRequired: function(data) {
-        if (!_mine()) return;
+        // HITL is not epoch-gated — see _defaultAttachCallbacks.
         // HITL: journal part + one projector paints the card.
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
@@ -2502,9 +2509,9 @@
         refreshSessionsSoon();
       },
       onHitl: function(data) {
-        if (!_mine()) return;
         var st = String((data && data.state) || 'pending');
         if (st === 'pending' && _hitlAlreadyClaimed(data)) return;
+        if (st !== 'pending' && !_mine()) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         if (st === 'pending') {
           _clearStatusStrip();
@@ -4314,6 +4321,70 @@
     } catch (e) { /* ignore */ }
   }
 
+  /** Fallback when the inline bubble card did not land — keep a card on
+   *  the chat page (the Alpine strip under the transcript), not only on
+   *  Dashboard. Cleared as soon as hasInlineApprovalCard() is true. */
+  function _showStoreApproval(data) {
+    if (!data) return;
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        Alpine.store('agent').pendingApproval = data;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function _payloadFromGate(g) {
+    g = g || {};
+    var p = (g.payload && typeof g.payload === 'object') ? g.payload : {};
+    return {
+      thread_id: p.thread_id || _serverThreadId || chatSessionId || '',
+      kind: p.kind || g.kind || 'security',
+      tool: p.tool || g.tool || 'unknown',
+      args: p.args || {},
+      tools: p.tools || [],
+      message: p.message || g.message || '',
+      yolo_allowed: p.yolo_allowed !== false,
+      interrupt_id: p.interrupt_id || g.gate_id || '',
+      items: p.items || null,
+    };
+  }
+
+  function _paintLiveGates() {
+    if (hasInlineApprovalCard()) return;
+    var list = _serverGates || [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      if (String((list[i] || {}).state || '') !== 'pending') continue;
+      var payload = _payloadFromGate(list[i]);
+      applyTurnEvent({
+        type: 'hitl',
+        state: 'pending',
+        tool: payload.tool,
+        interrupt_id: payload.interrupt_id,
+        payload: payload,
+        turn_id: _liveTurnId,
+        source: 'gates',
+      });
+      if (hasInlineApprovalCard()) return;
+    }
+    if (_serverHitl && String(_serverHitl.gate || '') === 'pending' && _serverHitl.tool) {
+      applyTurnEvent({
+        type: 'hitl',
+        state: 'pending',
+        tool: _serverHitl.tool || '',
+        interrupt_id: _serverHitl.interrupt_id || '',
+        payload: {
+          thread_id: _serverThreadId || chatSessionId || '',
+          tool: _serverHitl.tool || '',
+          interrupt_id: _serverHitl.interrupt_id || '',
+          message: '',
+        },
+        turn_id: _liveTurnId,
+        source: 'gates',
+      });
+    }
+  }
+
   /** Server-truth recovery: an interrupted turn whose approval card never
    *  rendered is a SILENTLY PAUSED turn — no card, no error, no progress
    *  (the 2026-08-26 "complete silence" X-post incident). One best-effort
@@ -4334,11 +4405,13 @@
 
   function recoverMissedApproval() {
     if (hasInlineApprovalCard()) return;
-    if (_hitlAlreadyClaimed(null)) return;
     if (_serverGenerating && !_serverPaused) return;
+    _paintLiveGates();
+    if (hasInlineApprovalCard()) return;
     var existing = _openHitlPart();
-    if (existing && String(existing.state || 'pending') !== 'pending') return;
-    if (existing && String(existing.state || '') === 'pending' && existing.payload) {
+    if (existing && String(existing.state || 'pending') !== 'pending') {
+      /* a settled part must not block a live gate painted above */
+    } else if (existing && String(existing.state || '') === 'pending' && existing.payload) {
       renderHitlCard(existing.payload, { lock: true });
       if (hasInlineApprovalCard()) return;
     }
@@ -4349,10 +4422,11 @@
         var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
         if (!pending.length) return;
         var hit = null;
-        // Preference order: the thread we saw interrupt → the session id →
-        // (single-operator fallback) the only pending entry. The approve
-        // endpoint's ownership check still guards cross-tenant abuse.
-        var candidates = [_lastInterruptedThreadId, chatSessionId || ''];
+        // Preference order: the thread we saw interrupt → status thread →
+        // the session id → (paused-session fallback) the first pending
+        // entry. The approve endpoint's ownership check still guards
+        // cross-tenant abuse.
+        var candidates = [_lastInterruptedThreadId, _serverThreadId || '', chatSessionId || ''];
         for (var c = 0; c < candidates.length && !hit; c++) {
           for (var i = 0; i < pending.length; i++) {
             var p = pending[i] || {};
@@ -4362,7 +4436,7 @@
         // Single-operator fallback: adopt the only pending entry ONLY when
         // this chat's own status says it is paused — otherwise a fresh chat
         // adopts another chat's pause and wears its state (2026-09-01).
-        if (!hit && pending.length === 1 && _serverPaused) hit = pending[0];
+        if (!hit && _serverPaused && pending.length) hit = pending[0];
         if (!hit) return;
         console.warn('[KazmaChat] Recovering missed approval card for thread=' + hit.thread_id);
         applyTurnEvent({
@@ -4430,19 +4504,22 @@
     // went completely silent (2026-08-26 X-post incident).
     if (_hitlAlreadyClaimed(data)) return;
     if (lockComposer) pauseForApproval(data);
-    // The inline card is the primary approval UI. Hide the bottom Alpine card
-    // (driven by $store.agent.pendingApproval) so the same approval is never
-    // rendered twice — incident 2026-08-16: duplicated YOLO card (one inline,
-    // one lower). The store fields submitApproval needs are set by the inline
-    // card's own handlers.
-    _clearStoreApproval();
     var targetThreadId = data.thread_id || chatSessionId || '';
     _pinLiveAssistantBubble();
     var content = _hitlHostContent(currentMsgEl);
-    if (!content) return;
+    if (!content) {
+      // Inline bubble never materialized — keep the chat-page Alpine card
+      // so approval is not dashboard-only.
+      _showStoreApproval(data);
+      return;
+    }
     var iid = _hitlInterruptIdOf(data);
-    var existing = _findHitlCard(iid, currentMsgEl);
-    if (existing && !_hitlCardIsTrapped(existing)) return;
+    var existing = iid ? _findHitlCard(iid, currentMsgEl) : null;
+    if (existing && !_hitlCardIsTrapped(existing)) {
+      if (hasInlineApprovalCard()) _clearStoreApproval();
+      else _showStoreApproval(data);
+      return;
+    }
     if (existing && _hitlCardIsTrapped(existing)) _placeHitlCard(content, existing);
     var scope = _outerAssistantBubble(currentMsgEl) || content;
     // Never strip a claimed card (Approved/Denied) — that is the
@@ -4460,7 +4537,10 @@
       }
       old.remove();
     });
-    if (hasInlineApprovalCard()) return;
+    if (hasInlineApprovalCard()) {
+      _clearStoreApproval();
+      return;
+    }
 
     // Phase 3: semantic clarify/confirm → render per-option buttons instead of
     // the generic Approve/Deny. The data carries kind + items[0].options from
@@ -4485,6 +4565,8 @@
           }).join('') +
         '</div>';
       _placeHitlCard(content, _semCard);
+      if (hasInlineApprovalCard()) _clearStoreApproval();
+      else _showStoreApproval(data);
       scrollToBottom();
       _semCard.querySelectorAll('.hitl-sem-opt').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -4626,6 +4708,8 @@
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
     _placeHitlCard(content, card);
+    if (hasInlineApprovalCard()) _clearStoreApproval();
+    else _showStoreApproval(data);
     scrollToBottom();
 
     function setCardState(state, label) {
@@ -5946,7 +6030,7 @@
     var prev = currentMsgEl;
     if (el) currentMsgEl = el;
     try {
-      if (gateRow && gateRow.state === 'pending' && hitl.payload && doc.status !== 'done') {
+      if (gateRow && gateRow.state === 'pending' && hitl.payload) {
         renderHitlCard(hitl.payload, { lock: true });
         return;
       }
@@ -5961,7 +6045,7 @@
       // (dashboard still had live buttons, 2026-09-01).
       // A live turn is generating before the interrupt is marked paused;
       // that pair is also not a claim.
-      if (state === 'pending' && hitl.payload && doc.status !== 'done') {
+      if (state === 'pending' && hitl.payload) {
         // Registry-authoritative fail posture: the server answered with the
         // live-gates list and NO row covers this interrupt. Without registry
         // evidence of a claim, chat must never invent "Approved" from

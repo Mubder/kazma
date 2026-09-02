@@ -224,8 +224,14 @@ function registerAgentStore() {
       // suppressing here because SSE "will render it later" left the turn
       // silently paused when that frame never arrived.
       if (chat && typeof chat._hitlApproval === 'function') {
-        this.pendingApproval = null;
+        // Keep the chat-page Alpine card until inline paint proves it
+        // landed. Clearing first left Dashboard as the only UI when
+        // renderHitlCard returned early (2026-09-02).
+        this.pendingApproval = approval;
         chat._hitlApproval(approval);
+        if (chat.hasInlineApprovalCard && chat.hasInlineApprovalCard()) {
+          this.pendingApproval = null;
+        }
         return;
       }
       this.pendingApproval = approval;

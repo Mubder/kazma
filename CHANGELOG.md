@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Fix — pending HITL always paints in chat (2026-09-02)
+
+Dashboard listed the gate because it polls the registry; chat dropped the
+SSE ``approval_required`` when the stream epoch had moved, cleared the
+Alpine fallback *before* the inline card existed, and never painted from
+``status.gates``. HITL frames are no longer epoch-gated, the chat-page
+card stays until inline paint lands, and resync paints live gates.
+
 ## Fix — HITL card visible in chat, not only on the dashboard (2026-09-02)
 
 After the chained-card stacking change, a live approval could land inside
