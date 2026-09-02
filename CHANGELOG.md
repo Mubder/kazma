@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Docs — production-checklist + recent-features to 2026-09 (2026-09-02)
+
+Checklist: `/health/live`+`ready` vs details/deep; trusted proxies; CSRF;
+TOOL_TIERS; pin-IP; 6h backup; gate registry; FanOut tri-state; guard
+`--reload`. Recent features: September Turn Delivery / HITL registry / SSRF
+/ context integrity; backup cadence 6h; PG staging retention 3.
+
 ## Docs — commitment-layer + diagnosis-map to 2026-09 (2026-09-02)
 
 Commitment: exceptions on semantic tools fail closed; swarm scope default ON;
