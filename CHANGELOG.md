@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Fix — X Studio posts first-try: proposal_id in the tool contract (2026-09-02)
+
+The commitment gate requires a resolvable ``proposal_id`` on
+``x_post``/``x_schedule_post``, but the requirement was invisible at every
+model-facing layer: the function signatures, the manifest descriptions the
+model plans from, and therefore the JSON schema (strict-mode providers
+could not emit the arg and ``filter_tool_arguments`` stripped it). The
+first posting attempt was structurally doomed to a deny, forcing an
+apologize-and-retry round-trip — during which the model also invented a
+"burst suppressor" batching story from a half-memory of gateway code.
+
+- ``x_post`` / ``x_schedule_post`` now declare ``proposal_id`` (signature
+  + schema + manifest) with the save-first / once-per-item contract; the
+  posted text is still rewritten from the stored proposal (id wins).
+- ``product_knowledge`` (injected into the system prompt) now states the
+  approval-card delivery facts: web chat has no card rate limit, distinct
+  proposal-backed posts always surface on every path, the gateway
+  3-per-4-minutes burst limit is exec-retry-storm-only and exempts X
+  posts — "never tell the operator to batch posts, wait between waves,
+  or expect delayed cards".
+- Tests: schema declares proposal_id; manifest teaches the contract;
+  knowledge carries the delivery facts.
+
 ## Fix — Kazma self-audit findings: PBKDF2 alignment + doc drift (2026-09-02)
 
 Fixes the three verified findings from Kazma's internal read-only audit

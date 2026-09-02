@@ -22,13 +22,19 @@ tools:
   x_post:
     arabic_name: "تغريدة"
     description: >
-      Post one tweet via official POST /2/tweets (OAuth 1.0a). HITL is
-      ALWAYS required — YOLO and standing grants cannot skip it. Policy
-      denies empty text, over-length, duplicate 30d, too many @mentions /
-      $cashtags / hashtags, and over Kazma daily/monthly caps. Args: text
-      (required), reply_to_id (optional, for a thread reply). Never ask the
-      operator to paste API secrets in chat. Do not use browser/computer_use
-      to tweet — that violates X ToU.
+      Post one tweet via official POST /2/tweets (OAuth 1.0a). CONTRACT:
+      persist drafts with save_proposal FIRST, then call this ONCE PER ITEM
+      with proposal_id=<that item's id> — the commitment gate refuses
+      without it and rewrites text from the stored proposal (the id wins).
+      HITL is ALWAYS required — YOLO and standing grants cannot skip it.
+      Policy denies empty text, over-length, duplicate 30d, too many
+      @mentions / $cashtags / hashtags, and over Kazma daily/monthly caps.
+      Args: text (required), proposal_id (required — the saved proposal
+      item id), reply_to_id (optional, for a thread reply). All approval
+      cards surface immediately on every path — never advise the operator
+      to batch or wait between posts. Never ask the operator to paste API
+      secrets in chat. Do not use browser/computer_use to tweet — that
+      violates X ToU.
     category: social
     prompt_chain:
       - "انشر تغريدة بعد موافقتي"
@@ -43,13 +49,17 @@ tools:
   x_schedule_post:
     arabic_name: "جدولة تغريدة"
     description: >
-      Schedule a tweet to be posted automatically at a future time. HITL is
-      ALWAYS required at booking — the operator approves the exact draft and
-      time once. Kazma stores it and publishes it at the appointed time (X has
-      no native post scheduling). Daily/monthly caps and the 30-day duplicate
-      rule are enforced at booking. Args: text (required), when (required —
-      '5m', '1h', 'daily at 9am', or ISO timestamp), reply_to_id (optional).
-      The post fires only while the Kazma server is running.
+      Schedule a tweet to be posted automatically at a future time. CONTRACT:
+      persist drafts with save_proposal FIRST, then call this ONCE PER ITEM
+      with proposal_id=<that item's id> — the commitment gate refuses without
+      it and rewrites text from the stored proposal. HITL is ALWAYS required
+      at booking — the operator approves the exact draft and time once. Kazma
+      stores it and publishes it at the appointed time (X has no native post
+      scheduling). Daily/monthly caps and the 30-day duplicate rule are
+      enforced at booking. Args: text (required), when (required — '5m',
+      '1h', 'daily at 9am', or ISO timestamp), proposal_id (required — the
+      saved proposal item id), reply_to_id (optional). The post fires only
+      while the Kazma server is running.
     category: social
     prompt_chain:
       - "جدول تغريدة لتنشر لاحقًا بعد موافقتي"

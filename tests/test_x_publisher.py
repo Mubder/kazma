@@ -199,3 +199,53 @@ def test_settings_tab_and_api_wired() -> None:
     assert 'class="toggle-row"' in html
     assert "settings.x_show_keys" in html
     assert "settings.x_enabled" in html
+
+
+def test_x_post_schema_carries_proposal_id() -> None:
+    """2026-09-02: the commitment gate requires proposal_id, but the tool
+    schema (built from the signature) never advertised it — strict-mode
+    providers could not emit it and filter_tool_arguments stripped it, so
+    the first post attempt was structurally doomed to a deny."""
+    from kazma_core.agent.tool_registry import LocalToolRegistry
+
+    reg = LocalToolRegistry()
+    for name in ("x_post", "x_schedule_post"):
+        tool = reg._tools[name]
+        props = (tool.input_schema or {}).get("properties") or {}
+        assert "proposal_id" in props, f"{name} schema must declare proposal_id"
+
+
+def test_manifest_documents_save_first_contract() -> None:
+    """The descriptions the model plans from must teach the workflow:
+    save_proposal first, one call per item, id wins over context text."""
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    manifest = yaml.safe_load(
+        (
+            root
+            / "kazma-skills"
+            / "kazma_skills"
+            / "native"
+            / "x_publisher"
+            / "skill_manifest.yaml"
+        ).read_text(encoding="utf-8")
+    )
+    for name in ("x_post", "x_schedule_post"):
+        desc = manifest["tools"][name]["description"]
+        assert "save_proposal" in desc
+        assert "proposal_id" in desc
+        assert "ONCE PER ITEM" in desc
+
+
+def test_product_knowledge_states_card_delivery_facts() -> None:
+    """The 'waves of 3' fiction came from the model free-styling about card
+    throttles it half-remembered from gateway code. The system-prompt
+    knowledge must state the authoritative delivery behavior."""
+    from kazma_core.product_knowledge import build_product_knowledge
+
+    text = build_product_knowledge()
+    assert "never invent throttles" in text
+    assert "no rate limit" in text
+    assert "Never tell the operator to batch posts" in text
+    assert "Allow tool (session)" in text
