@@ -537,12 +537,27 @@
       _serverGates = Array.isArray(status.gates) ? status.gates : [];
       _serverGatesAuth = !!status.gates_authoritative;
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
+      var pendingGate = false;
+      if (_serverGates && _serverGates.length) {
+        for (var gi = 0; gi < _serverGates.length; gi++) {
+          if (String(_serverGates[gi].state || '') === 'pending') { pendingGate = true; break; }
+        }
+      }
+      var hitlPending = !!(_serverHitl && String(_serverHitl.gate || '') === 'pending');
+      var liveHitl = pendingGate || hitlPending || paused;
+
+      // Server idle (no live gate) after /abort or restart: do not keep the
+      // composer locked on a fossil pending part. The next prompt is a turn.
+      if (!generating && !liveHitl && _awaitingApproval) {
+        _releaseHitlComposer('resync-idle');
+      }
+      if (liveHitl && !_awaitingApproval) pauseForApproval(_serverHitl);
 
       // Still running server-side → keep waiting honestly AND re-attach a
       // live SSE stream from the journal cursor — but only when the stream
       // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
       // trigger churned connections for no gain.
-      if (generating || paused) {
+      if (generating || liveHitl) {
         if (activeStream) {
           // A live stream owns this turn — NEVER abort it here. Aborting a
           // healthy stream forced a journal-cursor reopen whose replay
@@ -1938,6 +1953,7 @@
         // (command audit 2026-08-19).
         appendMessage('user', '/abort');
         if (window.showToast) window.showToast('⛔ Aborting task…', 'warning', 2500);
+        _releaseHitlComposer('abort');
         if (activeStream) { try { activeStream.abort(); } catch (_e) {} activeStream = null; }
         fetch('/api/chat/abort', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1989,10 +2005,23 @@
       }).then(function(r) {
         return r.ok ? r.json() : r.json().catch(function() { return { ok: false }; });
       }).then(function(body) {
-        if (body && body.ok === false && window.showToast) {
+        if (body && body.ok === false) {
           if (body.reason === 'no_active_task') {
-            window.showToast('No active task to steer.', 'info', 3000);
-          } else if (body.reason) {
+            // /steer with no live turn is a NEW prompt, not a swallowed note.
+            _releaseHitlComposer('steer-idle');
+            var fallback = _steerText || steerBody(text) || text;
+            fallback = String(fallback || '').replace(/^\/steer!?\s*/i, '').trim();
+            if (fallback) {
+              if (window.showToast) window.showToast(
+                'No paused task — sending as a new message.', 'info', 3000);
+              if (inputEl) inputEl.value = fallback;
+              sendMessage();
+            } else if (window.showToast) {
+              window.showToast('No active task to steer.', 'info', 3000);
+            }
+            return;
+          }
+          if (body.reason && window.showToast) {
             window.showToast('Steer failed: ' + body.reason, 'error', 3500);
           }
           return;
@@ -2013,24 +2042,44 @@
       return;
     }
 
-    // During HITL, a normal message is a soft steer — don't start a new turn.
+    // During LIVE HITL, a normal message is a soft steer — don't start a
+    // new turn. A fossil `_awaitingApproval` after restart/abort (no live
+    // card) must NOT rewrite the prompt as `/steer …`.
     if (_awaitingApproval && text && text.charAt(0) !== '/') {
-      appendMessage('user', '/steer ' + text);
-      inputEl.value = '';
-      inputEl.style.height = 'auto';
-      if (window.showToast) window.showToast(
-        '🧭 Steering the paused task with your note.', 'info', 3000);
-      fetch('/api/chat/steer', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: chatSessionId || '',
-          thread_id: currentThreadId(),
-          text: text,
-          mode: 'soft',
-        }),
-        credentials: 'same-origin',
-      }).catch(function() { /* best-effort */ });
-      return;
+      if (!hasInlineApprovalCard()) {
+        _awaitingApproval = false;
+      } else {
+        inputEl.value = '';
+        inputEl.style.height = 'auto';
+        syncSendButtonForDraft();
+        fetch('/api/chat/steer', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: chatSessionId || '',
+            thread_id: currentThreadId(),
+            text: text,
+            mode: 'soft',
+          }),
+          credentials: 'same-origin',
+        }).then(function(r) {
+          return r.ok ? r.json() : r.json().catch(function() { return { ok: false }; });
+        }).then(function(body) {
+          if (body && body.ok === false && body.reason === 'no_active_task') {
+            _releaseHitlComposer('steer-idle');
+            if (window.showToast) window.showToast(
+              'No paused task — sending as a new message.', 'info', 3000);
+            if (inputEl) inputEl.value = text;
+            sendMessage();
+            return;
+          }
+          appendMessage('user', '/steer ' + text);
+          if (window.showToast) window.showToast(
+            '🧭 Steering the paused task with your note.', 'info', 3000);
+        }).catch(function() {
+          appendMessage('user', '/steer ' + text);
+        });
+        return;
+      }
     }
 
     // Unknown slash-command hint (command audit 2026-08-19): a typo like
@@ -4063,6 +4112,26 @@
     }
   }
 
+  function _releaseHitlComposer(reason) {
+    // Abort / idle-steer: the composer is a NEW turn, not a steer of a
+    // ghost card. Freeze any live buttons so hydrate cannot re-lock.
+    _awaitingApproval = false;
+    _serverPaused = false;
+    if (messagesEl) {
+      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
+        if (_hitlCardIsClaimed(card)) return;
+        card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+        card.className = 'hitl-approval-card hitl-denied';
+        var actions = card.querySelector('.hitl-approval-actions');
+        if (actions) {
+          actions.innerHTML = '<span class="hitl-status hitl-denied">Aborted — send a new message</span>';
+        }
+      });
+    }
+    _clearStoreApproval();
+    diag('hitl-released', reason || '');
+  }
+
   function hasInlineApprovalCard() {
     if (!messagesEl) return false;
     var cards = messagesEl.querySelectorAll('.hitl-approval-card');
@@ -4238,8 +4307,9 @@
       .catch(function() { /* best-effort */ });
   }
 
-  function renderHitlCard(data) {
+  function renderHitlCard(data, opts) {
     if (!data) return;
+    var lockComposer = !(opts && opts.lock === false);
     // Idempotent: WS and SSE both deliver the approval (journal fan-out +
     // SSE frame). The FIRST render wins; a second live card for the same
     // interrupt duplicates buttons and double-fires resumes. Suppression
@@ -4252,7 +4322,7 @@
     // Approve used to mint a second card beside the claimed one (refresh
     // then showed one, because persist has a single HITL part).
     if (_findHitlCard(_hitlInterruptIdOf(data), currentMsgEl)) return;
-    pauseForApproval(data);
+    if (lockComposer) pauseForApproval(data);
     // The inline card is the primary approval UI. Hide the bottom Alpine card
     // (driven by $store.agent.pendingApproval) so the same approval is never
     // rendered twice — incident 2026-08-16: duplicated YOLO card (one inline,
@@ -5754,7 +5824,7 @@
     if (el) currentMsgEl = el;
     try {
       if (gateRow && gateRow.state === 'pending' && hitl.payload && doc.status !== 'done') {
-        renderHitlCard(hitl.payload);
+        renderHitlCard(hitl.payload, { lock: true });
         return;
       }
       if (gateRow && (gateRow.state === 'claimed' || gateRow.state === 'resuming')) {
@@ -5776,23 +5846,27 @@
         // is recoverable (the server re-verifies and answers "no longer
         // pending"); a fabricated Approved stamp is the incident.
         if (_serverGatesAuth && !gateRow) {
-          renderHitlCard(hitl.payload);
+          // Live buttons (never invent Approved) but do NOT lock the
+          // composer — an empty authoritative list means no live gate,
+          // so the next prompt is a new turn, not /steer.
+          renderHitlCard(hitl.payload, { lock: false });
           return;
         }
         // Registry did not answer: thin fallback. Never invent Approved
         // from leftover status. Paint idempotency (_hitlAlreadyClaimed)
-        // still blocks cloning the SAME interrupt's live card.
+        // still blocks cloning the SAME interrupt's live card. Hydrate
+        // without a pending gate row must not steal the next send as /steer.
         if (_hitlAlreadyClaimed(hitl)) {
           state = 'inflight';
         } else {
-          renderHitlCard(hitl.payload);
+          renderHitlCard(hitl.payload, { lock: false });
           return;
         }
       }
       var host = el || currentMsgEl;
       var card = _findHitlCard(iid, host);
       if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved' || state === 'inflight' || state === 'settled')) {
-        renderHitlCard(hitl.payload);
+        renderHitlCard(hitl.payload, { lock: false });
         host = el || currentMsgEl;
         card = _findHitlCard(iid, host);
       }

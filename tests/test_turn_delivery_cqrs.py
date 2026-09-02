@@ -26,6 +26,22 @@ def _src(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def test_abort_releases_hitl_gate_and_composer() -> None:
+    """ /abort must settle live gates so the next prompt is a new turn."""
+    init = _src(_INIT)
+    abort = init.split("async def abort_chat_turn", 1)[1]
+    assert "abort_thread_hitl" in abort
+    assert 'auto_deny=_hitl_now != "pending"' in init
+    chat = _src(_CHAT_JS)
+    assert "function _releaseHitlComposer" in chat
+    assert "_releaseHitlComposer('abort')" in chat
+    status = init.split("async def get_session_status", 1)[1].split(
+        "async def delete_session", 1
+    )[0]
+    assert 'str(g.get("state") or "") == "pending"' in status
+    assert 'hitl.get("gate")' in status
+
+
 def test_command_resume_ignores_own_drive_task() -> None:
     src = _src(_STREAMING)
     assert "get_active_turn(thread_id)" in src
@@ -211,7 +227,8 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     assert "_serverGenerating && !_serverPaused" not in paint
     assert "_hitlAlreadyClaimed(hitl)" in paint
     assert "statusInflight" not in paint
-    assert "renderHitlCard(hitl.payload)" in paint
+    assert "renderHitlCard(hitl.payload, { lock: false })" in paint
+    assert "renderHitlCard(hitl.payload, { lock: true })" in paint
     status = _src(_INIT)
     sess = status.split("async def get_session_status", 1)[1].split(
         "async def delete_session", 1
@@ -241,7 +258,7 @@ def test_hitl_claimed_match_is_interrupt_scoped() -> None:
         "function renderTurn(doc, meta)", 1
     )[0]
     assert "_findHitlCard" in paint
-    render = chat.split("function renderHitlCard(data)", 1)[1].split(
+    render = chat.split("function renderHitlCard(data, opts)", 1)[1].split(
         "function submitApproval(action, scope)", 1
     )[0]
     assert "_findHitlCard" in render
@@ -253,7 +270,7 @@ def test_hitl_claimed_match_is_interrupt_scoped() -> None:
 
 def test_hitl_card_is_not_torn_down_after_approve() -> None:
     chat = _src(_CHAT_JS)
-    render = chat.split("function renderHitlCard(data)", 1)[1].split(
+    render = chat.split("function renderHitlCard(data, opts)", 1)[1].split(
         "function submitApproval(action, scope)", 1
     )[0]
     assert "_hitlAlreadyClaimed" in render

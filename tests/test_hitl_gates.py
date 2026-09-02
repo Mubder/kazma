@@ -376,3 +376,25 @@ class TestCasWhitelist:
         register_gate(_gate(gid="cas-2"))
         row = claim_gate("cas-2", "approve", "web:test")
         assert row.state == "claimed" and row.decision == "approve"
+
+
+class TestAbortSettlesPending:
+    """/abort must settle pending gates; settle_thread_gates must not.
+
+    Negative control: the turn-terminal helper leaves pending rows live so a
+    second question stays open. Abort is terminal — pending dies too.
+    """
+
+    @pytest.mark.asyncio
+    async def test_abort_settles_pending_gate(self):
+        from kazma_ui.hitl_gate_bridge import abort_thread_hitl, settle_thread_gates
+
+        register_gate(_gate(gid="g-abort", thread="t-abort"))
+        assert live_gates("t-abort")[0].state == "pending"
+        await settle_thread_gates("t-abort")
+        assert live_gates("t-abort")[0].state == "pending"
+        await abort_thread_hitl("t-abort")
+        assert live_gates("t-abort") == []
+        row = gate_for("g-abort")
+        assert row is not None and row.state == "settled"
+        assert row.decision == "aborted"

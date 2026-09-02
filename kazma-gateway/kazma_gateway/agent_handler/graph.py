@@ -1205,6 +1205,12 @@ def create_graph_handler(
                         "task_status": "abandoned",
                         "auto_continue": False,
                     })
+                try:
+                    from kazma_ui.hitl_gate_bridge import abort_thread_hitl
+
+                    await abort_thread_hitl(thread_id)
+                except Exception:
+                    logger.debug("[agent-handler] abort HITL release skipped", exc_info=True)
                 logger.info(
                     "[agent-handler] /abort thread=%s cancelled=%s",
                     thread_id[:12], _ab_cancelled,

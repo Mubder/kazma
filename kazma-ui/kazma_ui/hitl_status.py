@@ -182,6 +182,24 @@ async def _load_snapshot(
         return None
 
 
+def _snapshot_abandoned(snapshot: Any) -> bool:
+    """True when ``/abort`` already wrote ``task_status=abandoned``.
+
+    A leftover LangGraph interrupt after abort is not a live question —
+    treating it as pending re-locks the composer and steals the next
+    prompt as ``/steer``.
+    """
+    if snapshot is None:
+        return False
+    try:
+        values = getattr(snapshot, "values", None) or {}
+        if isinstance(values, dict) and str(values.get("task_status") or "") == "abandoned":
+            return True
+    except Exception:
+        return False
+    return False
+
+
 async def _thin_execution_status(
     thread_id: str,
     *,
@@ -222,6 +240,7 @@ async def hitl_thread_status(
     if not thread_id:
         return "idle"
 
+    snap = snapshot
     try:
         from kazma_ui.hitl_gate_bridge import registry_on
 
@@ -235,14 +254,23 @@ async def hitl_thread_status(
                 return "pending"
             if rows:
                 return "inflight"
-            # Empty registry: unregistered pause or truly idle.
+            # Empty registry: unregistered pause or truly idle. An aborted
+            # turn's leftover interrupt is idle — not a live card.
+            if snap is None:
+                snap = await _load_snapshot(thread_id, graph=graph, snapshot=snapshot)
+            if _snapshot_abandoned(snap):
+                return "idle"
             return await _thin_execution_status(
-                thread_id, graph=graph, snapshot=snapshot
+                thread_id, graph=graph, snapshot=snap
             )
     except Exception:
         logger.debug("[hitl_status] registry read failed — thin fallback", exc_info=True)
 
-    return await _thin_execution_status(thread_id, graph=graph, snapshot=snapshot)
+    if snap is None:
+        snap = await _load_snapshot(thread_id, graph=graph, snapshot=snapshot)
+    if _snapshot_abandoned(snap):
+        return "idle"
+    return await _thin_execution_status(thread_id, graph=graph, snapshot=snap)
 
 
 async def is_truly_pending(

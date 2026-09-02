@@ -30,6 +30,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "abort_thread_hitl",
     "gate_pending_from_payload",
     "gate_claimed",
     "gate_claimed_for_thread",
@@ -188,6 +189,87 @@ async def gate_resuming(interrupt_id: str) -> None:
             _mismatch("resuming")
     except Exception:
         logger.warning("[GateBridge] mark_resuming failed", exc_info=True)
+
+
+async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
+    """Release a paused HITL turn after ``/abort``. Never raises.
+
+    ``/abort`` used to write ``task_status=abandoned`` and leave the live
+    gate + persisted pending HITL part in place. After a restart the client
+    hydrated that part into a live card, locked the composer, and rewrote
+    the next prompt as ``/steer …`` — which then 200'd as ``no_active_task``
+    and never started a turn (2026-09-02).
+
+    Abort is terminal: settle every live gate (including pending), stamp
+    the HITL part denied so refresh cannot revive the card, clear the
+    in-memory paused flag, and drop pending commitments on the thread.
+    """
+    if not thread_id:
+        return
+    try:
+        from kazma_ui.sse_chat._streaming import mark_thread_unpaused
+
+        mark_thread_unpaused(thread_id)
+    except Exception:
+        logger.debug("[GateBridge] unpause on abort skipped", exc_info=True)
+    if registry_on():
+        try:
+            from kazma_core.metrics import record_hitl_gate
+            from kazma_core.safety.hitl_gates import (
+                TransitionConflict,
+                live_gates_async,
+                settle_gate_async,
+            )
+
+            for row in await live_gates_async(thread_id):
+                try:
+                    settled = await settle_gate_async(row.gate_id, "aborted")
+                    record_hitl_gate(settled.state, settled.mechanism)
+                except TransitionConflict:
+                    _mismatch("abort_settle")
+        except Exception:
+            logger.warning("[GateBridge] abort settle failed", exc_info=True)
+    if session_id:
+        try:
+            from kazma_ui.hitl_status import persisted_hitl_for_thread
+            from kazma_ui.reply_sink import resolve_reply_turn
+            from kazma_ui.turn_runtime import persist_reply
+
+            part = persisted_hitl_for_thread(thread_id) or {}
+            raw_payload = part.get("payload") if isinstance(part, dict) else None
+            payload = raw_payload if isinstance(raw_payload, dict) else {}
+            iid = str(
+                (part.get("interrupt_id") if isinstance(part, dict) else "")
+                or payload.get("interrupt_id")
+                or ""
+            )
+            turn_id = resolve_reply_turn(thread_id, session_id)
+            persist_reply(
+                session_id,
+                turn_id,
+                "",
+                interrupted=False,
+                thread_id=thread_id,
+                parts=[{
+                    "type": "hitl",
+                    "tool": str(
+                        (part.get("tool") if isinstance(part, dict) else "")
+                        or payload.get("tool")
+                        or ""
+                    ),
+                    "state": "denied",
+                    "interrupt_id": iid,
+                    "payload": payload,
+                }],
+            )
+        except Exception:
+            logger.debug("[GateBridge] abort HITL stamp skipped", exc_info=True)
+    try:
+        from kazma_core.safety.commitment.store import abort_pending_for_thread
+
+        abort_pending_for_thread(thread_id, reason="user_abort")
+    except Exception:
+        logger.debug("[GateBridge] abort commitments skipped", exc_info=True)
 
 
 async def settle_thread_gates(thread_id: str, *, outcome: str = "") -> None:

@@ -73,6 +73,31 @@ def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> No
     assert "var _turnActive = !!_isGenerating" not in js
 
 
+def test_auto_steer_requires_live_card_not_fossil_flag() -> None:
+    """After restart/abort, `_awaitingApproval` alone must not prefix /steer."""
+    js = _js()
+    auto = js.split("if (_awaitingApproval && text && text.charAt(0) !== '/')", 1)
+    assert len(auto) == 2
+    body = auto[1][:1800]
+    assert "hasInlineApprovalCard()" in body
+    assert "no_active_task" in body
+    assert "sending as a new message" in body
+    assert "function _releaseHitlComposer" in js
+    abort = js.split("appendMessage('user', '/abort')", 1)[1][:500]
+    assert "_releaseHitlComposer('abort')" in abort
+
+
+def test_hydrate_pending_without_gate_does_not_lock_composer() -> None:
+    js = _js()
+    paint = js.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
+        "function renderTurn(doc, meta)", 1
+    )[0]
+    assert "renderHitlCard(hitl.payload, { lock: false })" in paint
+    assert "_awaitingApproval" not in paint
+    assert "function renderHitlCard(data, opts)" in js
+    assert "if (lockComposer) pauseForApproval(data);" in js
+
+
 def test_steer_body_strips_placeholder() -> None:
     js = _js()
     assert "/^<[^>]+>$/.test(rest)" in js
