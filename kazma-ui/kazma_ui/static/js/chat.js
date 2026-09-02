@@ -1193,6 +1193,7 @@
     chevron: null, body: null, stepsEl: null,
     visible: false, phase: 'idle', current: '', step: 0,
     turnStart: 0, elapsedS: 0, lastSignal: 0, deadline: 0,
+    planTotal: 0, planDone: 0,
     stalled: false, stallResynced: false, open: false,
     tickTimer: null, doneTimer: null, textOverride: '',
   };
@@ -1256,6 +1257,9 @@
     } else if (_tc.phase !== 'done' && _tc.phase !== 'error') {
       if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
       if (_tc.step > 0) bits.push(ti('task_step', 'step') + ' ' + _tc.step);
+      if (_tc.planTotal > 0) {
+        bits.push(ti('task_plan', 'plan') + ' ' + _tc.planDone + '/' + _tc.planTotal);
+      }
     }
     _tc.meta.textContent = bits.join(' · ');
     _tc.stallEl.hidden = !_tc.stalled;
@@ -1345,6 +1349,8 @@
         _tc.elapsedS = 0;
         _tc.turnStart = now;
         _tc.deadline = 0;
+        _tc.planTotal = 0;
+        _tc.planDone = 0;
         _tc.stalled = false;
         _tc.stallResynced = false;
         _tc.textOverride = '';
@@ -1383,6 +1389,10 @@
       else if (ev.message) { _tc.textOverride = String(ev.message); }
     }
     if (ev.t === 'text' && ev.msg) _tc.textOverride = String(ev.msg);
+    if (ev.t === 'plan') {
+      _tc.planTotal = parseInt(ev.total, 10) || 0;
+      _tc.planDone = parseInt(ev.done, 10) || 0;
+    }
     if (ev.t === 'approval') {
       _tc.visible = true;
       _tc.phase = 'awaiting';
@@ -3058,7 +3068,11 @@
 
   function applyMemoryExplain(data) {
     _lastMemoryExplain = data || null;
-    var panel = ensureProgressPanel();
+    // Attach-only (2026-09-03): memory explain updates an existing live
+    // workbench; it must not mint a phantom in-bubble panel on hydration.
+    var panel = messagesEl
+      ? messagesEl.querySelector('.agent-progress.is-active')
+      : null;
     if (!panel || !data) return;
     var wrap = panel.querySelector('.agent-memory-explain');
     var body = panel.querySelector('.agent-memory-explain-body');
@@ -3303,8 +3317,6 @@
 
   function setPlan(items) {
     if (!items || !items.length) return;
-    var panel = ensureProgressPanel();
-    if (!panel) return;
     // Merge unique plan lines (keep order)
     items.forEach(function(raw) {
       var text = String(raw || '').replace(/^[\-\*\d\.\)\s]+/, '').trim();
@@ -3314,8 +3326,21 @@
       });
       if (!exists) _planItems.push({ text: text, done: false });
     });
-    _renderPlanList(panel);
-    scrollToBottom();
+    // Live Task Card: plan progress rides the card header meta. setPlan
+    // must NEVER create an in-bubble workbench — on hydration it painted a
+    // phantom "Working…" panel over finished history (2026-09-03).
+    _taskCardEvent({
+      t: 'plan',
+      total: _planItems.length,
+      done: _planItems.filter(function(p) { return p.done; }).length,
+    });
+    var panel = messagesEl
+      ? messagesEl.querySelector('.agent-progress.is-active')
+      : null;
+    if (panel) {
+      _renderPlanList(panel);
+      scrollToBottom();
+    }
   }
 
   function markPlanProgress(toolName) {
@@ -3339,6 +3364,11 @@
       }
     }
     if (_progressEl) _renderPlanList(_progressEl);
+    _taskCardEvent({
+      t: 'plan',
+      total: _planItems.length,
+      done: _planItems.filter(function(p) { return p.done; }).length,
+    });
   }
 
   /**

@@ -402,3 +402,25 @@ def test_ws_store_feeds_task_card() -> None:
         "{ t: 'tool', name: tName }",
     ):
         assert needle in store, needle
+
+
+def test_setplan_and_memory_explain_never_create_panels() -> None:
+    """2026-09-03 live bug: setPlan/applyMemoryExplain called
+    ensureProgressPanel() directly — on hydration a plan-only historical
+    message minted a phantom in-bubble 'Working…' workbench over finished
+    history. Both are attach-only now; plan progress rides the card."""
+    js = _js()
+    plan = js.split("function setPlan(items)", 1)[1].split(
+        "function markPlanProgress(toolName)", 1
+    )[0]
+    assert "ensureProgressPanel()" not in plan
+    assert "_taskCardEvent({" in plan
+    mem = js.split("function applyMemoryExplain(data)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "ensureProgressPanel()" not in mem
+    # Card renders plan progress in the header meta.
+    tc_render = js.split("function _tcRender()", 1)[1].split(
+        "function _tcTick()", 1
+    )[0]
+    assert "_tc.planTotal" in tc_render
