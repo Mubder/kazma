@@ -115,6 +115,24 @@ def test_abort_generation_retires_live_turn_before_stop_wait() -> None:
     assert "seenTid" in dash
 
 
+def test_chained_hitl_card_appends_below_previous() -> None:
+    """A later interrupt must not paint above the card already approved."""
+    js = _js()
+    assert "function _placeHitlCard(content, card)" in js
+    place = js.split("function _placeHitlCard(content, card)", 1)[1].split(
+        "function renderHitlCard", 1
+    )[0]
+    assert "lastCard" in place
+    assert "insertBefore(card, after.nextSibling)" in place
+    # The old first-interrupt slot (right under CoT) is what stacked
+    # schedule_task above cancel_scheduled.
+    assert "insertBefore(card, progress.nextSibling)" not in js
+    rescue = js.split("function _rescueTurnDom(el)", 1)[1].split(
+        "function _answerFromDoc", 1
+    )[0]
+    assert "cursor.nextSibling" in rescue
+
+
 def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> None:
     js = _js()
     assert "thread_id: currentThreadId()" in js

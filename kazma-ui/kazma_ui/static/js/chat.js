@@ -4345,6 +4345,30 @@
       .catch(function() { /* best-effort */ });
   }
 
+  /** Chronological HITL cards: a later interrupt must sit BELOW the card
+   *  already approved in this bubble. Inserting after `.agent-progress`
+   *  put schedule_task above cancel_scheduled (2026-09-02). */
+  function _placeHitlCard(content, card) {
+    if (!content || !card) return;
+    var kids = content.children;
+    var lastCard = null;
+    var progress = null;
+    var i;
+    for (i = 0; i < kids.length; i++) {
+      if (!kids[i].classList) continue;
+      if (kids[i].classList.contains('hitl-approval-card')) lastCard = kids[i];
+      else if (!progress && kids[i].classList.contains('agent-progress')) progress = kids[i];
+    }
+    var after = lastCard || progress;
+    if (after && after.parentNode === content) {
+      if (progress) progress.classList.remove('is-collapsed');
+      if (after.nextSibling) content.insertBefore(card, after.nextSibling);
+      else content.appendChild(card);
+      return;
+    }
+    content.appendChild(card);
+  }
+
   function renderHitlCard(data, opts) {
     if (!data) return;
     var lockComposer = !(opts && opts.lock === false);
@@ -4401,7 +4425,7 @@
                    escapeHtml(opt.id) + '">' + escapeHtml(opt.label || opt.id) + '</button>';
           }).join('') +
         '</div>';
-      content.appendChild(_semCard);
+      _placeHitlCard(content, _semCard);
       scrollToBottom();
       _semCard.querySelectorAll('.hitl-sem-opt').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -4542,18 +4566,7 @@
           : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
-    var progress = content.querySelector('.agent-progress');
-    if (progress) {
-      progress.classList.remove('is-collapsed');
-      if (progress.parentNode === content) {
-        if (progress.nextSibling) content.insertBefore(card, progress.nextSibling);
-        else content.appendChild(card);
-      } else {
-        content.appendChild(card);
-      }
-    } else {
-      content.appendChild(card);
-    }
+    _placeHitlCard(content, card);
     scrollToBottom();
 
     function setCardState(state, label) {
@@ -5727,12 +5740,15 @@
     if (panel) {
       var body = panel.querySelector('.agent-progress-body') || panel;
       var trapped = body.querySelectorAll('.message-text, .hitl-approval-card, .message-meta, .message-actions');
-      var anchor = panel.nextSibling;
+      var cursor = panel;
       for (i = 0; i < trapped.length; i++) {
         var node = trapped[i];
         var owner = node.closest ? node.closest('.message') : null;
         if (owner && owner !== el) continue;
-        content.insertBefore(node, anchor);
+        // Same-anchor insertBefore reverses the node list (later cards
+        // would land above earlier ones). Walk the cursor forward.
+        content.insertBefore(node, cursor.nextSibling);
+        cursor = node;
       }
     }
     for (i = 0; i < content.children.length; i++) {
