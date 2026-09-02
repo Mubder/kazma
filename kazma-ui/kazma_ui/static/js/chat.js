@@ -4408,7 +4408,14 @@
     messagesEl.querySelectorAll('.hitl-approval-card').forEach(function (card) {
       if (_hitlCardIsClaimed(card) || _hitlCardIsTrapped(card)) return;
       var cid = String(card.getAttribute('data-interrupt-id') || '');
-      if (cid && pendingIids[cid]) return;
+      // Positive identification only: stamp a card whose interrupt id is
+      // KNOWN and confirmed absent from the authoritative pending list. A
+      // card with no id stays untouched — disabling a live question we
+      // cannot identify is exactly the failure this reconcile exists to
+      // prevent (2026-09-02 semantic-card window; the approval_timeout
+      // frame remains the live-stamp path for unidentified cards).
+      if (!cid) return;
+      if (pendingIids[cid]) return;
       var btns = card.querySelectorAll('button');
       var live = false;
       for (var i = 0; i < btns.length; i++) {
@@ -4601,6 +4608,14 @@
       var _semTcid = _semItem.tool_call_id || '';
       var _semCard = document.createElement('div');
       _semCard.className = 'hitl-approval-card';
+      // Same identity stamp as the security card — id-scoped consumers
+      // (_reconcileHitlCardsWithGates, markApprovalTimedOut, _findHitlCard)
+      // key off data-interrupt-id; a card without one was invisible to
+      // them and could be stamped resolved while live (2026-09-02).
+      var _semIid = _hitlInterruptIdOf(data);
+      if (_semIid) {
+        try { _semCard.setAttribute('data-interrupt-id', _semIid); } catch (eAttr) { /* ignore */ }
+      }
       _semCard.innerHTML =
         '<div class="hitl-approval-header">\u2754 Clarification Needed</div>' +
         '<div class="hitl-approval-body">' +
