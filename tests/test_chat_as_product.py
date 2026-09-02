@@ -233,3 +233,25 @@ def test_status_strip_never_toggles_per_token() -> None:
     js = _CHAT_JS.read_text(encoding="utf-8")
     on_token_body = js.split("onToken: function(data) {", 1)[1].split("onToolCall:", 1)[0]
     assert "_clearStatusStrip" not in on_token_body
+
+
+def test_live_assistant_bubble_is_pinned_not_minted() -> None:
+    """CoT ladder (2026-09-02): plan/status hops called createAssistantMessage
+    whenever currentMsgEl was null, stacking one bubble per hop.
+
+    Law: the only mint is _assistantBubbleForOpenTurn (reuse last assistant
+    after the last user). Progress/HITL/token/error pin that bubble.
+    """
+    js = _CHAT_JS.read_text(encoding="utf-8")
+    assert "function _pinLiveAssistantBubble()" in js
+    assert "function _assistantBubbleForOpenTurn()" in js
+    assert "if (!currentMsgEl) currentMsgEl = createAssistantMessage()" not in js
+    # ensureProgressPanel is the live CoT mint site
+    body = js.split("function ensureProgressPanel()", 1)[1].split("\n  function ", 1)[0]
+    assert "_pinLiveAssistantBubble()" in body
+    assert "createAssistantMessage()" not in body
+    # Semantic HITL must send interrupt_id (registry claim) and not stick
+    # on Resolving… after a 409.
+    sem = js.split("Clarification Needed", 1)[1].split("function setCardState", 1)[0]
+    assert "interrupt_id: data.interrupt_id" in sem
+    assert "res.status === 409" in sem

@@ -447,6 +447,27 @@ def _resolve_remind_act(
         )
 
     if res.decision == "clarify":
+        opts = _build_remind_clarify_options(res)
+        actionable = [
+            o for o in opts
+            if o.get("id") != "cancel" and o.get("slots_patch")
+        ]
+        if not actionable:
+            # Missing slot, not a two-date disambiguation. A Cancel-only
+            # interrupt parks the turn with no way to proceed and no
+            # assistant reply (2026-09-02). Deny so the model ASKS in chat.
+            commitment.status = "aborted"
+            commitment.policy_decision = "deny"
+            cid = create_commitment(commitment, cfg=cfg)
+            logger.info(
+                "[commitment] deny (no actionable clarify options) %s cid=%s — %s",
+                tool_name, cid, res.reason,
+            )
+            return EffectDecision(
+                decision="deny",
+                reason=(res.reason or "no time expression found — ask when to fire"),
+                profile=profile, audit=audit, commitment_id=cid,
+            )
         commitment.status = "needs_clarify"
         commitment.policy_decision = "clarify"
         cid = create_commitment(commitment, cfg=cfg)  # 24h TTL
@@ -457,7 +478,7 @@ def _resolve_remind_act(
         return EffectDecision(
             decision="clarify", reason=res.reason, profile=profile, audit=audit,
             commitment_id=cid, clarify_question=res.reason,
-            options=_build_remind_clarify_options(res),
+            options=opts,
         )
 
     # deny (rare for remind — e.g. unsatisfiable)

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Fix — CoT ladder mint + Cancel-only remind card (2026-09-02)
+
+Live CoT hops were calling `createAssistantMessage()` whenever
+`currentMsgEl` was null (Claude's historical-render left it null), stacking
+one bubble per plan token. All live paths now pin
+`_assistantBubbleForOpenTurn()`. Remind clarify with no actionable dates is
+**deny** (model asks in the reply) instead of a Cancel-only interrupt that
+parks the turn. Semantic card sends `interrupt_id` and recovers from 409.
+
 ## Docs — production-checklist + recent-features to 2026-09 (2026-09-02)
 
 Checklist: `/health/live`+`ready` vs details/deep; trusted proxies; CSRF;
