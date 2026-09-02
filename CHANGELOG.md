@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Fix — phantom live CoT panel on refresh (Live Task Card follow-up) (2026-09-03)
+
+Two direct DOM writers bypassed the card merge: ``setPlan`` and
+``applyMemoryExplain`` both called ``ensureProgressPanel()``, so a
+plan-only historical message painted a phantom in-bubble "Working…"
+workbench over finished history on every hydration — the "old CoT still
+there" report. Both are attach-only now (update an existing live panel,
+never create one); plan progress rides the Live Task Card header
+("plan 2/3") instead, fed by ``setPlan``/``markPlanProgress``.
+
 ## Feature — Live Task Card: one merged turn-state surface (2026-09-03)
 
 The user could not tell a working turn from a hung one: during long
