@@ -226,6 +226,69 @@ def test_hydrate_pending_without_gate_does_not_lock_composer() -> None:
     assert "if (lockComposer) pauseForApproval(data);" in js
 
 
+def test_hitl_card_suppression_is_interrupt_scoped_not_global() -> None:
+    """The first live-button card on the page must not eat every later
+    gate. 2026-09-02: a stale pending card from an earlier turn made
+    ``hasInlineApprovalCard()`` true, so renderHitlCard returned before
+    painting for EVERY later interrupt — cards appeared only on the
+    Dashboard while the gates silently auto-denied (watchdog)."""
+    js = _js()
+    rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
+        "function setCardState(state, label)", 1
+    )[0]
+    guard = rhc.split("if (hasInlineApprovalCard()) {", 1)[1].split(
+        "// Phase 3", 1
+    )[0]
+    # Same-interrupt cards skip (idempotent WS+SSE delivery) …
+    assert "_findHitlCard(iid" in guard
+    assert "_hitlCardIsClaimed(liveSameCard)" in guard
+    # … a DIFFERENT interrupt's card must fall through and paint.
+    assert "return;" in guard
+
+
+def test_stale_hitl_cards_reconcile_to_registry_when_idle() -> None:
+    """Once /status answers authoritatively and the thread is idle, a card
+    with live buttons whose interrupt has no pending registry row is a
+    fossil: stamp it resolved instead of offering Approve buttons that
+    only ever 409 (§30 — the registry owns the decision)."""
+    js = _js()
+    assert "function _reconcileHitlCardsWithGates()" in js
+    reconcile = js.split("function _reconcileHitlCardsWithGates()", 1)[1].split(
+        "function recoverMissedApproval", 1
+    )[0]
+    assert "_serverGatesAuth" in reconcile
+    # Never run while a pause may be in flight (row not registered yet).
+    assert "_openHitlPart()" in reconcile
+    assert "pending" in reconcile
+    resync = js.split("function _resyncDelivery(reason)", 1)[1].split(
+        "function _releaseHitlComposer", 1
+    )[0]
+    assert "if (!generating && !liveHitl) _reconcileHitlCardsWithGates();" in resync
+
+
+def test_reconcile_is_positive_id_only_and_semantic_card_carries_iid() -> None:
+    """2026-09-02 audit: the semantic clarify card was built without
+    data-interrupt-id, so id-scoped consumers could not identify it and
+    _reconcileHitlCardsWithGates could disable a LIVE semantic card in the
+    window before the pending gate reached the status snapshot. Two rules:
+    every card carries its interrupt id, and the reconcile only stamps
+    cards whose id is KNOWN and confirmed absent — never a guess."""
+    js = _js()
+    rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
+        "function setCardState(state, label)", 1
+    )[0]
+    sem = rhc.split("data.kind.indexOf('semantic_') === 0", 1)[1].split(
+        "_placeHitlCard(content, _semCard)", 1
+    )[0]
+    assert "_hitlInterruptIdOf(data)" in sem
+    assert "setAttribute('data-interrupt-id'" in sem
+    reconcile = js.split("function _reconcileHitlCardsWithGates()", 1)[1].split(
+        "function recoverMissedApproval", 1
+    )[0]
+    assert "if (!cid) return;" in reconcile
+    assert "if (pendingIids[cid]) return;" in reconcile
+
+
 def test_steer_body_strips_placeholder() -> None:
     js = _js()
     assert "/^<[^>]+>$/.test(rest)" in js

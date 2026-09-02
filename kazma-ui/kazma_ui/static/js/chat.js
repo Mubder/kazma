@@ -558,6 +558,10 @@
       var hitlPending = !!(_serverHitl && String(_serverHitl.gate || '') === 'pending');
       var liveHitl = pendingGate || hitlPending || paused;
 
+      // Registry answered authoritatively and the thread is idle → stamp
+      // fossil live-button cards resolved (see _reconcileHitlCardsWithGates).
+      if (!generating && !liveHitl) _reconcileHitlCardsWithGates();
+
       // Server idle (no live gate) after /abort or restart: do not keep the
       // composer locked on a fossil pending part. The next prompt is a turn.
       if (!generating && !liveHitl && _awaitingApproval) {
@@ -4385,6 +4389,48 @@
     }
   }
 
+  /** §30 decision truth: once /status answers with the authoritative gate
+   *  list and the thread is IDLE, a card still showing live buttons for an
+   *  interrupt with NO pending registry row is a fossil (settled in another
+   *  tab, or before a refresh). Stamp it resolved — the card stays as
+   *  history, but phantom Approve buttons that only ever 409 must not
+   *  linger. Never runs while a pause may be in flight: an interrupt whose
+   *  approval_required frame has not registered yet has no row, and a
+   *  generating thread can pause between the status fetch and this sweep. */
+  function _reconcileHitlCardsWithGates() {
+    if (!messagesEl || !_serverGatesAuth) return;
+    var open = _openHitlPart();
+    if (open && String(open.state || 'pending') === 'pending') return;
+    var pendingIids = {};
+    (_serverGates || []).forEach(function (g) {
+      if (String((g || {}).state || '') === 'pending') pendingIids[String(g.gate_id || '')] = true;
+    });
+    messagesEl.querySelectorAll('.hitl-approval-card').forEach(function (card) {
+      if (_hitlCardIsClaimed(card) || _hitlCardIsTrapped(card)) return;
+      var cid = String(card.getAttribute('data-interrupt-id') || '');
+      // Positive identification only: stamp a card whose interrupt id is
+      // KNOWN and confirmed absent from the authoritative pending list. A
+      // card with no id stays untouched — disabling a live question we
+      // cannot identify is exactly the failure this reconcile exists to
+      // prevent (2026-09-02 semantic-card window; the approval_timeout
+      // frame remains the live-stamp path for unidentified cards).
+      if (!cid) return;
+      if (pendingIids[cid]) return;
+      var btns = card.querySelectorAll('button');
+      var live = false;
+      for (var i = 0; i < btns.length; i++) {
+        if (!btns[i].disabled) { live = true; break; }
+      }
+      if (!live) return;
+      btns.forEach(function (b) { b.disabled = true; });
+      card.className = 'hitl-approval-card hitl-denied';
+      var actions = card.querySelector('.hitl-approval-actions');
+      if (actions) {
+        actions.innerHTML = '<span class="hitl-status hitl-denied">No longer pending</span>';
+      }
+    });
+  }
+
   /** Server-truth recovery: an interrupted turn whose approval card never
    *  rendered is a SILENTLY PAUSED turn — no card, no error, no progress
    *  (the 2026-08-26 "complete silence" X-post incident). One best-effort
@@ -4538,8 +4584,18 @@
       old.remove();
     });
     if (hasInlineApprovalCard()) {
-      _clearStoreApproval();
-      return;
+      // Idempotent skip — but ONLY for the SAME interrupt (WS + SSE both
+      // deliver the approval; first render wins). A DIFFERENT gate's pending
+      // card elsewhere in the transcript — or a stale pending card from an
+      // older turn — must not suppress this gate's card. The global check
+      // let the first live-button card on the page eat every later
+      // approval: cards landed dashboard-only while the gate auto-denied
+      // (2026-09-02 multi-gate sessions, three watchdog denials in a row).
+      var liveSameCard = iid ? _findHitlCard(iid, content) : null;
+      if (!iid || (liveSameCard && !_hitlCardIsClaimed(liveSameCard))) {
+        _clearStoreApproval();
+        return;
+      }
     }
 
     // Phase 3: semantic clarify/confirm → render per-option buttons instead of
@@ -4552,6 +4608,14 @@
       var _semTcid = _semItem.tool_call_id || '';
       var _semCard = document.createElement('div');
       _semCard.className = 'hitl-approval-card';
+      // Same identity stamp as the security card — id-scoped consumers
+      // (_reconcileHitlCardsWithGates, markApprovalTimedOut, _findHitlCard)
+      // key off data-interrupt-id; a card without one was invisible to
+      // them and could be stamped resolved while live (2026-09-02).
+      var _semIid = _hitlInterruptIdOf(data);
+      if (_semIid) {
+        try { _semCard.setAttribute('data-interrupt-id', _semIid); } catch (eAttr) { /* ignore */ }
+      }
       _semCard.innerHTML =
         '<div class="hitl-approval-header">\u2754 Clarification Needed</div>' +
         '<div class="hitl-approval-body">' +

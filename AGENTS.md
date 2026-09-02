@@ -1587,6 +1587,13 @@ notifier, mix ops pages into HITL cards, or page every backup success.
 > running server to "apply changes", do not restart it as part of any task.
 > After code changes, just tell the user a restart is needed — they will do it.
 
+> **RULE (user directive, 2026-09-02): NEVER edit the live install at
+> `C:\Users\balfa\kazma`.** The dev repo (`G:\GitHubRepos\kazma`) is where all
+> work happens; the deploy clone is the user's. Do not write, copy, patch, or
+> revert ANY file there (not even static assets that the server would pick up
+> "without a restart", and not even to verify a fix). Change only `origin/main`
+> via a normal commit + push; the user pulls in the deploy clone themselves.
+
 
 ```powershell
 # Pick up code changes (the only restart that cooperates with kazma_guard).

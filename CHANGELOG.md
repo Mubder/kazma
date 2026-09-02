@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## Fix — audit round: semantic cards carry their interrupt id; reconcile never guesses (2026-09-02)
+
+Full audit of the HITL chain (registry lifecycle, approve endpoint,
+watchdog, turn-close settle, persist merge, client resume) — 288 tests
+green, one narrow defect found and fixed. The semantic clarify/confirm
+card was built without ``data-interrupt-id``, leaving it invisible to
+id-scoped consumers; ``_reconcileHitlCardsWithGates`` could then stamp a
+live semantic card "No longer pending" in the window before its pending
+gate reached the status snapshot. Every card now carries its interrupt
+id, and the reconcile is positive-id-only: it stamps a card solely when
+its id is KNOWN and confirmed absent from the authoritative pending list
+— a card it cannot identify stays untouched (the ``approval_timeout``
+frame remains the live-stamp path for those).
+
+## Fix — one pending card no longer suppresses every later approval (2026-09-02)
+
+Root cause of the recurring "card shows only on the Dashboard" class the
+two entries below kept nibbling at: ``renderHitlCard``'s post-cleanup
+guard treated **any** live-button card in the transcript as "already
+rendered" and returned. The first unclaimed pending card — often a stale
+one from an older turn, since hydration paints pending parts before the
+gate registry answers — made ``hasInlineApprovalCard()`` true forever, so
+every later interrupt's card silently no-oped while the dashboard listed
+the gate and the 300 s watchdog auto-denied it. The skip is now scoped to
+the SAME interrupt (``data-interrupt-id``); a different gate falls
+through and paints. Also: when ``/status`` answers authoritatively and
+the thread is idle, cards still showing live buttons for interrupts with
+no pending registry row are stamped "No longer pending" instead of
+offering phantom Approve buttons that only ever 409.
+
 ## Fix — pending HITL always paints in chat (2026-09-02)
 
 Dashboard listed the gate because it polls the registry; chat dropped the
