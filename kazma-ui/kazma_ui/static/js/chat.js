@@ -560,6 +560,9 @@
         _releaseHitlComposer('resync-idle');
       }
       if (liveHitl && !_awaitingApproval) pauseForApproval(_serverHitl);
+      if (liveHitl && !hasInlineApprovalCard()) {
+        setTimeout(recoverMissedApproval, 0);
+      }
 
       // Still running server-side → keep waiting honestly AND re-attach a
       // live SSE stream from the journal cursor — but only when the stream
@@ -2469,8 +2472,7 @@
         // tab switch) is included: the interrupt event may have fired AFTER
         // this tab's stream dropped, so `interrupted` stays false and the
         // pending approval would otherwise be invisible until auto-deny.
-        if ((interrupted || truncated) && !hasInlineApprovalCard() && !_awaitingApproval
-            && !_serverGenerating) {
+        if ((interrupted || truncated) && !hasInlineApprovalCard() && !_serverGenerating) {
           setTimeout(recoverMissedApproval, 1200);
         }
         }
@@ -4290,16 +4292,19 @@
   }
 
   function recoverMissedApproval() {
-    if (hasInlineApprovalCard() || _awaitingApproval) return;
+    if (hasInlineApprovalCard()) return;
     if (_hitlAlreadyClaimed(null)) return;
     if (_serverGenerating && !_serverPaused) return;
     var existing = _openHitlPart();
     if (existing && String(existing.state || 'pending') !== 'pending') return;
-    if (existing && String(existing.state || '') === 'pending') return;
+    if (existing && String(existing.state || '') === 'pending' && existing.payload) {
+      renderHitlCard(existing.payload, { lock: true });
+      if (hasInlineApprovalCard()) return;
+    }
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(payload) {
-        if (hasInlineApprovalCard() || _awaitingApproval) return;
+        if (hasInlineApprovalCard()) return;
         var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
         if (!pending.length) return;
         var hit = null;
@@ -6027,12 +6032,17 @@
     if (!TD || typeof TD.applyEvent !== 'function') return false;
     var incoming = String(ev.turn_id || ev.turnId || '');
     var src = String(ev.source || ev.type || '');
-    if (incoming && _isRetiredTurn(incoming)) return false;
-    // New SSE tokens usually have no turn_id; the callback is already
-    // epoch-gated. Old WS/done without an id is the duplication path.
-    if (!incoming && _supersededLive && (src === 'ws' || src === 'done')) return false;
-    if (incoming === 'live' && _supersededLive && _liveTurnId && _liveTurnId !== 'live') {
-      return false;
+    var isHitl = ev.type === 'hitl' || ev.type === 'approval_required'
+      || ev.type === 'approval_needed' || ev.type === 'paused_for_approval'
+      || src === 'hitl';
+    if (!isHitl) {
+      if (incoming && _isRetiredTurn(incoming)) return false;
+      // New SSE tokens usually have no turn_id; the callback is already
+      // epoch-gated. Old WS/done without an id is the duplication path.
+      if (!incoming && _supersededLive && (src === 'ws' || src === 'done')) return false;
+      if (incoming === 'live' && _supersededLive && _liveTurnId && _liveTurnId !== 'live') {
+        return false;
+      }
     }
     var turnId = incoming || _liveTurnId || '';
     if (!turnId) turnId = 'live';

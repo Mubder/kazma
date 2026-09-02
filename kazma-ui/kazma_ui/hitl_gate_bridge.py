@@ -367,7 +367,12 @@ async def pending_items_from_registry() -> list[dict[str, Any]] | None:
         from kazma_core.safety.hitl_gates import pending_gates_async
 
         rows = await pending_gates_async()
-        return [gate_row_to_pending_item(r) for r in rows]
+        aliases = {str(getattr(r, "alias_id", "") or "") for r in rows}
+        aliases.discard("")
+        # A native-id row carries the hash as alias_id. The hash-id ghost
+        # of the same pause must not become a second dashboard card.
+        collapsed = [r for r in rows if str(getattr(r, "gate_id", "") or "") not in aliases]
+        return [gate_row_to_pending_item(r) for r in collapsed]
     except Exception:
         logger.warning("[GateBridge] pending_gates read failed", exc_info=True)
         _mismatch("pending_read")
@@ -428,6 +433,15 @@ async def ensure_paused_gate(
         payload = snapshot_interrupt_payload(snapshot)
         if not payload:
             return False
+        try:
+            from kazma_ui.hitl_status import snapshot_interrupt_id
+
+            iid = snapshot_interrupt_id(snapshot)
+            if iid and not payload.get("interrupt_id"):
+                payload = dict(payload)
+                payload["interrupt_id"] = iid
+        except Exception:
+            pass
         # Leftover checkpoint interrupt of a gate already persisted as
         # approved is not a new question — do not mint a ghost pending row.
         try:

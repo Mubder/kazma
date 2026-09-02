@@ -79,6 +79,65 @@ class TestRegister:
         assert again.gate_id == "intr-real-2"
         assert len(pending_gates()) == 1
 
+    def test_concurrent_native_and_hash_is_one_row(self):
+        """SSE native-id + ensure_paused_gate hash-id raced into two cards."""
+        import json
+
+        args = json.dumps({"timing": "2m", "prompt": "ping"}, sort_keys=True)
+        parsed = json.loads(args)
+        alias = make_gate_id("t1", "schedule_task", parsed)
+        barrier = threading.Barrier(2)
+
+        def native():
+            barrier.wait()
+            return register_gate(_gate(
+                gid="2afa500c471bf3f246a043ff176cf458",
+                tool="schedule_task",
+                alias_id=alias,
+                args_json=args,
+            ))
+
+        def hashed():
+            barrier.wait()
+            return register_gate(_gate(
+                gid=alias, tool="schedule_task", args_json=args,
+            ))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            f_native = pool.submit(native)
+            f_hashed = pool.submit(hashed)
+            f_native.result(timeout=5)
+            f_hashed.result(timeout=5)
+        assert len(pending_gates()) == 1  # negative control: not two dashboard cards
+
+    def test_same_tool_different_args_stay_two_pending(self):
+        register_gate(_gate(gid="a", tool="schedule_task", args_json='{"timing":"2m"}'))
+        register_gate(_gate(gid="b", tool="schedule_task", args_json='{"timing":"5m"}'))
+        assert len(pending_gates()) == 2
+
+    def test_claim_supersedes_already_split_twin(self):
+        args = '{"timing": "2m"}'
+        register_gate(_gate(gid="native", tool="schedule_task", args_json=args))
+        conn = hg._connect()
+        try:
+            conn.execute(
+                "INSERT INTO hitl_gates (gate_id, alias_id, thread_id, tenant_id, "
+                "session_id, turn_id, mechanism, kind, tool, args_json, message, "
+                "payload_json, state, decision, actor, supersedes, created_at) "
+                "VALUES ('gate-ghost','','t1','','','','graph','security',"
+                "'schedule_task',?,'','','pending','','','',?)",
+                (args, time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        assert len(pending_gates()) == 2
+        claim_gate("native", "approve", "web:me")
+        assert gate_for("native").state == "claimed"
+        ghost = gate_for("gate-ghost")
+        assert ghost is not None and ghost.state == "superseded"
+        assert len(pending_gates()) == 0
+
     def test_new_row_emits_gate_pending_exactly_once(self):
         events: list[tuple[str, str]] = []
         hg.gate_events.subscribe(lambda ev, r: events.append((ev, r.gate_id)))

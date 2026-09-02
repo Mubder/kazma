@@ -97,6 +97,22 @@ def test_abort_generation_retires_live_turn_before_stop_wait() -> None:
     ).read_text(encoding="utf-8")
     assert "_isSupersededFrame" in store
     assert "must not resurrect" in store
+    assert "paused_for_approval" in store
+    apply = js.split("function applyTurnEvent(ev)", 1)[1].split(
+        "function destroyChatMouth", 1
+    )[0]
+    assert "isHitl" in apply
+    assert "recoverMissedApproval" in js
+    dash = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "static"
+        / "js"
+        / "hitl_approval.js"
+    ).read_text(encoding="utf-8")
+    assert "if (card) card.remove();" in dash
+    assert "seenTid" in dash
 
 
 def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> None:
