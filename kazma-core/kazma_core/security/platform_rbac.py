@@ -115,24 +115,52 @@ def require_role(user: PlatformUser | None, minimum: str) -> bool:
     return user.has_at_least(minimum)
 
 
-def _hash_password(password: str, salt: str | None = None) -> str:
-    salt = salt or secrets.token_hex(16)
+# Aligned with security/vault.py (OWASP PBKDF2-SHA256 guidance). Login
+# passwords previously used 200k — legacy 3-field hashes (which carry no
+# iteration field) still verify at that count and upgrade on next login.
+_PBKDF2_ITERATIONS = 600_000
+_PBKDF2_LEGACY_ITERATIONS = 200_000
+
+
+def _pbkdf2_hex(password: str, salt: str, iterations: int) -> str:
     dk = hashlib.pbkdf2_hmac(
         "sha256",
         password.encode("utf-8"),
         salt.encode("utf-8"),
-        200_000,
+        iterations,
     )
-    return f"pbkdf2_sha256${salt}${dk.hex()}"
+    return dk.hex()
+
+
+def _hash_password(password: str, salt: str | None = None) -> str:
+    salt = salt or secrets.token_hex(16)
+    return (
+        f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${salt}"
+        f"${_pbkdf2_hex(password, salt, _PBKDF2_ITERATIONS)}"
+    )
+
+
+def _is_legacy_password_hash(stored: str) -> bool:
+    """Pre-alignment hash: 3 fields, iteration count implicit (200k)."""
+    parts = stored.split("$")
+    return len(parts) == 3 and parts[0] == "pbkdf2_sha256"
 
 
 def _verify_password(password: str, stored: str) -> bool:
     try:
-        algo, salt, hexdigest = stored.split("$", 2)
-        if algo != "pbkdf2_sha256":
+        parts = stored.split("$")
+        if len(parts) == 4 and parts[0] == "pbkdf2_sha256":
+            iterations = int(parts[1])
+            salt, hexdigest = parts[2], parts[3]
+        elif _is_legacy_password_hash(stored):
+            iterations = _PBKDF2_LEGACY_ITERATIONS
+            salt, hexdigest = parts[1], parts[2]
+        else:
             return False
-        check = _hash_password(password, salt=salt)
-        return hmac.compare_digest(check, stored)
+        if not 0 < iterations <= 10_000_000:
+            return False
+        check = _pbkdf2_hex(password, salt, iterations)
+        return hmac.compare_digest(check, hexdigest)
     except Exception:
         return False
 
@@ -229,7 +257,35 @@ def authenticate_local_user(username: str, password: str) -> PlatformUser | None
             continue
         if not u.get("enabled", True):
             return None
-        if _verify_password(password, str(u.get("password_hash") or "")):
+        stored = str(u.get("password_hash") or "")
+        if _verify_password(password, stored):
+            if _is_legacy_password_hash(stored):
+                # Silent migration: re-hash at the aligned 600k cost.
+                # Best-effort — a failed write leaves the legacy hash in
+                # place (still verifiable) rather than locking the user out.
+                try:
+                    users = _load_users_from_store()
+                    for candidate in users:
+                        if (
+                            str(candidate.get("user_id") or "")
+                            == str(u.get("user_id") or "")
+                            and str(candidate.get("username", "")).lower()
+                            == username.lower()
+                        ):
+                            candidate["password_hash"] = _hash_password(password)
+                            _save_users_to_store(users)
+                            logger.info(
+                                "[platform_rbac] upgraded password hash to "
+                                "%d iterations for username=%s",
+                                _PBKDF2_ITERATIONS,
+                                username,
+                            )
+                            break
+                except Exception:
+                    logger.debug(
+                        "[platform_rbac] password hash upgrade skipped",
+                        exc_info=True,
+                    )
             return PlatformUser(
                 user_id=str(u.get("user_id") or username),
                 username=str(u.get("username")),
