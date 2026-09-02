@@ -353,12 +353,28 @@ def _resolve_remind_act(
     # memory events must NOT turn this into "no time expression" / deny —
     # that parked every reschedule (2026-09-02). CoPilot guard stays on
     # conflicting *absolute* ISO dates below.
+    #
+    # Do NOT rewrite compact → ISO here. `_tc["arguments"] = rewritten_args`
+    # mutates `tool_calls_pending` in place; HITL `interrupt()` checkpoints
+    # that mutation; Approve re-runs this gate on the ISO, which then fails
+    # the nearby-belief CoPilot check and denies (live 2026-09-02: five
+    # compact allows, then five denies after Approve). `schedule_task`
+    # already parses Nm/Nh. Keep the native string so resume re-allows.
     if _timing_arg and mode != "strict":
         _delta = compact_relative_delta(_timing_arg)
+        if _delta is None:
+            _abs_from_now = parse_absolute_timing(_timing_arg)
+            # HITL-resume leftover: our previous compact rewrite used
+            # request_at+delta (preserves microseconds). Clock-aligned
+            # invented dates (…T09:00:00) stay on the CoPilot path.
+            if (
+                _abs_from_now is not None
+                and _abs_from_now > request_at
+                and int(_abs_from_now.microsecond or 0) > 0
+            ):
+                _delta = _abs_from_now - request_at
         if _delta is not None:
             _fire = request_at + _delta
-            _rewritten = dict(args)
-            _rewritten["timing"] = _fire.isoformat()
             req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
             _c = Commitment(
                 thread_id=thread_id or "", turn_id=turn_id, act="remind",
@@ -371,7 +387,7 @@ def _resolve_remind_act(
             _c.policy_decision = "allow"
             _cid = create_commitment(_c, cfg=cfg)
             logger.info(
-                "[commitment] allow+rewrite (compact timing) %s fire_at=%s "
+                "[commitment] allow (compact timing) %s fire_at=%s "
                 "delta=%s cid=%s source=%s",
                 tool_name, _fire.isoformat(), _delta, _cid, source,
             )
@@ -379,7 +395,7 @@ def _resolve_remind_act(
                 decision="allow",
                 reason=f"scheduler-native timing {_timing_arg!r} → request_at + {_delta}",
                 profile=profile, audit=audit, commitment_id=_cid,
-                rewritten_args=_rewritten,
+                rewritten_args=None,
             )
 
     if _timing_arg and mode != "strict":
@@ -501,7 +517,10 @@ def _resolve_remind_act(
             )
             return EffectDecision(
                 decision="deny",
-                reason=(res.reason or "no time expression found — ask when to fire"),
+                reason=(
+                    (res.reason or "no time expression found — ask when to fire")
+                    + " Pass schedule_task.timing as Nm/Nh (e.g. 247m) or ISO."
+                ),
                 profile=profile, audit=audit, commitment_id=cid,
             )
         commitment.status = "needs_clarify"
