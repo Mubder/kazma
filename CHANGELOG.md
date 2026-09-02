@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Fix — M-3 live HITL read merged, not replaced (auto_deny survived) (2026-09-02)
+
+The two long-failing ``TestToolWorkerUnbackedGate`` tests were catching a
+real regression: the audit-M-3 live config read REPLACED the compile-time
+``hitl_config`` wholesale. The live store never carries ``auto_deny``
+(it is a compile-time-only child-graph key, §7A), so every child graph
+built with ``auto_deny=True`` had it silently stripped at turn time —
+danger tools then routed into ``interrupt()`` on checkpointer-less
+graphs instead of denying directly, re-opening the unresumable-interrupt
+class that audit F9 closed. The live read now MERGES: store-owned policy
+keys (enabled / require_approval_for / timeouts — Settings changes still
+apply this turn) win; compile-time-only keys survive. The two tests were
+also pinned to honest M-3 semantics (patching the live read like their
+sibling tests), with the auto_deny test now guarding the merge itself.
+
 ## Fix — X Studio posts first-try: proposal_id in the tool contract (2026-09-02)
 
 The commitment gate requires a resolvable ``proposal_id`` on

@@ -870,17 +870,27 @@ class TestToolWorkerUnbackedGate:
     @pytest.mark.asyncio
     async def test_disabled_config_does_not_set_gate_ctx(self):
         """A safe tool under {"enabled": False} executes with the registry
-        gate NOT suppressed (previously the truthy dict set it)."""
+        gate NOT suppressed (previously the truthy dict set it).
+
+        M-3 live-read: the tool_worker merges the LIVE store config over the
+        compile-time one, so "disabled" only holds when the store is
+        disabled too — patch the live read to match the scenario."""
+        from unittest.mock import patch
+
         from kazma_core.agent.graph_builder import tool_worker_node
 
         exe = _GateRecordingExecutor()
         state = _tw_state("file_read", {"path": "a.txt"})
-        out = await tool_worker_node(
-            state,
-            tool_executor=exe,
-            tracer=_NoopTracer2(),
-            hitl_config={"enabled": False, "require_approval_for": {"shell_exec"}},
-        )
+        with patch(
+            "kazma_core.safety.hitl.get_hitl_config",
+            return_value={"enabled": False, "require_approval_for": {"shell_exec"}},
+        ):
+            out = await tool_worker_node(
+                state,
+                tool_executor=exe,
+                tracer=_NoopTracer2(),
+                hitl_config={"enabled": False, "require_approval_for": {"shell_exec"}},
+            )
         assert [c[0] for c in exe.calls] == ["file_read"]
         assert exe.gate_ctx_values == [False], "disabled config must not set the gate ContextVar"
         assert out["next_node"] in ("supervisor", "respond")
@@ -927,21 +937,33 @@ class TestToolWorkerUnbackedGate:
     @pytest.mark.asyncio
     async def test_auto_deny_config_denies_danger_tool(self):
         """enabled + auto_deny (child graphs, streaming graph) denies danger
-        tools directly — the tool_worker half of Fixes 1/2/4."""
+        tools directly — the tool_worker half of Fixes 1/2/4.
+
+        The live store config never carries ``auto_deny`` (it is a
+        compile-time-only child-graph key, §7A) — the M-3 live-read must
+        MERGE policy keys, not replace the config, or auto_deny is silently
+        stripped and the child graph interrupts unresumably instead of
+        denying (2026-09-02). This test pins that merge."""
+        from unittest.mock import patch
+
         from kazma_core.agent.graph_builder import tool_worker_node
 
         exe = _GateRecordingExecutor()
         state = _tw_state("shell_exec", {"command": "echo hi"})
-        out = await tool_worker_node(
-            state,
-            tool_executor=exe,
-            tracer=_NoopTracer2(),
-            hitl_config={
-                "enabled": True,
-                "require_approval_for": {"shell_exec"},
-                "auto_deny": True,
-            },
-        )
+        with patch(
+            "kazma_core.safety.hitl.get_hitl_config",
+            return_value={"enabled": True, "require_approval_for": {"shell_exec"}},
+        ):
+            out = await tool_worker_node(
+                state,
+                tool_executor=exe,
+                tracer=_NoopTracer2(),
+                hitl_config={
+                    "enabled": True,
+                    "require_approval_for": {"shell_exec"},
+                    "auto_deny": True,
+                },
+            )
         assert exe.calls == []
         dones = _done_results(out)
         assert dones[0]["is_error"] is True

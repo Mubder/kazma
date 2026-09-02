@@ -611,7 +611,22 @@ async def tool_worker_node(
 
                 _live = _live_hitl({})
                 if isinstance(_live, dict) and _live:
-                    hitl_config = _live
+                    # Merge, never replace: the live store owns the POLICY
+                    # keys (enabled / require_approval_for / timeouts — a
+                    # Settings change applies this turn, audit M-3), but
+                    # compile-time-only keys must survive — the old full
+                    # replace silently stripped child-graph ``auto_deny``
+                    # (§7A), re-opening the unresumable-interrupt class on
+                    # checkpointer-less graphs that audit F9 closed
+                    # (2026-09-02, caught by TestToolWorkerUnbackedGate).
+                    hitl_config = {
+                        **_live,
+                        **{
+                            k: v
+                            for k, v in hitl_config.items()
+                            if k not in _live
+                        },
+                    }
             except Exception:
                 logger.debug("[ToolWorker] live HITL config read failed", exc_info=True)
 
