@@ -144,6 +144,32 @@ def test_chained_hitl_card_appends_below_previous() -> None:
     assert "closest('.agent-progress')" in pin
 
 
+def test_hitl_is_not_epoch_gated_and_paints_from_status_gates() -> None:
+    """A superseded SSE stream dropping approval_required left the card
+    only on Dashboard. Pending gates from session status must paint too."""
+    js = _js()
+    attach = js.split("function _defaultAttachCallbacks(epoch)", 1)[1]
+    ar = attach.split("onApprovalRequired: function(data)", 1)[1].split(
+        "onHitl:", 1
+    )[0]
+    assert "if (!_mine()) return;" not in ar
+    assert "_hitlAlreadyClaimed(data)" in ar
+    assert "function _paintLiveGates()" in js
+    assert "_paintLiveGates();" in js
+    store = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "static"
+        / "js"
+        / "stores"
+        / "agentStore.js"
+    ).read_text(encoding="utf-8")
+    pause = store.split("_pauseForApproval(approval)", 1)[1][:1200]
+    assert "this.pendingApproval = approval;" in pause
+    assert "hasInlineApprovalCard()" in pause
+
+
 def test_place_hitl_card_dom_harness_under_node() -> None:
     """Placement must actually run, not just grep: card after CoT, never in it."""
     import shutil
