@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Fix — pasted alert mentioning "deep research" must not start a pipeline (2026-09-02)
+
+Intent execute auto-starts ``start_deep_research`` when
+``is_deep_research_intent`` fires at 0.86. A pasted Telegram reminder that
+listed "deep research on demand" as a product bullet matched, and two real
+8-source runs completed on the alert text (rs_3b5f52af, rs_19df40f3). Deep
+research now requires an opening ask or ``/research``, not a mid-body mention.
+
 ## Fix — cron Telegram alert is the reminder, not a plan dump (2026-09-02)
 
 Fire-time child graphs auto-deny ``send_message`` / ``dispatch_notification``.
