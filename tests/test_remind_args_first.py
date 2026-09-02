@@ -226,8 +226,10 @@ def test_compact_timing_arg_resolves_without_chat_time_words(ops_db):
         thread_id="t-0816-2", turn_id="turn1",
     )
     assert d.decision == "allow", f"got {d.decision}: {d.reason}"
-    assert d.rewritten_args is not None
-    assert "T" in d.rewritten_args["timing"]
+    # Compact stays compact — rewriting to ISO poisoned HITL resume.
+    assert d.rewritten_args is None or compact_relative_delta(
+        str((d.rewritten_args or {}).get("timing") or "")
+    ) is not None
 
 
 def test_conflicting_absolute_timing_still_guarded(ops_db):
@@ -264,7 +266,52 @@ def test_compact_5m_allows_even_with_nearby_reset(ops_db):
         thread_id="t-5m", turn_id="turn1",
     )
     assert d.decision == "allow", f"got {d.decision}: {d.reason}"
-    assert d.rewritten_args["timing"].startswith("2026-08-16")
+    assert d.rewritten_args is None
+
+
+def test_compact_allow_survives_hitl_resume_iso_poison(ops_db):
+    """Live 2026-09-02: compact allow rewrote timing to ISO; Approve re-ran
+    the gate; stale/far reset beliefs made the ISO a CoPilot 'conflict'
+    and denied. Compact must allow, and a leftover from-now ISO (with
+    microseconds, as request_at+delta) must also allow."""
+    far = [{"predicate": "zcode_next_reset", "object": "2026-12-01"}]
+    t0 = datetime(2026, 8, 16, 0, 13, 29, 982422, tzinfo=timezone.utc)
+    first = authorize_effect(
+        "schedule_task",
+        {"timing": "256m", "prompt": "ZCode in 30 minutes"},
+        user_text="schedule them with relative timing",
+        request_at=t0, memory_beliefs=far,
+        thread_id="t-hitl-resume", turn_id="turn1",
+    )
+    assert first.decision == "allow", f"compact: {first.decision} {first.reason}"
+    assert first.rewritten_args is None
+
+    poisoned_iso = (t0 + timedelta(minutes=256)).isoformat()
+    assert "." in poisoned_iso  # microseconds — the compact-rewrite signature
+    second = authorize_effect(
+        "schedule_task",
+        {"timing": poisoned_iso, "prompt": "ZCode in 30 minutes"},
+        user_text="schedule them with relative timing",
+        request_at=t0 + timedelta(seconds=2),
+        memory_beliefs=far,
+        thread_id="t-hitl-resume", turn_id="turn1",
+    )
+    assert second.decision == "allow", (
+        f"HITL-resume ISO must allow, got {second.decision}: {second.reason}"
+    )
+
+
+def test_clock_aligned_future_iso_still_copilot_guarded(ops_db):
+    """Invented calendar dates stay blocked even if they are in the future."""
+    far = [{"predicate": "zcode_next_reset", "object": "2026-12-01"}]
+    d = authorize_effect(
+        "schedule_task",
+        {"timing": "2026-11-01T09:00:00+00:00", "prompt": "x"},
+        user_text="schedule them with relative timing",
+        request_at=REQUEST_AT_0816, memory_beliefs=far,
+        thread_id="t-copilot-iso", turn_id="turn1",
+    )
+    assert d.decision != "allow", "clock-aligned invented ISO must not allow"
 
 
 def test_missing_time_is_deny_not_cancel_only_card(ops_db):
