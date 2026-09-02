@@ -194,6 +194,10 @@ def gate_registry_enabled() -> bool:
 _db_path_override: str | None = None
 _schema_ready = False
 _schema_lock = threading.Lock()
+# Serialize register/claim so a native-id row and a hash-id row for the
+# SAME pause cannot both insert (SSE scan + ensure_paused_gate race,
+# 2026-09-02: two dashboard cards, one Approve 409s "No longer pending").
+_write_lock = threading.Lock()
 
 
 def _db_path() -> str:
@@ -375,45 +379,13 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
     if gate.expires_at is None:
         ttl = _DEFAULT_TTL_SECONDS if ttl_seconds is None else ttl_seconds
         gate.expires_at = now + ttl if ttl and ttl > 0 else None
-    conn = _connect()
-    try:
-        # 1) exact id already present?
-        cur = conn.execute(
-            "SELECT * FROM hitl_gates WHERE gate_id = ?", (gate.gate_id,)
-        )
-        r = cur.fetchone()
-        if r is not None:
-            existing = _row_to_gate(r)
-            if existing.is_live:
-                return existing
-            # Terminal collision under a HASH id: a NEW pause for the same
-            # tool+args (the user asked again after a timeout/deny) must get
-            # a fresh row — a settled row must not eat the new question.
-            # A native LangGraph id can never legitimately recur, so hash
-            # ids get a uniquifying suffix; native-id repeats return the
-            # terminal row (idempotent late re-register of the same pause).
-            if gate.gate_id.startswith("gate-"):
-                gate.alias_id = gate.gate_id
-                gate.gate_id = f"{gate.gate_id}-r{int(now * 1000) % 1_000_000}"
-            else:
-                return existing
-        # 2) known under another id? (row's alias == our id, or row's id == our alias)
-        candidates = [x for x in (gate.alias_id, gate.gate_id) if x]
-        for cid in candidates:
-            cur = conn.execute(
-                "SELECT * FROM hitl_gates WHERE gate_id = ? OR (alias_id != '' AND alias_id = ?) "
-                "ORDER BY CASE WHEN state IN ('pending','claimed','resuming') THEN 0 ELSE 1 END, "
-                "created_at DESC",
-                (cid, cid),
-            )
-            r = cur.fetchone()
-            if r is not None:
-                existing = _row_to_gate(r)
-                if not existing.is_live:
-                    # Terminal row under the alias — same reasoning as above:
-                    # this is a NEW pause, register it fresh (no alias link
-                    # to the dead row).
-                    continue
+    created = False
+    with _write_lock:
+        conn = _connect()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = _lookup_live_gate(conn, gate)
+            if existing is not None:
                 if gate.alias_id and existing.gate_id == gate.alias_id:
                     # Row was registered under the provisional (hash) id and
                     # we now know the real id — upgrade in place; the old id
@@ -425,30 +397,108 @@ def register_gate(gate: GateRow, *, ttl_seconds: float | None = None) -> GateRow
                     conn.commit()
                     existing.alias_id = existing.gate_id
                     existing.gate_id = gate.gate_id
+                else:
+                    conn.commit()
                 return existing
-        # 3) genuinely new
-        gate.created_at = now
-        conn.execute(
-            """INSERT INTO hitl_gates
-               (gate_id, alias_id, thread_id, tenant_id, session_id, turn_id,
-                mechanism, kind, tool, args_json, message, payload_json,
-                state, decision, actor, supersedes,
-                created_at, claimed_at, settled_at, expires_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (
-                gate.gate_id, gate.alias_id, gate.thread_id, gate.tenant_id,
-                gate.session_id, gate.turn_id, gate.mechanism, gate.kind,
-                gate.tool, gate.args_json, gate.message, gate.payload_json,
-                gate.state, gate.decision, gate.actor, gate.supersedes,
-                gate.created_at, gate.claimed_at, gate.settled_at,
-                gate.expires_at,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    gate_events.publish("gate_pending", gate)
+            # Terminal collision under a HASH id: a NEW pause for the same
+            # tool+args (the user asked again after a timeout/deny) must get
+            # a fresh row — a settled row must not eat the new question.
+            cur = conn.execute(
+                "SELECT * FROM hitl_gates WHERE gate_id = ?", (gate.gate_id,)
+            )
+            r = cur.fetchone()
+            if r is not None:
+                existing = _row_to_gate(r)
+                if existing.is_live:
+                    conn.commit()
+                    return existing
+                if gate.gate_id.startswith("gate-"):
+                    gate.alias_id = gate.gate_id
+                    gate.gate_id = f"{gate.gate_id}-r{int(now * 1000) % 1_000_000}"
+                else:
+                    conn.commit()
+                    return existing
+            # 3) genuinely new
+            gate.created_at = now
+            conn.execute(
+                """INSERT INTO hitl_gates
+                   (gate_id, alias_id, thread_id, tenant_id, session_id, turn_id,
+                    mechanism, kind, tool, args_json, message, payload_json,
+                    state, decision, actor, supersedes,
+                    created_at, claimed_at, settled_at, expires_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    gate.gate_id, gate.alias_id, gate.thread_id, gate.tenant_id,
+                    gate.session_id, gate.turn_id, gate.mechanism, gate.kind,
+                    gate.tool, gate.args_json, gate.message, gate.payload_json,
+                    gate.state, gate.decision, gate.actor, gate.supersedes,
+                    gate.created_at, gate.claimed_at, gate.settled_at,
+                    gate.expires_at,
+                ),
+            )
+            conn.commit()
+            created = True
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+    if created:
+        gate_events.publish("gate_pending", gate)
     return gate
+
+
+def _same_pause_args(a: str | None, b: str | None) -> bool:
+    """True when two rows carry the same non-empty tool args (twin pause)."""
+    left = (a or "").strip()
+    right = (b or "").strip()
+    if not left or not right or left in ("{}", "null") or right in ("{}", "null"):
+        return False
+    return left == right
+
+
+def _lookup_live_gate(conn: sqlite3.Connection, gate: GateRow) -> GateRow | None:
+    """Find an already-live row for this pause (id, alias, or same args)."""
+    candidates = [x for x in (gate.alias_id, gate.gate_id) if x]
+    for cid in candidates:
+        cur = conn.execute(
+            "SELECT * FROM hitl_gates WHERE gate_id = ? OR (alias_id != '' AND alias_id = ?) "
+            "ORDER BY CASE WHEN state IN ('pending','claimed','resuming') THEN 0 ELSE 1 END, "
+            "created_at DESC",
+            (cid, cid),
+        )
+        r = cur.fetchone()
+        if r is not None:
+            existing = _row_to_gate(r)
+            if existing.is_live:
+                return existing
+    if not (gate.thread_id and gate.tool):
+        return None
+    cur = conn.execute(
+        "SELECT * FROM hitl_gates WHERE thread_id = ? AND tool = ? "
+        "AND state IN ('pending','claimed','resuming') ORDER BY created_at ASC",
+        (gate.thread_id, gate.tool),
+    )
+    for r in cur.fetchall():
+        existing = _row_to_gate(r)
+        if gate.gate_id and existing.gate_id == gate.gate_id:
+            return existing
+        if gate.alias_id and existing.gate_id == gate.alias_id:
+            return existing
+        if existing.alias_id and existing.alias_id in (gate.gate_id, gate.alias_id):
+            return existing
+        if _same_pause_args(existing.args_json, gate.args_json):
+            if not existing.alias_id and gate.gate_id != existing.gate_id:
+                conn.execute(
+                    "UPDATE hitl_gates SET alias_id = ? WHERE gate_id = ?",
+                    (gate.gate_id, existing.gate_id),
+                )
+                existing.alias_id = gate.gate_id
+            return existing
+    return None
 
 
 # Columns _cas may set — the CAS helper interpolates COLUMN NAMES into SQL
@@ -514,8 +564,33 @@ def claim_gate(gate_id: str, decision: str, actor: str) -> GateRow:
     finally:
         conn.close()
     assert row is not None
+    _supersede_pending_twins(row)
     gate_events.publish("gate_claimed", row)
     return row
+
+
+def _supersede_pending_twins(claimed: GateRow) -> None:
+    """Drop the hash-id ghost of a pause we just claimed under the native id."""
+    if not claimed.thread_id or not claimed.tool:
+        return
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "SELECT * FROM hitl_gates WHERE thread_id = ? AND tool = ? "
+            "AND state = 'pending' AND gate_id != ?",
+            (claimed.thread_id, claimed.tool, claimed.gate_id),
+        )
+        twins = [_row_to_gate(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+    for other in twins:
+        same_id = bool(
+            (claimed.alias_id and other.gate_id == claimed.alias_id)
+            or (other.alias_id and other.alias_id in (claimed.gate_id, claimed.alias_id))
+        )
+        same_args = _same_pause_args(other.args_json, claimed.args_json)
+        if same_id or same_args:
+            supersede_gate(other.gate_id, claimed.gate_id)
 
 
 def mark_resuming(gate_id: str) -> GateRow:

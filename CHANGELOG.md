@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Fix — HITL card in chat; one pause is one dashboard card (2026-09-02)
+
+A schedule_task pause minted two registry rows 14ms apart (LangGraph id +
+hash id). Dashboard showed both; Approve on the leftover 409'd "No longer
+pending". Register is now serialized and merges twins; listing hides the
+hash ghost; claim supersedes it. Chat recovers a missed inline card on
+resync and never drops HITL frames as a superseded turn.
+
 ## Fix — Web cron alerts Telegram; mid-turn send retires old stream (2026-09-02)
 
 Web-booked reminders fired on time then dropped: `_deliver` had

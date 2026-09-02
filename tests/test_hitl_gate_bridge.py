@@ -47,6 +47,31 @@ def _payload(thread="t1", tool="file_write", iid="intr-1", **kw):
     return p
 
 
+async def test_pending_items_hide_hash_twin():
+    """Dashboard listed native-id AND hash-id rows as two cards."""
+    from kazma_ui.hitl_gate_bridge import pending_items_from_registry
+
+    await gate_pending_from_payload(_payload())
+    alias = make_gate_id("t1", "file_write", {"path": "x.txt"})
+    conn = hg._connect()
+    try:
+        conn.execute(
+            "INSERT INTO hitl_gates (gate_id, alias_id, thread_id, tenant_id, "
+            "session_id, turn_id, mechanism, kind, tool, args_json, message, "
+            "payload_json, state, decision, actor, supersedes, created_at) "
+            "VALUES (?, '', 't1', '', '', '', 'graph', 'security', 'file_write', "
+            "'{\"path\": \"x.txt\"}', '', '', 'pending', '', '', '', ?)",
+            (alias, __import__("time").time()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    assert len(pending_gates()) == 2
+    items = await pending_items_from_registry()
+    assert items is not None and len(items) == 1
+    assert items[0]["interrupt_id"] == "intr-1"
+
+
 async def test_pending_from_payload_registers_row():
     await gate_pending_from_payload(_payload(), session_id="s1", turn_id="turn1")
     rows = pending_gates()

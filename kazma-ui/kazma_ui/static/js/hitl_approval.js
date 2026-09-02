@@ -72,6 +72,16 @@
     if (!list) return;
 
     if (!Array.isArray(pending)) pending = [];
+    // One card per thread: two registry rows for the same pause (native id
+    // + hash id) used to render two identical cards; the leftover 409'd.
+    var seenTid = {};
+    pending = pending.filter(function (item) {
+      var tid = String((item && item.thread_id) || '');
+      if (!tid) return true;
+      if (seenTid[tid]) return false;
+      seenTid[tid] = true;
+      return true;
+    });
 
     if (badge) {
       badge.textContent = String(pending.length);
@@ -252,14 +262,13 @@
             statusEl.className = 'hitl-approval-status';
             statusEl.style.display = 'inline-block';
           }
+          if (card) card.remove();
           refreshPending();
           return;
         }
-        if (statusEl) {
-          statusEl.textContent = t('dashboard.hitl_not_pending', 'No longer pending');
-          statusEl.className = 'hitl-approval-status hitl-status-error';
-          statusEl.style.display = 'inline-block';
-        }
+        // Twin/ghost card of a pause already claimed on the other row.
+        // Remove it — refreshPending used to redraw live buttons forever.
+        if (card) card.remove();
         refreshPending();
         return;
       }

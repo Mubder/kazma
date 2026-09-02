@@ -155,11 +155,18 @@ function registerAgentStore() {
     _isSupersededFrame(data, frame) {
       const chat = window.KazmaChat;
       if (!chat) return false;
+      const type = frame && frame.type;
+      const statusVal = (frame && frame.status) || (data && data.status);
+      // HITL must always paint — dropping paused_for_approval left the
+      // card only on Dashboard (2026-09-02).
+      if (type === 'hitl' || type === 'approval_required' || type === 'approval_needed'
+          || statusVal === 'paused_for_approval') {
+        return false;
+      }
       const tid = this._frameTurnId(data, frame);
       if (tid && typeof chat.isRetiredTurn === 'function' && chat.isRetiredTurn(tid)) {
         return true;
       }
-      const type = frame && frame.type;
       const live = type === 'token' || type === 'llm_delta' || type === 'done'
         || type === 'turn_complete' || type === 'status' || type === 'status_update'
         || type === 'tool_start' || type === 'tool_lifecycle';
