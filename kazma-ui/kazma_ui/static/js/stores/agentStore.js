@@ -149,6 +149,25 @@ function registerAgentStore() {
       } catch (e) { /* projector optional */ }
       return false;
     },
+    _frameTurnId(data, frame) {
+      return String((data && data.turn_id) || (frame && frame.turn_id) || '');
+    },
+    _isSupersededFrame(data, frame) {
+      const chat = window.KazmaChat;
+      if (!chat) return false;
+      const tid = this._frameTurnId(data, frame);
+      if (tid && typeof chat.isRetiredTurn === 'function' && chat.isRetiredTurn(tid)) {
+        return true;
+      }
+      const type = frame && frame.type;
+      const live = type === 'token' || type === 'llm_delta' || type === 'done'
+        || type === 'turn_complete' || type === 'status' || type === 'status_update'
+        || type === 'tool_start' || type === 'tool_lifecycle';
+      if (!tid && live && typeof chat.hasRetiredTurns === 'function' && chat.hasRetiredTurns()) {
+        return true;
+      }
+      return false;
+    },
     _progress(step) {
       const chat = this._chat();
       if (chat && typeof chat.logProgress === 'function') chat.logProgress(step);
@@ -763,6 +782,14 @@ function registerAgentStore() {
             }
           } catch (e) { /* ignore */ }
         }
+      }
+
+      // Mid-turn send retired the previous turn_id. Old WS tokens/done
+      // must not resurrect `_turnActive`, arm the watchdog, or paint
+      // the first bubble (seq tracking above still runs).
+      if (type !== 'resumed' && type !== 'pong' && type !== 'ping'
+          && this._isSupersededFrame(data, frame)) {
+        return;
       }
 
       // Keep chat.js idle-watchdog armed on any live frame

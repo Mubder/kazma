@@ -94,7 +94,7 @@ class ScheduledJob:
     delivery_target: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "job_id": self.job_id,
             "timing": self.timing,
             "prompt": self.prompt[:200],
@@ -107,6 +107,8 @@ class ScheduledJob:
             "tenant_id": self.tenant_id,
             "delivery_target": self.delivery_target,
         }
+        out.update(annotate_fire_times(self.next_run))
+        return out
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -175,6 +177,34 @@ def get_cron_timezone() -> tzinfo:
             )
             _tz_warned = True
         return UTC
+
+
+def annotate_fire_times(next_run: datetime | str | None) -> dict[str, str]:
+    """UTC + operator-local strings so the model does not report only UTC.
+
+    ``cron.timezone`` (e.g. Asia/Kuwait) already anchors ``daily at 9am``.
+    Compact ``5m``/ISO results were still returned as UTC ISO only, so the
+    agent said "fires at 01:15:19 UTC" even when the operator zone was Kuwait.
+    """
+    if next_run is None or next_run == "":
+        return {}
+    try:
+        dt = next_run if isinstance(next_run, datetime) else datetime.fromisoformat(str(next_run))
+    except (TypeError, ValueError):
+        return {}
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    name, _src = resolve_cron_timezone_name()
+    tz = get_cron_timezone()
+    utc = dt.astimezone(UTC)
+    local = dt.astimezone(tz)
+    utc_s = utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+    local_s = local.strftime("%Y-%m-%d %H:%M:%S") + f" {name}"
+    return {
+        "next_run_utc": utc_s,
+        "next_run_local": local_s,
+        "timezone": name,
+    }
 
 
 def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
@@ -673,7 +703,7 @@ class CronScheduler:
             tid,
             delivery_target or "(none)",
         )
-        return {
+        out = {
             "job_id": job.job_id,
             "timing": timing,
             "next_run": job.next_run,
@@ -681,6 +711,8 @@ class CronScheduler:
             "tenant_id": tid,
             "delivery_target": delivery_target,
         }
+        out.update(annotate_fire_times(next_run))
+        return out
 
     async def list_jobs(self) -> list[dict[str, Any]]:
         """List scheduled jobs (scoped to current tenant when multi-user/prod)."""

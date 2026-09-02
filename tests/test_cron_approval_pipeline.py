@@ -78,6 +78,95 @@ async def test_schedule_task_inherits_parent_target(monkeypatch):
     assert captured["platform"] == "telegram"
 
 
+@pytest.mark.asyncio
+async def test_schedule_task_uses_operator_telegram_when_contextvar_empty(monkeypatch):
+    """Web SSE/WS bookings have no inbound telegram chat — use swarm/allowed."""
+    captured: dict[str, object] = {}
+
+    class _Sched:
+        async def schedule(self, **kw):
+            captured.update(kw)
+            return {"job_id": "new-web"}
+
+    import kazma_skills.native.task_scheduler_cron.tools as tst
+
+    monkeypatch.setattr(
+        "kazma_core.cron.scheduler.get_cron_scheduler", lambda: _Sched()
+    )
+    monkeypatch.setattr(_sm_mod(), "get_current_delivery_target", lambda: "")
+    monkeypatch.setattr(
+        _sm_mod(), "operator_telegram_target", lambda: "telegram:1804015016"
+    )
+    out = await tst.schedule_task("2m", "Test schedule")
+    assert '"job_id": "new-web"' in out
+    assert captured["delivery_target"] == "telegram:1804015016"
+    assert captured["platform"] == "telegram"
+
+
+@pytest.mark.asyncio
+async def test_schedule_task_fails_closed_when_undeliverable(monkeypatch):
+    """Never persist target=(none) — that job fires then UNDELIVERABLE."""
+    called = []
+
+    class _Sched:
+        async def schedule(self, **kw):
+            called.append(kw)
+            return {"job_id": "should-not"}
+
+    import kazma_skills.native.task_scheduler_cron.tools as tst
+
+    monkeypatch.setattr(
+        "kazma_core.cron.scheduler.get_cron_scheduler", lambda: _Sched()
+    )
+    monkeypatch.setattr(_sm_mod(), "get_current_delivery_target", lambda: "")
+    monkeypatch.setattr(_sm_mod(), "operator_telegram_target", lambda: "")
+    out = await tst.schedule_task("2m", "Test schedule")
+    payload = __import__("json").loads(out)
+    assert payload["ok"] is False
+    assert "delivery" in payload["error"].lower()
+    assert not called
+
+
+def test_is_valid_delivery_target():
+    from kazma_core.tools.send_message import is_valid_delivery_target
+
+    assert is_valid_delivery_target("telegram:1804015016")
+    assert not is_valid_delivery_target("")
+    assert not is_valid_delivery_target("be9fc11e-a15b-408f-bd35-1356714da9c3")
+    assert not is_valid_delivery_target("telegram:")
+    assert not is_valid_delivery_target(None)
+
+
+def test_web_gateway_block_stamps_operator_telegram(monkeypatch):
+    from kazma_core.tools.send_message import web_gateway_block
+
+    monkeypatch.setattr(
+        _sm_mod(), "operator_telegram_target", lambda: "telegram:1804015016"
+    )
+    monkeypatch.setattr(_sm_mod(), "get_current_delivery_target", lambda: None)
+    gw = web_gateway_block("thread-1")
+    assert gw["platform"] == "web"
+    assert gw["thread_id"] == "thread-1"
+    assert gw["delivery_target"] == "telegram:1804015016"
+    assert set(gw) <= {"thread_id", "display_name", "platform", "delivery_target"}
+
+
+def test_sse_and_ws_stamp_web_gateway():
+    """The documented _gateway fallback is dead unless Web writes it."""
+    from tests._module_source import module_source
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    sse = module_source(root / "kazma-ui" / "kazma_ui" / "sse_chat" / "__init__.py")
+    ws = (root / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py").read_text(
+        encoding="utf-8"
+    )
+    assert "web_gateway_block" in sse
+    assert 'input_state["_gateway"]' in sse
+    assert "web_gateway_block" in ws
+    assert 'input_state["_gateway"]' in ws
+
+
 # ── Item 2: _deliver repair chain ─────────────────────────────────────
 
 

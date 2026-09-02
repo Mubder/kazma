@@ -18,6 +18,14 @@
   var currentMsgEl = null;
   var tokenAccum = '';
   var _liveTurnId = '';
+  /** Turn ids retired by abortThenSend / Stop. Old SSE/WS tokens with these
+   *  ids must not paint (or switch `_liveTurnId` back to the first bubble). */
+  var _retiredTurnIds = [];
+  var _RETIRED_CAP = 32;
+  /** True after abortThenSend/Stop until session switch. SSE tokens often
+   *  have no turn_id — they stay accepted (epoch-gated). Orphan WS/done
+   *  frames without a turn_id must not dump into the new bubble. */
+  var _supersededLive = false;
   var _docs = {};
   var activeStream = null;
   /** Live typing-indicator element for the current turn (cleared on abort). */
@@ -1037,9 +1045,28 @@
    *  Leftover `_serverGenerating=true` from a previous session's post-Approve
    *  resync painted the next session's pending card as already approved
    *  (2026-09-01). Grants stay server-side and thread-scoped; this is UI only. */
+  function _isRetiredTurn(id) {
+    if (!id) return false;
+    return _retiredTurnIds.indexOf(String(id)) !== -1;
+  }
+  function _retireLiveTurn() {
+    var id = String(_liveTurnId || '');
+    if (id && id !== 'live' && _retiredTurnIds.indexOf(id) === -1) {
+      _retiredTurnIds.push(id);
+    }
+    while (_retiredTurnIds.length > _RETIRED_CAP) _retiredTurnIds.shift();
+    _supersededLive = true;
+    _liveTurnId = '';
+    _liveRenderEl = null;
+    currentMsgEl = null;
+    tokenAccum = '';
+  }
+
   function _resetSessionTurnState() {
     _docs = {};
     _liveTurnId = '';
+    _retiredTurnIds = [];
+    _supersededLive = false;
     _serverGenerating = false;
     _serverPaused = false;
     _serverHitl = null;
@@ -1392,6 +1419,12 @@
 
   function abortGeneration(opts) {
     opts = opts || {};
+    // Invalidate in-flight SSE immediately. abortThenSend used to wait up
+    // to 1.5s for POST /stop with the old epoch still current, so tokens
+    // kept painting the first bubble while the new CoT opened below
+    // (2026-09-02 mid-turn send).
+    _sseEpoch++;
+    _retireLiveTurn();
     if (activeStream) {
       activeStream.abort();
       activeStream = null;
@@ -5992,8 +6025,18 @@
     ev = ev || {};
     var TD = window.KazmaTurnDocument;
     if (!TD || typeof TD.applyEvent !== 'function') return false;
-    var turnId = String(ev.turn_id || ev.turnId || _liveTurnId || '');
+    var incoming = String(ev.turn_id || ev.turnId || '');
+    var src = String(ev.source || ev.type || '');
+    if (incoming && _isRetiredTurn(incoming)) return false;
+    // New SSE tokens usually have no turn_id; the callback is already
+    // epoch-gated. Old WS/done without an id is the duplication path.
+    if (!incoming && _supersededLive && (src === 'ws' || src === 'done')) return false;
+    if (incoming === 'live' && _supersededLive && _liveTurnId && _liveTurnId !== 'live') {
+      return false;
+    }
+    var turnId = incoming || _liveTurnId || '';
     if (!turnId) turnId = 'live';
+    if (_isRetiredTurn(turnId)) return false;
     _liveTurnId = turnId;
     var prev = _docs[turnId] || TD.empty(turnId);
     var next = TD.applyEvent(prev, ev);
@@ -6051,6 +6094,10 @@
      *  "what actually happened" for fast-dead turns. */
     diagnostics: dumpDiagnostics,
     applyTurnEvent: applyTurnEvent,
+    isRetiredTurn: _isRetiredTurn,
+    hasRetiredTurns: function() {
+      return _retiredTurnIds.length > 0 || _supersededLive;
+    },
     renderTurn: renderTurn,
     turnStatus: function() {
       var doc = _docs[_liveTurnId];

@@ -126,6 +126,29 @@ class TestOperatorTimezone:
         result = parse_timing("2026-12-01T09:00:00+03:00")
         assert result == datetime(2026, 12, 1, 9, 0, tzinfo=timezone(timedelta(hours=3)))
 
+    @requires_tzdb
+    def test_annotate_fire_times_includes_kuwait_local(self, monkeypatch) -> None:
+        """Compact 5m used to return UTC ISO only — agent said '01:15 UTC'."""
+        from kazma_core.cron.scheduler import annotate_fire_times
+
+        monkeypatch.setenv("KAZMA_TZ", "Asia/Kuwait")
+        from zoneinfo import ZoneInfo
+
+        monkeypatch.setattr(
+            "kazma_core.cron.scheduler.resolve_cron_timezone_name",
+            lambda: ("Asia/Kuwait", "env"),
+        )
+        monkeypatch.setattr(
+            "kazma_core.cron.scheduler.get_cron_timezone",
+            lambda: ZoneInfo("Asia/Kuwait"),
+        )
+        dt = datetime(2026, 9, 2, 1, 15, 19, tzinfo=UTC)
+        out = annotate_fire_times(dt)
+        assert out["timezone"] == "Asia/Kuwait"
+        assert "01:15:19 UTC" in out["next_run_utc"]
+        assert "04:15:19" in out["next_run_local"]
+        assert "Asia/Kuwait" in out["next_run_local"]
+
     def test_default_utc_when_unset(self, _no_tz_env) -> None:
         """No config key and no env → UTC behavior unchanged (back-compat)."""
         now = datetime(2026, 12, 1, 10, 0, tzinfo=UTC)

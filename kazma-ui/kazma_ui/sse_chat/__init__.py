@@ -814,6 +814,15 @@ def create_sse_chat_router(
             ),
         )
         input_state["messages"] = messages
+        # Web has no inbound telegram chat_id. Stamp operator Telegram on
+        # `_gateway` so schedule_task captures a deliverable target (the
+        # gateway path already writes this block; SSE used not to).
+        try:
+            from kazma_core.tools.send_message import web_gateway_block
+
+            input_state["_gateway"] = web_gateway_block(thread_id)
+        except Exception:
+            logger.debug("[SSE] web gateway stamp skipped", exc_info=True)
         # Transport-level working-memory pin (before supervisor loop)
         try:
             from kazma_core.agent.turn_input import build_turn_working_memory

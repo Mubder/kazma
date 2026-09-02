@@ -1621,6 +1621,16 @@ def create_ws_chat_router(
                         ),
                     )
                     input_state["messages"] = full_messages
+                    # Mirror SSE: stamp operator Telegram so Web-booked
+                    # reminders are not born target=(none).
+                    try:
+                        from kazma_core.tools.send_message import web_gateway_block
+
+                        input_state["_gateway"] = web_gateway_block(thread_id)
+                    except Exception:
+                        logger.debug(
+                            "[WS-Chat] web gateway stamp skipped", exc_info=True
+                        )
                     # Transport-level working-memory pin (before supervisor loop)
                     try:
                         from kazma_core.agent.turn_input import build_turn_working_memory

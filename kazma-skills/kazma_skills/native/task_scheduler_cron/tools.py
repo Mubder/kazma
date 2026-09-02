@@ -20,7 +20,7 @@ async def schedule_task(timing: str, prompt: str) -> str:
     """
     from kazma_core.cron.scheduler import get_cron_scheduler
     from kazma_core.safety.hitl import get_current_thread_id
-    from kazma_core.tools.send_message import get_current_delivery_target
+    from kazma_core.tools.send_message import resolve_delivery_target
 
     scheduler = get_cron_scheduler()
     if scheduler is None:
@@ -30,21 +30,19 @@ async def schedule_task(timing: str, prompt: str) -> str:
     # to the right conversation at fire time. The delivery_target is a
     # platform-prefixed id like "telegram:<chat_id>"; infer the platform from
     # its prefix so _deliver uses the matching backend.
-    delivery_target = get_current_delivery_target() or ""
-    # Cron-fired turns (agent RESCHEDULING from inside a scheduled job) have
-    # no gateway context — inherit the FIRING job's delivery identity so the
-    # rescheduled job is never born targetless (2026-08-27 incident: the
-    # "Rescheduled batch job N/8" rows carried "" and every result message
-    # died with 'target_id must be platform:id format').
+    # Web SSE/WS never used to stamp `_gateway.delivery_target`, so the
+    # ContextVar was empty and every job was born `target=(none)` — the
+    # fire ran, then UNDELIVERABLE dropped the Telegram alert (2026-09-02).
+    delivery_target = resolve_delivery_target()
     if not delivery_target:
-        try:
-            from kazma_core.cron.scheduler import get_cron_parent
-
-            parent = get_cron_parent()
-            if parent and str(parent.get("delivery_target") or "").strip():
-                delivery_target = str(parent["delivery_target"]).strip()
-        except Exception:
-            pass
+        return _json.dumps({
+            "ok": False,
+            "error": (
+                "Cannot schedule: no delivery address. Book from Telegram, or "
+                "set connectors.telegram.swarm_chat_id / allowed_users so a "
+                "Web-booked reminder can alert you."
+            ),
+        }, ensure_ascii=False)
     platform = delivery_target.split(":", 1)[0] if ":" in delivery_target else "telegram"
     # Capture the booking thread too (bound in tool_worker_node). The
     # commitment cancel_job resolver verifies against pending jobs; jobs

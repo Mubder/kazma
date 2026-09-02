@@ -26,6 +26,10 @@ __all__ = [
     "get_current_delivery_target",
     "set_current_delivery_target",
     "reset_current_delivery_target",
+    "is_valid_delivery_target",
+    "operator_telegram_target",
+    "resolve_delivery_target",
+    "web_gateway_block",
 ]
 
 _message_backends: dict[str, Callable] = {}
@@ -78,6 +82,84 @@ def get_current_delivery_target() -> str | None:
     Returns None when no conversation is active (e.g. headless cron execution).
     """
     return _current_delivery_target.get()
+
+
+def is_valid_delivery_target(target: str | None) -> bool:
+    """True for a well-formed ``platform:id`` address (not a bare thread UUID)."""
+    t = str(target or "").strip()
+    if not t or ":" not in t or t.endswith(":"):
+        return False
+    plat, ident = t.split(":", 1)
+    return bool(plat.strip()) and bool(ident.strip())
+
+
+def operator_telegram_target() -> str:
+    """The operator's Telegram chat from ConfigStore, or ``""``.
+
+    Web-booked reminders have no inbound ``telegram:<chat_id>``. Lifecycle
+    notifications already use ``connectors.telegram.swarm_chat_id`` (else
+    the first allowed user). Same address so a reminder booked in the
+    Web UI actually rings Telegram instead of being stored targetless.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        store = get_config_store()
+        tg_id = store.get("connectors.telegram.swarm_chat_id")
+        if not tg_id:
+            allowed = store.get("connectors.telegram.allowed_users")
+            if isinstance(allowed, str):
+                allowed = [u.strip() for u in allowed.replace(",", " ").split() if u.strip()]
+            elif not isinstance(allowed, list):
+                allowed = []
+            if allowed:
+                tg_id = str(allowed[0])
+        tg_id = str(tg_id or "").strip()
+        if tg_id:
+            return f"telegram:{tg_id}"
+    except Exception:
+        pass
+    return ""
+
+
+def resolve_delivery_target() -> str:
+    """Best delivery address for a reminder booked on this turn.
+
+    Order: live ContextVar (gateway/Telegram chat) → cron-parent job →
+    operator Telegram. Empty means the booking must fail closed rather
+    than persist ``target=(none)`` and drop the fire-time alert.
+    """
+    cur = str(get_current_delivery_target() or "").strip()
+    if is_valid_delivery_target(cur):
+        return cur
+    try:
+        from kazma_core.cron.scheduler import get_cron_parent
+
+        parent = get_cron_parent()
+        if parent:
+            inherited = str(parent.get("delivery_target") or "").strip()
+            if is_valid_delivery_target(inherited):
+                return inherited
+    except Exception:
+        pass
+    return operator_telegram_target()
+
+
+def web_gateway_block(thread_id: str) -> dict[str, str]:
+    """Internal ``_gateway`` routing block for Web SSE/WS turns.
+
+    Web has no inbound ``telegram:<chat_id>``. Stamp the operator Telegram
+    address (same one lifecycle notifications use) so ``schedule_task``
+    captures a deliverable target. ``platform`` stays ``web`` — the
+    conversation is the Web UI; only the reminder alert goes to Telegram.
+    Does not put a raw ``chat_id`` on SupervisorState (AGENTS.md §2).
+    """
+    return {
+        "thread_id": str(thread_id or ""),
+        "display_name": "web",
+        "platform": "web",
+        "delivery_target": resolve_delivery_target(),
+    }
 
 
 def register_message_backend(name: str, handler: Callable) -> None:
