@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Fix — cron Telegram alert is the reminder, not a plan dump (2026-09-02)
+
+Fire-time child graphs auto-deny ``send_message`` / ``dispatch_notification``.
+The agent then emitted a `````plan`` and ``_deliver`` sent that plan as the
+alert. Delivery now prefers the agent's prose; if there is none, it sends
+the quoted reminder from the stored prompt. ``schedule_task``'s prompt is
+the message to deliver, not a "call dispatch_notification" mission.
+
 ## Fix — HITL card in chat; one pause is one dashboard card (2026-09-02)
 
 A schedule_task pause minted two registry rows 14ms apart (LangGraph id +

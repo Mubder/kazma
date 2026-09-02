@@ -46,6 +46,7 @@ from kazma_core.cron.scheduler import (
     JobStatus,
     ScheduledJob,
     SQLiteCronStore,
+    compose_cron_delivery,
     get_cron_scheduler,
     parse_timing,
     set_cron_scheduler,
@@ -364,6 +365,44 @@ class TestToolsRegistered:
         tools = registry.get_tool_definitions()
         tool_names = [t["function"]["name"] for t in tools]
         assert "edit_scheduled" in tool_names
+
+
+class TestComposeCronDelivery:
+    """Fire-time Telegram body is the reminder, not a ```plan dump."""
+
+    def test_prose_wins_over_prompt(self) -> None:
+        assert compose_cron_delivery("Posted the tweet.", "post tweet 7") == (
+            "Posted the tweet."
+        )
+
+    def test_plan_only_falls_back_to_quoted_reminder(self) -> None:
+        plan = (
+            "```plan\n"
+            "- Send the test message to Mubder's Telegram\n"
+            "- List scheduled jobs\n"
+            "```"
+        )
+        prompt = (
+            'Send a test message to Mubder via Telegram (dispatch_notification '
+            'to 1804015016) saying "Test schedule fired successfully '
+            '(2-minute test #2)". Then check the scheduled jobs.'
+        )
+        out = compose_cron_delivery(plan, prompt)
+        assert "Test schedule fired successfully (2-minute test #2)" in out
+        assert "```plan" not in out
+        assert "dispatch_notification" not in out
+
+    def test_plan_plus_prose_keeps_prose(self) -> None:
+        text = "```plan\n- do it\n```\n\nAll set."
+        assert compose_cron_delivery(text, "ignored mission") == "All set."
+
+    def test_plain_prompt_when_no_quotes(self) -> None:
+        out = compose_cron_delivery("", "Drink water")
+        assert "Drink water" in out
+        assert "```" not in out
+
+    def test_empty_falls_back_to_fired(self) -> None:
+        assert compose_cron_delivery("", "") == "Scheduled task fired."
 
 
 class TestSingleton:

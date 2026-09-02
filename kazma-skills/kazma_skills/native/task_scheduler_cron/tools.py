@@ -13,7 +13,10 @@ async def schedule_task(timing: str, prompt: str) -> str:
 
     Args:
         timing: Timing expression, e.g. '5m', '1h', 'daily at 9am'.
-        prompt: The goal or prompt the agent should execute.
+        prompt: For a reminder, the EXACT message to deliver at fire time
+            (e.g. 'Test schedule fired successfully'). Do NOT wrap it in
+            'send via Telegram' / dispatch_notification — the scheduler
+            delivers it. For a later agent job, the goal to execute.
 
     Returns:
         JSON response with the scheduled job info.
