@@ -26,7 +26,16 @@ from zoneinfo import ZoneInfo
 
 import aiosqlite
 
-__all__ = ["CronScheduler", "JobStatus", "SQLiteCronStore", "ScheduledJob", "get_cron_scheduler", "parse_timing", "set_cron_scheduler"]
+__all__ = [
+    "CronScheduler",
+    "JobStatus",
+    "SQLiteCronStore",
+    "ScheduledJob",
+    "get_cron_scheduler",
+    "parse_timing",
+    "set_cron_scheduler",
+    "compose_cron_delivery",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +214,45 @@ def annotate_fire_times(next_run: datetime | str | None) -> dict[str, str]:
         "next_run_local": local_s,
         "timezone": name,
     }
+
+
+_QUOTED_RE = re.compile(r'["“”](.+?)["“”]', re.DOTALL)
+
+
+def _reminder_from_prompt(prompt: str | None) -> str:
+    """Reminder body from the stored prompt.
+
+    Models often wrap a reminder as ``send via Telegram saying "X"``. Prefer
+    the quoted message; otherwise the prompt itself.
+    """
+    p = str(prompt or "").strip()
+    if not p:
+        return ""
+    quoted = [q.strip() for q in _QUOTED_RE.findall(p) if q.strip()]
+    for q in reversed(quoted):
+        if 4 <= len(q) <= 800:
+            return q
+    return p
+
+
+def compose_cron_delivery(summary: str | None, prompt: str | None) -> str:
+    """User-facing text for ``_deliver``.
+
+    Cron child graphs ``auto_deny`` outbound tools (``send_message`` /
+    ``dispatch_notification``). The fire-time agent then dumps a `````plan``
+    and that used to be the Telegram alert (2026-09-02 test #2). Prefer the
+    agent's prose; if there is none, send the reminder from the stored prompt.
+    """
+    from kazma_core.agent.plan_fence import prose_for_user
+
+    prose = (prose_for_user(summary) or "").strip()
+    if prose:
+        return prose[:4000]
+    body = _reminder_from_prompt(prompt)
+    if body:
+        return f"⏰ Reminder\n\n{body}"[:4000]
+    leftover = str(summary or "").strip()
+    return (leftover or "Scheduled task fired.")[:4000]
 
 
 def parse_timing(timing: str, from_time: datetime | None = None) -> datetime:
@@ -867,7 +915,12 @@ class CronScheduler:
                         "role": "system",
                         "content": (
                             "You are running a scheduled task. "
-                            "Complete it autonomously and return a clear summary."
+                            "Do NOT call send_message or dispatch_notification — "
+                            "the scheduler delivers your final answer to the user's "
+                            "chat. Write the user-facing reminder or result as plain "
+                            "text. Do not emit a ```plan fence unless you will also "
+                            "call tools this graph can run (read/search). Outbound "
+                            "send tools are auto-denied on this child graph."
                         ),
                     },
                     {"role": "user", "content": job.prompt},
@@ -980,8 +1033,9 @@ class CronScheduler:
             from kazma_core.tools.send_message import send_message
 
             platform = target_id.split(":", 1)[0]
+            body = compose_cron_delivery(text, job.prompt)
             logger.info("[CronScheduler] delivering %s -> %s", job.job_id, target_id)
-            await send_message(target_id, text, backend=platform)
+            await send_message(target_id, body, backend=platform)
         except Exception as exc:
             logger.critical(
                 "[CronScheduler] delivery FAILED for %s -> %s: %s",
