@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Docs — commitment-layer + diagnosis-map to 2026-09 (2026-09-02)
+
+Commitment: exceptions on semantic tools fail closed; swarm scope default ON;
+Soul confirm auto-ON in production; Soul is ConfigStore not a JSON file;
+proposal-backed posts; H-8 on `execute()`. Diagnosis map: FanOut tri-state,
+gate registry, `close_turn`, `graph_tool_worker`, streaming graph auto_deny,
+V2 recall, pin-IP, shift_explicit vs inferred.
+
 ## Docs — security-and-safety + memory-and-rag to 2026-09 (2026-09-02)
 
 HITL is three execution paths + registry; tool_worker is
