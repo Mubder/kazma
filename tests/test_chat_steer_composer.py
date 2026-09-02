@@ -289,6 +289,34 @@ def test_reconcile_is_positive_id_only_and_semantic_card_carries_iid() -> None:
     assert "if (pendingIids[cid]) return;" in reconcile
 
 
+def test_approval_cards_count_down_to_watchdog_deadline() -> None:
+    """2026-09-02: unattended cards died silently at 300s. The server stamps
+    approval_deadline (SSE payload / status gates / pending items) and the
+    card counts down, stamps itself timed-out at zero, and every claim path
+    stops the ticker."""
+    js = _js()
+    assert "function _attachHitlCountdown(card, data)" in js
+    assert "function _stopHitlCountdown(card)" in js
+    rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
+        "function setCardState(state, label)", 1
+    )[0]
+    # Both card branches attach the countdown (semantic + security)…
+    assert "_attachHitlCountdown(_semCard, data);" in rhc
+    assert "_attachHitlCountdown(card, data);" in rhc
+    # …the deadline flows through the gates payload projection…
+    payload = js.split("function _payloadFromGate(g)", 1)[1].split(
+        "function _paintLiveGates()", 1
+    )[0]
+    assert "approval_deadline" in payload
+    # …zero stamps the card timed-out…
+    cd = js.split("function _attachHitlCountdown(card, data)", 1)[1].split(
+        "function renderHitlCard(data, opts)", 1
+    )[0]
+    assert "Approval timed out" in cd
+    # …and every claim/timeout/reconcile path stops the ticker.
+    assert js.count("_stopHitlCountdown(") >= 4
+
+
 def test_steer_body_strips_placeholder() -> None:
     js = _js()
     assert "/^<[^>]+>$/.test(rest)" in js
@@ -320,3 +348,57 @@ def test_supervisor_steer_tid_falls_back_to_context() -> None:
     # Fallback sits in the steer gate, not some unrelated HITL import.
     idx = gb.index("_steer_tid = str(state.get(\"thread_id\") or \"\")")
     assert "get_current_thread_id" in gb[idx : idx + 400]
+
+
+def test_live_task_card_single_writer_and_liveness() -> None:
+    """2026-09-03: the merged Live Task Card is the ONE turn-state surface.
+    Single-writer (_taskCardEvent), heartbeat-fed, stalled-honest, and the
+    retired strip delegates to it instead of fighting it."""
+    js = _js()
+    assert "function _taskCardEvent(ev)" in js
+    assert "id=\"live-task-card\"" in (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
+    ).read_text(encoding="utf-8")
+    # Legacy strip delegates to the card — one surface, one writer.
+    strip = js.split("function _setStatusStrip(msg)", 1)[1].split(
+        "function _clearStatusStrip()", 1
+    )[0]
+    assert "_taskCardEvent({ t: 'text', msg: msg })" in strip
+    # Heartbeats feed the card from BOTH SSE callback builders and the
+    # WS store; pause shows awaiting + the watchdog countdown.
+    assert js.count("t: 'hb'") >= 2
+    assert "taskCard: _taskCardEvent" in js
+    assert "_taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) })" in js
+    # Stalled honesty: 20s signal gap → amber warning + one resync.
+    tc = js.split("function _tcTick()", 1)[1].split("function _tcStepsFromDoc()", 1)[0]
+    assert "> 20000" in tc
+    assert "_resyncDelivery('heartbeat-gap')" in tc
+    # Compact body: doc-fed steps, 50-row cap, 2-line clamp is CSS.
+    steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
+        "The single writer", 1
+    )[0]
+    assert "rows.slice(-50)" in steps
+    # Live turns no longer build an in-bubble workbench — the terminal
+    # branch swaps in the durable summary when the turn ends.
+    cot = js.split("function _syncCotPanel(el, activity, status, meta)", 1)[1].split(
+        "function _paintHitlFromDoc(el, doc)", 1
+    )[0]
+    assert "_taskCardEvent({ t: 'doc' })" in cot
+
+
+def test_ws_store_feeds_task_card() -> None:
+    store = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js"
+    ).read_text(encoding="utf-8")
+    assert "_taskCard(ev)" in store
+    assert "chat.taskCard(ev)" in store
+    for needle in (
+        "{ t: 'status', status: 'thinking'",
+        "{ t: 'status', status: 'routing_node'",
+        "{ t: 'status', status: 'synthesizing'",
+        "{ t: 'token' }",
+        "{ t: 'tool', name: tName }",
+    ):
+        assert needle in store, needle

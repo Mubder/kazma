@@ -1247,10 +1247,12 @@ def create_sse_chat_router(
                 from kazma_ui.hitl_gate_bridge import registry_on
 
                 if registry_on():
+                    from kazma_core.safety.hitl import approval_deadline_from
                     from kazma_core.safety.hitl_gates import live_gates_async
 
-                    gates = [
-                        {
+                    gates = []
+                    for g in await live_gates_async(thread_id):
+                        item = {
                             "gate_id": g.gate_id,
                             "state": g.state,
                             "tool": g.tool,
@@ -1259,8 +1261,14 @@ def create_sse_chat_router(
                             "message": g.message,
                             "payload": g.payload(),
                         }
-                        for g in await live_gates_async(thread_id)
-                    ]
+                        if g.state == "pending":
+                            try:
+                                dl = approval_deadline_from(g.created_at)
+                                if dl:
+                                    item["approval_deadline"] = dl
+                            except Exception:
+                                pass
+                        gates.append(item)
                     gates_authoritative = True
             except Exception:
                 gates = []

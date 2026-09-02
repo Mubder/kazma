@@ -181,3 +181,31 @@ async def test_thread_claim_backfills_when_registry_missed_the_pause():
     rows = live_gates("t-gw")
     assert len(rows) == 1
     assert rows[0].state == "claimed" and rows[0].decision == "deny"
+
+
+def test_pending_item_carries_approval_deadline(monkeypatch):
+    """Pending dashboard/recovery items must carry the watchdog deadline so
+    cards painted from them can count down (2026-09-02)."""
+    from kazma_core.safety import hitl as _h
+    from kazma_core.safety.hitl_gates import GateRow
+    from kazma_ui.hitl_gate_bridge import gate_row_to_pending_item
+
+    monkeypatch.setattr(
+        _h,
+        "get_hitl_config",
+        lambda raw=None: {
+            "enabled": True,
+            "require_approval_for": set(),
+            "approval_timeout_seconds": 300,
+            "auto_deny_on_timeout": True,
+        },
+    )
+    row = GateRow(
+        gate_id="g1",
+        thread_id="t1",
+        tool="x_post",
+        state="pending",
+        created_at=2000.0,
+    )
+    item = gate_row_to_pending_item(row)
+    assert item["approval_deadline"] == 2300.0

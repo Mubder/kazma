@@ -190,3 +190,41 @@ class TestToolTierLookup:
 
     def test_unknown_tier(self) -> None:
         assert get_tool_tier("nonexistent_tool") == "unknown"
+
+
+class TestApprovalDeadline:
+    """Countdown surface (2026-09-02): the watchdog deadline stamped onto
+    payloads/cards so the UI counts down instead of silently dropping."""
+
+    def test_deadline_is_created_plus_timeout(self, monkeypatch) -> None:
+        from kazma_core.safety import hitl as h
+
+        monkeypatch.setattr(
+            h,
+            "get_hitl_config",
+            lambda raw=None: {
+                "enabled": True,
+                "require_approval_for": set(),
+                "approval_timeout_seconds": 300,
+                "auto_deny_on_timeout": True,
+            },
+        )
+        dl = h.approval_deadline_from(1000.0)
+        assert dl == 1300.0
+        # Default base = now → a future epoch.
+        assert h.approval_deadline_from() > 1000000000
+
+    def test_deadline_none_when_timeout_disabled(self, monkeypatch) -> None:
+        from kazma_core.safety import hitl as h
+
+        monkeypatch.setattr(
+            h,
+            "get_hitl_config",
+            lambda raw=None: {
+                "enabled": True,
+                "require_approval_for": set(),
+                "approval_timeout_seconds": 0,
+                "auto_deny_on_timeout": True,
+            },
+        )
+        assert h.approval_deadline_from(1000.0) is None

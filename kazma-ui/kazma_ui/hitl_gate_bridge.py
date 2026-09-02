@@ -342,7 +342,7 @@ def gate_row_to_pending_item(row: Any) -> dict[str, Any]:
         args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
         if not args and isinstance(payload.get("arguments"), dict):
             args = payload["arguments"]
-    return {
+    item = {
         "thread_id": str(getattr(row, "thread_id", "") or ""),
         "tool_name": str(getattr(row, "tool", "") or payload.get("tool") or ""),
         "arguments": args,
@@ -352,6 +352,18 @@ def gate_row_to_pending_item(row: Any) -> dict[str, Any]:
         "kind": str(getattr(row, "kind", "") or "security"),
         "items": payload.get("items"),
     }
+    # Countdown surface: an unattended card auto-denies at the watchdog
+    # deadline — show it counting down instead of dropping silently.
+    try:
+        if str(getattr(row, "state", "") or "") == "pending":
+            from kazma_core.safety.hitl import approval_deadline_from
+
+            dl = approval_deadline_from(getattr(row, "created_at", None))
+            if dl:
+                item["approval_deadline"] = dl
+    except Exception:
+        pass
+    return item
 
 
 async def pending_items_from_registry() -> list[dict[str, Any]] | None:

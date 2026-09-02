@@ -385,6 +385,15 @@ Two cross-cutting subsystems sit across the supervisor and the tools:
 - **HITL Gate Registry.** One row per ask in `hitl_gates.db` (`pending → claimed
   → resuming → settled`). Surfaces render; they never mint. Swarm FanOut is
   tri-state; web `claim_gate` is first-claim 200 / second 409.
+- **Approval cards.** Web chat has **no card rate limit** — every gate surfaces
+  immediately. Distinct proposal-backed posts (`x_post`/`x_schedule_post` with
+  a `proposal_id`) always surface their card on every path; the gateway's
+  3-cards-per-4-minutes burst limit applies only to exec retry-loop storms on
+  platform adapters and exempts X/proposal cards by design. Unattended cards
+  auto-deny at `safety.hitl.approval_timeout_seconds` (default 300); the
+  deadline is stamped as `approval_deadline` on the SSE payload, session-status
+  gates, and pending-approval items, and the chat card counts down to it.
+  **"Allow tool (session)"** grants one tool for ~30 minutes in the thread.
 - **Turn Delivery V2.** Journal + `close_turn` are SoT; SSE/WS/`chat.js` project.
   A pending registry row keeps the turn open. No second painter.
 - **Ops alerting.** Three paths only: Guard Telegram-direct (child is down),
