@@ -904,3 +904,20 @@ def test_mcp_npx_probe_covers_nvm_windows() -> None:
     )[0]
     assert "NVM_SYMLINK" in probe
     assert "nvm4w" in probe
+
+
+def test_mcp_resolved_shim_prepends_its_dir_to_child_path() -> None:
+    """2026-09-03: npx.cmd was found via the probe, but its INTERNAL call to
+    `node` still died — the nvm symlink dir (holding node.exe) was not on
+    the stale-PATH server's environment, so the child couldn't resolve its
+    own sibling. Resolving a shim must prepend its directory to the child
+    PATH."""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-core" / "kazma_core" / "mcp" / "manager.py"
+    ).read_text(encoding="utf-8")
+    probe = src.split("Probe the canonical Windows locations", 1)[1].split(
+        "asyncio.create_subprocess_exec", 1
+    )[0]
+    assert 'env["PATH"] = (' in probe
+    assert "_os.path.dirname(resolved)" in probe

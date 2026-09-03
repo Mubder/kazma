@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Fix — MCP shim resolution also fixes the child's PATH (2026-09-03)
+
+The probe found ``npx.cmd`` at the nvm symlink — but ``npx.cmd`` shells
+out to ``node`` internally, and the symlink dir (holding ``node.exe``)
+was NOT on the stale-PATH server process's environment. The child died
+with ``'"node"' is not recognized`` and the handshake EOF'd. Resolving a
+shim now prepends its own directory to the child's PATH, so sibling
+executables resolve no matter how stale the server's environment is.
+
 ## Fix — MCP npx probe covers nvm-windows (2026-09-03)
 
 The canonical-location probe missed nvm-windows installs
