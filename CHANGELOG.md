@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Fix — ghost approval card flashed on refresh (2026-09-03)
+
+Refreshing any session that once had an approval painted a live approval
+card for under a second before reconciliation cleared it. Root cause:
+the journal re-delivers a settled approval's retained
+``approval_required`` / ``paused_for_approval`` frames on every attach,
+and the client painted them as a LIVE ask before the gate registry
+answered. Both replay paths (WS resume handshake + SSE attach) now
+stamp ``replay: true`` on re-delivered frames, and every pending-paint
+site refuses them — the registry reconciler remains the only authority
+for what is genuinely pending (§30). A truly paused turn still gets its
+card on refresh via the registry-backed recovery path.
+
 ## Fix — every scheduled-post outcome is announced (2026-09-03)
 
 Success and failure notifications both bailed silently when the booking

@@ -806,3 +806,32 @@ def test_cot_stays_blue_and_collapsed_and_hydration_never_bounces() -> None:
     assert ".agent-progress.is-done {\n  opacity: 1;\n}" in css
     assert "is-done.is-collapsed {\n  background:" not in css
     assert "opacity: 0.92" not in v5
+
+
+def test_replayed_frames_never_paint_pending_approval() -> None:
+    """2026-09-03 ghost-card flash: refreshing any session that once had
+    an approval painted a live card for <1s before reconciliation cleared
+    it. The journal re-delivers the settled approval's retained frames on
+    every attach — both transports now stamp ``replay: true`` and every
+    pending-paint site refuses replayed frames; the gate registry stays
+    the only authority for live questions (§30)."""
+    js = _js()
+    assert js.count("data && data.replay) return;") >= 3
+    hitl_guards = js.count("st === 'pending' && data && data.replay) return;")
+    assert hitl_guards == 2  # attach + send onHitl handlers
+    store = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js"
+    ).read_text(encoding="utf-8")
+    assert "frame.replay || data.replay" in store
+    # Server: both replay loops stamp provenance.
+    ws = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py"
+    ).read_text(encoding="utf-8")
+    assert 'data["replay"] = True' in ws
+    sse = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "sse_chat" / "_streaming.py"
+    ).read_text(encoding="utf-8")
+    assert 'data["replay"] = True' in sse

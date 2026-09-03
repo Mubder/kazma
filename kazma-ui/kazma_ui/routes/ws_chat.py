@@ -182,6 +182,23 @@ async def _ws_resume_handshake(socket: Any, thread_id: str, last_seq: int) -> No
         )
         for frame in frames:
             if is_replayable(frame):
+                # Replay provenance (2026-09-03): a frame re-delivered from
+                # the journal is HISTORY, not a live ask. Clients must not
+                # paint live approval state from it — a settled approval's
+                # retained ``approval_required`` frame used to flash a
+                # ghost card on every refresh of any session that once had
+                # an approval. The gate registry (via the load reconciler)
+                # is the only authority for what is genuinely pending.
+                try:
+                    data = dict(frame.get("data") or {})
+                    data["replay"] = True
+                    stamped = dict(frame)
+                    stamped["data"] = data
+                    frame = stamped
+                except Exception:
+                    logger.debug(
+                        "[WS-Chat] replay stamp skipped", exc_info=True
+                    )
                 await socket.send_json(frame)
     except Exception:
         logger.debug(

@@ -964,6 +964,10 @@ function registerAgentStore() {
             });
             this._syncThinkingBanner();
           } else if (statusVal === 'paused_for_approval') {
+            // Replayed frames are history — a settled approval's retained
+            // status frame must not flash the fallback card on refresh
+            // (2026-09-03). The registry reconciler paints real pending.
+            if (frame.replay || data.replay) break;
             this._progress({
               kind: 'status',
               title: _ti('waiting_approval', 'Waiting for approval'),
