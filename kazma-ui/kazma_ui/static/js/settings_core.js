@@ -206,17 +206,21 @@
         hubProviders: [],
         hubConnectors: [],
         // Delivery & Routing (Settings → Providers & Connectors →
-        // Platform Connectors): the COMPLETE credential set per route —
-        // bot tokens (vault-masked as '***' on load) AND destinations —
-        // plus the alert / swarm-output route selectors (2026-09-03 v3).
+        // Platform Connectors): every field the old per-platform cards
+        // carried — token, allowed users, guild/workspace, enabled —
+        // loaded from /api/connectors (masked ****XXXX round-trip), plus
+        // each route's destination and the alert / swarm-output selectors
+        // (2026-09-03 v4).
         adapterRouting: {
-            tgToken: '', tgMainChat: '',
+            tgToken: '', tgEnabled: true, tgAllowed: '', tgMainChat: '',
             tgGroupEnabled: false, tgGroupChat: '', tgGroupToken: '',
-            discordToken: '', discordChannel: '',
-            slackToken: '', slackAppToken: '', slackChannel: '',
+            discordToken: '', discordEnabled: true, discordGuild: '', discordAllowed: '', discordChannel: '',
+            slackToken: '', slackAppToken: '', slackWorkspace: '', slackAllowed: '', slackEnabled: true, slackChannel: '',
             alertRoutes: [], swarmRoutes: [],
         },
         adapterRoutingSaving: false,
+        adapterRoutingTesting: '',
+        adapterRoutingTest: null,
         hubProfiles: [],
         hubProviderModal: false,
         hubConnectorModal: false,

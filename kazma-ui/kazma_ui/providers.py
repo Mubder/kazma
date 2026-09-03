@@ -452,6 +452,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             config_store.set(f"connectors.{name}.token", token, category="connectors")
         config_store.set(f"connectors.{name}.enabled", req.enabled, category="connectors")
         for key, value in req.extras.items():
+            # Masked-extras round-trip (2026-09-03 v4): GET /api/connectors
+            # masks secret extras (e.g. slack app_token → "****abcd"). A save
+            # that did not touch that field sends the mask back — writing it
+            # would clobber the stored credential with the mask string (the
+            # old per-platform dialog silently did this to app_token).
+            if (
+                _is_masked_placeholder(str(value))
+                and existing_config.get(key)
+            ):
+                continue
             config_store.set(f"connectors.{name}.{key}", value, category="connectors")
 
         # Live-apply allowlists onto running adapters (token changes still

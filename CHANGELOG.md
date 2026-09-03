@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Feature — Delivery & Routing v4: every old-dialog field, one card (2026-09-03)
+
+v3 still missed fields the old per-platform cards had. v4 copies them
+ALL into the Delivery & Routing card, wired through the SAME endpoints
+the old dialogs used:
+
+- **Telegram**: bot token, chat id, **Allowed User IDs**, enabled
+  toggle, **Test** button.
+- **Discord**: bot token, channel id, **Guild ID**, **Allowed User
+  IDs**, enabled toggle, **Test** button.
+- **Slack**: bot token, app token, **Workspace**, channel id,
+  **Allowed User IDs**, enabled toggle, **Test** button.
+- Connector state loads from ``GET /api/connectors`` and saves via
+  ``POST /api/connectors`` (token normalization, mask preservation,
+  live allowlist apply) — then triggers ``/api/gateway/refresh-
+  adapters`` exactly like the old modal, so token changes apply
+  WITHOUT a server restart. Test mirrors the old modal too: save that
+  platform, then health-check it (getMe / users/@me / auth.test) with
+  the result shown inline.
+- **Fixed a credential-clobbering bug inherited from the old dialog**:
+  ``GET /api/connectors`` masks secret extras (slack ``app_token`` →
+  ``****abcd``) and the old save POSTed that mask back, silently
+  replacing the real credential with the mask string.
+  ``upsert_connector`` now skips masked extras (behavioral test:
+  masked round-trip preserves the stored secret; non-secret extras
+  still update).
+
 ## Feature — Delivery & Routing v3: full credentials on one card + real route fan-out (2026-09-03)
 
 v2 still shipped half a settings page: chat ids on the card, bot tokens

@@ -238,6 +238,66 @@ class TestMaybeSendToOutputTarget:
 # ── Bus adapter names (ops-alert channel selection) ─────────────────────
 
 
+class _FakeConnectorStore:
+    """ConfigStore double for the connectors router (get/set/get_all)."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, Any] = {}
+
+    def get_all(self) -> dict[str, dict[str, Any]]:
+        return {"connectors": dict(self._data)}
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any, category: str = "connectors") -> None:
+        self._data[key] = value
+
+    def delete(self, key: str) -> None:
+        self._data.pop(key, None)
+
+
+class TestMaskedExtrasRoundTrip:
+    def test_masked_app_token_sent_back_does_not_clobber_the_secret(self) -> None:
+        """GET /api/connectors masks secret extras (slack app_token →
+        ``****abcd``). The old per-platform dialog POSTed that mask back on
+        every save, silently replacing the real credential with the mask
+        string. The card v4 round-trips through the same endpoints, so the
+        server must skip masked extras."""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from kazma_ui.providers import create_providers_router
+
+        store = _FakeConnectorStore()
+        app = FastAPI()
+        app.include_router(create_providers_router(store))  # type: ignore[arg-type]
+        client = TestClient(app)
+
+        # Save a real slack connector with an app token.
+        resp = client.post("/api/connectors", json={
+            "name": "slack", "token": "xoxb-real", "enabled": True,
+            "extras": {"app_token": "xapp-1-real-secret", "workspace": "acme"},
+        })
+        assert resp.status_code == 200
+
+        # Load it back the way the UI does — the app token comes masked.
+        entry = next(c for c in client.get("/api/connectors").json()
+                     if c["name"] == "slack")
+        assert entry["extras"]["app_token"].startswith("****")
+
+        # Re-save the entry unchanged (what a form submit does).
+        resp = client.post("/api/connectors", json={
+            "name": "slack", "token": entry["token"], "enabled": entry["enabled"],
+            "extras": entry["extras"],
+        })
+        assert resp.status_code == 200
+
+        # The stored credential survived the masked round-trip.
+        assert store.get("connectors.slack.app_token") == "xapp-1-real-secret"
+        # Non-secret extras still update normally.
+        assert store.get("connectors.slack.workspace") == "acme"
+
+
 class TestBusAdapterNames:
     def test_every_bus_adapter_has_a_routing_name(self) -> None:
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
