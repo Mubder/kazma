@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Feature — Delivery & Routing v2: four complete routes (2026-09-03)
+
+The v1 card over-consolidated: it kept only chat ids and dropped the
+swarm bot token, breaking dedicated-swarm-bot Telegram delivery. v2
+carries FOUR routes with every required field:
+
+- **Telegram — Main bot**: chat id (uses the main bot token).
+- **Telegram — Group**: enable toggle + group chat id + OPTIONAL
+  dedicated bot token (the swarm bot). Stored as ``swarm.output_target``
+  with a masked-token round-trip (``***`` never clobbers the stored
+  credential — the server preserves it).
+- **Discord / Slack**: channel ids (main bot tokens).
+- **Two destination selectors**: ops alerts AND swarm output each pick
+  any of ``telegram`` / ``telegram-group`` / ``discord`` / ``slack``
+  (alerts: empty = all configured). ``telegram-group`` alert delivery is
+  Telegram-direct using the group's dedicated bot token when present,
+  else the main bot token; swarm results already follow the output
+  target, and the group route rides the existing direct-send mode.
+
 ## Fix — Settings 500 (Jinja pipe) + silent operator reloads (2026-09-03)
 
 - The Settings page 500'd: a JavaScript-style ``||`` inside a Jinja

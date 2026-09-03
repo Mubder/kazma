@@ -225,6 +225,15 @@ class SwarmService:
             raise ValueError("chat_id must be an integer")
 
         bot_token = str(payload.get("bot_token", "") or "").strip()
+        # Masked-token round-trip (2026-09-03): GET masks the token as
+        # '***'; a save that did not touch the password field must not
+        # clobber the stored credential with the mask.
+        if bot_token in ("***",):
+            existing = cs.get("swarm.output_target", None)
+            bot_token = (
+                str(existing.get("bot_token", "") or "").strip()
+                if isinstance(existing, dict) else ""
+            )
         target = {
             "platform": str(payload.get("platform") or "telegram"),
             "chat_id": chat_id,

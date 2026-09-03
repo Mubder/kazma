@@ -875,7 +875,7 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
     ).read_text(encoding="utf-8")
-    assert "toggleRoutingChannel" in settings_html
+    assert "toggleRoutingList" in settings_html  # v2 selector helper
     assert "notifications.ops.channels" in (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
@@ -961,3 +961,50 @@ def test_guard_notifies_on_operator_reload() -> None:
     )[0]
     assert "self.notify.send(" in branch
     assert "operator reload" in branch
+
+
+def test_four_delivery_routes_complete_fields() -> None:
+    """2026-09-03 v2: the routing card carries FOUR routes with COMPLETE
+    fields — the earlier chat-id-only version dropped the swarm bot token
+    and broke the user's dedicated swarm-bot Telegram delivery. Telegram
+    group = swarm.output_target (chat id + optional dedicated bot token,
+    masked round-trip preserved server-side); alerts accept a
+    'telegram-group' route delivered Telegram-direct."""
+    settings_html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
+    ).read_text(encoding="utf-8")
+    for needle in (
+        "Telegram — Main bot",
+        "Telegram — Group",
+        "tgGroupToken",
+        "tgGroupEnabled",
+        "Dedicated Bot Token",
+        "discordChannel",
+        "slackChannel",
+        "alertRoutes",
+        "swarmRoutes",
+        "telegram-group",
+    ):
+        assert needle in settings_html, needle
+
+    hub = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
+    ).read_text(encoding="utf-8")
+    # Group route saves through the output-target API; *** never sent back.
+    assert "r.tgGroupToken !== '***'" in hub
+    assert "swarm/output-target" in hub
+
+    services = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "services.py"
+    ).read_text(encoding="utf-8")
+    assert 'if bot_token in ("***",):' in services
+
+    ops = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-core" / "kazma_core" / "observability" / "ops_alerts.py"
+    ).read_text(encoding="utf-8")
+    assert 'group_route: bool = False' in ops
+    assert '"telegram-group" in channels' in ops
