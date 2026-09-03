@@ -5753,8 +5753,13 @@
     _placeHitlCard(content, card);
     _revealHitlCard(card);
     _attachHitlCountdown(card, data);
-    if (hasInlineApprovalCard()) _clearStoreApproval();
-    else _showStoreApproval(data);
+    if (hasInlineApprovalCard()) {
+      _clearStoreApproval();
+    } else if (opts && opts.store === false) {
+      // Historical/claimed paint — must not arm the live fallback.
+    } else {
+      _showStoreApproval(data);
+    }
     scrollToBottom();
 
     function setCardState(state, label) {
@@ -7184,7 +7189,9 @@
       var host = el || currentMsgEl;
       var card = _findHitlCard(iid, host);
       if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved' || state === 'inflight' || state === 'settled')) {
-        renderHitlCard(hitl.payload, { lock: false });
+        // store:false — a historical decision must not arm the Alpine
+        // fallback (the <1s ghost card at the top of the page, 2026-09-03).
+        renderHitlCard(hitl.payload, { lock: false, store: false });
         host = el || currentMsgEl;
         card = _findHitlCard(iid, host);
       }

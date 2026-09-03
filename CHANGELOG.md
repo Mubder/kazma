@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Fix — ghost approval card, round 3: the fallback itself (2026-09-03)
+
+Round-trap diagnosis on the live page: the bubble card was no longer the
+flash — it renders disabled and STAYS (correct history). What flashed
+was the Alpine fallback at the top: ``renderHitlCard`` armed
+``pendingApproval`` (a 4-button live card) whenever the painted card had
+no ENABLED buttons — which is exactly the claimed/historical case.
+A settled decision was arming a live ask for ~300ms. Historical paints
+now pass ``store: false``; only a card with live buttons (or an explicit
+live path) may arm the fallback.
+
 ## Fix — ghost approval card, round 2: hydration paint (2026-09-03)
 
 The replay-frame guards weren't enough: the flash survived because
