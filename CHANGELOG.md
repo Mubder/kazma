@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Fix — MCP npx probe covers nvm-windows (2026-09-03)
+
+The canonical-location probe missed nvm-windows installs
+(``NVM_SYMLINK``, default ``C:\nvm4w\nodejs``) — the machine's actual
+Node layout — so a Kazma server started from a stale-PATH shell (before
+an ``nvm use`` switch) still failed the filesystem MCP server even with
+the probe. The symlink dir (env override, sensible default) is now the
+second probe location.
+
 ## Feature — first-class Telegram groups (2026-09-03)
 
 Group chat ids (-100…) were the one thing blocking "add a Telegram

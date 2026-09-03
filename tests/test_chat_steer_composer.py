@@ -889,3 +889,18 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
     assert "output-routing-bot-token" not in swarm_html
     assert "saveOutputTarget()" not in swarm_html
     assert "output-routing-card" in swarm_html  # pointer card remains
+
+
+def test_mcp_npx_probe_covers_nvm_windows() -> None:
+    """2026-09-03: this machine runs nvm-windows (NVM_SYMLINK=C:\nvm4w\nodejs)
+    — the canonical Program Files/npm probes missed it, so a server started
+    from a stale-PATH shell still lost the filesystem MCP server."""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-core" / "kazma_core" / "mcp" / "manager.py"
+    ).read_text(encoding="utf-8")
+    probe = src.split("Probe the canonical Windows locations", 1)[1].split(
+        "if resolved:", 1
+    )[0]
+    assert "NVM_SYMLINK" in probe
+    assert "nvm4w" in probe

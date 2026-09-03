@@ -1266,11 +1266,16 @@ class AsyncMCPManager:
                     # before giving up.
                     import os as _os
 
+                    nvm_link = (
+                        _os.environ.get("NVM_SYMLINK")
+                        or r"C:\nvm4w\nodejs"
+                    )
                     for cand in (
                         _os.path.join(
                             _os.environ.get("ProgramFiles", r"C:\Program Files"),
                             "nodejs", "npx.cmd",
                         ),
+                        _os.path.join(nvm_link, "npx.cmd"),
                         _os.path.join(
                             _os.environ.get("APPDATA", ""), "npm", "npx.cmd",
                         ),
