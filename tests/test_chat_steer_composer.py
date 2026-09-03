@@ -825,6 +825,15 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
         "\n  function renderTurn(doc, meta)", 1
     )[0]
     assert "if (_hydratingSession) return;" in paint
+    # Round 3: the FLASH itself was the Alpine fallback being armed by a
+    # CLAIMED historical card (renderHitlCard lit pendingApproval whenever
+    # the painted card had no enabled buttons). Historical paints pass
+    # store:false; only a live card arms the fallback.
+    assert "renderHitlCard(hitl.payload, { lock: false, store: false });" in paint
+    rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "opts && opts.store === false" in rhc
     hitl_guards = js.count("st === 'pending' && data && data.replay) return;")
     assert hitl_guards == 2  # attach + send onHitl handlers
     store = (
