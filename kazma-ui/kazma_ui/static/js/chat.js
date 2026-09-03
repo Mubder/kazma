@@ -1121,6 +1121,11 @@
     _lastInterruptedThreadId = '';
     _awaitingApproval = false;
     _clearStoreApproval();
+    // Switching sessions is not the END of a turn — it is the ABSENCE of
+    // one. forceEndTurn's 'done' frame left the card on screen for its
+    // 1.6s retire animation, so a brand-new empty session flashed a
+    // "Done" task card for a turn that never happened (2026-09-03).
+    _taskCardEvent({ t: 'reset' });
   }
   /** Progress-idle failsafe — only fires when NO activity for IDLE ms (not wall-clock). */
   var _turnWatchdogTimer = null;
@@ -1503,9 +1508,13 @@
     var rows = (window.KazmaTurnDocument && doc && KazmaTurnDocument.activityOf)
       ? KazmaTurnDocument.activityOf(doc.parts || [])
       : [];
-    // Newest last (chronological); cap _TC_STEP_CAP live rows. An empty doc
-    // must CLEAR — early-returning on no rows left the previous turn's steps
-    // sitting in the body for anyone who expanded it at turn start.
+    // An empty READ is not an empty turn. _liveTurnId is retired and _docs is
+    // dropped around the end of a turn, so blanking the body here wiped the
+    // steps out from under anyone reading them the moment the turn finished.
+    // Clearing belongs to the events that know a turn STARTED or a session
+    // CHANGED — 'begin' and 'reset' both empty the list explicitly.
+    if (!rows.length) return;
+    // Newest last (chronological); cap _TC_STEP_CAP live rows.
     rows = rows.slice(-_TC_STEP_CAP);
     var html = '';
     for (var i = 0; i < rows.length; i++) {
@@ -1540,6 +1549,41 @@
     ev = ev || {};
     if (!_tcMount()) return;
     var now = Date.now();
+
+    // A session change is the ABSENCE of a turn, not the end of one: unmount
+    // now, with no terminal frame and no retire animation.
+    if (ev.t === 'reset') {
+      if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
+      if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
+      _tc.visible = false;
+      _tc.phase = 'idle';
+      _tc.current = '';
+      _tc.detail = '';
+      _tc.step = 0;
+      _tc.elapsedS = 0;
+      _tc.elapsedFloor = 0;
+      _tc.turnStart = 0;
+      _tc.phaseStart = 0;
+      _tc.srvElapsed = 0;
+      _tc.srvElapsedAt = 0;
+      _tc.lastSignal = 0;
+      _tc.deadline = 0;
+      _tc.planTotal = 0;
+      _tc.planDone = 0;
+      _tc.stalled = false;
+      _tc.dead = false;
+      _tc.stallTries = 0;
+      _tc.nextResyncAt = 0;
+      _tc.textOverride = '';
+      _tc.summary = '';
+      _tc.emptyTurn = false;
+      _tc.announced = '';
+      _tc.stepsHtml = '';
+      if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
+      if (_tc.liveEl) _tc.liveEl.textContent = '';
+      if (_tc.el) _tc.el.hidden = true;
+      return;
+    }
 
     if (ev.t === 'begin') {
       _tc.phase = 'idle';
@@ -4965,6 +5009,25 @@
   }
 
   /** Existing HITL card for this interrupt. Never reuse a claimed card for a new gate. */
+  /**
+   * Did the inline paint LAND for this interrupt — in any state?
+   *
+   * The Alpine store keeps `pendingApproval` as a fallback for "the inline
+   * card never rendered", and cleared it only when hasInlineApprovalCard()
+   * was true — i.e. only while a card still had ENABLED buttons. On a hard
+   * refresh of a finished session the inline card is painted and then
+   * immediately stamped "No longer pending" by the gate reconcile, so that
+   * check went false and the fallback strip stayed on screen forever: a
+   * dead card with four live buttons for a gate the server had already
+   * settled (2026-09-03). A card that exists is proof the paint landed,
+   * whatever its buttons say.
+   */
+  function hitlCardExistsFor(data) {
+    var iid = _hitlInterruptIdOf(data);
+    if (!iid || !messagesEl) return false;
+    return !!_findHitlCard(iid, null);
+  }
+
   function _findHitlCard(interruptId, host) {
     interruptId = String(interruptId || '');
     var cards = messagesEl ? messagesEl.querySelectorAll('.hitl-approval-card') : [];
@@ -5134,6 +5197,16 @@
         actions.innerHTML = '<span class="hitl-status hitl-denied">No longer pending</span>';
       }
     });
+    // The store's fallback strip lives OUTSIDE messagesEl and carries no
+    // interrupt id, so the sweep above can never reach it. An authoritative
+    // list with nothing pending is the server saying "no gate is waiting" —
+    // retire the strip too, or it keeps offering live buttons for a decision
+    // that is already made (the ghost card on every hard refresh).
+    var anyPending = false;
+    for (var pk in pendingIids) {
+      if (Object.prototype.hasOwnProperty.call(pendingIids, pk)) { anyPending = true; break; }
+    }
+    if (!anyPending) _clearStoreApproval();
   }
 
   /** Server-truth recovery: an interrupted turn whose approval card never
@@ -7163,6 +7236,7 @@
     _hitlApproval: renderHitlCard,
     markApprovalTimedOut: markApprovalTimedOut,
     hasInlineApprovalCard: hasInlineApprovalCard,
+    hitlCardExistsFor: hitlCardExistsFor,
     beginTurn: beginTurn,
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,

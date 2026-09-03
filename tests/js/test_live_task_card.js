@@ -455,6 +455,46 @@ test("the open/closed choice survives the next mount", () => {
   eq(c2.q("live-task-body").hidden, false, "body still collapsed");
 });
 
+test("finishing a turn does not wipe the steps you are reading", () => {
+  const rows = [{ kind: "tool", title: "web_search", detail: "notes", state: "done" }];
+  const c = makeCardWithActivity(rows, OPEN);
+  c.ev({ t: "begin" });
+  c.ev({ t: "doc" });
+  assert(c.q("live-task-steps").innerHTML.includes("web_search"), "setup");
+  // The turn ends: _liveTurnId is retired and _docs is dropped, so the next
+  // read comes back empty. That is an empty READ, not an empty turn.
+  c.env.activity = [];
+  c.ev({ t: "done", ok: true, summary: "1 step" });
+  c.ev({ t: "text", msg: "" });          // endTurn's _clearStatusStrip
+  assert(c.q("live-task-steps").innerHTML.includes("web_search"),
+    "steps vanished the moment the turn finished");
+});
+
+test("a session change unmounts the card with no Done flash", () => {
+  const c = makeCardWithActivity([{ kind: "status", title: "x", state: "done" }], OPEN);
+  c.ev({ t: "begin" });
+  c.ev({ t: "doc" });
+  c.ev({ t: "reset" });
+  eq(c.card.hidden, true, "card still on screen after a session change");
+  eq(c.tc.visible, false, "still marked visible");
+  eq(c.tc.tickTimer, null, "tick timer left running");
+  eq(c.tc.doneTimer, null, "a retire animation was armed");
+  eq(c.q("live-task-steps").innerHTML, "", "previous session's steps kept");
+  // ...and it must STAY hidden — a leftover timer used to reveal it again.
+  c.clock.advance(5000);
+  eq(c.card.hidden, true, "card reappeared on a timer");
+});
+
+test("reset then a real turn still works", () => {
+  const c = makeCardWithActivity(null, OPEN);
+  c.ev({ t: "begin" });
+  c.ev({ t: "reset" });
+  c.ev({ t: "begin" });
+  c.ev({ t: "tool", name: "grep" });
+  eq(c.card.hidden, false, "card did not come back for a real turn");
+  eq(c.label(), "Running grep", "label");
+});
+
 // ── a11y ────────────────────────────────────────────────────────────────
 test("the live region announces phase, not every tick", () => {
   const c = makeCardWithActivity();

@@ -169,7 +169,11 @@ def test_hitl_is_not_epoch_gated_and_paints_from_status_gates() -> None:
         / "stores"
         / "agentStore.js"
     ).read_text(encoding="utf-8")
-    pause = store.split("_pauseForApproval(approval)", 1)[1][:1200]
+    # Slice to the end of the method, not a byte budget — a comment added
+    # inside it used to push the assertion out of a fixed 1200-char window.
+    pause = store.split("_pauseForApproval(approval)", 1)[1].split(
+        "_resetTurnState()", 1
+    )[0]
     assert "this.pendingApproval = approval;" in pause
     assert "hasInlineApprovalCard()" in pause
 
@@ -476,6 +480,89 @@ def test_approval_freeze_is_scoped_to_the_card_decided() -> None:
     assert "_liveHitlDeadline()" in submit
     # The deadline has to be readable off the node for that to work.
     assert "card.setAttribute('data-approval-deadline'" in js
+
+
+def test_store_approval_fallback_never_outlives_the_inline_card() -> None:
+    """The ghost approval card on every hard refresh.
+
+    The Alpine store keeps ``pendingApproval`` as a fallback for "the inline
+    card never rendered", and cleared it only while
+    ``hasInlineApprovalCard()`` was true — i.e. only while some card still
+    had ENABLED buttons. On a hard refresh of a finished session the inline
+    card paints and is immediately stamped "No longer pending" by the gate
+    reconcile, so that check goes false and the fallback strip stays on
+    screen: a dead card offering four live buttons for a gate the server had
+    already settled (server said ``gates: [], gates_authoritative: true``).
+
+    Two independent guards, because the strip lives outside ``messagesEl``
+    and carries no interrupt id, so the reconcile sweep cannot reach it.
+    """
+    js = _js()
+    store = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js"
+    ).read_text(encoding="utf-8")
+
+    # 1. A card that EXISTS is proof the paint landed — live buttons are not
+    #    the test.
+    assert "function hitlCardExistsFor(data)" in js
+    assert "hitlCardExistsFor: hitlCardExistsFor," in js
+    pause = store.split("_pauseForApproval(approval) {", 1)[1].split(
+        "_resetTurnState()", 1
+    )[0]
+    assert "chat.hitlCardExistsFor(approval)" in pause
+    assert "if (landed) this.pendingApproval = null;" in pause
+
+    # 2. An authoritative gate list with nothing pending retires the strip.
+    rec = js.split("function _reconcileHitlCardsWithGates()", 1)[1].split(
+        "/** Server-truth recovery", 1
+    )[0]
+    assert "anyPending" in rec
+    assert "_clearStoreApproval()" in rec
+
+
+def test_session_change_unmounts_the_task_card_without_a_done_flash() -> None:
+    """A brand-new empty session flashed a "Done" card for 1-2 seconds.
+
+    ``newSession`` calls ``forceEndTurn``, whose terminal frame leaves the
+    card on screen for its 1.6s retire animation. But a session change is
+    the ABSENCE of a turn, not the end of one — there is nothing to
+    animate away. ``_resetSessionTurnState`` now unmounts it outright.
+    """
+    js = _js()
+    reset = js.split("function _resetSessionTurnState()", 1)[1].split(
+        "/** Progress-idle failsafe", 1
+    )[0]
+    assert "_taskCardEvent({ t: 'reset' })" in reset
+    # The reset branch must cancel BOTH timers, or a leftover one reveals or
+    # re-hides the card after the session has already changed.
+    branch = js.split("if (ev.t === 'reset') {", 1)[1].split("if (ev.t === 'begin')", 1)[0]
+    assert "clearTimeout(_tc.doneTimer)" in branch
+    assert "clearInterval(_tc.tickTimer)" in branch
+    assert "_tc.visible = false;" in branch
+    assert "_tc.el.hidden = true;" in branch
+    assert "_tc.stepsEl.innerHTML = '';" in branch
+
+
+def test_an_empty_read_never_wipes_the_steps_you_are_reading() -> None:
+    """Expanding the CoT and letting the turn finish emptied it.
+
+    ``_liveTurnId`` is retired and ``_docs`` is dropped around the end of a
+    turn, so ``_tcStepsFromDoc`` reads back nothing — and it treated that as
+    "this turn has no steps" and blanked the body under the reader.
+    Clearing belongs to the events that KNOW a turn started or a session
+    changed; both do it explicitly.
+    """
+    js = _js()
+    steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
+        "The single writer", 1
+    )[0]
+    assert "if (!rows.length) return;" in steps, (
+        "an empty read blanks the body again"
+    )
+    for owner in ("if (ev.t === 'reset') {", "if (ev.t === 'begin') {"):
+        branch = js.split(owner, 1)[1][:2000]
+        assert "_tc.stepsEl.innerHTML = '';" in branch, owner
 
 
 def test_live_placeholder_is_never_a_bubble_identity() -> None:

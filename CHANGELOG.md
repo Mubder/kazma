@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## Fix - ghost approval card, phantom card on a new session, vanishing CoT (2026-09-03)
+
+Three follow-ups from live testing of the Live Task Card work.
+
+**A dead approval card with live buttons on every hard refresh.** The
+Alpine store keeps ``pendingApproval`` as a fallback for "the inline card
+never rendered", and cleared it only while ``hasInlineApprovalCard()``
+was true - i.e. only while some card still had ENABLED buttons. On a hard
+refresh of a finished session the inline card paints and is immediately
+stamped "No longer pending" by the gate reconcile, so that check goes
+false and the fallback strip stays on screen offering four clickable
+buttons for a gate the server had already settled (``/status`` answered
+``gates: [], gates_authoritative: true, paused: false`` - the card was
+invented entirely client-side). A card that EXISTS is now proof the
+inline paint landed, whatever its buttons say. Second guard, because the
+strip lives outside ``messagesEl`` and carries no interrupt id so the
+reconcile sweep can never reach it: an authoritative gate list with
+nothing pending retires the strip too.
+
+**A "Done" task card flashed for 1-2s in a brand-new empty session.**
+``newSession`` calls ``forceEndTurn``, whose terminal frame leaves the
+card up for its 1.6s retire animation. But a session change is the
+ABSENCE of a turn, not the end of one - there is nothing to animate away.
+``_resetSessionTurnState`` now unmounts the card outright, cancelling both
+timers so nothing reveals it again a second later.
+
+**Expanding the CoT and letting the turn finish emptied it.**
+``_liveTurnId`` is retired and ``_docs`` dropped around the end of a
+turn, so ``_tcStepsFromDoc`` reads back nothing - and it treated that
+empty READ as an empty turn and blanked the body under the reader.
+Clearing belongs to the events that KNOW a turn started or a session
+changed; ``begin`` and ``reset`` both do it explicitly, so the read path
+no longer needs to.
+
+Tests: three behaviors added to ``tests/js/test_live_task_card.js`` (28
+total) plus three source contracts, all mutation-checked. Verified in a
+real browser: no ghost strip after refresh, card hidden at 0/1.2/2.4s
+after a session change, and step markup byte-identical across the end of
+a turn.
+
 ## Fix + Feature - Live Task Card: the vanishing card, the empty bubble, and a card worth reading (2026-09-03)
 
 Two live-user reports against the day-old Live Task Card, plus the
