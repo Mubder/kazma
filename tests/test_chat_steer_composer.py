@@ -817,6 +817,14 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
     the only authority for live questions (§30)."""
     js = _js()
     assert js.count("data && data.replay) return;") >= 3
+    # The second ghost source: hydration itself painted stale pending
+    # parts (frame guards alone weren't enough — the persisted part still
+    # says 'pending'). _paintHitlFromDoc must refuse pending paints while
+    # hydrating; the registry resync is the only pending painter on load.
+    paint = js.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
+        "\n  function renderTurn(doc, meta)", 1
+    )[0]
+    assert "if (_hydratingSession) return;" in paint
     hitl_guards = js.count("st === 'pending' && data && data.replay) return;")
     assert hitl_guards == 2  # attach + send onHitl handlers
     store = (
