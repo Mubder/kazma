@@ -249,3 +249,53 @@ def test_product_knowledge_states_card_delivery_facts() -> None:
     assert "no rate limit" in text
     assert "Never tell the operator to batch posts" in text
     assert "Allow tool (session)" in text
+
+
+def test_scheduled_fire_binds_booking_tenant(monkeypatch, tmp_path) -> None:
+    """2026-09-03: X OAuth keys saved via Settings live in the vault under
+    the operator's tenant; the background fire loop has NO request context,
+    so vault.retrieve(name) (global-only) missed them and every scheduled
+    post died as "connector disabled at fire time" while chat posts worked.
+    The fire loop must run under the post's booked tenant."""
+    import asyncio
+
+    from kazma_core.x_api import scheduled_fire as sf
+
+    seen: dict[str, object] = {}
+
+    class _Post:
+        id = 1
+        text = "t"
+        reply_to_id = ""
+        tenant_id = "default"
+
+    async def _inner(post):
+        from kazma_core.tenant_context import get_current_tenant_id
+
+        seen["tenant"] = get_current_tenant_id()
+
+    monkeypatch.setattr(sf, "_fire_post_inner", _inner)
+    asyncio.run(sf._fire_post(_Post()))
+    assert seen["tenant"] == "default"
+
+
+def test_vault_get_resolves_tenant_scoped_secrets(monkeypatch) -> None:
+    """The credential ladder must see tenant-scoped vault rows from
+    context-free callers: current tenant → 'default' → global."""
+    from kazma_core.x_api import config as xc
+
+    calls: list[object] = []
+
+    class _Vault:
+        def retrieve(self, name, tenant_id=None):
+            calls.append(tenant_id)
+            return "sekret" if tenant_id == "default" else None
+
+    monkeypatch.setattr("kazma_core.security.vault.get_vault", lambda: _Vault())
+    monkeypatch.setattr(
+        "kazma_core.tenant_context.get_current_tenant_id", lambda: None
+    )
+    assert xc._vault_get("cfg:connectors.x.api_key") == "sekret"
+    # Short-circuits on the first scope that answers — 'default' before
+    # global.
+    assert calls[0] == "default"

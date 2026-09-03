@@ -102,6 +102,30 @@ async def _fire_due_posts() -> None:
 async def _fire_post(post: ScheduledXPost) -> None:
     store = get_x_scheduled_store()
 
+    # The post carries the tenant it was booked under. A background loop
+    # has NO request context, so tenant-scoped vault entries (X OAuth keys
+    # saved via Settings live under tenant 'default') were invisible here —
+    # every scheduled fire failed with "connector disabled at fire time"
+    # while the same credentials worked from chat (2026-09-03). Same
+    # pattern as the cron delivery_target fix (§16): bind context at
+    # schedule time, restore it at fire time.
+    _tenant_token = None
+    if post.tenant_id:
+        from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
+
+        _tenant_token = set_current_tenant_id(post.tenant_id)
+    try:
+        await _fire_post_inner(post)
+    finally:
+        if _tenant_token is not None:
+            from kazma_core.tenant_context import reset_current_tenant_id
+
+            reset_current_tenant_id(_tenant_token)
+
+
+async def _fire_post_inner(post: ScheduledXPost) -> None:
+    store = get_x_scheduled_store()
+
     cfg = get_x_config()
     if not cfg.can_post():
         store.mark_failed(

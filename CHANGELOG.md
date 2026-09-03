@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Fix — scheduled X posts fired with no tenant context (all fires failed) (2026-09-03)
+
+Eight hourly scheduled posts failed with "X connector was disabled at
+fire time" while the same credentials posted fine from chat. Root cause:
+the four X OAuth keys live in the vault under the operator's TENANT
+(``default`` — saved via Settings), and ``vault.retrieve()`` with no
+tenant argument sees only GLOBAL rows. Chat/web requests carry the
+tenant; the background fire loop carries nothing — so the scheduler
+resolved empty credentials every time. Same class as the cron
+``delivery_target`` lesson (§16): context bound at schedule time must be
+restored at fire time.
+
+- ``scheduled_fire._fire_post`` now runs under the post's booked
+  ``tenant_id`` (ContextVar set/reset around the fire).
+- ``x_api.config._vault_get`` resolves a tenant ladder — current tenant →
+  ``default`` → global — so any context-free consumer sees the same
+  connector keys a request-scoped one does.
+
+The failed posts are re-bookable from the Scheduled page (drafts are
+intact in the failed rows).
+
 ## Fix — CoT keeps its blue identity, stays collapsed, and old sessions never bounce (2026-09-03)
 
 Polish round: (a) the CoT panel keeps its blue accent identity when the
