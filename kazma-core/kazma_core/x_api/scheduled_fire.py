@@ -190,30 +190,64 @@ def _parse_retry_wait(exc: XApiError) -> float:
 
 
 async def _notify_success(post: ScheduledXPost, tweet_id: str) -> None:
-    if not post.delivery_target or ":" not in post.delivery_target:
-        return
     url = f"https://x.com/i/web/status/{tweet_id}" if tweet_id else ""
     text = f"✅ Scheduled post published on X.\n{post.text}\n{url}".strip()
-    await _deliver(post.delivery_target, text)
+    await _deliver(post, text)
 
 
 async def _notify_failure(post: ScheduledXPost, reason: str) -> None:
     logger.warning("[x-schedule] post %s failed: %s", post.id, reason)
-    if not post.delivery_target or ":" not in post.delivery_target:
-        return
     text = (
         "⚠️ A scheduled X post FAILED and was NOT published.\n"
         f"Draft: {post.text[:200]}\nReason: {reason[:300]}\n"
         "You can re-book it from the Scheduled page or chat."
     )
-    await _deliver(post.delivery_target, text)
+    await _deliver(post, text)
 
 
-async def _deliver(target: str, text: str) -> None:
+async def _deliver(post: ScheduledXPost, text: str) -> None:
+    """Every fire outcome is announced. Explicit delivery target first
+    (captured at booking); otherwise fan out through the SwarmMessageBus
+    to every configured platform — the same route the lifecycle notifier
+    uses (§17A). A post booked from a context with no target used to fire
+    completely silently, success AND failure (2026-09-03)."""
+    target = post.delivery_target or ""
+    if target and ":" in target:
+        try:
+            from kazma_core.tools.send_message import send_message
+
+            platform = target.split(":", 1)[0]
+            await send_message(target, text, backend=platform)
+            return
+        except Exception:  # noqa: BLE001
+            logger.critical(
+                "[x-schedule] could not deliver notification to %s",
+                target, exc_info=True,
+            )
     try:
-        from kazma_core.tools.send_message import send_message
+        import asyncio as _aio
 
-        platform = target.split(":", 1)[0]
-        await send_message(target, text, backend=platform)
-    except Exception:  # noqa: BLE001
-        logger.critical("[x-schedule] could not deliver notification to %s", target, exc_info=True)
+        from kazma_core.swarm.bus import BusMessage, NullBusAdapter, get_message_bus
+
+        bus = get_message_bus()
+        adapter = bus.adapter
+        if isinstance(adapter, NullBusAdapter):
+            # No platform configured — nothing to announce to. Not an
+            # error: single-operator headless installs still fire posts.
+            return
+        await _aio.wait_for(
+            adapter.send(
+                BusMessage(
+                    worker_name="Kazma",
+                    worker_role="system",
+                    content=text[:4000],
+                    level="info",
+                )
+            ),
+            timeout=15.0,
+        )
+    except Exception:  # noqa: BLE001 — a notification must never fail the fire
+        logger.critical(
+            "[x-schedule] notification fan-out failed for post %s",
+            post.id, exc_info=True,
+        )
