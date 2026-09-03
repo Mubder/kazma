@@ -181,6 +181,7 @@ def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
         token = str(cs.get("connectors.telegram.token", "") or "").strip()
         chat = (
             str(cs.get("guard.telegram.chat_id", "") or "").strip()
+            or str(cs.get("connectors.telegram.swarm_chat_id", "") or "").strip()
             or str(cs.get("swarm.group_chat_id", "") or "").strip()
         )
         # 'telegram-group' route (2026-09-03): deliver to the configured

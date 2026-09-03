@@ -80,6 +80,11 @@ class TelegramBusAdapter(BusAdapter):
         self._pending_results: dict[str, bool] = {}
         self._http: Any = None  # lazy httpx client
 
+    @property
+    def name(self) -> str:
+        """Routing key for platform selection (ops-alert channels)."""
+        return "telegram"
+
     # ── HTTP helpers ────────────────────────────────────────────────
 
     async def _ensure_http(self) -> Any:

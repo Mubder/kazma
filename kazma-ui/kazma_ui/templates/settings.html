@@ -231,17 +231,20 @@
                     <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
                 </div>
 
-                                <!-- Delivery & Routing (2026-09-03, v2): FOUR routes with
-                     complete fields — Telegram main bot, Telegram GROUP
-                     (optional dedicated swarm bot), Discord, Slack — plus
-                     per-consumer destination selectors for ops alerts and
+                                <!-- Delivery & Routing (2026-09-03, v3): FOUR
+                     routes, each with its COMPLETE credential set — bot
+                     tokens AND destinations on this one card, no per-
+                     platform edit hopscotch. Writes the same ConfigStore
+                     keys the gateway adapters read (vault-encrypted,
+                     returned masked as ***). The two selectors at the
+                     bottom choose which routes receive ops alerts and
                      swarm output. -->
                 <div style="margin-top:16px;padding:16px;border:1px solid var(--border);border-radius:var(--radius-card)">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
                         <div style="text-align:left;">
                             <strong>Delivery &amp; Routing</strong>
                             <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">
-                                Four delivery routes with their complete settings. Pick which routes receive ops alerts and swarm output below.
+                                Every delivery route with all of its settings — tokens and destinations live here. Pick which routes receive ops alerts and swarm output below.
                             </p>
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveAdapterRouting()" :disabled="adapterRoutingSaving">
@@ -251,14 +254,22 @@
 
                     <!-- Route: Telegram main bot -->
                     <div style="padding:10px 0;border-top:1px solid var(--border)">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
-                            <strong style="font-size:0.9rem">Telegram — Main bot</strong>
-                            <span class="badge badge-stdio">uses main bot token</span>
+                        <strong style="font-size:0.9rem">Telegram — Main bot</strong>
+                        <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">The bot that handles platform chat and delivers alerts by default.</p>
+                        <div class="two-col-grid">
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
+                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.tgToken" @input="adapterRouting.tgToken = $event.target.value"
+                                       :placeholder="adapterRouting.tgToken === '***' ? '•••••• saved — type to replace' : '123456789:AAF…'">
+                            </div>
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Chat ID (your user id for DMs, or a chat id)</label>
+                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                       :value="adapterRouting.tgMainChat" @input="adapterRouting.tgMainChat = $event.target.value"
+                                       placeholder="1804015016 or -100…">
+                            </div>
                         </div>
-                        <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Chat ID (your user id for DMs, or a group id)</label>
-                        <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                               :value="adapterRouting.tgMainChat" @input="adapterRouting.tgMainChat = $event.target.value"
-                               placeholder="1804015016 or -100…">
                     </div>
 
                     <!-- Route: Telegram GROUP (dedicated swarm bot optional) -->
@@ -269,7 +280,7 @@
                                 <input type="checkbox" :checked="adapterRouting.tgGroupEnabled" @change="adapterRouting.tgGroupEnabled = $event.target.checked">
                                 <span class="toggle-slider"></span>
                             </label>
-                            <span class="text-muted" style="font-size:0.75rem">optional dedicated swarm bot — leave the token empty to use the main bot</span>
+                            <span class="text-muted" style="font-size:0.75rem">optional second route — leave the dedicated token empty to use the main bot</span>
                         </div>
                         <div class="two-col-grid">
                             <div>
@@ -282,32 +293,54 @@
                                 <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Dedicated Bot Token (optional)</label>
                                 <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
                                        :value="adapterRouting.tgGroupToken" @input="adapterRouting.tgGroupToken = $event.target.value"
-                                       placeholder="8668…:AAF… (leave *** to keep unchanged)">
+                                       :placeholder="adapterRouting.tgGroupToken === '***' ? '•••••• saved — type to replace' : '987654321:AAF…'">
                             </div>
                         </div>
                     </div>
 
-                    <!-- Routes: Discord / Slack -->
-                    <div class="two-col-grid" style="padding:10px 0;border-top:1px solid var(--border)">
-                        <div>
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                                <strong style="font-size:0.9rem">Discord</strong>
-                                <span class="badge badge-stdio">uses main bot token</span>
+                    <!-- Route: Discord -->
+                    <div style="padding:10px 0;border-top:1px solid var(--border)">
+                        <strong style="font-size:0.9rem">Discord</strong>
+                        <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">Bot token from the Discord Developer Portal (Bot → Reset Token).</p>
+                        <div class="two-col-grid">
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
+                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.discordToken" @input="adapterRouting.discordToken = $event.target.value"
+                                       :placeholder="adapterRouting.discordToken === '***' ? '•••••• saved — type to replace' : 'MTIzNDU2…'">
                             </div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                   :value="adapterRouting.discordChannel" @input="adapterRouting.discordChannel = $event.target.value"
-                                   placeholder="channel id">
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID</label>
+                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                       :value="adapterRouting.discordChannel" @input="adapterRouting.discordChannel = $event.target.value"
+                                       placeholder="channel id (enable Developer Mode → right-click channel → Copy ID)">
+                            </div>
                         </div>
-                        <div>
-                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-                                <strong style="font-size:0.9rem">Slack</strong>
-                                <span class="badge badge-stdio">uses main bot token</span>
+                    </div>
+
+                    <!-- Route: Slack -->
+                    <div style="padding:10px 0;border-top:1px solid var(--border)">
+                        <strong style="font-size:0.9rem">Slack</strong>
+                        <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">Bot token (xoxb-) from the Slack app install; app token (xapp-) is optional Socket Mode.</p>
+                        <div class="two-col-grid">
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
+                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.slackToken" @input="adapterRouting.slackToken = $event.target.value"
+                                       :placeholder="adapterRouting.slackToken === '***' ? '•••••• saved — type to replace' : 'xoxb-…'">
                             </div>
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">App Token (optional, Socket Mode)</label>
+                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.slackAppToken" @input="adapterRouting.slackAppToken = $event.target.value"
+                                       :placeholder="adapterRouting.slackAppToken === '***' ? '•••••• saved — type to replace' : 'xapp-…'">
+                            </div>
+                        </div>
+                        <div style="margin-top:6px">
                             <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID</label>
                             <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
                                    :value="adapterRouting.slackChannel" @input="adapterRouting.slackChannel = $event.target.value"
-                                   placeholder="channel id">
+                                   placeholder="channel id (C… — right-click channel → View channel details)">
                         </div>
                     </div>
 
@@ -326,7 +359,7 @@
                         </div>
                         <div>
                             <strong style="font-size:0.85rem">Swarm output goes to</strong>
-                            <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">telegram-group requires the group route enabled above.</p>
+                            <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">A route only delivers when its chat id above is set. Leave all unchecked for the legacy single output target.</p>
                             <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'s' + r">
                                 <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
                                     <input type="checkbox" :checked="(adapterRouting.swarmRoutes || []).includes(r)"
@@ -337,7 +370,7 @@
                         </div>
                     </div>
                     <p class="text-muted" style="font-size:0.72rem;margin:8px 0 0">
-                        Applies on the next alert / swarm run (restart for bus-level routes).
+                        Saved tokens are vault-encrypted (shown as •••••• — leave them to keep the saved value). Alert routing applies immediately; swarm result fan-out applies on the next dispatch; tokens apply after a server reload.
                     </p>
                 </div>
             </div>

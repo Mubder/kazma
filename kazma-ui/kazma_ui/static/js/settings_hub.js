@@ -330,11 +330,11 @@
         },
 
         async loadAdapterRouting() {
-            // Delivery & Routing card v2 (2026-09-03): four routes —
+            // Delivery & Routing card v3 (2026-09-03): four routes —
             // telegram main bot / telegram GROUP (optional dedicated swarm
-            // bot) / discord / slack — plus alert + swarm destination
-            // selectors. Reads the grouped settings snapshot and the swarm
-            // output target (bot token comes back MASKED as ***).
+            // bot) / discord / slack — each with its FULL credential set.
+            // Tokens come back vault-masked as '***' from the settings
+            // snapshot; '***' means "saved, leave untouched".
             try {
                 const data = await this._fetch('/api/settings');
                 if (!data) return;
@@ -349,8 +349,12 @@
                     swarmRoutes = swarmRoutes.split(',').map(x => x.trim()).filter(Boolean);
                 }
                 const r = this.adapterRouting;
+                r.tgToken = String(conn['telegram.token'] || '');
                 r.tgMainChat = String(conn['telegram.swarm_chat_id'] || '');
+                r.discordToken = String(conn['discord.token'] || '');
                 r.discordChannel = String(conn['discord.swarm_channel_id'] || '');
+                r.slackToken = String(conn['slack.token'] || '');
+                r.slackAppToken = String(conn['slack.app_token'] || '');
                 r.slackChannel = String(conn['slack.swarm_channel_id'] || '');
                 r.alertRoutes = Array.isArray(alerts) ? alerts : [];
                 r.swarmRoutes = Array.isArray(swarmRoutes) ? swarmRoutes : [];
@@ -387,6 +391,18 @@
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ key, value, category }),
                 }));
+                // Credential fields: '***' is the vault mask for an already
+                // saved value — never write it back (it would clobber the
+                // real secret). Empty also means "leave unchanged"; typing a
+                // new value replaces the stored one.
+                const secretPut = (key, value) => {
+                    const v = String(value || '').trim();
+                    if (v && v !== '***' && !v.startsWith('***')) single(key, v, 'connectors');
+                };
+                secretPut('connectors.telegram.token', r.tgToken);
+                secretPut('connectors.discord.token', r.discordToken);
+                secretPut('connectors.slack.token', r.slackToken);
+                secretPut('connectors.slack.app_token', r.slackAppToken);
                 single('connectors.telegram.swarm_chat_id', String(r.tgMainChat || '').trim(), 'connectors');
                 single('connectors.discord.swarm_channel_id', String(r.discordChannel || '').trim(), 'connectors');
                 single('connectors.slack.swarm_channel_id', String(r.slackChannel || '').trim(), 'connectors');
@@ -400,7 +416,7 @@
                         chat_id: String(r.tgGroupChat).trim(),
                         enabled: true,
                     };
-                    if (r.tgGroupToken && r.tgGroupToken !== '***') {
+                    if (r.tgGroupToken && r.tgGroupToken !== '***' && !String(r.tgGroupToken).startsWith('***')) {
                         payload.bot_token = r.tgGroupToken.trim();
                     }
                     puts.push(fetch('/api/swarm/output-target', {

@@ -206,11 +206,14 @@
         hubProviders: [],
         hubConnectors: [],
         // Delivery & Routing (Settings → Providers & Connectors →
-        // Platform Connectors): ops-alert channels + per-platform swarm
-        // output channels. Moved from the Swarm tab (2026-09-03).
+        // Platform Connectors): the COMPLETE credential set per route —
+        // bot tokens (vault-masked as '***' on load) AND destinations —
+        // plus the alert / swarm-output route selectors (2026-09-03 v3).
         adapterRouting: {
-            tgMainChat: '', tgGroupEnabled: false, tgGroupChat: '', tgGroupToken: '',
-            discordChannel: '', slackChannel: '',
+            tgToken: '', tgMainChat: '',
+            tgGroupEnabled: false, tgGroupChat: '', tgGroupToken: '',
+            discordToken: '', discordChannel: '',
+            slackToken: '', slackAppToken: '', slackChannel: '',
             alertRoutes: [], swarmRoutes: [],
         },
         adapterRoutingSaving: false,
