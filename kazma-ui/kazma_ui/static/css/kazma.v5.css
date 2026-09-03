@@ -481,9 +481,9 @@ html[data-theme="light"] { color-scheme: only light; }
 }
 
 /* A5 — compact workbench when done */
+/* Done keeps the base (blue) identity; only the live glow is dropped. */
 .agent-progress.is-done {
   box-shadow: none;
-  opacity: 0.92;
 }
 .agent-progress.is-done .agent-progress-header { padding: 8px 12px; }
 @media (prefers-reduced-motion: reduce) {

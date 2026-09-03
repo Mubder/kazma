@@ -897,12 +897,16 @@ class TestWorkbenchCollapseTiming:
     """
 
     def test_finalize_does_not_collapse(self):
+        """2026-09-03: the terminal frame must not touch expansion EITHER
+        way. Collapsing was the end-of-turn flash; UN-collapsing auto-
+        expanded the panel in the gray done-style at turn end (the
+        expand-gray / collapse-blue cycle). Expansion is the user's
+        chevron click only."""
         src = _CHAT_JS.read_text(encoding="utf-8")
         fin = src.split("function finalizeProgress(", 1)[1].split("\n  function ", 1)[0]
-        assert "classList.add('is-collapsed')" not in fin, (
-            "collapsing at the terminal frame is the end-of-turn flash"
+        assert "is-collapsed" not in fin, (
+            "the terminal frame must neither collapse nor expand the panel"
         )
-        assert "panel.classList.remove('is-collapsed');" in fin
 
     def test_next_turn_collapses_finished_panels(self):
         src = _CHAT_JS.read_text(encoding="utf-8")

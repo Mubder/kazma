@@ -1,5 +1,20 @@
 # CHANGELOG
 
+## Fix — CoT keeps its blue identity, stays collapsed, and old sessions never bounce (2026-09-03)
+
+Polish round: (a) the CoT panel keeps its blue accent identity when the
+turn ends — the ``is-done`` gray override (background strip in
+kazma.css + opacity muting in v5) is gone; done/live differ only in
+glow, while element-level colors (step states, tool icons, HITL bars)
+keep their meaning. (b) The last auto-expand is closed:
+``finalizeProgress`` un-collapsed the panel at the exact frame it
+turned gray — the reader saw expand-gray then collapse-blue on the next
+turn. The terminal frame now touches expansion in NEITHER direction;
+the panel ends the turn in whatever state the user left it. (c)
+Entering an old session with a stale pending-looking approval card no
+longer scroll-bounces the reader to it — the reveal is suppressed
+while hydration paints history (``_hydratingSession``).
+
 ## Fix — CoT never auto-expands; stable task-card header; approval cards bounce into view (2026-09-03)
 
 Live-testing trio: (1) the Live Task Card header strobed on fast

@@ -770,3 +770,39 @@ def test_card_label_hysteresis_no_cot_autoexpand_card_reveal() -> None:
     assert "scrollIntoView" in reveal
     assert "document.hidden" in reveal
     assert "disabled" in reveal
+
+
+def test_cot_stays_blue_and_collapsed_and_hydration_never_bounces() -> None:
+    """2026-09-03 final polish round: (a) the CoT panel keeps its blue
+    accent identity when done — the gray is-done override is gone (element
+    colors inside keep their meaning); (b) the terminal frame must not
+    touch expansion (the last auto-expand — finalizeProgress un-collapsed
+    the panel in the gray style at turn end, then the next turn collapsed
+    it back); (c) entering an old session with a stale pending-looking
+    approval card must never scroll-bounce the reader to it."""
+    js = _js()
+    # (b) finalizeProgress no longer touches is-collapsed.
+    fin = js.split("function finalizeProgress(ok)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "is-collapsed" not in fin
+    # (c) hydration guard: flag declared, set around the load paint, and
+    # honored by the reveal.
+    assert "var _hydratingSession = false;" in js
+    assert "_hydratingSession = true;" in js
+    reveal = js.split("function _revealHitlCard(card)", 1)[1].split(
+        "\n  function renderHitlCard", 1
+    )[0]
+    assert "_hydratingSession" in reveal
+    # (a) the gray overrides are gone from BOTH stylesheets.
+    css = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
+    ).read_text(encoding="utf-8")
+    v5 = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.v5.css"
+    ).read_text(encoding="utf-8")
+    assert ".agent-progress.is-done {\n  opacity: 1;\n}" in css
+    assert "is-done.is-collapsed {\n  background:" not in css
+    assert "opacity: 0.92" not in v5

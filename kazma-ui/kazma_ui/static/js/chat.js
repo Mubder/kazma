@@ -4403,15 +4403,12 @@
     _tickProgressElapsed();
     panel.classList.remove('is-active');
     panel.classList.add('is-done');
-    // DO NOT collapse here. Collapsing at the terminal frame removes ~230px
-    // of height from ABOVE the reply while the view is pinned to the bottom,
-    // so the freshly painted answer visibly jerks upward — a layout-shift
-    // flash at the exact moment the previous repaint flash used to happen.
-    // The panel is collapsed by _collapseFinishedWorkbenches() when the NEXT
-    // turn begins, where the view is scrolling to the new user message anyway
-    // and the shift cannot be seen. History still ends up as one-line
-    // summaries; only the turn you are currently reading stays open.
-    panel.classList.remove('is-collapsed');
+    // Terminal MUST NOT touch expansion either way (2026-09-03): the old
+    // un-collapse here auto-expanded the panel at the exact frame it turned
+    // is-done — the reader saw the CoT spring open in the grayed style,
+    // then _collapseFinishedWorkbenches folded it back on the next turn.
+    // Expansion is the user's chevron click only; the panel ends the turn
+    // in whatever state the user left it.
     var titleEl = panel.querySelector('.agent-progress-title');
     var elapsed = _progressStartedAt ? _formatElapsed(Date.now() - _progressStartedAt) : '';
     if (titleEl) {
@@ -5485,6 +5482,9 @@
     if (!card || !card.isConnected) return;
     try {
       if (document.hidden) return;
+      // Hydration paints HISTORICAL cards — entering an old session with a
+      // stale pending-looking card must never yank the reader to it.
+      if (_hydratingSession) return;
       var live = false;
       var btns = card.querySelectorAll('button');
       for (var i = 0; i < btns.length; i++) {
@@ -6401,6 +6401,11 @@
   // In-flight guard: one loadSession per session at a time (boot used to
   // double-fetch/render — audit P1-6; retries must also not stack).
   var _loadInFlightFor = null;
+  // True ONLY while a session's history is being painted. Historical
+  // approval cards must never bounce the chat — entering an old session
+  // with a stale pending card used to scroll-jump the reader to it
+  // (2026-09-03).
+  var _hydratingSession = false;
 
   function loadSession(sessionId) {
     if (_loadInFlightFor === sessionId) return;
@@ -6474,6 +6479,8 @@
         var prevAssistantContent = null;
         var prevUserContent = null;
         messages = _coalesceAssistantRuns(messages);
+        _hydratingSession = true;
+        try {
         messages.forEach(function(msg) {
           // Only human-visible roles. System injects (self-improvement Soul,
           // knowledge fences, CONTINUITY notes) must never render as "You".
@@ -6549,6 +6556,10 @@
         // trailing-user (detached turn may exist) without any pollers —
         // live delivery arrives via the resumed WS cursor stream.
         _reopenCount = 0;
+        } finally {
+          _hydratingSession = false;
+        }
+
         _resyncDelivery('load');
 
         scrollToBottomForce(); // session load shows the latest turn
