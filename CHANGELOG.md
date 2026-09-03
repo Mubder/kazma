@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Fix — routing choices "didn't hold" after save (2026-09-03 v5)
+
+The saves were working all along (the store held the selection and ops
+alerts followed it) — the LOADER read the wrong shape.
+``ConfigStore.get_all()`` groups FULL dotted keys under the category
+(``data.notifications["notifications.ops.channels"]``), but the card's
+loader read the prefix-stripped shape (``notif["ops.channels"]``), so
+the value was always undefined and every routing checkbox — and the
+three chat-id fields, same bug — silently reset on every reload.
+The loader now reads the grouped shape (with a stripped fallback), and
+a two-ended behavioral test locks the contract: the store's grouped
+shape in ``test_delivery_routing.py``, the loader's read shape in the
+steer suite.
+
 ## Feature — Delivery & Routing v4: every old-dialog field, one card (2026-09-03)
 
 v3 still missed fields the old per-platform cards had. v4 copies them
