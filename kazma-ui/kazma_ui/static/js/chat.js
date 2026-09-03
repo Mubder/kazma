@@ -4884,6 +4884,10 @@
         if (actions) {
           actions.innerHTML = '<span class="hitl-status hitl-denied">' + escapeHtml(text) + '</span>';
         }
+        // Timeout is a decision too: park above the continuing reply and
+        // collapse to the one-line bar.
+        _parkClaimedHitlCard(card);
+        _collapseClaimedHitlCard(card);
       });
     }
     _awaitingApproval = false;
@@ -5391,6 +5395,69 @@
     card.__cdTimer = setInterval(paint, 1000);
   }
 
+  /** Park a CLAIMED card between the CoT block and the reply text, so the
+   *  post-approval response streams BELOW it. While pending the card sits
+   *  at the bottom (chronology: narration → ask); on decision it moves up
+   *  (narration → ✓ card → reply). The streamed reply used to paint ABOVE
+   *  a bottom-docked card — "response on top of the card" (2026-09-03). */
+  function _parkClaimedHitlCard(card) {
+    if (!card || !card.parentNode) return;
+    var host = card.parentNode;
+    if (!host.classList || !host.classList.contains('message-content')) return;
+    var textEl = _directChildByClass(host, 'message-text');
+    if (textEl && textEl !== card.nextSibling) {
+      host.insertBefore(card, textEl);
+      return;
+    }
+    if (!textEl) {
+      var cot = _directChildByClass(host, 'agent-progress');
+      if (cot && cot.nextSibling) host.insertBefore(card, cot.nextSibling);
+    }
+  }
+
+  /** Collapse a claimed card to a one-line CoT-style bar (click to expand).
+   *  Keeps the decision visible in the timeline without a full card body
+   *  sitting between the CoT and the streamed reply. The header chip is
+   *  re-synced on every call so later state changes ("Resolving…" →
+   *  "Approved") stay visible while collapsed. */
+  function _collapseClaimedHitlCard(card) {
+    if (!card) return;
+    var header = card.querySelector('.hitl-approval-header');
+    if (!header) return;
+    var status = card.querySelector('.hitl-approval-actions .hitl-status');
+    var chip = header.querySelector('.hitl-collapse-chip');
+    if (status) {
+      var txt = status.textContent || '';
+      var cls = status.className || 'hitl-status';
+      if (!chip) {
+        chip = document.createElement('span');
+        chip.className = 'hitl-collapse-chip ' + cls;
+        header.appendChild(chip);
+      }
+      if (chip.textContent !== txt) chip.textContent = txt;
+      chip.className = 'hitl-collapse-chip ' + cls;
+    }
+    if (card.classList.contains('hitl-collapsed')) return;
+    card.classList.add('hitl-collapsed');
+    if (!header.querySelector('.hitl-collapse-chevron')) {
+      var chev = document.createElement('span');
+      chev.className = 'hitl-collapse-chevron';
+      chev.setAttribute('aria-hidden', 'true');
+      chev.textContent = '▸';
+      header.appendChild(chev);
+    }
+    if (!card.__hitlCollapseWired) {
+      card.__hitlCollapseWired = true;
+      header.addEventListener('click', function (e) {
+        if (e.target.closest('button')) return;
+        var nowCollapsed = card.classList.toggle('hitl-collapsed');
+        var ch = header.querySelector('.hitl-collapse-chevron');
+        if (ch) ch.textContent = nowCollapsed ? '▸' : '▾';
+        e.stopPropagation();
+      });
+    }
+  }
+
   function renderHitlCard(data, opts) {
     if (!data) return;
     var lockComposer = !(opts && opts.lock === false);
@@ -5491,6 +5558,10 @@
           _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
           var act = _semCard.querySelector('.hitl-approval-actions');
           if (act) act.innerHTML = '<span class="hitl-status">Resolving\u2026</span>';
+          // Same claim treatment as the security card: park above the
+          // incoming reply and collapse to the one-line bar.
+          _parkClaimedHitlCard(_semCard);
+          _collapseClaimedHitlCard(_semCard);
           tokenAccum = '';
           // Resolving a semantic choice resumes THIS turn \u2014 same rule as the
           // security card: keep the workbench and its steps.
@@ -5636,6 +5707,10 @@
       card.className = 'hitl-approval-card hitl-' + state;
       var actions = card.querySelector('.hitl-approval-actions');
       if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
+      // Decision made: park between CoT and the reply text (the streamed
+      // answer must land BELOW the card) and collapse to the one-line bar.
+      _parkClaimedHitlCard(card);
+      _collapseClaimedHitlCard(card);
     }
 
     function appendAssistantText(text) {
