@@ -1026,6 +1026,11 @@ def test_four_delivery_routes_complete_fields() -> None:
         "notifications.swarm.routes",
     ):
         assert key in hub, key
+    # The loader must read the GROUPED shape get_all() actually produces
+    # (full dotted keys under the category) — the stripped read was the
+    # "routing choices don't hold after save" bug (2026-09-03 v5).
+    assert "grouped(notif, 'notifications', 'notifications.ops.channels')" in hub
+    assert "grouped(conn, 'connectors', 'connectors.telegram.swarm_chat_id')" in hub
     # Group route saves through the output-target API; *** never sent back.
     assert "r.tgGroupToken !== '***'" in hub
     assert "swarm/output-target" in hub

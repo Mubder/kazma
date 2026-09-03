@@ -298,6 +298,38 @@ class TestMaskedExtrasRoundTrip:
         assert store.get("connectors.slack.workspace") == "acme"
 
 
+class TestSettingsGroupedShape:
+    """GET /api/settings groups FULL dotted keys under the category
+    (``data.notifications["notifications.ops.channels"]``). v2–v4 of the
+    card read the prefix-stripped shape (``notif["ops.channels"]``) — the
+    value was always undefined, so every routing checkbox and chat-id field
+    silently reset after each save even though the save itself worked.
+    This locks BOTH ends of the wire: the store's grouped shape here, the
+    loader's read shape in test_chat_steer_composer."""
+
+    def test_get_all_groups_full_dotted_keys_under_category(self, tmp_path):
+        from kazma_core.config_store import ConfigStore
+
+        store = ConfigStore(db_path=str(tmp_path / "settings.db"))
+        store.set(
+            "notifications.ops.channels", "telegram,telegram-group",
+            category="notifications",
+        )
+        store.set(
+            "connectors.telegram.swarm_chat_id", "1804015016",
+            category="connectors",
+        )
+        grouped = store.get_all()
+
+        notif = grouped.get("notifications", {})
+        assert notif["notifications.ops.channels"] == "telegram,telegram-group"
+        assert "ops.channels" not in notif  # stripped shape must not be assumed
+
+        conn = grouped.get("connectors", {})
+        assert conn["connectors.telegram.swarm_chat_id"] == "1804015016"
+        assert "telegram.swarm_chat_id" not in conn
+
+
 class TestBusAdapterNames:
     def test_every_bus_adapter_has_a_routing_name(self) -> None:
         from kazma_gateway.adapters.discord_bus import DiscordBusAdapter

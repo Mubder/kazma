@@ -348,11 +348,22 @@
                 }
                 const conn = data.connectors || {};
                 const notif = data.notifications || {};
-                let alerts = notif['ops.channels'];
+                // get_all() groups FULL dotted keys under the category
+                // (data.notifications['notifications.ops.channels']); read
+                // that shape first, with a prefix-stripped fallback. v2–v4
+                // read the stripped shape only, so every routing checkbox
+                // and chat-id field silently reset after each save.
+                const grouped = (section, prefix, key) => {
+                    if (section[key] !== undefined) return section[key];
+                    const short = key.startsWith(prefix + '.')
+                        ? key.slice(prefix.length + 1) : key;
+                    return section[short];
+                };
+                let alerts = grouped(notif, 'notifications', 'notifications.ops.channels');
                 if (typeof alerts === 'string') {
                     alerts = alerts.split(',').map(x => x.trim()).filter(Boolean);
                 }
-                let swarmRoutes = notif['swarm.routes'];
+                let swarmRoutes = grouped(notif, 'notifications', 'notifications.swarm.routes');
                 if (typeof swarmRoutes === 'string') {
                     swarmRoutes = swarmRoutes.split(',').map(x => x.trim()).filter(Boolean);
                 }
@@ -370,9 +381,9 @@
                 r.slackWorkspace = ex('slack', 'workspace');
                 r.slackAllowed = ex('slack', 'allowed_users');
                 r.slackEnabled = (byName.slack || {}).enabled !== false;
-                r.tgMainChat = String(conn['telegram.swarm_chat_id'] || '');
-                r.discordChannel = String(conn['discord.swarm_channel_id'] || '');
-                r.slackChannel = String(conn['slack.swarm_channel_id'] || '');
+                r.tgMainChat = String(grouped(conn, 'connectors', 'connectors.telegram.swarm_chat_id') || '');
+                r.discordChannel = String(grouped(conn, 'connectors', 'connectors.discord.swarm_channel_id') || '');
+                r.slackChannel = String(grouped(conn, 'connectors', 'connectors.slack.swarm_channel_id') || '');
                 r.alertRoutes = Array.isArray(alerts) ? alerts : [];
                 r.swarmRoutes = Array.isArray(swarmRoutes) ? swarmRoutes : [];
                 // Group route lives in swarm.output_target (masked token).
