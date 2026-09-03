@@ -7149,6 +7149,14 @@
       // A live turn is generating before the interrupt is marked paused;
       // that pair is also not a claim.
       if (state === 'pending' && hitl.payload) {
+        // Hydration NEVER paints a pending card (2026-09-03 ghost flash):
+        // historical parts can carry a stale 'pending' stamp long after the
+        // gate settled, and painting them minted a ghost card (bubble +
+        // store fallback) for the sub-second before reconciliation. The
+        // load-time resync paints from REGISTRY truth only — a genuinely
+        // paused turn still gets its card via _paintLiveGates /
+        // recoverMissedApproval.
+        if (_hydratingSession) return;
         // Registry-authoritative fail posture: the server answered with the
         // live-gates list and NO row covers this interrupt. Without registry
         // evidence of a claim, chat must never invent "Approved" from

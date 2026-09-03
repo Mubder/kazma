@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Fix — ghost approval card, round 2: hydration paint (2026-09-03)
+
+The replay-frame guards weren't enough: the flash survived because
+HYDRATION itself painted the stale part — the persisted hitl part still
+says ``pending`` long after its gate settled, and ``_paintHitlFromDoc``
+rendered it as a card (whose store side-effect also lit the Alpine
+fallback) for the sub-second before reconciliation cleared it.
+``_paintHitlFromDoc`` now refuses to paint PENDING state while a session
+hydrates; the load-time registry resync remains the only painter of
+pending cards on load (a genuinely paused turn still gets its card via
+``_paintLiveGates`` / ``recoverMissedApproval``).
+
 ## Fix — ghost approval card flashed on refresh (2026-09-03)
 
 Refreshing any session that once had an approval painted a live approval
