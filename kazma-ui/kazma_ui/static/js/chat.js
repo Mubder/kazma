@@ -4910,6 +4910,8 @@
         if (actions) {
           actions.innerHTML = '<span class="hitl-status hitl-denied">Aborted — send a new message</span>';
         }
+        _parkClaimedHitlCard(card);
+        _collapseClaimedHitlCard(card);
       });
     }
     _clearStoreApproval();
@@ -5200,6 +5202,8 @@
       if (actions) {
         actions.innerHTML = '<span class="hitl-status hitl-denied">No longer pending</span>';
       }
+      _parkClaimedHitlCard(card);
+      _collapseClaimedHitlCard(card);
     });
     // The store's fallback strip lives OUTSIDE messagesEl and carries no
     // interrupt id, so the sweep above can never reach it. An authoritative
@@ -5385,6 +5389,8 @@
         if (act) act.innerHTML = '<span class="hitl-status hitl-denied">' +
           escapeHtml(ti('approval_expired', 'Approval timed out — continuing without this tool.')) + '</span>';
         row.textContent = '';
+        _parkClaimedHitlCard(card);
+        _collapseClaimedHitlCard(card);
         return;
       }
       var m = Math.floor(left / 60);
@@ -7131,6 +7137,13 @@
             (state === 'error' ? 'error' : 'denied') + '">' +
             escapeHtml(errLabel) + '</span>';
         }
+        // This projector runs on the journal's claim frame — right AFTER
+        // the click path already parked+collapsed the card. The wholesale
+        // className assignment above used to strip `hitl-collapsed`, so
+        // the card sprang back open mid-reply with a stranded chip in the
+        // header (2026-09-03). Re-assert the claim treatment.
+        _parkClaimedHitlCard(card);
+        _collapseClaimedHitlCard(card);
       } else if (state === 'approved' || state === 'inflight' || state === 'settled') {
         card.className = 'hitl-approval-card hitl-approved';
         var okActions = card.querySelector('.hitl-approval-actions');
@@ -7138,6 +7151,8 @@
           var okLabel = state === 'inflight' ? 'Approved — running\u2026' : 'Approved';
           okActions.innerHTML = '<span class="hitl-status hitl-approved">' + okLabel + '</span>';
         }
+        _parkClaimedHitlCard(card);
+        _collapseClaimedHitlCard(card);
       }
     } finally {
       currentMsgEl = prev || el;

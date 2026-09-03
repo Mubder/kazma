@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Fix — claim frame no longer re-expands a collapsed approval card (2026-09-03)
+
+Follow-up to the park+collapse change: the click path worked, but the
+journal's claim frame arrived a beat later and ``_paintHitlFromDoc``
+reassigned ``card.className`` wholesale — stripping ``hitl-collapsed``,
+so the card sprang back open mid-reply with the decision chip stranded
+in the header ("not collapsed" + overlapping "Approval Required /
+Approved ✓"). Every claim site now re-asserts park+collapse (the
+projector's denied AND approved branches, ``_releaseHitlComposer``, the
+registry reconcile, the countdown-zero self-stamp), and the chip +
+chevron are CSS-hidden whenever the card is not collapsed — they exist
+only inside the one-line bar.
+
 ## Fix — claimed approval cards park above the reply and collapse (2026-09-03)
 
 With the Live Task Card there is no live in-bubble CoT panel, so a

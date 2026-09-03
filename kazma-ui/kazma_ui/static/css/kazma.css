@@ -1901,6 +1901,12 @@ tbody tr:last-child td {
   color: var(--text-muted);
   font-size: 0.75rem;
 }
+/* Chip + chevron only exist visually in the collapsed bar — never cram
+   them into the full card's header (the overlap, 2026-09-03). */
+.hitl-approval-card:not(.hitl-collapsed) .hitl-collapse-chip,
+.hitl-approval-card:not(.hitl-collapsed) .hitl-collapse-chevron {
+  display: none;
+}
 
 /* Old opaque top-bar .chat-model-bar / .chat-input-area rules removed —
    v5 owns both (composer dock + glassy bar); the old block was dead for
