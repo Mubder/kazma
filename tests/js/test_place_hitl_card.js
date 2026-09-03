@@ -256,8 +256,10 @@ function childNames(el) {
 }
 
 {
-  // ...but a panel that actually TRAPS a card must still open, so the card
-  // is not sitting inside an overflow:hidden collapsed body.
+  // 2026-09-03: NOTHING auto-expands a CoT panel — the user's chevron is
+  // the only opener. A trapped card is lifted out by the caller's cleanup,
+  // not revealed by expanding its cage; an auto-opened panel used to push
+  // approval cards below the fold while the reader was scrolled up.
   const t = bubble();
   t.progress.classList.add("is-collapsed");
   const inside = new El("div", "hitl-approval-card");
@@ -265,8 +267,8 @@ function childNames(el) {
   const other = new El("div", "hitl-approval-card");
   api._placeHitlCard(t.content, other);
   assert(
-    "CoT holding a card is opened",
-    !t.progress.classList.contains("is-collapsed"),
+    "CoT holding a card stays collapsed (no auto-expand)",
+    t.progress.classList.contains("is-collapsed"),
   );
 }
 

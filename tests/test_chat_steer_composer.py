@@ -740,3 +740,33 @@ def test_claim_frame_does_not_unglue_the_collapsed_bar() -> None:
         / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
     ).read_text(encoding="utf-8")
     assert ".hitl-approval-card:not(.hitl-collapsed) .hitl-collapse-chip" in css
+
+
+def test_card_label_hysteresis_no_cot_autoexpand_card_reveal() -> None:
+    """2026-09-03 trio: (1) the task-card header must not strobe on fast
+    tool→think→tool flips; (2) NOTHING may auto-expand a CoT panel — the
+    user's chevron click is the only opener (an auto-expanded panel pushed
+    approval cards below the fold); (3) a PENDING approval card bounces the
+    chat so it is visible; claimed cards never bounce."""
+    js = _js()
+    # (1) hysteresis — one accepted label+icon snapshot, escalations cut
+    # through, reset on begin.
+    render = js.split("function _tcRender()", 1)[1].split("\n  function ", 1)[0]
+    assert "_TC_LABEL_MIN_MS" in render
+    assert js.count("_TC_LABEL_MIN_MS") >= 2  # constant + use
+    assert "_tc.labelShownAt = 0;" in js.split("case 'begin'", 1)[0] + js.split("if (ev.t === 'begin')", 1)[1][:800]
+    # (2) auto-expand removed: the placement sweep and both force-expands
+    # are gone; only un-done remains.
+    place = js.split("function _placeHitlCard(content, card)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "is-collapsed" not in place.replace("lastCard", "")  # no class surgery on panels
+    assert js.count("classList.remove('is-collapsed', 'is-done')") == 0
+    assert js.count("_revealHitlCard(") >= 3  # helper + both branches
+    # (3) reveal bounces only live cards.
+    reveal = js.split("function _revealHitlCard(card)", 1)[1].split(
+        "\n  function renderHitlCard", 1
+    )[0]
+    assert "scrollIntoView" in reveal
+    assert "document.hidden" in reveal
+    assert "disabled" in reveal

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Fix — CoT never auto-expands; stable task-card header; approval cards bounce into view (2026-09-03)
+
+Live-testing trio: (1) the Live Task Card header strobed on fast
+tool→think→tool flips of a multi-step turn — the label+icon now change as
+ONE accepted snapshot with 1.2s hysteresis (escalations — awaiting,
+stalled, done, error — cut through instantly). (2) NOTHING auto-expands
+a CoT panel anymore: the placement sweep and both holdOpen/legacy
+force-expands are gone — the user's chevron click is the only opener
+(an auto-expanded panel pushed a pending approval card below the fold
+while the reader was scrolled up). (3) A PENDING approval card bounces
+the chat (smooth scrollIntoView, centered) whenever it renders outside
+the viewport; claimed/historical cards never bounce.
+
 ## Fix — claim frame no longer re-expands a collapsed approval card (2026-09-03)
 
 Follow-up to the park+collapse change: the click path worked, but the
