@@ -82,6 +82,33 @@ def test_session_search_input_contained() -> None:
     assert "min-width: 0;" in css.split(".session-search-wrapper {")[1].split("}")[0]
 
 
+def test_approval_card_never_eats_the_chat_pane() -> None:
+    """2026-09-03: the approval card filled the whole chat.
+
+    ``.hitl-approval-card { flex: 1 1 100% }`` was written for
+    ``.message-content`` — a wrapping flex ROW, where the 100% basis is what
+    puts the card on its own line instead of sharing it with the reasoning
+    panel. The store-driven fallback card is a direct child of ``.chat-main``,
+    a flex COLUMN: there ``flex-grow: 1`` means grow-to-fill, so the card took
+    the entire pane and squeezed the transcript to a 24px sliver (measured in
+    a real browser).
+    """
+    css = _V5.parent.joinpath("kazma.css").read_text(encoding="utf-8")
+    # Anchor on the rule's own comment: ".hitl-approval-card {" also
+    # matches earlier variant blocks.
+    base = css.split("NEVER grow by default", 1)[1].split("}", 1)[0]
+    assert "flex: 0 0 auto;" in base, "the card grows by default again"
+    assert "flex: 1 1 100%;" not in base
+    # ...but inside a bubble it must still claim the whole line.
+    line = css.split(".message-content > .hitl-approval-card,", 1)[1].split("}", 1)[0]
+    assert "flex: 1 1 100%;" in line
+    # ...and the docked fallback strip is capped, so a long argument list
+    # scrolls inside the card instead of pushing the transcript out.
+    dock = css.split(".chat-main > .hitl-approval-card {", 1)[1].split("}", 1)[0]
+    assert "max-height:" in dock
+    assert "overflow-y: auto;" in dock
+
+
 def test_transcript_wider_measure_small_side_margins() -> None:
     """Operator decision 2026-08-27: the inner chat column was too slim —
     message measure widened to 96ch and the 12vw side slab reduced to a
@@ -216,12 +243,26 @@ def test_scroll_is_pin_to_bottom_not_forced() -> None:
     assert js.count("scrollToBottomForce();") >= 2  # send + session load
 
 
-def test_thinking_strip_uses_class_not_x_show() -> None:
-    """x-show display:none jumped the composer; is-on is opacity/height."""
+def test_thinking_strip_is_retired_and_inert() -> None:
+    """The strip is gone; the Live Task Card is the one turn-state surface.
+
+    The original contract here was "toggle a class, never x-show" — x-show's
+    display:none jumped the composer, so is-on animated opacity/height
+    instead. The Live Task Card merge retired the strip entirely and left
+    #thinking-indicator as an inert hidden node for the typingEl cache, so
+    the is-on rule has nothing left to toggle. What still matters is that
+    NOTHING re-attaches an Alpine display toggle to that in-flow element.
+    """
     html = _CHAT.read_text(encoding="utf-8")
     assert "thinking-indicator" in html
-    assert "is-on" in html
+    strip = html[html.index('id="thinking-indicator"') - 200:]
+    strip = strip[: strip.index(">", strip.index('id="thinking-indicator"')) + 1]
+    assert "hidden" in strip, "the retired strip must stay inert"
+    assert "x-show" not in strip
     assert 'x-show="$store.agent && $store.agent.isThinking"' not in html
+    # The card that replaced it is docked in the same place.
+    assert 'id="live-task-card"' in html
+    assert html.index('id="live-task-card"') < html.index('id="thinking-indicator"')
 
 
 def test_status_strip_never_toggles_per_token() -> None:
@@ -243,9 +284,14 @@ def test_live_assistant_bubble_is_pinned_not_minted() -> None:
     after the last user). Progress/HITL/token/error pin that bubble.
     """
     js = _CHAT_JS.read_text(encoding="utf-8")
-    assert "function _pinLiveAssistantBubble()" in js
-    assert "function _assistantBubbleForOpenTurn()" in js
+    assert "function _pinLiveAssistantBubble(create)" in js
+    assert "function _assistantBubbleForOpenTurn(create)" in js
     assert "if (!currentMsgEl) currentMsgEl = createAssistantMessage()" not in js
+    # `create: false` looks only. Since the Live Task Card took the live view
+    # out of the bubble, a progress-only frame that minted one left a bare
+    # avatar + timestamp + reaction buttons with nothing in it — the empty
+    # bubble every turn opened with.
+    assert "return mayCreate ? createAssistantMessage() : null;" in js
     # ensureProgressPanel is the live CoT mint site
     body = js.split("function ensureProgressPanel()", 1)[1].split("\n  function ", 1)[0]
     assert "_pinLiveAssistantBubble()" in body

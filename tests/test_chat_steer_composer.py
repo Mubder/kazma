@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from tests._module_source import module_source
-
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
+
+from tests._module_source import module_source
 
 _CHAT_JS = (
     Path(__file__).resolve().parent.parent
@@ -138,7 +142,7 @@ def test_chained_hitl_card_appends_below_previous() -> None:
         "function _hitlInterruptIdOf", 1
     )[0]
     assert "_hitlCardIsTrapped" in has_inline
-    pin = js.split("function _assistantBubbleForOpenTurn()", 1)[1].split(
+    pin = js.split("function _assistantBubbleForOpenTurn(", 1)[1].split(
         "function _pinLiveAssistantBubble", 1
     )[0]
     assert "closest('.agent-progress')" in pin
@@ -351,16 +355,21 @@ def test_supervisor_steer_tid_falls_back_to_context() -> None:
 
 
 def test_live_task_card_single_writer_and_liveness() -> None:
-    """2026-09-03: the merged Live Task Card is the ONE turn-state surface.
+    """The merged Live Task Card is the ONE turn-state surface.
+
     Single-writer (_taskCardEvent), heartbeat-fed, stalled-honest, and the
-    retired strip delegates to it instead of fighting it."""
+    retired strip delegates to it instead of fighting it. These are
+    STRUCTURAL assertions - that the wiring exists. What the card actually
+    DOES on each event sequence is tested for real in
+    tests/js/test_live_task_card.js (driven below).
+    """
     js = _js()
     assert "function _taskCardEvent(ev)" in js
-    assert "id=\"live-task-card\"" in (
+    assert 'id="live-task-card"' in (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
     ).read_text(encoding="utf-8")
-    # Legacy strip delegates to the card — one surface, one writer.
+    # Legacy strip delegates to the card - one surface, one writer.
     strip = js.split("function _setStatusStrip(msg)", 1)[1].split(
         "function _clearStatusStrip()", 1
     )[0]
@@ -370,21 +379,178 @@ def test_live_task_card_single_writer_and_liveness() -> None:
     assert js.count("t: 'hb'") >= 2
     assert "taskCard: _taskCardEvent" in js
     assert "_taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) })" in js
-    # Stalled honesty: 20s signal gap → amber warning + one resync.
-    tc = js.split("function _tcTick()", 1)[1].split("function _tcStepsFromDoc()", 1)[0]
-    assert "> 20000" in tc
+    # Stalled honesty: a signal gap warns, then resyncs with BACKOFF. The
+    # first version fired one resync and latched, so a dead stream sat amber
+    # forever with nothing else attempted and no way to say so.
+    tc = js.split("function _tcTick()", 1)[1].split("function _tcIsTerminal()", 1)[0]
+    assert "_TC_STALL_MS" in tc
     assert "_resyncDelivery('heartbeat-gap')" in tc
-    # Compact body: doc-fed steps, 50-row cap, 2-line clamp is CSS.
+    assert "_TC_STALL_RETRY_MS" in tc
+    assert "_TC_STALL_MAX_TRIES" in tc
+    assert "_tc.dead = true" in tc
+    # Compact body: doc-fed steps, capped, tail-pinned, 2-line clamp is CSS.
     steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
         "The single writer", 1
     )[0]
-    assert "rows.slice(-50)" in steps
-    # Live turns no longer build an in-bubble workbench — the terminal
+    assert "rows.slice(-_TC_STEP_CAP)" in steps
+    assert "_TC_STEP_CAP = 50" in js
+    assert "if (html === _tc.stepsHtml) return;" in steps, (
+        "identical markup re-assigned - tears the subtree down and throws "
+        "away the reader's scroll position"
+    )
+    assert "el.scrollTop = el.scrollHeight;" in steps
+    # Live turns no longer build an in-bubble workbench - the terminal
     # branch swaps in the durable summary when the turn ends.
     cot = js.split("function _syncCotPanel(el, activity, status, meta)", 1)[1].split(
         "function _paintHitlFromDoc(el, doc)", 1
     )[0]
     assert "_taskCardEvent({ t: 'doc' })" in cot
+
+
+def test_live_task_card_behaviors_under_node() -> None:
+    """Drive the real state machine on a fake clock; see the JS file.
+
+    Substring assertions pass happily while the branch they name leaks a
+    hide timer - which is exactly how "approve -> the card vanished and no
+    response" shipped. These are the tests with teeth.
+    """
+    script = Path(__file__).resolve().parent / "js" / "test_live_task_card.js"
+    assert script.is_file()
+    node = shutil.which("node")
+    if not node:  # pragma: no cover - CI always has node
+        pytest.skip("node not available")
+    proc = subprocess.run(
+        [node, str(script)], capture_output=True, text=True, timeout=120
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_live_task_card_never_hides_a_live_turn() -> None:
+    """Structural guard for the vanishing card.
+
+    Every liveness event - approval and resuming included - must go through
+    _tcWake, which cancels a hide armed by the previous terminal frame.
+    'approval' and 'resuming' used to skip it: a done frame less than 1.6s
+    earlier blanked the card mid-approve, and a resume never restarted the
+    tick timer (frozen elapsed, dead stall detection).
+    """
+    js = _js()
+    wake = js.split("function _tcWake(now)", 1)[1].split(
+        "/** Phase changes restart", 1
+    )[0]
+    assert "clearTimeout(_tc.doneTimer)" in wake
+    assert "_tc.visible = true" in wake
+    assert "setInterval(_tcTick, 1000)" in wake
+    dispatch = js.split("function _taskCardEvent(ev)", 1)[1].split(
+        "function _tcWake(now)", 1
+    )[0]
+    # The liveness arm: every event on it wakes the card. Read the `else if`
+    # condition itself, not the `begin` branch that precedes it.
+    live = dispatch.split("} else if (", 1)[1].split(") {", 1)[0]
+    for ev in ("'token'", "'tool'", "'tool_end'", "'status'", "'hb'",
+               "'approval'", "'resuming'"):
+        assert ev in live, ev + " does not restore the card through _tcWake"
+    assert "_tcWake(now);" in dispatch.split("} else if (", 1)[1]
+
+
+def test_approval_freeze_is_scoped_to_the_card_decided() -> None:
+    """Two concurrent approval cards is a supported state.
+
+    _placeHitlCard deliberately stacks a second card after the first, but
+    _freezeHitlButtons disabled every card in the transcript. Approving the
+    first killed the second's buttons; nothing re-enables them
+    (_reconcileHitlCardsWithGates only ever disables), and with no enabled
+    button left hasInlineApprovalCard() went false - so onDone took the
+    endTurn branch while the graph was still parked on the untouched
+    interrupt. Card gone, no reply (2026-09-03).
+    """
+    js = _js()
+    assert "function _freezeHitlButtons(scope)" in js
+    assert "_freezeHitlButtons(card);" in js
+    assert "_freezeHitlButtons();" not in js, (
+        "unscoped freeze reintroduced - it kills a sibling gate's buttons"
+    )
+    # Deciding gate A does not mean the turn stopped waiting on gate B.
+    submit = js.split("function submitApproval(action, scope)", 1)[1]
+    assert "_awaitingApproval = hasInlineApprovalCard();" in submit
+    assert "_liveHitlDeadline()" in submit
+    # The deadline has to be readable off the node for that to work.
+    assert "card.setAttribute('data-approval-deadline'" in js
+
+
+def test_live_placeholder_is_never_a_bubble_identity() -> None:
+    """The reply that appeared above the user's message AND below it.
+
+    ``applyTurnEvent`` falls back to the turn id ``'live'`` for every frame
+    the server has not stamped yet — which is most of them at the start of a
+    turn. ``renderTurn`` both LOOKED UP and STAMPED bubbles by that id, so a
+    bubble left carrying ``data-turn-id="live"`` became a permanent magnet:
+    the next turn's untagged frames painted into that old bubble (above the
+    new user row), and when a frame finally arrived carrying the real id the
+    stale bubble was "historical" — a user row now follows it — so a second
+    bubble was minted at the end. Same reply, twice, in the wrong order
+    (observed live 2026-09-03: a bubble with data-turn-id="live" and one with
+    the real id, both 331 chars).
+
+    The open turn is anchored by ``currentMsgEl``; the placeholder must never
+    reach the DOM.
+    """
+    js = _js()
+    render = js.split("function renderTurn(doc, meta)", 1)[1].split(
+        "function applyTurnEvent(ev)", 1
+    )[0]
+    assert "if (turnId && turnId !== 'live') {" in render
+    # Both halves guarded: the lookup AND the stamp.
+    assert render.count("turnId !== 'live'") >= 2, (
+        "one of the lookup/stamp pair is unguarded — the magnet is back"
+    )
+    lookup = render.split('.message-assistant[data-turn-id="', 1)[0]
+    assert "turnId !== 'live'" in lookup
+    stamp = render.split("el.setAttribute('data-turn-id', turnId)", 1)[0]
+    assert stamp.rstrip().endswith("{")
+    assert "turnId !== 'live'" in stamp.rsplit("if (", 1)[-1]
+    # A turn that never got a real id can still leave one behind (older
+    # builds, restored transcripts) — beginTurn releases it.
+    begin = js.split("function beginTurn(opts)", 1)[1].split(
+        "// \u2500\u2500 Turn lifecycle diagnostics", 1
+    )[0]
+    assert '.message-assistant[data-turn-id="live"]' in begin
+    assert "removeAttribute('data-turn-id')" in begin
+
+
+def test_progress_only_frames_never_mint_an_empty_bubble() -> None:
+    """The empty bubble that opened every turn.
+
+    beginTurn seeds a "Thinking..." progress row; renderTurn used to answer
+    it with createAssistantMessage(). Since the Live Task Card took the live
+    view OUT of the bubble, that left a bare avatar + timestamp + reaction
+    buttons with nothing inside until the first token.
+    """
+    js = _js()
+    assert "function _assistantBubbleForOpenTurn(create)" in js
+    assert "var mayCreate = create !== false;" in js
+    assert "return mayCreate ? createAssistantMessage() : null;" in js
+    assert "function _docHasBubbleContent(doc)" in js
+    render = js.split("function renderTurn(doc, meta)", 1)[1].split(
+        "function applyTurnEvent(ev)", 1
+    )[0]
+    assert "_docHasBubbleContent(doc)" in render
+    assert "_assistantBubbleForOpenTurn(_paintable)" in render
+    assert "_assistantBubbleForOpenTurn()" not in render, (
+        "an unconditional mint is back in the paint path"
+    )
+    # A finished turn still earns its bubble: the durable one-line workbench
+    # summary and the approval card both need a host.
+    host = js.split("function _docHasBubbleContent(doc)", 1)[1].split(
+        "function _answerFromDoc", 1
+    )[0]
+    assert "'done'" in host and "'paused'" in host and "'hitl'" in host
+    # A tool step has nothing to put in the bubble either.
+    assert "_pinLiveAssistantBubble(false);" in js
+    # ...and the "no response" diagnosis must not be gated on the bubble
+    # being ABSENT, which any mint suppressed.
+    done = js.split("onDone: function(data) {", 1)[1]
+    assert "!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted" in done
 
 
 def test_ws_store_feeds_task_card() -> None:

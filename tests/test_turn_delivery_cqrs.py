@@ -371,13 +371,15 @@ def test_stream_silence_journals_turn_heartbeats() -> None:
 
     # Streaming loop: 10s queue silence → keepalive AND a journaled
     # turn_heartbeat with phase/current/step/elapsed.
-    loop = src.split(
-        '_hb: dict[str, Any] = {"phase": "llm", "current": "", "step": 0}', 1
-    )[1].split("finally:", 1)[0]
+    loop = src.split('_hb: dict[str, Any] = {', 1)[1].split("finally:", 1)[0]
     assert 'yield ": keepalive' in loop  # raw source holds the literal \n\n
     assert 'emit_j("turn_heartbeat"' in loop
-    for key in ('"phase"', '"current"', '"step"', '"elapsed_s"'):
+    # "detail" names WHAT the phase is acting on. A heartbeat that says only
+    # "tool: file_search" for two minutes tells the reader far less than one
+    # naming the query that is taking two minutes.
+    for key in ('"phase"', '"current"', '"detail"', '"step"', '"elapsed_s"'):
         assert key in loop
+    assert '_hb["detail"] = hb_arg_summary(inputs)' in src
 
     # Phase is tracked at every boundary the events already carry.
     assert src.count('_hb["phase"] = "tool"') >= 1

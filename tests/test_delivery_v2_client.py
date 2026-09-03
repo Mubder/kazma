@@ -284,12 +284,24 @@ class TestV2ArchitecturePresent:
         assert "function _setStatusStrip(" in src
         assert "function _clearStatusStrip(" in src
         # beginTurn arms the indicator before anything else can. Since the
-        # Live Task Card merge (2026-09-03) the card event comes first and
-        # _setStatusStrip (which delegates into the card) follows.
+        # Live Task Card merge the card event comes first, and the Alpine
+        # liveness flag follows through _setStoreThinking — NOT through
+        # _setStatusStrip, whose text override outranked the phase the card
+        # event had just set (every approve read "↻ Kazma is thinking…"
+        # instead of "Resuming after approval").
         at = src.index("function beginTurn(")
-        seg = src[at:at + 800]
+        seg = src[at:at + 1200]
         assert "_taskCardEvent(" in seg
-        assert "_setStatusStrip(" in seg
+        assert "_setStoreThinking(" in seg
+        assert "_setStatusStrip(" not in seg, (
+            "beginTurn stamps a text override over its own phase again"
+        )
+        # The legacy strip entry points still delegate into the one writer.
+        strip = src.split("function _setStatusStrip(", 1)[1].split(
+            "function _directChildByClass", 1
+        )[0]
+        assert "_taskCardEvent({ t: 'text', msg: msg })" in strip
+        assert "_setStoreThinking(" in strip
         # no imperative display writes on the Alpine-owned element remain
         assert "showTyping(typingEl" not in src
         assert "hideTyping(typingEl" not in src

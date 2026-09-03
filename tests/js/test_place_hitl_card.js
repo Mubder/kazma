@@ -245,7 +245,29 @@ function childNames(el) {
     card.parentNode === t.content && !api._hitlCardIsTrapped(card),
     "parent=" + (card.parentNode && card.parentNode.className),
   );
-  assert("CoT uncollapsed when placing", !t.progress.classList.contains("is-collapsed"));
+  // The card landed OUTSIDE the panel, so the panel's collapsed state hides
+  // nothing. Opening it anyway is what left the full CoT ladder expanded in
+  // the transcript on every turn that saw an approval (2026-09-03) — the
+  // terminal repaint inherits the expansion and never closes it again.
+  assert(
+    "unrelated CoT stays collapsed",
+    t.progress.classList.contains("is-collapsed"),
+  );
+}
+
+{
+  // ...but a panel that actually TRAPS a card must still open, so the card
+  // is not sitting inside an overflow:hidden collapsed body.
+  const t = bubble();
+  t.progress.classList.add("is-collapsed");
+  const inside = new El("div", "hitl-approval-card");
+  t.body.appendChild(inside);
+  const other = new El("div", "hitl-approval-card");
+  api._placeHitlCard(t.content, other);
+  assert(
+    "CoT holding a card is opened",
+    !t.progress.classList.contains("is-collapsed"),
+  );
 }
 
 if (fail) {
