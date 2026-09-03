@@ -299,3 +299,51 @@ def test_vault_get_resolves_tenant_scoped_secrets(monkeypatch) -> None:
     # Short-circuits on the first scope that answers — 'default' before
     # global.
     assert calls[0] == "default"
+
+
+def test_every_fire_outcome_is_announced(monkeypatch) -> None:
+    """2026-09-03: a post booked from a context with no delivery_target
+    fired completely silently — success AND failure bailed when the target
+    was empty. Every outcome must announce: explicit target first, else
+    bus fan-out to every configured platform (lifecycle-notifier route)."""
+    import asyncio
+
+    from kazma_core.x_api import scheduled_fire as sf
+
+    sent: list[tuple[str, str]] = []
+    fanned: list[dict] = []
+
+    class _Post:
+        id = 7
+        text = "hello"
+        reply_to_id = ""
+        tenant_id = "default"
+        delivery_target = ""
+
+    async def _send(target, text, backend=None):
+        sent.append((target, backend))
+
+    class _Adapter:
+        async def send(self, msg):
+            fanned.append({"content": msg.content, "level": msg.level})
+
+    class _Bus:
+        adapter = _Adapter()
+
+    import importlib
+
+    sms = importlib.import_module("kazma_core.tools.send_message")
+    busmod = importlib.import_module("kazma_core.swarm.bus")
+    monkeypatch.setattr(sms, "send_message", _send)
+    monkeypatch.setattr(busmod, "get_message_bus", lambda: _Bus())
+
+    # No target → bus fan-out (not silent).
+    asyncio.run(sf._deliver(_Post(), "✅ done"))
+    assert len(fanned) == 1 and "✅ done" in fanned[0]["content"]
+
+    # Explicit target → direct send, no fan-out.
+    class _PostT(_Post):
+        delivery_target = "telegram:1804015016"
+
+    asyncio.run(sf._deliver(_PostT(), "✅ done"))
+    assert sent == [("telegram:1804015016", "telegram")] and len(fanned) == 1

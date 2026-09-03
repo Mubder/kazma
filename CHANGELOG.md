@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Fix — every scheduled-post outcome is announced (2026-09-03)
+
+Success and failure notifications both bailed silently when the booking
+carried no ``delivery_target`` — a post booked from a target-less context
+fired with NO announcement at all. ``_deliver`` now falls back to the
+SwarmMessageBus fan-out (every configured platform, the same route the
+lifecycle notifier uses) when the explicit target is missing; direct
+send still wins when a target exists. A notification failure never fails
+the fire itself.
+
 ## Fix — scheduled X posts fired with no tenant context (all fires failed) (2026-09-03)
 
 Eight hourly scheduled posts failed with "X connector was disabled at
