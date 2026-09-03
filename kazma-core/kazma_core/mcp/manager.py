@@ -1285,6 +1285,19 @@ class AsyncMCPManager:
                             break
                 if resolved:
                     command = [resolved] + list(command[1:])
+                    # The resolved shim's siblings must be findable by the
+                    # CHILD too: npx.cmd shells out to `node`, and on
+                    # nvm-windows both live in the symlink dir — which a
+                    # stale-PATH server process doesn't have. Prepending
+                    # the resolved dir fixes '"node" is not recognized'
+                    # handshake deaths (2026-09-03).
+                    _resolved_dir = _os.path.dirname(resolved)
+                    if _resolved_dir:
+                        env["PATH"] = (
+                            _resolved_dir
+                            + _os.pathsep
+                            + str(env.get("PATH") or _os.environ.get("PATH", ""))
+                        )
 
             try:
                 process = await asyncio.create_subprocess_exec(

@@ -1050,6 +1050,18 @@ class Guard:
                 # new process immediately; do not climb the crash ladder and
                 # do not page Telegram as if Kazma died.
                 self.log("info", "guard.operator_reload", reason=reason)
+                # Informational notice (2026-09-03): operator reloads had
+                # become the ONLY silent restart path — every restart since
+                # Sep 2 was a --reload, so the operator's usual
+                # "stopped/restarting" Telegram alerts vanished entirely.
+                # Quiet tone: deliberate maintenance, not a crash.
+                try:
+                    self.notify.send(
+                        f"[guard] Kazma restarting (operator reload: {reason}). "
+                        "Back in a moment — no action needed."
+                    )
+                except Exception:
+                    self.log("debug", "guard.operator_reload.notify_failed")
                 continue
 
             self.restarts += 1
