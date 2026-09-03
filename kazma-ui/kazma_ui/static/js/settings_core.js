@@ -208,7 +208,11 @@
         // Delivery & Routing (Settings → Providers & Connectors →
         // Platform Connectors): ops-alert channels + per-platform swarm
         // output channels. Moved from the Swarm tab (2026-09-03).
-        adapterRouting: { channels: [], swarmChat: { telegram: '', discord: '', slack: '' } },
+        adapterRouting: {
+            tgMainChat: '', tgGroupEnabled: false, tgGroupChat: '', tgGroupToken: '',
+            discordChannel: '', slackChannel: '',
+            alertRoutes: [], swarmRoutes: [],
+        },
         adapterRoutingSaving: false,
         hubProfiles: [],
         hubProviderModal: false,

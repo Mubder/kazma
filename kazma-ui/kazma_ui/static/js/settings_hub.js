@@ -330,63 +330,96 @@
         },
 
         async loadAdapterRouting() {
-            // Delivery & Routing card (2026-09-03): ops-alert channels +
-            // per-platform swarm output channels. Read from the grouped
-            // settings snapshot (chat ids are not secret).
+            // Delivery & Routing card v2 (2026-09-03): four routes —
+            // telegram main bot / telegram GROUP (optional dedicated swarm
+            // bot) / discord / slack — plus alert + swarm destination
+            // selectors. Reads the grouped settings snapshot and the swarm
+            // output target (bot token comes back MASKED as ***).
             try {
                 const data = await this._fetch('/api/settings');
                 if (!data) return;
-                const pick = (cat, key) => (data[cat] || {})[key];
-                let channels = pick('notifications', 'ops.channels');
-                if (typeof channels === 'string') {
-                    channels = channels.split(',').map(s => s.trim()).filter(Boolean);
-                }
-                this.adapterRouting.channels = Array.isArray(channels) ? channels : [];
-                const swarmChat = {};
                 const conn = data.connectors || {};
-                for (const p of ['telegram', 'discord', 'slack']) {
-                    swarmChat[p] = String(conn[p + '.swarm_chat_id'] || '');
+                const notif = data.notifications || {};
+                let alerts = notif['ops.channels'];
+                if (typeof alerts === 'string') {
+                    alerts = alerts.split(',').map(x => x.trim()).filter(Boolean);
                 }
-                this.adapterRouting.swarmChat = swarmChat;
+                let swarmRoutes = notif['swarm.routes'];
+                if (typeof swarmRoutes === 'string') {
+                    swarmRoutes = swarmRoutes.split(',').map(x => x.trim()).filter(Boolean);
+                }
+                const r = this.adapterRouting;
+                r.tgMainChat = String(conn['telegram.swarm_chat_id'] || '');
+                r.discordChannel = String(conn['discord.swarm_channel_id'] || '');
+                r.slackChannel = String(conn['slack.swarm_channel_id'] || '');
+                r.alertRoutes = Array.isArray(alerts) ? alerts : [];
+                r.swarmRoutes = Array.isArray(swarmRoutes) ? swarmRoutes : [];
+                // Group route lives in swarm.output_target (masked token).
+                r.tgGroupChat = '';
+                r.tgGroupToken = '';
+                r.tgGroupEnabled = false;
+                try {
+                    const t = await this._fetch('/api/swarm/output-target');
+                    const ot = (t && t.output_target) || {};
+                    r.tgGroupChat = ot.chat_id != null ? String(ot.chat_id) : '';
+                    r.tgGroupToken = ot.bot_token === '***' ? '***' : (ot.bot_token || '');
+                    r.tgGroupEnabled = !!ot.enabled && !!ot.chat_id;
+                } catch (eGrp) { /* group route not configured */ }
             } catch (e) {
                 console.error('[Hub] Failed to load adapter routing:', e);
             }
         },
 
-        toggleRoutingChannel(platform, checked) {
-            const list = this.adapterRouting.channels || [];
-            const idx = list.indexOf(platform);
-            if (checked && idx === -1) list.push(platform);
+        toggleRoutingList(list, item, checked) {
+            if (!Array.isArray(list)) return;
+            const idx = list.indexOf(item);
+            if (checked && idx === -1) list.push(item);
             if (!checked && idx !== -1) list.splice(idx, 1);
         },
 
         async saveAdapterRouting() {
             this.adapterRoutingSaving = true;
             try {
-                const saves = [fetch('/api/settings/single', {
+                const r = this.adapterRouting;
+                const puts = [];
+                const single = (key, value, category) => puts.push(fetch('/api/settings/single', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({
-                        key: 'notifications.ops.channels',
-                        value: (this.adapterRouting.channels || []).join(','),
-                        category: 'notifications',
-                    }),
-                })];
-                for (const p of ['telegram', 'discord', 'slack']) {
-                    saves.push(fetch('/api/settings/single', {
+                    body: JSON.stringify({ key, value, category }),
+                }));
+                single('connectors.telegram.swarm_chat_id', String(r.tgMainChat || '').trim(), 'connectors');
+                single('connectors.discord.swarm_channel_id', String(r.discordChannel || '').trim(), 'connectors');
+                single('connectors.slack.swarm_channel_id', String(r.slackChannel || '').trim(), 'connectors');
+                single('notifications.ops.channels', (r.alertRoutes || []).join(','), 'notifications');
+                single('notifications.swarm.routes', (r.swarmRoutes || []).join(','), 'notifications');
+                // Group route: the swarm output target. Never send the
+                // masked '***' back — the server preserves the stored token.
+                if (r.tgGroupEnabled && String(r.tgGroupChat || '').trim()) {
+                    const payload = {
+                        platform: 'telegram',
+                        chat_id: String(r.tgGroupChat).trim(),
+                        enabled: true,
+                    };
+                    if (r.tgGroupToken && r.tgGroupToken !== '***') {
+                        payload.bot_token = r.tgGroupToken.trim();
+                    }
+                    puts.push(fetch('/api/swarm/output-target', {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                        body: JSON.stringify({
-                            key: 'connectors.' + p + '.swarm_chat_id',
-                            value: String((this.adapterRouting.swarmChat || {})[p] || '').trim(),
-                            category: 'connectors',
-                        }),
+                        body: JSON.stringify(payload),
+                    }));
+                } else {
+                    puts.push(fetch('/api/swarm/output-target', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({ clear: true }),
                     }));
                 }
-                const results = await Promise.all(saves);
-                const bad = results.find(r => !r.ok);
+                const results = await Promise.all(puts);
+                const bad = results.find(x => !x.ok);
                 if (bad) throw new Error('HTTP ' + bad.status);
                 showToast('Delivery & routing saved.', 'success');
+                this.loadAdapterRouting();
             } catch (e) {
                 showToast('Save failed: ' + e.message, 'error');
             }

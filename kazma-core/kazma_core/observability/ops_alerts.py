@@ -161,7 +161,7 @@ def _ops_channels() -> list[str]:
     return []
 
 
-def _telegram_direct(text: str) -> bool:
+def _telegram_direct(text: str, *, group_route: bool = False) -> bool:
     """Send straight to Telegram, bypassing the in-process bus.
 
     The bus adapter only exists in the process the gateway initialised. An
@@ -183,6 +183,16 @@ def _telegram_direct(text: str) -> bool:
             str(cs.get("guard.telegram.chat_id", "") or "").strip()
             or str(cs.get("swarm.group_chat_id", "") or "").strip()
         )
+        # 'telegram-group' route (2026-09-03): deliver to the configured
+        # group via the dedicated swarm bot token when present (the group
+        # route's own bot), else the main bot token.
+        if group_route:
+            ot = cs.get("swarm.output_target", None)
+            if isinstance(ot, dict) and ot.get("enabled") and ot.get("chat_id"):
+                chat = str(ot["chat_id"])
+                grp_token = str(ot.get("bot_token", "") or "").strip()
+                if grp_token:
+                    token = grp_token
         if not (token and chat):
             logger.warning(
                 "[ops_alerts] NOT DELIVERED: no bus adapter and no Telegram "
@@ -226,6 +236,17 @@ async def _deliver(text: str) -> bool:
     is unset).
     """
     channels = _ops_channels()
+    # The group route is Telegram-direct only (it is not a bus adapter):
+    # always fire it alongside whatever the bus delivers.
+    sent_group = False
+    if "telegram-group" in channels:
+        try:
+            sent_group = await asyncio.get_running_loop().run_in_executor(
+                None, lambda t=text: _telegram_direct(t, group_route=True)
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("[ops_alerts] telegram-group delivery failed", exc_info=True)
+        channels = [c for c in channels if c != "telegram-group"]
     try:
         from kazma_core.swarm.bus import (
             BusMessage,
@@ -247,6 +268,8 @@ async def _deliver(text: str) -> bool:
                     if str(getattr(a, "name", "") or "").lower() in channels
                 ]
                 if not targets:
+                    if sent_group:
+                        return True  # group route already delivered
                     logger.info(
                         "[ops_alerts] channels %s match no configured "
                         "adapter — alert not bus-delivered (operator "
@@ -270,6 +293,8 @@ async def _deliver(text: str) -> bool:
     # No platform bus in this process (worker/CLI/script) -- go direct.
     # Direct is Telegram-only: honor the routing choice.
     if channels and "telegram" not in channels:
+        if sent_group:
+            return True
         logger.info(
             "[ops_alerts] no bus adapter and Telegram not in channels %s "
             "— alert exists only in this log (operator routing choice)",
