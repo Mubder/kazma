@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Feature — first-class Telegram groups (2026-09-03)
+
+Group chat ids (-100…) were the one thing blocking "add a Telegram
+group" as a target — they are nearly impossible to find. When the bot is
+added to a group (or a group is created around it), it now announces the
+group's chat id right there, with a pointer to Settings → Delivery &
+Routing and the @BotFather privacy-mode note (privacy mode ON hides all
+non-command group messages from the bot). Inbound group messages from a
+whitelisted user were already supported; output channels already accept
+group ids — this closes the discovery gap.
+
+Also: the Node 24.20 update broke Node machine-wide while leaving
+winget's registration intact ("no available upgrade found", node.exe
+gone) — repair is ``winget install --force OpenJS.NodeJS.LTS`` in a NEW
+shell, then ``npm rm -g npx``, then restart Kazma.
+
 ## Feature — ops-alert routing + adapter settings page; MCP npx hint (2026-09-03)
 
 - **Ops alerts route by choice**: ``notifications.ops.channels``

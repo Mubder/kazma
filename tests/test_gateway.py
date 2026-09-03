@@ -943,3 +943,45 @@ def test_create_graph_handler_returns_incoming_handler_not_send_backend() -> Non
     # And the returned closure is the incoming handler defined in-scope.
     assert "async def handler(msg: IncomingMessage) -> None:" in src
     assert src.rstrip().endswith("return handler") or "return handler" in src[-200:]
+
+
+def test_group_add_announces_chat_id(monkeypatch) -> None:
+    """2026-09-03: adding the bot to a Telegram group posts the group's
+    chat id right there — group ids (-100…) are otherwise nearly
+    impossible to find, which blocked 'add a telegram group' as an
+    alerts/swarm-output target."""
+    import asyncio
+
+    from kazma_gateway.adapters.telegram import TelegramAdapter
+
+    sent: list[dict] = []
+
+    class _Http:
+        async def post(self, path, json=None):
+            sent.append({"path": path, "json": json})
+
+    adapter = TelegramAdapter.__new__(TelegramAdapter)
+    adapter._http = _Http()
+    adapter._bot_username = "KazmaWSLBot"
+    adapter._group_announced = set()
+
+    asyncio.run(adapter._announce_if_added_to_group({
+        "message": {
+            "group_chat_created": True,
+            "chat": {"id": -1001234567890, "type": "supergroup"},
+        }
+    }))
+    assert len(sent) == 1 and sent[0]["json"]["chat_id"] == -1001234567890
+    assert "-1001234567890" in sent[0]["json"]["text"]
+
+    # Idempotent per chat, and non-group updates are ignored.
+    asyncio.run(adapter._announce_if_added_to_group({
+        "message": {
+            "group_chat_created": True,
+            "chat": {"id": -1001234567890, "type": "supergroup"},
+        }
+    }))
+    asyncio.run(adapter._announce_if_added_to_group({
+        "message": {"text": "hi", "chat": {"id": 1804015016, "type": "private"}}
+    }))
+    assert len(sent) == 1
