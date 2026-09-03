@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Fix — inbound Telegram/Discord/Slack messages crashed since Sep 1 (2026-09-03)
+
+A Telegram ``/sessions`` (and, it turns out, EVERY inbound platform
+message since Sep 1) was silently dropped: the handler died with
+``_handler() missing 1 required positional argument: 'text'`` before any
+processing. Root cause: the audit H-2 commit (6073badc) named the cron
+send-backend ``handler`` at the bottom of ``create_graph_handler`` —
+shadowing the incoming-message closure of the same name — so the factory
+returned the SEND backend (signature ``(target_id, text)``) to the
+gateway, which calls it as ``(msg)``. Outbound deliveries (cron
+reminders, scheduled-post alerts) kept working, which masked the break
+for two days. The send-backend now has its own name (``send_backend``);
+the factory returns the real one-argument message processor.
+
 ## Fix — ghost approval card, round 3: the fallback itself (2026-09-03)
 
 Round-trap diagnosis on the live page: the bubble card was no longer the

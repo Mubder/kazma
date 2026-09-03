@@ -2279,9 +2279,16 @@ def create_graph_handler(
     try:
         from kazma_core.tools.send_message import register_message_backend
 
-        handler = make_gateway_send_handler(manager, _store)
+        # NOTE (2026-09-03): this MUST NOT be named `handler` — it shadowed
+        # the incoming-message closure defined above, so `return handler`
+        # handed the gateway the SEND backend instead of the message
+        # processor. Every inbound platform message died with
+        # ``_handler() missing 1 required positional argument: 'text'``
+        # (Telegram /sessions silently dropped). Distinct name, distinct
+        # role: send_backend routes OUTBOUND deliveries only.
+        send_backend = make_gateway_send_handler(manager, _store)
         for name in ("telegram", "discord", "slack"):
-            register_message_backend(name, handler)
+            register_message_backend(name, send_backend)
     except ImportError:
         logger.debug("[agent-handler] kazma_core not available — backend registration skipped")
 
