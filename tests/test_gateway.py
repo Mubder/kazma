@@ -919,3 +919,27 @@ class TestSendMessageTool:
         assert "text" in params["properties"]
         assert params["properties"]["target_id"]["type"] == "string"
         assert params["properties"]["text"]["type"] == "string"
+
+
+def test_create_graph_handler_returns_incoming_handler_not_send_backend() -> None:
+    """2026-09-03: audit H-2 (6073badc) named the cron send-backend
+    ``handler`` at the bottom of create_graph_handler — shadowing the
+    incoming-message closure — so the factory returned the SEND backend.
+    Every inbound platform message died with ``_handler() missing 1
+    required positional argument: 'text'`` (a Telegram /sessions was
+    silently dropped). The factory's return must be the one-argument
+    message processor; the send backend is a registered side effect."""
+    import inspect
+
+    from kazma_gateway.agent_handler.graph import create_graph_handler
+
+    sig = inspect.signature(create_graph_handler.__wrapped__
+                            if hasattr(create_graph_handler, "__wrapped__")
+                            else create_graph_handler)
+    src = inspect.getsource(create_graph_handler)
+    # The shadow is gone: the send backend has its own name.
+    assert "send_backend = make_gateway_send_handler" in src
+    assert "handler = make_gateway_send_handler" not in src
+    # And the returned closure is the incoming handler defined in-scope.
+    assert "async def handler(msg: IncomingMessage) -> None:" in src
+    assert src.rstrip().endswith("return handler") or "return handler" in src[-200:]
