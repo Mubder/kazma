@@ -237,9 +237,14 @@ function registerAgentStore() {
         // renderHitlCard returned early (2026-09-02).
         this.pendingApproval = approval;
         chat._hitlApproval(approval);
-        if (chat.hasInlineApprovalCard && chat.hasInlineApprovalCard()) {
-          this.pendingApproval = null;
-        }
+        // A card that EXISTS is proof the inline paint landed — live buttons
+        // are not the test. Requiring them left this fallback on screen with
+        // four clickable buttons after a refresh, for a gate the server had
+        // already settled and the reconcile had just stamped "No longer
+        // pending" (the ghost card, 2026-09-03).
+        var landed = !!(chat.hasInlineApprovalCard && chat.hasInlineApprovalCard())
+          || !!(chat.hitlCardExistsFor && chat.hitlCardExistsFor(approval));
+        if (landed) this.pendingApproval = null;
         return;
       }
       this.pendingApproval = approval;
