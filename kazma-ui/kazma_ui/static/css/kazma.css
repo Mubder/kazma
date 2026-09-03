@@ -2421,9 +2421,12 @@ tbody tr:last-child td {
     0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent),
     0 10px 28px color-mix(in srgb, var(--accent) 8%, transparent);
 }
+/* Finished panels keep the SAME blue identity as live ones (2026-09-03):
+   the accent wash is the CoT's color, not a "busy" signal — done/active
+   only differ in emphasis, and element-level colors (step states, tool
+   icons, HITL bars) carry their own purposeful meaning. */
 .agent-progress.is-done {
   opacity: 1;
-  background: var(--bg-elevated, var(--bg-panel));
 }
 .agent-progress-header {
   display: flex;
@@ -2439,9 +2442,6 @@ tbody tr:last-child td {
 }
 /* A finished turn is a summary line, not a section header: drop the accent
    wash and let it sit quietly above the answer it describes. */
-.agent-progress.is-done.is-collapsed {
-  background: var(--bg-elevated, var(--bg-panel));
-}
 .agent-progress.is-done.is-collapsed .agent-progress-header {
   padding: 5px 11px;
   background: transparent;
