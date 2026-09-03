@@ -230,6 +230,48 @@
                     </div>
                     <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
                 </div>
+
+                <!-- Delivery & Routing (2026-09-03): per-platform ops-alert
+                     routing + swarm output channels. Moved from the Swarm
+                     tab so every adapter setting lives here. -->
+                <div style="margin-top:16px;padding:16px;border:1px solid var(--border);border-radius:var(--radius-card)">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+                        <div style="text-align:left;">
+                            <strong>Delivery &amp; Routing</strong>
+                            <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">
+                                {{ t('settings.delivery_routing_desc') || 'Choose which platforms receive ops alerts, and set each adapter\'s swarm output channel. Leave all unchecked to deliver to every configured platform.' }}
+                            </p>
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="saveAdapterRouting()" :disabled="adapterRoutingSaving">
+                            <span x-text="adapterRoutingSaving ? '…' : 'Save'"></span>
+                        </button>
+                    </div>
+                    <template x-for="p in ['telegram', 'discord', 'slack']" :key="p">
+                        <div class="two-col-grid" style="align-items:center;padding:10px 0;border-top:1px solid var(--border)">
+                            <div style="display:flex;align-items:center;gap:10px">
+                                <strong x-text="p" style="text-transform:capitalize;font-size:0.9rem"></strong>
+                                <label class="toggle" :title="'Ops alerts'">
+                                    <input type="checkbox" :checked="(adapterRouting.channels || []).includes(p)"
+                                           @change="toggleRoutingChannel(p, $event.target.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span class="text-muted" style="font-size:0.75rem">Ops alerts</span>
+                            </div>
+                            <div>
+                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">
+                                    Swarm output channel (chat id)
+                                </label>
+                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                       :value="adapterRouting.swarmChat[p] || ''"
+                                       @input="adapterRouting.swarmChat[p] = $event.target.value"
+                                       :placeholder="p === 'telegram' ? '1804015016 or -100…' : (p === 'discord' ? 'channel id' : 'channel id')">
+                            </div>
+                        </div>
+                    </template>
+                    <p class="text-muted" style="font-size:0.72rem;margin:8px 0 0">
+                        Applies on the next alert / swarm run.
+                    </p>
+                </div>
             </div>
         </div>
 

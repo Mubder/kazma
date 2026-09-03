@@ -1259,6 +1259,25 @@ class AsyncMCPManager:
                 import shutil as _shutil
 
                 resolved = _shutil.which(command[0])
+                if not resolved and command[0].lower() in ("npx", "npx.cmd"):
+                    # Node updates can leave PATH pointing at a removed
+                    # install dir (2026-09-03: npx vanished machine-wide
+                    # mid-update). Probe the canonical Windows locations
+                    # before giving up.
+                    import os as _os
+
+                    for cand in (
+                        _os.path.join(
+                            _os.environ.get("ProgramFiles", r"C:\Program Files"),
+                            "nodejs", "npx.cmd",
+                        ),
+                        _os.path.join(
+                            _os.environ.get("APPDATA", ""), "npm", "npx.cmd",
+                        ),
+                    ):
+                        if cand and _os.path.isfile(cand):
+                            resolved = cand
+                            break
                 if resolved:
                     command = [resolved] + list(command[1:])
 
@@ -1291,7 +1310,17 @@ class AsyncMCPManager:
                 )
                 process = _SyncProcessAdapter(popen)  # type: ignore[assignment]
         except FileNotFoundError as exc:
-            raise MCPBridgeError(f"Command not found: {command[0]}") from exc
+            hint = ""
+            if command[0].lower().startswith(("npx", "node")):
+                hint = (
+                    " — Node.js/npx is not installed or not on the server's "
+                    "PATH. Install Node.js (npx ships with it; the standalone "
+                    "'npm i -g npx' package is deprecated and can shadow it), "
+                    "then restart the Kazma server."
+                )
+            raise MCPBridgeError(
+                f"Command not found: {command[0]}{hint}"
+            ) from exc
         except OSError as exc:
             raise MCPBridgeError(f"Failed to start process: {exc}") from exc
 

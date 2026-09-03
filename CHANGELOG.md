@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Feature — ops-alert routing + adapter settings page; MCP npx hint (2026-09-03)
+
+- **Ops alerts route by choice**: ``notifications.ops.channels``
+  (Settings → Providers & Connectors → Platform Connectors → Delivery &
+  Routing) selects which platforms receive ops alerts — Telegram,
+  Discord, and/or Slack. Empty = all configured (previous fan-out
+  behavior). The bus send filters adapters by name; the Telegram-direct
+  fallback honors the choice too; an explicitly empty match is logged as
+  an operator routing decision, never a silent drop.
+- **Swarm output channels moved to the adapters page**: the per-platform
+  swarm output channel (``connectors.<p>.swarm_chat_id``) is now managed
+  in the same Delivery & Routing card for telegram/discord/slack. The
+  Swarm page's Output Routing card is now a pointer (its telegram-only
+  form moved, not duplicated).
+- **MCP npx failures are actionable**: the win32 resolution now also
+  probes the canonical Node locations (``Program Files\nodejs``,
+  ``%APPDATA%\npm``) when PATH is stale (a Node update removed the
+  install dir machine-wide on 2026-09-03), and the "Command not found"
+  error explains that npx ships with Node.js and that the standalone
+  ``npm i -g npx`` package is deprecated.
+
 ## Fix — inbound Telegram/Discord/Slack messages crashed since Sep 1 (2026-09-03)
 
 A Telegram ``/sessions`` (and, it turns out, EVERY inbound platform
