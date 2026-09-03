@@ -53,6 +53,11 @@ class DiscordBusAdapter(BusAdapter):
         self._pending_msg_ids: dict[str, str] = {}
         self._http: Any = None  # lazy httpx client
 
+    @property
+    def name(self) -> str:
+        """Routing key for platform selection (ops-alert channels)."""
+        return "discord"
+
     # ── HTTP helpers ────────────────────────────────────────────────
 
     async def _ensure_http(self) -> Any:

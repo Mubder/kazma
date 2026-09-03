@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Feature — Delivery & Routing v3: full credentials on one card + real route fan-out (2026-09-03)
+
+v2 still shipped half a settings page: chat ids on the card, bot tokens
+buried in per-platform edit dialogs (Discord/Slack tokens had no home on
+the card at all), and two dead wires behind the selectors. v3 fixes all
+of it:
+
+- **Every route now carries its COMPLETE credential set** on the one
+  Delivery & Routing card: Telegram main bot TOKEN + chat id; Telegram
+  group chat id + optional dedicated bot token; Discord bot TOKEN +
+  channel id; Slack bot TOKEN (xoxb-) + app TOKEN (xapp-, Socket Mode)
+  + channel id. Tokens write the canonical keys the gateway adapters
+  read (``connectors.{telegram,discord,slack}.token`` etc.) — vault-
+  encrypted on save, masked ``***`` on load, never written back over a
+  real secret. No per-platform edit hopscotch to deliver an alert.
+- **``notifications.swarm.routes`` now has a real consumer**:
+  `_maybe_send_to_output_target` fans the final swarm report out over
+  the selected routes (telegram main / telegram-group / discord /
+  slack), each resolving its own destination. A selected-but-
+  unconfigured route is skipped with a log, never re-routed. Explicit
+  ``-> telegram:<id>`` suffixes still win; empty selection keeps the
+  legacy single output target.
+- **Origin dedupe moved inside the fan-out**: dispatching FROM the
+  group used to skip the entire mirror send — with routes selected it
+  would have starved every other route. Now each route is checked
+  individually against the originating chat.
+- **Bus adapters got a ``name`` property** — the ops-alert channel
+  filter read ``getattr(adapter, "name", "")`` and no adapter had one,
+  so selecting any channel silently dropped the alert from the bus.
+- Telegram-direct alert fallback now honors the card's main-route chat
+  id (``connectors.telegram.swarm_chat_id`` in the fallback ladder).
+
+Tests: `tests/test_delivery_routing.py` (behavioral: route resolution,
+fan-out, origin dedupe, adapter names, channel filter),
+`tests/test_chat_steer_composer.py` v3 field-completeness source
+slices.
+
 ## Feature — Delivery & Routing v2: four complete routes (2026-09-03)
 
 The v1 card over-consolidated: it kept only chat ids and dropped the

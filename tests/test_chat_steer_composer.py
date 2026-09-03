@@ -964,34 +964,55 @@ def test_guard_notifies_on_operator_reload() -> None:
 
 
 def test_four_delivery_routes_complete_fields() -> None:
-    """2026-09-03 v2: the routing card carries FOUR routes with COMPLETE
-    fields — the earlier chat-id-only version dropped the swarm bot token
-    and broke the user's dedicated swarm-bot Telegram delivery. Telegram
-    group = swarm.output_target (chat id + optional dedicated bot token,
-    masked round-trip preserved server-side); alerts accept a
-    'telegram-group' route delivered Telegram-direct."""
+    """2026-09-03 v3: every route carries its COMPLETE credential set on the
+    one Delivery & Routing card — bot tokens AND destinations. v2 showed
+    chat ids only ("uses main bot token" badges) which forced the operator
+    back into the per-platform edit dialogs and left no place at all to set
+    Discord/Slack tokens."""
     settings_html = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
     ).read_text(encoding="utf-8")
+    # Route sections with their credential inputs.
     for needle in (
         "Telegram — Main bot",
+        "adapterRouting.tgToken",          # main bot TOKEN field
+        "tgMainChat",                       # main chat id
         "Telegram — Group",
         "tgGroupToken",
         "tgGroupEnabled",
         "Dedicated Bot Token",
+        "adapterRouting.discordToken",      # discord bot token field
         "discordChannel",
+        "adapterRouting.slackToken",        # slack bot token field
+        "adapterRouting.slackAppToken",     # slack app token (Socket Mode)
         "slackChannel",
         "alertRoutes",
         "swarmRoutes",
         "telegram-group",
     ):
         assert needle in settings_html, needle
+    # The misleading badges are gone — every route owns its token now.
+    assert "uses main bot token" not in settings_html
 
     hub = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
     ).read_text(encoding="utf-8")
+    # All four platform credentials are saved to the canonical keys the
+    # gateway adapters read (app.py gateway setup).
+    for key in (
+        "connectors.telegram.token",
+        "connectors.discord.token",
+        "connectors.slack.token",
+        "connectors.slack.app_token",
+        "connectors.telegram.swarm_chat_id",
+        "connectors.discord.swarm_channel_id",
+        "connectors.slack.swarm_channel_id",
+    ):
+        assert key in hub, key
+    # Mask guard: the vault mask is never written back over a real secret.
+    assert "!v.startsWith('***')" in hub
     # Group route saves through the output-target API; *** never sent back.
     assert "r.tgGroupToken !== '***'" in hub
     assert "swarm/output-target" in hub
@@ -1008,3 +1029,41 @@ def test_four_delivery_routes_complete_fields() -> None:
     ).read_text(encoding="utf-8")
     assert 'group_route: bool = False' in ops
     assert '"telegram-group" in channels' in ops
+    # The Telegram-direct fallback honors the card's main-route chat id.
+    assert "connectors.telegram.swarm_chat_id" in ops
+
+
+def test_swarm_routes_selector_has_a_real_consumer() -> None:
+    """v3 shipped `notifications.swarm.routes` as a UI selector with NO
+    consumer — a checkbox that does nothing. The gateway's
+    `_maybe_send_to_output_target` must fan the final swarm report out over
+    the selected routes, and every bus adapter needs a `name` so the
+    ops-alert channel filter can select platforms at all (the filter read
+    `getattr(a, "name", "")` and every adapter lacked the attribute —
+    selecting any channel silently dropped the alert from the bus)."""
+    dispatch = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-gateway" / "kazma_gateway" / "agent_handler" / "swarm_dispatch.py"
+    ).read_text(encoding="utf-8")
+    assert 'notifications.swarm.routes' in dispatch
+    assert "_swarm_route_config" in dispatch
+    # telegram-group resolves to the group route; the others to their
+    # per-platform swarm chat/channel keys.
+    assert "connectors.telegram.swarm_chat_id" in dispatch
+    assert "connectors.discord.swarm_channel_id" in dispatch
+    assert "connectors.slack.swarm_channel_id" in dispatch
+    # Origin dedupe moved inside so a dispatch FROM the group still reaches
+    # the other selected routes (the old outer guard skipped the whole send).
+    assert "origin: IncomingMessage | None = None" in dispatch
+
+    for fname, expected in (
+        ("telegram_bus.py", '"telegram"'),
+        ("discord_bus.py", '"discord"'),
+        ("slack_bus.py", '"slack"'),
+    ):
+        src = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-gateway" / "kazma_gateway" / "adapters" / fname
+        ).read_text(encoding="utf-8")
+        assert "def name(self)" in src, fname
+        assert expected in src, fname

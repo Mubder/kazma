@@ -30,6 +30,9 @@ from .swarm_dispatch import (
     _maybe_send_to_output_target,
     _dispatch_swarm_from_chat,
     _send_swarm_reply,
+    _swarm_routes,
+    _swarm_route_config,
+    _target_is_origin_chat,
 )
 from .commands import (
     _try_swarm_command,
@@ -66,6 +69,9 @@ __all__ = [
     "_maybe_send_to_output_target",
     "_dispatch_swarm_from_chat",
     "_send_swarm_reply",
+    "_swarm_routes",
+    "_swarm_route_config",
+    "_target_is_origin_chat",
     "_try_swarm_command",
     "_handle_swarm_config_command",
     "_get_visible_providers",

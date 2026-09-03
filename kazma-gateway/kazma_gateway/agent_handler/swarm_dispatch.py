@@ -206,6 +206,91 @@ def _get_output_target_config() -> dict[str, Any] | None:
         return None
 
 
+def _swarm_routes() -> list[str]:
+    """Operator-selected swarm-output routes (``notifications.swarm.routes``).
+
+    Delivery & Routing v3 (2026-09-03). Live-read, mirrors
+    ``ops_alerts._ops_channels``. Empty = no selection made — the legacy
+    single ``swarm.output_target`` behaviour applies. Never raises: a
+    routing-config failure must not break the swarm reply.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("notifications.swarm.routes", [])
+        if isinstance(raw, str):
+            raw = [p.strip().lower() for p in raw.split(",") if p.strip()]
+        if isinstance(raw, (list, tuple)):
+            return [str(p).strip().lower() for p in raw if str(p).strip()]
+    except Exception:
+        logger.debug("[agent-handler] swarm routes read failed", exc_info=True)
+    return []
+
+
+_ROUTE_CHAT_KEYS: dict[str, str] = {
+    "telegram": "connectors.telegram.swarm_chat_id",
+    "discord": "connectors.discord.swarm_channel_id",
+    "slack": "connectors.slack.swarm_channel_id",
+}
+
+
+def _swarm_route_config(route: str) -> dict[str, Any] | None:
+    """Resolve one selected route name to a sendable target config.
+
+    ``telegram``        → main bot chat (``connectors.telegram.swarm_chat_id``)
+    ``telegram-group``  → the group route (``swarm.output_target``, with its
+                          optional dedicated bot token)
+    ``discord``/``slack`` → the platform's swarm channel id
+
+    Returns ``None`` when the route is selected but not configured (no chat
+    id saved) — that route is skipped with a log, never silently re-routed
+    to a different platform.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+    except ImportError:
+        return None
+    try:
+        cs = get_config_store()
+        route = route.strip().lower()
+        if route == "telegram-group":
+            cfg = cs.get("swarm.output_target", None)
+            if isinstance(cfg, dict) and cfg.get("enabled") and cfg.get("chat_id"):
+                cfg.setdefault("platform", "telegram")
+                return dict(cfg)
+            return None
+        key = _ROUTE_CHAT_KEYS.get(route)
+        if not key:
+            return None
+        chat = str(cs.get(key, "") or "").strip()
+        if not chat:
+            return None
+        return {"platform": route, "chat_id": chat, "enabled": True}
+    except Exception:
+        logger.debug("[agent-handler] route config read failed", exc_info=True)
+        return None
+
+
+def _target_is_origin_chat(
+    cfg: dict[str, Any] | None, msg: IncomingMessage
+) -> bool:
+    """True when ``cfg`` points at the very chat ``msg`` came from.
+
+    Sending there would duplicate the report the operator already receives
+    as the direct reply.
+    """
+    if not cfg or not isinstance(cfg, dict):
+        return False
+    target_platform = str(cfg.get("platform", "telegram")).lower()
+    target_chat = str(cfg.get("chat_id", "")).strip()
+    if not target_chat:
+        return False
+    if target_platform != msg.platform:
+        return False
+    origin_chat = str(msg.context_metadata.get("chat_id", "")).strip()
+    return bool(origin_chat) and origin_chat == target_chat
+
+
 def _parse_output_target_suffix(task: str) -> tuple[str, dict[str, Any] | None]:
     """Detect a trailing ``-> telegram:<chat_id>`` routing suffix.
 
@@ -290,41 +375,70 @@ async def _maybe_send_to_output_target(
     override: dict[str, Any] | None = None,
     *,
     is_html: bool = False,
+    origin: IncomingMessage | None = None,
 ) -> bool:
-    """Send ``text`` to the configured output target (e.g. a Telegram group).
+    """Send ``text`` to the configured swarm output routes.
 
-    Resolution order: per-dispatch ``override`` dict → ConfigStore entry.
+    Resolution order (Delivery & Routing v3, 2026-09-03):
+
+    1. per-dispatch ``override`` (the ``-> telegram:<chat_id>`` suffix) —
+       wins outright.
+    2. ``notifications.swarm.routes`` — the operator's selected fan-out
+       over the configured routes (telegram main / telegram-group /
+       discord / slack). Each route resolves its own destination; a route
+       pointing at the originating chat is skipped (the direct reply
+       already delivered the report there).
+    3. legacy single ``swarm.output_target``.
+
+    ``origin`` (the IncomingMessage that dispatched the task) enables the
+    duplicate-suppression above; callers should always pass it.
 
     When ``is_html`` is True the text is already Telegram HTML (e.g. from
     :func:`format_swarm_task_result`) and must NOT be re-converted by the
     adapter — passing it through ``md_to_tg_html`` would double-escape it.
 
-    Delegates to the platform-specific adapter in ``swarm_output``.
-
     Returns True if a message was sent (or attempted), False if no target.
     """
-    return await send_swarm_output(manager, text, override, is_html=is_html)
+    if override is not None:
+        if origin is not None and _target_is_origin_chat(override, origin):
+            return False
+        return await send_swarm_output(manager, text, override, is_html=is_html)
+
+    routes = _swarm_routes()
+    if routes:
+        sent_any = False
+        for route in routes:
+            cfg = _swarm_route_config(route)
+            if cfg is None:
+                logger.info(
+                    "[agent-handler] swarm route %r selected but not configured "
+                    "— skipped (set its chat id in Settings → Delivery & Routing)",
+                    route,
+                )
+                continue
+            if origin is not None and _target_is_origin_chat(cfg, origin):
+                continue
+            sent_any = (
+                await send_swarm_output(manager, text, cfg, is_html=is_html)
+                or sent_any
+            )
+        return sent_any
+
+    cfg = _get_output_target_config()
+    if origin is not None and _target_is_origin_chat(cfg, origin):
+        return False
+    return await send_swarm_output(manager, text, cfg, is_html=is_html)
 
 
 def _output_target_is_origin(msg: IncomingMessage, override: dict[str, Any] | None) -> bool:
-    """Return True if the resolved output target is the same chat the message
-    originated from.
+    """Backward-compat wrapper: does the resolved output target equal ``msg``'s chat?
 
     Used to avoid sending the same swarm report twice (once via the direct
     reply and once via the output-target mirror) when the operator dispatches
-    from the very group configured as the output target.
+    from the very chat configured as the output target.
     """
     cfg = override if override is not None else _get_output_target_config()
-    if not cfg or not isinstance(cfg, dict):
-        return False
-    target_platform = str(cfg.get("platform", "telegram")).lower()
-    target_chat = str(cfg.get("chat_id", "")).strip()
-    if not target_chat:
-        return False
-    if target_platform != msg.platform:
-        return False
-    origin_chat = str(msg.context_metadata.get("chat_id", "")).strip()
-    return bool(origin_chat) and origin_chat == target_chat
+    return _target_is_origin_chat(cfg, msg)
 
 
 async def _dispatch_swarm_from_chat(
@@ -417,33 +531,36 @@ async def _dispatch_swarm_from_chat(
                 telegram_reply,
                 text_is_html=True,
             )
-            # Mirror the SAME rich HTML report to the output target so the
+            # Mirror the SAME rich HTML report to the output routes so the
             # Telegram group sees the formatted report, not raw markdown.
-            # Skip when the output target IS the originating chat — otherwise
-            # the operator gets the report twice.
-            if not _output_target_is_origin(msg, target_override):
-                await _maybe_send_to_output_target(
-                    manager, telegram_reply, target_override, is_html=True
-                )
+            # Origin-chat dedupe happens inside (the direct reply above
+            # already delivered the report to the originating chat).
+            await _maybe_send_to_output_target(
+                manager, telegram_reply, target_override, is_html=True, origin=msg
+            )
         else:
             await _send_swarm_reply(msg, store, manager, thread_id, reply)
-            if not _output_target_is_origin(msg, target_override):
-                await _maybe_send_to_output_target(manager, reply, target_override)
+            await _maybe_send_to_output_target(
+                manager, reply, target_override, origin=msg
+            )
 
     except asyncio.TimeoutError:
         logger.error("[agent-handler] Swarm dispatch timed out after %ds for thread %s",
                      SWARM_DISPATCH_TIMEOUT_SECONDS, thread_id)
         error_reply = "⚠️ Swarm task timed out after 5 minutes. The task may still be running in background."
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
-        if not _output_target_is_origin(msg, target_override):
-            await _maybe_send_to_output_target(manager, error_reply, target_override)
+        await _maybe_send_to_output_target(
+            manager, error_reply, target_override, origin=msg
+        )
     except Exception as exc:
         logger.exception("[agent-handler] Swarm dispatch failed for thread %s", thread_id)
         error_reply = sanitize_error(exc)
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
-        # Mirror the failure to the output target too, consistent with the success path.
-        if not _output_target_is_origin(msg, target_override):
-            await _maybe_send_to_output_target(manager, error_reply, target_override)
+        # Mirror the failure to the output routes too, consistent with the
+        # success path.
+        await _maybe_send_to_output_target(
+            manager, error_reply, target_override, origin=msg
+        )
 
     return True
 

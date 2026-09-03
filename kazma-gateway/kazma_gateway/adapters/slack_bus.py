@@ -53,6 +53,11 @@ class SlackBusAdapter(BusAdapter):
         self._pending_msg_ts: dict[str, str] = {}
         self._http: Any = None  # lazy httpx client
 
+    @property
+    def name(self) -> str:
+        """Routing key for platform selection (ops-alert channels)."""
+        return "slack"
+
     # ── HTTP helpers ────────────────────────────────────────────────
 
     def _headers(self) -> dict[str, str]:
