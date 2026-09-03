@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Fix — claimed approval cards park above the reply and collapse (2026-09-03)
+
+With the Live Task Card there is no live in-bubble CoT panel, so a
+PENDING card docked at the bottom of the bubble — and after
+Approve/Deny the streamed reply painted ABOVE it ("response on top of
+the card"). On any decision (approve/deny, semantic option, watchdog
+timeout) the claimed card now: (1) parks itself between the CoT block
+and ``.message-text`` so the reply streams below it — chronology
+narration → decision → reply; (2) collapses to a CoT-style one-line bar
+showing the decision chip (click the bar to re-expand the full card
+with args/scopes; the chip re-syncs on later state changes).
+
 ## Fix - ghost approval card, phantom card on a new session, vanishing CoT (2026-09-03)
 
 Three follow-ups from live testing of the Live Task Card work.

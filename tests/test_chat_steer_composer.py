@@ -677,3 +677,41 @@ def test_setplan_and_memory_explain_never_create_panels() -> None:
         "function _tcTick()", 1
     )[0]
     assert "_tc.planTotal" in tc_render
+
+
+def test_claimed_card_parks_above_reply_and_collapses() -> None:
+    """2026-09-03: with the Live Task Card there is no live in-bubble CoT
+    panel, so a pending card docked at the BOTTOM of the bubble — and the
+    post-approval reply painted ABOVE it ("response on top of the card").
+    On claim the card must park between the CoT block and .message-text
+    and collapse to the CoT-style one-line bar (click to re-expand)."""
+    js = _js()
+    assert "function _parkClaimedHitlCard(card)" in js
+    assert "function _collapseClaimedHitlCard(card)" in js
+    park = js.split("function _parkClaimedHitlCard(card)", 1)[1].split(
+        "function _collapseClaimedHitlCard(card)", 1
+    )[0]
+    assert "message-text" in park
+    # All three claim paths: security approve/deny, semantic option,
+    # watchdog timeout.
+    set_state = js.split("function setCardState(state, label)", 1)[1].split(
+        "function appendAssistantText", 1
+    )[0]
+    assert "_parkClaimedHitlCard(card);" in set_state
+    assert "_collapseClaimedHitlCard(card);" in set_state
+    sem = js.split("_semCard.querySelectorAll('.hitl-sem-opt')", 1)[1][:900]
+    assert "_parkClaimedHitlCard(_semCard);" in sem
+    timeout = js.split("function markApprovalTimedOut(msg)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "_parkClaimedHitlCard(card);" in timeout
+    # Collapsed bar shows the decision chip in the header (actions hidden).
+    collapse = js.split("function _collapseClaimedHitlCard(card)", 1)[1].split(
+        "\n  function renderHitlCard", 1
+    )[0]
+    assert "hitl-collapse-chip" in collapse
+    css = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
+    ).read_text(encoding="utf-8")
+    assert ".hitl-approval-card.hitl-collapsed .hitl-approval-body" in css

@@ -1868,6 +1868,39 @@ tbody tr:last-child td {
   font-variant-numeric: tabular-nums;
   color: var(--warning, #f59e0b);
 }
+/* Claimed approval card, collapsed to the CoT-style one-line bar
+   (2026-09-03): the decision stays visible in the timeline; click the
+   bar to re-expand the full card (args, scopes). */
+.hitl-approval-card.hitl-collapsed {
+  padding: 0;
+  margin: 4px 0;
+  border-inline-start: 2px solid var(--accent, #6c8cff);
+  background: none;
+}
+.hitl-approval-card.hitl-collapsed.hitl-approved { border-inline-start-color: var(--success); }
+.hitl-approval-card.hitl-collapsed.hitl-denied { border-inline-start-color: var(--danger); }
+.hitl-approval-card.hitl-collapsed .hitl-approval-body,
+.hitl-approval-card.hitl-collapsed .hitl-approval-actions {
+  display: none;
+}
+.hitl-approval-card.hitl-collapsed .hitl-approval-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+.hitl-approval-card.hitl-collapsed .hitl-approval-header .hitl-status {
+  font-size: 0.78rem;
+}
+.hitl-collapse-chevron {
+  margin-inline-start: auto;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
 
 /* Old opaque top-bar .chat-model-bar / .chat-input-area rules removed —
    v5 owns both (composer dock + glassy bar); the old block was dead for
