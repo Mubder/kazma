@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Fix — Settings 500 (Jinja pipe) + silent operator reloads (2026-09-03)
+
+- The Settings page 500'd: a JavaScript-style ``||`` inside a Jinja
+  ``{{ }}`` expression in the new Delivery & Routing card (Jinja needs
+  ``or``). Replaced with a plain literal; added a test that compiles
+  EVERY template with Jinja so this class is caught at test time, never
+  at page-load time.
+- Restart alerts vanished because every restart since Sep 2 was an
+  operator ``--reload`` — the one restart path that deliberately did not
+  notify (``do not page Telegram as if Kazma died``). Reloads now send a
+  quiet informational notice ("Kazma restarting (operator reload)…
+  no action needed"); crash-page behavior is unchanged.
+
 ## Fix — MCP shim resolution also fixes the child's PATH (2026-09-03)
 
 The probe found ``npx.cmd`` at the nvm symlink — but ``npx.cmd`` shells

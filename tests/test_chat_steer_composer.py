@@ -921,3 +921,43 @@ def test_mcp_resolved_shim_prepends_its_dir_to_child_path() -> None:
     )[0]
     assert 'env["PATH"] = (' in probe
     assert "_os.path.dirname(resolved)" in probe
+
+
+def test_templates_parse_as_jinja() -> None:
+    """2026-09-03: a JavaScript-style ``||`` inside a Jinja ``{{ }}``
+    expression (my Delivery & Routing card) took the whole Settings page
+    down with a 500. Compile every template with Jinja itself — this
+    catches the whole class at test time, not at page-load time."""
+    from jinja2 import Environment, FileSystemLoader
+
+    root = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates"
+    )
+    env = Environment(loader=FileSystemLoader(str(root)))
+    env.globals["t"] = lambda key, **kw: key
+    env.globals["js_version"] = lambda: "1"
+    env.globals["css_version"] = lambda: "1"
+    for tpl in sorted(root.glob("*.html")):
+        env.get_template(tpl.name)  # raises TemplateSyntaxError on bad syntax
+    # And the specific regression: no JS pipes inside Jinja expressions.
+    import re as _re
+
+    settings = (root / "settings.html").read_text(encoding="utf-8")
+    assert not _re.search(r"\{\{[^}]*\|\|[^}]*\}\}", settings)
+
+
+def test_guard_notifies_on_operator_reload() -> None:
+    """2026-09-03: operator --reload was the ONLY silent restart path —
+    every restart since Sep 2 was a reload, so the operator's usual
+    Telegram restart alerts vanished. Reloads now send a quiet
+    informational notice (not the crash-page tone)."""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "scripts" / "service" / "kazma_guard.py"
+    ).read_text(encoding="utf-8")
+    branch = src.split("consume_reload_request()", 1)[1].split(
+        "self.restarts += 1", 1
+    )[0]
+    assert "self.notify.send(" in branch
+    assert "operator reload" in branch
