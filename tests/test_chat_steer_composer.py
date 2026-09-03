@@ -964,29 +964,42 @@ def test_guard_notifies_on_operator_reload() -> None:
 
 
 def test_four_delivery_routes_complete_fields() -> None:
-    """2026-09-03 v3: every route carries its COMPLETE credential set on the
-    one Delivery & Routing card — bot tokens AND destinations. v2 showed
-    chat ids only ("uses main bot token" badges) which forced the operator
-    back into the per-platform edit dialogs and left no place at all to set
-    Discord/Slack tokens."""
+    """2026-09-03 v4: the card carries EVERY field the old per-platform
+    cards had — token, allowed users, guild/workspace, enabled toggle,
+    Test — plus each route's destination. Connector state loads from
+    /api/connectors and saves via POST /api/connectors, the exact flow the
+    old dialogs used (token normalization, mask preservation, live
+    allowlist apply, adapter refresh)."""
     settings_html = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
     ).read_text(encoding="utf-8")
-    # Route sections with their credential inputs.
+    # Route sections: credential + destination + old-dialog platform fields.
     for needle in (
         "Telegram — Main bot",
-        "adapterRouting.tgToken",          # main bot TOKEN field
-        "tgMainChat",                       # main chat id
+        "adapterRouting.tgToken",
+        "tgMainChat",
+        "adapterRouting.tgAllowed",           # telegram allowed user ids
         "Telegram — Group",
         "tgGroupToken",
         "tgGroupEnabled",
         "Dedicated Bot Token",
-        "adapterRouting.discordToken",      # discord bot token field
+        "adapterRouting.discordToken",
+        "adapterRouting.discordGuild",        # discord guild id (old dialog)
+        "adapterRouting.discordAllowed",      # discord allowed user ids
         "discordChannel",
-        "adapterRouting.slackToken",        # slack bot token field
-        "adapterRouting.slackAppToken",     # slack app token (Socket Mode)
+        "adapterRouting.slackToken",
+        "adapterRouting.slackAppToken",
+        "adapterRouting.slackWorkspace",      # slack workspace (old dialog)
+        "adapterRouting.slackAllowed",        # slack allowed user ids
         "slackChannel",
+        # Enabled toggles + Test buttons per platform (old card affordances)
+        "adapterRouting.tgEnabled",
+        "adapterRouting.discordEnabled",
+        "adapterRouting.slackEnabled",
+        "testRoute('telegram')",
+        "testRoute('discord')",
+        "testRoute('slack')",
         "alertRoutes",
         "swarmRoutes",
         "telegram-group",
@@ -999,20 +1012,20 @@ def test_four_delivery_routes_complete_fields() -> None:
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
     ).read_text(encoding="utf-8")
-    # All four platform credentials are saved to the canonical keys the
-    # gateway adapters read (app.py gateway setup).
+    # Connector state rides the SAME endpoints as the old dialogs.
+    assert "_fetch('/api/connectors')" in hub
+    assert "fetch('/api/connectors'," in hub
+    assert "gateway/refresh-adapters" in hub
+    assert "_connectorPayloadFor" in hub
+    # Destinations + selectors still write the canonical settings keys.
     for key in (
-        "connectors.telegram.token",
-        "connectors.discord.token",
-        "connectors.slack.token",
-        "connectors.slack.app_token",
         "connectors.telegram.swarm_chat_id",
         "connectors.discord.swarm_channel_id",
         "connectors.slack.swarm_channel_id",
+        "notifications.ops.channels",
+        "notifications.swarm.routes",
     ):
         assert key in hub, key
-    # Mask guard: the vault mask is never written back over a real secret.
-    assert "!v.startsWith('***')" in hub
     # Group route saves through the output-target API; *** never sent back.
     assert "r.tgGroupToken !== '***'" in hub
     assert "swarm/output-target" in hub
@@ -1022,6 +1035,14 @@ def test_four_delivery_routes_complete_fields() -> None:
         / "kazma-ui" / "kazma_ui" / "services.py"
     ).read_text(encoding="utf-8")
     assert 'if bot_token in ("***",):' in services
+
+    providers = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "providers.py"
+    ).read_text(encoding="utf-8")
+    # Masked-extras guard: a masked app_token sent back unchanged must not
+    # clobber the stored credential (the old dialog silently did).
+    assert "_is_masked_placeholder(str(value))" in providers
 
     ops = (
         Path(__file__).resolve().parent.parent

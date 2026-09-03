@@ -330,14 +330,22 @@
         },
 
         async loadAdapterRouting() {
-            // Delivery & Routing card v3 (2026-09-03): four routes —
-            // telegram main bot / telegram GROUP (optional dedicated swarm
-            // bot) / discord / slack — each with its FULL credential set.
-            // Tokens come back vault-masked as '***' from the settings
-            // snapshot; '***' means "saved, leave untouched".
+            // Delivery & Routing card v4 (2026-09-03): the connector state
+            // loads from /api/connectors — the SAME source the old
+            // per-platform cards used (token masked ****XXXX, extras +
+            // enabled included) — so the card shows exactly what the old
+            // dialogs showed. Destinations + selectors come from the
+            // settings snapshot; the group route from the output target.
             try {
-                const data = await this._fetch('/api/settings');
+                const [data, connectors] = await Promise.all([
+                    this._fetch('/api/settings'),
+                    this._fetch('/api/connectors'),
+                ]);
                 if (!data) return;
+                const byName = {};
+                for (const c of (Array.isArray(connectors) ? connectors : [])) {
+                    byName[c.name] = c;
+                }
                 const conn = data.connectors || {};
                 const notif = data.notifications || {};
                 let alerts = notif['ops.channels'];
@@ -349,12 +357,21 @@
                     swarmRoutes = swarmRoutes.split(',').map(x => x.trim()).filter(Boolean);
                 }
                 const r = this.adapterRouting;
-                r.tgToken = String(conn['telegram.token'] || '');
+                const ex = (name, key) => String(((byName[name] || {}).extras || {})[key] || '');
+                r.tgToken = String((byName.telegram || {}).token || '');
+                r.tgEnabled = (byName.telegram || {}).enabled !== false;
+                r.tgAllowed = ex('telegram', 'allowed_users');
+                r.discordToken = String((byName.discord || {}).token || '');
+                r.discordEnabled = (byName.discord || {}).enabled !== false;
+                r.discordGuild = ex('discord', 'guild_id');
+                r.discordAllowed = ex('discord', 'allowed_users');
+                r.slackToken = String((byName.slack || {}).token || '');
+                r.slackAppToken = ex('slack', 'app_token');
+                r.slackWorkspace = ex('slack', 'workspace');
+                r.slackAllowed = ex('slack', 'allowed_users');
+                r.slackEnabled = (byName.slack || {}).enabled !== false;
                 r.tgMainChat = String(conn['telegram.swarm_chat_id'] || '');
-                r.discordToken = String(conn['discord.token'] || '');
                 r.discordChannel = String(conn['discord.swarm_channel_id'] || '');
-                r.slackToken = String(conn['slack.token'] || '');
-                r.slackAppToken = String(conn['slack.app_token'] || '');
                 r.slackChannel = String(conn['slack.swarm_channel_id'] || '');
                 r.alertRoutes = Array.isArray(alerts) ? alerts : [];
                 r.swarmRoutes = Array.isArray(swarmRoutes) ? swarmRoutes : [];
@@ -381,28 +398,61 @@
             if (!checked && idx !== -1) list.splice(idx, 1);
         },
 
+        _connectorPayloadFor(name) {
+            // Build the {name, token, enabled, extras} body the old
+            // per-platform dialogs POSTed — masked values are sent back
+            // as-is and the server preserves the stored secret.
+            const r = this.adapterRouting;
+            if (name === 'telegram') {
+                return {
+                    name, token: String(r.tgToken || ''), enabled: !!r.tgEnabled,
+                    extras: { allowed_users: String(r.tgAllowed || '').trim() },
+                };
+            }
+            if (name === 'discord') {
+                return {
+                    name, token: String(r.discordToken || ''), enabled: !!r.discordEnabled,
+                    extras: {
+                        guild_id: String(r.discordGuild || '').trim(),
+                        allowed_users: String(r.discordAllowed || '').trim(),
+                    },
+                };
+            }
+            if (name === 'slack') {
+                return {
+                    name, token: String(r.slackToken || ''), enabled: !!r.slackEnabled,
+                    extras: {
+                        app_token: String(r.slackAppToken || ''),
+                        workspace: String(r.slackWorkspace || '').trim(),
+                        allowed_users: String(r.slackAllowed || '').trim(),
+                    },
+                };
+            }
+            return null;
+        },
+
         async saveAdapterRouting() {
             this.adapterRoutingSaving = true;
             try {
                 const r = this.adapterRouting;
                 const puts = [];
+                // Platform connector state — the exact POST the old dialogs
+                // sent (normalizes tokens, preserves masked values, applies
+                // allowlists live).
+                for (const name of ['telegram', 'discord', 'slack']) {
+                    const payload = this._connectorPayloadFor(name);
+                    if (!payload) continue;
+                    puts.push(fetch('/api/connectors', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify(payload),
+                    }));
+                }
                 const single = (key, value, category) => puts.push(fetch('/api/settings/single', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ key, value, category }),
                 }));
-                // Credential fields: '***' is the vault mask for an already
-                // saved value — never write it back (it would clobber the
-                // real secret). Empty also means "leave unchanged"; typing a
-                // new value replaces the stored one.
-                const secretPut = (key, value) => {
-                    const v = String(value || '').trim();
-                    if (v && v !== '***' && !v.startsWith('***')) single(key, v, 'connectors');
-                };
-                secretPut('connectors.telegram.token', r.tgToken);
-                secretPut('connectors.discord.token', r.discordToken);
-                secretPut('connectors.slack.token', r.slackToken);
-                secretPut('connectors.slack.app_token', r.slackAppToken);
                 single('connectors.telegram.swarm_chat_id', String(r.tgMainChat || '').trim(), 'connectors');
                 single('connectors.discord.swarm_channel_id', String(r.discordChannel || '').trim(), 'connectors');
                 single('connectors.slack.swarm_channel_id', String(r.slackChannel || '').trim(), 'connectors');
@@ -434,12 +484,47 @@
                 const results = await Promise.all(puts);
                 const bad = results.find(x => !x.ok);
                 if (bad) throw new Error('HTTP ' + bad.status);
+                // Rebuild the platform adapters from the new config, exactly
+                // like the old connector dialogs did after save.
+                try {
+                    await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
+                } catch (eRef) {
+                    console.warn('[Hub] Gateway refresh failed:', eRef);
+                }
                 showToast('Delivery & routing saved.', 'success');
                 this.loadAdapterRouting();
             } catch (e) {
                 showToast('Save failed: ' + e.message, 'error');
             }
             this.adapterRoutingSaving = false;
+        },
+
+        async testRoute(name) {
+            // Mirrors the old modal's test: save this platform's card state
+            // first (the test runs against SAVED credentials), then run the
+            // platform health check and show the result inline.
+            if (!['telegram', 'discord', 'slack'].includes(name)) return;
+            this.adapterRoutingTesting = name;
+            this.adapterRoutingTest = null;
+            try {
+                const payload = this._connectorPayloadFor(name);
+                if (payload) {
+                    const saveResp = await fetch('/api/connectors', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify(payload),
+                    });
+                    if (!saveResp.ok) throw new Error('save failed (HTTP ' + saveResp.status + ')');
+                }
+                const resp = await fetch('/api/connectors/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+                const result = await resp.json();
+                this.adapterRoutingTest = { name, ...result };
+                showToast(result.success ? 'Connection test succeeded' : 'Test failed: ' + (result.error || 'unknown'), result.success ? 'success' : 'error');
+            } catch (e) {
+                this.adapterRoutingTest = { name, success: false, error: e.message };
+                showToast('Test failed: ' + e.message, 'error');
+            }
+            this.adapterRoutingTesting = '';
         },
 
         async loadHubProfiles() {
