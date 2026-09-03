@@ -111,8 +111,29 @@ def _vault_get(name: str) -> str:
         vault = get_vault()
         if vault is None:
             return ""
-        val = vault.retrieve(name)
-        return str(val).strip() if val else ""
+        # Tenant ladder (2026-09-03): vault.retrieve() with no tenant sees
+        # ONLY global rows, but connector credentials saved via Settings
+        # live under the operator's tenant (single-operator installs:
+        # 'default'). Background consumers (scheduled fire loop) carry no
+        # tenant context — resolve current tenant, then 'default', then
+        # global so a scheduled post sees the same keys a chat post does.
+        tenants: list[str | None] = []
+        try:
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            current = get_current_tenant_id()
+            if current:
+                tenants.append(current)
+        except Exception:
+            pass
+        for fallback in ("default", None):
+            if fallback not in tenants:
+                tenants.append(fallback)
+        for tid in tenants:
+            val = vault.retrieve(name, tid)
+            if val and str(val).strip():
+                return str(val).strip()
+        return ""
     except Exception:
         return ""
 
