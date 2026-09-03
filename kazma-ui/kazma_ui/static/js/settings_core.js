@@ -205,6 +205,11 @@
         hubSubtab: 'providers',
         hubProviders: [],
         hubConnectors: [],
+        // Delivery & Routing (Settings → Providers & Connectors →
+        // Platform Connectors): ops-alert channels + per-platform swarm
+        // output channels. Moved from the Swarm tab (2026-09-03).
+        adapterRouting: { channels: [], swarmChat: { telegram: '', discord: '', slack: '' } },
+        adapterRoutingSaving: false,
         hubProfiles: [],
         hubProviderModal: false,
         hubConnectorModal: false,
@@ -504,6 +509,7 @@
                         self.loadHubProviders(),
                         self.loadHubConnectors(),
                         self.loadHubProfiles(),
+                        self.loadAdapterRouting(),
                     ]);
                 }
             } catch (e) {

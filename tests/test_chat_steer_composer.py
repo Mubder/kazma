@@ -852,3 +852,40 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
         / "kazma-ui" / "kazma_ui" / "sse_chat" / "_streaming.py"
     ).read_text(encoding="utf-8")
     assert 'data["replay"] = True' in sse
+
+
+def test_ops_alert_channel_routing_and_adapter_page() -> None:
+    """2026-09-03: operators choose WHERE ops alerts go
+    (notifications.ops.channels) and manage every adapter setting —
+    including the swarm output channels — on the connectors settings tab
+    (moved out of the Swarm page)."""
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-core" / "kazma_core" / "observability" / "ops_alerts.py"
+    ).read_text(encoding="utf-8")
+    assert "def _ops_channels()" in src
+    assert "notifications.ops.channels" in src
+    # Channel selection filters the bus adapters by name.
+    assert "FanOutBusAdapter" in src
+    assert 'str(getattr(a, "name", "") or "").lower() in channels' in src
+    # Telegram-direct fallback honors the choice.
+    assert '"telegram" not in channels' in src
+
+    settings_html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
+    ).read_text(encoding="utf-8")
+    assert "toggleRoutingChannel" in settings_html
+    assert "notifications.ops.channels" in (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
+    ).read_text(encoding="utf-8")
+    # The swarm output form is GONE from the Swarm page (moved, not
+    # duplicated) — only the pointer card remains.
+    swarm_html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "swarm.html"
+    ).read_text(encoding="utf-8")
+    assert "output-routing-bot-token" not in swarm_html
+    assert "saveOutputTarget()" not in swarm_html
+    assert "output-routing-card" in swarm_html  # pointer card remains

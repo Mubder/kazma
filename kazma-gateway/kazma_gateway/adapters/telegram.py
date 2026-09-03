@@ -270,6 +270,8 @@ class TelegramAdapter(BaseAdapter):
                     self._running = False
                     return
                 bot_info = me_resp.json().get("result", {})
+                self._bot_username = str(bot_info.get("username") or "")
+                self._group_announced: set[str] = set()
                 logger.info(
                     "[telegram] Connected as @%s (%s)",
                     bot_info.get("username", "unknown"),
@@ -532,6 +534,17 @@ class TelegramAdapter(BaseAdapter):
         run on a per-chat chain task instead of blocking getUpdates.
         """
         try:
+            # Group discovery (2026-09-03): when the bot is added to a
+            # group (or a group is created with it), announce the group's
+            # chat id right there. Group ids (-100…) are otherwise nearly
+            # impossible to find, which blocked "add a telegram group" as
+            # an alerts/swarm-output target. Best-effort: never blocks the
+            # normal message path.
+            try:
+                await self._announce_if_added_to_group(update)
+            except Exception:
+                logger.debug("[telegram] group-add announce skipped", exc_info=True)
+
             # Handle voice messages (async download + transcribe)
             # and generic media (photo/document/video/animation).
             msg = self._parse_update(update)
@@ -1209,6 +1222,64 @@ class TelegramAdapter(BaseAdapter):
         return transcription
 
     # ── Typing indicator (fire-and-forget) ──────────────────────────
+
+    async def _announce_if_added_to_group(self, update: dict) -> None:
+        """When the bot joins a group, post the group's chat id there.
+
+        Group ids (-100…) are otherwise nearly impossible for an operator
+        to find — this is what makes "add a Telegram group" as an
+        alerts/swarm-output target actually usable (2026-09-03). Fired on
+        ``group_chat_created`` or on ``new_chat_members`` containing this
+        bot. Best-effort and idempotent per chat.
+        """
+        message = update.get("message") or {}
+        chat = message.get("chat") or {}
+        chat_type = str(chat.get("type") or "")
+        if chat_type not in ("group", "supergroup"):
+            return
+        added = bool(message.get("group_chat_created")) or bool(
+            message.get("supergroup_chat_created")
+        )
+        if not added:
+            members = message.get("new_chat_members") or []
+            me = getattr(self, "_bot_username", "") or ""
+            for m in members:
+                if str(m.get("username") or "").lstrip("@") == me.lstrip("@") or m.get("is_bot"):
+                    added = True
+                    break
+        if not added:
+            return
+        chat_id = chat.get("id")
+        if not chat_id:
+            return
+        key = f"tg:group-announced:{chat_id}"
+        announced = getattr(self, "_group_announced", None)
+        if announced is None:
+            announced = set()
+            self._group_announced = announced
+        if key in announced:
+            return
+        announced.add(key)
+        text = (
+            f"👋 Kazma here. This group's chat id:\n"
+            f"`{chat_id}`\n\n"
+            "Use it in Settings → Providers & Connectors → Platform "
+            "Connectors → Delivery & Routing (ops alerts / swarm output), "
+            "or anywhere a target chat id is asked for.\n"
+            "Note: for me to see ALL group messages (not just commands and "
+            "replies), disable privacy mode via @BotFather → /setprivacy."
+        )
+        try:
+            if self._http is not None:
+                await self._http.post(
+                    "/sendMessage",
+                    json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                )
+                logger.info(
+                    "[telegram] Announced group chat id %s on join", chat_id
+                )
+        except Exception:
+            logger.debug("[telegram] group-id announce send failed", exc_info=True)
 
     async def _trigger_typing(self, target_id: str) -> None:
         """Send a 'typing…' chat action to the user (fire-and-forget)."""

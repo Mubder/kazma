@@ -994,3 +994,30 @@ class TestToolWorkerUnbackedGate:
                 },
             )
         assert exe.calls == []
+
+
+class TestOpsAlertRouting:
+    """2026-09-03: notifications.ops.channels routes ops alerts."""
+
+    def test_channels_parse_list_and_csv(self, monkeypatch) -> None:
+        from kazma_core.observability import ops_alerts as oa
+
+        class _CS:
+            def __init__(self, v):
+                self._v = v
+
+            def get(self, key, default=None):
+                return self._v if key == "notifications.ops.channels" else default
+
+        monkeypatch.setattr(
+            "kazma_core.config_store.get_config_store", lambda: _CS(["Telegram", " discord "])
+        )
+        assert oa._ops_channels() == ["telegram", "discord"]
+        monkeypatch.setattr(
+            "kazma_core.config_store.get_config_store", lambda: _CS("slack")
+        )
+        assert oa._ops_channels() == ["slack"]
+        monkeypatch.setattr(
+            "kazma_core.config_store.get_config_store", lambda: _CS(None)
+        )
+        assert oa._ops_channels() == []

@@ -592,39 +592,15 @@
           </form>
         </div>
 
-        <!-- Phase 5: Output Routing -->
+        <!-- Phase 5: Output Routing — MOVED to Settings → Providers & Connectors →
+     Platform Connectors (Delivery & Routing card, 2026-09-03). Kept as a
+     pointer so existing muscle-memory finds it. -->
         <div class="card" id="output-routing-card">
-          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:16px;"><span class="ki" data-icon="upload" aria-hidden="true"></span> {{ t('swarm.output_routing') }}</h3>
-          <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:16px;">
-            {{ t('swarm.output_routing_desc') }}
+          <h3 style="font-size:0.95rem;font-weight:600;margin-bottom:8px;"><span class="ki" data-icon="upload" aria-hidden="true"></span> Output Routing</h3>
+          <p style="font-size:0.8rem;color:var(--text-muted);">
+            Output routing now lives with the other adapter settings:
+            <strong>Settings → Providers &amp; Connectors → Platform Connectors → Delivery &amp; Routing</strong>.
           </p>
-          <form id="output-routing-form" onsubmit="return false;">
-            <div class="form-group">
-              <label class="form-label">
-                <input type="checkbox" id="output-routing-enabled" style="margin-right:6px;vertical-align:middle;">
-                {{ t('swarm.enable_routing') }}
-              </label>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.swarm_bot_token') }} <span style="font-size:0.7rem;color:var(--text-muted);">({{ t('swarm.swarm_bot_token_hint') }})</span></label>
-              <input type="password" id="output-routing-bot-token" class="form-input" placeholder="8668...:AAF..." style="font-family:var(--font-mono);">
-              <span style="font-size:0.7rem;color:var(--text-tertiary);display:block;margin-top:4px;">
-                {{ t('swarm.swarm_bot_token_desc') }}
-              </span>
-            </div>
-            <div class="form-group">
-              <label class="form-label">{{ t('swarm.target_chat_id') }}</label>
-              <input type="text" id="output-routing-chat-id" class="form-input" placeholder="1804015016 or -1001234567890" style="font-family:var(--font-mono);">
-              <span style="font-size:0.7rem;color:var(--text-tertiary);display:block;margin-top:4px;">
-                {{ t('swarm.target_chat_id_desc') }}
-              </span>
-            </div>
-            <div class="form-actions" style="display:flex;gap:8px;">
-              <button type="button" class="btn btn-primary" onclick="KazmaSwarm.saveOutputTarget()">{{ t('swarm.save') }}</button>
-              <button type="button" class="btn btn-secondary" onclick="KazmaSwarm.clearOutputTarget()">{{ t('swarm.clear') }}</button>
-              <span id="output-routing-status" style="font-size:0.8rem;color:var(--text-muted);align-self:center;margin-left:auto;"></span>
-            </div>
-          </form>
         </div>
       </div>
     </div>

@@ -36,6 +36,7 @@ import os
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,27 @@ def _format(severity: str, title: str, detail: str, suppressed: int,
     return text
 
 
+def _ops_channels() -> list[str]:
+    """User-selected delivery platforms for ops alerts (live-read).
+
+    ``notifications.ops.channels`` = e.g. ``["telegram", "discord"]``.
+    Empty/missing = ALL configured platforms (the previous fan-out
+    behaviour). Never raises — routing config problems must not mute an
+    alert (the mute-theorem in the module header).
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        raw = get_config_store().get("notifications.ops.channels", [])
+        if isinstance(raw, str):
+            raw = [p.strip().lower() for p in raw.split(",") if p.strip()]
+        if isinstance(raw, (list, tuple)):
+            return [str(p).strip().lower() for p in raw if str(p).strip()]
+    except Exception:
+        logger.debug("[ops_alerts] channels read failed — routing to all", exc_info=True)
+    return []
+
+
 def _telegram_direct(text: str) -> bool:
     """Send straight to Telegram, bypassing the in-process bus.
 
@@ -196,21 +218,49 @@ async def _deliver(text: str) -> bool:
     just Telegram) and falls back to a direct send. Silence is never an
     acceptable outcome here: if neither works, that is logged at WARNING
     rather than swallowed.
+
+    Routing (2026-09-03): ``notifications.ops.channels`` selects which
+    platforms receive ops alerts (empty = all configured). With a FanOut
+    bus only the selected adapters are sent through; the Telegram-direct
+    fallback only fires when Telegram is among the selected (or routing
+    is unset).
     """
+    channels = _ops_channels()
     try:
-        from kazma_core.swarm.bus import BusMessage, NullBusAdapter, get_message_bus
+        from kazma_core.swarm.bus import (
+            BusMessage,
+            FanOutBusAdapter,
+            NullBusAdapter,
+            get_message_bus,
+        )
 
         adapter = get_message_bus().adapter
         if not isinstance(adapter, NullBusAdapter):
-            await asyncio.wait_for(
-                adapter.send(
-                    BusMessage(
-                        worker_name="Kazma",
-                        worker_role="ops",
-                        content=text[:4000],
-                        level="warn",
+            targets: list[Any] = []
+            if isinstance(adapter, FanOutBusAdapter):
+                targets = list(adapter.adapters)
+            else:
+                targets = [adapter]
+            if channels:
+                targets = [
+                    a for a in targets
+                    if str(getattr(a, "name", "") or "").lower() in channels
+                ]
+                if not targets:
+                    logger.info(
+                        "[ops_alerts] channels %s match no configured "
+                        "adapter — alert not bus-delivered (operator "
+                        "routing choice)", channels,
                     )
-                ),
+                    return True  # deliberately routed nowhere on the bus
+            msg = BusMessage(
+                worker_name="Kazma",
+                worker_role="ops",
+                content=text[:4000],
+                level="warn",
+            )
+            await asyncio.wait_for(
+                asyncio.gather(*(a.send(msg) for a in targets)),
                 timeout=10.0,
             )
             return True
@@ -218,6 +268,14 @@ async def _deliver(text: str) -> bool:
         logger.warning("[ops_alerts] bus delivery failed, trying direct: %s", exc)
 
     # No platform bus in this process (worker/CLI/script) -- go direct.
+    # Direct is Telegram-only: honor the routing choice.
+    if channels and "telegram" not in channels:
+        logger.info(
+            "[ops_alerts] no bus adapter and Telegram not in channels %s "
+            "— alert exists only in this log (operator routing choice)",
+            channels,
+        )
+        return True
     return await asyncio.get_running_loop().run_in_executor(
         None, _telegram_direct, text
     )

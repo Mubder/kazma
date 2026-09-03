@@ -329,6 +329,70 @@
             }
         },
 
+        async loadAdapterRouting() {
+            // Delivery & Routing card (2026-09-03): ops-alert channels +
+            // per-platform swarm output channels. Read from the grouped
+            // settings snapshot (chat ids are not secret).
+            try {
+                const data = await this._fetch('/api/settings');
+                if (!data) return;
+                const pick = (cat, key) => (data[cat] || {})[key];
+                let channels = pick('notifications', 'ops.channels');
+                if (typeof channels === 'string') {
+                    channels = channels.split(',').map(s => s.trim()).filter(Boolean);
+                }
+                this.adapterRouting.channels = Array.isArray(channels) ? channels : [];
+                const swarmChat = {};
+                const conn = data.connectors || {};
+                for (const p of ['telegram', 'discord', 'slack']) {
+                    swarmChat[p] = String(conn[p + '.swarm_chat_id'] || '');
+                }
+                this.adapterRouting.swarmChat = swarmChat;
+            } catch (e) {
+                console.error('[Hub] Failed to load adapter routing:', e);
+            }
+        },
+
+        toggleRoutingChannel(platform, checked) {
+            const list = this.adapterRouting.channels || [];
+            const idx = list.indexOf(platform);
+            if (checked && idx === -1) list.push(platform);
+            if (!checked && idx !== -1) list.splice(idx, 1);
+        },
+
+        async saveAdapterRouting() {
+            this.adapterRoutingSaving = true;
+            try {
+                const saves = [fetch('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({
+                        key: 'notifications.ops.channels',
+                        value: (this.adapterRouting.channels || []).join(','),
+                        category: 'notifications',
+                    }),
+                })];
+                for (const p of ['telegram', 'discord', 'slack']) {
+                    saves.push(fetch('/api/settings/single', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: JSON.stringify({
+                            key: 'connectors.' + p + '.swarm_chat_id',
+                            value: String((this.adapterRouting.swarmChat || {})[p] || '').trim(),
+                            category: 'connectors',
+                        }),
+                    }));
+                }
+                const results = await Promise.all(saves);
+                const bad = results.find(r => !r.ok);
+                if (bad) throw new Error('HTTP ' + bad.status);
+                showToast('Delivery & routing saved.', 'success');
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            }
+            this.adapterRoutingSaving = false;
+        },
+
         async loadHubProfiles() {
             try {
                 const data = await this._fetch('/api/models/profiles');
