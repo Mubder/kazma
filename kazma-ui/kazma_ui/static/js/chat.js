@@ -1244,7 +1244,12 @@
     open: false, tickTimer: null, doneTimer: null,
     textOverride: '', summary: '', emptyTurn: false,
     announced: '', stepsHtml: '',
+    // Label hysteresis (2026-09-03): tool→think→tool flips made the header
+    // churn on every event of a multi-step turn. A non-escalating label
+    // change is only accepted after this long; escalations always apply.
+    labelShown: '', labelShownAt: 0, phaseShown: '',
   };
+  var _TC_LABEL_MIN_MS = 1200;
 
   function _tcMount() {
     if (_tc.el) return _tc.el;
@@ -1383,8 +1388,22 @@
     var now = Date.now();
     var terminal = _tc.phase === 'done' || _tc.phase === 'error';
     if (!terminal) _tc.elapsedS = _tcElapsed(now);
-    if (_tc.phaseEl) _tc.phaseEl.textContent = _tcPhaseIcon(_tc.phase);
-    if (_tc.label) _tc.label.textContent = _tcPhaseLabel();
+    // Label hysteresis: show label + icon as ONE accepted snapshot so a
+    // fast tool batch cannot strobe the header (Thinking ↔ Running X ↔
+    // Thinking ↔ Running Y …). Escalations cut through immediately.
+    var escalated = _tc.phase === 'awaiting' || _tc.stalled || _tc.dead || terminal;
+    var lbl = _tcPhaseLabel();
+    if (lbl !== _tc.labelShown) {
+      if (escalated || !_tc.labelShownAt || now - _tc.labelShownAt >= _TC_LABEL_MIN_MS) {
+        _tc.labelShown = lbl;
+        _tc.phaseShown = _tc.phase;
+        _tc.labelShownAt = now;
+      }
+    } else {
+      _tc.phaseShown = escalated ? _tc.phase : (_tc.phaseShown || _tc.phase);
+    }
+    if (_tc.phaseEl) _tc.phaseEl.textContent = _tcPhaseIcon(_tc.phaseShown || _tc.phase);
+    if (_tc.label) _tc.label.textContent = _tc.labelShown || lbl;
 
     var bits = [];
     if (terminal) {
@@ -1608,6 +1627,9 @@
       _tc.emptyTurn = false;
       _tc.announced = '';
       _tc.stepsHtml = '';
+      _tc.labelShown = '';
+      _tc.phaseShown = '';
+      _tc.labelShownAt = 0;
       if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
       _tcWake(now);
       _tcSetPhase('llm', '', '', now);
@@ -4347,7 +4369,9 @@
     if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
 
     panel.classList.add('is-active');
-    panel.classList.remove('is-collapsed', 'is-done');
+    // Never auto-expand (2026-09-03): un-done yes, un-collapse no — the
+    // user's chevron click is the only thing that opens a CoT panel.
+    panel.classList.remove('is-done');
     list.scrollTop = list.scrollHeight;
     scrollToBottom();
   }
@@ -5309,23 +5333,12 @@
       if (kids[i].classList.contains('hitl-approval-card')) lastCard = kids[i];
       else if (!progress && kids[i].classList.contains('agent-progress')) progress = kids[i];
     }
-    // Expand ONLY a panel that actually traps a card. This used to open
-    // every collapsed workbench in the bubble, which was aimed at a card
-    // nested inside one — but the card is placed as a SIBLING here, so the
-    // sweep only ever hit the durable one-line summary and left it open
-    // forever (the terminal repaint below inherits that expansion). Every
-    // turn that saw an approval ended up with the old full CoT ladder
-    // sitting in the transcript (2026-09-03).
-    try {
-      var nested = host.querySelectorAll
-        ? host.querySelectorAll('.agent-progress.is-collapsed')
-        : [];
-      for (i = 0; i < nested.length; i++) {
-        if (nested[i].querySelector('.hitl-approval-card')) {
-          nested[i].classList.remove('is-collapsed');
-        }
-      }
-    } catch (eOpen) { /* ignore */ }
+    // NEVER auto-expand a CoT panel (2026-09-03): expansion is the user's
+    // click only. The old sweep opened collapsed panels that trapped a
+    // card — with the card parked as a sibling, an auto-expanded panel
+    // just pushed the approval card below the fold while the reader was
+    // scrolled elsewhere. A trapped card is LIFTED out by the caller's
+    // cleanup, not revealed by expanding its cage.
     var after = lastCard || progress;
     try {
       if (after && after.parentNode === host && after !== card) {
@@ -5464,6 +5477,30 @@
     }
   }
 
+  /** A pending approval card must be SEEN, not just rendered: if the
+   *  reader is scrolled up (or a tall bubble grew past the fold), bounce
+   *  the chat so the card lands center-frame (2026-09-03). Claimed/historical
+   *  cards never bounce — only a live ask with enabled buttons does. */
+  function _revealHitlCard(card) {
+    if (!card || !card.isConnected) return;
+    try {
+      if (document.hidden) return;
+      var live = false;
+      var btns = card.querySelectorAll('button');
+      for (var i = 0; i < btns.length; i++) {
+        if (!btns[i].disabled) { live = true; break; }
+      }
+      if (!live) return;
+      var r = card.getBoundingClientRect();
+      var vh = window.innerHeight || 0;
+      if (r.top >= 0 && r.bottom <= vh) return; // already visible
+      setTimeout(function () {
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+        catch (eSv) { try { card.scrollIntoView(); } catch (eSv2) { /* ignore */ } }
+      }, 60);
+    } catch (eRv) { /* never break the render */ }
+  }
+
   function renderHitlCard(data, opts) {
     if (!data) return;
     var lockComposer = !(opts && opts.lock === false);
@@ -5554,6 +5591,7 @@
           }).join('') +
         '</div>';
       _placeHitlCard(content, _semCard);
+      _revealHitlCard(_semCard);
       _attachHitlCountdown(_semCard, data);
       if (hasInlineApprovalCard()) _clearStoreApproval();
       else _showStoreApproval(data);
@@ -5702,6 +5740,7 @@
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
     _placeHitlCard(content, card);
+    _revealHitlCard(card);
     _attachHitlCountdown(card, data);
     if (hasInlineApprovalCard()) _clearStoreApproval();
     else _showStoreApproval(data);
@@ -7030,7 +7069,9 @@
     currentMsgEl = prev || el;
     if (!panel) return;
     if (holdOpen) {
-      panel.classList.remove('is-collapsed', 'is-done');
+      // Re-activate but never auto-expand: an approval pause must not
+      // spring a collapsed panel open under the reader (2026-09-03).
+      panel.classList.remove('is-done');
       panel.classList.add('is-active');
     }
     var list = panel.querySelector('.agent-progress-steps');
