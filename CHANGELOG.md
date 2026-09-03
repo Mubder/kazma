@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Fix — guard logged "holder_reaped" for a kill that never happened (2026-09-03)
+
+Live incident: an elevated zombie python (pid 113924) held port 9090 and
+survived the guard's non-admin taskkill — while the guard logged
+``port.holder_reaped`` three times in one evening. Every ``--reload``
+then silently discarded the new child (bind failure) while the zombie
+kept serving the OLD build: the operator's restart never took effect,
+and the pre-fix alert-routing code on the zombie dropped every routed
+ops alert. Two honesty fixes:
+
+- ``reap_port_holder`` now captures taskkill's output (an Access Denied
+  on an elevated holder was swallowed) and MEASURES the kill: if the pid
+  is still alive it logs ``port.holder_reap_ineffective`` (error, with
+  the admin taskkill command) and returns False. Success is measured,
+  not assumed.
+- The supervisor loop re-checks the port after the pre-spawn clear and,
+  when something still holds it, pages the operator once per holder pid
+  (mute-theorem dedupe): "RESTART DID NOT TAKE EFFECT: pid X still owns
+  port 9090 and is serving the OLD build — kill it from an ADMIN
+  terminal." The kill needs an elevated shell only the operator can
+  open; the guard cannot stay quiet about it.
+
+Tests: behavioral reap survive/die pair + supervisor page-once slices in
+``tests/test_kazma_guard_reload.py``.
+
 ## Fix — routing choices "didn't hold" after save (2026-09-03 v5)
 
 The saves were working all along (the store held the selection and ops
