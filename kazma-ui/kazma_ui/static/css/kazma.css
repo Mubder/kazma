@@ -1851,6 +1851,12 @@ tbody tr:last-child td {
 .hitl-approval-card.hitl-approved { border-color: var(--success); }
 .hitl-approval-card.hitl-denied { border-color: var(--danger); }
 .hitl-approval-card.hitl-error { border-color: var(--danger); }
+/* Once answered the card is a RECORD, not a prompt: the how-to-choose tips
+   are spent, and they were a third of its height in the transcript. What
+   was asked, and what was decided, stay. */
+.hitl-approval-card.hitl-approved .hitl-scope-hint,
+.hitl-approval-card.hitl-denied .hitl-scope-hint,
+.hitl-approval-card.hitl-error .hitl-scope-hint { display: none; }
 .hitl-status { font-size: 0.8rem; font-weight: 600; }
 .hitl-status.hitl-approved { color: var(--success); }
 .hitl-status.hitl-denied { color: var(--danger); }
@@ -2185,9 +2191,9 @@ tbody tr:last-child td {
   font-size: 0.8rem;
 }
 
-/* ── Live Task Card (2026-09-03) — the ONE turn-state surface ──────
-   Merged live indicator + compact CoT. Docked between transcript and
-   composer; one line collapsed, expands upward. */
+/* ── Live Task Card — the ONE turn-state surface ──────────────────
+   Merged live indicator + compact CoT + the turn's own actions. Docked
+   between transcript and composer; one line collapsed, expands upward. */
 .live-task-card {
   margin: 0 var(--sp-3) var(--sp-2);
   border: 1px solid color-mix(in srgb, var(--accent, #6c8cff) 28%, transparent);
@@ -2201,13 +2207,32 @@ tbody tr:last-child td {
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 12px;
+  padding: 3px 8px 3px 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+/* The expander owns the informative half of the row and grows to fill it;
+   the action buttons keep their intrinsic width at the end. */
+.live-task-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 4px 7px 12px;
   background: none;
   border: none;
   cursor: pointer;
   text-align: start;
-  color: var(--text-secondary);
-  font-size: 0.85rem;
+  color: inherit;
+  font: inherit;
+}
+[dir="rtl"] .live-task-header { padding: 3px 0 3px 8px; }
+[dir="rtl"] .live-task-toggle { padding: 7px 12px 7px 4px; }
+.live-task-phase {
+  flex: 0 0 auto;
+  font-size: 0.95rem;
+  line-height: 1;
 }
 .live-task-label {
   font-weight: 600;
@@ -2215,27 +2240,60 @@ tbody tr:last-child td {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .live-task-meta {
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   font-size: 0.78rem;
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+.live-task-chevron {
+  margin-inline-start: auto;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  flex: 0 0 auto;
 }
 .live-task-stall {
   color: var(--warning, #facc15);
   font-size: 0.78rem;
   font-weight: 600;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
-.live-task-chevron {
-  margin-inline-start: auto;
-  color: var(--text-muted);
-  font-size: 0.75rem;
+/* Turn actions: Stop while running, Review to reach the approval buttons,
+   Retry once liveness recovery has given up. */
+.live-task-act {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-elevated, transparent);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.live-task-act:hover {
+  color: var(--text-primary);
+  border-color: var(--accent, #6c8cff);
+}
+.live-task-stop:hover {
+  color: var(--danger, #ef4444);
+  border-color: var(--danger, #ef4444);
+}
+.live-task-jump {
+  color: var(--warning, #facc15);
+  border-color: color-mix(in srgb, var(--warning, #facc15) 55%, transparent);
 }
 .live-task-body {
-  border-top: 1px solid var(--border-subtle, rgba(128,128,128,0.18));
-  background: color-mix(in srgb, var(--bg, #0b0f17) 55%, transparent);
+  border-top: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.18));
+  /* No hardcoded dark fallback: an unset --bg used to paint this near-black
+     in the light theme. Tint the surface the card already sits on. */
+  background: color-mix(in srgb, var(--text-primary, #000) 4%, transparent);
 }
 .live-task-steps {
   list-style: none;
@@ -2243,6 +2301,7 @@ tbody tr:last-child td {
   padding: 4px 0;
   max-height: 220px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .live-task-step {
   display: flex;
@@ -2275,16 +2334,33 @@ tbody tr:last-child td {
 .live-task-card.is-stalled {
   border-color: var(--warning, #facc15);
 }
+.live-task-card.is-dead {
+  border-color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 6%, var(--bg-elevated, transparent));
+}
 .live-task-card.is-done {
   border-color: var(--success, #10b981);
+}
+/* A turn that delivered nothing must not look like a success. */
+.live-task-card.is-empty {
+  border-color: var(--warning, #facc15);
 }
 .live-task-card.is-error {
   border-color: var(--danger, #ef4444);
 }
+/* Approval card the Review button just scrolled to. */
+.hitl-approval-card.is-flash {
+  animation: kz-hitl-flash 1.4s ease-out 1;
+}
+@keyframes kz-hitl-flash {
+  0%, 100% { box-shadow: none; }
+  20%, 60% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning, #facc15) 55%, transparent); }
+}
 @media (prefers-reduced-motion: reduce) {
   .live-task-card, .live-task-header { transition: none; }
+  .hitl-approval-card.is-flash { animation: none; outline: 2px solid var(--warning, #facc15); }
 }
-[dir="rtl"] .live-task-header { text-align: end; }
+[dir="rtl"] .live-task-toggle { text-align: end; }
 
 /* ── Agent turn workbench (Plan + Activity) ─────────────────────── */
 .agent-progress {
@@ -5019,11 +5095,15 @@ canvas { display: block; border-radius: 4px; }
    unreadable -- while the card takes 493px beside it. Whatever the container
    turns out to be, these two are never flex items sharing a line. */
 .hitl-approval-card {
-  /* Full width, and a 100% basis so that if the container is ever a flex row
-     this takes the whole line rather than sharing it with the reasoning
-     panel. See .message-content flex-wrap. */
   width: 100%;
-  flex: 1 1 100%;
+  /* NEVER grow by default. `flex: 1 1 100%` is a .message-content rule (see
+     the override below) — that container is a wrapping flex ROW, where the
+     100% basis is what puts the card on its own line instead of sharing it
+     with the reasoning panel. The store-driven fallback card is a direct
+     child of .chat-main, a flex COLUMN: there the same declaration means
+     grow-to-fill, so the card ate the entire chat pane and squeezed the
+     transcript to a sliver (2026-09-03). */
+  flex: 0 0 auto;
   /* Same horizontal inset as .agent-progress (none). 16px left/right
      shifted the card off the CoT column while width:100% still applied. */
   margin: 8px 0 12px;
@@ -5042,6 +5122,21 @@ canvas { display: block; border-radius: 4px; }
 }
 .hitl-approval-card:last-child { margin-bottom: 0; }
 .hitl-approval-card:hover { border-color: var(--border-strong); }
+/* In a bubble the container IS a wrapping flex row: take the whole line. */
+.message-content > .hitl-approval-card,
+.agent-progress .hitl-approval-card {
+  flex: 1 1 100%;
+}
+/* The store-driven fallback strip sits between the transcript and the
+   composer. Inset it like the Live Task Card, and cap it: a long tool
+   argument list must scroll inside the card, never push the transcript out
+   of the pane. */
+.chat-main > .hitl-approval-card {
+  margin: 0 var(--sp-3) var(--sp-2);
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .hitl-approval-header {
   display: flex;
   align-items: center;

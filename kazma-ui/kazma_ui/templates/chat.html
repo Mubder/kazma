@@ -81,19 +81,32 @@
     </div>
 
     <!-- Live Task Card — the ONE turn-state surface: merged live indicator
-         (phase · elapsed · step · liveness · approval countdown) + compact
-         expandable step list. Owned by chat.js _TaskCard; Alpine never
-         writes here. Finalizes into the turn's transcript bubble on done. -->
+         (phase · target · elapsed · step · liveness · approval countdown) +
+         compact expandable step list, plus the turn's own actions (Stop /
+         Review / Retry). Owned by chat.js _taskCardEvent; Alpine never
+         writes here. Finalizes into the turn's transcript bubble on done.
+
+         a11y: the toggle keeps a STATIC accessible name ("Task details") so
+         a per-second header rewrite does not spam screen readers; the phase,
+         countdown and stall warning are announced through .live-task-live
+         at coarse thresholds instead. -->
     <div id="live-task-card" class="live-task-card" hidden>
-      <button type="button" class="live-task-header" aria-expanded="false" aria-controls="live-task-body">
-        <span class="live-task-phase" aria-hidden="true">●</span>
-        <span class="live-task-label">{{ t('chat.thinking') }}</span>
-        <span class="live-task-meta" aria-hidden="true"></span>
-        <span class="live-task-stall" hidden></span>
-        <span class="live-task-chevron" aria-hidden="true">▸</span>
-      </button>
+      <div class="live-task-header">
+        <button type="button" class="live-task-toggle" aria-expanded="false" aria-controls="live-task-body">
+          <span class="live-task-phase" aria-hidden="true">●</span>
+          <span class="live-task-label" aria-hidden="true">{{ t('chat.thinking') }}</span>
+          <span class="live-task-meta" aria-hidden="true"></span>
+          <span class="live-task-chevron" aria-hidden="true">▸</span>
+          <span class="sr-only">{{ t('chat.task_details') }}</span>
+        </button>
+        <span class="live-task-stall" aria-hidden="true" hidden></span>
+        <button type="button" class="live-task-act live-task-jump" hidden>{{ t('chat.task_review') }}</button>
+        <button type="button" class="live-task-act live-task-retry" hidden>{{ t('chat.task_retry') }}</button>
+        <button type="button" class="live-task-act live-task-stop" hidden>{{ t('chat.stop_generation') }}</button>
+      </div>
+      <p class="live-task-live sr-only" role="status" aria-live="polite"></p>
       <div id="live-task-body" class="live-task-body" hidden>
-        <ul class="live-task-steps" role="log" aria-live="polite"></ul>
+        <ul class="live-task-steps" role="log"></ul>
       </div>
     </div>
 
@@ -278,7 +291,33 @@
     rename: {{ t('chat.rename') | tojson }},
     archive: {{ t('chat.archive') | tojson }},
     restore: {{ t('chat.restore') | tojson }},
-    delete: {{ t('chat.delete') | tojson }}
+    delete: {{ t('chat.delete') | tojson }},
+    /* Live Task Card — these ti() keys had no bridge entry, so the whole
+       card rendered its hardcoded English fallbacks in every language. */
+    task_details: {{ t('chat.task_details') | tojson }},
+    task_thinking: {{ t('chat.task_thinking') | tojson }},
+    task_running_tool: {{ t('chat.task_running_tool') | tojson }},
+    task_awaiting: {{ t('chat.task_awaiting') | tojson }},
+    task_resuming: {{ t('chat.task_resuming') | tojson }},
+    task_done: {{ t('chat.task_done') | tojson }},
+    task_error: {{ t('chat.task_error') | tojson }},
+    task_writing: {{ t('chat.task_writing') | tojson }},
+    task_no_reply: {{ t('chat.task_no_reply') | tojson }},
+    task_step: {{ t('chat.task_step') | tojson }},
+    task_plan: {{ t('chat.task_plan') | tojson }},
+    task_tool: {{ t('chat.task_tool') | tojson }},
+    task_tools: {{ t('chat.task_tools') | tojson }},
+    task_in_tool: {{ t('chat.task_in_tool') | tojson }},
+    task_no_signal: {{ t('chat.task_no_signal') | tojson }},
+    task_checking: {{ t('chat.task_checking') | tojson }},
+    task_not_responding: {{ t('chat.task_not_responding') | tojson }},
+    task_review: {{ t('chat.task_review') | tojson }},
+    task_retry: {{ t('chat.task_retry') | tojson }},
+    task_auto_deny_in: {{ t('chat.task_auto_deny_in') | tojson }},
+    auto_deny_in: {{ t('chat.auto_deny_in') | tojson }},
+    auto_deny_seconds: {{ t('chat.auto_deny_seconds') | tojson }},
+    approval_expired: {{ t('chat.approval_expired') | tojson }},
+    approval_expired_short: {{ t('chat.approval_expired_short') | tojson }}
   };
 </script>
 <script src="/static/js/modules/delivery_cursor.js?v={{ js_version() }}"></script>

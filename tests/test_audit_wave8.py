@@ -27,7 +27,12 @@ def test_health_details_is_gated_live_ready_open() -> None:
 
 
 def test_listed_x_show_have_x_cloak() -> None:
-    """L-4: first-paint flash — listed x-show nodes also carry x-cloak."""
+    """L-4: first-paint flash — listed x-show nodes also carry x-cloak.
+
+    ``<template x-if>`` is exempt from the rule: its body is not in the
+    document until Alpine evaluates it, so there is nothing to flash. The
+    node badge moved from x-show to x-if and is asserted separately below.
+    """
     files = {
         REPO / "kazma-ui/kazma_ui/templates/base.html": (
             'x-show="$store.search.loading || $store.search.results.length',
@@ -35,7 +40,6 @@ def test_listed_x_show_have_x_cloak() -> None:
         ),
         REPO / "kazma-ui/kazma_ui/templates/chat.html": (
             'x-show="$store.agent?.pendingApproval?.message"',
-            'x-show="$store.agent && $store.agent.activeNode"',
         ),
         REPO / "kazma-ui/kazma_ui/templates/ide.html": (
             'x-show="result"',
@@ -49,6 +53,12 @@ def test_listed_x_show_have_x_cloak() -> None:
             assert idx >= 0, f"{path.name} missing {needle}"
             window = text[max(0, idx - 80) : idx + len(needle)]
             assert "x-cloak" in window, f"{path.name}: {needle} lacks x-cloak nearby"
+
+    chat = (REPO / "kazma-ui/kazma_ui/templates/chat.html").read_text(encoding="utf-8")
+    badge = 'x-if="$store.agent && $store.agent.activeNode"'
+    at = chat.find(badge)
+    assert at >= 0, f"chat.html missing {badge}"
+    assert "x-cloak" in chat[max(0, at - 200) : at], "node badge wrapper lost x-cloak"
 
 
 def test_workspace_merge_uses_kazma_confirm() -> None:

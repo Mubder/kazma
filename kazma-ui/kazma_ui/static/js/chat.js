@@ -354,7 +354,11 @@
       },
       onToolCall: function(data) {
         if (!_mine()) return;
-        _taskCardEvent({ t: 'tool', name: data.tool_name || 'tool' });
+        _taskCardEvent({
+          t: 'tool',
+          name: data.tool_name || 'tool',
+          detail: _tcArgSummary(data.inputs),
+        });
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
           try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
@@ -754,9 +758,17 @@
   /**
    * Assistant bubble for the open turn: the one after the last user message.
    * NEVER create a second assistant without a new user row (duplicate root cause).
+   *
+   * @param {boolean} [create=true] Pass false to LOOK ONLY — returns null
+   *   instead of minting a bubble. Since the Live Task Card took the live
+   *   view out of the bubble, a progress-only frame that minted one left a
+   *   bare avatar + timestamp + reaction buttons with nothing inside it
+   *   sitting above the composer until the first token: the "empty plain
+   *   bubble before streaming" every turn opened with.
    */
-  function _assistantBubbleForOpenTurn() {
-    if (!messagesEl) return createAssistantMessage();
+  function _assistantBubbleForOpenTurn(create) {
+    var mayCreate = create !== false;
+    if (!messagesEl) return mayCreate ? createAssistantMessage() : null;
     var msgs = messagesEl.querySelectorAll('.message-user, .message-assistant');
     var lastAsstAfterUser = null;
     for (var i = 0; i < msgs.length; i++) {
@@ -771,15 +783,16 @@
       }
     }
     if (lastAsstAfterUser) return lastAsstAfterUser;
-    return createAssistantMessage();
+    return mayCreate ? createAssistantMessage() : null;
   }
 
   /** Pin the open-turn assistant. NEVER `createAssistantMessage()` from
    *  progress/HITL/token paths — that minted the CoT ladder (one bubble per
    *  plan hop) after currentMsgEl was left null by historical-render. */
-  function _pinLiveAssistantBubble() {
-    currentMsgEl = _assistantBubbleForOpenTurn();
-    return currentMsgEl;
+  function _pinLiveAssistantBubble(create) {
+    var el = _assistantBubbleForOpenTurn(create);
+    if (el) currentMsgEl = el;
+    return el;
   }
 
   // ── Slash commands (catalog lives in chat_slash.js) ───────────
@@ -1171,70 +1184,164 @@
   }
 
   /**
-   * ── Live Task Card (2026-09-03) ─────────────────────────────────────
+   * ── Live Task Card ──────────────────────────────────────────────────
    * The ONE turn-state surface, merged from the retired status strip and
    * the live in-bubble CoT panel. Single writer: _taskCardEvent — every
    * other helper (_setStatusStrip, SSE/WS callbacks, pauseForApproval,
    * endTurn) dispatches through it, so two surfaces can never disagree
    * again (the frozen-thinking / blank-while-paused bug class).
    *
-   * Header: phase icon + label + elapsed + step, e.g.
-   *   ⚙ file_search · 42s · step 23   /  🧠 Thinking · 12s
-   *   ⏳ Awaiting approval · 3:12 left (server-stamped watchdog deadline)
-   *   ⚠ No signal 20s — checking…      (heartbeat gap → amber + resync)
-   * Body (collapsed default): compact step list from the TurnDocument,
-   * reasoning clamped to 2 lines, 50-row cap.
+   * Header — phase icon + WHAT it is doing + elapsed + step:
+   *   ⚙ Running file_search "auth middleware" · 42s · 1:12 in this tool · step 23
+   *   🧠 Thinking · 12s
+   *   ⏳ Awaiting your approval · auto-denies in 3:12          [Review ↑]
+   *   ⚠ no signal 24s — checking…            (journal gap → resync w/ backoff)
+   *   ⚠ not responding                       (backoff exhausted)  [Retry]
+   *   ✓ Done · 12 steps · 3 tools · 18.4s · 4.2k tokens
+   * The turn's own actions live here too: Stop while running, Review to
+   * jump to the approval card, Retry once liveness recovery gives up.
+   *
+   * Body (remembers open/closed across turns and reloads): compact step
+   * list from the TurnDocument, reasoning clamped to 2 lines, 50-row cap,
+   * tail-pinned unless the reader scrolled up.
+   *
    * Lifecycle: docked here while the turn runs; on done the summary
    * finalizes into the transcript bubble (existing restored-workbench
    * path) and the card unmounts.
+   *
+   * a11y: the toggle's accessible name is STATIC ("Task details") — its
+   * live text is aria-hidden, because a per-second header rewrite made
+   * screen readers re-announce the whole control every tick. Phase,
+   * countdown and liveness go to the role="status" region at coarse
+   * thresholds instead.
    */
+  // >>> LIVE_TASK_CARD_BEGIN — self-contained state machine. tests/js/
+  // test_live_task_card.js extracts this block verbatim and drives it on a
+  // fake clock + fake DOM; only the stubs it declares may be referenced
+  // from outside these markers.
+  var _TC_OPEN_KEY = 'kazma.taskcard.open';
+  var _TC_STALL_MS = 20000;        // heartbeats land every ~8-10s
+  var _TC_STALL_RETRY_MS = 30000;  // backoff between resync attempts
+  var _TC_STALL_MAX_TRIES = 3;     // then stop retrying and say so
+  var _TC_STEP_CAP = 50;
+  var _TC_TOOL_PHASE_MIN_S = 15;   // below this, "in this tool" is noise
+
   var _tc = {
-    el: null, header: null, label: null, meta: null, stallEl: null,
-    chevron: null, body: null, stepsEl: null,
-    visible: false, phase: 'idle', current: '', step: 0,
-    turnStart: 0, elapsedS: 0, lastSignal: 0, deadline: 0,
+    el: null, header: null, toggle: null, phaseEl: null, label: null,
+    meta: null, stallEl: null, chevron: null, body: null, stepsEl: null,
+    liveEl: null, stopBtn: null, jumpBtn: null, retryBtn: null,
+    visible: false, phase: 'idle', current: '', detail: '', step: 0,
+    turnStart: 0, elapsedS: 0, elapsedFloor: 0,
+    srvElapsed: 0, srvElapsedAt: 0,
+    phaseStart: 0, lastSignal: 0, deadline: 0,
     planTotal: 0, planDone: 0,
-    stalled: false, stallResynced: false, open: false,
-    tickTimer: null, doneTimer: null, textOverride: '',
+    stalled: false, stallTries: 0, nextResyncAt: 0, dead: false,
+    open: false, tickTimer: null, doneTimer: null,
+    textOverride: '', summary: '', emptyTurn: false,
+    announced: '', stepsHtml: '',
   };
 
   function _tcMount() {
     if (_tc.el) return _tc.el;
     _tc.el = document.getElementById('live-task-card');
     if (!_tc.el) return null;
-    _tc.header = _tc.el.querySelector('.live-task-header');
-    _tc.label = _tc.el.querySelector('.live-task-label');
-    _tc.meta = _tc.el.querySelector('.live-task-meta');
-    _tc.stallEl = _tc.el.querySelector('.live-task-stall');
-    _tc.chevron = _tc.el.querySelector('.live-task-chevron');
-    _tc.body = _tc.el.querySelector('.live-task-body');
-    _tc.stepsEl = _tc.el.querySelector('.live-task-steps');
-    _tc.header.addEventListener('click', function () {
-      _tc.open = !_tc.open;
-      _tcRender();
-    });
+    function q(sel) { return _tc.el.querySelector(sel); }
+    _tc.header = q('.live-task-header');
+    _tc.toggle = q('.live-task-toggle');
+    _tc.phaseEl = q('.live-task-phase');
+    _tc.label = q('.live-task-label');
+    _tc.meta = q('.live-task-meta');
+    _tc.stallEl = q('.live-task-stall');
+    _tc.chevron = q('.live-task-chevron');
+    _tc.body = q('.live-task-body');
+    _tc.stepsEl = q('.live-task-steps');
+    _tc.liveEl = q('.live-task-live');
+    _tc.stopBtn = q('.live-task-stop');
+    _tc.jumpBtn = q('.live-task-jump');
+    _tc.retryBtn = q('.live-task-retry');
+    // Readers who want the steps open want them open on the NEXT turn too.
+    try {
+      _tc.open = window.localStorage.getItem(_TC_OPEN_KEY) === '1';
+    } catch (eLs) { /* private mode / storage disabled */ }
+    if (_tc.toggle) {
+      _tc.toggle.addEventListener('click', function () {
+        _tc.open = !_tc.open;
+        try {
+          window.localStorage.setItem(_TC_OPEN_KEY, _tc.open ? '1' : '0');
+        } catch (eSet) { /* ignore */ }
+        if (_tc.open) _tcStepsFromDoc();
+        _tcRender();
+      });
+    }
+    if (_tc.stopBtn) {
+      _tc.stopBtn.addEventListener('click', function () {
+        try { abortGeneration(); } catch (eAb) { /* ignore */ }
+      });
+    }
+    if (_tc.jumpBtn) _tc.jumpBtn.addEventListener('click', _tcJumpToApproval);
+    if (_tc.retryBtn) {
+      _tc.retryBtn.addEventListener('click', function () {
+        _tc.stallTries = 0;
+        _tc.nextResyncAt = 0;
+        _tc.dead = false;
+        try { _resyncDelivery('stall-retry'); } catch (eR) { /* ignore */ }
+        _tcRender();
+      });
+    }
     return _tc.el;
+  }
+
+  /** The countdown says "auto-denies in 3:12" — the buttons are hundreds of
+   *  pixels up the transcript. Put them one click away. */
+  function _tcJumpToApproval() {
+    if (!messagesEl) return;
+    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
+    for (var i = cards.length - 1; i >= 0; i--) {
+      if (!cards[i].querySelector('button:not([disabled])')) continue;
+      var card = cards[i];
+      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      catch (eSc) { try { card.scrollIntoView(); } catch (eS2) { /* ignore */ } }
+      card.classList.add('is-flash');
+      setTimeout(function () { card.classList.remove('is-flash'); }, 1400);
+      return;
+    }
   }
 
   function _tcPhaseIcon(phase) {
     if (phase === 'tool') return '⚙';
     if (phase === 'awaiting') return '⏳';
     if (phase === 'resuming') return '↻';
-    if (phase === 'done') return '✓';
+    // A turn that delivered nothing must not wear a checkmark.
+    if (phase === 'done') return _tc.emptyTurn ? '⚠' : '✓';
     if (phase === 'error') return '✕';
     return '🧠'; // llm / supervisor / thinking
   }
 
+  /**
+   * Structural phases outrank the free-text override. The override used to
+   * win unconditionally, so beginTurn's "Kazma is thinking…" painted itself
+   * over "Resuming after approval" one line after the resume set it — the
+   * card read "↻ Kazma is thinking…" through every approve.
+   */
   function _tcPhaseLabel() {
-    if (_tc.textOverride) return _tc.textOverride;
     switch (_tc.phase) {
-      case 'tool': return ti('task_running_tool', 'Running') + ' ' + _tc.current;
+      case 'tool': {
+        var t = ti('task_running_tool', 'Running') + ' ' + (_tc.current || 'tool');
+        return _tc.detail ? t + ' ' + _tc.detail : t;
+      }
       case 'awaiting': return ti('task_awaiting', 'Awaiting your approval');
       case 'resuming': return ti('task_resuming', 'Resuming after approval');
-      case 'done': return ti('task_done', 'Done');
-      case 'error': return ti('task_error', 'Turn failed');
-      case 'llm': return ti('task_thinking', 'Thinking');
-      default: return ti('thinking', 'Kazma is thinking\u2026');
+      case 'error': return _tc.textOverride || ti('task_error', 'Turn failed');
+      case 'done':
+        if (_tc.textOverride) return _tc.textOverride;
+        return _tc.emptyTurn
+          ? ti('task_no_reply', 'No reply received')
+          : ti('task_done', 'Done');
+      default:
+        if (_tc.textOverride) return _tc.textOverride;
+        return _tc.phase === 'llm'
+          ? ti('task_thinking', 'Thinking')
+          : ti('thinking', 'Kazma is thinking…');
     }
   }
 
@@ -1245,67 +1352,149 @@
     return m + ':' + (r < 10 ? '0' : '') + r;
   }
 
+  /**
+   * Server heartbeats are authoritative; the local clock fills the gaps.
+   * The first version had this backwards — it only recomputed while signals
+   * were FRESH, so the timer froze at exactly the moment you are staring at
+   * it wondering whether the turn hung. A resumed run restarts the server's
+   * own clock at zero, so take the max: the displayed turn time never goes
+   * backwards.
+   */
+  function _tcElapsed(now) {
+    var local = _tc.turnStart ? (now - _tc.turnStart) / 1000 : 0;
+    var srv = _tc.srvElapsedAt
+      ? _tc.srvElapsed + (now - _tc.srvElapsedAt) / 1000
+      : 0;
+    // Monotonic within a turn: whichever clock is further ahead wins, and
+    // the reading never moves backwards. Both can regress on their own — the
+    // server's restarts at zero on a resumed run, the local one starts late
+    // when this tab attached to a turn already in flight.
+    _tc.elapsedFloor = Math.max(local, srv, _tc.elapsedFloor || 0);
+    return _tc.elapsedFloor;
+  }
+
   function _tcRender() {
     if (!_tcMount() || !_tc.visible) return;
-    _tc.label.textContent = _tcPhaseIcon(_tc.phase) + '  ' + _tcPhaseLabel();
+    var now = Date.now();
+    var terminal = _tc.phase === 'done' || _tc.phase === 'error';
+    if (!terminal) _tc.elapsedS = _tcElapsed(now);
+    if (_tc.phaseEl) _tc.phaseEl.textContent = _tcPhaseIcon(_tc.phase);
+    if (_tc.label) _tc.label.textContent = _tcPhaseLabel();
+
     var bits = [];
-    if (_tc.phase === 'awaiting' && _tc.deadline) {
-      var left = Math.floor(_tc.deadline - Date.now() / 1000);
+    if (terminal) {
+      if (_tc.summary) bits.push(_tc.summary);
+    } else if (_tc.phase === 'awaiting' && _tc.deadline) {
+      var left = Math.floor(_tc.deadline - now / 1000);
       bits.push('⏳ ' + (left > 0
-        ? ti('auto_deny_in', 'auto-denies in') + ' ' + _tcFmtMMSS(left)
+        ? ti('task_auto_deny_in', 'auto-denies in') + ' ' + _tcFmtMMSS(left)
         : ti('approval_expired_short', 'expired')));
-    } else if (_tc.phase !== 'done' && _tc.phase !== 'error') {
+    } else {
       if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
+      // A tool that has been running three minutes is the thing worth
+      // seeing; total turn time hides it behind everything that came before.
+      var inPhase = _tc.phaseStart ? (now - _tc.phaseStart) / 1000 : 0;
+      if (_tc.phase === 'tool' && inPhase > _TC_TOOL_PHASE_MIN_S) {
+        bits.push(tiFmt('task_in_tool', '{d} in this tool', { d: _tcFmtMMSS(inPhase) }));
+      }
       if (_tc.step > 0) bits.push(ti('task_step', 'step') + ' ' + _tc.step);
       if (_tc.planTotal > 0) {
         bits.push(ti('task_plan', 'plan') + ' ' + _tc.planDone + '/' + _tc.planTotal);
       }
     }
-    _tc.meta.textContent = bits.join(' · ');
-    _tc.stallEl.hidden = !_tc.stalled;
-    if (_tc.stalled) {
-      _tc.stallEl.textContent = '⚠ ' + ti('task_no_signal', 'no signal') + ' ' +
-        Math.floor((Date.now() - _tc.lastSignal) / 1000) + 's — ' +
-        ti('task_checking', 'checking…');
+    if (_tc.meta) _tc.meta.textContent = bits.join(' · ');
+
+    if (_tc.stallEl) {
+      _tc.stallEl.hidden = !_tc.stalled;
+      if (_tc.stalled) {
+        _tc.stallEl.textContent = '⚠ ' + (_tc.dead
+          ? ti('task_not_responding', 'not responding')
+          : ti('task_no_signal', 'no signal') + ' ' +
+            Math.floor((now - _tc.lastSignal) / 1000) + 's — ' +
+            ti('task_checking', 'checking…'));
+      }
     }
-    _tc.chevron.textContent = _tc.open ? '▾' : '▸';
-    _tc.header.setAttribute('aria-expanded', _tc.open ? 'true' : 'false');
-    _tc.body.hidden = !_tc.open;
+    if (_tc.stopBtn) _tc.stopBtn.hidden = terminal || _tc.phase === 'awaiting';
+    if (_tc.jumpBtn) _tc.jumpBtn.hidden = _tc.phase !== 'awaiting';
+    if (_tc.retryBtn) _tc.retryBtn.hidden = !_tc.dead;
+
+    if (_tc.chevron) _tc.chevron.textContent = _tc.open ? '▾' : '▸';
+    if (_tc.toggle) _tc.toggle.setAttribute('aria-expanded', _tc.open ? 'true' : 'false');
+    if (_tc.body) _tc.body.hidden = !_tc.open;
     _tc.el.className = 'live-task-card' +
       (_tc.phase === 'awaiting' ? ' is-awaiting' : '') +
       (_tc.stalled ? ' is-stalled' : '') +
+      (_tc.dead ? ' is-dead' : '') +
       (_tc.phase === 'done' ? ' is-done' : '') +
       (_tc.phase === 'error' ? ' is-error' : '') +
+      (terminal && _tc.emptyTurn ? ' is-empty' : '') +
       (_tc.open ? ' is-open' : '');
     _tc.el.hidden = false;
+    _tcAnnounce(now, terminal);
+  }
+
+  /**
+   * Screen-reader channel. The header's visible text is aria-hidden and the
+   * toggle's name is fixed, so nothing here fires on the 1s tick — only on
+   * a phase change, a coarse countdown threshold, a liveness change, or the
+   * terminal summary.
+   */
+  function _tcAnnounce(now, terminal) {
+    if (!_tc.liveEl) return;
+    var say = _tcPhaseLabel();
+    if (_tc.phase === 'awaiting' && _tc.deadline) {
+      var left = Math.floor(_tc.deadline - now / 1000);
+      var bucket = left <= 0 ? 0
+        : (left <= 10 ? 10 : (left <= 30 ? 30 : (left <= 60 ? 60 : -1)));
+      if (bucket === 0) say += ' — ' + ti('approval_expired_short', 'expired');
+      else if (bucket > 0) {
+        say += ' — ' + tiFmt('auto_deny_seconds', 'auto-denies in {n} seconds',
+          { n: bucket });
+      }
+    }
+    if (_tc.stalled) {
+      say += ' — ' + (_tc.dead
+        ? ti('task_not_responding', 'not responding')
+        : ti('task_no_signal', 'no signal'));
+    }
+    if (terminal && _tc.summary) say += ' — ' + _tc.summary;
+    if (say === _tc.announced) return;
+    _tc.announced = say;
+    _tc.liveEl.textContent = say;
   }
 
   function _tcTick() {
     if (!_tc.visible) return;
-    // Elapsed: server heartbeats are authoritative; local clock fills gaps.
-    if (Date.now() - _tc.lastSignal < 2500) {
-      if (_tc.turnStart) _tc.elapsedS = (Date.now() - _tc.turnStart) / 1000;
-    }
-    // Stalled honesty: heartbeats arrive every ~8-10s during silence; a
-    // 20s gap means the JOURNAL went quiet — surface it and reconcile once.
-    if (_tc.phase !== 'awaiting' && _tc.phase !== 'done' &&
-        _tc.lastSignal && Date.now() - _tc.lastSignal > 20000) {
+    var now = Date.now();
+    // Stalled honesty: heartbeats arrive every ~8-10s during silence, so a
+    // _TC_STALL_MS gap means the JOURNAL went quiet — surface it and try to
+    // reconcile. Recovery is a BACKOFF, not a one-shot: the first version
+    // latched after a single resync, so a genuinely dead stream sat amber
+    // forever with nothing else attempted and no way to say so.
+    var watched = _tc.phase !== 'awaiting' && !_tcIsTerminal();
+    if (watched && _tc.lastSignal && now - _tc.lastSignal > _TC_STALL_MS) {
       if (!_tc.stalled) {
         _tc.stalled = true;
-        _tc.stallResynced = false;
+        _tc.stallTries = 0;
+        _tc.nextResyncAt = 0;
       }
-      if (!_tc.stallResynced) {
-        _tc.stallResynced = true;
-        try { _resyncDelivery('heartbeat-gap'); } catch (eR) { /* ignore */ }
+      if (!_tc.dead && now >= _tc.nextResyncAt) {
+        _tc.stallTries += 1;
+        _tc.nextResyncAt = now + _TC_STALL_RETRY_MS;
+        if (_tc.stallTries > _TC_STALL_MAX_TRIES) _tc.dead = true;
+        else { try { _resyncDelivery('heartbeat-gap'); } catch (eR) { /* ignore */ } }
       }
-      _tcRender();
     } else if (_tc.stalled) {
       _tc.stalled = false;
-      _tcRender();
-    } else {
-      _tcRender();
+      _tc.dead = false;
+      _tc.stallTries = 0;
+      _tc.nextResyncAt = 0;
     }
-    if (_tc.phase === 'awaiting' && _tc.deadline) _tcRender();
+    _tcRender();
+  }
+
+  function _tcIsTerminal() {
+    return _tc.phase === 'done' || _tc.phase === 'error';
   }
 
   function _tcStepsFromDoc() {
@@ -1314,9 +1503,10 @@
     var rows = (window.KazmaTurnDocument && doc && KazmaTurnDocument.activityOf)
       ? KazmaTurnDocument.activityOf(doc.parts || [])
       : [];
-    if (!rows.length) return;
-    // Newest last (chronological); cap 50 live rows.
-    rows = rows.slice(-50);
+    // Newest last (chronological); cap _TC_STEP_CAP live rows. An empty doc
+    // must CLEAR — early-returning on no rows left the previous turn's steps
+    // sitting in the body for anyone who expanded it at turn start.
+    rows = rows.slice(-_TC_STEP_CAP);
     var html = '';
     for (var i = 0; i < rows.length; i++) {
       var r = rows[i] || {};
@@ -1327,126 +1517,275 @@
         '<span class="live-task-step-detail">' + escapeHtml(truncateStr(String(r.detail || ''), 400)) + '</span>' +
         '</li>';
     }
-    _tc.stepsEl.innerHTML = html;
+    // Re-assigning identical markup still tears the subtree down and costs a
+    // reflow (same lesson as the live-token paint throttle) AND throws away
+    // the reader's scroll position.
+    if (html === _tc.stepsHtml) return;
+    _tc.stepsHtml = html;
+    var el = _tc.stepsEl;
+    var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) < 24;
+    el.innerHTML = html;
+    // Tail-pinned by default; a reader who scrolled up keeps their place.
+    if (pinned) el.scrollTop = el.scrollHeight;
   }
 
   /**
    * The single writer. Events:
-   *  begin | token | tool{name} | tool_end{name} | hb{phase,current,step,elapsed_s}
-   *  status{status,message} | text{msg} | approval{deadline} | resuming
-   *  done{ok} | error{msg} | doc
+   *  begin | token | tool{name,detail} | tool_end{name}
+   *  hb{phase,current,detail,step,elapsed_s} | status{status,message}
+   *  text{msg} | plan{total,done} | approval{deadline} | resuming
+   *  done{ok,summary,msg} | error{msg} | doc
    */
   function _taskCardEvent(ev) {
     ev = ev || {};
     if (!_tcMount()) return;
     var now = Date.now();
+
+    if (ev.t === 'begin') {
+      _tc.phase = 'idle';
+      _tc.current = '';
+      _tc.detail = '';
+      _tc.step = 0;
+      _tc.elapsedS = 0;
+      _tc.elapsedFloor = 0;
+      _tc.turnStart = now;
+      _tc.phaseStart = now;
+      _tc.srvElapsed = 0;
+      _tc.srvElapsedAt = 0;
+      _tc.deadline = 0;
+      _tc.planTotal = 0;
+      _tc.planDone = 0;
+      _tc.stalled = false;
+      _tc.dead = false;
+      _tc.stallTries = 0;
+      _tc.nextResyncAt = 0;
+      _tc.textOverride = '';
+      _tc.summary = '';
+      _tc.emptyTurn = false;
+      _tc.announced = '';
+      _tc.stepsHtml = '';
+      if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
+      _tcWake(now);
+      _tcSetPhase('llm', '', '', now);
+    } else if (ev.t === 'token' || ev.t === 'tool' || ev.t === 'tool_end' ||
+               ev.t === 'status' || ev.t === 'hb' || ev.t === 'approval' ||
+               ev.t === 'resuming') {
+      // Every liveness event restores the card. `approval` and `resuming`
+      // used to skip this: a pending hide from the previous terminal frame
+      // stayed armed and blanked the card mid-approve, and a resume never
+      // restarted the tick timer (frozen elapsed, dead stall detection).
+      _tcWake(now);
+    }
+
     switch (ev.t) {
-      case 'begin':
-        _tc.visible = true;
-        _tc.phase = 'llm';
-        _tc.current = '';
-        _tc.step = 0;
-        _tc.elapsedS = 0;
-        _tc.turnStart = now;
-        _tc.deadline = 0;
-        _tc.planTotal = 0;
-        _tc.planDone = 0;
-        _tc.stalled = false;
-        _tc.stallResynced = false;
+      case 'tool':
+        _tcSetPhase('tool', ev.name || 'tool', ev.detail, now);
+        _tc.step += 1;
         _tc.textOverride = '';
-        _tc.lastSignal = now;
-        if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
-        if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
+        break;
+      case 'tool_end':
+        if (_tc.phase === 'tool') _tcSetPhase('supervisor', '', '', now);
         break;
       case 'token':
-      case 'tool':
-      case 'tool_end':
-      case 'status':
-      case 'hb':
-        _tc.lastSignal = now;
-        if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
-        if (!_tc.visible) { _tc.visible = true; if (!_tc.turnStart) _tc.turnStart = now; }
-        if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
+        if (_tc.phase !== 'awaiting') _tcSetPhase('llm', '', '', now);
         break;
+      case 'hb':
+        if (ev.phase) _tcSetPhase(String(ev.phase), ev.current, ev.detail, now);
+        if (ev.step) _tc.step = Math.max(_tc.step, parseInt(ev.step, 10) || 0);
+        if (ev.elapsed_s) {
+          _tc.srvElapsed = Number(ev.elapsed_s) || 0;
+          _tc.srvElapsedAt = now;
+        }
+        if (_tc.phase !== 'awaiting') _tc.textOverride = '';
+        break;
+      case 'status': {
+        var st = String(ev.status || '');
+        if (st === 'synthesizing') {
+          _tcSetPhase('llm', '', '', now);
+          _tc.textOverride = ti('task_writing', 'Writing the reply…');
+        } else if (st === 'routing_node') {
+          _tc.textOverride = String(ev.message || '');
+        } else if (st === 'paused_for_approval') {
+          /* the approval event owns this */
+        } else if (ev.message) {
+          _tc.textOverride = String(ev.message);
+        }
+        break;
+      }
+      case 'text':
+        // An empty msg CLEARS. `if (ev.msg)` let _clearStatusStrip leave a
+        // stale override ("Writing the reply…") alive under a later phase.
+        _tc.textOverride = String(ev.msg || '');
+        break;
+      case 'plan':
+        _tc.planTotal = parseInt(ev.total, 10) || 0;
+        _tc.planDone = parseInt(ev.done, 10) || 0;
+        break;
+      case 'approval':
+        _tcSetPhase('awaiting', '', '', now);
+        _tc.deadline = Number(ev.deadline || 0);
+        _tc.textOverride = '';
+        break;
+      case 'resuming':
+        _tcSetPhase('resuming', '', '', now);
+        _tc.deadline = 0;
+        _tc.textOverride = '';
+        break;
+      case 'doc':
+        // Cheap when collapsed: the body is not on screen, so skip the
+        // rebuild entirely — the toggle builds it on open.
+        if (_tc.visible && _tc.open) _tcStepsFromDoc();
+        return;
+      case 'done':
+      case 'error':
+        _tc.phase = ev.t === 'error' ? 'error' : 'done';
+        _tc.phaseStart = now;
+        _tc.deadline = 0;
+        _tc.stalled = false;
+        _tc.dead = false;
+        _tc.textOverride = ev.msg ? String(ev.msg) : '';
+        _tc.summary = String(ev.summary || '');
+        // `ok: false` is an explicit "the turn delivered nothing" from
+        // endTurn — undefined (abort / forceEndTurn) is not a failure.
+        _tc.emptyTurn = ev.ok === false;
+        if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
+        if (!_tc.visible) return;
+        _tcRender();
+        // Bubble carries the durable summary now — card retires shortly.
+        if (_tc.doneTimer) clearTimeout(_tc.doneTimer);
+        _tc.doneTimer = setTimeout(function () {
+          _tc.visible = false;
+          if (_tc.el) _tc.el.hidden = true;
+          _tc.doneTimer = null;
+        }, ev.t === 'error' ? 4000 : (_tc.summary ? 3200 : 1600));
+        return;
       default:
         break;
     }
-    if (ev.t === 'tool') { _tc.phase = 'tool'; _tc.current = String(ev.name || ''); _tc.step += 1; _tc.textOverride = ''; }
-    if (ev.t === 'tool_end') { if (_tc.phase === 'tool') { _tc.phase = 'supervisor'; _tc.current = ''; } }
-    if (ev.t === 'token') { if (_tc.phase !== 'awaiting') { _tc.phase = 'llm'; _tc.current = ''; } }
-    if (ev.t === 'hb') {
-      _tc.phase = String(ev.phase || _tc.phase);
-      _tc.current = String(ev.current || '');
-      if (ev.step) _tc.step = Math.max(_tc.step, parseInt(ev.step, 10) || 0);
-      if (ev.elapsed_s) _tc.elapsedS = Number(ev.elapsed_s) || _tc.elapsedS;
-      if (_tc.phase !== 'awaiting') _tc.textOverride = '';
-    }
-    if (ev.t === 'status') {
-      var st = String(ev.status || '');
-      if (st === 'synthesizing') { _tc.phase = 'llm'; _tc.textOverride = ti('task_writing', 'Writing the reply…'); }
-      else if (st === 'routing_node') { _tc.textOverride = String(ev.message || ''); }
-      else if (st === 'paused_for_approval') { /* approval event handles it */ }
-      else if (ev.message) { _tc.textOverride = String(ev.message); }
-    }
-    if (ev.t === 'text' && ev.msg) _tc.textOverride = String(ev.msg);
-    if (ev.t === 'plan') {
-      _tc.planTotal = parseInt(ev.total, 10) || 0;
-      _tc.planDone = parseInt(ev.done, 10) || 0;
-    }
-    if (ev.t === 'approval') {
-      _tc.visible = true;
-      _tc.phase = 'awaiting';
-      _tc.deadline = Number(ev.deadline || 0);
-      _tc.textOverride = '';
-      _tc.lastSignal = now;
-      if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
-    }
-    if (ev.t === 'resuming') {
-      _tc.phase = 'resuming';
-      _tc.deadline = 0;
-      _tc.lastSignal = now;
-    }
-    if (ev.t === 'doc') { if (_tc.visible) _tcStepsFromDoc(); return; }
-    if (ev.t === 'done' || ev.t === 'error') {
-      _tc.phase = ev.t === 'error' ? 'error' : 'done';
-      _tc.deadline = 0;
-      _tc.stalled = false;
-      _tc.textOverride = ev.msg ? String(ev.msg) : '';
-      _tcRender();
-      // Bubble carries the durable summary now — card retires shortly.
-      if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
-      var hideMs = ev.t === 'error' ? 4000 : 1600;
-      if (_tc.doneTimer) clearTimeout(_tc.doneTimer);
-      _tc.doneTimer = setTimeout(function () {
-        _tc.visible = false;
-        _tc.el.hidden = true;
-        _tc.doneTimer = null;
-      }, hideMs);
-      return;
-    }
     _tcRender();
     if (_tc.open) _tcStepsFromDoc();
+  }
+
+  /** Liveness restore, shared by every event that proves the turn is alive. */
+  function _tcWake(now) {
+    _tc.visible = true;
+    _tc.lastSignal = now;
+    if (!_tc.turnStart) _tc.turnStart = now;
+    if (!_tc.phaseStart) _tc.phaseStart = now;
+    // A frame IS the signal — clear the warning here, not a tick later, or
+    // the same render that shows the new phase also shows "no signal 0s".
+    if (_tc.stalled) {
+      _tc.stalled = false;
+      _tc.dead = false;
+      _tc.stallTries = 0;
+      _tc.nextResyncAt = 0;
+    }
+    // A hide armed by a previous terminal frame must never fire onto a live
+    // card — this is what blanked the card the instant you hit Approve.
+    if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
+    if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
+  }
+
+  /** Phase changes restart the phase-scoped clock ("1:12 in this tool"). */
+  function _tcSetPhase(phase, current, detail, now) {
+    if (phase && phase !== _tc.phase) {
+      _tc.phase = phase;
+      _tc.phaseStart = now;
+    }
+    if (current !== undefined) _tc.current = String(current || '');
+    if (detail !== undefined) _tc.detail = String(detail || '');
+  }
+  // <<< LIVE_TASK_CARD_END
+
+  /**
+   * "12 steps · 3 tools · 18.4s · 4.2k tokens" for the card's terminal
+   * frame. The shape of what just happened used to be thrown away — the
+   * card flashed a bare "Done" and the counts died with the live panel.
+   */
+  function _tcTurnSummary() {
+    var bits = [];
+    if (_progressStepCount > 0) {
+      bits.push(_progressStepCount + ' ' +
+        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps')));
+    }
+    if (_progressToolCount > 0) {
+      bits.push(_progressToolCount + ' ' +
+        (_progressToolCount === 1 ? ti('task_tool', 'tool') : ti('task_tools', 'tools')));
+    }
+    var s = _lastTurnStats || null;
+    if (s && s.durationMs > 0 && KS.formatDuration) bits.push(KS.formatDuration(s.durationMs));
+    else if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
+    if (s && s.tokens > 0 && KS.formatTokens) {
+      bits.push(KS.formatTokens(s.tokens) + ' ' + ti('tokens', 'tokens'));
+    }
+    if (s && s.cost > 0 && KS.formatCost) bits.push(KS.formatCost(s.cost));
+    return bits.join(' · ');
+  }
+
+  /**
+   * A compact "what is it doing this to" for the card header: the first
+   * meaningful scalar out of a tool's arguments. "Running file_search" tells
+   * you far less than 'Running file_search "auth middleware"'.
+   */
+  var _TC_ARG_SKIP = { session_id: 1, thread_id: 1, workspace_id: 1, turn_id: 1, id: 1 };
+  var _TC_ARG_PREFER = ['query', 'q', 'path', 'file', 'file_path', 'url', 'name',
+    'command', 'cmd', 'pattern', 'text', 'prompt', 'title', 'to'];
+  function _tcArgSummary(inputs) {
+    var obj = inputs;
+    if (typeof obj === 'string') {
+      var s = obj.trim();
+      if (!s) return '';
+      if (s.charAt(0) === '{' || s.charAt(0) === '[') {
+        try { obj = JSON.parse(s); } catch (eP) { return _tcQuote(s); }
+      } else {
+        return _tcQuote(s);
+      }
+    }
+    if (!obj || typeof obj !== 'object') return '';
+    if (Array.isArray(obj)) return obj.length ? _tcArgSummary(obj[0]) : '';
+    var k, i;
+    for (i = 0; i < _TC_ARG_PREFER.length; i++) {
+      k = _TC_ARG_PREFER[i];
+      if (typeof obj[k] === 'string' && obj[k].trim()) return _tcQuote(obj[k]);
+      if (typeof obj[k] === 'number') return _tcQuote(String(obj[k]));
+    }
+    var keys = Object.keys(obj);
+    for (i = 0; i < keys.length; i++) {
+      k = keys[i];
+      if (_TC_ARG_SKIP[k]) continue;
+      var v = obj[k];
+      if (typeof v === 'string' && v.trim()) return _tcQuote(v);
+      if (typeof v === 'number' || typeof v === 'boolean') return _tcQuote(String(v));
+    }
+    return '';
+  }
+  function _tcQuote(s) {
+    s = String(s).replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    return '“' + truncateStr(s, 48) + '”';
+  }
+
+  /** Alpine store liveness flag. Split out of _setStatusStrip so a turn can
+   *  mark itself thinking WITHOUT stamping a text override on the card. */
+  function _setStoreThinking(on, msg) {
+    try {
+      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
+        var st = Alpine.store('agent');
+        st.isThinking = !!on;
+        if (on && msg) st.statusMessage = msg;
+      }
+    } catch (e) { /* store not ready */ }
   }
 
   /** Legacy strip call sites route here — one surface, one writer. */
   function _setStatusStrip(msg) {
     _taskCardEvent({ t: 'text', msg: msg });
     // Store flag kept for WS liveness logic; it no longer owns any DOM.
-    try {
-      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-        var st = Alpine.store('agent');
-        st.isThinking = true;
-        if (msg) st.statusMessage = msg;
-      }
-    } catch (e) { /* store not ready */ }
+    _setStoreThinking(true, msg);
   }
   function _clearStatusStrip() {
     _taskCardEvent({ t: 'text', msg: '' });
-    try {
-      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-        Alpine.store('agent').isThinking = false;
-      }
-    } catch (e) { /* store not ready */ }
+    _setStoreThinking(false);
   }
 
   function _directChildByClass(parent, cls) {
@@ -1518,7 +1857,11 @@
     // approve-resume) — no longer dependent on WS frames arriving.
     // A resume is not a new card epoch (keeps elapsed/step).
     _taskCardEvent(resume ? { t: 'resuming' } : { t: 'begin' });
-    _setStatusStrip(ti('thinking', 'Kazma is thinking\u2026'));
+    // Store flag only. Stamping a text override here painted "Kazma is
+    // thinking\u2026" over the phase the line above just set \u2014 every approve
+    // rendered as "\u21bb Kazma is thinking\u2026" instead of "Resuming after
+    // approval". The card's own phase is the label.
+    _setStoreThinking(true, ti('thinking', 'Kazma is thinking\u2026'));
     // Keep visibility recovery armed even if no token frames arrive before
     // the user switches tabs (WS can be silent for seconds at turn start).
     _armTurnWatchdog();
@@ -1549,6 +1892,18 @@
       } catch (eLive) {
         try { delete _docs.live; } catch (eDel) { /* ignore */ }
       }
+      // Release any bubble a previous turn left carrying the placeholder id
+      // (older builds stamped it; a restored transcript can carry it too).
+      // While one exists, this turn's untagged frames would paint into it
+      // instead of into this turn's own bubble.
+      try {
+        var _stale = messagesEl
+          ? messagesEl.querySelectorAll('.message-assistant[data-turn-id="live"]')
+          : [];
+        for (var _si = 0; _si < _stale.length; _si++) {
+          _stale[_si].removeAttribute('data-turn-id');
+        }
+      } catch (eStale) { /* ignore */ }
       logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     }
     if (inputEl) {
@@ -1598,7 +1953,10 @@
     } catch (e) { /* store not ready */ }
     // Honest summary: a turn that delivered no reply must not claim "Done".
     finalizeProgress(_turnPainted ? true : 'empty');
-    _taskCardEvent({ t: 'done', ok: !!_turnPainted });
+    // The card's last frame carries the SHAPE of what just happened
+    // ("12 steps · 3 tools · 18.4s · 4.2k tokens") instead of a bare "Done"
+    // that threw the counts away with the live panel.
+    _taskCardEvent({ t: 'done', ok: !!_turnPainted, summary: _tcTurnSummary() });
     if (activeTypingEl && KS.hideTyping) {
       KS.hideTyping(activeTypingEl);
     }
@@ -2577,8 +2935,14 @@
       onToolCall: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        _taskCardEvent({ t: 'tool', name: data.tool_name || 'tool' });
-        _pinLiveAssistantBubble();
+        _taskCardEvent({
+          t: 'tool',
+          name: data.tool_name || 'tool',
+          detail: _tcArgSummary(data.inputs),
+        });
+        // Look-only: a tool step has nothing to put IN the bubble, and
+        // minting one here opened every tool-first turn with a blank bubble.
+        _pinLiveAssistantBubble(false);
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
           try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
@@ -2716,13 +3080,16 @@
         // _turnPainted: a late stale terminal must NEVER print this after a
         // successful reply already painted (the trailing "_No response
         // received." under the posted-tweets answer, 2026-08-26).
-        if (!tokenAccum && !currentMsgEl && !interrupted && !_awaitingApproval
-            && !_turnPainted) {
+        // `!currentMsgEl` used to gate this. Any open bubble — including the
+        // blank one a progress frame minted — suppressed the diagnosis, so a
+        // turn that died on an unanswered gate showed nothing at all. What
+        // matters is that the bubble is EMPTY, not that it is absent.
+        if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {
           diag('empty-terminal');
           dumpDiagnostics();
           _pinLiveAssistantBubble();
-          var emptyEl = currentMsgEl.querySelector('.message-text');
-          if (emptyEl) {
+          var emptyEl = currentMsgEl && currentMsgEl.querySelector('.message-text');
+          if (emptyEl && !String(emptyEl.textContent || '').trim()) {
             var retryHtml = '';
             if (lastSentUserText || (messagesEl.querySelector('.message-user'))) {
               retryHtml = ' <button class="btn btn-secondary btn-sm" '
@@ -4628,11 +4995,28 @@
     } catch (eLs) { /* ignore */ }
   }
 
-  function _freezeHitlButtons() {
-    if (!messagesEl) return;
-    messagesEl.querySelectorAll('.hitl-approval-card button').forEach(function(b) {
-      b.disabled = true;
-    });
+  /**
+   * Freeze the buttons of the card being decided — and ONLY that card.
+   *
+   * Two concurrent approval cards is a supported state (_placeHitlCard
+   * deliberately stacks a second one after the first), but this froze every
+   * card in the transcript. Approving the first killed the second's buttons,
+   * nothing re-enables them (_reconcileHitlCardsWithGates only ever
+   * disables), and with no enabled button left hasInlineApprovalCard() went
+   * false — so onDone took the endTurn branch while the graph was still
+   * parked on the untouched interrupt. The card vanished and the reply never
+   * came (2026-09-03).
+   *
+   * @param {Element} [scope] The card to freeze. Omitted = every card, which
+   *   is only correct at a hard turn reset.
+   */
+  function _freezeHitlButtons(scope) {
+    var isCard = !!(scope && scope.classList
+      && scope.classList.contains('hitl-approval-card'));
+    var host = scope || messagesEl;
+    if (!host || !host.querySelectorAll) return;
+    host.querySelectorAll(isCard ? 'button' : '.hitl-approval-card button')
+      .forEach(function(b) { b.disabled = true; });
   }
 
   /** Hide the chat.html bottom Alpine approval card (driven by the store). */
@@ -4844,10 +5228,22 @@
       if (kids[i].classList.contains('hitl-approval-card')) lastCard = kids[i];
       else if (!progress && kids[i].classList.contains('agent-progress')) progress = kids[i];
     }
-    if (progress) progress.classList.remove('is-collapsed');
+    // Expand ONLY a panel that actually traps a card. This used to open
+    // every collapsed workbench in the bubble, which was aimed at a card
+    // nested inside one — but the card is placed as a SIBLING here, so the
+    // sweep only ever hit the durable one-line summary and left it open
+    // forever (the terminal repaint below inherits that expansion). Every
+    // turn that saw an approval ended up with the old full CoT ladder
+    // sitting in the transcript (2026-09-03).
     try {
-      var nested = host.querySelectorAll ? host.querySelectorAll('.agent-progress.is-collapsed') : [];
-      for (i = 0; i < nested.length; i++) nested[i].classList.remove('is-collapsed');
+      var nested = host.querySelectorAll
+        ? host.querySelectorAll('.agent-progress.is-collapsed')
+        : [];
+      for (i = 0; i < nested.length; i++) {
+        if (nested[i].querySelector('.hitl-approval-card')) {
+          nested[i].classList.remove('is-collapsed');
+        }
+      }
     } catch (eOpen) { /* ignore */ }
     var after = lastCard || progress;
     try {
@@ -4876,10 +5272,27 @@
     return dl > 0 ? dl : 0;
   }
 
+  /** Deadline of the newest card that still has live buttons, 0 if none.
+   *  Lets the Live Task Card keep counting down for a SIBLING gate after the
+   *  first one is decided. */
+  function _liveHitlDeadline() {
+    if (!messagesEl) return 0;
+    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
+    for (var i = cards.length - 1; i >= 0; i--) {
+      if (!cards[i].querySelector('button:not([disabled])')) continue;
+      return Number(cards[i].getAttribute('data-approval-deadline') || 0) || 0;
+    }
+    return 0;
+  }
+
   function _attachHitlCountdown(card, data) {
     if (!card) return;
     var dl = _hitlDeadlineOf(data);
     if (!dl) return;
+    // Published on the node so _liveHitlDeadline can find it — the value
+    // used to live only in this closure.
+    try { card.setAttribute('data-approval-deadline', String(dl)); }
+    catch (eDl) { /* ignore */ }
     var row = document.createElement('div');
     row.className = 'hitl-countdown';
     var host = card.querySelector('.hitl-approval-body') || card;
@@ -5184,7 +5597,8 @@
       // beginTurn clears the HITL wait; keep recover/replay from re-arming
       // this card while the JSON approve is in flight.
       _awaitingApproval = true;
-      _freezeHitlButtons();
+      // THIS card only — a sibling card is a different, still-pending gate.
+      _freezeHitlButtons(card);
       setCardState('approved', scope === 'yolo'
         ? ti('yolo_on', 'YOLO on ✓')
         : (scope === 'tool' ? ti('tool_allowed', 'Tool allowed ✓')
@@ -5278,8 +5692,13 @@
         }
         // Decision accepted — the graph is running again. Clear the HITL
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
-        _awaitingApproval = false;
+        // Unless another card is still live: deciding gate A does not mean
+        // the turn stopped waiting on gate B.
+        _awaitingApproval = hasInlineApprovalCard();
         _awaitingReply = true;
+        if (_awaitingApproval) {
+          _taskCardEvent({ t: 'approval', deadline: _liveHitlDeadline() });
+        }
         _notifyHitlResolved({
           thread_id: data.thread_id || targetThreadId,
           tool: data.tool || '',
@@ -6340,6 +6759,26 @@
     }
   }
 
+  /**
+   * Does this document need a transcript bubble at all?
+   *
+   * Text and reasoning are covered by _answerFromDoc. Beyond those, only two
+   * things belong in the bubble: an approval card, and the durable one-line
+   * workbench summary a FINISHED turn leaves behind (which needs a host even
+   * when the turn produced no prose). Everything else — the running step
+   * list — is the Live Task Card's job now.
+   */
+  function _docHasBubbleContent(doc) {
+    if (!doc) return false;
+    var st = String(doc.status || '');
+    if (st === 'done' || st === 'error' || st === 'paused') return true;
+    var parts = doc.parts || [];
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] && parts[i].type === 'hitl') return true;
+    }
+    return false;
+  }
+
   function _answerFromDoc(TD, doc) {
     var text = (TD && TD.textOf) ? TD.textOf(doc.parts) : '';
     if (!text) text = doc.stream || '';
@@ -6526,6 +6965,13 @@
       }
       if (!card) return;
       card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+      // A settled card must stop counting down. This projector disabled the
+      // buttons but left the ticker running, so an approved card kept
+      // advertising "auto-denies if unanswered in 3:59" under an "Approved"
+      // stamp (only the click path and the timeout path stopped it).
+      _stopHitlCountdown(card);
+      var cdRow = card.querySelector('.hitl-countdown');
+      if (cdRow && cdRow.parentNode) cdRow.parentNode.removeChild(cdRow);
       if (state === 'timeout' || state === 'denied' || state === 'error') {
         card.className = 'hitl-approval-card hitl-' + (state === 'error' ? 'error' : 'denied');
         var deniedActions = card.querySelector('.hitl-approval-actions');
@@ -6561,17 +7007,37 @@
     if (!TD) return;
     var turnId = String(doc.turnId || '');
     var el = null;
-    if (turnId) {
+    // 'live' is a PLACEHOLDER, not an identity — applyTurnEvent falls back to
+    // it for every frame the server has not yet stamped with a real turn id,
+    // which is most of them at the start of a turn. Matching on it made any
+    // bubble left carrying data-turn-id="live" a permanent magnet: the NEXT
+    // turn's first tokens painted into that old bubble, above the new user
+    // message, and when a frame finally arrived with the real id the stale
+    // bubble was 'historical' (a user row now follows it) so a second bubble
+    // was minted at the end — the same reply above AND below (2026-09-03).
+    // The open turn is anchored by currentMsgEl, which is what the fallback
+    // below already uses.
+    if (turnId && turnId !== 'live') {
       try {
         el = messagesEl.querySelector('.message-assistant[data-turn-id="' + _cssEscapeAttr(turnId) + '"]');
       } catch (eSel) { el = null; }
     }
-    if (!el) el = currentMsgEl || _assistantBubbleForOpenTurn();
+    // A doc with nothing to SHOW in a bubble (progress rows only — the Live
+    // Task Card's territory) must never mint one. beginTurn seeds a
+    // "Thinking…" progress row, which used to land here with currentMsgEl
+    // freshly nulled and open every turn with an empty bubble.
+    var _paintable = !!_answerFromDoc(TD, doc) || _docHasBubbleContent(doc);
+    if (!el) el = currentMsgEl || _assistantBubbleForOpenTurn(_paintable);
     if (_isUserBubble(el) || _isUserBubble(currentMsgEl)) {
       currentMsgEl = null;
-      el = _assistantBubbleForOpenTurn();
+      el = _assistantBubbleForOpenTurn(_paintable);
     }
-    if (!el) el = _assistantBubbleForOpenTurn();
+    if (!el) el = _assistantBubbleForOpenTurn(_paintable);
+    if (!el) {
+      // Progress-only frame with no bubble yet: the card is the surface.
+      _taskCardEvent({ t: 'doc' });
+      return;
+    }
     // A bubble FOLLOWED by a user message belongs to a closed historical
     // turn: paint it, but never let it capture the open-turn pointer. A late
     // hydrate/resync for the previous turn used to re-pin its bubble as
@@ -6585,7 +7051,9 @@
       if (_sib.classList && _sib.classList.contains('message-user')) { _historical = true; break; }
     }
     if (!_historical) currentMsgEl = el;
-    if (turnId) {
+    // Never stamp the placeholder (see the lookup above): a real server turn
+    // id identifies a bubble, 'live' identifies nothing.
+    if (turnId && turnId !== 'live') {
       try { el.setAttribute('data-turn-id', turnId); } catch (eAttr) { /* ignore */ }
     }
     _rescueTurnDom(el);

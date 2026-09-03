@@ -1,5 +1,128 @@
 # CHANGELOG
 
+## Fix + Feature - Live Task Card: the vanishing card, the empty bubble, and a card worth reading (2026-09-03)
+
+Two live-user reports against the day-old Live Task Card, plus the
+hardening pass they exposed.
+
+**Bug 1 - every turn opened with an empty bubble.** ``beginTurn`` seeds a
+"Thinking..." progress row; ``renderTurn`` answered it with
+``createAssistantMessage()``. That was harmless while the live workbench
+lived IN the bubble - the card merge moved the live view out and left the
+mint behind, so each turn opened with a bare avatar + timestamp +
+reaction buttons and nothing inside until the first token.
+``_assistantBubbleForOpenTurn(create)`` can now look without minting, and
+``renderTurn`` only mints when the document actually has something for a
+bubble (``_docHasBubbleContent``: answer text, an approval card, or a
+finished turn whose durable summary needs a host). The tool-call path
+pins look-only for the same reason.
+
+**Bug 2 - approve two permission cards, the card vanishes, no reply.**
+Three compounding causes:
+
+- ``_freezeHitlButtons()`` disabled EVERY approval card in the
+  transcript, though ``_placeHitlCard`` deliberately stacks concurrent
+  cards. Approving gate A killed gate B's buttons; nothing re-enables
+  them (``_reconcileHitlCardsWithGates`` only ever disables). With no
+  enabled button left ``hasInlineApprovalCard()`` went false, so
+  ``onDone`` took the ``endTurn`` branch while the graph was still parked
+  on the untouched interrupt: card hidden, no reply, no diagnosis. The
+  freeze is now scoped to the card being decided, and resolving gate A no
+  longer clears the HITL wait while gate B is live (the card keeps
+  counting down for it, via a new ``data-approval-deadline`` stamp).
+- ``approval`` and ``resuming`` were the only liveness events that did
+  not cancel a hide armed by a previous terminal frame - and ``resuming``
+  never restored visibility or restarted the tick timer either (frozen
+  elapsed, dead stall detection). All liveness events now go through one
+  ``_tcWake``.
+- The "no response received" fallback was gated on ``!currentMsgEl``, so
+  any minted bubble suppressed it. It now keys off the bubble being
+  EMPTY.
+
+**The card itself.** Elapsed was inverted - it only recomputed while
+signals were fresh, freezing at exactly the moment you are wondering
+whether the turn hung; the clock is now monotonic across a resume
+(server-authoritative, local fills gaps, never runs backwards).
+``beginTurn`` stamped "Kazma is thinking..." over the phase it had just
+set one line earlier, so every approve read "resuming" with the wrong
+words; structural phases now outrank the free-text override and the
+store flag moved to ``_setStoreThinking``. An empty ``_clearStatusStrip``
+no longer leaves a stale override alive. Stall recovery is a backoff (3
+resyncs, then an honest "not responding" + Retry) instead of one shot
+that latched forever. Steps clear on a new turn, skip identical
+rebuilds, and stay tail-pinned unless the reader scrolled up.
+
+**More informative.** The header names WHAT a tool is acting on
+(``Running file_search "auth middleware"``), carries a phase-scoped clock
+(``1:12 in this tool`` - a three-minute tool is invisible behind total
+turn time), and the terminal frame shows the shape of the turn
+(``12 steps - 3 tools - 18.4s - 4.2k tokens``) instead of a bare "Done".
+A turn that delivered nothing says so and does not wear a checkmark. The
+turn's own actions live in the header: Stop while running, Review to
+jump to the approval buttons the countdown is talking about, Retry once
+liveness recovery gives up. The open/closed choice persists. Heartbeats
+carry the same ``detail`` server-side (``hb_arg_summary``), so a journal
+attach reads like the live stream.
+
+**i18n + a11y.** Every ``task_*`` key the card asks for was missing from
+the catalog AND from the ``CHAT_I18N`` bridge - the whole card rendered
+hardcoded English in Arabic sessions. 24 keys added and wired; the phase
+icon moved into its own span (the markup's ``.live-task-phase`` dot was
+dead, so headers rendered a stray bullet and RTL glued the emoji to the
+front of Arabic text). The toggle now keeps a STATIC accessible name;
+its live text is aria-hidden and phase/countdown/liveness are announced
+through a ``role="status"`` region at coarse thresholds instead of being
+re-read every second. The body's hardcoded ``#0b0f17`` fallback no longer
+paints near-black in the light theme.
+
+**Bug 3 - the approval card filled the whole chat.**
+``.hitl-approval-card { flex: 1 1 100% }`` is a ``.message-content`` rule:
+that container is a wrapping flex ROW, where the 100% basis is what puts
+the card on its own line instead of sharing it with the reasoning panel.
+The store-driven fallback card is a direct child of ``.chat-main``, a
+flex COLUMN - there the same declaration means grow-to-fill. Measured in
+a browser on stock HEAD: a 548px card above a 24px transcript. The base
+rule no longer grows, the row behaviour moved to a ``.message-content >``
+override, and the docked strip is inset and capped at 40vh with its own
+scroll.
+
+**Bug 4 - the old CoT was still there.** ``_placeHitlCard`` force-opened
+EVERY collapsed workbench in the bubble. That sweep was aimed at a card
+nested inside one, but the card is placed as a SIBLING, so in practice it
+only ever hit the durable one-line summary - and ``_syncCotPanel``'s
+terminal repaint inherits that expansion and never closes it again. Every
+turn that saw an approval kept the full CoT ladder open in the transcript
+(320px). Now only a panel that actually contains a card is opened; the
+summary stays the 30px one-liner it was built as. A settled card also
+stops its countdown (an approved card kept advertising "auto-denies if
+unanswered in 3:59") and drops the how-to-choose tips it no longer needs.
+
+**Bug 5 - the reply appeared above the user's message, and again below
+it.** ``applyTurnEvent`` falls back to the turn id ``'live'`` for every
+frame the server has not stamped yet - most of them at the start of a
+turn. ``renderTurn`` both LOOKED UP and STAMPED bubbles by that id, so a
+bubble left carrying ``data-turn-id="live"`` became a permanent magnet:
+the next turn's untagged frames painted into that OLD bubble, which now
+sits above the new user row, and when a frame finally arrived with the
+real id the stale bubble counted as historical (a user row follows it) so
+a second bubble was minted at the end. Observed live: one bubble stamped
+``live`` and one with the real id, both holding the same 331-character
+reply, straddling the user's message. The placeholder never reaches the
+DOM now - the open turn is anchored by ``currentMsgEl``, which was
+already the fallback - and ``beginTurn`` releases any stamp an older
+build or a restored transcript left behind.
+
+**Tests.** The card's existing tests assert that source substrings
+EXIST - they passed happily while the branch they name leaked a hide
+timer, which is how this shipped. ``tests/js/test_live_task_card.js``
+extracts the state machine verbatim (between explicit markers) and drives
+it on a fake clock and fake DOM: 25 behaviors, run under Node from
+``test_live_task_card_behaviors_under_node``. Mutation-checked - each of
+the five headline bugs, reintroduced, is caught. Three older tests that
+described markup the card merge retired (``is-on`` strip toggle, the node
+badge's ``x-show``, the no-arg bubble helpers) were updated to the
+current contract.
+
 ## Fix — phantom live CoT panel on refresh (Live Task Card follow-up) (2026-09-03)
 
 Two direct DOM writers bypassed the card merge: ``setPlan`` and

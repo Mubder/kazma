@@ -356,6 +356,102 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "كاظمه تفكر… اكتب لترتيب رسالتك التالية",
         "en": "Kazma is thinking… type to queue your next message",
     },
+    "chat.approval_expired_short": {
+        "ar": "انتهت المهلة",
+        "en": "expired",
+    },
+    "chat.auto_deny_seconds": {
+        "ar": "رفض تلقائي خلال {n} ثانية",
+        "en": "auto-denies in {n} seconds",
+    },
+    "chat.approval_expired": {
+        "ar": "انتهت مهلة الموافقة — سنكمل بدون هذه الأداة.",
+        "en": "Approval timed out — continuing without this tool.",
+    },
+    "chat.auto_deny_in": {
+        "ar": "رفض تلقائي إن لم يُرد خلال",
+        "en": "Auto-denies if unanswered in",
+    },
+    "chat.task_auto_deny_in": {
+        "ar": "رفض تلقائي خلال",
+        "en": "auto-denies in",
+    },
+    "chat.task_awaiting": {
+        "ar": "بانتظار موافقتك",
+        "en": "Awaiting your approval",
+    },
+    "chat.task_checking": {
+        "ar": "جارٍ التحقق…",
+        "en": "checking…",
+    },
+    "chat.task_details": {
+        "ar": "تفاصيل المهمة",
+        "en": "Task details",
+    },
+    "chat.task_done": {
+        "ar": "تم",
+        "en": "Done",
+    },
+    "chat.task_error": {
+        "ar": "فشلت الجولة",
+        "en": "Turn failed",
+    },
+    "chat.task_in_tool": {
+        "ar": "{d} في هذه الأداة",
+        "en": "{d} in this tool",
+    },
+    "chat.task_no_reply": {
+        "ar": "لم يصل أي رد",
+        "en": "No reply received",
+    },
+    "chat.task_no_signal": {
+        "ar": "لا توجد إشارة",
+        "en": "no signal",
+    },
+    "chat.task_not_responding": {
+        "ar": "لا يستجيب",
+        "en": "not responding",
+    },
+    "chat.task_plan": {
+        "ar": "خطة",
+        "en": "plan",
+    },
+    "chat.task_resuming": {
+        "ar": "استئناف بعد الموافقة",
+        "en": "Resuming after approval",
+    },
+    "chat.task_retry": {
+        "ar": "إعادة المحاولة",
+        "en": "Retry",
+    },
+    "chat.task_review": {
+        "ar": "مراجعة ↑",
+        "en": "Review ↑",
+    },
+    "chat.task_running_tool": {
+        "ar": "تشغيل",
+        "en": "Running",
+    },
+    "chat.task_step": {
+        "ar": "خطوة",
+        "en": "step",
+    },
+    "chat.task_thinking": {
+        "ar": "تفكير",
+        "en": "Thinking",
+    },
+    "chat.task_tool": {
+        "ar": "أداة",
+        "en": "tool",
+    },
+    "chat.task_tools": {
+        "ar": "أدوات",
+        "en": "tools",
+    },
+    "chat.task_writing": {
+        "ar": "كتابة الرد…",
+        "en": "Writing the reply…",
+    },
     "chat.title": {
         "ar": "المحادثة",
         "en": "Chat",

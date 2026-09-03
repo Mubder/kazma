@@ -51,6 +51,64 @@ def is_thread_paused(thread_id: str) -> bool:
     return bool(thread_id) and thread_id in _paused_threads
 
 
+#: Argument keys that identify nothing to a reader.
+_HB_SKIP_ARGS = frozenset({"session_id", "thread_id", "workspace_id", "turn_id", "id"})
+#: Preferred order for "what is this tool acting on".
+_HB_PREFER_ARGS = (
+    "query", "q", "path", "file", "file_path", "url", "name",
+    "command", "cmd", "pattern", "text", "prompt", "title", "to",
+)
+
+
+def hb_arg_summary(inputs: Any, limit: int = 48) -> str:
+    """One short quoted value naming what a tool is acting on.
+
+    A heartbeat that says only ``tool: file_search`` for two minutes tells
+    the reader far less than one naming the query that is taking two
+    minutes. Mirrors ``_tcArgSummary`` in chat.js so the live card reads the
+    same whether the frame came from ``tool_call`` or from a heartbeat.
+    """
+    obj = inputs
+    if isinstance(obj, str):
+        s = obj.strip()
+        if not s:
+            return ""
+        if s[0] in "{[":
+            try:
+                obj = json.loads(s)
+            except (ValueError, TypeError):
+                return _hb_quote(s, limit)
+        else:
+            return _hb_quote(s, limit)
+    if isinstance(obj, (list, tuple)):
+        return hb_arg_summary(obj[0], limit) if obj else ""
+    if not isinstance(obj, dict):
+        return ""
+    for key in _HB_PREFER_ARGS:
+        val = obj.get(key)
+        if isinstance(val, str) and val.strip():
+            return _hb_quote(val, limit)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return _hb_quote(str(val), limit)
+    for key, val in obj.items():
+        if key in _HB_SKIP_ARGS:
+            continue
+        if isinstance(val, str) and val.strip():
+            return _hb_quote(val, limit)
+        if isinstance(val, (int, float, bool)):
+            return _hb_quote(str(val), limit)
+    return ""
+
+
+def _hb_quote(text: str, limit: int) -> str:
+    s = " ".join(str(text).split())
+    if not s:
+        return ""
+    if len(s) > limit:
+        s = s[: limit - 1].rstrip() + "…"
+    return "“" + s + "”"
+
+
 from kazma_ui.sse_chat._helpers import (
     _extract_hitl_payload,
     _last_assistant_text,
@@ -412,6 +470,7 @@ async def _stream_langgraph_events(
                         yield await emit_j("turn_heartbeat", {
                             "phase": "resuming",
                             "current": "",
+                            "detail": "",
                             "step": 0,
                             "elapsed_s": round(time.monotonic() - turn_start, 1),
                         })
@@ -522,7 +581,12 @@ async def _stream_langgraph_events(
                 # produce no other journaled frames. Phase is derived from
                 # the events already consumed here; the 10s queue-silence
                 # branch below journals a turn_heartbeat carrying it.
-                _hb: dict[str, Any] = {"phase": "llm", "current": "", "step": 0}
+                # `detail` is a compact "…to WHAT": a heartbeat that says only
+                # "tool: file_search" for two minutes tells you far less than
+                # one that says which query is taking two minutes.
+                _hb: dict[str, Any] = {
+                    "phase": "llm", "current": "", "detail": "", "step": 0,
+                }
 
                 try:
                     while True:
@@ -543,6 +607,7 @@ async def _stream_langgraph_events(
                             yield await emit_j("turn_heartbeat", {
                                 "phase": _hb["phase"],
                                 "current": _hb["current"],
+                                "detail": _hb["detail"],
                                 "step": _hb["step"],
                                 "elapsed_s": round(time.monotonic() - turn_start, 1),
                             })
@@ -606,11 +671,13 @@ async def _stream_langgraph_events(
                             _first_token_of_model_call = True
                             _hb["phase"] = "llm"
                             _hb["current"] = ""
+                            _hb["detail"] = ""
 
                         # ── on_chat_model_end: LLM finished — extract usage ────
                         elif kind == "on_chat_model_end":
                             _hb["phase"] = "supervisor"
                             _hb["current"] = ""
+                            _hb["detail"] = ""
                             output = data.get("output", {})
                             if hasattr(output, "usage_metadata"):
                                 usage = output.usage_metadata or {}
@@ -629,6 +696,7 @@ async def _stream_langgraph_events(
                             inputs = data.get("input", {})
                             if isinstance(inputs, dict) and "input" in inputs:
                                 inputs = inputs["input"]
+                            _hb["detail"] = hb_arg_summary(inputs)
                             yield await emit_j(
                                 "tool_call",
                                 {
@@ -643,6 +711,7 @@ async def _stream_langgraph_events(
                         elif kind == "on_tool_end":
                             _hb["phase"] = "supervisor"
                             _hb["current"] = ""
+                            _hb["detail"] = ""
                             output = data.get("output", "")
                             if hasattr(output, "content"):
                                 output = output.content
