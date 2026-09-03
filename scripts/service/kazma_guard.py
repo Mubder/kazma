@@ -750,10 +750,19 @@ def reap_port_holder(url: str, log: GuardLog) -> bool:
             note="refusing to kill a non-python process")
         return False
     log("warn", "port.reaping_holder", pid=pid, port=port, name=name)
+    kill_note = ""
     try:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
-                           capture_output=True, timeout=30, check=False)
+            # /T takes the whole tree; capture the output so an Access
+            # Denied on an elevated holder is SEEN, not swallowed.
+            kill = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, text=True, encoding="utf-8",
+                errors="replace", timeout=30, check=False,
+            )
+            if kill.returncode != 0:
+                lines = (kill.stderr or kill.stdout or "").strip().splitlines()
+                kill_note = lines[-1][:160] if lines else f"exit {kill.returncode}"
         else:
             os.kill(pid, signal.SIGKILL)
     except Exception as exc:
@@ -763,6 +772,19 @@ def reap_port_holder(url: str, log: GuardLog) -> bool:
         if not _pid_alive(pid):
             break
         time.sleep(0.5)
+    if _pid_alive(pid):
+        # Honesty (2026-09-03): this used to log holder_reaped and return
+        # True unconditionally. Live that night: an elevated zombie python
+        # survived the guard's non-admin taskkill through THREE "successful"
+        # reaps — every --reload silently discarded the new child while the
+        # zombie kept serving the old build, so the operator's restart never
+        # took effect and nothing said so. Success is measured, not assumed.
+        log("error", "port.holder_reap_ineffective", pid=pid, port=port,
+            name=name,
+            kill_result=kill_note or "process still alive after taskkill",
+            note=(f"restart will NOT take effect until this pid is killed "
+                  f"from an ELEVATED shell: taskkill /PID {pid} /F"))
+        return False
     log("info", "port.holder_reaped", pid=pid, port=port)
     return True
 
@@ -855,6 +877,10 @@ class Guard:
         self.restarts = 0
         self.recent = deque(maxlen=CRASH_LOOP_COUNT)
         self._stop = False
+        # Last port-holder pid we paged about (mute-theorem dedupe): a
+        # squatter the guard cannot kill repeats every spawn cycle, and
+        # paging on each one trains the operator to ignore the channel.
+        self._last_stale_holder_notified: int | None = None
 
     # -- lifecycle ----------------------------------------------------
 
@@ -1007,6 +1033,32 @@ class Guard:
             # the port. Clearing it here costs one netstat; discovering it
             # after the spawn costs a discarded child and a backoff.
             clear_stale_port(self.health_url, self.log)
+            # Honesty (2026-09-03): when the clear FAILED the port is still
+            # held, the spawn below cannot bind, and the server answering
+            # requests is the OLD build — the operator's restart silently
+            # did not take effect (live: elevated zombie python survived
+            # three reaps while the guard logged holder_reaped). Page once
+            # per holder pid; the kill needs an elevated shell only the
+            # operator can open.
+            _stale_pid = _port_holder_pid(_port_from_url(self.health_url))
+            if _stale_pid:
+                if _stale_pid != self._last_stale_holder_notified:
+                    self._last_stale_holder_notified = _stale_pid
+                    self.log("error", "guard.port_still_held", pid=_stale_pid,
+                             port=_port_from_url(self.health_url),
+                             note="spawn below cannot bind; old build still serving")
+                    try:
+                        self.notify.send(
+                            f"[guard] RESTART DID NOT TAKE EFFECT: pid {_stale_pid} "
+                            f"still owns port {_port_from_url(self.health_url)} and is "
+                            f"serving the OLD build — the guard cannot kill it (likely "
+                            f"elevated). From an ADMIN terminal: taskkill /PID {_stale_pid} /F, "
+                            f"then restart the guard."
+                        )
+                    except Exception:
+                        self.log("debug", "guard.port_still_held.notify_failed")
+            else:
+                self._last_stale_holder_notified = None
             spawned_at = time.time()
             self.proc = spawn(self.cmd, self.cwd, self.log)
 

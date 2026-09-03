@@ -89,3 +89,73 @@ def test_guard_cli_has_install_alias() -> None:
     assert "install_service.py" in src
     body = src.split("def _cmd_install()", 1)[1].split("\ndef ", 1)[0]
     assert "install_service.py" in body
+
+
+# ── Reap honesty (2026-09-03) ────────────────────────────────────────────
+# Live incident: an elevated zombie python (pid 113924) survived the guard's
+# non-admin taskkill while the guard logged "port.holder_reaped" — three
+# times in one evening. Every --reload then silently discarded the new child
+# while the zombie served the OLD build, and the operator's restart never
+# took effect. A kill must be measured, not assumed.
+
+
+class _LogRecorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def __call__(self, level: str, event: str, **kw: object) -> None:
+        self.events.append((level, event))
+
+
+def _fake_kill(result: dict):
+    def _run(cmd, **kwargs):
+        class R:
+            returncode = result.get("returncode", 0)
+            stdout = result.get("stdout", "")
+            stderr = result.get("stderr", "")
+        return R()
+    return _run
+
+
+def test_reap_reports_ineffective_when_holder_survives(monkeypatch) -> None:
+    rec = _LogRecorder()
+    monkeypatch.setattr(_guard, "_port_holder_pid", lambda port: 4242)
+    monkeypatch.setattr(_guard, "_windows_image_name", lambda pid: "python.exe")
+    monkeypatch.setattr(_guard, "_is_reapable_image", lambda n: True)
+    monkeypatch.setattr(
+        _guard.subprocess, "run",
+        _fake_kill({"returncode": 1, "stderr": "ERROR: Access is denied."}),
+    )
+    monkeypatch.setattr(_guard.os, "kill", lambda *a: None)
+    monkeypatch.setattr(_guard, "_pid_alive", lambda pid: True)  # survived
+
+    assert _guard.reap_port_holder("http://127.0.0.1:9090/health", rec) is False
+    levels = {event: level for level, event in rec.events}
+    assert levels.get("port.holder_reap_ineffective") == "error"
+    assert "port.holder_reaped" not in levels
+
+
+def test_reap_still_succeeds_when_holder_dies(monkeypatch) -> None:
+    rec = _LogRecorder()
+    monkeypatch.setattr(_guard, "_port_holder_pid", lambda port: 4242)
+    monkeypatch.setattr(_guard, "_windows_image_name", lambda pid: "python.exe")
+    monkeypatch.setattr(_guard, "_is_reapable_image", lambda n: True)
+    monkeypatch.setattr(
+        _guard.subprocess, "run", _fake_kill({"returncode": 0}),
+    )
+    monkeypatch.setattr(_guard.os, "kill", lambda *a: None)
+    monkeypatch.setattr(_guard, "_pid_alive", lambda pid: False)  # dead
+
+    assert _guard.reap_port_holder("http://127.0.0.1:9090/health", rec) is True
+    assert ("info", "port.holder_reaped") in rec.events
+
+
+def test_supervisor_pages_once_per_surviving_holder() -> None:
+    """The run loop must page Telegram-direct (once per holder pid — the
+    mute theorem) when the port is still held after the pre-spawn clear."""
+    src = Path("scripts/service/kazma_guard.py").read_text(encoding="utf-8")
+    assert "guard.port_still_held" in src
+    assert "RESTART DID NOT TAKE EFFECT" in src
+    assert "_last_stale_holder_notified" in src
+    # Dedupe reset when the port frees again.
+    assert "self._last_stale_holder_notified = None" in src
