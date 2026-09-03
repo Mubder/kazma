@@ -403,6 +403,8 @@
       onApprovalRequired: function(data) {
         // HITL is not epoch-gated: a superseded stream's approval is still
         // the live question. Dropping it left the card only on Dashboard.
+        // Replayed frames are history — registry reconciler paints pending.
+        if (data && data.replay) return;
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         pauseForApproval(data);
@@ -418,6 +420,8 @@
       },
       onHitl: function(data) {
         var st = String((data && data.state) || 'pending');
+        // Replayed pending frames are history (ghost-card flash, 2026-09-03).
+        if (st === 'pending' && data && data.replay) return;
         if (st === 'pending' && _hitlAlreadyClaimed(data)) return;
         if (st !== 'pending' && !_mine()) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
@@ -3226,6 +3230,11 @@
       onApprovalRequired: function(data) {
         // HITL is not epoch-gated — see _defaultAttachCallbacks.
         // HITL: journal part + one projector paints the card.
+        // Replay provenance: a frame re-delivered from the journal is
+        // history — a settled approval's retained frame must not flash a
+        // ghost card on refresh. The registry reconciler is the only
+        // painter of pending state during load.
+        if (data && data.replay) return;
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
@@ -3244,6 +3253,8 @@
       },
       onHitl: function(data) {
         var st = String((data && data.state) || 'pending');
+        // Replayed pending frames are history (ghost-card flash, 2026-09-03).
+        if (st === 'pending' && data && data.replay) return;
         if (st === 'pending' && _hitlAlreadyClaimed(data)) return;
         if (st !== 'pending' && !_mine()) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);

@@ -1180,10 +1180,18 @@ async def _stream_langgraph_events(
         reset_turn_id(_turn_token)
 
 def _frame_from_journaled(frame: dict[str, Any]) -> str:
-    """Render a journal entry as an id:-lined SSE frame."""
+    """Render a journal entry as an id:-lined SSE frame.
+
+    Replay provenance (2026-09-03): re-delivered frames carry
+    ``replay: true`` — history, not a live ask. The client refuses to
+    paint PENDING approval state from them (a settled approval's retained
+    ``approval_required`` frame flashed a ghost card on every refresh);
+    the gate registry stays the only authority for live questions.
+    """
     data = dict(frame.get("data") or {})
     seq = frame.get("seq")
     data["seq"] = seq
+    data["replay"] = True
     return _sse_frame(str(frame.get("type") or "message"), data, id=seq)
 
 async def _journal_fast_path(thread_id: str, event: str, data: dict[str, Any]) -> str:
