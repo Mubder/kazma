@@ -715,3 +715,28 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
         / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
     ).read_text(encoding="utf-8")
     assert ".hitl-approval-card.hitl-collapsed .hitl-approval-body" in css
+
+
+def test_claim_frame_does_not_unglue_the_collapsed_bar() -> None:
+    """2026-09-03 live bug: the click path parked+collapsed the card, then
+    the journal's claim frame arrived and _paintHitlFromDoc reassigned
+    card.className wholesale — stripping hitl-collapsed so the card sprang
+    back open mid-reply with a stranded decision chip in the header. Every
+    claim site must re-assert park+collapse, and the chip/chevron must
+    never render outside the collapsed bar."""
+    js = _js()
+    paint = js.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
+        "\n  function renderTurn(doc, meta)", 1
+    )[0]
+    assert paint.count("_collapseClaimedHitlCard(card);") >= 2, (
+        "both claimed branches of the projector must re-assert the collapse"
+    )
+    release = js.split("function _releaseHitlComposer", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "_collapseClaimedHitlCard(card);" in release
+    css = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
+    ).read_text(encoding="utf-8")
+    assert ".hitl-approval-card:not(.hitl-collapsed) .hitl-collapse-chip" in css
