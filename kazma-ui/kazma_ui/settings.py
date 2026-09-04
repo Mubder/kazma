@@ -7,8 +7,9 @@ appearance, shortcuts, account, tools, system, and import/export.
 
 from __future__ import annotations
 
-import re
+import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -1300,14 +1301,14 @@ class SettingsRouterBuilder:
             return await _get_sm().test_tool(tool_name, req.get("arguments", {}))
 
         @router.get("/api/settings/system/logs")
-        async def api_get_logs(lines: int = Query(100)) -> dict[str, Any]:
+        async def api_get_logs(lines: int = Query(100, ge=1, le=5000)) -> dict[str, Any]:
             """Get system logs."""
-            return _get_sm().get_logs(lines)
+            return await asyncio.to_thread(_get_sm().get_logs, lines)
 
         @router.get("/api/settings/system/backup")
         async def api_backup() -> Response:
             """Download a full config backup."""
-            content = _get_sm().create_backup()
+            content = await asyncio.to_thread(_get_sm().create_backup)
             return Response(
                 content=content,
                 media_type="text/yaml; charset=utf-8",
@@ -1476,7 +1477,7 @@ class SettingsRouterBuilder:
         @router.get("/api/settings/system/updates")
         async def api_check_updates() -> dict[str, Any]:
             """Check for updates."""
-            return _get_sm().check_updates()
+            return await asyncio.to_thread(_get_sm().check_updates)
 
         @router.post("/api/settings/import")
         async def api_import_config(req: ImportConfigRequest) -> dict[str, str]:

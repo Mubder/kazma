@@ -284,6 +284,9 @@ CREATE TABLE IF NOT EXISTS memory_task_queue (
 CREATE INDEX IF NOT EXISTS idx_task_pending
   ON memory_task_queue(status, created_at) WHERE status = 'pending';
 
+CREATE INDEX IF NOT EXISTS idx_mem_queue_status_updated
+  ON memory_task_queue(status, updated_at);
+
 -- Immutable memory audit log — every belief mutation, merge, decay, promote.
 CREATE TABLE IF NOT EXISTS memory_audit_log (
   id                  TEXT PRIMARY KEY,

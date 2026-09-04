@@ -178,7 +178,7 @@ def create_research_router() -> APIRouter:
 
     # ── Live deep-research sessions (R3) ──────────────────────────────
 
-    @router.get("/api/research/ready")
+    @router.get("/api/research/ready", dependencies=[Depends(rate_limit("research", 10))])
     async def research_ready(live: bool = False) -> JSONResponse:
         """Industry preflight: search backends, proxy, optional live probe."""
         try:

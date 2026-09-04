@@ -400,8 +400,9 @@ class LLMProvider:
         # or semantically-similar prompts. Enable KAZMA_SEMANTIC_CACHE=true
         # only for single-operator deployments or all-global-prompt workloads.
         cache_enabled = os.environ.get("KAZMA_SEMANTIC_CACHE", "false").lower() == "true"
-        prompt_str = json.dumps(messages, sort_keys=True)
+        prompt_str = ""
         if cache_enabled:
+            prompt_str = json.dumps(messages, sort_keys=True)
             try:
                 from kazma_core.swarm.semantic_cache import SemanticCache
                 global _semantic_cache_singleton

@@ -29,7 +29,6 @@ def _qnorm(q: str) -> str:
 
 def register_mcp_tools(registry: Any) -> None:
     """Register the mcp tools onto *registry*."""
-    from kazma_core.agent.tool_registry import _pending_dispatch_tasks  # noqa: F401
 
     @registry.register(
         description=(

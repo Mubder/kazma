@@ -235,6 +235,8 @@ class TurnBroker:
         # order even if two coroutines race; production emits sequentially
         # per pump anyway — this is defense, not the primary mechanism).
         self._emit_locks: dict[str, asyncio.Lock] = {}
+        self._emit_locks_activity: dict[str, float] = {}
+        self._max_emit_locks: int = 512
         self._lock = threading.RLock()
 
     # ── Socket registry ───────────────────────────────────────────
@@ -332,10 +334,24 @@ class TurnBroker:
 
     def _emit_lock_for(self, thread_id: str) -> asyncio.Lock:
         with self._lock:
+            now = time.monotonic()
             lock = self._emit_locks.get(thread_id)
             if lock is None:
+                if len(self._emit_locks) >= self._max_emit_locks:
+                    candidates = [
+                        tid for tid, lk in self._emit_locks.items()
+                        if not lk.locked() and tid != thread_id
+                    ]
+                    if candidates:
+                        victim = min(
+                            candidates,
+                            key=lambda tid: self._emit_locks_activity.get(tid, 0.0),
+                        )
+                        self._emit_locks.pop(victim, None)
+                        self._emit_locks_activity.pop(victim, None)
                 lock = asyncio.Lock()
                 self._emit_locks[thread_id] = lock
+            self._emit_locks_activity[thread_id] = now
             return lock
 
     # ── Resume / replay ───────────────────────────────────────────

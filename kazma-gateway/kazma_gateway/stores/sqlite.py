@@ -59,6 +59,7 @@ class SQLiteSessionStore(SessionStore):
     """
 
     def __init__(self, db_path: str = "kazma-data/sessions.db") -> None:
+        super().__init__()
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None
         self._init_lock = asyncio.Lock()
@@ -136,6 +137,27 @@ class SQLiteSessionStore(SessionStore):
         else:
             await db.execute(_DELETE, (thread_id,))
         await db.commit()
+
+    async def update(
+        self,
+        thread_id: str,
+        mutator: Any,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically read, modify, and write back context_metadata for a thread_id."""
+        import inspect
+
+        lock = await self._get_thread_lock(thread_id)
+        async with lock:
+            current = await self.get(thread_id, tenant_id=tenant_id)
+            ctx = dict(current or {})
+            res = mutator(ctx)
+            if inspect.isawaitable(res):
+                res = await res
+            if res is not None:
+                await self.put(thread_id, res, tenant_id=tenant_id)
+                return res
+            return ctx
 
     async def evict_older_than(self, seconds: float) -> int:
         """Evict session entries whose ``updated_at`` is older than ``seconds``.

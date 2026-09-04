@@ -44,13 +44,11 @@ __all__ = [
     "mission_hard_rounds",
     "mission_recursion_limit",
     "pause_long_task",
-    "record_budget_exhausted",
     "record_long_task_event",
     "reset_progress_sender",
     "resolve_turn_budgets",
     "set_progress_sender",
     "store_continue_context",
-    "tool_call_signature",
 ]
 
 _ProgressSender = Callable[[str], Awaitable[None] | None]
@@ -711,25 +709,12 @@ def consume_continue_context(
 # ── Anti-loop detection ──────────────────────────────────────────────────
 
 
-def tool_call_signature(name: str, arguments: Any) -> str:
-    """Stable short signature for a tool invocation."""
-    import hashlib
-    import json
-
-    try:
-        blob = json.dumps(arguments, sort_keys=True, default=str, ensure_ascii=False)
-    except Exception:
-        blob = str(arguments)
-    digest = hashlib.sha256(f"{name}:{blob}".encode("utf-8", errors="replace")).hexdigest()[:16]
-    return f"{name}:{digest}"
-
-
 def normalized_tool_signature(name: str, arguments: Any) -> str:
     """Digit-normalized signature — repetition detector for PAGING loops.
 
-    ``tool_call_signature`` hashes exact args, so a model that pages through
+    Exact arg hashing allows a model that pages through
     a blob in slices (``substr(hex(checkpoint), 40001, 40000)`` → ``80001``
-    → ``120001`` …) never repeats. Collapsing digits to ``#`` makes every
+    → ``120001`` …) to never repeat. Collapsing digits to ``#`` makes every
     page of the same query shape identical, which is exactly the pathology
     the loop breaker must catch (2026-08-27 live incident: 26+ iterations
     of one-python_exec-per-page on checkpoints.db, no final answer).
@@ -788,7 +773,3 @@ def record_long_task_event(kind: str) -> None:
         record_long_task(kind)
     except Exception:
         pass
-
-
-def record_budget_exhausted(reason: str = "recursion") -> None:
-    record_long_task_event(f"budget_{reason}")

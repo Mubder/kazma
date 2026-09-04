@@ -301,6 +301,8 @@ async def supervisor_node(
     _stubbed_segments = 0
     # Merged into every supervisor return after classification (focus lifecycle).
     intent_patch: dict[str, Any] = {}
+    _decision = None
+    _ledger_clarify = False
     try:
         from kazma_core.agent.state import TaskStatus
         from kazma_core.agent.turn_input import (
@@ -675,6 +677,8 @@ async def supervisor_node(
     except Exception:
         logger.debug("[Supervisor] continuation/store intent expand skipped", exc_info=True)
         intent_patch = {}
+        _decision = None
+        _ledger_clarify = False
 
     # ── Explicit Working Memory (immutable turn anchors) ───────────
     # Parse once at iteration 0; re-inject the system anchor every iteration.

@@ -569,8 +569,6 @@ def register_memory_tools(registry: Any) -> None:
             primary.close()
             ops.close()
 
-    from kazma_core.agent.tool_registry import _pending_dispatch_tasks  # noqa: F401
-
 
     @registry.register(
         description=(

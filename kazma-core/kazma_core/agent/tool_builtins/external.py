@@ -29,7 +29,6 @@ def _qnorm(q: str) -> str:
 
 def register_external_tools(registry: Any) -> None:
     """Register the external tools onto *registry*."""
-    from kazma_core.agent.tool_registry import _pending_dispatch_tasks  # noqa: F401
 
     # ── Register tools from kazma_core/tools/ ──────────────────────
     try:

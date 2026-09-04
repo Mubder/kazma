@@ -489,13 +489,12 @@ def format_operator_card(
     if src.lower() == "gaurd":
         src = "Guard"
     sev_key = str(severity or "warn").strip().lower()
-    sev = severities.get(sev_key, str(severity or "Warn").strip().title() or "Warn")
     icon = icons.get(sev_key, icons["warn"])
-    lines = [f"{icon} Kazma — {sev}", str(title or "").strip() or sev]
+    head = str(title or "").strip() or severities.get(sev_key, "Warn")
+    lines = [f"{icon} [{src}] {head}"]
     body = str(detail or "").strip()
     if body:
         lines.append(body)
-    lines.append(src)
     return "\n".join(lines)
 
 
@@ -1253,9 +1252,9 @@ class Guard:
                 try:
                     self._page(
                         "info",
-                        "Kazma restarting (operator reload)",
-                        f"{reason}. Back in a moment — no action needed.",
-                        fingerprint=f"reload:{reason}",
+                        "Kazma is restarting for an operator reload.",
+                        "Back in a moment — no action needed.",
+                        fingerprint="reload",
                     )
                 except Exception:
                     self.log("debug", "guard.operator_reload.notify_failed")

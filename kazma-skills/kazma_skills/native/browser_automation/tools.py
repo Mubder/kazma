@@ -117,17 +117,22 @@ def _close_sync() -> None:
         page = _state.get("page")
         browser = _state.get("browser")
         pw = _state.get("playwright")
-        try:
-            if page is not None:
+        if page is not None:
+            try:
                 page.close()
-            if browser is not None:
+            except Exception:
+                logger.debug("[browser] page close error", exc_info=True)
+        if browser is not None:
+            try:
                 browser.close()
-            if pw is not None:
+            except Exception:
+                logger.debug("[browser] browser close error", exc_info=True)
+        if pw is not None:
+            try:
                 pw.stop()
-        except Exception:
-            logger.debug("[browser] teardown error", exc_info=True)
-        finally:
-            _state.update(playwright=None, browser=None, page=None)
+            except Exception:
+                logger.debug("[browser] playwright stop error", exc_info=True)
+        _state.update(playwright=None, browser=None, page=None)
 
 
 # ── per-tool sync ops (run on worker threads, serialized by the lock) ──────
@@ -237,6 +242,14 @@ async def browser_navigate(url: str) -> str:
     url = url.strip()
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+
+    try:
+        from kazma_core.security.ssrf import validate_url
+
+        validate_url(url, block_unresolved=True)
+    except Exception as exc:
+        return f"Error: URL blocked by security policy — {exc}"
+
     try:
         title, text = await _run_sync(_navigate_sync, url)
     except RuntimeError as exc:
@@ -256,6 +269,7 @@ async def browser_click(selector: str) -> str:
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
+        await _run_sync(_close_sync)
         return f"Error: click failed — {type(exc).__name__}: {exc}"
     return f"Clicked '{selector}'.\n\n{text[:MAX_TEXT_CHARS]}"
 
@@ -267,6 +281,7 @@ async def browser_extract_text(selector: str = "") -> str:
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
+        await _run_sync(_close_sync)
         return f"Error: extraction failed — {type(exc).__name__}: {exc}"
     return text[:MAX_TEXT_CHARS]
 
@@ -278,6 +293,7 @@ async def browser_screenshot(full_page: bool = True) -> str:
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
+        await _run_sync(_close_sync)
         return f"Error: screenshot failed — {type(exc).__name__}: {exc}"
     return f"Screenshot saved to {dest}"
 
@@ -300,6 +316,7 @@ async def browser_fill_form(
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
+        await _run_sync(_close_sync)
         return f"Error: form fill failed — {type(exc).__name__}: {exc}"
     return result
 
@@ -316,5 +333,6 @@ async def browser_eval_js(expression: str) -> str:
     except RuntimeError as exc:
         return str(exc)
     except Exception as exc:  # noqa: BLE001
+        await _run_sync(_close_sync)
         return f"Error: JS evaluation failed — {type(exc).__name__}: {exc}"
     return f"Result: {result}"

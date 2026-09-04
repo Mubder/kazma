@@ -30,7 +30,6 @@ def _qnorm(q: str) -> str:
 
 def register_research_tools(registry: Any) -> None:
     """Register the research tools onto *registry*."""
-    from kazma_core.agent.tool_registry import _pending_dispatch_tasks  # noqa: F401
 
     # ── Research planning / session tools (audit M1: previously defined        # and exported in tools/ but never registered — the model could not
     # call them) ────────────────────────────────────────────────────

@@ -39,29 +39,26 @@ def format_operator_card(
 ) -> str:
     """Build the operator-visible card.
 
-    Layout (no dummy quotes, source is never ``[guard]``)::
+    Source is the sentence start, always capitalized in brackets::
 
-        🟡 Kazma — Warn
-        title
-        optional detail
-        Ops
+        🟡 [Guard] Kazma is restarting for an operator reload.
+        Back in a moment — no action needed.
     """
     src_key = str(source or "").strip().lower().strip("[]")
     src = _SOURCES.get(src_key, str(source or "Ops").strip() or "Ops")
     if src.lower() == "gaurd":
         src = "Guard"
     sev_key = str(severity or "warn").strip().lower()
-    sev = _SEVERITY.get(sev_key, str(severity or "Warn").strip().title() or "Warn")
     icon = _ICONS.get(sev_key, _ICONS["warn"])
-    lines = [f"{icon} Kazma — {sev}", str(title or "").strip() or sev]
+    head = str(title or "").strip() or _SEVERITY.get(sev_key, "Warn")
+    lines = [f"{icon} [{src}] {head}"]
     body = str(detail or "").strip()
     if body:
         lines.append(body)
-    lines.append(src)
     return "\n".join(lines)
 
 
 def is_operator_card(content: str) -> bool:
     """True when ``content`` is already a finished Kazma operator card."""
     first = (content or "").split("\n", 1)[0]
-    return "Kazma —" in first
+    return any(tag in first for tag in ("[Guard]", "[Ops]", "[System]"))

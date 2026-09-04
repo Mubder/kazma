@@ -140,7 +140,7 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         )
         _needs_synthesis = False
     if _needs_synthesis:
-        _llm = llm or state.get("_llm")
+        _llm = llm
         if _llm is not None:
             try:
                 from kazma_core.runtime.turn_model import resolve_turn_client

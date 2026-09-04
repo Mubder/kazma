@@ -98,6 +98,12 @@ def authorize_effect(
     enforce_unknown_mutators: bool = False,
     cfg: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    # Aliases accepted for caller compatibility:
+    tool_args: dict[str, Any] | None = None,
+    intent_desc: str | None = None,
+    requested_at: datetime | None = None,
+    constraints: list[dict[str, Any]] | None = None,
+    enforce_unknown: bool | None = None,
 ) -> EffectDecision:
     """Authorize one tool effect.
 
@@ -106,6 +112,17 @@ def authorize_effect(
     ``tool_worker`` gate additionally passes ``user_text`` / ``request_at`` /
     ``memory_beliefs`` / thread context → full remind-act resolution kicks in.
     """
+    if args is None and tool_args is not None:
+        args = tool_args
+    if user_text is None and intent_desc is not None:
+        user_text = intent_desc
+    if request_at is None and requested_at is not None:
+        request_at = requested_at
+    if memory_beliefs is None and constraints is not None:
+        memory_beliefs = constraints
+    if enforce_unknown is not None:
+        enforce_unknown_mutators = enforce_unknown
+
     profile = get_effect_profile(tool_name)
     ctx = context or {}
     audit = {

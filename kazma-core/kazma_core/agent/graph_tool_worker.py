@@ -43,6 +43,8 @@ def _last_user_text(state: SupervisorState) -> str:
 def _commitment_resolve_gate(
     state: SupervisorState,
     pending: list[PendingToolCall],
+    *,
+    allow_interrupt: bool = True,
 ) -> tuple[list[PendingToolCall], list[ToolResult]]:
     """Phase 2.5 (SRP): the semantic commitment gate, extracted from
     tool_worker_node for independent testing + cleaner separation of policy
@@ -127,160 +129,196 @@ def _commitment_resolve_gate(
                 except Exception:
                     _enforce_unknown = True
                 for _tc in _sem:
+                    _tname = str(_tc.get("name") or "")
                     try:
                         _dec = _authz(
-                            _tc["name"], _tc.get("arguments") or {},
-                            user_text=_user_text, request_at=_req_at, memory_beliefs=_beliefs,
-                            thread_id=state.get("thread_id"), tenant_id=_tenant,
-                            enforce_unknown_mutators=_enforce_unknown,
-                            context={"source": "graph"},
+                            tool_name=_tname,
+                            tool_args=dict(_tc.get("arguments") or {}),
+                            intent_desc=_user_text or _tname,
+                            requested_at=_req_at,
+                            constraints=_beliefs,
+                            tenant_id=_tenant,
+                            enforce_unknown=_enforce_unknown,
                         )
-                    except Exception:
-                        # Fail CLOSED (deep-audit 2026-08-19, finding #9):
-                        # mirror the registry choke's posture so a broken
-                        # policy engine cannot free-fire semantic acts (the
-                        # remind/CoPilot class). The error tells the model to
-                        # surface the failure instead of retrying blind.
-                        logger.warning(
-                            "[ToolWorker] commitment gate errored for %s — fail-closed",
-                            _tc["name"],
+                    except Exception as _exc:  # noqa: BLE001
+                        # Fail-closed per tool (deep-audit 2026-08-19, finding #9)
+                        logger.error(
+                            "[ToolWorker] semantic authz crashed for %s: %s",
+                            _tname,
+                            _exc,
                             exc_info=True,
                         )
-                        _block_unhealthy(_tc["name"], _tc.get("id"))
+                        _block_unhealthy(_tname, _tc.get("id"))
                         continue
-                    try:
-                        if _dec.decision == "allow":
-                            if _dec.rewritten_args:
-                                _tc["arguments"] = _dec.rewritten_args
-                            _kept.append(_tc)
-                        elif _dec.decision in ("clarify", "confirm"):
-                            semantic_hold.append((_tc, _dec))
-                        else:
-                            _q = _dec.reason or "denied by commitment gate"
-                            semantic_blocked.append(ToolResult(
-                                tool_call_id=str(_tc.get("id") or ""),
-                                name=_tc["name"],
-                            content=(f"Commitment gate denied {_tc['name']}: {_q}. "
-                                     "Do not retry; tell the user why and what they can do."),
-                            is_error=True, duration_ms=0, outcome="terminal",
+                    if _dec.decision == "deny":
+                        semantic_blocked.append(ToolResult(
+                            tool_call_id=str(_tc.get("id") or ""),
+                            name=_tname,
+                            content=_dec.reason or f"Semantic policy blocked {_tname}",
+                            is_error=True,
+                            duration_ms=0,
+                            outcome="terminal",
                         ))
                         if record_commitment_terminal:
-                            try: record_commitment_terminal("denied")
-                            except Exception: pass
-                    except Exception:
-                        # Any exception while processing THIS tool's decision
-                        # denies only THAT tool fail-closed — it must never
-                        # un-gate the rest of the batch (finding #9).
-                        logger.warning(
-                            "[ToolWorker] commitment gate errored processing "
-                            "%s decision — denying that tool (fail-closed)",
-                            _tc.get("name"),
-                            exc_info=True,
-                        )
-                        _block_unhealthy(str(_tc.get("name") or ""), _tc.get("id"))
+                            try:
+                                record_commitment_terminal("denied")
+                            except Exception:
+                                pass
+                    elif _dec.decision in ("clarify", "confirm"):
+                        semantic_hold.append((_tc, _dec))
+                    elif _dec.rewritten_args is not None:
+                        _tc["arguments"] = _dec.rewritten_args
+                        _kept.append(_tc)
+                    else:
+                        _kept.append(_tc)
                 pending = _kept
         except Exception:
-            # Structural failure in the SHARED gate setup above (tenant
-            # stamp, clock, constraint-belief shim) — NOT a per-tool error.
-            # Per-tool resolve exceptions are guarded inside the loop below,
-            # so one broken tool no longer un-gates the rest of the batch
-            # (deep-audit 2026-08-19, finding #9). Anything still unresolved
-            # here is DENIED fail-closed (AGENTS.md §20: authorization-engine
-            # exceptions on semantic acts fail closed); non-semantic tools
-            # continue untouched so reads never stall on this path.
-            logger.warning(
-                "[ToolWorker] commitment gate structural failure — blocking "
-                "remaining semantic tools (fail-closed)",
-                exc_info=True,
-            )
-            _still_open: list[PendingToolCall] = []
+            logger.error("[ToolWorker] semantic commitment gate failed", exc_info=True)
+            _kept = []
             for _tc in pending:
                 if _is_semantic(str(_tc.get("name") or "")):
-                    _block_unhealthy(_tc["name"], _tc.get("id"))
+                    _block_unhealthy(str(_tc.get("name") or ""), _tc.get("id"))
+                else:
+                    _kept.append(_tc)
+            pending = _kept
+
+    # Audit H-14: Filter out superseded/dropped tool calls before commitment clarify
+    if semantic_hold:
+        active_ids = {str(tc.get("id") or "") for tc in pending}
+        if active_ids:
+            semantic_hold = [
+                (tc, dec) for tc, dec in semantic_hold
+                if str(tc.get("id") or "") in active_ids or not tc.get("id")
+            ]
+
+    # Dynamic proposal check
+    if pending:
+        try:
+            from kazma_core.safety.commitment.proposals import is_proposal_tool
+            _tenant = state.get("tenant_id") or "default"
+            _still_open = []
+            for _tc in pending:
+                _tname = str(_tc.get("name") or "")
+                if is_proposal_tool(_tname):
+                    semantic_blocked.append(ToolResult(
+                        tool_call_id=str(_tc.get("id") or ""),
+                        name=_tname,
+                        content=f"Proposal tool '{_tname}' is managed by the commitment engine and cannot be invoked directly.",
+                        is_error=True,
+                        duration_ms=0,
+                        outcome="terminal",
+                    ))
                 else:
                     _still_open.append(_tc)
             pending = _still_open
+        except Exception:
+            pass
 
     if semantic_hold:
-        _items = [{
-            "tool_call_id": str(_tc.get("id") or ""),
-            "tool": _tc["name"],
-            "commitment_id": _dec.commitment_id,
-            "question": _dec.clarify_question or _dec.reason or "needs clarification",
-            "options": list(_dec.options) if _dec.options else [],
-        } for _tc, _dec in semantic_hold]
-        _sem_kind = ("semantic_confirm" if all(d.decision == "confirm" for _, d in semantic_hold)
-                     else "semantic_clarify")
-        _sem_payload = {
-            "type": "hitl_approval", "kind": _sem_kind, "items": _items,
-            "message": (_items[0]["question"] if len(_items) == 1
-                        else f"{len(_items)} actions need clarification"),
-        }
-        _sem_choice = interrupt(_sem_payload)
-        _choice_map = (_sem_choice if isinstance(_sem_choice, dict)
-                       else {str(semantic_hold[0][0].get("id") or ""): _sem_choice})
-        for _tc, _dec in semantic_hold:
-            _tcid = str(_tc.get("id") or "")
-            _opt_id = _choice_map.get(_tcid) if isinstance(_choice_map, dict) else _sem_choice
-            _opt = next((o for o in (_dec.options or []) if o.get("id") == _opt_id), None)
-            _patch = (_opt or {}).get("slots_patch")
-            if _opt_id == "cancel":
+        if not allow_interrupt:
+            # Checkpointer-less guard (audit H6): child/cron/streaming graphs
+            # cannot pause for human approval via interrupt(). Degrade clarify/confirm
+            # decisions to a terminal deny so the turn completes gracefully without
+            # hanging forever.
+            for _tc, _dec in semantic_hold:
+                _q = _dec.clarify_question or _dec.reason or "needs clarification/confirmation"
                 semantic_blocked.append(ToolResult(
-                    tool_call_id=_tcid, name=_tc["name"],
-                    content=("Commitment clarify cancelled by the user. Stop this "
-                             "scheduling attempt; confirm what the user wants instead."),
-                    is_error=True, duration_ms=0, outcome="terminal",
+                    tool_call_id=str(_tc.get("id") or ""),
+                    name=_tc["name"],
+                    content=(
+                        f"Commitment gate requires confirmation/clarification for '{_tc['name']}' ({_q}), "
+                        "but this graph cannot pause for human approval (checkpointer-less / auto_deny). "
+                        "Operation was denied. Do not retry; confirm details directly with the user."
+                    ),
+                    is_error=True,
+                    duration_ms=0.0,
+                    outcome="terminal",
                 ))
                 if record_commitment_terminal:
-                    try: record_commitment_terminal("cancelled")
-                    except Exception: pass
-            elif _patch is not None:
-                # No-late-approve (AGENTS.md §20C): the LangGraph interrupt stays
-                # resumable in the checkpointer long after the commitment's TTL
-                # has passed, and sweep_expired may have already moved it to
-                # 'expired'. The store-level "no late approve" guard only covers
-                # resumes that go through update_status — NOT this clarify path,
-                # which applies slots_patch directly. Re-check liveness here so a
-                # stale fire_at cannot slip through.
-                _alive = True
-                if _dec.commitment_id:
                     try:
-                        from kazma_core.safety.commitment.store import get_commitment
-                        _c = get_commitment(_dec.commitment_id)
-                        if _c is None or _c.status not in ("needs_clarify", "needs_confirm") or (
-                            _c.expires_at is not None and time.time() > _c.expires_at
-                        ):
-                            _alive = False
-                    except Exception:  # noqa: BLE001
-                        logger.debug("[ToolWorker] commitment liveness check failed; assuming live")
-                if not _alive:
+                        record_commitment_terminal("auto_denied")
+                    except Exception:
+                        pass
+        else:
+            _items = [{
+                "tool_call_id": str(_tc.get("id") or ""),
+                "tool": _tc["name"],
+                "commitment_id": _dec.commitment_id,
+                "question": _dec.clarify_question or _dec.reason or "needs clarification",
+                "options": list(_dec.options) if _dec.options else [],
+            } for _tc, _dec in semantic_hold]
+            _sem_kind = ("semantic_confirm" if all(d.decision == "confirm" for _, d in semantic_hold)
+                         else "semantic_clarify")
+            _sem_payload = {
+                "type": "hitl_approval", "kind": _sem_kind, "items": _items,
+                "message": (_items[0]["question"] if len(_items) == 1
+                            else f"{len(_items)} actions need clarification"),
+            }
+            _sem_choice = interrupt(_sem_payload)
+            _choice_map = (_sem_choice if isinstance(_sem_choice, dict)
+                           else {str(semantic_hold[0][0].get("id") or ""): _sem_choice})
+            for _tc, _dec in semantic_hold:
+                _tcid = str(_tc.get("id") or "")
+                _opt_id = _choice_map.get(_tcid) if isinstance(_choice_map, dict) else _sem_choice
+                _opt = next((o for o in (_dec.options or []) if o.get("id") == _opt_id), None)
+                _patch = (_opt or {}).get("slots_patch")
+                if _opt_id == "cancel":
                     semantic_blocked.append(ToolResult(
                         tool_call_id=_tcid, name=_tc["name"],
-                        content=("This scheduling clarification has expired — the original "
-                                 "timing is no longer valid. Ask the user to confirm the "
-                                 "exact date/time again before re-scheduling."),
+                        content=("Commitment clarify cancelled by the user. Stop this "
+                                 "scheduling attempt; confirm what the user wants instead."),
                         is_error=True, duration_ms=0, outcome="terminal",
                     ))
                     if record_commitment_terminal:
+                        try: record_commitment_terminal("cancelled")
+                        except Exception: pass
+                elif _patch is not None:
+                    # No-late-approve (AGENTS.md §20C): the LangGraph interrupt stays
+                    # resumable in the checkpointer long after the commitment's TTL
+                    # has passed, and sweep_expired may have already moved it to
+                    # 'expired'. The store-level "no late approve" guard only covers
+                    # resumes that go through update_status — NOT this clarify path,
+                    # which applies slots_patch directly. Re-check liveness here so a
+                    # stale fire_at cannot slip through.
+                    _alive = True
+                    if _dec.commitment_id:
                         try:
-                            record_commitment_terminal("clarify_expired")
-                        except Exception:
-                            pass
+                            from kazma_core.safety.commitment.store import get_commitment
+                            _c = get_commitment(_dec.commitment_id)
+                            if _c is None or _c.status not in ("needs_clarify", "needs_confirm") or (
+                                _c.expires_at is not None and time.time() > _c.expires_at
+                            ):
+                                _alive = False
+                        except Exception:  # noqa: BLE001
+                            logger.debug("[ToolWorker] commitment liveness check failed; assuming live")
+                    if not _alive:
+                        semantic_blocked.append(ToolResult(
+                            tool_call_id=_tcid, name=_tc["name"],
+                            content=("This scheduling clarification has expired — the original "
+                                     "timing is no longer valid. Ask the user to confirm the "
+                                     "exact date/time again before re-scheduling."),
+                            is_error=True, duration_ms=0, outcome="terminal",
+                        ))
+                        if record_commitment_terminal:
+                            try:
+                                record_commitment_terminal("clarify_expired")
+                            except Exception:
+                                pass
+                    else:
+                        _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
+                        pending.append(_tc)
                 else:
-                    _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
-                    pending.append(_tc)
-            else:
-                semantic_blocked.append(ToolResult(
-                    tool_call_id=_tcid, name=_tc["name"],
-                    content=(f"Commitment clarify unresolved for {_tc['name']}: "
-                             f"{_dec.clarify_question or 'a specific time is required'}. "
-                             "Ask the user for the exact date/time; do not re-call "
-                             "this tool until they answer."),
-                    is_error=True, duration_ms=0, outcome="terminal",
-                ))
-                if record_commitment_terminal:
-                    try: record_commitment_terminal("clarify_unresolved")
-                    except Exception: pass
+                    semantic_blocked.append(ToolResult(
+                        tool_call_id=_tcid, name=_tc["name"],
+                        content=(f"Commitment clarify unresolved for {_tc['name']}: "
+                                 f"{_dec.clarify_question or 'a specific time is required'}. "
+                                 "Ask the user for the exact date/time; do not re-call "
+                                 "this tool until they answer."),
+                        is_error=True, duration_ms=0, outcome="terminal",
+                    ))
+                    if record_commitment_terminal:
+                        try: record_commitment_terminal("clarify_unresolved")
+                        except Exception: pass
     return pending, semantic_blocked
 
 
@@ -353,6 +391,7 @@ async def tool_worker_node(
     tool_executor: Any,
     tracer: Any,
     hitl_config: dict[str, Any] | None = None,
+    allow_interrupt: bool = True,
 ) -> dict[str, Any]:
     """Tool Worker node — executes pending tool calls (parallel fan-out).
 
@@ -587,8 +626,11 @@ async def tool_worker_node(
     # delivery ContextVar binds on that path too — with the call outside
     # the try, every clarify/confirm interrupt leaked the binds.
 
+    if hitl_config and hitl_config.get("auto_deny"):
+        allow_interrupt = False
+
     try:
-        pending, semantic_blocked = _commitment_resolve_gate(state, pending)
+        pending, semantic_blocked = _commitment_resolve_gate(state, pending, allow_interrupt=allow_interrupt)
 
         # ── HITL: separate safe and danger tools ──────────────────────
         safe_tools: list[PendingToolCall] = []

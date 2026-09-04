@@ -73,7 +73,6 @@ def create_chat_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRout
             "chat.html",
             {
                 "config": agent.config,
-                "sessions": list_sessions(),
             },
         )
 

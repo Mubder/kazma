@@ -175,8 +175,10 @@ class DiscordBusAdapter(BusAdapter):
         await self._post_message(payload)
 
     async def request_approval(
-        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+        self, approval: ApprovalRequest, timeout: float | None = None
     ) -> bool:
+        if timeout is None:
+            timeout = _APPROVAL_TIMEOUT
         """Post an approval card with buttons and await the response.
 
         Buttons carry ``custom_id`` = ``swarm_approve_{task_id}`` /
@@ -226,15 +228,30 @@ class DiscordBusAdapter(BusAdapter):
         self._pending_approvals[approval.task_id] = event
         if msg_id:
             self._pending_msg_ids[approval.task_id] = msg_id
+        approved: bool = False
         try:
-            approved = await shared_approvals.wait_for_resolution(
-                approval.task_id, timeout=timeout
+            shared_task = asyncio.create_task(
+                shared_approvals.wait_for_resolution(approval.task_id, timeout=timeout)
             )
+            local_task = asyncio.create_task(
+                asyncio.wait_for(event.wait(), timeout=timeout)
+            )
+            done, pending = await asyncio.wait(
+                [shared_task, local_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+
             if approval.task_id in self._pending_results:
                 approved = self._pending_results[approval.task_id]
-        except TimeoutError:
+            elif shared_task in done and not shared_task.cancelled():
+                approved = shared_task.result()
+            else:
+                approved = self._pending_results.get(approval.task_id, False)
+        except (TimeoutError, asyncio.TimeoutError):
             logger.warning("[DiscordBus] Approval timed out for task %s", approval.task_id)
-            approved = False
+            approved = self._pending_results.get(approval.task_id, False)
         finally:
             self._pending_approvals.pop(approval.task_id, None)
             self._pending_results.pop(approval.task_id, None)

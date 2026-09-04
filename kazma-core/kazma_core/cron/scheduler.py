@@ -101,6 +101,7 @@ class ScheduledJob:
     # Empty for legacy rows scheduled before this field existed; `_deliver`
     # falls back to the thread_id in that case.
     delivery_target: str = ""
+    failure_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         out = {
@@ -115,6 +116,7 @@ class ScheduledJob:
             "last_result": self.last_result[:200] if self.last_result else None,
             "tenant_id": self.tenant_id,
             "delivery_target": self.delivery_target,
+            "failure_count": self.failure_count,
         }
         out.update(annotate_fire_times(self.next_run))
         return out
@@ -335,7 +337,8 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     status TEXT DEFAULT 'pending',
     created_at TEXT,
     next_run TEXT,
-    last_result TEXT
+    last_result TEXT,
+    failure_count INTEGER DEFAULT 0
 )
 """
 
@@ -390,6 +393,15 @@ class SQLiteCronStore:
         except Exception as exc:
             if "duplicate column" not in str(exc).lower():
                 logger.warning("[CronStore] delivery_target migration failed: %s", exc)
+        # Idempotent failure_count column for retry budgeting (audit H3)
+        try:
+            await self._db.execute(
+                "ALTER TABLE cron_jobs ADD COLUMN failure_count INTEGER NOT NULL DEFAULT 0"
+            )
+            await self._db.commit()
+        except Exception as exc:
+            if "duplicate column" not in str(exc).lower():
+                logger.warning("[CronStore] failure_count migration failed: %s", exc)
         await self._db.commit()
         logger.info("[CronStore] Initialized at %s", self._db_path)
 
@@ -399,11 +411,11 @@ class SQLiteCronStore:
             raise RuntimeError("CronDB not initialized")
         await self._db.execute(
             "INSERT INTO cron_jobs (job_id, timing, prompt, platform, thread_id, "
-            "status, created_at, next_run, tenant_id, delivery_target) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "status, created_at, next_run, tenant_id, delivery_target, failure_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (job.job_id, job.timing, job.prompt, job.platform, job.thread_id,
              job.status.value, job.created_at, job.next_run, job.tenant_id,
-             job.delivery_target),
+             job.delivery_target, getattr(job, "failure_count", 0)),
         )
         await self._db.commit()
 
@@ -414,6 +426,12 @@ class SQLiteCronStore:
         delivery_target = ""
         if len(row) > 10 and row[10] is not None:
             delivery_target = str(row[10])
+        failure_count = 0
+        if len(row) > 11 and row[11] is not None:
+            try:
+                failure_count = int(row[11])
+            except (ValueError, TypeError):
+                failure_count = 0
         return ScheduledJob(
             job_id=row[0],
             timing=row[1],
@@ -426,6 +444,7 @@ class SQLiteCronStore:
             last_result=row[8],
             tenant_id=tenant,
             delivery_target=delivery_target,
+            failure_count=failure_count,
         )
 
     async def list_active(self) -> list[ScheduledJob]:
@@ -434,7 +453,7 @@ class SQLiteCronStore:
             raise RuntimeError("CronDB not initialized")
         async with self._db.execute(
             "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-            "next_run, last_result, tenant_id, delivery_target "
+            "next_run, last_result, tenant_id, delivery_target, failure_count "
             "FROM cron_jobs WHERE status IN ('pending', 'running')"
         ) as cursor:
             jobs = []
@@ -442,22 +461,28 @@ class SQLiteCronStore:
                 jobs.append(self._row_to_job(row))
             return jobs
 
-    async def list_all(self, *, tenant_id: str | None = None) -> list[ScheduledJob]:
+    async def list_all(
+        self,
+        *,
+        tenant_id: str | None = None,
+        limit: int | None = 500,
+    ) -> list[ScheduledJob]:
         """List jobs; optionally filter by tenant for multi-user UI."""
         if self._db is None:
             raise RuntimeError("CronDB not initialized")
+        limit_clause = f" LIMIT {int(limit)}" if limit is not None else ""
         if tenant_id:
             sql = (
                 "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-                "next_run, last_result, tenant_id, delivery_target "
-                "FROM cron_jobs WHERE tenant_id = ? ORDER BY created_at DESC"
+                "next_run, last_result, tenant_id, delivery_target, failure_count "
+                f"FROM cron_jobs WHERE tenant_id = ? ORDER BY created_at DESC{limit_clause}"
             )
             args: tuple[Any, ...] = (tenant_id,)
         else:
             sql = (
                 "SELECT job_id, timing, prompt, platform, thread_id, status, created_at, "
-                "next_run, last_result, tenant_id, delivery_target "
-                "FROM cron_jobs ORDER BY created_at DESC"
+                "next_run, last_result, tenant_id, delivery_target, failure_count "
+                f"FROM cron_jobs ORDER BY created_at DESC{limit_clause}"
             )
             args = ()
         async with self._db.execute(sql, args) as cursor:
@@ -465,6 +490,49 @@ class SQLiteCronStore:
             async for row in cursor:
                 jobs.append(self._row_to_job(row))
             return jobs
+
+    async def purge_terminal_jobs(
+        self,
+        *,
+        older_than_days: int = 14,
+        keep_last: int = 500,
+    ) -> int:
+        """Purge terminal jobs (completed/failed/cancelled) older than retention window.
+
+        Also enforces a global ceiling by keeping at most `keep_last` terminal rows.
+        Returns the number of deleted rows.
+        """
+        if self._db is None:
+            return 0
+        from datetime import datetime, timedelta, timezone
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=older_than_days)).isoformat()
+        deleted = 0
+        try:
+            # 1. Purge terminal jobs older than cutoff date
+            cursor = await self._db.execute(
+                "DELETE FROM cron_jobs WHERE status IN ('done', 'completed', 'failed', 'cancelled') "
+                "AND created_at < ?",
+                (cutoff,),
+            )
+            deleted += cursor.rowcount or 0
+
+            # 2. If terminal rows still exceed keep_last, delete excess oldest
+            cursor2 = await self._db.execute(
+                "DELETE FROM cron_jobs WHERE job_id IN ("
+                "  SELECT job_id FROM cron_jobs "
+                "  WHERE status IN ('done', 'completed', 'failed', 'cancelled') "
+                "  ORDER BY created_at DESC LIMIT -1 OFFSET ?"
+                ")",
+                (keep_last,),
+            )
+            deleted += cursor2.rowcount or 0
+            if deleted > 0:
+                await self._db.commit()
+                logger.info("[CronStore] Purged %d old terminal job rows", deleted)
+        except Exception:
+            logger.debug("[CronStore] purge_terminal_jobs error", exc_info=True)
+        return deleted
 
     async def update_status(self, job_id: str, status: JobStatus) -> None:
         """Update a job's status."""
@@ -493,6 +561,31 @@ class SQLiteCronStore:
         await self._db.execute(
             "UPDATE cron_jobs SET next_run = ?, status = 'pending' WHERE job_id = ?",
             (next_run, job_id),
+        )
+        await self._db.commit()
+
+    async def bump_failure(self, job_id: str) -> int:
+        """Increment failure_count for a job and return the updated count."""
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
+        await self._db.execute(
+            "UPDATE cron_jobs SET failure_count = failure_count + 1 WHERE job_id = ?",
+            (job_id,),
+        )
+        await self._db.commit()
+        async with self._db.execute(
+            "SELECT failure_count FROM cron_jobs WHERE job_id = ?", (job_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return int(row[0]) if row and row[0] is not None else 1
+
+    async def reset_failure(self, job_id: str) -> None:
+        """Reset failure_count to 0 on success."""
+        if self._db is None:
+            raise RuntimeError("CronStore DB not initialized")
+        await self._db.execute(
+            "UPDATE cron_jobs SET failure_count = 0 WHERE job_id = ?",
+            (job_id,),
         )
         await self._db.commit()
 
@@ -631,6 +724,7 @@ class CronScheduler:
         # until restart, where recovery marks it FAILED).
         self._exec_tasks: set[asyncio.Task] = set()
         self._sem: asyncio.Semaphore | None = None
+        self._poll_count: int = 0
 
     async def start(self) -> None:
         """Start the scheduler polling loop."""
@@ -638,6 +732,11 @@ class CronScheduler:
             return
         self._running = True
         self._sem = asyncio.Semaphore(self._max_concurrent)
+        # Purge stale terminal jobs to bound table size
+        try:
+            await self._store.purge_terminal_jobs()
+        except Exception:
+            logger.debug("[CronScheduler] startup purge skipped", exc_info=True)
         # Audit H10: recover jobs left RUNNING after crash
         try:
             await self._recover_stale_running()
@@ -664,7 +763,7 @@ class CronScheduler:
                 # and the user stops receiving the reminder forever (audit
                 # finding). Reschedule it to its next run instead.
                 timing = getattr(job, "timing", "") or ""
-                if timing.startswith("daily"):
+                if timing.strip().lower().startswith("daily"):
                     try:
                         nr = parse_timing(timing)
                         await self._store.update_next_run(job.job_id, nr.isoformat())
@@ -866,6 +965,13 @@ class CronScheduler:
             except Exception:
                 logger.exception("[CronScheduler] Poll error")
 
+            self._poll_count += 1
+            if self._poll_count % 120 == 0:
+                try:
+                    await self._store.purge_terminal_jobs()
+                except Exception:
+                    pass
+
             await asyncio.sleep(self._poll_interval)
 
     async def _execute_bounded(self, job: ScheduledJob, sem: asyncio.Semaphore) -> None:
@@ -941,14 +1047,8 @@ class CronScheduler:
             )
             summary = (_turn.text or "")[:2000]
 
-            await self._store.update_status(job.job_id, JobStatus.DONE)
             await self._store.update_result(job.job_id, summary)
-
-            # Schedule next run for recurring jobs
-            if job.timing.startswith("daily"):
-                next_run = parse_timing(job.timing)
-                await self._store.update_next_run(job.job_id, next_run.isoformat())
-                logger.info("[CronScheduler] Recurring job %s rescheduled for %s", job.job_id, next_run)
+            await self._finalize(job, failed=False)
 
             # Deliver result
             await self._deliver(job, summary)
@@ -956,16 +1056,58 @@ class CronScheduler:
 
         except TimeoutError:
             logger.warning("[CronScheduler] %s timed out", job.job_id)
-            await self._store.update_status(job.job_id, JobStatus.FAILED)
             await self._store.update_result(job.job_id, "Timed out after 120s")
+            await self._finalize(job, failed=True)
 
         except Exception as exc:
             logger.exception("[CronScheduler] %s failed", job.job_id)
-            await self._store.update_status(job.job_id, JobStatus.FAILED)
             await self._store.update_result(job.job_id, f"Error: {str(exc)[:500]}")
+            await self._finalize(job, failed=True)
         finally:
             _cron_parent_ctx.reset(parent_token)
             self._in_flight.discard(job.job_id)
+
+    async def _finalize(self, job: ScheduledJob, failed: bool = False) -> None:
+        """Handle job state transition and retry budgeting for recurring jobs."""
+        timing = (job.timing or "").strip().lower()
+        if timing.startswith("daily"):
+            if not failed:
+                await self._store.update_status(job.job_id, JobStatus.DONE)
+                await self._store.reset_failure(job.job_id)
+                next_run = parse_timing(job.timing)
+                await self._store.update_next_run(job.job_id, next_run.isoformat())
+                logger.info("[CronScheduler] Recurring job %s rescheduled for %s", job.job_id, next_run)
+                return
+
+            # Failed execution path
+            new_failures = await self._store.bump_failure(job.job_id)
+            if new_failures == 1:
+                try:
+                    from kazma_core.observability.ops_alerts import alert
+                    alert(
+                        "cron.job_failure",
+                        f"Recurring cron job {job.job_id} failed on first attempt",
+                        detail=f"Prompt: {job.prompt[:100]} | Timing: {job.timing}",
+                        severity="warn",
+                    )
+                except Exception:
+                    logger.warning("[CronScheduler] Ops alert failed for job %s", job.job_id, exc_info=True)
+
+            if new_failures >= 3:
+                await self._store.update_status(job.job_id, JobStatus.FAILED)
+                logger.error(
+                    "[CronScheduler] Recurring job %s exceeded failure budget (%d/3) → marked FAILED",
+                    job.job_id, new_failures,
+                )
+            else:
+                next_run = parse_timing(job.timing)
+                await self._store.update_next_run(job.job_id, next_run.isoformat())
+                logger.warning(
+                    "[CronScheduler] Recurring job %s failed (attempt %d/3) → rescheduled for %s",
+                    job.job_id, new_failures, next_run,
+                )
+        else:
+            await self._store.update_status(job.job_id, JobStatus.FAILED if failed else JobStatus.DONE)
 
     async def _deliver(self, job: ScheduledJob, text: str) -> None:
         """Send result to the user via the original platform — with repair.

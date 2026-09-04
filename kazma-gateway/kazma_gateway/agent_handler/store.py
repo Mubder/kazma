@@ -160,6 +160,7 @@ class _InMemoryStore(SessionStore):
     """
 
     def __init__(self) -> None:
+        super().__init__()
         self._data: dict[str, dict[str, Any]] = {}
         self._timestamps: dict[str, float] = {}
 
@@ -211,19 +212,20 @@ async def _build_initial_state(msg: IncomingMessage, store: SessionStore) -> dic
     #
     # Merge with any existing session keys (e.g. active_agent_skill from
     # /skill activate) so a normal chat turn does not wipe them.
-    existing: dict[str, Any] = {}
+    def _mutate_ctx(existing: dict[str, Any]) -> dict[str, Any]:
+        base = {
+            k: v for k, v in existing.items() if k not in _EPHEMERAL_CTX_KEYS
+        }
+        persisted = {**base, **dict(ctx)}
+        persisted.setdefault("sender_id", msg.sender_id)
+        return persisted
+
     try:
-        existing = dict(await store.get(thread_id) or {})
+        await store.update(thread_id, _mutate_ctx)
     except Exception:
-        existing = {}
-    # Drop previous turn's ephemeral flags so they don't leak into this reply
-    # (e.g. voice_transcribed after a voice note → stuck TTS on all replies).
-    base = {
-        k: v for k, v in existing.items() if k not in _EPHEMERAL_CTX_KEYS
-    }
-    persisted_ctx = {**base, **dict(ctx)}
-    persisted_ctx.setdefault("sender_id", msg.sender_id)
-    await store.put(thread_id, persisted_ctx)
+        persisted_ctx = dict(ctx)
+        persisted_ctx.setdefault("sender_id", msg.sender_id)
+        await store.put(thread_id, persisted_ctx)
 
     # Build graph state with ONLY platform-agnostic fields
     try:

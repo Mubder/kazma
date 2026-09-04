@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 from kazma_core.swarm.bus import (
@@ -56,20 +57,27 @@ def _escape_md(text: str) -> str:
     return result
 
 
-_CARD_SOURCES = frozenset({"Guard", "Ops", "System"})
+def _safe_slice_md(text: str, limit: int = 4096) -> str:
+    """Safely slice markdown text at limit without leaving dangling escape slashes."""
+    sliced = text[:limit]
+    slashes = 0
+    for char in reversed(sliced):
+        if char == "\\":
+            slashes += 1
+        else:
+            break
+    if slashes % 2 != 0:
+        sliced = sliced[:-1]
+    return sliced
 
 
 def _format_operator_card_md(content: str) -> str:
-    """MarkdownV2: bold the header and source lines of an operator card."""
+    """MarkdownV2: bold the first line (``[Guard]`` / ``[Ops]`` / ``[System]``)."""
     lines = (content or "")[:4096].split("\n")
     out: list[str] = []
-    last = len(lines) - 1
     for i, line in enumerate(lines):
         esc = _escape_md(line)
-        if i == 0 or (i == last and line in _CARD_SOURCES):
-            out.append(f"*{esc}*")
-        else:
-            out.append(esc)
+        out.append(f"*{esc}*" if i == 0 else esc)
     return "\n".join(out)
 
 
@@ -111,14 +119,41 @@ class TelegramBusAdapter(BusAdapter):
         return self._http
 
     async def _post(self, payload: dict[str, Any], method: str = "sendMessage") -> dict[str, Any] | None:
-        """Send a request to the Telegram API.  Returns parsed JSON or None."""
+        """Send a request to the Telegram API. Returns parsed JSON or None."""
         try:
             http = await self._ensure_http()
             resp = await http.post(
                 f"{_TELEGRAM_API}/bot{self._bot_token}/{method}",
                 json=payload,
             )
-            return resp.json()
+            data = resp.json()
+            if isinstance(data, dict):
+                if data.get("ok"):
+                    return data
+                # Check for Markdown parse failure to attempt fallback
+                desc = str(data.get("description", ""))
+                err_code = data.get("error_code")
+                logger.warning(
+                    "[TelegramBus] %s returned ok=false (code=%s, desc=%s)",
+                    method, err_code, desc,
+                )
+                if payload.get("parse_mode") and ("parse" in desc.lower() or err_code == 400 or "entities" in desc.lower()):
+                    logger.info("[TelegramBus] Retrying %s with plain text fallback", method)
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("parse_mode", None)
+                    raw_text = fallback_payload.get("text", "")
+                    if isinstance(raw_text, str):
+                        # Strip Markdown escape slashes if present
+                        fallback_payload["text"] = re.sub(r"\\([_*\[\]()~`>#+\-=|{}.!])", r"\1", raw_text)[:4096]
+                    fallback_resp = await http.post(
+                        f"{_TELEGRAM_API}/bot{self._bot_token}/{method}",
+                        json=fallback_payload,
+                    )
+                    fallback_data = fallback_resp.json()
+                    if isinstance(fallback_data, dict) and fallback_data.get("ok"):
+                        return fallback_data
+                    logger.warning("[TelegramBus] Plain text fallback also failed for %s", method)
+            return data
         except Exception as exc:
             # httpx exception strings embed the full request URL — including
             # bot<token>. Log the exception class only so a connect/timeout
@@ -129,23 +164,16 @@ class TelegramBusAdapter(BusAdapter):
 
     async def _edit_message(
         self, message_id: int, text: str, reply_markup: dict[str, Any] | None = None
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Edit an existing message (for removing buttons after action)."""
-        try:
-            http = await self._ensure_http()
-            await http.post(
-                f"{_TELEGRAM_API}/bot{self._bot_token}/editMessageText",
-                json={
-                    "chat_id": self._chat_id,
-                    "message_id": message_id,
-                    "text": text[:4096],
-                    "parse_mode": "MarkdownV2",
-                    **(reply_markup or {}),
-                },
-            )
-        except Exception as exc:
-            # Exception class only — the string form embeds bot<token> (see _post).
-            logger.debug("[TelegramBus] editMessage failed: %s", type(exc).__name__)
+        payload = {
+            "chat_id": self._chat_id,
+            "message_id": message_id,
+            "text": _safe_slice_md(text, 4096),
+            "parse_mode": "MarkdownV2",
+            **(reply_markup or {}),
+        }
+        return await self._post(payload, method="editMessageText")
 
     # ── Formatting ──────────────────────────────────────────────────
 
@@ -167,8 +195,8 @@ class TelegramBusAdapter(BusAdapter):
         lines.append("━━━━━━━━━━━━━━━━━━━━━")
 
         if report.output.strip():
-            # Truncate for mobile readability
-            output = report.output[:400]
+            # Truncate for mobile readability and escape codeblock specials (\ and `)
+            output = report.output[:400].replace("\\", "\\\\").replace("`", "\\`")
             lines.append(f"```\n{output}\n```")
 
         return "\n".join(lines)
@@ -185,10 +213,10 @@ class TelegramBusAdapter(BusAdapter):
         if is_operator_card(raw):
             text = _format_operator_card_md(raw)
         else:
-            text = _escape_md(raw[:4096])
+            text = _escape_md(raw[:3500])
         await self._post({
             "chat_id": self._chat_id,
-            "text": text[:4096],
+            "text": _safe_slice_md(text, 4096),
             "parse_mode": "MarkdownV2",
         })
 
@@ -197,7 +225,7 @@ class TelegramBusAdapter(BusAdapter):
         card = self._format_report_card(report)
         await self._post({
             "chat_id": self._chat_id,
-            "text": card[:4096],
+            "text": _safe_slice_md(card, 4096),
             "parse_mode": "MarkdownV2",
         })
 
@@ -251,11 +279,13 @@ class TelegramBusAdapter(BusAdapter):
 
         # Include inline keyboard ONLY if we have a callback_id and status is not ACTIVE
         if callback_id and status != "ACTIVE":
+            from kazma_gateway.adapters.callback_store import encode_callback_data
+
             payload["reply_markup"] = {
                 "inline_keyboard": [[
                     {
                         "text": button_text,
-                        "callback_data": callback_data,
+                        "callback_data": encode_callback_data(callback_data),
                     }
                 ]]
             }
@@ -263,8 +293,10 @@ class TelegramBusAdapter(BusAdapter):
         await self._post(payload)
 
     async def request_approval(
-        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+        self, approval: ApprovalRequest, timeout: float | None = None
     ) -> bool:
+        if timeout is None:
+            timeout = _APPROVAL_TIMEOUT
         """Post an approval card with inline keyboard buttons.
 
         Buttons: ``[👍 Approve]`` ``[👎 Reject]``
@@ -294,25 +326,34 @@ class TelegramBusAdapter(BusAdapter):
         text += f"\\(auto\\-reject in {int(timeout)}s\\)"
 
         # Inline keyboard
+        from kazma_gateway.adapters.callback_store import encode_callback_data
+
         reply_markup = {
             "inline_keyboard": [[
                 {
                     "text": "👍 Approve",
-                    "callback_data": f"swarm_approve_{approval.task_id}",
+                    "callback_data": encode_callback_data(f"swarm_approve_{approval.task_id}"),
                 },
                 {
                     "text": "👎 Reject",
-                    "callback_data": f"swarm_reject_{approval.task_id}",
+                    "callback_data": encode_callback_data(f"swarm_reject_{approval.task_id}"),
                 },
             ]]
         }
 
         result = await self._post({
             "chat_id": self._chat_id,
-            "text": text[:4096],
+            "text": _safe_slice_md(text, 4096),
             "parse_mode": "MarkdownV2",
             "reply_markup": reply_markup,
         })
+
+        if not result or not result.get("ok"):
+            logger.warning(
+                "[TelegramBus] Failed to deliver approval prompt for task %s",
+                approval.task_id,
+            )
+            return False
 
         # Wait for callback — shared store so multi-replica can resolve
         from kazma_core.swarm import shared_approvals
@@ -324,26 +365,41 @@ class TelegramBusAdapter(BusAdapter):
         # Keep local Event map for same-process fast path
         event = asyncio.Event()
         self._pending_approvals[approval.task_id] = event
+        approved: bool = False
         try:
-            approved = await shared_approvals.wait_for_resolution(
-                approval.task_id, timeout=timeout
+            shared_task = asyncio.create_task(
+                shared_approvals.wait_for_resolution(approval.task_id, timeout=timeout)
             )
-            # Mirror onto local maps if same process resolved via handle_callback
+            local_task = asyncio.create_task(
+                asyncio.wait_for(event.wait(), timeout=timeout)
+            )
+            done, pending = await asyncio.wait(
+                [shared_task, local_task],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for t in pending:
+                t.cancel()
+
             if approval.task_id in self._pending_results:
                 approved = self._pending_results[approval.task_id]
-        except TimeoutError:
+            elif shared_task in done and not shared_task.cancelled():
+                approved = shared_task.result()
+            else:
+                approved = self._pending_results.get(approval.task_id, False)
+        except (TimeoutError, asyncio.TimeoutError):
             logger.warning("[TelegramBus] Approval timed out for task %s", approval.task_id)
-            approved = False
+            approved = self._pending_results.get(approval.task_id, False)
         finally:
             self._pending_approvals.pop(approval.task_id, None)
             self._pending_results.pop(approval.task_id, None)
 
         # Edit the original message to show result (remove buttons)
         if result and result.get("ok"):
-            msg_id = result["result"]["message_id"]
-            result_text = text.replace("⚠️ *APPROVAL REQUIRED*",
-                                       "✅ *APPROVED*" if approved else "❌ *REJECTED*")
-            await self._edit_message(msg_id, result_text)
+            msg_id = result.get("result", {}).get("message_id")
+            if msg_id:
+                result_text = text.replace("⚠️ *APPROVAL REQUIRED*",
+                                           "✅ *APPROVED*" if approved else "❌ *REJECTED*")
+                await self._edit_message(msg_id, result_text)
 
         return approved
 
@@ -382,6 +438,10 @@ class TelegramBusAdapter(BusAdapter):
 
             bus_adapter.handle_callback(callback_query["data"])
         """
+        from kazma_gateway.adapters.callback_store import decode_callback_data
+
+        callback_data = decode_callback_data(callback_data)
+
         if callback_data.startswith("swarm_approve_"):
             task_id = callback_data[len("swarm_approve_"):]
             self.approve(task_id)

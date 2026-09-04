@@ -183,7 +183,14 @@ def build_supervisor_graph(
             record_heartbeat(str(state.get("thread_id", "")))
         except Exception:
             pass
-        return await tool_worker_node(state, tool_executor=tool_executor, tracer=tracer, hitl_config=hitl_config)
+        allow_interrupt = (checkpointer is not None) and not (hitl_config and hitl_config.get("auto_deny"))
+        return await tool_worker_node(
+            state,
+            tool_executor=tool_executor,
+            tracer=tracer,
+            hitl_config=hitl_config,
+            allow_interrupt=allow_interrupt,
+        )
 
     async def _respond(state: SupervisorState) -> dict[str, Any]:
         return await respond_node(state, llm=llm)
@@ -213,13 +220,9 @@ def build_supervisor_graph(
                     )
                     # Mission max_iterations is normally the hard wall; if a
                     # soft wave is smaller, still allow tool_worker under wall.
+                    # Supervisor will wave-extend on the next entry.
                     if _used < _hard and next_node == NodeName.TOOL_WORKER:
                         _allow_mission_continue = True
-                    elif _used < _hard and max_iter < _hard:
-                        # Soft wave hit but hard wall remains — let tools run;
-                        # supervisor will wave-extend on the next entry.
-                        if next_node == NodeName.TOOL_WORKER:
-                            _allow_mission_continue = True
             except Exception:
                 logger.debug("[Router] mission check failed", exc_info=True)
 

@@ -1200,15 +1200,9 @@ class KazmaAgent:
             except Exception as e:  # noqa: BLE001
                 logger.debug("Error closing snapshot recorder: %s", e)
             self._snapshot_recorder = None
-        if self._checkpoint_conn is not None:
-            try:
-                await self._checkpoint_conn.close()
-            except Exception as e:  # noqa: BLE001
-                logger.debug("Error closing checkpointer connection: %s", e)
-            self._checkpoint_conn = None
-            self._checkpointer = None
-            self._graph = None
-            self._streaming_graph = None
+        await self._close_checkpointer()
+        self._graph = None
+        self._streaming_graph = None
         logger.info("Kazma agent shut down.")
 
 

@@ -157,7 +157,7 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
     except Exception:
         alerts = {}
 
-    lines = ["\U0001f4c5 Kazma — Info", f"Window: {window}"]
+    lines = ["\U0001f4c5 [Ops] Daily digest", f"Window: {window}"]
 
     turns = app.get("turns completed", 0)
     lines.append("")
@@ -205,7 +205,6 @@ def build_digest(hours: float = DIGEST_INTERVAL_HOURS) -> str:
         lines.append("")
         lines.append("No failures, no restarts, no alerts.")
 
-    lines.append("Ops")
     return "\n".join(lines)
 
 

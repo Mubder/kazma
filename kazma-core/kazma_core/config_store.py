@@ -22,7 +22,7 @@ import os
 import sqlite3
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -472,6 +472,8 @@ class ConfigStoreProtocol(Protocol):
     
     def get(self, key: str, default: Any = None) -> Any: ...
     def set(self, key: str, value: Any) -> None: ...
+    def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool: ...
+    def atomic_update(self, key: str, updater: Callable[[Any], Any], category: str = "general") -> Any: ...
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int: ...
     def transaction(self): ...
     def get_category(self, category: str) -> dict[str, Any]: ...
@@ -511,6 +513,36 @@ class _InMemoryStore:
                 self._evict_oldest()
             self._data[key] = value
             self._timestamps[key] = time.monotonic()
+
+    def set_if_absent(self, key: str, value: Any, ttl: float | None = None, category: str = "general") -> bool:
+        with self._lock:
+            self._evict_expired()
+            now = time.time()
+            if key in self._data:
+                existing = self._data[key]
+                is_expired = False
+                if isinstance(existing, dict):
+                    exp = float(existing.get("expires_at") or 0.0)
+                    holder = str(existing.get("holder") or "")
+                    if exp <= now or not holder:
+                        is_expired = True
+                elif ttl is not None:
+                    ts = self._timestamps.get(key, 0.0)
+                    if (time.monotonic() - ts) >= ttl:
+                        is_expired = True
+                if not is_expired:
+                    return False
+
+            val_to_store = value
+            if isinstance(value, dict) and ttl is not None and "expires_at" not in value:
+                val_to_store = dict(value)
+                val_to_store["expires_at"] = now + ttl
+
+            if len(self._data) >= self._max_entries:
+                self._evict_oldest()
+            self._data[key] = val_to_store
+            self._timestamps[key] = time.monotonic()
+            return True
     
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
         with self._lock:
@@ -733,6 +765,14 @@ class ConfigStore:
 
     def _resolve_vault_value(self, key: str, val: Any) -> Any:
         """Resolve vault:// pointers; optionally migrate plaintext secrets into vault."""
+        if isinstance(val, dict):
+            return {
+                sub_k: self._resolve_vault_value(f"{key}.{sub_k}" if key else sub_k, sub_v)
+                for sub_k, sub_v in val.items()
+            }
+        if isinstance(val, list):
+            return [self._resolve_vault_value(key, item) for item in val]
+
         if is_vault_ref(val):
             vault = _try_get_vault()
             if vault is None:
@@ -866,8 +906,9 @@ class ConfigStore:
                             merged = self._collect_prefixed_pg(pool, key)
                             if merged:
                                 self._cache[key] = merged
-                                return merged
-                            raw = _MISSING
+                                raw = merged
+                            else:
+                                raw = _MISSING
                 else:
                     conn = self._get_conn()
                     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
@@ -879,8 +920,9 @@ class ConfigStore:
                         merged = self._collect_prefixed(conn, key)
                         if merged:
                             self._cache[key] = merged
-                            return merged
-                        raw = _MISSING
+                            raw = merged
+                        else:
+                            raw = _MISSING
 
         if raw is not _MISSING:
             resolved = self._resolve_vault_value(key, raw)
@@ -960,6 +1002,208 @@ class ConfigStore:
             "Setting updated: %s = %s (category=%s)",
             key, _redact_for_log(key, to_store), category,
         )
+
+    def set_if_absent(
+        self,
+        key: str,
+        value: Any,
+        ttl: float | None = None,
+        category: str = "general",
+    ) -> bool:
+        """Atomically set key if absent or if the existing lease has expired.
+
+        Used for distributed coordination such as circuit-breaker half-open
+        probe leases (audit M5).
+
+        Args:
+            key: Setting key to acquire.
+            value: Value to store (typically dict with holder/expires_at).
+            ttl: Optional TTL in seconds. If provided and value is a dict without
+                expires_at, expires_at is set to now + ttl.
+            category: Setting category.
+
+        Returns:
+            True if the lease/key was acquired and set, False otherwise.
+        """
+        to_store = self._prepare_value_for_storage(key, value)
+        if to_store is None:
+            return False
+
+        now_sec = time.time()
+        if isinstance(to_store, dict) and ttl is not None and "expires_at" not in to_store:
+            to_store = dict(to_store)
+            to_store["expires_at"] = now_sec + ttl
+
+        now_iso = datetime.now(UTC).isoformat()
+        with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT value, updated_at FROM kazma_settings WHERE key = %s FOR UPDATE",
+                            (key,),
+                        )
+                        row = cur.fetchone()
+                        if row is not None:
+                            existing_val = row[0]
+                            if isinstance(existing_val, str):
+                                try:
+                                    existing_val = json.loads(existing_val)
+                                except Exception:
+                                    pass
+                            is_expired = False
+                            if isinstance(existing_val, dict):
+                                exp = float(existing_val.get("expires_at") or 0.0)
+                                holder = str(existing_val.get("holder") or "")
+                                if exp <= now_sec or not holder:
+                                    is_expired = True
+                            elif ttl is not None:
+                                try:
+                                    up_at = datetime.fromisoformat(str(row[1])).timestamp()
+                                    if (now_sec - up_at) >= ttl:
+                                        is_expired = True
+                                except Exception:
+                                    pass
+                            if not is_expired:
+                                return False
+
+                        cur.execute(
+                            """
+                            INSERT INTO kazma_settings (key, value, category, updated_at)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (key) DO UPDATE SET
+                              value = EXCLUDED.value,
+                              category = EXCLUDED.category,
+                              updated_at = EXCLUDED.updated_at
+                            """,
+                            (key, json.dumps(to_store), category, now_iso),
+                        )
+                    conn.commit()
+                self._cache.pop(key, None)
+                return True
+            else:
+                conn = self._get_conn()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    cur = conn.execute(
+                        "SELECT value, updated_at FROM settings WHERE key = ?",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                    if row is not None:
+                        existing_val = None
+                        try:
+                            existing_val = json.loads(row[0])
+                        except Exception:
+                            existing_val = row[0]
+                        is_expired = False
+                        if isinstance(existing_val, dict):
+                            exp = float(existing_val.get("expires_at") or 0.0)
+                            holder = str(existing_val.get("holder") or "")
+                            if exp <= now_sec or not holder:
+                                is_expired = True
+                        elif ttl is not None:
+                            try:
+                                up_at = datetime.fromisoformat(str(row[1])).timestamp()
+                                if (now_sec - up_at) >= ttl:
+                                    is_expired = True
+                            except Exception:
+                                pass
+                        if not is_expired:
+                            conn.execute("COMMIT")
+                            return False
+
+                    conn.execute(
+                        """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                           VALUES (?, ?, ?, ?)""",
+                        (key, json.dumps(to_store), category, now_iso),
+                    )
+                    conn.execute("COMMIT")
+                    self._cache.pop(key, None)
+                    return True
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
+
+    def atomic_update(
+        self,
+        key: str,
+        updater: Callable[[Any], Any],
+        category: str = "general",
+    ) -> Any:
+        """Atomically read, mutate via updater(current_value), and persist key.
+
+        Uses BEGIN IMMEDIATE on SQLite or FOR UPDATE on Postgres to prevent
+        lost updates across concurrent workers/replicas (audit L11).
+        """
+        now_iso = datetime.now(UTC).isoformat()
+        with self._lock:
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    raise RuntimeError("Postgres pool unavailable")
+                with pool.connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT value FROM kazma_settings WHERE key = %s FOR UPDATE",
+                            (key,),
+                        )
+                        row = cur.fetchone()
+                        curr = None
+                        if row is not None and row[0]:
+                            try:
+                                curr = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                            except Exception:
+                                curr = row[0]
+                        new_val = updater(curr)
+                        to_store = self._prepare_value_for_storage(key, new_val)
+                        val_str = json.dumps(to_store) if not isinstance(to_store, str) else to_store
+                        cur.execute(
+                            """
+                            INSERT INTO kazma_settings (key, value, category, updated_at)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (key) DO UPDATE SET
+                              value = EXCLUDED.value,
+                              category = EXCLUDED.category,
+                              updated_at = EXCLUDED.updated_at
+                            """,
+                            (key, val_str, category, now_iso),
+                        )
+                    conn.commit()
+                self._cache[key] = new_val
+                return new_val
+            else:
+                conn = self._get_conn()
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    cur = conn.execute(
+                        "SELECT value FROM settings WHERE key = ?",
+                        (key,),
+                    )
+                    row = cur.fetchone()
+                    curr = None
+                    if row is not None and row[0]:
+                        try:
+                            curr = json.loads(row[0])
+                        except Exception:
+                            curr = row[0]
+                    new_val = updater(curr)
+                    to_store = self._prepare_value_for_storage(key, new_val)
+                    val_str = json.dumps(to_store) if not isinstance(to_store, str) else to_store
+                    conn.execute(
+                        """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
+                           VALUES (?, ?, ?, ?)""",
+                        (key, val_str, category, now_iso),
+                    )
+                    conn.execute("COMMIT")
+                    self._cache[key] = new_val
+                    return new_val
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
 
     def batch_set(self, items: list[tuple[str, Any, str]]) -> int:
         """Atomically set multiple keys in a single transaction.

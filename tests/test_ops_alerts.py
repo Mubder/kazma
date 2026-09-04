@@ -130,11 +130,11 @@ def test_messages_are_attributed_to_ops(sent):
     """Distinguishable from lifecycle (System) and guard (Guard)."""
     ops_alerts.alert("x", "t")
     text = sent[0]
-    assert text.rstrip().endswith("Ops")
+    first = text.split("\n", 1)[0]
+    assert "[Ops]" in first
+    assert "[guard]" not in text
     assert 'Role: "Ops"' not in text
     assert '"Warn"' not in text
-    assert "[guard]" not in text.lower()
-    assert "Kazma — Warn" in text
 
 
 # ── the conditions that must never be silent again ────────────────────
@@ -270,8 +270,7 @@ class TestOperatorCardFormat:
 
         ops_alerts.alert("k", "MCP server down", "transient: still retrying")
         ops_text = sent[0]
-        assert "Kazma — Warn" in ops_text
-        assert ops_text.rstrip().endswith("Ops")
+        assert "[Ops]" in ops_text.split("\n", 1)[0]
         assert '"Warn"' not in ops_text
         assert 'Role: "Ops"' not in ops_text
 
@@ -279,15 +278,16 @@ class TestOperatorCardFormat:
             "System", "success", lifecycle_notifier._EVENTS["started"]["label"],
             "Adapters: telegram",
         )
-        assert "Kazma — Success" in life
-        assert life.rstrip().endswith("System")
+        assert "[System]" in life.split("\n", 1)[0]
         assert '"Success"' not in life
         assert 'Role: "System"' not in life
 
         guard = format_operator_card(
             "gaurd", "warn", "Kazma stopped", "unhealthy (database: x)"
         )
-        assert guard.rstrip().endswith("Guard")
+        first = guard.split("\n", 1)[0]
+        assert first.endswith("Kazma stopped") or "[Guard]" in first
+        assert "[Guard]" in first
         assert "[guard]" not in guard
         assert "gaurd" not in guard
 
@@ -346,7 +346,7 @@ class TestOperatorCardFormat:
         await s.send(msg)
         d_text = discord_got["payload"]["content"]
         s_text = slack_got["payload"]["text"]
-        assert d_text.startswith(card.split("\n", 1)[0]) or "Kazma — Warn" in d_text
+        assert "[Ops]" in d_text.split("\n", 1)[0]
         assert "**Kazma**:" not in d_text
         assert "*Kazma*:" not in s_text
-        assert "Kazma — Warn" in s_text
+        assert "[Ops]" in s_text.split("\n", 1)[0]

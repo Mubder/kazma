@@ -25,26 +25,46 @@ logger = logging.getLogger(__name__)
 __all__ = ["register_misc_routes"]
 
 _approve_locks: dict[str, asyncio.Lock] = {}
+_approve_locks_activity: dict[str, float] = {}
+_APPROVE_LOCKS_MAX: int = 512
 _resume_inflight: set[str] = set()
+_snapshot_store: Any = None
+
+
+def _get_snapshot_store() -> Any:
+    global _snapshot_store
+    if _snapshot_store is None:
+        import kazma_core.time_travel as _tt_mod
+
+        _snapshot_store = _tt_mod.SnapshotStore()
+    return _snapshot_store
 
 
 def _approve_lock_for(thread_id: str) -> asyncio.Lock:
+    import time
+    now = time.monotonic()
     lock = _approve_locks.get(thread_id)
     if lock is None:
+        if len(_approve_locks) >= _APPROVE_LOCKS_MAX:
+            candidates = [
+                tid for tid, lk in _approve_locks.items()
+                if not lk.locked() and tid != thread_id
+            ]
+            if candidates:
+                victim = min(
+                    candidates,
+                    key=lambda tid: _approve_locks_activity.get(tid, 0.0),
+                )
+                _approve_locks.pop(victim, None)
+                _approve_locks_activity.pop(victim, None)
         lock = asyncio.Lock()
         _approve_locks[thread_id] = lock
+    _approve_locks_activity[thread_id] = now
     return lock
 
 
 def register_misc_routes(self: Any) -> None:
     """Register the misc routes onto ``self.app``."""
-    @self.app.delete("/api/mcp/servers/{server_name}")
-    async def _delete_mcp_server(server_name: str):
-        try:
-            self.agent.remove_mcp_server(server_name)
-            return {"status": "ok", "message": f"Server '{server_name}' deleted"}
-        except Exception as exc:
-            return {"status": "error", "message": safe_error(exc)}
     @self.app.get("/api/telemetry/typing")
     async def _typing_signal():
         return {"status": "processing", "timestamp": __import__("time").time()}
@@ -54,15 +74,14 @@ def register_misc_routes(self: Any) -> None:
         task_id = req.get("task_id", "")
         logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
         return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
-    import kazma_core.time_travel as _tt_mod
     @self.app.get("/api/session/history")
     async def _session_history(thread_id: str = "", limit: int = 20):
-        store = _tt_mod.SnapshotStore()
-        if thread_id:
-            records = store.list_for_thread(thread_id)[:limit]
-        else:
-            records = []
-        return {"sessions": [r.to_dict() for r in records]}
+        limit = max(1, min(limit, 500))
+        if not thread_id:
+            return {"sessions": []}
+        store = _get_snapshot_store()
+        records = await asyncio.to_thread(store.list_for_thread, thread_id)
+        return {"sessions": [r.to_dict() for r in records[:limit]]}
     @self.app.post("/api/session/replay")
     async def _session_replay(req: dict):
         thread_id = req.get("thread_id", "")
@@ -71,6 +90,16 @@ def register_misc_routes(self: Any) -> None:
             from fastapi import HTTPException as _httpx
 
             raise _httpx(status_code=400, detail="thread_id required")
+        try:
+            iteration = int(iteration)
+            if iteration < 0:
+                raise ValueError
+        except (ValueError, TypeError):
+            from fastapi import HTTPException as _httpx
+
+            raise _httpx(status_code=400, detail="iteration must be a non-negative integer")
+
+        import kazma_core.time_travel as _tt_mod
         engine = _tt_mod.ReplayEngine()
         return await engine.replay_from(thread_id, iteration)
     @self.app.get("/api/alerts/recent")
@@ -164,9 +193,6 @@ def register_misc_routes(self: Any) -> None:
                 "metrics": {},
             },
         )
-    @self.app.get("/chat", response_class=HTMLResponse)
-    async def chat_redirect() -> RedirectResponse:
-        return RedirectResponse("/", status_code=307)
     @self.app.get("/workspace", response_class=HTMLResponse)
     async def workspace_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(
@@ -326,8 +352,24 @@ def register_misc_routes(self: Any) -> None:
             "adapters_count": len(self.gateway.adapters),
             "adapters": [a.name for a in self.gateway.adapters],
         }
+
+    def _is_caller_admin(request: Request) -> bool:
+        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+        secret = get_kazma_secret()
+        if not secret:
+            return True
+        if not is_authenticated(request, secret):
+            return False
+        principal = get_request_principal(request) or {}
+        if principal.get("source") == "secret":
+            return True
+        return principal.get("role") == "admin"
+
     @self.app.get("/health")
-    async def health_check() -> dict[str, Any]:
+    async def health_check(request: Request) -> dict[str, Any]:
+        if not _is_caller_admin(request):
+            return {"status": "ok"}
         if self.gateway is None:
             return {
                 "status": "ok",
@@ -854,7 +896,15 @@ def register_misc_routes(self: Any) -> None:
             return _JSONResponse({"pending": [], "count": 0, "error": "Internal error"}, status_code=500)
     @self.app.post("/api/pending-approvals/clear")
     @self.app.delete("/api/pending-approvals")
-    async def clear_pending_approvals_route() -> _JSONResponse:
+    async def clear_pending_approvals_route(request: Request) -> _JSONResponse:
+        from kazma_ui.auth import get_kazma_secret, is_authenticated
+
+        _secret = get_kazma_secret()
+        if _secret and not is_authenticated(request, _secret):
+            return _JSONResponse({"error": "Unauthorized"}, status_code=401)
+        if not _is_caller_admin(request):
+            return _JSONResponse({"error": "Admin role required"}, status_code=403)
+
         from kazma_ui.hitl_approval import _get_pending_approvals
         from kazma_ui.session_manager import get_session_manager
 

@@ -209,26 +209,44 @@ class DiscordAdapter(BaseAdapter):
                 # Start heartbeat
                 self._heartbeat_task = asyncio.create_task(self._heartbeat(ws, heartbeat_interval, shutdown_event))
 
-                # Send Identify
-                await ws.send(
-                    json.dumps(
-                        {
-                            "op": 2,
-                            "d": {
-                                "token": self._token,
-                                # GUILDS + GUILD_MESSAGES + MESSAGE_CONTENT
-                                # (privileged — must ALSO be enabled in the
-                                # Discord Developer Portal, or the gateway
-                                # closes with 4014) + DIRECT_MESSAGES.
-                                # Without MESSAGE_CONTENT, guild messages
-                                # arrive with empty content (2023 enforcement)
-                                # and DMs require DIRECT_MESSAGES.
-                                "intents": (1 << 0) | (1 << 9) | (1 << 15) | (1 << 12),
-                                "properties": {"os": "linux", "browser": "kazma", "device": "kazma"},
-                            },
-                        }
+                # Send Resume or Identify
+                if self._session_id and self._sequence is not None:
+                    logger.info(
+                        "[discord] Sending op 6 Resume (session=%s, seq=%s)",
+                        self._session_id, self._sequence,
                     )
-                )
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "op": 6,
+                                "d": {
+                                    "token": self._token,
+                                    "session_id": self._session_id,
+                                    "seq": self._sequence,
+                                },
+                            }
+                        )
+                    )
+                else:
+                    await ws.send(
+                        json.dumps(
+                            {
+                                "op": 2,
+                                "d": {
+                                    "token": self._token,
+                                    # GUILDS + GUILD_MESSAGES + MESSAGE_CONTENT
+                                    # (privileged — must ALSO be enabled in the
+                                    # Discord Developer Portal, or the gateway
+                                    # closes with 4014) + DIRECT_MESSAGES.
+                                    # Without MESSAGE_CONTENT, guild messages
+                                    # arrive with empty content (2023 enforcement)
+                                    # and DMs require DIRECT_MESSAGES.
+                                    "intents": (1 << 0) | (1 << 9) | (1 << 15) | (1 << 12),
+                                    "properties": {"os": "linux", "browser": "kazma", "device": "kazma"},
+                                },
+                            }
+                        )
+                    )
 
                 # Process events
                 async for raw_msg in ws:
@@ -249,7 +267,14 @@ class DiscordAdapter(BaseAdapter):
                         self._sequence = s
 
                     # Dispatch
-                    if op == 0 and t == "MESSAGE_CREATE":
+                    if op == 0 and t == "READY":
+                        self._session_id = d.get("session_id") if isinstance(d, dict) else None
+                        logger.info("[discord] Gateway READY, session_id=%s", self._session_id)
+
+                    elif op == 0 and t == "RESUMED":
+                        logger.info("[discord] Gateway session resumed successfully")
+
+                    elif op == 0 and t == "MESSAGE_CREATE":
                         parsed = self._parse_message(d)
                         if parsed:
                             if self._allowed_guilds:
@@ -270,20 +295,25 @@ class DiscordAdapter(BaseAdapter):
                                     )
                                     continue
 
-                            # Voice: if enabled and an audio attachment is
-                            # present, fetch + transcribe it into msg.text.
-                            parsed = await self._maybe_transcribe_audio(parsed)
+                            # Voice: offload fetch + transcribe to background so
+                            # the Gateway WebSocket receive loop is never blocked.
+                            async def _process_and_enqueue(msg_parsed: IncomingMessage) -> None:
+                                try:
+                                    msg_transcribed = await self._maybe_transcribe_audio(msg_parsed)
+                                    try:
+                                        queue.put_nowait(msg_transcribed)
+                                        logger.info(
+                                            "[discord] Enqueued from %s (ch=%s): %.80s",
+                                            msg_transcribed.context_metadata.get("username", "?"),
+                                            msg_transcribed.context_metadata.get("channel_id", "?"),
+                                            msg_transcribed.text,
+                                        )
+                                    except asyncio.QueueFull:
+                                        logger.warning("[discord] Queue full — dropping message")
+                                except Exception:
+                                    logger.exception("[discord] Failed to process message in background")
 
-                            try:
-                                queue.put_nowait(parsed)
-                                logger.info(
-                                    "[discord] Enqueued from %s (ch=%s): %.80s",
-                                    parsed.context_metadata.get("username", "?"),
-                                    parsed.context_metadata.get("channel_id", "?"),
-                                    parsed.text,
-                                )
-                            except asyncio.QueueFull:
-                                logger.warning("[discord] Queue full — dropping message")
+                            spawn_background(_process_and_enqueue(parsed), name="discord-msg-process")
 
                     elif op == 0 and t == "INTERACTION_CREATE":
                         # HITL approval button press — route to the active
@@ -296,8 +326,11 @@ class DiscordAdapter(BaseAdapter):
                         return
 
                     elif op == 9:  # Invalid session
-                        logger.warning("[discord] Invalid session — will reconnect")
-                        self._session_id = None
+                        resumable = bool(d)
+                        logger.warning("[discord] Invalid session (resumable=%s) — will reconnect", resumable)
+                        if not resumable:
+                            self._session_id = None
+                            self._sequence = None
                         return
 
                     elif op == 11:  # Heartbeat ACK
@@ -394,7 +427,10 @@ class DiscordAdapter(BaseAdapter):
             task_id = route_swarm_bus(custom_id)
             if task_id is not None:
                 logger.info("[discord] Swarm approval resolved: %s", task_id)
-            await _ack({"type": 6})
+            old_content = data.get("message", {}).get("content", "")
+            action_label = "✅ Approved" if "approve" in custom_id else "❌ Rejected"
+            new_content = f"{old_content}\n\n*({action_label})*" if old_content else f"*({action_label})*"
+            await _ack({"type": 7, "data": {"content": new_content, "components": []}})
             return
 
         # Graph HITL / personality / model pickers → synthetic slash into queue
@@ -424,7 +460,8 @@ class DiscordAdapter(BaseAdapter):
                     queue.put_nowait(msg)
             except Exception as exc:
                 logger.warning("[discord] Failed to enqueue interaction command: %s", exc)
-            await _ack({"type": 6})
+            old_content = data.get("message", {}).get("content", "")
+            await _ack({"type": 7, "data": {"content": old_content, "components": []}})
             return
 
         # Unknown component — ignore

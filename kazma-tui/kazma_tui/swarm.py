@@ -19,12 +19,26 @@ logger = logging.getLogger(__name__)
 _HEARTBEAT_STALE_SECONDS = 60
 
 
-def _live_json(path: str) -> dict:
+def _live_json(path: str, timeout: float = 2.0) -> dict:
     """GET JSON from the running Kazma server (TUI is a mouth)."""
     from kazma_core.runtime.local_api import request_json
 
-    data = request_json("GET", path)
-    return data if isinstance(data, dict) else {}
+    try:
+        data = request_json("GET", path, timeout=timeout)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+async def _live_json_async(path: str, timeout: float = 2.0) -> dict:
+    """Async GET JSON from the running Kazma server (TUI is a mouth)."""
+    from kazma_core.runtime.local_api import request_json_async
+
+    try:
+        data = await request_json_async("GET", path, timeout=timeout)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 
 def _parse_iso(ts: str | None) -> datetime | None:
@@ -65,15 +79,15 @@ class WorkerTable(DataTable):
     }
     """
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.cursor_type = "row"
         self.add_columns("Name", "Role", "Status", "Model")
-        self._refresh()
+        await self._refresh()
 
-    def _refresh(self) -> None:
+    async def _refresh(self) -> None:
         self.clear()
         try:
-            data = _live_json("/api/swarm/status")
+            data = await _live_json_async("/api/swarm/status")
             workers = data.get("workers") or []
             if not workers:
                 self.add_row("(no workers on server)", "", "", "")
@@ -91,8 +105,8 @@ class WorkerTable(DataTable):
         except Exception:
             self.add_row("(server unreachable)", "", "", "")
 
-    def on_show(self) -> None:
-        self._refresh()
+    async def on_show(self) -> None:
+        await self._refresh()
 
 
 class SwarmTasksTable(DataTable):
@@ -107,15 +121,15 @@ class SwarmTasksTable(DataTable):
     }
     """
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.cursor_type = "row"
         self.add_columns("Task ID", "Type", "Status", "Workers", "Duration")
-        self._refresh()
+        await self._refresh()
 
-    def _refresh(self) -> None:
+    async def _refresh(self) -> None:
         self.clear()
         try:
-            data = _live_json("/api/swarm/tasks?pageSize=20")
+            data = await _live_json_async("/api/swarm/tasks?pageSize=20")
             tasks = data.get("tasks") or []
             for t in tasks:
                 tid = str(t.get("id") or t.get("task_id") or "")
@@ -169,13 +183,13 @@ class ActiveTasksLog(RichLog):
     def __init__(self, **kwargs) -> None:
         super().__init__(markup=True, **kwargs)
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.write("[bold #22d3ee]Active Tasks[/]")
-        self._refresh()
+        await self._refresh()
 
-    def _refresh(self) -> None:
+    async def _refresh(self) -> None:
         try:
-            data = _live_json("/api/swarm/tasks/active")
+            data = await _live_json_async("/api/swarm/tasks/active")
             active = data.get("tasks") or []
             if not active:
                 self.write("[dim]No active tasks on server[/]")
@@ -189,9 +203,9 @@ class ActiveTasksLog(RichLog):
         except Exception as exc:
             logger.debug("Active tasks refresh failed: %s", exc)
 
-    def on_show(self) -> None:
+    async def on_show(self) -> None:
         self.clear()
-        self.on_mount()
+        await self.on_mount()
 
 
 class WorkerTree(Tree):
@@ -209,11 +223,11 @@ class WorkerTree(Tree):
     }
     """
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.show_root = False
         root = self.root
         try:
-            data = _live_json("/api/swarm/status")
+            data = await _live_json_async("/api/swarm/status")
             workers = data.get("workers") or []
             if not workers:
                 root.add_leaf("(no workers on server)")
@@ -235,9 +249,9 @@ class WorkerTree(Tree):
         except Exception:
             root.add_leaf("(server unreachable)")
 
-    def on_show(self) -> None:
+    async def on_show(self) -> None:
         self.clear()
-        self.on_mount()
+        await self.on_mount()
 
 
 class SwarmPanel(VerticalScroll):
@@ -336,7 +350,7 @@ class SwarmPanel(VerticalScroll):
                 yield LogStream(id="swarm-log-stream")
 
     def on_mount(self) -> None:
-        self._refresh_metrics()
+        self.app.call_later(self._refresh_metrics)
         self.set_interval(self.REFRESH_INTERVAL, self._refresh_metrics)
         self._subscribe_bus_log()
 
@@ -368,15 +382,15 @@ class SwarmPanel(VerticalScroll):
             logger.debug("[swarm-panel] bus subscribe failed", exc_info=True)
 
     def on_show(self) -> None:
-        self._refresh_metrics()
+        self.app.call_later(self._refresh_metrics)
 
-    def _refresh_metrics(self) -> None:
+    async def _refresh_metrics(self) -> None:
         workers_online = 0
         workers_total = 0
         active_n = 0
         recent_n = 0
         try:
-            status = _live_json("/api/swarm/status")
+            status = await _live_json_async("/api/swarm/status")
             workers = status.get("workers") or []
             workers_total = len(workers)
             workers_online = sum(
@@ -385,15 +399,13 @@ class SwarmPanel(VerticalScroll):
                 if str(w.get("status") or "") in {"online", "busy", "running"}
             )
             try:
-                active_n = int(
-                    (_live_json("/api/swarm/tasks/active").get("count") or 0)
-                )
+                active_payload = await _live_json_async("/api/swarm/tasks/active")
+                active_n = int(active_payload.get("count") or 0)
             except Exception:
                 active_n = 0
             try:
-                recent_n = len(
-                    (_live_json("/api/swarm/tasks?pageSize=50").get("tasks") or [])
-                )
+                recent_payload = await _live_json_async("/api/swarm/tasks?pageSize=50")
+                recent_n = len(recent_payload.get("tasks") or [])
             except Exception:
                 recent_n = 0
         except Exception as exc:

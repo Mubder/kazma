@@ -28,7 +28,6 @@ class CallbackAction:
     text: str = ""  # synthetic message text for agent path (if any)
     package_name: str = ""
     swarm_data: str = ""  # raw callback data for swarm bus
-    handled_in_process: bool = False  # True if no IncomingMessage needed
 
 
 def parse_callback_data(data: str) -> CallbackAction:
@@ -39,6 +38,10 @@ def parse_callback_data(data: str) -> CallbackAction:
     """
     if not data:
         return CallbackAction(kind="unknown")
+
+    from kazma_gateway.adapters.callback_store import decode_callback_data
+
+    data = decode_callback_data(data)
 
     # Phase 3: semantic option buttons — hitl:opt:{option_id}:{request_id}
     if data.startswith("hitl:opt:"):
@@ -64,7 +67,6 @@ def parse_callback_data(data: str) -> CallbackAction:
         return CallbackAction(
             kind="swarm",
             swarm_data=data,
-            handled_in_process=True,
         )
 
     if data.startswith("personality:"):
@@ -89,14 +91,12 @@ def parse_callback_data(data: str) -> CallbackAction:
         return CallbackAction(
             kind="sys_install",
             package_name=data.split(":", 1)[1],
-            handled_in_process=True,
         )
 
     if data.startswith("install_dependency:"):
         return CallbackAction(
             kind="install_dep",
             package_name=data.split(":", 1)[1],
-            handled_in_process=True,
         )
 
     return CallbackAction(kind="unknown", text=data)

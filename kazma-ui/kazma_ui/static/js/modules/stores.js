@@ -59,6 +59,7 @@ export function registerStores() {
              *   click or Escape (i.e. without an explicit action button).
              */
             show(opts = {}) {
+                this._previousActiveElement = document.activeElement;
                 this.title = opts.title || '';
                 this.body = opts.body || '';
                 this.size = opts.size || 'md';
@@ -68,14 +69,39 @@ export function registerStores() {
                 this.inputType = opts.inputType || 'text';
                 this._onClose = opts.onClose || null;
                 this.open = true;
+                if (typeof document !== 'undefined' && document.documentElement) {
+                    document.documentElement.dataset.overlayOpen = '1';
+                }
+                setTimeout(() => {
+                    const modalEl = document.querySelector('.modal-overlay .modal');
+                    if (modalEl) {
+                        const focusables = modalEl.querySelectorAll(
+                            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+                        );
+                        if (focusables.length > 0) {
+                            const inputEl = modalEl.querySelector('.modal-input');
+                            if (inputEl) inputEl.focus();
+                            else focusables[0].focus();
+                        }
+                    }
+                }, 50);
             },
 
             close() {
                 this.open = false;
+                if (typeof document !== 'undefined' && document.documentElement) {
+                    delete document.documentElement.dataset.overlayOpen;
+                }
                 if (this._onClose) {
                     const cb = this._onClose;
                     this._onClose = null;
                     cb();
+                }
+                if (this._previousActiveElement && typeof this._previousActiveElement.focus === 'function') {
+                    try {
+                        this._previousActiveElement.focus();
+                    } catch (e) { /* ignore */ }
+                    this._previousActiveElement = null;
                 }
                 // Reset after transition
                 setTimeout(() => {
@@ -208,6 +234,23 @@ export function registerStores() {
             },
         });
 
+        // ═══════════════════════════════════════════════════════════════
+        // GLOBAL OVERRIDES — kill native browser dialogs everywhere.
+        //
+        // Every window.confirm() / window.alert() / window.prompt() call
+        // across the entire codebase (current AND future) is intercepted
+        // and routed through the styled Kazma modal. No more unstyled
+        // browser dialogs.
+        //
+        // IMPORTANT: these overrides are ASYNC (return Promises). Code that
+        // uses them synchronously must be converted to async/await. The
+        // original native functions are preserved as _nativeConfirm etc.
+        // for the Alpine-not-ready fallback path.
+        // ═══════════════════════════════════════════════════════════════
+        const _nativeConfirm = typeof window !== 'undefined' && window.confirm ? window.confirm.bind(window) : function () { return false; };
+        const _nativeAlert = typeof window !== 'undefined' && window.alert ? window.alert.bind(window) : function () {};
+        const _nativePrompt = typeof window !== 'undefined' && window.prompt ? window.prompt.bind(window) : function () { return null; };
+
         // Global promise-based confirm — drop-in replacement for window.confirm().
         // Usage: if (!(await window.kazmaConfirm({ message: 'Delete?', danger: true }))) return;
         window.kazmaConfirm = function (opts) {
@@ -217,7 +260,7 @@ export function registerStores() {
                 return Alpine.store('modal').confirmAsync(opts || {});
             }
             // Fallback if Alpine hasn't booted yet (shouldn't happen on user action).
-            return Promise.resolve(window.confirm(opts && opts.message ? opts.message : ''));
+            return Promise.resolve(_nativeConfirm(opts && opts.message ? opts.message : ''));
         };
 
         // Global promise-based alert — drop-in replacement for window.alert().
@@ -249,7 +292,7 @@ export function registerStores() {
                 });
             }
             // Fallback if Alpine hasn't booted yet.
-            return Promise.resolve(window.alert(opts.message || ''));
+            return Promise.resolve(_nativeAlert(opts.message || ''));
         };
 
         // Global promise-based prompt — drop-in replacement for window.prompt().
@@ -261,25 +304,8 @@ export function registerStores() {
                 return Alpine.store('modal').promptAsync(opts || {});
             }
             // Fallback if Alpine hasn't booted yet.
-            return Promise.resolve(window.prompt(opts && opts.message ? opts.message : ''));
+            return Promise.resolve(_nativePrompt(opts && opts.message ? opts.message : ''));
         };
-
-        // ═══════════════════════════════════════════════════════════════
-        // GLOBAL OVERRIDES — kill native browser dialogs everywhere.
-        //
-        // Every window.confirm() / window.alert() / window.prompt() call
-        // across the entire codebase (current AND future) is intercepted
-        // and routed through the styled Kazma modal. No more unstyled
-        // browser dialogs.
-        //
-        // IMPORTANT: these overrides are ASYNC (return Promises). Code that
-        // uses them synchronously must be converted to async/await. The
-        // original native functions are preserved as _nativeConfirm etc.
-        // for the Alpine-not-ready fallback path.
-        // ═══════════════════════════════════════════════════════════════
-        const _nativeConfirm = window.confirm.bind(window);
-        const _nativeAlert = window.alert.bind(window);
-        const _nativePrompt = window.prompt.bind(window);
 
         window.confirm = function (message) {
             // If a string is passed, wrap it. If kazmaConfirm is available,
@@ -357,6 +383,7 @@ export function registerStores() {
             },
 
             async doSearch() {
+                var epoch = this._searchEpoch = (this._searchEpoch || 0) + 1;
                 var q = (this.query || '').trim().toLowerCase();
                 this.searched = true;
                 this.hovered = 0;
@@ -375,8 +402,10 @@ export function registerStores() {
                         credentials: 'same-origin',
                         headers: { 'Accept': 'application/json' },
                     });
+                    if (epoch !== this._searchEpoch) return;
                     if (res.ok) {
                         var list = await res.json();
+                        if (epoch !== this._searchEpoch) return;
                         (Array.isArray(list) ? list : []).forEach(function (s) {
                             var title = s.title || s.session_id || '';
                             var sid = s.session_id || '';
@@ -392,6 +421,7 @@ export function registerStores() {
                     }
                 } catch (e) { /* degrades to pages-only on failure */ }
 
+                if (epoch !== this._searchEpoch) return;
                 this.results = matches;
                 this.loading = false;
             },

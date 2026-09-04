@@ -178,6 +178,17 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
     import time
 
     now = time.time()
+
+    # Prune stale threads when map grows to avoid slow memory leaks
+    if len(_recent_cards) > 128:
+        stale_threads = [
+            tid
+            for tid, hist in list(_recent_cards.items())
+            if not hist or (now - max((float(r[0]) for r in hist), default=0)) >= _BURST_WINDOW_S
+        ]
+        for tid in stale_threads:
+            _recent_cards.pop(tid, None)
+
     try:
         fingerprint = hashlib.sha256(
             f"{tool}:{args!r}".encode("utf-8", "replace")
@@ -196,7 +207,10 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
 
     for ts, fp, _c in history:
         if fp == fingerprint and now - ts < _DUPLICATE_WINDOW_S:
-            _recent_cards[thread_id] = history
+            if not history:
+                _recent_cards.pop(thread_id, None)
+            else:
+                _recent_cards[thread_id] = history
             return (
                 f"identical {tool} approval already sent "
                 f"{int(now - ts)}s ago — not repeating it"
@@ -205,12 +219,23 @@ def approval_card_suppressed(thread_id: str, tool: str, args: Any) -> str | None
     if counts:
         storm = sum(1 for _ts, _fp, c in history if c)
         if storm >= _BURST_LIMIT:
-            _recent_cards[thread_id] = history
+            if not history:
+                _recent_cards.pop(thread_id, None)
+            else:
+                _recent_cards[thread_id] = history
             return (
                 f"{storm} approval requests already sent for this thread in "
                 f"the last {int(_BURST_WINDOW_S / 60)} minutes — muting further "
                 "cards until you reply. Nothing has been approved or run."
             )
+
+    # Hard ceiling on distinct threads
+    if len(_recent_cards) >= 512 and thread_id not in _recent_cards:
+        oldest_tid = min(
+            _recent_cards.keys(),
+            key=lambda k: max((float(r[0]) for r in _recent_cards[k]), default=0),
+        )
+        _recent_cards.pop(oldest_tid, None)
 
     history.append((now, fingerprint, counts))
     _recent_cards[thread_id] = history
@@ -556,7 +581,10 @@ async def _handle_hitl_resume(
     # Fail-closed: if the target session is missing, deny cross-thread
     # approvals rather than skipping the check.
     if target_thread != thread_id:
-        from kazma_core.sessions.ttl import refuse_session_lookup_for_durable_job
+        from kazma_core.sessions.ttl import (
+            SESSION_TTL_SECONDS,
+            refuse_session_lookup_for_durable_job,
+        )
 
         target_ctx = await store.get(target_thread)
         if not target_ctx:
@@ -573,7 +601,7 @@ async def _handle_hitl_resume(
                     target_id=_build_target_id(msg.platform, ctx),
                     text=(
                         "⚠️ Cannot approve: target session expired "
-                        "(SessionStore TTL is 5 minutes). Approve from the "
+                        f"(SessionStore TTL is {SESSION_TTL_SECONDS // 60} minutes). Approve from the "
                         "original chat, or send a new request."
                     ),
                     context_metadata=ctx,

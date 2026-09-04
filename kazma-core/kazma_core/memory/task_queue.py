@@ -33,6 +33,8 @@ __all__ = [
     "reset_worker",
     "start_worker",
     "stop_worker",
+    "purge_completed_tasks",
+    "async_purge_completed_tasks",
 ]
 
 # Reclaim threshold: a task stuck in 'processing' longer than this (seconds)
@@ -120,6 +122,7 @@ class _MemoryWorker:
         self.poll_interval = poll_interval
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
+        self._renewal_task: asyncio.Task | None = None
         self._running = False
         self._lock = threading.Lock()
         # Strong references to dispatched handler tasks. Without these, CPython
@@ -158,6 +161,7 @@ class _MemoryWorker:
             self._running = True
             self._wake = asyncio.Event()
             self._task = loop.create_task(self._run())
+            self._renewal_task = loop.create_task(self._run_lease_renewal())
             logger.info("[task_queue] worker started (concurrency=%d)", self.max_concurrency)
 
     async def stop(self) -> None:
@@ -165,6 +169,13 @@ class _MemoryWorker:
         with self._lock:
             self._running = False
             self._wake.set()
+        if self._renewal_task is not None:
+            self._renewal_task.cancel()
+            try:
+                await self._renewal_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._renewal_task = None
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=5.0)
@@ -178,6 +189,21 @@ class _MemoryWorker:
             await asyncio.gather(*self._inflight, return_exceptions=True)
             self._inflight.clear()
 
+    async def _run_lease_renewal(self) -> None:
+        """Dedicated background task to renew leases independently of poll/concurrency (M4)."""
+        interval = max(1.0, _LEASE_RENEW_INTERVAL_SEC / 3.0)
+        while self._running:
+            try:
+                await asyncio.sleep(interval)
+                if not self._running:
+                    break
+                if self._leases:
+                    await asyncio.to_thread(self._renew_leases)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.debug("[task_queue] lease renewal failed", exc_info=True)
+
     async def _run(self) -> None:
         """Main poll loop: claim → dispatch → ack/nack, repeat."""
         sem = asyncio.Semaphore(self.max_concurrency)
@@ -189,12 +215,6 @@ class _MemoryWorker:
                     t = asyncio.create_task(self._process(sem, task))
                     self._inflight.add(t)
                     t.add_done_callback(self._inflight.discard)
-                # Lease heartbeat: extend in-flight tasks' leases so long
-                # handlers are not re-claimed and double-executed.
-                mono = time.monotonic()
-                if self._leases and mono - self._last_lease_renew >= _LEASE_RENEW_INTERVAL_SEC:
-                    self._renew_leases()
-                    self._last_lease_renew = mono
             except Exception:
                 logger.debug("[task_queue] poll cycle failed", exc_info=True)
             # Wait for the next poll interval or an explicit wake
@@ -438,3 +458,32 @@ async def stop_worker() -> None:
         w = _worker
     if w is not None:
         await w.stop()
+
+
+def purge_completed_tasks(retention_days: int = 7) -> int:
+    """Delete terminal tasks (completed/failed) older than retention_days (M2)."""
+    from kazma_core.config_store import apply_sqlite_pragmas
+    from kazma_core.paths import memory_ops_db
+
+    cutoff = time.time() - (max(1, int(retention_days)) * 86400.0)
+    conn = sqlite3.connect(memory_ops_db(), check_same_thread=False)
+    try:
+        apply_sqlite_pragmas(conn)
+        cur = conn.execute(
+            """DELETE FROM memory_task_queue
+               WHERE status IN ('completed', 'failed') AND updated_at < ?""",
+            (cutoff,),
+        )
+        conn.commit()
+        deleted = cur.rowcount
+        if deleted:
+            logger.info("[task_queue] purged %d completed/failed tasks (>%dd old)", deleted, retention_days)
+        return deleted
+    finally:
+        conn.close()
+
+
+async def async_purge_completed_tasks(retention_days: int = 7) -> int:
+    """Async wrapper for purge_completed_tasks via asyncio.to_thread."""
+    return await asyncio.to_thread(purge_completed_tasks, retention_days=retention_days)
+

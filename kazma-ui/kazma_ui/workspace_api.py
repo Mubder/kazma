@@ -17,6 +17,7 @@ Security:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -72,6 +73,34 @@ def _file_mtime_str(p: Path) -> str:
         return dt.strftime("%Y-%m-%d %H:%M")
     except OSError:
         return ""
+
+
+def _scan_recent_files(root: Path, limit: int) -> list[dict[str, Any]]:
+    """Scan workspace for recently modified files."""
+    all_files: list[tuple[float, Path]] = []
+    try:
+        for p in root.rglob("*"):
+            if p.is_file() and not p.name.startswith("."):
+                try:
+                    all_files.append((p.stat().st_mtime, p))
+                except OSError:
+                    continue
+    except PermissionError:
+        return []
+
+    all_files.sort(key=lambda pair: pair[0], reverse=True)
+    recent: list[dict[str, Any]] = []
+    for mtime, p in all_files[:limit]:
+        rel = str(p.relative_to(root)).replace("\\", "/")
+        recent.append(
+            {
+                "name": p.name,
+                "path": rel,
+                "time": _file_mtime_str(p),
+                "size": _human_size(p.stat().st_size) if p.exists() else "",
+            }
+        )
+    return recent
 
 
 # ── Router factory ─────────────────────────────────────────────────────
@@ -194,30 +223,7 @@ def create_workspace_router() -> APIRouter:
     async def recent_files(limit: int = Query(20, ge=1, le=100)) -> dict[str, Any]:
         """Return the most recently modified files in the workspace."""
         root = _resolve_workspace_root()
-
-        all_files: list[tuple[float, Path]] = []
-        try:
-            for p in root.rglob("*"):
-                if p.is_file() and not p.name.startswith("."):
-                    try:
-                        all_files.append((p.stat().st_mtime, p))
-                    except OSError:
-                        continue
-        except PermissionError:
-            return {"files": []}
-
-        all_files.sort(key=lambda pair: pair[0], reverse=True)
-        recent: list[dict[str, Any]] = []
-        for mtime, p in all_files[:limit]:
-            rel = str(p.relative_to(root)).replace("\\", "/")
-            recent.append(
-                {
-                    "name": p.name,
-                    "path": rel,
-                    "time": _file_mtime_str(p),
-                    "size": _human_size(p.stat().st_size) if p.exists() else "",
-                }
-            )
-        return {"files": recent}
+        files = await asyncio.to_thread(_scan_recent_files, root, limit)
+        return {"files": files}
 
     return router

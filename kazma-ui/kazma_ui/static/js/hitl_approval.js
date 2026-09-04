@@ -202,7 +202,7 @@
         if (act) act.innerHTML = '<span>Resolving…</span>';
         var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once', choices: {} };
         payload.choices[tcid] = optId;
-        fetch('/api/approve/' + tid, {
+        fetch('/api/approve/' + encodeURIComponent(tid), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }).then(function() { refreshPending(); })
@@ -362,7 +362,11 @@
       clearBtn.dataset.wired = 'true';
       clearBtn.textContent = t('dashboard.clear_all', 'Clear All');
       clearBtn.addEventListener('click', async function () {
-        if (!confirm(t('dashboard.clear_all_confirm', 'Clear all pending approvals?'))) return;
+        var msg = t('dashboard.clear_all_confirm', 'Clear all pending approvals?');
+        var ok = window.kazmaConfirm
+          ? await window.kazmaConfirm({ title: t('dashboard.clear_all', 'Clear All'), message: msg, danger: true, confirmText: t('dashboard.clear_all', 'Clear All') })
+          : await window.confirm(msg);
+        if (!ok) return;
         clearBtn.disabled = true;
         try {
           await fetch('/api/pending-approvals/clear', { method: 'POST', credentials: 'same-origin' });

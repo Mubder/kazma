@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import time
 from datetime import UTC, datetime
@@ -1223,16 +1224,32 @@ class SettingsManager:
     # ══════════════════════════════════════════════════════════════════
 
     def get_logs(self, lines: int = 100) -> dict[str, Any]:
-        """Read recent log entries."""
-        log_paths = [
+        """Read recent log entries using bounded tail read."""
+        lines = max(1, min(lines, 5000))
+        log_paths = []
+        if env_log := os.environ.get("KAZMA_LOG_FILE"):
+            log_paths.append(Path(env_log))
+        log_paths.extend([
             Path("kazma-data/kazma.log"),
             Path.cwd() / "kazma.log",
-        ]
+        ])
         for log_path in log_paths:
             if log_path.exists():
                 try:
-                    all_lines = log_path.read_text(errors="replace").splitlines()
-                    return {"lines": all_lines[-lines:], "total": len(all_lines), "path": str(log_path)}
+                    size = log_path.stat().st_size
+                    read_bytes = min(size, max(65536, lines * 512))
+                    with open(log_path, "rb") as f:
+                        if size > read_bytes:
+                            f.seek(size - read_bytes)
+                        chunk = f.read(read_bytes).decode("utf-8", errors="replace")
+                    tail_lines = chunk.splitlines()
+                    if size > read_bytes and tail_lines:
+                        tail_lines = tail_lines[1:]
+                    return {
+                        "lines": tail_lines[-lines:],
+                        "total": len(tail_lines),
+                        "path": str(log_path),
+                    }
                 except Exception as e:
                     return {"lines": [f"Error reading log: {e}"], "total": 0}
         return {"lines": ["No log file found"], "total": 0}

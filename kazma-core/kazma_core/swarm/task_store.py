@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS swarm_tasks (
     created_at TEXT NOT NULL,
     started_at TEXT,
     completed_at TEXT,
+    sort_at TEXT,
     cost REAL DEFAULT 0.0,
     tokens INTEGER DEFAULT 0,
     metadata TEXT DEFAULT '{}'
@@ -57,6 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_swarm_tasks_status ON swarm_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_type ON swarm_tasks(type);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_completed_at ON swarm_tasks(completed_at);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_created_at ON swarm_tasks(created_at);
+CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC);
 
 CREATE TABLE IF NOT EXISTS swarm_worker_metrics (
     worker TEXT NOT NULL,
@@ -127,6 +129,8 @@ class TaskStore:
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS aggregation TEXT DEFAULT '';
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS timeout DOUBLE PRECISION;
             ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS workspace_id TEXT;
+            ALTER TABLE kazma_swarm_tasks ADD COLUMN IF NOT EXISTS sort_at TEXT;
+            CREATE INDEX IF NOT EXISTS idx_kazma_swarm_tasks_sort_at ON kazma_swarm_tasks(sort_at DESC);
             CREATE TABLE IF NOT EXISTS kazma_swarm_worker_metrics (
                 worker TEXT NOT NULL,
                 date TEXT NOT NULL,
@@ -159,6 +163,7 @@ class TaskStore:
                 ("aggregation", "TEXT DEFAULT ''"),
                 ("timeout", "REAL"),
                 ("workspace_id", "TEXT"),
+                ("sort_at", "TEXT"),
             ]
             for col_name, col_def in migrations:
                 if col_name not in existing_cols:
@@ -166,6 +171,15 @@ class TaskStore:
                         conn.execute(f"ALTER TABLE swarm_tasks ADD COLUMN {col_name} {col_def}")
                     except Exception:
                         pass
+            if "sort_at" not in existing_cols:
+                try:
+                    conn.execute("UPDATE swarm_tasks SET sort_at = COALESCE(completed_at, created_at) WHERE sort_at IS NULL")
+                except Exception:
+                    pass
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC)")
+            except Exception:
+                pass
             conn.commit()
 
     def close(self) -> None:
@@ -219,6 +233,7 @@ class TaskStore:
             else ""
         )
         meta_j = json.dumps(task.metadata, ensure_ascii=False, default=str)
+        sort_at = task.completed_at or task.created_at or _utc_now_iso()
 
         with self._lock:
             if self._pg:
@@ -229,12 +244,12 @@ class TaskStore:
                     INSERT INTO kazma_swarm_tasks (
                         id, type, prompt, status, workers, result, context,
                         dependencies, fallback_chain, validation_schema, aggregation,
-                        timeout, created_at, started_at, completed_at, cost, tokens,
+                        timeout, created_at, started_at, completed_at, sort_at, cost, tokens,
                         metadata, workspace_id
                     ) VALUES (
                         %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s,
                         %s::jsonb, %s::jsonb, %s, %s,
-                        %s, %s, %s, %s, %s, %s, %s::jsonb, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s
                     )
                     ON CONFLICT (id) DO UPDATE SET
                         type = EXCLUDED.type,
@@ -251,6 +266,7 @@ class TaskStore:
                         created_at = EXCLUDED.created_at,
                         started_at = EXCLUDED.started_at,
                         completed_at = EXCLUDED.completed_at,
+                        sort_at = EXCLUDED.sort_at,
                         cost = EXCLUDED.cost,
                         tokens = EXCLUDED.tokens,
                         metadata = EXCLUDED.metadata,
@@ -263,7 +279,7 @@ class TaskStore:
                         deps_j, fb_j, vs,
                         getattr(task, "aggregation", "") or "",
                         getattr(task, "timeout", None),
-                        task.created_at, task.started_at, task.completed_at,
+                        task.created_at, task.started_at, task.completed_at, sort_at,
                         cost, tokens, meta_j,
                         getattr(task, "workspace_id", None),
                     ),
@@ -275,15 +291,15 @@ class TaskStore:
                    (id, type, prompt, status, workers, result,
                     context, dependencies, fallback_chain,
                     validation_schema, aggregation, timeout,
-                    created_at, started_at, completed_at, cost, tokens,
+                    created_at, started_at, completed_at, sort_at, cost, tokens,
                     metadata, workspace_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task.id, type_s, task.prompt, status_s, workers_j, result_json,
                     task.context or "", deps_j, fb_j, vs,
                     getattr(task, "aggregation", "") or "",
                     getattr(task, "timeout", None),
-                    task.created_at, task.started_at, task.completed_at,
+                    task.created_at, task.started_at, task.completed_at, sort_at,
                     cost, tokens, meta_j,
                     getattr(task, "workspace_id", None),
                 ),
@@ -394,7 +410,7 @@ class TaskStore:
                     total = int(count_row["cnt"]) if count_row else 0
                 rows = get_pool().execute(
                     f"""SELECT * FROM kazma_swarm_tasks {where_clause}
-                        ORDER BY COALESCE(completed_at, created_at) DESC
+                        ORDER BY COALESCE(sort_at, completed_at, created_at) DESC
                         LIMIT %s OFFSET %s""",
                     params + [page_size, offset],
                 )
@@ -436,7 +452,7 @@ class TaskStore:
                 total = count_row["cnt"] if count_row else 0
             rows = conn.execute(
                 f"""SELECT * FROM swarm_tasks {where_clause}
-                    ORDER BY COALESCE(completed_at, created_at) DESC
+                    ORDER BY COALESCE(sort_at, completed_at, created_at) DESC
                     LIMIT ? OFFSET ?""",
                 params + [page_size, offset],
             ).fetchall()
@@ -445,6 +461,42 @@ class TaskStore:
         if include_count:
             return tasks, total
         return tasks
+
+    def prune_tasks(self, retention_days: int = 30) -> int:
+        """Prune terminal swarm tasks older than retention_days (audit M3).
+
+        Deletes completed, failed, or cancelled tasks where sort_at is older
+        than the retention cutoff.
+        """
+        from datetime import timedelta
+        cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(retention_days)))).isoformat()
+        with self._lock:
+            if self._pg:
+                from kazma_core.db.pg_helpers import get_pool
+
+                res = get_pool().execute(
+                    """DELETE FROM kazma_swarm_tasks
+                       WHERE status IN ('completed', 'failed', 'cancelled')
+                         AND COALESCE(sort_at, completed_at, created_at) < %s""",
+                    (cutoff,),
+                )
+                deleted = len(res) if isinstance(res, list) else 0
+                if deleted:
+                    logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
+                return deleted
+
+            conn = self._get_conn()
+            cur = conn.execute(
+                """DELETE FROM swarm_tasks
+                   WHERE status IN ('completed', 'failed', 'cancelled')
+                     AND COALESCE(sort_at, completed_at, created_at) < ?""",
+                (cutoff,),
+            )
+            conn.commit()
+            deleted = cur.rowcount
+            if deleted:
+                logger.info("[TaskStore] pruned %d terminal tasks older than %d days", deleted, retention_days)
+            return deleted
 
     def get_paused_tasks(self) -> list[SwarmTask]:
         """Return all tasks with status='paused' (for HITL restore on restart)."""

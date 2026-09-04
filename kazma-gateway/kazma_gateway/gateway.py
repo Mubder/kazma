@@ -247,6 +247,22 @@ class SessionStore(ABC):
     instead of being deleted immediately.
     """
 
+    def __init__(self) -> None:
+        self._thread_locks: dict[str, asyncio.Lock] = {}
+        self._locks_lock = asyncio.Lock()
+
+    async def _get_thread_lock(self, thread_id: str) -> asyncio.Lock:
+        async with self._locks_lock:
+            lock = self._thread_locks.get(thread_id)
+            if lock is None:
+                if len(self._thread_locks) > 2000:
+                    unheld = [tid for tid, lk in self._thread_locks.items() if not lk.locked()]
+                    for tid in unheld:
+                        self._thread_locks.pop(tid, None)
+                lock = asyncio.Lock()
+                self._thread_locks[thread_id] = lock
+            return lock
+
     @abstractmethod
     async def get(self, thread_id: str) -> dict[str, Any]:
         """Retrieve stored context_metadata for a thread_id.
@@ -264,6 +280,30 @@ class SessionStore(ABC):
     async def delete(self, thread_id: str) -> None:
         """Remove stored context for a thread_id. No-op if not found."""
         ...
+
+    async def update(
+        self,
+        thread_id: str,
+        mutator: Callable[[dict[str, Any]], dict[str, Any] | None | Awaitable[dict[str, Any] | None]],
+    ) -> dict[str, Any]:
+        """Atomically read, modify, and write back context_metadata for a thread_id.
+
+        Serializes concurrent RMW operations on the same thread_id using a
+        per-thread asyncio.Lock.
+        """
+        import inspect
+
+        lock = await self._get_thread_lock(thread_id)
+        async with lock:
+            current = await self.get(thread_id)
+            ctx = dict(current or {})
+            res = mutator(ctx)
+            if inspect.isawaitable(res):
+                res = await res
+            if res is not None:
+                await self.put(thread_id, res)
+                return res
+            return ctx
 
     async def evict_older_than(self, seconds: float) -> int:
         """Evict session entries older than ``seconds`` since their last update.

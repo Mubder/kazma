@@ -47,15 +47,12 @@ import inspect
 import json
 import logging
 import queue
-import sqlite3
 import threading
 import time
-import types as _types
 import typing as _typing
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -77,10 +74,6 @@ from kazma_core.agent.tool_schema import (
     strict_tools_enabled,
 )
 from kazma_core.agent.tool_scope import _is_under_agent_skill_dir, _workspace_scope_error
-
-# Strong references for background dispatch tasks so the GC doesn't
-# kill them before they complete (and persist to TaskStore).
-_pending_dispatch_tasks: set = set()
 
 #: ContextVar set by the graph's interrupt() gate after HITL approval.
 #: This is the ONLY trusted source for the "already approved" flag —

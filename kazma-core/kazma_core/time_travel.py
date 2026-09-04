@@ -47,13 +47,25 @@ from typing import Any
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
-__all__ = ["DEFAULT_DB_PATH", "DEFAULT_MAX_SNAPSHOTS", "ReplayEngine", "SnapshotRecord", "SnapshotRecorder", "SnapshotStore", "create_recorder", "maintain_snapshots", "start_snapshot_maintenance_loop"]
+__all__ = [
+    "DEFAULT_DB_PATH",
+    "DEFAULT_MAX_SNAPSHOTS",
+    "DEFAULT_MAX_GLOBAL_SNAPSHOTS",
+    "ReplayEngine",
+    "SnapshotRecord",
+    "SnapshotRecorder",
+    "SnapshotStore",
+    "create_recorder",
+    "maintain_snapshots",
+    "start_snapshot_maintenance_loop",
+]
 
 logger = logging.getLogger(__name__)
 
 # Default paths / limits
 DEFAULT_DB_PATH = "kazma-data/snapshots.db"
 DEFAULT_MAX_SNAPSHOTS = 50
+DEFAULT_MAX_GLOBAL_SNAPSHOTS = 2000
 
 
 def _resolve_db_path(db_path: str | Path | None) -> str:
@@ -308,11 +320,13 @@ class SnapshotRecorder:
         *,
         enabled: bool = True,
         max_snapshots: int = DEFAULT_MAX_SNAPSHOTS,
+        max_global_snapshots: int = DEFAULT_MAX_GLOBAL_SNAPSHOTS,
         db_path: str | Path | None = DEFAULT_DB_PATH,
         store: SnapshotStore | None = None,
     ) -> None:
         self._enabled = enabled
         self._max_snapshots = max_snapshots
+        self._max_global_snapshots = max(1, int(max_global_snapshots))
         # H19: resolve once (data-dir anchored, cwd-independent). Relative
         # literals from legacy kazma.yaml configs normalize to the data dir.
         self._db_path = _resolve_db_path(db_path)
@@ -384,6 +398,10 @@ class SnapshotRecorder:
         while len(thread_keys) > self._max_snapshots:
             oldest_key = thread_keys.pop(0)
             del self._memory[oldest_key]
+
+        # Evict oldest globally if over global cap (M9)
+        while len(self._memory) > self._max_global_snapshots:
+            self._memory.popitem(last=False)
 
         # Write-through to SQLite
         try:
@@ -602,6 +620,7 @@ def create_recorder(
     config: dict[str, Any] | None = None,
     db_path: str | None = None,
     max_snapshots: int | None = None,
+    max_global_snapshots: int | None = None,
     store: SnapshotStore | None = None,
 ) -> SnapshotRecorder:
     """Create a SnapshotRecorder from kazma.yaml config.
@@ -611,6 +630,7 @@ def create_recorder(
             ``time_travel.max_snapshots``, ``time_travel.db_path``.
         db_path: Override db_path (takes precedence over config).
         max_snapshots: Override max_snapshots (takes precedence over config).
+        max_global_snapshots: Override max_global_snapshots.
         store: Inject a pre-built SnapshotStore (for testing).
 
     Returns:
@@ -619,6 +639,7 @@ def create_recorder(
     tt_cfg = (config or {}).get("time_travel", {})
     enabled = tt_cfg.get("enabled", True)
     _max = max_snapshots if max_snapshots is not None else tt_cfg.get("max_snapshots", DEFAULT_MAX_SNAPSHOTS)
+    _max_global = max_global_snapshots if max_global_snapshots is not None else tt_cfg.get("max_global_snapshots", DEFAULT_MAX_GLOBAL_SNAPSHOTS)
     _db = db_path or tt_cfg.get("db_path", DEFAULT_DB_PATH)
 
     # Effective resolution mirrors the embedder: ConfigStore override >
@@ -628,15 +649,20 @@ def create_recorder(
     try:
         from kazma_core.config_store import get_config_store
 
-        store_max = get_config_store().get("time_travel.max_snapshots", None)
+        cs = get_config_store()
+        store_max = cs.get("time_travel.max_snapshots", None)
         if store_max is not None:
             _max = int(store_max)
+        store_global_max = cs.get("time_travel.max_global_snapshots", None)
+        if store_global_max is not None:
+            _max_global = int(store_global_max)
     except Exception:  # noqa: BLE001 - never break startup over the override
         logger.debug("[TimeTravel] ConfigStore override unavailable; using yaml/default", exc_info=True)
 
     return SnapshotRecorder(
         enabled=enabled,
         max_snapshots=_max,
+        max_global_snapshots=_max_global,
         db_path=_db,
         store=store,
     )

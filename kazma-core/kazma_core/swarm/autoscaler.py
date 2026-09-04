@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from dataclasses import dataclass, field
@@ -198,12 +199,22 @@ class AutoScaler:
         return list(self._templates.values())
 
     def save_templates(self) -> None:
-        """Persist templates to JSON file."""
+        """Persist templates to JSON file atomically."""
         data = [t.to_dict() for t in self._templates.values()]
-        self._templates_path.parent.mkdir(parents=True, exist_ok=True)
-        self._templates_path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        p = Path(self._templates_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(f".{p.name}.tmp.{os.getpid()}.{time.time_ns()}")
+        try:
+            tmp.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+            )
+            os.replace(tmp, p)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
 
     def load_templates(self) -> None:
         """Load templates from JSON file."""
