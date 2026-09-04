@@ -119,9 +119,22 @@ var KazmaStream = (function() {
             break;
           case 'done':
           case 'turn_complete':
-            // Prefer turn_complete / enriched done content when tokens were missed
-            if (data && data.content && callbacks.onToken && !callbacks._sawToken) {
-              try { callbacks.onToken({ content: data.content }); } catch (e) { /* ignore */ }
+            // Prefer turn_complete / enriched done content when tokens were missed.
+            if (data && data.content && !callbacks._sawToken) {
+              if (data.capacity) {
+                // Capacity ack (slash fast-path): REPLACE, never append —
+                // feeding the ack through onToken doubled the reply when the
+                // capacity frame had already painted (the §29F duplicated-
+                // prefix class), and paintCapacityReply is content-key
+                // idempotent, so a repeat after a successful paint dedupes.
+                try {
+                  if (window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
+                    window.KazmaChat.paintCapacityReply(data.content, data.turn_id);
+                  }
+                } catch (e) { /* ignore */ }
+              } else if (callbacks.onToken) {
+                try { callbacks.onToken({ content: data.content }); } catch (e) { /* ignore */ }
+              }
             }
             if (type === 'done' || type === 'turn_complete') {
               finishStream(data);

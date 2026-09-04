@@ -199,8 +199,48 @@ class TestV2ArchitecturePresent:
             "identical re-send deduped on a STALE doc",
             "fresh doc (post _resetTurnState) repaints identical reply",
             "different reply paints even on stale doc",
+            "capacity REPLACES streamed text (never appends)",
         ):
             assert marker in proc.stdout, f"missing behavioral assertion: {marker}"
+
+    def test_capacity_ack_routing_under_node(self):
+        """Behavioral lock of the 2026-09-05 doubling regression: a
+        capacity ack's done frame must paint via paintCapacityReply
+        (replace, idempotent) and NEVER feed onToken (append) — and a
+        lost capacity frame must still paint from the done frame alone."""
+        if shutil.which("node") is None:
+            import pytest
+
+            pytest.skip("node not available")
+        proc = subprocess.run(
+            ["node", str(_ROOT / "tests" / "js" / "test_streaming_ack.js")],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(_ROOT),
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "FAIL" not in proc.stdout
+        for marker in (
+            "ack: onToken never fed",
+            "ack: done frame painted via paintCapacityReply",
+            "lost-capacity: reply painted from done frame alone",
+            "real turn: onToken fallback intact",
+        ):
+            assert marker in proc.stdout, f"missing behavioral assertion: {marker}"
+
+    def test_streaming_done_capacity_branch_precedes_token_fallback(self):
+        """Source-order lock: in streaming.js's done case, the capacity
+        branch must route to paintCapacityReply BEFORE (and exclusive of)
+        the generic onToken content fallback — the old code fed every
+        done frame with content through onToken, doubling capacity acks
+        that the capacity frame had already painted."""
+        src = _STREAM_JS.read_text(encoding="utf-8")
+        assert "if (data.capacity) {" in src
+        assert "window.KazmaChat.paintCapacityReply(data.content, data.turn_id)" in src
+        at_cap = src.index("if (data.capacity) {")
+        at_token = src.index("else if (callbacks.onToken)")
+        assert at_cap < at_token, "capacity branch must precede the onToken fallback"
+        # The onToken feed itself must still exist for REAL turns.
+        assert "callbacks.onToken({ content: data.content })" in src
 
     def test_terminal_push_suppressed_for_capacity_acks(self, monkeypatch):
         """The done-frame content fallback must not mint a Web Push for
