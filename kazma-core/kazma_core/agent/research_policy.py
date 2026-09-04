@@ -25,6 +25,7 @@ __all__ = [
     "deep_research_route_hint",
     "should_prefer_pipeline",
     "extract_topic_hint",
+    "has_extractable_topic",
 ]
 
 # Injected into product knowledge / tool guidance.
@@ -40,12 +41,17 @@ RESEARCH_PROTOCOL = """
 Casual factual Q&A may use a single search.
 """.strip()
 
+# Report-shaped phrases carry an on/about tail: "reproduce a full report"
+# (render your findings) is NOT a research ask, while "a full report on X"
+# is (2026-09-04: the bare "full report" alternative auto-dispatched the
+# web pipeline on a local file-audit instruction).
 _DEEP_RE = re.compile(
     r"("
     r"deep\s*research|research\s+thorough\w*|thoroughly\s+research|"
-    r"comprehensive\s+(report|research|paper|analysis)|"
-    r"full\s+report|research\s+paper|in[- ]depth|"
-    r"write\s+a\s+(report|paper)|investigate\s+deeply|"
+    r"comprehensive\s+(report|paper)\s+(on|about)|"
+    r"comprehensive\s+(research|analysis)|"
+    r"full\s+report\s+(on|about)|research\s+paper|in[- ]depth|"
+    r"write\s+a\s+(report|paper)\s+(on|about)|investigate\s+deeply|"
     r"/research\s+deep"
     r")",
     re.I,
@@ -110,10 +116,12 @@ _TOPIC_STRIP = re.compile(
     r"deep\s*research(\s+on)?|"
     r"research\s+thoroughly(\s+on)?|"
     r"thoroughly\s+research|"
-    r"write\s+a\s+(comprehensive\s+)?(report|paper)\s+(on|about)|"
+    r"write\s+a\s+((comprehensive|full)\s+)?(report|paper)\s+(on|about)|"
+    r"full\s+report\s+(on|about)|"
     r"comprehensive\s+(report|research|paper|analysis)\s+(on|about)|"
     r"in[- ]depth\s+(research|analysis)\s+(on|about)|"
-    r"/research(\s+deep)?"
+    r"research(\s+on)?|investigate(\s+(on|about))?"
+    r"|\s*/research(\s+deep)?\s*"
     r")\s*[:\-]?\s*",
     re.I,
 )
@@ -161,6 +169,23 @@ def extract_topic_hint(text: str) -> str:
     t = re.sub(r"\s+", " ", t)
     cleaned = _TOPIC_STRIP.sub("", t).strip(" .,:;-")
     return cleaned[:300] if cleaned else t[:300]
+
+
+def has_extractable_topic(text: str) -> bool:
+    """True when a research prefix was actually STRIPPED — the hint is a
+    subject, not the instruction echoed back.
+
+    ``extract_topic_hint`` falls back to the raw message when nothing
+    strips. Feeding that to the web pipeline researches the command string
+    itself (2026-09-04: "finish the two unread files then reproduce a full
+    report" started a real 8-source session on its own instruction text).
+    The execute auto-dispatch must not fire without an honest subject.
+    """
+    t = re.sub(r"\s+", " ", (text or "").strip())
+    if not t:
+        return False
+    stripped = _TOPIC_STRIP.sub("", t).strip(" .,:;-")
+    return bool(stripped) and stripped != t.strip(" .,:;-")
 
 
 def deep_research_route_hint(user_text: str) -> str | None:

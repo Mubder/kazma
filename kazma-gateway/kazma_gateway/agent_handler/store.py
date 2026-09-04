@@ -319,6 +319,15 @@ def _build_target_id(platform: str, ctx: dict[str, Any]) -> str:
     if chat_id is not None:
         return f"{platform}:{chat_id}"
 
+    # Discord threads ARE channels in the Discord API — posting to the
+    # thread id lands the reply inside the thread. Inbound sets
+    # discord_thread_id (discord_parse), but rebuilt targets ignored it, so
+    # thread replies fell back to the parent channel (2026-09-04 audit).
+    if platform == "discord":
+        thread_id = ctx.get("discord_thread_id")
+        if thread_id:
+            return f"discord:{thread_id}"
+
     # Discord / Slack route on channel_id
     channel_id = ctx.get("channel_id")
     if channel_id is not None:

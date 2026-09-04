@@ -47,7 +47,9 @@ def resolve_channel_id(
     if channel_id:
         return str(channel_id)
     if ":" in (target_id or ""):
-        return target_id.split(":", 1)[1] or None
+        # LAST segment, mirroring discord_send: any platform-prefixed
+        # target shape (single- or dual-colon) resolves to its channel.
+        return target_id.split(":")[-1] or None
     return target_id or None
 
 

@@ -225,3 +225,63 @@ def test_list_research_papers_finds_report_md(tmp_path, monkeypatch):
     (d / "report.md").write_text("# Report\n\nhello", encoding="utf-8")
     papers = rp.list_research_papers(limit=10)
     assert any("solid-state" in str(p.get("report_path") or p.get("id") or "") for p in papers)
+
+
+def test_full_report_incident_and_topic_extraction():
+    """2026-09-04 incident: 'finish the two unread files then reproduce a
+    full report' auto-dispatched the web pipeline (route=execute) with the
+    instruction itself as the research topic. Two guards: report-shaped
+    phrases need an on/about subject, and execute never fires without an
+    extractable topic."""
+    from kazma_core.agent.research_policy import (
+        extract_topic_hint,
+        has_extractable_topic,
+        is_deep_research_intent,
+    )
+    from kazma_core.agent.intent.heuristics import detect_acts
+    from kazma_core.agent.intent.types import ActKind
+
+    incident = "finish the two unread files then reproduce a full report"
+    # The trigger phrase without a subject is not a research ask.
+    assert not is_deep_research_intent(incident)
+    assert not has_extractable_topic(incident)
+    assert extract_topic_hint(incident) == incident  # nothing to strip
+
+    kinds = {a.kind for a in detect_acts(incident)}
+    assert ActKind.RESEARCH_DEEP not in kinds
+
+    # Real asks still fire — with a real subject extracted.
+    for ask in (
+        "write a full report on solid-state batteries",
+        "full report about the Qatar LNG market",
+        "comprehensive report on EV charging standards",
+        "deep research on fusion energy",
+        "/research deep solid-state batteries",
+    ):
+        assert is_deep_research_intent(ask), ask
+        assert has_extractable_topic(ask), ask
+        assert extract_topic_hint(ask) not in ("", ask), ask
+
+    # A deep phrase with NO subject must not auto-execute (the old
+    # fallback researched the command string itself).
+    assert not has_extractable_topic("deep research")
+
+
+def test_research_handler_refuses_verbatim_instruction_topic():
+    """The execute handler must escalate when no topic slot exists — its old
+    fallback fed the user's entire message to the web pipeline."""
+    import asyncio
+
+    from kazma_core.agent.intent.handlers.research import run_research_deep
+    from kazma_core.agent.intent.types import ActKind, IntentAct
+
+    decision = type("D", (), {
+        "primary": IntentAct(kind=ActKind.RESEARCH_DEEP, confidence=0.95, slots={}),
+    })()
+    result = asyncio.run(
+        run_research_deep(decision, {"messages": [
+            {"role": "user", "content": "finish the two unread files then reproduce a full report"},
+        ]})
+    )
+    assert result.ok is False
+    assert result.escalate is True

@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Fix — research auto-dispatch on an instruction + Discord/Slack target routing (2026-09-04)
+
+**Intent engine (the "reproduce a full report" misfire):** the
+deep-research regex matched the bare phrase "full report", and
+RESEARCH_DEEP — the only act on the execute allowlist — auto-dispatched
+the web pipeline with the user's ENTIRE instruction as its topic (live:
+a local file-audit continuation started a real 8-source session
+researching "finish the two unread files then reproduce a full report").
+Three guards:
+
+- Report-shaped triggers now require an on/about subject ("full report
+  on X", "comprehensive report on X", "write a report about X").
+- ``has_extractable_topic()``: the execute auto-dispatch only fires when
+  a research prefix actually strips off a SUBJECT — an instruction with
+  nothing to strip never auto-starts a pipeline.
+- The execute handler's verbatim-message fallback is now
+  subject-extractable only ("research cloud security" → "cloud
+  security" still works); otherwise it escalates to the supervisor loop.
+
+**Connector routing (audit follow-up):**
+
+- ``resolve_channel_id`` (Discord + Slack) takes the LAST colon segment
+  on fallback — a dual-colon Discord DM sender id
+  (``discord:{user}:{channel}``) used to resolve to the invalid
+  snowflake "user:channel".
+- ``_build_target_id`` prefers ``discord_thread_id`` for Discord —
+  thread replies now land in the thread (thread ids are channel ids in
+  the Discord API) instead of the parent channel.
+
+Tests: incident regression in the research-policy suite (trigger phrase,
+topic extraction, handler refusal), handler subject-fallback case, and
+``tests/test_target_id_routing.py`` (9 behavioral cases).
+
 ## Fix — frozen CoT after Approve + approval card above the streamed text (2026-09-04)
 
 Live thread 8d4c4ead: after approving the first danger tool (shell_exec)

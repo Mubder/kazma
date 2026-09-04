@@ -53,7 +53,10 @@ def resolve_channel_id(
     if channel_id:
         return str(channel_id)
     if ":" in (target_id or ""):
-        return target_id.split(":", 1)[1] or None
+        # LAST segment: inbound DM sender ids are dual-colon
+        # (discord:{user_id}:{channel_id}) — split(":", 1)[1] used to yield
+        # "user_id:channel_id", an invalid snowflake (2026-09-04 audit).
+        return target_id.split(":")[-1] or None
     return target_id or None
 
 
