@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Fix — Capacity-ack done frame must REPLACE, not append (2026-09-05)
+
+Follow-up to the instant-slash live-delivery fix, found by live
+reproduction on the deployed build: the done frame's content fallback
+fed capacity acks through the **token** path (append), so when the
+`capacity` frame had already painted, the reply rendered **twice** and
+the turn document stuck at `streaming` (the §29F duplicated-prefix
+class); when the capacity frame was lost mid-navigation, nothing
+painted and the watchdog card returned.
+
+- **streaming.js:** in the done/turn_complete case, frames carrying the
+  `capacity` ack flag route through `paintCapacityReply` (replace
+  semantics, content-key idempotent — a repeat after a successful paint
+  dedupes; a lost capacity frame is repainted from the done frame
+  alone). Real turns keep the pre-existing onToken fallback untouched.
+- **Tests:** new Node harness `tests/js/test_streaming_ack.js` runs the
+  real `KazmaStream` dispatch over scripted SSE bodies — ack never feeds
+  onToken, lost-capacity still paints, real-turn fallback intact, real
+  tokens suppress the done feed; `test_turn_document.js` locks that a
+  capacity event REPLACES streamed text; pytest runs both harnesses and
+  source-orders the routing branch.
+
+**Verification:** node checks ×3; 170 tests green across the delivery /
+turn / SSE / WS / S3-2 suites.
+
 ## Fix — Instant-slash live delivery + ack push suppression (2026-09-04)
 
 `/unrestricted`, `/yolo`, `/long`, `/plan` replies painted live as

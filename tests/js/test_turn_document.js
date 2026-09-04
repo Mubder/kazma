@@ -169,6 +169,17 @@ var cap3 = TD.applyEvent(cap1, {
   type: "capacity", reply: "YOLO OFF", turn_id: "live", source: "capacity",
 });
 assert("different reply paints even on stale doc", cap3 !== cap1 && TD.textOf(cap3.parts) === "YOLO OFF");
+// Capacity REPLACEs the stream — never appends. The 2026-09-05 doubling
+// regression fed the ack through the token path (append); a late capacity
+// repaint over an already-streamed partial must leave ONLY the ack.
+var capTok = TD.applyEvent(TD.empty("live"), {
+  type: "token", content: "partial streamed text", turn_id: "live",
+});
+var capRep = TD.applyEvent(capTok, {
+  type: "capacity", reply: "MISSION ON", turn_id: "live", source: "capacity",
+});
+assert("capacity REPLACES streamed text (never appends)",
+  TD.textOf(capRep.parts) === "MISSION ON" && capRep.stream === "MISSION ON");
 
 if (fail) process.exit(1);
 console.log("all ok");
