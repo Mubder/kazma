@@ -1257,6 +1257,7 @@ class AsyncMCPManager:
             # this is a no-op (which returns the path as-is for executables).
             if sys.platform == "win32":
                 import shutil as _shutil
+                import os as _os  # must be bound before `if resolved:` (PATH prepend)
 
                 resolved = _shutil.which(command[0])
                 if not resolved and command[0].lower() in ("npx", "npx.cmd"):
@@ -1264,8 +1265,6 @@ class AsyncMCPManager:
                     # install dir (2026-09-03: npx vanished machine-wide
                     # mid-update). Probe the canonical Windows locations
                     # before giving up.
-                    import os as _os
-
                     nvm_link = (
                         _os.environ.get("NVM_SYMLINK")
                         or r"C:\nvm4w\nodejs"
