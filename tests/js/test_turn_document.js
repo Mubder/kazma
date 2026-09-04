@@ -140,5 +140,35 @@ var secondHitl = secondGate.parts.filter(function (p) { return p.type === "hitl"
 assert("new interrupt_id is a new gate", secondHitl && secondHitl.state === "pending" && secondHitl.interrupt_id === "def");
 assert("new gate pauses", secondGate.status === "paused");
 
+// ── Capacity fast-path: content-key dedupe + reset semantics ────────
+// chat.js paintCapacityReply forwards reply+turn_id but NOT seq, so the
+// eventKey for capacity events is content-derived. This locks the
+// 2026-09-04 live-delivery incident: instant slashes skip beginTurn, the
+// stale _docs.live kept the prior capacity key, and the identical Retry
+// re-send hit doc.seen[key] and silently dropped (the "_No response
+// received." card). The fix resets the doc per send — locked here.
+var capDoc = TD.empty("live");
+var cap1 = TD.applyEvent(capDoc, {
+  type: "capacity", reply: "MISSION ON", turn_id: "live", source: "capacity",
+});
+assert("capacity reply paints", TD.textOf(cap1.parts) === "MISSION ON");
+assert("capacity marks turn done", cap1.status === "done");
+var cap1b = TD.applyEvent(cap1, {
+  type: "capacity", reply: "MISSION ON", turn_id: "live", source: "capacity",
+});
+assert("identical re-send deduped on a STALE doc", cap1b === cap1);
+// What _resetTurnState() guarantees per send: a fresh empty document
+// accepts the identical event again — the Retry path after the fix.
+var cap2 = TD.applyEvent(TD.empty("live"), {
+  type: "capacity", reply: "MISSION ON", turn_id: "live", source: "capacity",
+});
+assert("fresh doc (post _resetTurnState) repaints identical reply",
+  cap2 !== cap1 && TD.textOf(cap2.parts) === "MISSION ON");
+// A DIFFERENT reply must never be deduped even on the stale doc.
+var cap3 = TD.applyEvent(cap1, {
+  type: "capacity", reply: "YOLO OFF", turn_id: "live", source: "capacity",
+});
+assert("different reply paints even on stale doc", cap3 !== cap1 && TD.textOf(cap3.parts) === "YOLO OFF");
+
 if (fail) process.exit(1);
 console.log("all ok");

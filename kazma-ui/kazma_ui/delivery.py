@@ -305,10 +305,13 @@ class TurnBroker:
         # Turn Delivery V2 P5: Web Push on terminal — the ONE choke point
         # both transports flow through, so WS and SSE turns both notify.
         # Fire-and-forget: never raises into the turn, never blocks it.
+        # ``capacity`` done frames are slash-command acks (/yolo, /long,
+        # /unrestricted): their content is the confirmation the sending
+        # tab already painted — pushing it to every device is noise.
         if stamped.get("type") in ("turn_complete", "done"):
             data = stamped.get("data") or {}
             summary = str(data.get("content") or "").strip()
-            if summary:
+            if summary and not (isinstance(data, dict) and data.get("capacity")):
                 spawn_background(self._push_terminal(summary), name="delivery-push-terminal")
 
         return stamped

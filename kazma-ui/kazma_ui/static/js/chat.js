@@ -1941,6 +1941,44 @@
     }
   }
 
+  function _resetTurnState() {
+    currentMsgEl = null;
+    tokenAccum = '';
+    _liveTurnId = '';
+    _turnPainted = false;
+    _progressEl = null;
+    _progressStepCount = 0;
+    _progressToolCount = 0;
+    _planItems = [];
+    _planParsedFromText = false;
+    _lastTurnStats = null;
+    // Drop the previous turn's 'live' document. Otherwise the first
+    // logProgress merges into leftover parts and _answerFromDoc paints
+    // yesterday's reasoning over this turn's bubble — and if that node
+    // is the You row, the sent text vanishes from the chip (2026-09-01).
+    try {
+      if (window.KazmaTurnDocument && typeof KazmaTurnDocument.empty === 'function') {
+        _docs.live = KazmaTurnDocument.empty('live');
+      } else {
+        delete _docs.live;
+      }
+    } catch (eLive) {
+      try { delete _docs.live; } catch (eDel) { /* ignore */ }
+    }
+    // Release any bubble a previous turn left carrying the placeholder id
+    // (older builds stamped it; a restored transcript can carry it too).
+    // While one exists, this turn's untagged frames would paint into it
+    // instead of into this turn's own bubble.
+    try {
+      var _stale = messagesEl
+        ? messagesEl.querySelectorAll('.message-assistant[data-turn-id="live"]')
+        : [];
+      for (var _si = 0; _si < _stale.length; _si++) {
+        _stale[_si].removeAttribute('data-turn-id');
+      }
+    } catch (eStale) { /* ignore */ }
+  }
+
   /**
    * @param {{resume?: boolean}} [opts] `resume: true` continues the turn that
    *   is already on screen (HITL approve / deny) instead of starting a new
@@ -1977,39 +2015,7 @@
     // logProgress opens a new assistant bubble.
     if (!resume) {
       currentMsgEl = null;
-      tokenAccum = '';
-      _liveTurnId = '';
-      _progressEl = null;
-      _progressStepCount = 0;
-      _progressToolCount = 0;
-      _planItems = [];
-      _planParsedFromText = false;
-      _lastTurnStats = null;
-      // Drop the previous turn's 'live' document. Otherwise the first
-      // logProgress merges into leftover parts and _answerFromDoc paints
-      // yesterday's reasoning over this turn's bubble — and if that node
-      // is the You row, the sent text vanishes from the chip (2026-09-01).
-      try {
-        if (window.KazmaTurnDocument && typeof KazmaTurnDocument.empty === 'function') {
-          _docs.live = KazmaTurnDocument.empty('live');
-        } else {
-          delete _docs.live;
-        }
-      } catch (eLive) {
-        try { delete _docs.live; } catch (eDel) { /* ignore */ }
-      }
-      // Release any bubble a previous turn left carrying the placeholder id
-      // (older builds stamped it; a restored transcript can carry it too).
-      // While one exists, this turn's untagged frames would paint into it
-      // instead of into this turn's own bubble.
-      try {
-        var _stale = messagesEl
-          ? messagesEl.querySelectorAll('.message-assistant[data-turn-id="live"]')
-          : [];
-        for (var _si = 0; _si < _stale.length; _si++) {
-          _stale[_si].removeAttribute('data-turn-id');
-        }
-      } catch (eStale) { /* ignore */ }
+      _resetTurnState();
       logProgress({ kind: 'status', title: ti('thinking', 'Kazma is thinking\u2026'), state: 'running' });
     }
     if (inputEl) {
@@ -2953,6 +2959,8 @@
       } catch (eBegin) {
         console.error('[KazmaChat] beginTurn failed', eBegin);
       }
+    } else {
+      _resetTurnState();
     }
 
     // Status strip is store-owned now; beginTurn arms it below.
@@ -7536,14 +7544,15 @@
       messagesEl.appendChild(chip);
       try { messagesEl.scrollTop = messagesEl.scrollHeight; } catch (e) { /* ignore */ }
     },
-    paintCapacityReply: function(reply) {
+    paintCapacityReply: function(reply, optTurnId) {
       if (!reply || !messagesEl) return;
       var incoming = String(reply).trim();
       if (!incoming) return;
+      var tid = optTurnId || ((_liveTurnId && !_isRetiredTurn(_liveTurnId)) ? _liveTurnId : 'live');
       applyTurnEvent({
         type: 'capacity',
         reply: incoming,
-        turn_id: _liveTurnId,
+        turn_id: tid,
         source: 'capacity',
       });
     },

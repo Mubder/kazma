@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## Fix — Instant-slash live delivery + ack push suppression (2026-09-04)
+
+`/unrestricted`, `/yolo`, `/long`, `/plan` replies painted live as
+"_No response received." while the transcript held the real reply
+(refresh showed it). Root cause (reproduced live against a running
+server): instant slashes skip `beginTurn()`, so `_liveTurnId` kept the
+previous turn's UUID (the capacity reply painted into the old bubble as
+a historical render) and `_docs.live` kept the prior capacity
+`eventKey` — an identical Retry re-send hit `doc.seen[key]` and was
+silently dropped, leaving `tokenAccum` empty for the done watchdog.
+
+- **chat.js:** extracted `_resetTurnState()` from `beginTurn()` and
+  call it from the instant-slash branch of `sendMessage()` — `_liveTurnId`,
+  `_docs.live` (dedupe map) and stale `data-turn-id="live"` attributes
+  reset every send. `paintCapacityReply` accepts an optional turn id and
+  never forwards a retired/stale one.
+- **_capacity.py:** fast-path `done` frames now carry `content`
+  (transport-drop fallback: the done handler paints it when no tokens
+  streamed) and `"capacity": True` (ack marker).
+- **delivery.py:** the terminal Web Push choke skips capacity acks — a
+  push per `/yolo` confirmation is noise. The ack marker also keeps the
+  now-content-bearing done frame out of cursor replay (no reconnect
+  double-paint, the 2026-08-16 duplicated-MISSION-ON class).
+- **Tests:** behavioral Node locks for the content-key dedupe + fresh-doc
+  repaint (the exact dropped-Retry mechanism); regex-locked reset call
+  sites (instant-slash else-branch AND beginTurn); push-suppression test
+  via `TurnBroker`; done-frame contract assertions.
+
+**Verification:** `node --check` ×3, `py_compile` ×3, delivery/turn/
+SSE/WS/S3-2 suites (211 tests) green, full `fast_test` gate 0 failures
+(two unrelated slow files re-run green standalone).
+
 ## Audit & Hardening — Full Codebase & UI/UX Audit Execution (Waves 1–7) (2026-09-04)
 
 Complete industrial remediation across all 60 findings from `docs/audits/AUDIT_CODEBASE_UIUX_2026-09-04.md`:

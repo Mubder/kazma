@@ -139,9 +139,98 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _isInstantCapacitySlash" in src
         assert "if (!_instantSlash)" in src
+        assert "_resetTurnState()" in src
+        assert "function _resetTurnState()" in src
+        # The instant-slash else-branch must actually CALL the reset — the
+        # 2026-09-04 live-delivery incident was exactly this call missing
+        # (stale _liveTurnId painted into the previous turn's bubble; the
+        # stale _docs.live dedupe key ate the identical Retry re-send).
+        assert re.search(
+            r"if \(!_instantSlash\) \{[\s\S]*?\} else \{\s*_resetTurnState\(\);\s*\}",
+            src,
+        ), "instant-slash else-branch must call _resetTurnState()"
+        # beginTurn's non-resume path resets through the same helper (one
+        # reset implementation, not two divergent copies).
+        assert re.search(
+            r"if \(!resume\) \{\s*currentMsgEl = null;\s*_resetTurnState\(\);", src
+        ), "beginTurn must reset via _resetTurnState()"
+        assert "paintCapacityReply: function(reply, optTurnId)" in src
         assert "prevUserContent" in src
         assert "'/api/pending-approvals'" in src
         assert "setTimeout(recoverMissedApproval, 1200)" in src
+
+    def test_capacity_fast_path_done_frame_carries_content(self):
+        cap_src = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui"
+            / "kazma_ui"
+            / "sse_chat"
+            / "_capacity.py"
+        ).read_text(encoding="utf-8")
+        assert '"content": _cap.reply' in cap_src
+        assert '"content": _pl.reply' in cap_src
+        assert '"content": confirmation' in cap_src
+        # All three fast-path done frames are capacity ACKS: the flag keeps
+        # the now-content-bearing done frame out of cursor replay (no
+        # double-paint on reconnect) and out of the terminal Web Push.
+        assert cap_src.count('"capacity": True') == 3, (
+            "every fast-path done frame must carry the capacity ack flag"
+        )
+
+    def test_capacity_ack_dedupe_and_reset_under_node(self):
+        """Behavioral lock of the dropped-Retry mechanism: identical
+        capacity events (reply + turn_id, NO seq — the shape
+        paintCapacityReply forwards) are content-key deduped on a stale
+        doc, and a fresh empty doc (what _resetTurnState mints per send)
+        accepts the identical event again."""
+        if shutil.which("node") is None:
+            import pytest
+
+            pytest.skip("node not available")
+        proc = subprocess.run(
+            ["node", str(_ROOT / "tests" / "js" / "test_turn_document.js")],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(_ROOT),
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert "FAIL" not in proc.stdout
+        for marker in (
+            "capacity reply paints",
+            "identical re-send deduped on a STALE doc",
+            "fresh doc (post _resetTurnState) repaints identical reply",
+            "different reply paints even on stale doc",
+        ):
+            assert marker in proc.stdout, f"missing behavioral assertion: {marker}"
+
+    def test_terminal_push_suppressed_for_capacity_acks(self, monkeypatch):
+        """The done-frame content fallback must not mint a Web Push for
+        slash acks — /yolo or /long confirmations pinging every device is
+        noise. A real reply turn still pushes (Turn Delivery V2 P5)."""
+        import asyncio
+
+        from kazma_ui.delivery import TurnBroker
+
+        spawned: list[str | None] = []
+
+        def _fake_spawn(coro, name=None):
+            spawned.append(name)
+            coro.close()  # consume: never await, never warn
+
+        monkeypatch.setattr("kazma_ui.delivery.spawn_background", _fake_spawn)
+        broker = TurnBroker()
+
+        async def _run():
+            await broker.emit(
+                "t-cap", {"type": "done", "data": {"content": "MISSION ON", "capacity": True}}
+            )
+            await broker.emit(
+                "t-norm", {"type": "done", "data": {"content": "Real assistant reply"}}
+            )
+
+        asyncio.run(_run())
+        assert spawned == ["delivery-push-terminal"], (
+            "capacity ack must not push; the real reply must"
+        )
 
     def test_stale_stream_epoch_guard(self):
         """Superseded SSE dispatches (approval resume, re-attach, abort)
