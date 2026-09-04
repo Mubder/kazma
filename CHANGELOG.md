@@ -1,5 +1,28 @@
 # CHANGELOG
 
+## Fix — settings saved into RAM: volatile ConfigStore fallback made loud + retried (2026-09-04)
+
+Live incident: the server process serving 9090 (started outside the
+guard) latched the in-memory settings fallback at boot — its SQLite open
+failed once, ``get_config_store()`` cached ``_InMemoryStore`` for the
+whole process lifetime, and the init CRITICAL fired before file logging
+came up, so nobody saw it. Hours of 200-OK Delivery & Routing saves went
+to RAM and vanished on restart while the real values sat safe in
+Postgres. Three fixes:
+
+- ``get_config_store()`` now retries init (4 attempts, 1s backoff) — a
+  transient lock at boot no longer makes the process permanently
+  volatile.
+- ``is_config_store_volatile()`` + the deep-health ConfigStore check now
+  FAIL readiness on the fallback (a plain read worked fine against RAM,
+  which is why the canary never caught it).
+- App startup re-checks after logging is up: CRITICAL log line + an ops
+  alert ("Settings saves are NOT persisting") so the failure is visible
+  on the operator's side, not just on an unread console.
+
+Tests: ``tests/test_config_store.py::TestVolatileFallback`` (retry
+recovers, persistent failure falls back + reports, deep health fails).
+
 ## Fix — guard logged "holder_reaped" for a kill that never happened (2026-09-03)
 
 Live incident: an elevated zombie python (pid 113924) held port 9090 and

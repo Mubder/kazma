@@ -1367,6 +1367,11 @@ _config_store: ConfigStore | None = None
 # (each opening its own SQLite connection + its own lock), and the loser's
 # cache/lock diverged from the survivor's (audit finding).
 _config_store_lock = __import__("threading").Lock()
+# Init retry (2026-09-04): a transient settings.db lock at boot used to latch
+# the in-memory fallback for the WHOLE process lifetime — every later save
+# returned 200 and went to RAM (live incident).
+_INIT_ATTEMPTS = 4
+_INIT_RETRY_BACKOFF_S = 1.0
 
 
 def get_config_store() -> ConfigStore:
@@ -1377,8 +1382,14 @@ def get_config_store() -> ConfigStore:
     share one SQLite connection and one ``threading.Lock`` for write
     coordination.
 
-    On SQLite initialization failure, falls back to an in-memory store
-    rather than returning None, preventing downstream AttributeError.
+    On SQLite initialization failure, retries with a short backoff (a
+    transient lock at boot must not make the whole process volatile), then
+    falls back to an in-memory store rather than returning None, preventing
+    downstream AttributeError. ``is_config_store_volatile()`` reports
+    whether the fallback is active — surfaces in /health/deep so a
+    volatile process cannot silently swallow every settings save (live
+    2026-09-04: a process ran for hours accepting 200-OK saves into RAM
+    while the failure reason went to a console nobody read).
     """
     global _config_store
     if _config_store is None:
@@ -1386,19 +1397,41 @@ def get_config_store() -> ConfigStore:
             # Double-checked locking: re-test inside the lock so only one thread
             # constructs the singleton (audit finding).
             if _config_store is None:
-                try:
-                    _config_store = ConfigStore()
-                except Exception as e:
+                last_exc: Exception | None = None
+                for attempt in range(_INIT_ATTEMPTS):
+                    try:
+                        _config_store = ConfigStore()
+                        last_exc = None
+                        break
+                    except Exception as e:
+                        last_exc = e
+                        logger.warning(
+                            "ConfigStore init attempt %d/%d failed: %s",
+                            attempt + 1, _INIT_ATTEMPTS, e,
+                        )
+                        if attempt < _INIT_ATTEMPTS - 1:
+                            time.sleep(_INIT_RETRY_BACKOFF_S)
+                if last_exc is not None:
                     logger.critical(
-                        "ConfigStore (SQLite) initialization FAILED: %s. "
-                        "SAFETY-CRITICAL data (path grants, HITL approvals, YOLO state, "
-                        "task grants) will NOT persist across restarts — using volatile "
-                        "in-memory fallback with 1-hour TTL. Fix: check kazma-data/ "
-                        "permissions, disk space, and that settings.db is not locked.",
-                        e,
+                        "ConfigStore (SQLite) initialization FAILED after %d "
+                        "attempts: %s. SAFETY-CRITICAL data (path grants, HITL "
+                        "approvals, YOLO state, task grants) will NOT persist "
+                        "across restarts — using volatile in-memory fallback "
+                        "with 1-hour TTL. Fix: check kazma-data/ permissions, "
+                        "disk space, and that settings.db is not locked.",
+                        _INIT_ATTEMPTS, last_exc,
                     )
                     _config_store = _InMemoryStore()  # type: ignore[assignment]
     return _config_store
+
+
+def is_config_store_volatile() -> bool:
+    """True when the process runs on the in-memory settings fallback.
+
+    Every settings write in this state is silently non-durable. Polled by
+    the deep health canary and the app startup banner.
+    """
+    return isinstance(get_config_store(), _InMemoryStore)
 
 
 def set_config_store(store: ConfigStore) -> None:
