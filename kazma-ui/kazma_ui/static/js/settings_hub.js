@@ -397,9 +397,45 @@
                     r.tgGroupToken = ot.bot_token === '***' ? '***' : (ot.bot_token || '');
                     r.tgGroupEnabled = !!ot.enabled && !!ot.chat_id;
                 } catch (eGrp) { /* group route not configured */ }
+                // Snapshot for dirty-checking: Save only writes what changed
+                // (and only restarts the platform adapters when credentials
+                // actually changed — refresh takes seconds and used to run
+                // on EVERY save, even routing-only ones).
+                this.adapterRoutingSnapshot = JSON.stringify(this._routingDiffable());
             } catch (e) {
                 console.error('[Hub] Failed to load adapter routing:', e);
             }
+        },
+
+        _routingDiffable() {
+            // The comparable state of the card: everything Save would write.
+            const r = this.adapterRouting;
+            return {
+                tgToken: String(r.tgToken || ''),
+                tgEnabled: !!r.tgEnabled,
+                tgAllowed: String(r.tgAllowed || '').trim(),
+                tgMainChat: String(r.tgMainChat || '').trim(),
+                tgGroupEnabled: !!(r.tgGroupEnabled && String(r.tgGroupChat || '').trim()),
+                tgGroupChat: String(r.tgGroupChat || '').trim(),
+                tgGroupToken: String(r.tgGroupToken || ''),
+                discordToken: String(r.discordToken || ''),
+                discordEnabled: !!r.discordEnabled,
+                discordGuild: String(r.discordGuild || '').trim(),
+                discordAllowed: String(r.discordAllowed || '').trim(),
+                discordChannel: String(r.discordChannel || '').trim(),
+                slackToken: String(r.slackToken || ''),
+                slackAppToken: String(r.slackAppToken || ''),
+                slackEnabled: !!r.slackEnabled,
+                slackWorkspace: String(r.slackWorkspace || '').trim(),
+                slackAllowed: String(r.slackAllowed || '').trim(),
+                slackChannel: String(r.slackChannel || '').trim(),
+                alertRoutes: [...(r.alertRoutes || [])].sort(),
+                swarmRoutes: [...(r.swarmRoutes || [])].sort(),
+            };
+        },
+
+        _routingChanged(prev, curr, key) {
+            return JSON.stringify(prev[key]) !== JSON.stringify(curr[key]);
         },
 
         toggleRoutingList(list, item, checked) {
@@ -443,66 +479,143 @@
         },
 
         async saveAdapterRouting() {
+            // Diff-driven save (2026-09-04): only the CHANGED values are
+            // written, and the (slow) adapter restart runs ONLY when
+            // platform credentials/allowlists changed — in the background,
+            // so the Save button never sits grayed for seconds.
             this.adapterRoutingSaving = true;
             try {
                 const r = this.adapterRouting;
+                const prev = {};
+                try { Object.assign(prev, JSON.parse(this.adapterRoutingSnapshot || '{}')); } catch (eSnap) { /* empty */ }
+                const curr = this._routingDiffable();
+                const changed = (k) => this._routingChanged(prev, curr, k);
                 const puts = [];
-                // Platform connector state — the exact POST the old dialogs
-                // sent (normalizes tokens, preserves masked values, applies
-                // allowlists live).
-                for (const name of ['telegram', 'discord', 'slack']) {
-                    const payload = this._connectorPayloadFor(name);
-                    if (!payload) continue;
-                    puts.push(fetch('/api/connectors', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                        body: JSON.stringify(payload),
-                    }));
-                }
                 const single = (key, value, category) => puts.push(fetch('/api/settings/single', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ key, value, category }),
                 }));
-                single('connectors.telegram.swarm_chat_id', String(r.tgMainChat || '').trim(), 'connectors');
-                single('connectors.discord.swarm_channel_id', String(r.discordChannel || '').trim(), 'connectors');
-                single('connectors.slack.swarm_channel_id', String(r.slackChannel || '').trim(), 'connectors');
-                single('notifications.ops.channels', (r.alertRoutes || []).join(','), 'notifications');
-                single('notifications.swarm.routes', (r.swarmRoutes || []).join(','), 'notifications');
-                // Group route: the swarm output target. Never send the
-                // masked '***' back — the server preserves the stored token.
-                if (r.tgGroupEnabled && String(r.tgGroupChat || '').trim()) {
-                    const payload = {
-                        platform: 'telegram',
-                        chat_id: String(r.tgGroupChat).trim(),
-                        enabled: true,
-                    };
-                    if (r.tgGroupToken && r.tgGroupToken !== '***' && !String(r.tgGroupToken).startsWith('***')) {
-                        payload.bot_token = r.tgGroupToken.trim();
+                const connectorPut = (payload) => puts.push(fetch('/api/connectors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify(payload),
+                }));
+                // Credential fields: the masked value round-trips unchanged —
+                // the server preserves the stored secret; a typed value replaces.
+                const secretChanged = (field) => {
+                    const v = String(curr[field] || '');
+                    return v !== '' && !v.startsWith('****') && v !== String(prev[field] || '');
+                };
+
+                // Platform connectors (POST /api/connectors — the endpoint the
+                // old dialogs used: normalizes tokens, preserves masks, applies
+                // allowlists live). Only platforms with actual changes.
+                let platformChanged = false;
+                const platforms = [
+                    {
+                        name: 'telegram',
+                        dirty: changed('tgToken') || changed('tgEnabled') || changed('tgAllowed'),
+                        payload: () => ({
+                            name: 'telegram',
+                            token: secretChanged('tgToken') ? String(r.tgToken).trim() : String(r.tgToken || ''),
+                            enabled: !!r.tgEnabled,
+                            extras: { allowed_users: String(r.tgAllowed || '').trim() },
+                        }),
+                    },
+                    {
+                        name: 'discord',
+                        dirty: changed('discordToken') || changed('discordEnabled') || changed('discordGuild') || changed('discordAllowed'),
+                        payload: () => ({
+                            name: 'discord',
+                            token: String(r.discordToken || ''),
+                            enabled: !!r.discordEnabled,
+                            extras: {
+                                guild_id: String(r.discordGuild || '').trim(),
+                                allowed_users: String(r.discordAllowed || '').trim(),
+                            },
+                        }),
+                    },
+                    {
+                        name: 'slack',
+                        dirty: changed('slackToken') || changed('slackAppToken') || changed('slackEnabled') || changed('slackWorkspace') || changed('slackAllowed'),
+                        payload: () => ({
+                            name: 'slack',
+                            token: String(r.slackToken || ''),
+                            enabled: !!r.slackEnabled,
+                            extras: {
+                                app_token: String(r.slackAppToken || ''),
+                                workspace: String(r.slackWorkspace || '').trim(),
+                                allowed_users: String(r.slackAllowed || '').trim(),
+                            },
+                        }),
+                    },
+                ];
+                for (const p of platforms) {
+                    if (!p.dirty) continue;
+                    platformChanged = true;
+                    connectorPut(p.payload());
+                }
+
+                // Destinations + routing selectors.
+                if (changed('tgMainChat')) single('connectors.telegram.swarm_chat_id', curr.tgMainChat, 'connectors');
+                if (changed('discordChannel')) single('connectors.discord.swarm_channel_id', curr.discordChannel, 'connectors');
+                if (changed('slackChannel')) single('connectors.slack.swarm_channel_id', curr.slackChannel, 'connectors');
+                if (changed('alertRoutes')) single('notifications.ops.channels', (r.alertRoutes || []).join(','), 'notifications');
+                if (changed('swarmRoutes')) single('notifications.swarm.routes', (r.swarmRoutes || []).join(','), 'notifications');
+
+                // Group route (swarm.output_target) — only when it changed.
+                if (changed('tgGroupEnabled') || changed('tgGroupChat') || changed('tgGroupToken')) {
+                    if (r.tgGroupEnabled && String(r.tgGroupChat || '').trim()) {
+                        const payload = {
+                            platform: 'telegram',
+                            chat_id: String(r.tgGroupChat).trim(),
+                            enabled: true,
+                        };
+                        const tok = String(r.tgGroupToken || '');
+                        if (tok && tok !== '***' && !tok.startsWith('***')) {
+                            payload.bot_token = tok.trim();
+                        }
+                        puts.push(fetch('/api/swarm/output-target', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                            body: JSON.stringify(payload),
+                        }));
+                    } else {
+                        puts.push(fetch('/api/swarm/output-target', {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                            body: JSON.stringify({ clear: true }),
+                        }));
                     }
-                    puts.push(fetch('/api/swarm/output-target', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                        body: JSON.stringify(payload),
-                    }));
-                } else {
-                    puts.push(fetch('/api/swarm/output-target', {
-                        method: 'PUT',
-                        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                        body: JSON.stringify({ clear: true }),
-                    }));
+                }
+
+                if (puts.length === 0) {
+                    showToast('Nothing to save — no changes.', 'info');
+                    this.adapterRoutingSaving = false;
+                    return;
                 }
                 const results = await Promise.all(puts);
                 const bad = results.find(x => !x.ok);
                 if (bad) throw new Error('HTTP ' + bad.status);
-                // Rebuild the platform adapters from the new config, exactly
-                // like the old connector dialogs did after save.
-                try {
-                    await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
-                } catch (eRef) {
-                    console.warn('[Hub] Gateway refresh failed:', eRef);
+                showToast('Saved.', 'success');
+                this.adapterRoutingSnapshot = JSON.stringify(curr);
+
+                // Adapter rebuild (seconds) runs AFTER the save confirms —
+                // only when platform credentials/allowlists changed.
+                if (platformChanged) {
+                    this.adapterRoutingApplying = true;
+                    fetch('/api/gateway/refresh-adapters', { method: 'POST' })
+                        .then(resp => {
+                            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+                            showToast('Adapters refreshed.', 'success');
+                        })
+                        .catch(eRef => {
+                            console.warn('[Hub] Gateway refresh failed:', eRef);
+                            showToast('Saved, but adapter refresh failed — use Refresh Adapters.', 'error');
+                        })
+                        .finally(() => { this.adapterRoutingApplying = false; });
                 }
-                showToast('Delivery & routing saved.', 'success');
                 this.loadAdapterRouting();
             } catch (e) {
                 showToast('Save failed: ' + e.message, 'error');

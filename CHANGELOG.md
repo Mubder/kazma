@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Feature — Platform Adapters: one professional interface + instant Save (2026-09-04 v5)
+
+- **The connectors tab is now ONE interface.** "Platform Adapters" cards
+  (Telegram main, Telegram Group, Discord, Slack) own every field —
+  vault-masked tokens with show/hide eyes, destinations, allowlists,
+  guild/workspace, enabled toggles, live Test with inline
+  ✓/✗ status, Configured/Not-configured badges — followed by a
+  Delivery-routing section and the adapter-refresh box. The legacy
+  per-platform edit dialogs are retired for the chat platforms; the old
+  card list survives as "Other integrations" (Email/Webhook only), and
+  the add-connector dialog no longer offers Telegram/Discord/Slack —
+  exactly one place to enter each token.
+- **Save is diff-driven and instant.** The card snapshots its loaded
+  state; Save writes only the changed values (a routing-only change no
+  longer rewrites five keys), says "Saved." as soon as the writes
+  confirm, and the multi-second adapter restart runs only when platform
+  credentials/allowlists actually changed — in the background with an
+  "Applying to adapters…" indicator and its own completion toast,
+  instead of graying the button until every poller reconnected.
+  Saving with no changes is a no-op notice.
+
+Tests: steer-suite field/interface slices + the routing suites (162
+green, all-templates Jinja parse included).
+
 ## Fix — settings saved into RAM: volatile ConfigStore fallback made loud + retried (2026-09-04)
 
 Live incident: the server process serving 9090 (started outside the

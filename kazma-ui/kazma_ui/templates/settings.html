@@ -175,247 +175,238 @@
              ═══════════════════════════════════════════════════════════ -->
         <div :class="{ hidden: hubSubtab !== 'connectors' }" x-cloak>
             <div class="settings-group">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                    <h3>{{ t('settings.platform_connectors') }}</h3>
-                    <button class="btn btn-primary btn-sm" @click="openHubConnectorModal()">+ {{ t('settings.add_connector') }}</button>
-                </div>
-
-                <template x-for="c in hubConnectors" :key="c.name">
-                    <div style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
-                        <div style="flex:1">
-                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                                <strong x-text="c.name" style="font-size:0.95rem;text-transform:capitalize"></strong>
-                                <span class="badge" :class="c.enabled ? 'badge-stdio' : 'badge-sse'" x-text="c.enabled ? t('common.enabled') : t('common.disabled')"></span>
-                                <span class="badge" :class="c.status === 'configured' ? 'badge-stdio' : 'badge-premium'" x-text="c.status || t('settings.unknown')"></span>
-                            </div>
-                            <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="c.endpoint || '—'"></div>
-                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px">
-                                {{ t('settings.token') }}: <span x-text="c.token || '—'" style="font-family:var(--font-mono)"></span>
-                            </div>
-                            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="Object.keys(c.extras || {}).length" x-cloak>
-                                <template x-for="(val, key) in c.extras" :key="key">
-                                    <span x-text="key + ': ' + val" style="margin-right:12px"></span>
-                                </template>
-                            </div>
-                        </div>
-                        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                            <label class="toggle" :title="c.enabled ? t('common.disable') : t('common.enable')">
-                                <input type="checkbox" :checked="c.enabled" @change="toggleHubConnector(c.name, $event.target.checked)">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <button class="btn btn-secondary btn-sm" @click="testHubConnector(c.name)" :disabled="hubTestingConnector === c.name" x-text="hubTestingConnector === c.name ? '...' : '{{ t('settings.test') }}'"></button>
-                            <button class="btn btn-secondary btn-sm" @click="editHubConnector(c.name)">{{ t('common.edit') }}</button>
-                            <button class="btn btn-danger btn-sm" @click="deleteHubConnector(c.name)">×</button>
-                        </div>
-                    </div>
-                </template>
-
-                <div x-show="hubConnectors.length === 0 && !loading" class="empty-state" x-cloak>
-                    {{ t('settings.no_connectors') }}
-                </div>
-
-                <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px" x-cloak>
-                    <template x-if="hubTestResult?.success">
-                        <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
-                    </template>
-                    <template x-if="!hubTestResult?.success">
-                        <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
-                    </template>
-                </div>
-
-                <div style="margin-top:16px;padding:12px 16px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.22);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                <!-- Platform Adapters (2026-09-04, v5): ONE professional
+                     interface. Every platform's complete settings — bot
+                     token (vault-masked, with show/hide), destinations,
+                     allowlists, guild/workspace, enabled toggle, live Test
+                     — plus the alert/swarm routing selectors. The old
+                     per-platform edit dialogs are retired for
+                     telegram/discord/slack (Email/Webhook integrations
+                     keep the legacy card list below). -->
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">
                     <div style="text-align:left;">
-                        <strong>{{ t('settings.gateway_adapters') }}</strong>
-                        <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">{{ t('settings.gateway_adapters_desc') }}</p>
+                        <h3 style="margin:0">Platform Adapters</h3>
+                        <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">
+                            Credentials, destinations and routing for every delivery platform — all in one place. Tokens are vault-encrypted; leave the masked dots to keep the saved value.
+                        </p>
                     </div>
-                    <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
-                </div>
-
-                                <!-- Delivery & Routing (2026-09-03, v4): every
-                     field from the old per-platform cards, in this one
-                     place — token, allowed users, guild/workspace, enabled
-                     toggle, Test button — plus each route's destination and
-                     the alert/swarm selectors. Saves through the SAME
-                     endpoints the old dialogs used (POST /api/connectors,
-                     which normalizes tokens, preserves masked values, and
-                     live-applies allowlists + adapter refresh). -->
-                <div style="margin-top:16px;padding:16px;border:1px solid var(--border);border-radius:var(--radius-card)">
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
-                        <div style="text-align:left;">
-                            <strong>Delivery &amp; Routing</strong>
-                            <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">
-                                Every delivery route with all of its settings — tokens, destinations and platform options live here. Pick which routes receive ops alerts and swarm output below.
-                            </p>
-                        </div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span x-show="adapterRoutingApplying" x-cloak class="text-muted" style="font-size:0.75rem">Applying to adapters…</span>
                         <button class="btn btn-primary btn-sm" @click="saveAdapterRouting()" :disabled="adapterRoutingSaving">
-                            <span x-text="adapterRoutingSaving ? '…' : 'Save'"></span>
+                            <span x-text="adapterRoutingSaving ? 'Saving…' : 'Save'"></span>
                         </button>
                     </div>
+                </div>
 
-                    <!-- Route: Telegram main bot -->
-                    <div style="padding:10px 0;border-top:1px solid var(--border)">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-                            <strong style="font-size:0.9rem">Telegram — Main bot</strong>
-                            <label class="toggle" title="Enable this platform adapter">
-                                <input type="checkbox" :checked="adapterRouting.tgEnabled" @change="adapterRouting.tgEnabled = $event.target.checked">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <button class="btn btn-secondary btn-sm" @click="testRoute('telegram')" :disabled="adapterRoutingTesting === 'telegram'"
-                                    x-text="adapterRoutingTesting === 'telegram' ? '…' : 'Test'"></button>
-                            <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'telegram'">
-                                <span style="font-size:0.72rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
-                                      x-text="adapterRoutingTest.success ? ('Connected' + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('Failed: ' + adapterRoutingTest.error)"></span>
-                            </template>
-                        </div>
-                        <div class="two-col-grid">
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
-                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
-                                       :value="adapterRouting.tgToken" @input="adapterRouting.tgToken = $event.target.value"
-                                       :placeholder="adapterRouting.tgToken ? '•••••• saved — type to replace' : '123456789:AAF…'">
-                            </div>
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Chat ID (your user id for DMs, or a chat id)</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.tgMainChat" @input="adapterRouting.tgMainChat = $event.target.value"
-                                       placeholder="1804015016 or -100…">
-                            </div>
-                        </div>
-                        <div style="margin-top:6px">
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Allowed User IDs</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                   :value="adapterRouting.tgAllowed" @input="adapterRouting.tgAllowed = $event.target.value"
-                                   placeholder="1804015016 — comma-separated; empty allows all (non-strict mode)">
-                        </div>
+                <!-- Telegram main bot -->
+                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <span style="font-size:1.1rem" aria-hidden="true">✈️</span>
+                        <strong style="font-size:0.95rem">Telegram — Main bot</strong>
+                        <span class="badge" :class="adapterRouting.tgToken ? 'badge-stdio' : 'badge-premium'"
+                              x-text="adapterRouting.tgToken ? 'Configured' : 'Not configured'"></span>
+                        <label class="toggle" title="Enable this platform adapter">
+                            <input type="checkbox" :checked="adapterRouting.tgEnabled" @change="adapterRouting.tgEnabled = $event.target.checked">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="flex:1"></span>
+                        <button class="btn btn-secondary btn-sm" @click="testRoute('telegram')" :disabled="adapterRoutingTesting === 'telegram'"
+                                x-text="adapterRoutingTesting === 'telegram' ? 'Testing…' : 'Test'"></button>
+                        <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'telegram'">
+                            <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                                  x-text="adapterRoutingTest.success ? ('✓ Connected' + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
+                        </template>
                     </div>
-
-                    <!-- Route: Telegram GROUP (dedicated swarm bot optional) -->
-                    <div style="padding:10px 0;border-top:1px solid var(--border)">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-                            <strong style="font-size:0.9rem">Telegram — Group</strong>
-                            <label class="toggle" title="Enable this route">
-                                <input type="checkbox" :checked="adapterRouting.tgGroupEnabled" @change="adapterRouting.tgGroupEnabled = $event.target.checked">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <span class="text-muted" style="font-size:0.75rem">optional second route — leave the dedicated token empty to use the main bot</span>
-                        </div>
-                        <div class="two-col-grid">
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Group Chat ID</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.tgGroupChat" @input="adapterRouting.tgGroupChat = $event.target.value"
-                                       placeholder="-100… (the bot announces it when added to a group)">
-                            </div>
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Dedicated Bot Token (optional)</label>
-                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
-                                       :value="adapterRouting.tgGroupToken" @input="adapterRouting.tgGroupToken = $event.target.value"
-                                       :placeholder="adapterRouting.tgGroupToken === '***' ? '•••••• saved — type to replace' : '987654321:AAF…'">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Route: Discord -->
-                    <div style="padding:10px 0;border-top:1px solid var(--border)">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-                            <strong style="font-size:0.9rem">Discord</strong>
-                            <label class="toggle" title="Enable this platform adapter">
-                                <input type="checkbox" :checked="adapterRouting.discordEnabled" @change="adapterRouting.discordEnabled = $event.target.checked">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <button class="btn btn-secondary btn-sm" @click="testRoute('discord')" :disabled="adapterRoutingTesting === 'discord'"
-                                    x-text="adapterRoutingTesting === 'discord' ? '…' : 'Test'"></button>
-                            <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'discord'">
-                                <span style="font-size:0.72rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
-                                      x-text="adapterRoutingTest.success ? ('Connected' + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('Failed: ' + adapterRoutingTest.error)"></span>
-                            </template>
-                        </div>
-                        <div class="two-col-grid">
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
-                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
-                                       :value="adapterRouting.discordToken" @input="adapterRouting.discordToken = $event.target.value"
-                                       :placeholder="adapterRouting.discordToken ? '•••••• saved — type to replace' : 'MTIzNDU2…'">
-                            </div>
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.discordChannel" @input="adapterRouting.discordChannel = $event.target.value"
-                                       placeholder="channel id (Developer Mode → right-click channel → Copy ID)">
-                            </div>
-                        </div>
-                        <div class="two-col-grid" style="margin-top:6px">
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Guild ID</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.discordGuild" @input="adapterRouting.discordGuild = $event.target.value"
-                                       placeholder="server id (Developer Mode → right-click server → Copy ID)">
-                            </div>
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Allowed User IDs</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.discordAllowed" @input="adapterRouting.discordAllowed = $event.target.value"
-                                       placeholder="111, 222 — comma-separated">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Route: Slack -->
-                    <div style="padding:10px 0;border-top:1px solid var(--border)">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
-                            <strong style="font-size:0.9rem">Slack</strong>
-                            <label class="toggle" title="Enable this platform adapter">
-                                <input type="checkbox" :checked="adapterRouting.slackEnabled" @change="adapterRouting.slackEnabled = $event.target.checked">
-                                <span class="toggle-slider"></span>
-                            </label>
-                            <button class="btn btn-secondary btn-sm" @click="testRoute('slack')" :disabled="adapterRoutingTesting === 'slack'"
-                                    x-text="adapterRoutingTesting === 'slack' ? '…' : 'Test'"></button>
-                            <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'slack'">
-                                <span style="font-size:0.72rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
-                                      x-text="adapterRoutingTest.success ? ('Connected' + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('Failed: ' + adapterRoutingTest.error)"></span>
-                            </template>
-                        </div>
-                        <div class="two-col-grid">
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
-                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
-                                       :value="adapterRouting.slackToken" @input="adapterRouting.slackToken = $event.target.value"
-                                       :placeholder="adapterRouting.slackToken ? '•••••• saved — type to replace' : 'xoxb-…'">
-                            </div>
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">App Token (optional, Socket Mode)</label>
-                                <input type="password" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
-                                       :value="adapterRouting.slackAppToken" @input="adapterRouting.slackAppToken = $event.target.value"
-                                       :placeholder="adapterRouting.slackAppToken ? '•••••• saved — type to replace' : 'xapp-…'">
-                            </div>
-                        </div>
-                        <div class="two-col-grid" style="margin-top:6px">
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Workspace</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.slackWorkspace" @input="adapterRouting.slackWorkspace = $event.target.value"
-                                       placeholder="workspace-name">
-                            </div>
-                            <div>
-                                <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID</label>
-                                <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                       :value="adapterRouting.slackChannel" @input="adapterRouting.slackChannel = $event.target.value"
-                                       placeholder="channel id (C… — right-click channel → View channel details)">
-                            </div>
-                        </div>
-                        <div style="margin-top:6px">
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Allowed User IDs</label>
-                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
-                                   :value="adapterRouting.slackAllowed" @input="adapterRouting.slackAllowed = $event.target.value"
-                                   placeholder="U0123ABCD — comma-separated">
-                        </div>
-                    </div>
-
-                    <!-- Destination selectors -->
-                    <div class="two-col-grid" style="padding:10px 0;border-top:1px solid var(--border)">
+                    <div class="two-col-grid">
                         <div>
-                            <strong style="font-size:0.85rem">Ops alerts go to</strong>
-                            <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">Leave ALL unchecked to deliver to every configured platform.</p>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
+                            <div class="input-with-toggle">
+                                <input :type="routingShow.tgToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.tgToken" @input="adapterRouting.tgToken = $event.target.value"
+                                       placeholder="123456789:AAF… (from @BotFather)">
+                                <button class="btn btn-icon" type="button" @click="routingShow.tgToken = !routingShow.tgToken"
+                                        :title="routingShow.tgToken ? 'Hide' : 'Show'"
+                                        x-html="routingShow.tgToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                            <p class="text-muted" style="font-size:0.68rem;margin:3px 0 0">Saved value shows as dots — type to replace it.</p>
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Chat ID <span class="text-muted">(delivery destination)</span></label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.tgMainChat" @input="adapterRouting.tgMainChat = $event.target.value"
+                                   placeholder="1804015016 (your user id) or -100…">
+                            <p class="text-muted" style="font-size:0.68rem;margin:3px 0 0">Where alerts and swarm reports land when this route is selected.</p>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px">
+                        <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Allowed User IDs</label>
+                        <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                               :value="adapterRouting.tgAllowed" @input="adapterRouting.tgAllowed = $event.target.value"
+                               placeholder="1804015016 — comma-separated; empty allows all (non-strict mode)">
+                    </div>
+                </div>
+
+                <!-- Telegram group -->
+                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <span style="font-size:1.1rem" aria-hidden="true">👥</span>
+                        <strong style="font-size:0.95rem">Telegram — Group</strong>
+                        <span class="badge" :class="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? 'badge-stdio' : 'badge-sse'"
+                              x-text="adapterRouting.tgGroupEnabled && adapterRouting.tgGroupChat ? 'Active' : 'Off'"></span>
+                        <label class="toggle" title="Enable the group route">
+                            <input type="checkbox" :checked="adapterRouting.tgGroupEnabled" @change="adapterRouting.tgGroupEnabled = $event.target.checked">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span class="text-muted" style="font-size:0.72rem">optional second route — leave the dedicated token empty to use the main bot</span>
+                    </div>
+                    <div class="two-col-grid">
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Group Chat ID</label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.tgGroupChat" @input="adapterRouting.tgGroupChat = $event.target.value"
+                                   placeholder="-100… (the bot announces it when added to a group)">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Dedicated Bot Token <span class="text-muted">(optional)</span></label>
+                            <div class="input-with-toggle">
+                                <input :type="routingShow.tgGroupToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.tgGroupToken" @input="adapterRouting.tgGroupToken = $event.target.value"
+                                       placeholder="987654321:AAF…">
+                                <button class="btn btn-icon" type="button" @click="routingShow.tgGroupToken = !routingShow.tgGroupToken"
+                                        :title="routingShow.tgGroupToken ? 'Hide' : 'Show'"
+                                        x-html="routingShow.tgGroupToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discord -->
+                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <span style="font-size:1.1rem" aria-hidden="true">🎮</span>
+                        <strong style="font-size:0.95rem">Discord</strong>
+                        <span class="badge" :class="adapterRouting.discordToken ? 'badge-stdio' : 'badge-premium'"
+                              x-text="adapterRouting.discordToken ? 'Configured' : 'Not configured'"></span>
+                        <label class="toggle" title="Enable this platform adapter">
+                            <input type="checkbox" :checked="adapterRouting.discordEnabled" @change="adapterRouting.discordEnabled = $event.target.checked">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="flex:1"></span>
+                        <button class="btn btn-secondary btn-sm" @click="testRoute('discord')" :disabled="adapterRoutingTesting === 'discord'"
+                                x-text="adapterRoutingTesting === 'discord' ? 'Testing…' : 'Test'"></button>
+                        <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'discord'">
+                            <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                                  x-text="adapterRoutingTest.success ? ('✓ Connected' + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
+                        </template>
+                    </div>
+                    <div class="two-col-grid">
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
+                            <div class="input-with-toggle">
+                                <input :type="routingShow.discordToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.discordToken" @input="adapterRouting.discordToken = $event.target.value"
+                                       placeholder="MTIzNDU2… (Developer Portal → Bot → Reset Token)">
+                                <button class="btn btn-icon" type="button" @click="routingShow.discordToken = !routingShow.discordToken"
+                                        :title="routingShow.discordToken ? 'Hide' : 'Show'"
+                                        x-html="routingShow.discordToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID <span class="text-muted">(delivery destination)</span></label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.discordChannel" @input="adapterRouting.discordChannel = $event.target.value"
+                                   placeholder="channel id (Developer Mode → right-click channel → Copy ID)">
+                        </div>
+                    </div>
+                    <div class="two-col-grid" style="margin-top:8px">
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Guild ID</label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.discordGuild" @input="adapterRouting.discordGuild = $event.target.value"
+                                   placeholder="server id (Developer Mode → right-click server → Copy ID)">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Allowed User IDs</label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.discordAllowed" @input="adapterRouting.discordAllowed = $event.target.value"
+                                   placeholder="111, 222 — comma-separated">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Slack -->
+                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+                        <span style="font-size:1.1rem" aria-hidden="true">💬</span>
+                        <strong style="font-size:0.95rem">Slack</strong>
+                        <span class="badge" :class="adapterRouting.slackToken ? 'badge-stdio' : 'badge-premium'"
+                              x-text="adapterRouting.slackToken ? 'Configured' : 'Not configured'"></span>
+                        <label class="toggle" title="Enable this platform adapter">
+                            <input type="checkbox" :checked="adapterRouting.slackEnabled" @change="adapterRouting.slackEnabled = $event.target.checked">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span style="flex:1"></span>
+                        <button class="btn btn-secondary btn-sm" @click="testRoute('slack')" :disabled="adapterRoutingTesting === 'slack'"
+                                x-text="adapterRoutingTesting === 'slack' ? 'Testing…' : 'Test'"></button>
+                        <template x-if="adapterRoutingTest && adapterRoutingTest.name === 'slack'">
+                            <span style="font-size:0.75rem" :class="adapterRoutingTest.success ? 'text-success' : 'text-error'"
+                                  x-text="adapterRoutingTest.success ? ('✓ Connected' + (adapterRoutingTest.bot_name ? ' (@' + adapterRoutingTest.bot_name + ')' : '')) : ('✗ ' + adapterRoutingTest.error)"></span>
+                        </template>
+                    </div>
+                    <div class="two-col-grid">
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Bot Token</label>
+                            <div class="input-with-toggle">
+                                <input :type="routingShow.slackToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.slackToken" @input="adapterRouting.slackToken = $event.target.value"
+                                       placeholder="xoxb-… (from the Slack app install)">
+                                <button class="btn btn-icon" type="button" @click="routingShow.slackToken = !routingShow.slackToken"
+                                        :title="routingShow.slackToken ? 'Hide' : 'Show'"
+                                        x-html="routingShow.slackToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">App Token <span class="text-muted">(optional, Socket Mode)</span></label>
+                            <div class="input-with-toggle">
+                                <input :type="routingShow.slackAppToken ? 'text' : 'password'" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem" autocomplete="new-password"
+                                       :value="adapterRouting.slackAppToken" @input="adapterRouting.slackAppToken = $event.target.value"
+                                       placeholder="xapp-…">
+                                <button class="btn btn-icon" type="button" @click="routingShow.slackAppToken = !routingShow.slackAppToken"
+                                        :title="routingShow.slackAppToken ? 'Hide' : 'Show'"
+                                        x-html="routingShow.slackAppToken ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="two-col-grid" style="margin-top:8px">
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Workspace</label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.slackWorkspace" @input="adapterRouting.slackWorkspace = $event.target.value"
+                                   placeholder="workspace-name">
+                        </div>
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Channel ID <span class="text-muted">(delivery destination)</span></label>
+                            <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                                   :value="adapterRouting.slackChannel" @input="adapterRouting.slackChannel = $event.target.value"
+                                   placeholder="C… (right-click channel → View channel details)">
+                        </div>
+                    </div>
+                    <div style="margin-top:8px">
+                        <label class="form-label" style="font-size:0.75rem;margin-bottom:2px">Allowed User IDs</label>
+                        <input type="text" class="form-input" style="font-family:var(--font-mono);font-size:0.8rem"
+                               :value="adapterRouting.slackAllowed" @input="adapterRouting.slackAllowed = $event.target.value"
+                               placeholder="U0123ABCD — comma-separated">
+                    </div>
+                </div>
+
+                <!-- Delivery routing -->
+                <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
+                    <strong style="font-size:0.9rem">Delivery routing</strong>
+                    <p class="text-muted" style="font-size:0.72rem;margin:2px 0 10px">Pick which routes receive each kind of message. A route only delivers when its destination above is set.</p>
+                    <div class="two-col-grid">
+                        <div>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">Ops alerts go to</label>
+                            <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">Leave ALL unchecked to deliver to every configured platform.</p>
                             <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'a' + r">
                                 <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
                                     <input type="checkbox" :checked="(adapterRouting.alertRoutes || []).includes(r)"
@@ -425,8 +416,8 @@
                             </template>
                         </div>
                         <div>
-                            <strong style="font-size:0.85rem">Swarm output goes to</strong>
-                            <p class="text-muted" style="font-size:0.72rem;margin:2px 0 6px">A route only delivers when its chat id above is set. Leave all unchecked for the legacy single output target.</p>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">Swarm output goes to</label>
+                            <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">The final swarm report is mirrored to every selected route. Leave all unchecked for the single Telegram-group target only.</p>
                             <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'s' + r">
                                 <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
                                     <input type="checkbox" :checked="(adapterRouting.swarmRoutes || []).includes(r)"
@@ -436,9 +427,63 @@
                             </template>
                         </div>
                     </div>
-                    <p class="text-muted" style="font-size:0.72rem;margin:8px 0 0">
-                        Saved tokens are vault-encrypted (shown masked — leave them to keep the stored value). Saving refreshes the platform adapters live, like the old per-platform dialogs did; Test checks the saved credentials against the platform.
-                    </p>
+                </div>
+
+                <!-- Gateway runtime refresh -->
+                <div style="padding:12px 16px;background:rgba(34,211,238,0.06);border:1px solid rgba(34,211,238,0.22);border-radius:var(--radius-card);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+                    <div style="text-align:left;">
+                        <strong>{{ t('settings.gateway_adapters') }}</strong>
+                        <p class="text-muted" style="font-size:0.8rem;margin:4px 0 0">Restart the platform adapters without restarting the server. Saving applies credential changes automatically.</p>
+                    </div>
+                    <button class="btn btn-primary" @click="refreshGateway()" :disabled="saving"><span class="ki" data-icon="refresh" aria-hidden="true"></span> <span x-text="saving ? t('settings.refreshing') : t('settings.refresh_gateway')"></span></button>
+                </div>
+
+                <!-- Other integrations (Email / Webhook) -->
+                <div style="margin-top:18px">
+                    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                        <div>
+                            <strong style="font-size:0.9rem">Other integrations</strong>
+                            <p class="text-muted" style="font-size:0.72rem;margin:2px 0 0">Email and webhook connectors. Telegram, Discord and Slack are managed in Platform Adapters above.</p>
+                        </div>
+                        <button class="btn btn-primary btn-sm" @click="openHubConnectorModal()">+ {{ t('settings.add_connector') }}</button>
+                    </div>
+                    <template x-for="c in hubConnectors.filter(x => x.name === 'email' || x.name === 'webhook')" :key="c.name">
+                        <div style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:8px">
+                            <div style="flex:1">
+                                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                    <strong x-text="c.name" style="font-size:0.95rem;text-transform:capitalize"></strong>
+                                    <span class="badge" :class="c.enabled ? 'badge-stdio' : 'badge-sse'" x-text="c.enabled ? t('common.enabled') : t('common.disabled')"></span>
+                                    <span class="badge" :class="c.status === 'configured' ? 'badge-stdio' : 'badge-premium'" x-text="c.status || t('settings.unknown')"></span>
+                                </div>
+                                <div style="font-size:0.8rem;color:var(--text-muted);margin-top:2px" x-text="c.endpoint || '—'"></div>
+                                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:2px" x-show="Object.keys(c.extras || {}).length" x-cloak>
+                                    <template x-for="(val, key) in c.extras" :key="key">
+                                        <span x-text="key + ': ' + val" style="margin-right:12px"></span>
+                                    </template>
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                                <label class="toggle" :title="c.enabled ? t('common.disable') : t('common.enable')">
+                                    <input type="checkbox" :checked="c.enabled" @change="toggleHubConnector(c.name, $event.target.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <button class="btn btn-secondary btn-sm" @click="testHubConnector(c.name)" :disabled="hubTestingConnector === c.name" x-text="hubTestingConnector === c.name ? '...' : '{{ t('settings.test') }}'"></button>
+                                <button class="btn btn-secondary btn-sm" @click="editHubConnector(c.name)">{{ t('common.edit') }}</button>
+                                <button class="btn btn-danger btn-sm" @click="deleteHubConnector(c.name)">×</button>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="!hubConnectors.some(x => x.name === 'email' || x.name === 'webhook')" class="empty-state" x-cloak>
+                        {{ t('settings.no_connectors') }}
+                    </div>
+                    <div x-show="hubTestResult && hubTestResult.type === 'connector'" class="validation-result" style="margin-top:12px" x-cloak>
+                        <template x-if="hubTestResult?.success">
+                            <span class="text-success">{{ t('settings.connected') }} <span x-text="hubTestResult.bot_name ? '(' + hubTestResult.bot_name + ')' : ''"></span></span>
+                        </template>
+                        <template x-if="!hubTestResult?.success">
+                            <span class="text-error"><span class="ki" data-icon="x" aria-hidden="true"></span> <span x-text="hubTestResult.error"></span></span>
+                        </template>
+                    </div>
                 </div>
             </div>
         </div>
@@ -564,9 +609,9 @@
                     <label>{{ t('settings.connector_name') }}</label>
                     <select class="form-select" x-model="hubEditingConnector.name" :disabled="hubEditingConnector._existing" @change="onHubConnectorPlatformChange()">
                         <option value="">{{ t('settings.select_connector') }}</option>
-                        <option value="telegram">Telegram</option>
-                        <option value="discord">Discord</option>
-                        <option value="slack">Slack</option>
+                        <!-- Telegram/Discord/Slack live in Platform Adapters —
+                             this dialog only manages the integrations that
+                             stayed on the legacy list. -->
                         <option value="email">Email</option>
                         <option value="webhook">Webhook</option>
                     </select>

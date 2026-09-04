@@ -1031,8 +1031,48 @@ def test_four_delivery_routes_complete_fields() -> None:
     # "routing choices don't hold after save" bug (2026-09-03 v5).
     assert "grouped(notif, 'notifications', 'notifications.ops.channels')" in hub
     assert "grouped(conn, 'connectors', 'connectors.telegram.swarm_chat_id')" in hub
-    # Group route saves through the output-target API; *** never sent back.
-    assert "r.tgGroupToken !== '***'" in hub
+
+
+def test_platform_adapters_is_the_single_token_ui() -> None:
+    """2026-09-04 v5: ONE adapters interface. Platform Adapters owns every
+    telegram/discord/slack field; the legacy dialog is Email/Webhook only
+    (two token entry points for the same keys was operator-confusing), and
+    the old all-platforms card list is filtered down to those integrations.
+    The save is also diff-driven: only changed values are written and the
+    slow adapter restart runs only when platform credentials changed — in
+    the background, so the Save button never grays out for seconds."""
+    settings_html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
+    ).read_text(encoding="utf-8")
+    assert "Platform Adapters" in settings_html
+    assert "Delivery routing" in settings_html
+    assert "Other integrations" in settings_html
+    # The legacy add-connector dialog must NOT offer the chat platforms.
+    assert '<option value="telegram">Telegram</option>' not in settings_html
+    assert '<option value="discord">Discord</option>' not in settings_html
+    assert '<option value="slack">Slack</option>' not in settings_html
+    # The legacy card list shows only email/webhook.
+    assert "hubConnectors.filter(x => x.name === 'email' || x.name === 'webhook')" in settings_html
+    # Secret fields have show/hide toggles.
+    assert "routingShow.tgToken" in settings_html
+    assert "routingShow.slackAppToken" in settings_html
+
+    hub = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
+    ).read_text(encoding="utf-8")
+    # Diff-driven save.
+    assert "_routingDiffable" in hub
+    assert "adapterRoutingSnapshot" in hub
+    assert "if (puts.length === 0)" in hub
+    # The slow adapter restart is gated on platform changes and runs in the
+    # background (after the Saved toast), never blocking the button.
+    assert "if (platformChanged)" in hub
+    assert "adapterRoutingApplying = true" in hub
+    # Group route saves through the output-target API; the mask is never
+    # sent back over a stored secret.
+    assert "tok !== '***'" in hub
     assert "swarm/output-target" in hub
 
     services = (
