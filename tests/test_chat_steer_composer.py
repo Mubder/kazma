@@ -1133,3 +1133,28 @@ def test_swarm_routes_selector_has_a_real_consumer() -> None:
         ).read_text(encoding="utf-8")
         assert "def name(self)" in src, fname
         assert expected in src, fname
+
+
+def test_post_approve_attach_and_card_below_text() -> None:
+    """2026-09-04 incident: after approving shell_exec the CoT sat frozen
+    for 3+ minutes. The server journaled 8s heartbeats the whole time — the
+    browser never re-attached because _attachJournal's anti-loop budget
+    (_REOPEN_MAX=3) was exhausted by earlier stream hiccups and the decline
+    was silent. An Approve click is a deliberate operator action and must
+    never be rationed by that budget. Same incident: the second approval
+    card rendered ABOVE the already-streamed text (insert-after-CoT) — a
+    pending card must land below the text that provoked it."""
+    chat = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    # Approve-driven attaches reset the reopen budget (never rationed).
+    assert "reason === 'approve-json' || reason === 'approve-409'" in chat
+    assert "_reopenCount = 0" in chat
+    # A declined attach is no longer silent.
+    assert "reopen budget exhausted" in chat
+    # New pending card lands below the streamed text (anchor becomes the
+    # message-text element, stacking below a previous card only when that
+    # card is already below the text).
+    assert "after = textEl;" in chat
+    assert "compareDocumentPosition(textEl) & 4" in chat

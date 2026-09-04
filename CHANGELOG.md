@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## Fix — frozen CoT after Approve + approval card above the streamed text (2026-09-04)
+
+Live thread 8d4c4ead: after approving the first danger tool (shell_exec)
+the Live Task Card sat frozen for 3m17s until the second approval card
+appeared. The server journaled 8-second "resuming" heartbeats the whole
+time — the browser never re-attached: ``_attachJournal``'s anti-loop
+budget (``_REOPEN_MAX = 3``, guards automatic cursor re-attach loops)
+was exhausted by earlier stream hiccups in the turn, so the post-approve
+attach was **silently declined** and nothing delivered the journaled
+frames. Two chat.js fixes:
+
+- **Approve-driven attaches reset the reopen budget** — a deliberate
+  operator click is never a cursor loop — and any declined attach now
+  logs "reopen budget exhausted" instead of failing silently.
+- **A pending approval card now lands BELOW the already-streamed text**
+  (it inserted after the CoT block, i.e. at the top of the streaming
+  reply). Stacking below a previous card is kept only when that card
+  already sits below the text; with no streamed text yet the card keeps
+  its CoT-adjacent slot.
+
+Tests: three new DOM-order cases in ``tests/js/test_place_hitl_card.js``
+(below text / stacks under previous card / no-text keeps CoT slot) +
+regression slices in the steer suite.
+
 ## Feature — Platform Adapters: one professional interface + instant Save (2026-09-04 v5)
 
 - **The connectors tab is now ONE interface.** "Platform Adapters" cards

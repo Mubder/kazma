@@ -129,6 +129,27 @@ El.prototype.querySelectorAll = function (sel) {
 El.prototype.querySelector = function (sel) {
   return this.querySelectorAll(sel)[0] || null;
 };
+// Node.DOCUMENT_POSITION_FOLLOWING == 4; enough for _placeHitlCard's
+// "is the previous card already below the text?" check.
+El.prototype.compareDocumentPosition = function (other) {
+  const order = [];
+  (function walk(n) {
+    order.push(n);
+    (n.childNodes || []).forEach(walk);
+  })(this.parentNode || this);
+  const ia = order.indexOf(this);
+  const ib = order.indexOf(other);
+  if (ib > ia) return 4; // other follows this
+  if (ib < ia) return 2; // other precedes this
+  return 0;
+};
+Object.defineProperty(El.prototype, "textContent", {
+  get: function () {
+    return (this.childNodes || []).map(function (n) {
+      return typeof n === "string" ? n : (n.textContent || "");
+    }).join("");
+  },
+});
 
 function _directChildByClass(parent, cls) {
   if (!parent || !parent.children) return null;
@@ -269,6 +290,62 @@ function childNames(el) {
   assert(
     "CoT holding a card stays collapsed (no auto-expand)",
     t.progress.classList.contains("is-collapsed"),
+  );
+}
+
+{
+  // 2026-09-04: a card summoned while the bubble already carries STREAMED
+  // text must land BELOW the text — inserting after the CoT put it at the
+  // top of the streaming text (live: second approval card above the reply).
+  const t = bubble();
+  const leaf = new El("span", "");
+  leaf.childNodes.push("already-streamed reply text");
+  t.text.appendChild(leaf);
+  const card = new El("div", "hitl-approval-card");
+  api._placeHitlCard(t.content, card);
+  const names = t.content.children.map(function (c) { return c.className; });
+  const iText = names.indexOf("message-text");
+  const iCard = names.indexOf("hitl-approval-card");
+  assert(
+    "pending card lands BELOW streamed text",
+    iText >= 0 && iCard > iText,
+    names.join(" | "),
+  );
+}
+
+{
+  // Stacking rule still holds when the previous card already sits below
+  // the text: the new card goes under the previous one, not above it.
+  const t = bubble();
+  const leaf = new El("span", "");
+  leaf.childNodes.push("streamed");
+  t.text.appendChild(leaf);
+  const first = new El("div", "hitl-approval-card");
+  api._placeHitlCard(t.content, first);
+  const second = new El("div", "hitl-approval-card");
+  api._placeHitlCard(t.content, second);
+  const names = t.content.children.map(function (c) { return c.className; });
+  const iText = names.indexOf("message-text");
+  assert(
+    "second card stacks below text AND first card",
+    names.indexOf("hitl-approval-card", iText + 1) > 0 &&
+      names.lastIndexOf("hitl-approval-card") > names.indexOf("hitl-approval-card"),
+    names.join(" | "),
+  );
+}
+
+{
+  // No streamed text yet → the card keeps its CoT-adjacent slot (the
+  // original behaviour; the text will stream in under it).
+  const t = bubble();
+  const card = new El("div", "hitl-approval-card");
+  api._placeHitlCard(t.content, card);
+  const names = t.content.children.map(function (c) { return c.className; });
+  const iProgress = names.indexOf("agent-progress is-active");
+  assert(
+    "no text yet — card stays after CoT",
+    iProgress >= 0 && names.indexOf("hitl-approval-card") === iProgress + 1,
+    names.join(" | "),
   );
 }
 
