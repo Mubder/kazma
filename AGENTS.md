@@ -509,21 +509,20 @@ not per-tenant.
 
 ### 17. Lifecycle Status Notifier (`kazma-core/kazma_core/lifecycle_notifier.py`)
 
-Server lifecycle status notifications — pushes a status update to every
-configured platform (Telegram/Discord/Slack) when the server starts,
-restarts, shuts down, or fails to boot, so an operator can tell from chat
-when something went wrong (hung boot, a crash emitting no shutdown message,
-a bad bot token, etc.). Three invariants must hold:
+Server lifecycle status notifications — pushes a status update when the
+server starts, restarts, shuts down, or fails to boot, so an operator can
+tell from chat when something went wrong (hung boot, a crash emitting no
+shutdown message, a bad bot token, etc.). Three invariants must hold:
 
 **A. Notifications route through the SwarmMessageBus — no parallel path.**
-`notify_lifecycle(event)` calls `get_message_bus().adapter.send(BusMessage(...))`.
-The bus is wired during `KazmaAppBuilder.build()` (before the lifespan runs),
-and `FanOutBusAdapter` already fans a single send out to every configured
-platform concurrently, with each `*BusAdapter` holding its own destination
-`chat_id`/`channel_id` (from `connectors.<platform>.swarm_chat_id`). Do NOT
-construct new adapters or introduce new recipient config for this feature —
-reuse the bus. `NullBusAdapter` (no platform configured, or under pytest via
-`_skip_real_adapters`) silently drops the message; the feature self-disables.
+`notify_lifecycle(event)` sends a `BusMessage` through the adapters
+selected by `notifications.ops.channels` (same Settings checkboxes as
+ops alerts; empty = every configured platform). `bus_send_targets()`
+filters a `FanOutBusAdapter`; `telegram-group` is not a bus adapter and
+uses the ops-alerts group route. Do NOT construct new adapters or
+introduce a second recipient config. `NullBusAdapter` (no platform
+configured, or under pytest via `_skip_real_adapters`) silently drops
+the message; the feature self-disables.
 The bus adapters are standalone `httpx` clients independent of
 `gateway.start()`/`stop()`, so notifications work during early startup
 (before the inbound poller is up) and late shutdown (after `gateway.stop()`,
@@ -1545,15 +1544,16 @@ httpx `>=0.27`.
 |------|-----|------|---------|
 | Guard `Notifier` | Supervisor process, stdlib urllib | Child dead / unhealthy / crash-loop / pause | Telegram-direct — must work when the app cannot |
 | `observability/ops_alerts.alert()` | Inside Kazma | Backup/offsite/restic/MCP/persist/turn-fail | Fan-out bus + Telegram-direct fallback |
-| `lifecycle_notifier` | App boot/shutdown | starting / started / restarted / shutting_down | Same bus |
+| `lifecycle_notifier` | App boot/shutdown | starting / started / restarted / shutting_down | Same bus, filtered by `notifications.ops.channels` |
 
 Cooldown default 900s per key (`KAZMA_OPS_ALERT_COOLDOWN_S`). Never raises.
 Kill-switch `KAZMA_OPS_ALERTS=0` (does not mute lifecycle). Mute theorem:
 60 identical messages = the channel is ignored.
 
-Guard `probe()` currently formats HTTP 503 as `unreachable: Service
-Unavailable` and **discards** the JSON `checks` (live 2026-09-02 Docker
-Desktop / Postgres). Cause-quality + flap control is **deferred**:
+Guard `probe()` reads JSON 503 `checks` and names the failing
+dependency (P0). Same-detail restart pages collapse on a cooldown; a
+recovery card fires once after an unhealthy kill (P1). Remaining backup
+success-summary / `native_pg_backup` ops wiring is still deferred:
 `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`. Do not invent a fourth
 notifier, mix ops pages into HITL cards, or page every backup success.
 

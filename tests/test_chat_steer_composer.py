@@ -858,7 +858,8 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
     """2026-09-03: operators choose WHERE ops alerts go
     (notifications.ops.channels) and manage every adapter setting —
     including the swarm output channels — on the connectors settings tab
-    (moved out of the Swarm page)."""
+    (moved out of the Swarm page). 2026-09-04: lifecycle start/stop uses
+    the same filter — the checkboxes must not be ops-only."""
     src = (
         Path(__file__).resolve().parent.parent
         / "kazma-core" / "kazma_core" / "observability" / "ops_alerts.py"
@@ -880,6 +881,15 @@ def test_ops_alert_channel_routing_and_adapter_page() -> None:
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
     ).read_text(encoding="utf-8")
+    life = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-core" / "kazma_core" / "lifecycle_notifier.py"
+    ).read_text(encoding="utf-8")
+    assert "bus_send_targets" in life
+    assert "_ops_channels" in life
+    assert "Alerts go to" in settings_html
+    assert "Adapters &amp; Routes" in settings_html
+    assert "Delivery routing" in settings_html
     # The swarm output form is GONE from the Swarm page (moved, not
     # duplicated) — only the pointer card remains.
     swarm_html = (

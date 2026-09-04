@@ -127,9 +127,14 @@ def test_severity_changes_the_icon(sent):
 
 
 def test_messages_are_attributed_to_ops(sent):
-    """Distinguishable from lifecycle ("System") and guard ("[guard]")."""
+    """Distinguishable from lifecycle (System) and guard (Guard)."""
     ops_alerts.alert("x", "t")
-    assert 'Role: "Ops"' in sent[0]
+    text = sent[0]
+    assert text.rstrip().endswith("Ops")
+    assert 'Role: "Ops"' not in text
+    assert '"Warn"' not in text
+    assert "[guard]" not in text.lower()
+    assert "Kazma — Warn" in text
 
 
 # ── the conditions that must never be silent again ────────────────────
@@ -256,3 +261,92 @@ class TestDeliveryIsNeverSilent:
         with caplog.at_level("WARNING"):
             assert ops_alerts._telegram_direct("x") is False
         assert any("NOT DELIVERED" in r.message for r in caplog.records)
+
+
+class TestOperatorCardFormat:
+    def test_ops_and_lifecycle_cards_have_no_dummy_quotes(self, sent):
+        from kazma_core.observability.alert_card import format_operator_card
+        from kazma_core import lifecycle_notifier
+
+        ops_alerts.alert("k", "MCP server down", "transient: still retrying")
+        ops_text = sent[0]
+        assert "Kazma — Warn" in ops_text
+        assert ops_text.rstrip().endswith("Ops")
+        assert '"Warn"' not in ops_text
+        assert 'Role: "Ops"' not in ops_text
+
+        life = format_operator_card(
+            "System", "success", lifecycle_notifier._EVENTS["started"]["label"],
+            "Adapters: telegram",
+        )
+        assert "Kazma — Success" in life
+        assert life.rstrip().endswith("System")
+        assert '"Success"' not in life
+        assert 'Role: "System"' not in life
+
+        guard = format_operator_card(
+            "gaurd", "warn", "Kazma stopped", "unhealthy (database: x)"
+        )
+        assert guard.rstrip().endswith("Guard")
+        assert "[guard]" not in guard
+        assert "gaurd" not in guard
+
+    @pytest.mark.asyncio
+    async def test_telegram_bus_does_not_clip_operator_card_at_300(self):
+        from kazma_core.observability.alert_card import format_operator_card
+        from kazma_core.swarm.bus import BusMessage
+        from kazma_gateway.adapters.telegram_bus import TelegramBusAdapter
+
+        marker = "UNIQUETOKENSEQTHINKING"
+        detail = ("x" * 400) + marker + ("y" * 50)
+        card = format_operator_card("Ops", "warn", "MCP server sequential-thinking down", detail)
+        assert len(card) > 300
+
+        captured: dict = {}
+        adapter = TelegramBusAdapter("1:a", 1)
+
+        async def fake_post(payload, method="sendMessage"):
+            captured["payload"] = payload
+            return {}
+
+        adapter._post = fake_post  # type: ignore[method-assign]
+        await adapter.send(BusMessage(
+            worker_name="Kazma", worker_role="ops", content=card, level="warn",
+        ))
+        posted = captured["payload"]["text"]
+        assert marker in posted
+        assert len(posted) > 300
+
+    @pytest.mark.asyncio
+    async def test_discord_and_slack_do_not_rewrap_operator_card(self):
+        from kazma_core.observability.alert_card import format_operator_card
+        from kazma_core.swarm.bus import BusMessage
+        from kazma_gateway.adapters.discord_bus import DiscordBusAdapter
+        from kazma_gateway.adapters.slack_bus import SlackBusAdapter
+
+        card = format_operator_card("Ops", "warn", "MCP down", "transient: still retrying")
+        msg = BusMessage(worker_name="Kazma", worker_role="ops", content=card, level="warn")
+
+        discord_got: dict = {}
+        slack_got: dict = {}
+        d = DiscordBusAdapter("t", "1")
+        s = SlackBusAdapter("xoxb-x", "C1")
+
+        async def d_post(payload):
+            discord_got["payload"] = payload
+            return {}
+
+        async def s_post(payload):
+            slack_got["payload"] = payload
+            return {}
+
+        d._post_message = d_post  # type: ignore[method-assign]
+        s._post_message = s_post  # type: ignore[method-assign]
+        await d.send(msg)
+        await s.send(msg)
+        d_text = discord_got["payload"]["content"]
+        s_text = slack_got["payload"]["text"]
+        assert d_text.startswith(card.split("\n", 1)[0]) or "Kazma — Warn" in d_text
+        assert "**Kazma**:" not in d_text
+        assert "*Kazma*:" not in s_text
+        assert "Kazma — Warn" in s_text

@@ -1,6 +1,6 @@
 # GOAL: Guard / ops alerting — cause quality + flap control
 
-**Status:** DEFERRED — next major implementation sprint. Do **not** start until the operator says proceed.  
+**Status:** P0 (503 body) and P1 (flap collapse + recovery card) shipped 2026-09-04. P2 backup summary / `native_pg_backup` ops wiring remains deferred.  
 **Created:** 2026-09-02  
 **Trigger:** live Telegram `[guard] Kazma stopped: unhealthy (unreachable: Service Unavailable). Restarting in 15s (attempt 1).` after a Docker Desktop update took Postgres down.  
 **Rule:** Do **not** start/restart the Kazma server. After Python lands: operator reload via `kazma_guard.py --reload`.

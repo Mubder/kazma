@@ -105,8 +105,14 @@ class SlackBusAdapter(BusAdapter):
 
     async def send(self, message: BusMessage) -> None:
         """Deliver a log/status line as a plain message."""
-        icon = {"info": "ℹ️", "warning": "⚠️", "error": "🔴"}.get(message.level, "•")
-        text = f"{icon} *{message.worker_name}*: {message.content[:2500]}"
+        from kazma_core.observability.alert_card import is_operator_card
+
+        content = message.content or ""
+        if is_operator_card(content):
+            text = content[:2900]
+        else:
+            icon = {"info": "ℹ️", "warning": "⚠️", "error": "🔴"}.get(message.level, "•")
+            text = f"{icon} *{message.worker_name}*: {content[:2500]}"
         await self._post_message({"text": text[:2900], "mrkdwn": True})
 
     async def send_report(self, report: SwarmReport) -> None:

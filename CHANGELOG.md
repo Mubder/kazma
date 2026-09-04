@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Fix — Adapters & Routes + Guard operator pages (2026-09-04)
+
+**Routing:** Settings → Adapters & Routes (the Delivery routing
+checkboxes) now drive both ops pages and lifecycle start/stop/restart
+through ``bus_send_targets()``. Telegram-only stays Telegram-only on
+``--reload``. Empty still means every configured platform.
+
+**Guard:** ``probe()`` reads a JSON 503 body and names the failing
+ready-check (``database: ping timed out (3s)``) instead of
+``unreachable: Service Unavailable``. Identical restart details collapse
+inside a 15-minute cooldown (every attempt still in ``guard.log``). The
+first healthy probe after an unhealthy kill sends one recovery card.
+
+**Copy:** Guard / Ops / System share one card layout. Source is
+``Guard`` (never ``[guard]``). Severity and role are not dummy-quoted.
+Telegram no longer clips the card at 300 characters. Discord/Slack do
+not wrap an already-complete card in a second ``Kazma:`` header.
+
+## Fix — lifecycle start/stop honors Delivery routing checkboxes (2026-09-04)
+
+The Delivery & Routing card saved ``notifications.ops.channels``, and
+ops pages (MCP down, backups) already filtered the FanOut bus by that
+list. ``lifecycle_notifier`` on ``--reload`` still called
+``adapter.send()`` on the whole FanOut, so a Telegram-only selection
+still posted "Kazma server started" to Discord and Slack. Startup,
+shutdown, and restart now use the same ``bus_send_targets()`` filter
+(and the telegram-group route when that box is checked). Empty still
+means every configured platform.
+
 ## Fix — research auto-dispatch on an instruction + Discord/Slack target routing (2026-09-04)
 
 **Intent engine (the "reproduce a full report" misfire):** the
