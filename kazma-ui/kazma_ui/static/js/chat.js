@@ -317,7 +317,24 @@
     if (!chatSessionId) return;
     var stream = window.KazmaStream;
     if (!stream || typeof stream.sse !== 'function') return;
-    if (_reopenCount >= _REOPEN_MAX) return;
+    // An Approve click is a deliberate operator action, never a cursor
+    // loop — it must never be rationed by the reopen budget. Live
+    // 2026-09-04: after a turn with a few stream hiccups the budget was
+    // exhausted, the post-approve attach was silently declined, and the
+    // CoT sat frozen for 3+ minutes (heartbeats journaled server-side,
+    // nobody attached) until the pending-approval poll painted the next
+    // card. Reset the budget for approve-driven attaches and SAY SO when
+    // a decline happens.
+    if (reason === 'approve-json' || reason === 'approve-409') {
+      if (_reopenCount > 0) {
+        console.warn('[KazmaChat] Reopen budget reset by approve attach');
+      }
+      _reopenCount = 0;
+    }
+    if (_reopenCount >= _REOPEN_MAX) {
+      console.warn('[KazmaChat] Attach declined — reopen budget exhausted (' + (reason || '?') + ')');
+      return;
+    }
     _reopenCount++;
     _attachInFlight = true;
     var cursor = _lastSeqSeen > 0 ? _lastSeqSeen : 0;
@@ -5348,6 +5365,23 @@
     // scrolled elsewhere. A trapped card is LIFTED out by the caller's
     // cleanup, not revealed by expanding its cage.
     var after = lastCard || progress;
+    // A card summoned while the bubble already carries streamed text must
+    // land BELOW that text (2026-09-04) — the question follows the content
+    // that provoked it. Inserting after the CoT put it at the TOP of the
+    // streaming text. Keep stacking below a previous card only when that
+    // card already sits below the text.
+    try {
+      var textEl = host.querySelector('.message-text');
+      if (
+        textEl && textEl.textContent && textEl.textContent.trim() &&
+        (!lastCard ||
+          // Node.DOCUMENT_POSITION_FOLLOWING == 4 (numeric: no DOM global
+          // needed — works in the Node test harness too).
+          (lastCard.compareDocumentPosition(textEl) & 4))
+      ) {
+        after = textEl;
+      }
+    } catch (eText) { /* compareDocumentPosition unavailable — keep anchor */ }
     try {
       if (after && after.parentNode === host && after !== card) {
         if (after.nextSibling) host.insertBefore(card, after.nextSibling);
