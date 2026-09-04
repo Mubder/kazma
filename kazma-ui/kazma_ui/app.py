@@ -1450,6 +1450,35 @@ class KazmaAppBuilder:
 
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
+        # ── Volatile settings store alarm (2026-09-04) ────────────────
+        # The init-time CRITICAL for the in-memory fallback fires BEFORE
+        # file logging is up, so the reason lands on an unread console.
+        # Re-check here — after logging_config initialised — and raise the
+        # alarm in the log AND over ops alerting. Live incident: a process
+        # ran for hours accepting 200-OK settings saves into RAM.
+        try:
+            from kazma_core.config_store import is_config_store_volatile
+
+            if is_config_store_volatile():
+                logger.critical(
+                    "[Startup] SETTINGS STORE IS VOLATILE (in-memory fallback) — "
+                    "every settings save in this process is NON-DURABLE and will "
+                    "be lost on restart. Check kazma-data/settings.db locks and "
+                    "permissions, then restart via the guard."
+                )
+                from kazma_core.observability.ops_alerts import alert
+
+                alert(
+                    "config_store.volatile",
+                    "Settings saves are NOT persisting",
+                    "The settings store fell back to in-memory at boot — every "
+                    "save returns OK but is lost on restart. Restart the server "
+                    "via the guard after checking kazma-data/settings.db.",
+                    severity="critical",
+                )
+        except Exception:  # noqa: BLE001 — never block boot
+            logger.debug("[Startup] volatile-store check failed", exc_info=True)
+
         # ── Early shutdown signal hooks ───────────────────────────────
         # Install BEFORE subsystems come up so a Ctrl+C (while a long-lived
         # SSE/WS stream is open, or during boot) flips the global shutdown

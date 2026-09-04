@@ -74,12 +74,29 @@ def get_health_dependencies():
 
 
 def check_config_store() -> dict[str, Any]:
-    """Check ConfigStore connectivity."""
+    """Check ConfigStore connectivity AND durability.
+
+    A read works equally well against the in-memory fallback, so the old
+    check passed while every settings save silently went to RAM (live
+    2026-09-04: hours of 200-OK saves, none persisted). Volatile store =
+    failed readiness — that is the honest signal.
+    """
     try:
-        from kazma_core.config_store import get_config_store
+        from kazma_core.config_store import get_config_store, is_config_store_volatile
+
         store = get_config_store()
         # Test read
         _ = store.get("health.check", "ok")
+        if is_config_store_volatile():
+            return {
+                "status": "failed",
+                "component": "config_store",
+                "error": (
+                    "settings store is the VOLATILE in-memory fallback — "
+                    "saves do not persist (check kazma-data/settings.db "
+                    "locks/permissions)"
+                ),
+            }
         return {"status": "ok", "component": "config_store"}
     except Exception as e:
         logger.error("ConfigStore health check failed: %s", e)
