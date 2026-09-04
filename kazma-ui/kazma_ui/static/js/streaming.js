@@ -187,7 +187,7 @@ var KazmaStream = (function() {
           case 'capacity':
             try {
               if (data && data.reply && window.KazmaChat && typeof window.KazmaChat.paintCapacityReply === 'function') {
-                window.KazmaChat.paintCapacityReply(data.reply);
+                window.KazmaChat.paintCapacityReply(data.reply, data.turn_id);
               }
               if (window.KazmaChat && typeof window.KazmaChat.refreshCapacity === 'function') {
                 window.KazmaChat.refreshCapacity();

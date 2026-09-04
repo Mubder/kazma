@@ -66,7 +66,17 @@ def intercept_capacity_fast_path(
                 "reply": _cap.reply,
             })
             yield await _journal_fast_path(thread_id, "done", {
-                "tokens": 1, "cost": 0.0, "duration_ms": 100,
+                "tokens": 1,
+                "cost": 0.0,
+                "duration_ms": 100,
+                "content": _cap.reply,
+                # Capacity ack: excludes this done frame from cursor replay
+                # (it now carries the full reply — replaying it into a
+                # reconnecting client double-paints, same class as the
+                # 2026-08-16 duplicated-MISSION-ON) and from the terminal
+                # Web Push choke in delivery.py (a push per /long ack is
+                # noise, not an assistant reply).
+                "capacity": True,
             })
 
         return _stream(_long_generator()), None
@@ -89,7 +99,12 @@ def intercept_capacity_fast_path(
                     "reply": _pl.reply,
                 })
                 yield await _journal_fast_path(thread_id, "done", {
-                    "tokens": 1, "cost": 0.0, "duration_ms": 50,
+                    "tokens": 1,
+                    "cost": 0.0,
+                    "duration_ms": 50,
+                    "content": _pl.reply,
+                    # Capacity ack — see the /long generator note above.
+                    "capacity": True,
                 })
 
             return _stream(_plan_generator()), None
@@ -108,6 +123,9 @@ def intercept_capacity_fast_path(
                 "tokens": 1,
                 "cost": 0.0,
                 "duration_ms": 100,
+                "content": confirmation,
+                # Capacity ack — see the /long generator note above.
+                "capacity": True,
             })
 
         return _stream(_yolo_generator()), None
