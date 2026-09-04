@@ -387,8 +387,13 @@ export function initSoftNav() {
         try {
             if (typeof window.kazmaOnSoftNavLeave === 'function') {
                 window.kazmaOnSoftNavLeave();
+            } else if (Array.isArray(window.kazmaOnSoftNavLeave)) {
+                window.kazmaOnSoftNavLeave.forEach((fn) => {
+                    try { if (typeof fn === 'function') fn(); } catch (e) { /* ignore */ }
+                });
             }
         } catch (e) { /* ignore */ }
+        window.kazmaOnSoftNavLeave = null;
         const held = window.__kazmaEventSources;
         if (Array.isArray(held)) {
             held.forEach((src) => {

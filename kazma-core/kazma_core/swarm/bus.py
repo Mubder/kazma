@@ -34,7 +34,7 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Approval timeout: how long to wait before auto-rejecting.
-_DEFAULT_APPROVAL_TIMEOUT = 60.0  # seconds
+_DEFAULT_APPROVAL_TIMEOUT = 300.0  # seconds
 _MAX_BUS_MESSAGE_LEN = 4096       # Telegram message limit
 
 
@@ -348,10 +348,24 @@ class SwarmMessageBus:
         task_description: str,
         proposed_output: str,
         task_id: str = "",
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ) -> bool:
         """Request HITL approval. Returns True if approved, False if rejected or timed out."""
         import asyncio
+
+        if timeout is None:
+            try:
+                from kazma_core.safety.hitl import get_hitl_config
+
+                cfg = get_hitl_config({})
+                if "approval_timeout_seconds" in cfg:
+                    timeout = float(cfg["approval_timeout_seconds"])
+                else:
+                    timeout = _DEFAULT_APPROVAL_TIMEOUT
+            except Exception:
+                timeout = _DEFAULT_APPROVAL_TIMEOUT
+        timeout = max(10.0, min(600.0, float(timeout)))
+
         approval = ApprovalRequest(
             worker_name=worker_name,
             task_description=task_description,

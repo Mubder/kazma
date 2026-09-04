@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Audit & Hardening — Full Codebase & UI/UX Audit Execution (Waves 1–7) (2026-09-04)
+
+Complete industrial remediation across all 60 findings from `docs/audits/AUDIT_CODEBASE_UIUX_2026-09-04.md`:
+
+- **Wave 1 (Safety-Critical Correctness):** Fixed HITL confirmation Promise truthy bypass; hoisted supervisor intent classification variables preventing NameError turn crash points; declared `_gateway` in `SupervisorState`; hardened Telegram bus card chunking and fallback; enforced fail-closed auth on DocumentsAPI.
+- **Wave 2 (Event-Loop & Freeze Hygiene):** Offloaded synchronous log tailing, workspace scanning, and file writes to worker threadpools (`asyncio.to_thread`); migrated TUI screens to non-blocking async requests; guarded HTTP client pool locks across awaits; guarded semantic cache serialization.
+- **Wave 3 (Turn & Job Liveness):** Added cron failure budget and case-insensitive schedule normalization; enforced commitment checkpointer guards and CAS state transitions; added atomic `update()` to `SessionStore`; configured dynamic swarm bus timeouts.
+- **Wave 4 (Frontend Correctness & Leaks):** Eliminated inline `onclick` string building in `research.js`, `replay.js`, and `swarm.js` in favor of declarative `data-*` attributes and event delegation; upgraded modal dialog focus trapping and activeElement restoration; registered soft-navigation teardown hooks; standardized canonical HTML escaping.
+- **Wave 5 (Persistence & Queue Scaling):** Added composite index `(status, sort_at)` and background pruning to task queue and swarm store; added background lease renewal task; implemented atomic `set_if_absent()` probe leasing; bounded snapshot and lock caches; closed checkpointer connection pools.
+- **Wave 6 (Security Surface Polish):** Admin-gated and path-traversal-guarded skills installer; built 64-byte short-hash callback store for Telegram; added SSRF IP pin-ladder and driver cleanup for browser automation; enforced decompression bomb and size caps on image analysis; disabled dual-bus racing and deactivated buttons on click.
+- **Wave 7 (Dead Code, Consistency & System Invariants):** Purged dead symbols, shadowed imports, and duplicate router branches; consolidated session TTL imports; bounded recent card caches; capped concurrency caches; added cron terminal job purging and atomic ConfigStore updates.
+- **Verification:** 88/88 tests passing across 8 audit test suites and framework import validation.
+
 ## Fix — Adapters & Routes + Guard operator pages (2026-09-04)
 
 **Routing:** Settings → Adapters & Routes (the Delivery routing
@@ -13,10 +26,12 @@ ready-check (``database: ping timed out (3s)``) instead of
 inside a 15-minute cooldown (every attempt still in ``guard.log``). The
 first healthy probe after an unhealthy kill sends one recovery card.
 
-**Copy:** Guard / Ops / System share one card layout. Source is
-``Guard`` (never ``[guard]``). Severity and role are not dummy-quoted.
-Telegram no longer clips the card at 300 characters. Discord/Slack do
-not wrap an already-complete card in a second ``Kazma:`` header.
+**Copy:** Guard / Ops / System share one card layout. The source is
+the sentence start — ``[Guard]``, ``[Ops]``, ``[System]`` (never
+``[guard]``). A planned ``--reload`` says "restarting for an operator
+reload" instead of "process exited (code 1)". Telegram no longer clips
+the card at 300 characters. Discord/Slack do not wrap an already-complete
+card in a second ``Kazma:`` header.
 
 ## Fix — lifecycle start/stop honors Delivery routing checkboxes (2026-09-04)
 

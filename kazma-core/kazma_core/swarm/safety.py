@@ -68,7 +68,7 @@ _SENSITIVE_READS = [
 ]
 
 # Maximum time to wait for approval before auto-rejecting.
-_DEFAULT_APPROVAL_TIMEOUT = 60.0  # seconds
+_DEFAULT_APPROVAL_TIMEOUT = 300.0  # seconds
 
 # Defensive fallback when safety.hitl cannot be imported (mirrors the ALWAYS
 # set — YOLO must never widen beyond this on an import failure).
@@ -120,6 +120,29 @@ class SafetyMiddleware:
         self._blocked_count: int = 0
         self._approved_count: int = 0
         self._rejected_count: int = 0
+
+    @property
+    def approval_timeout(self) -> float:
+        """Resolve the effective approval timeout.
+
+        Prefers live Settings ``safety.approval_timeout`` / ``approval_timeout_seconds``
+        from get_hitl_config({}), clamped between 10.0 and 600.0 seconds,
+        falling back to self._approval_timeout.
+        """
+        try:
+            from kazma_core.safety.hitl import get_hitl_config
+
+            cfg = get_hitl_config({})
+            if "approval_timeout_seconds" in cfg:
+                val = float(cfg["approval_timeout_seconds"])
+                return max(10.0, min(600.0, val))
+        except Exception:
+            pass
+        return self._approval_timeout
+
+    @approval_timeout.setter
+    def approval_timeout(self, value: float) -> None:
+        self._approval_timeout = float(value)
 
     # ── Configuration ───────────────────────────────────────────────────
 
@@ -314,7 +337,7 @@ class SafetyMiddleware:
                         mechanism="swarm_bus",
                         message=(tool_args or "")[:500],
                     ),
-                    ttl_seconds=self._approval_timeout,
+                    ttl_seconds=self.approval_timeout,
                 )
         except Exception:
             logger.debug("[Safety] gate register skipped", exc_info=True)
@@ -324,7 +347,7 @@ class SafetyMiddleware:
             task_description=f"Tool: {tool_name}" + (f" — {tool_args[:100]}" if tool_args else ""),
             proposed_output=f"Danger-tier tool '{tool_name}' requires approval before execution.",
             task_id=task_id,
-            timeout=self._approval_timeout,
+            timeout=self.approval_timeout,
         )
 
         # Gate registry (P4): settle the row with the bus outcome.

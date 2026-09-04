@@ -36,13 +36,17 @@ from .commands import (
     _build_slash_ctx,
 )
 from .session_commands import try_session_command
+from kazma_core.sessions.ttl import SESSION_TTL_SECONDS as _session_ttl_seconds
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "SESSION_TTL_SECONDS",
     "create_graph_handler",
     "make_gateway_send_handler",
 ]
+
+SESSION_TTL_SECONDS = _session_ttl_seconds
 
 
 def _prepare_tg_outbound(
@@ -525,8 +529,7 @@ def create_graph_handler(
     # this TTL (reminders, HITL cards, cron). Cron captures delivery_target
     # at schedule time. Helper:
     # kazma_core.sessions.ttl.refuse_session_lookup_for_durable_job
-    # Keep in lockstep with kazma_core.sessions.ttl.SESSION_TTL_SECONDS.
-    _session_ttl_seconds = 300  # 5 minutes
+    from kazma_core.sessions.ttl import SESSION_TTL_SECONDS as _session_ttl_seconds
 
     async def _get_thread_lock(thread_id: str) -> asyncio.Lock:
         """Return (creating if needed) the serialization lock for a thread_id.

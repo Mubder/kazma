@@ -42,6 +42,12 @@ DEFAULT_QUESTION = "Describe this image in detail."
 RESIZE_MAX_DIMENSION = 2048  # px — longest side after downscale
 REQUEST_TIMEOUT = 60.0
 
+try:
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = 50_000_000
+except ImportError:
+    pass
+
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -66,11 +72,16 @@ def _resize_image(image_bytes: bytes, max_dim: int = RESIZE_MAX_DIMENSION) -> by
     """
     try:
         from PIL import Image
+        Image.MAX_IMAGE_PIXELS = 50_000_000
     except ImportError:
         logger.warning("Pillow not installed — returning original image bytes")
         return image_bytes
 
-    img = Image.open(io.BytesIO(image_bytes))
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+    except Exception as exc:
+        logger.warning("Failed to open image for resize: %s", exc)
+        return image_bytes
 
     # Convert palette / RGBA modes to RGB for broadest API compat
     if img.mode in ("P", "LA", "PA"):
@@ -120,6 +131,13 @@ def _load_local_image(path: Path) -> tuple[bytes, str]:
         raise ValueError(
             f"Unsupported image format: '{path.suffix}'. "
             f"Supported: {supported}"
+        )
+
+    stat = path.stat()
+    if stat.st_size > MAX_IMAGE_BYTES * 2:
+        raise ValueError(
+            f"Image file too large ({stat.st_size / 1_048_576:.1f} MB). "
+            f"Max {MAX_IMAGE_BYTES * 2 / 1_048_576:.0f} MB."
         )
 
     raw = path.read_bytes()

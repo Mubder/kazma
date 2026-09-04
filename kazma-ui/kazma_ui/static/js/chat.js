@@ -221,10 +221,28 @@
       }
     });
 
+    function _modalOrOverlayOpen() {
+      try {
+        if (window.Alpine && window.Alpine.store) {
+          var modalStore = window.Alpine.store('modal');
+          if (modalStore && modalStore.open) return true;
+          var searchStore = window.Alpine.store('search');
+          if (searchStore && searchStore.open) return true;
+        }
+        if (typeof document !== 'undefined') {
+          if (document.documentElement && document.documentElement.dataset.overlayOpen === '1') return true;
+          var activeModal = document.querySelector('.search-overlay:not([style*="display: none"]), .modal-overlay:not([style*="display: none"]), dialog[open]');
+          if (activeModal) return true;
+        }
+      } catch (e) { /* ignore */ }
+      return false;
+    }
+
     // Global Escape key — abort generation from anywhere on the page
-    // (not just when the textarea has focus).
+    // (not just when the textarea has focus). Yields when a modal or search overlay is open.
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && _isGenerating) {
+        if (_modalOrOverlayOpen()) return;
         e.preventDefault();
         abortGeneration();
       }
@@ -980,6 +998,7 @@
     // Ctrl+Enter also sends the message (so users who press Ctrl+Enter
     // from muscle-memory get the expected behaviour).
     if (e.key === 'Escape') {
+      if (_modalOrOverlayOpen()) return;
       if (_isGenerating) { abortGeneration(); return; }
       hideSlashMenu();
       return;
@@ -6661,6 +6680,10 @@
     bar.addEventListener('click', function(e) {
       var btn = e.target.closest('[data-cap]');
       if (!btn || !inputEl) return;
+      if (_isGenerating) {
+        if (KS && KS.toast) KS.toast('Please wait for generation to finish or abort first', 'info', 2500);
+        return;
+      }
       var cap = btn.getAttribute('data-cap') || '';
       if (cap === '/plan on' && btn.classList.contains('is-on')) {
         cap = '/plan off';

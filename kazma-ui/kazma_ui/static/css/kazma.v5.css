@@ -283,8 +283,8 @@ html[data-theme="light"] { color-scheme: only light; }
 /* Bubbles — gradient user bubble ink adapts to theme */
 .message-user .message-text { color: var(--text-inverse); }
 [data-theme="light"] .message-user .message-text { color: #ffffff; }
-.message-avatar.u { color: var(--text-inverse); }
-[data-theme="light"] .message-avatar.u { color: #ffffff; }
+.message-avatar-user, .message-avatar.u { color: var(--text-inverse); }
+[data-theme="light"] .message-avatar-user, [data-theme="light"] .message-avatar.u { color: #ffffff; }
 
 /* Welcome screen — logo tile. Dark theme keeps the app-icon dark tile
    (matches the sidebar badge). Light theme swaps to an elevated surface

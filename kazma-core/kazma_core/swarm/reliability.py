@@ -484,21 +484,26 @@ class CircuitBreaker:
             cs = get_config_store()
             key = self._probe_lease_key(worker_name)
             now = time.time()
+            ttl = self._probe_lease_ttl()
             holder = self._new_probe_holder()
-            raw = cs.get(key)
-            if isinstance(raw, dict):
-                exp = float(raw.get("expires_at") or 0)
-                existing = str(raw.get("holder") or "")
-                if existing and exp > now and existing != holder:
-                    return False
             payload = {
                 "holder": holder,
-                "expires_at": now + self._probe_lease_ttl(),
+                "expires_at": now + ttl,
                 "acquired_at": now,
             }
-            cs.set(key, payload, category="swarm")
-            check = cs.get(key)
-            if isinstance(check, dict) and str(check.get("holder") or "") == holder:
+            if hasattr(cs, "set_if_absent"):
+                acquired = cs.set_if_absent(key, payload, ttl=ttl, category="swarm")
+            else:
+                raw = cs.get(key)
+                if isinstance(raw, dict):
+                    exp = float(raw.get("expires_at") or 0)
+                    existing = str(raw.get("holder") or "")
+                    if existing and exp > now and existing != holder:
+                        return False
+                cs.set(key, payload, category="swarm")
+                check = cs.get(key)
+                acquired = bool(isinstance(check, dict) and str(check.get("holder") or "") == holder)
+            if acquired:
                 self._probe_lease_worker = worker_name
                 self._probe_lease_holder = holder
                 return True

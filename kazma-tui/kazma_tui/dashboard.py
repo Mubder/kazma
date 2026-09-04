@@ -379,9 +379,9 @@ class MetricsDashboard(Widget):
         # ── Active Agents (live server first; this TUI process is fallback) ──
         agent_names: list[str] = []
         try:
-            from kazma_core.runtime.local_api import request_json
+            from kazma_core.runtime.local_api import request_json_async
 
-            data = request_json("GET", "/api/swarm/status")
+            data = await request_json_async("GET", "/api/swarm/status")
             agent_names = sorted(
                 str(w.get("name"))
                 for w in (data.get("workers") or [])

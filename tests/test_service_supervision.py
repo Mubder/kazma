@@ -653,7 +653,8 @@ def test_failure_alerts_are_attributed_to_the_guard():
     card = guard.format_operator_card(
         "Guard", "warn", "Kazma stopped: unhealthy (database: x)", "Restarting in 15s."
     )
-    assert card.rstrip().endswith("Guard")
+    first = card.split("\n", 1)[0]
+    assert "[Guard]" in first
     assert "[guard]" not in card
     assert "gaurd" not in card.lower()
     assert '"Warn"' not in card
@@ -687,10 +688,20 @@ def test_same_detail_restarts_page_once(tmp_path):
     assert g.notify_restart(reason, 60) is False
     assert len(g.notify.sent) == 1
     text = g.notify.sent[0]
-    assert "Guard" in text
+    assert "[Guard]" in text.split("\n", 1)[0]
     assert "[guard]" not in text
     assert '"Warn"' not in text
     assert "database" in text
+
+
+def test_operator_reload_page_starts_with_guard_and_omits_exit_code():
+    """A planned --reload must not look like a crash (`process exited`)."""
+    import inspect
+
+    src = inspect.getsource(guard.Guard.run)
+    assert "Kazma is restarting for an operator reload" in src
+    assert "operator reload:" not in src
+    assert "process exited" not in src[src.index("consume_reload_request") :]
 
 
 def test_different_unhealthy_detail_pages_again(tmp_path):
@@ -708,7 +719,7 @@ def test_recovery_page_after_unhealthy_uses_guard_not_bracket(tmp_path):
     assert g.notify_recovered() is False  # nothing pending
     text = g.notify.sent[-1]
     assert "healthy again" in text.lower()
-    assert text.rstrip().endswith("Guard")
+    assert "[Guard]" in text.split("\n", 1)[0]
     assert "[guard]" not in text
     assert "gaurd" not in text.lower()
 

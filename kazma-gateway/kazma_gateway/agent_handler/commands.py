@@ -1938,10 +1938,11 @@ async def _try_skill_command(
 
             # Remember for this thread so the next agent turn can prefer it.
             try:
-                ctx = await store.get(thread_id) or {}
-                ctx = dict(ctx)
-                ctx["active_agent_skill"] = name
-                await store.put(thread_id, ctx)
+                def _set_skill(c: dict[str, Any]) -> dict[str, Any]:
+                    c["active_agent_skill"] = name
+                    return c
+
+                await store.update(thread_id, _set_skill)
             except Exception:
                 logger.debug(
                     "[agent-handler] failed to persist active_agent_skill",
@@ -1962,11 +1963,14 @@ async def _try_skill_command(
             return True
 
         if sub in ("deactivate", "off", "clear"):
+            had = None
             try:
-                ctx = await store.get(thread_id) or {}
-                ctx = dict(ctx)
-                had = ctx.pop("active_agent_skill", None)
-                await store.put(thread_id, ctx)
+                def _clear_skill(c: dict[str, Any]) -> dict[str, Any]:
+                    nonlocal had
+                    had = c.pop("active_agent_skill", None)
+                    return c
+
+                await store.update(thread_id, _clear_skill)
             except Exception:
                 had = None
             if had:

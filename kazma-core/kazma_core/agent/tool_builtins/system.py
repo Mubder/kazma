@@ -29,9 +29,11 @@ def _qnorm(q: str) -> str:
 
 
 
+_pending_dispatch_tasks: set[Any] = set()
+
+
 def register_system_tools(registry: Any) -> None:
     """Register the system tools onto *registry*."""
-    from kazma_core.agent.tool_registry import _pending_dispatch_tasks  # noqa: F401
 
     @registry.register(
         description="Get the current date, time, and timezone in ISO-8601 format.",

@@ -83,7 +83,11 @@ def register_memory_routes(self: Any) -> None:
             ],
         }
     @self.app.post("/api/memory/graph/clear")
-    def _memory_graph_clear(tenant: str = "default"):
+    def _memory_graph_clear(
+        request: Request,
+        tenant: str = "default",
+        confirm: bool = False,
+    ):
         """Invalidate all currently-active V2 beliefs (bi-temporal clear).
 
         Replaces the legacy destructive ``kg.clear()``. V2 is append-only /
@@ -94,12 +98,38 @@ def register_memory_routes(self: Any) -> None:
 
         Tenant-scoped (M-05): defaults to the shared ``default`` tenant;
         pass ``tenant=<id>`` to clear a specific one. There is deliberately
-        NO all-tenants mode.
+        NO all-tenants mode. Requires explicit confirm=true and tenant authorization.
         """
         import json
         import sqlite3
+        from starlette.responses import JSONResponse
+
+        if not confirm:
+            return JSONResponse(
+                {"error": "Confirmation required. Pass confirm=true to clear memory graph."},
+                status_code=400,
+            )
 
         tid = (tenant or "default").strip() or "default"
+
+        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+        secret = get_kazma_secret()
+        if secret and not is_authenticated(request, secret):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        principal = get_request_principal(request) or {}
+        is_admin = principal.get("source") == "secret" or principal.get("role") == "admin"
+        caller_tenant = principal.get("tenant") or principal.get("tenant_id")
+
+        if not is_admin and secret:
+            if not caller_tenant:
+                return JSONResponse({"error": "Admin role or tenant binding required"}, status_code=403)
+            if caller_tenant != tid:
+                return JSONResponse(
+                    {"error": f"Forbidden: cannot clear memory for tenant '{tid}'"},
+                    status_code=403,
+                )
 
 
         try:

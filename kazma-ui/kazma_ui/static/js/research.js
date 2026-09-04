@@ -62,13 +62,70 @@
     } catch (e) { return iso; }
   }
 
+  function _registerSoftNavTeardown() {
+    if (typeof window === 'undefined') return;
+    var teardown = function () {
+      if (window.KazmaResearch && typeof window.KazmaResearch.destroy === 'function') {
+        window.KazmaResearch.destroy();
+      }
+    };
+    if (Array.isArray(window.kazmaOnSoftNavLeave)) {
+      window.kazmaOnSoftNavLeave.push(teardown);
+    } else if (typeof window.kazmaOnSoftNavLeave === 'function') {
+      window.kazmaOnSoftNavLeave = [window.kazmaOnSoftNavLeave, teardown];
+    } else {
+      window.kazmaOnSoftNavLeave = [teardown];
+    }
+  }
+
+  var _delegatedBound = false;
+  function _bindDelegatedEvents() {
+    if (_delegatedBound) return;
+    _delegatedBound = true;
+    document.addEventListener('click', function (e) {
+      var actEl = e.target.closest('[data-act]');
+      if (!actEl) return;
+      var container = actEl.closest('#research-list, #research-archived-list, #research-live-actions');
+      if (!container) return;
+
+      var act = actEl.getAttribute('data-act');
+      var tid = actEl.getAttribute('data-task-id');
+      if (!act) return;
+
+      if (act === 'archive') {
+        e.stopPropagation();
+        if (tid) window.KazmaResearch.archive(tid);
+      } else if (act === 'del') {
+        e.stopPropagation();
+        if (tid) window.KazmaResearch.del(tid);
+      } else if (act === 'restore') {
+        e.stopPropagation();
+        if (tid) window.KazmaResearch.restore(tid);
+      } else if (act === 'del-archived') {
+        e.stopPropagation();
+        if (tid) window.KazmaResearch.delArchived(tid);
+      } else if (act === 'view-detail') {
+        if (e.target.closest('a, button[data-act]:not([data-act="view-detail"])')) return;
+        if (tid) window.KazmaResearch.viewDetail(tid);
+      }
+    });
+  }
+
   window.KazmaResearch = {
     init: function () {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       this.load();
       // Skip the poll while the tab is hidden (matches memory_console.js).
       pollTimer = setInterval(function() {
         if (!document.hidden) window.KazmaResearch.load();
       }, 15000);
+      _bindDelegatedEvents();
+      _registerSoftNavTeardown();
+    },
+
+    destroy: function () {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      closeLiveStream();
     },
 
     switchTab: function (name) {
@@ -715,8 +772,8 @@
           html += '<a class="btn btn-primary btn-sm" href="/api/research/papers/file?path=' +
             encodeURIComponent(s.report_path) + '" target="_blank">' +
             esc(i18n('research_view_report') || 'View report') + '</a>';
-          html += '<button class="btn btn-secondary btn-sm" onclick="KazmaResearch.viewDetail(\'session:' +
-            esc(s.id || liveSessionId || '') + '\')">' + esc(i18n('research_open_md') || 'Open') + '</button>';
+          html += '<button class="btn btn-secondary btn-sm" data-act="view-detail" data-task-id="' +
+            esc('session:' + (s.id || liveSessionId || '')) + '">' + esc(i18n('research_open_md') || 'Open') + '</button>';
         }
         actions.innerHTML = html;
       }
@@ -735,6 +792,10 @@
   function closeLiveStream() {
     if (liveSource) {
       try { liveSource.close(); } catch (e) { /* ignore */ }
+      if (typeof window !== 'undefined' && Array.isArray(window.__kazmaEventSources)) {
+        var idx = window.__kazmaEventSources.indexOf(liveSource);
+        if (idx !== -1) window.__kazmaEventSources.splice(idx, 1);
+      }
       liveSource = null;
     }
   }
@@ -744,6 +805,10 @@
     if (!sessionId || typeof EventSource === 'undefined') return;
     var url = '/api/research/sessions/' + encodeURIComponent(sessionId) + '/stream';
     liveSource = new EventSource(url);
+    if (typeof window !== 'undefined') {
+      window.__kazmaEventSources = window.__kazmaEventSources || [];
+      window.__kazmaEventSources.push(liveSource);
+    }
     function onPayload(raw) {
       var data;
       try { data = JSON.parse(raw.data); } catch (e) { return; }
@@ -846,11 +911,10 @@
       } else if (isSession) {
         actions = '';
       } else {
-        actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.archive(\'' + t.id + '\')" title="Archive">' + ARCHIVE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.del(\'' + t.id + '\')" title="Delete">×</button>';
+        actions = '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="archive" data-task-id="' + esc(t.id) + '" title="Archive">' + ARCHIVE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del" data-task-id="' + esc(t.id) + '" title="Delete">×</button>';
       }
-      var onclick = ' onclick="KazmaResearch.viewDetail(\'' + String(t.id).replace(/'/g, "\\'") + '\')"';
-      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;"' + onclick + '>' +
+      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
             '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
@@ -873,7 +937,7 @@
       return;
     }
     el.innerHTML = tasks.map(function (t) {
-      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;opacity:0.7;" onclick="KazmaResearch.viewDetail(\'' + t.id + '\')">' +
+      return '<div class="card" style="padding:12px 16px;cursor:pointer;max-width:100%;overflow:hidden;box-sizing:border-box;opacity:0.7;" data-act="view-detail" data-task-id="' + esc(t.id) + '">' +
         '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">' +
           '<div style="flex:1;min-width:0;overflow:hidden;">' +
             '<div style="font-weight:600;color:var(--text-primary);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">' + esc(t.prompt || '(no prompt)') + '</div>' +
@@ -884,8 +948,8 @@
             '</div>' +
           '</div>' +
           '<span style="font-size:0.75rem;color:var(--text-muted);background:var(--surface-2);padding:2px 8px;border-radius:4px;flex-shrink:0;">' + esc(t.status) + '</span>' +
-          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" onclick="event.stopPropagation();KazmaResearch.restore(\'' + t.id + '\')" title="Restore">' + RESTORE_SVG + '</button>' +
-          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" onclick="event.stopPropagation();KazmaResearch.delArchived(\'' + t.id + '\')" title="Delete">×</button>' +
+          '<button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;display:flex;align-items:center;" data-act="restore" data-task-id="' + esc(t.id) + '" title="Restore">' + RESTORE_SVG + '</button>' +
+          '<button class="btn btn-danger btn-sm" style="flex-shrink:0;margin-left:4px;padding:2px 8px;font-size:0.75rem;" data-act="del-archived" data-task-id="' + esc(t.id) + '" title="Delete">×</button>' +
         '</div>' +
       '</div>';
     }).join('');

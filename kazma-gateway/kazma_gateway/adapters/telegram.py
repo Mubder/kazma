@@ -1383,8 +1383,10 @@ class TelegramAdapter(BaseAdapter):
             self._spawn(self._answer_callback_query(cb_id, "Not authorized"))
             return
 
+        from kazma_gateway.adapters.callback_store import decode_callback_data
         from kazma_gateway.adapters.telegram_callbacks import parse_callback_data
 
+        data = decode_callback_data(data)
         action = parse_callback_data(data)
         text = action.text
 

@@ -291,16 +291,34 @@ class SlackAdapter(BaseAdapter):
                 filled.append(att)
                 continue
             try:
-                resp = await self._http.get(att.url, headers=headers, timeout=30.0)
-                resp.raise_for_status()
-                data = resp.content
-                if len(data) > 20 * 1024 * 1024:
-                    logger.warning(
-                        "[Slack] attachment %s over size cap (%d bytes)",
-                        att.filename, len(data),
-                    )
-                    filled.append(att)
-                    continue
+                _MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+                async with self._http.stream("GET", att.url, headers=headers, timeout=30.0) as resp:
+                    resp.raise_for_status()
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length and content_length.isdigit() and int(content_length) > _MAX_ATTACHMENT_BYTES:
+                        logger.warning(
+                            "[Slack] attachment %s over size cap (%s bytes)",
+                            att.filename, content_length,
+                        )
+                        filled.append(att)
+                        continue
+                    chunks: list[bytes] = []
+                    total = 0
+                    oversized = False
+                    async for chunk in resp.aiter_bytes(chunk_size=65536):
+                        total += len(chunk)
+                        if total > _MAX_ATTACHMENT_BYTES:
+                            logger.warning(
+                                "[Slack] attachment %s exceeded size cap (%d bytes) while streaming",
+                                att.filename, total,
+                            )
+                            oversized = True
+                            break
+                        chunks.append(chunk)
+                    if oversized:
+                        filled.append(att)
+                        continue
+                    data = b"".join(chunks)
                 meta = dict(att.meta or {})
                 meta.pop("bot_token", None)
                 filled.append(
@@ -607,6 +625,16 @@ class SlackAdapter(BaseAdapter):
                                     elif action.kind == "swarm":
                                         try:
                                             route_swarm_bus(value)
+                                            if response_url:
+                                                label = "✅ Approved" if "approve" in value else "❌ Rejected"
+                                                async with httpx.AsyncClient() as client:
+                                                    await client.post(
+                                                        response_url,
+                                                        json={
+                                                            "text": f"Task approval: {label}",
+                                                            "replace_original": True,
+                                                        },
+                                                    )
                                         except Exception as exc:
                                             logger.warning(
                                                 "[Slack] Swarm approval callback failed: %s",
@@ -652,6 +680,18 @@ class SlackAdapter(BaseAdapter):
                                                 },
                                             )
                                             self._queue.put_nowait(incoming)
+                                            if response_url:
+                                                try:
+                                                    async with httpx.AsyncClient() as client:
+                                                        await client.post(
+                                                            response_url,
+                                                            json={
+                                                                "text": f"Selection received ({action.kind})",
+                                                                "replace_original": True,
+                                                            },
+                                                        )
+                                                except Exception:
+                                                    pass
                                         except Exception as exc:
                                             logger.warning(
                                                 "[Slack] Failed to enqueue interaction: %s",

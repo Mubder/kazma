@@ -960,7 +960,7 @@
     if (!_openBeliefId) return;
     const ok = window.kazmaConfirm
       ? await window.kazmaConfirm({ title: 'Unlink belief?', message: 'Soft-invalidate this edge from active memory.' })
-      : confirm('Unlink (invalidate) belief?');
+      : await window.confirm('Unlink (invalidate) belief?');
     if (!ok) return;
     await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
     const d = document.getElementById('v2-belief-drawer');
@@ -1001,7 +1001,7 @@
   document.getElementById('v2-queue-clear-failed')?.addEventListener('click', async function() {
     const ok = window.kazmaConfirm
       ? await window.kazmaConfirm({ title: 'Clear failed tasks?', message: 'Permanently delete dead-letter queue rows.' })
-      : confirm('Clear all failed queue tasks?');
+      : await window.confirm('Clear all failed queue tasks?');
     if (!ok) return;
     try {
       const r = await fetch('/api/memory/v2/queue/clear-failed', { method: 'POST' });

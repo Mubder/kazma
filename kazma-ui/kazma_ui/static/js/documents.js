@@ -547,10 +547,10 @@ function documentsPage() {
             danger: true,
           }));
         } else {
-          proceed = window.confirm(`Archive "${label}"?`);
+          proceed = await window.confirm(`Archive "${label}"?`);
         }
       } catch (e) {
-        proceed = window.confirm(`Archive "${label}"?`);
+        proceed = await window.confirm(`Archive "${label}"?`);
       }
       if (!proceed) return;
       this.acting = true;

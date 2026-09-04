@@ -9,11 +9,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
 from kazma_ui.models import SkillInstallRequest, SkillToggleRequest
+from kazma_ui.rate_limit import rate_limit
+from kazma_core.errors import safe_error
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -27,6 +29,28 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
     """Create the skills management router."""
 
     router = APIRouter(tags=["skills"])
+
+    def _require_admin(request: Request) -> JSONResponse | None:
+        """Admin/operator gate for skill modification operations."""
+        try:
+            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+            secret = get_kazma_secret()
+            if not secret:
+                return None
+            if not is_authenticated(request, secret):
+                return JSONResponse({"status": "error", "error": "Unauthorized"}, status_code=401)
+            principal = get_request_principal(request) or {}
+            if principal.get("source") == "secret":
+                return None
+            if principal.get("role") != "admin":
+                return JSONResponse(
+                    {"status": "error", "error": "Admin role required"}, status_code=403
+                )
+            return None
+        except Exception as exc:
+            logger.warning("[skills_ui] admin check failed: %s", exc)
+            return JSONResponse({"status": "error", "error": "Authentication error"}, status_code=401)
 
     def _localize_skill_desc(name: str, description: str, lang: str) -> str:
         """Prefer skill.desc.{name} i18n when present."""
@@ -276,16 +300,27 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             )
         return out
 
-    @router.post("/api/skills/install")
-    async def api_install_skill(req: SkillInstallRequest) -> dict[str, str]:
+    @router.post("/api/skills/install", dependencies=[Depends(rate_limit("skills_install", 5))])
+    async def api_install_skill(req: SkillInstallRequest, request: Request) -> JSONResponse:
         """Install a skill from the Kazma hub or Agent Skills (GitHub / path).
 
         * ``kazma-hub://author/name@version`` → hub registry install
         * ``owner/repo``, GitHub URL, or local path → Agent Skills installer
         """
+        auth_err = _require_admin(request)
+        if auth_err:
+            return auth_err
+
         skill_id = (req.skill_id or "").strip()
         if not skill_id:
-            return {"status": "error", "error": "skill_id is required"}
+            return JSONResponse({"status": "error", "error": "skill_id is required"}, status_code=400)
+
+        # Path traversal guard for file/relative paths
+        if ".." in skill_id or "\0" in skill_id:
+            return JSONResponse(
+                {"status": "error", "error": "Directory traversal not allowed in skill_id"},
+                status_code=400,
+            )
 
         # Agent Skills path (agentskills.io)
         if not skill_id.startswith("kazma-hub://"):
@@ -295,19 +330,19 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
                 result = await install_from_any(skill_id, scope="user")
                 if result.success:
                     paths = ", ".join(i.get("path", "") for i in result.installed)
-                    return {
+                    return JSONResponse({
                         "status": "ok",
                         "path": paths,
                         "message": result.message,
                         "installed": str(len(result.installed)),
-                    }
-                return {
+                    })
+                return JSONResponse({
                     "status": "error",
                     "error": "; ".join(result.errors) or result.message,
-                }
+                }, status_code=400)
             except Exception as exc:
                 logger.exception("Agent skill install failed")
-                return {"status": "error", "error": str(exc)}
+                return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
         try:
             from kazma_core.hub.registry import KazmaHub
@@ -315,30 +350,44 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
             hub = KazmaHub()
             path = await hub.install(skill_id)
             await hub.close()
-            return {"status": "ok", "path": str(path)}
-        except Exception:
-            return {"status": "error", "error": "Internal error"}
+            return JSONResponse({"status": "ok", "path": str(path)})
+        except Exception as exc:
+            logger.exception("Hub skill install failed")
+            return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/skills/uninstall")
-    async def api_uninstall_skill(req: SkillInstallRequest) -> dict[str, str]:
+    async def api_uninstall_skill(req: SkillInstallRequest, request: Request) -> JSONResponse:
         """Uninstall a hub skill or Agent Skill."""
+        auth_err = _require_admin(request)
+        if auth_err:
+            return auth_err
+
         skill_id = (req.skill_id or "").strip()
+        if not skill_id:
+            return JSONResponse({"status": "error", "error": "skill_id is required"}, status_code=400)
+        if ".." in skill_id or "\0" in skill_id:
+            return JSONResponse(
+                {"status": "error", "error": "Directory traversal not allowed in skill_id"},
+                status_code=400,
+            )
+
         try:
             if skill_id.startswith("agent-skill:"):
                 name = skill_id.split(":", 1)[1]
                 from kazma_core.agent_skills.installer import uninstall_skill
 
                 result = uninstall_skill(name)
-                return {"status": "ok" if result.success else "not_found"}
+                return JSONResponse({"status": "ok" if result.success else "not_found"})
 
             from kazma_core.hub.registry import KazmaHub
 
             hub = KazmaHub()
             removed = await hub.unregister(skill_id)
             await hub.close()
-            return {"status": "ok" if removed else "not_found"}
-        except Exception:
-            return {"status": "error", "error": "Internal error"}
+            return JSONResponse({"status": "ok" if removed else "not_found"})
+        except Exception as exc:
+            logger.exception("Skill uninstall failed")
+            return JSONResponse({"status": "error", "error": safe_error(exc)}, status_code=500)
 
     @router.post("/api/skills/toggle")
     async def api_toggle_skill(req: SkillToggleRequest) -> dict[str, str]:

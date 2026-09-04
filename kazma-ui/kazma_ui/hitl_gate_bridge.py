@@ -265,9 +265,9 @@ async def abort_thread_hitl(thread_id: str, *, session_id: str = "") -> None:
         except Exception:
             logger.debug("[GateBridge] abort HITL stamp skipped", exc_info=True)
     try:
-        from kazma_core.safety.commitment.store import abort_pending_for_thread
+        from kazma_core.safety.commitment.store import async_abort_pending_for_thread
 
-        abort_pending_for_thread(thread_id, reason="user_abort")
+        await async_abort_pending_for_thread(thread_id, reason="user_abort")
     except Exception:
         logger.debug("[GateBridge] abort commitments skipped", exc_info=True)
 

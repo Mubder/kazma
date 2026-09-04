@@ -204,18 +204,29 @@ class ReliabilityRegistry:
 
     # ── Bounded concurrency ─────────────────────────────────────────
 
+    _MAX_CONCURRENCY_CACHE_SIZE: int = 64
+
     def get_bounded_concurrency(
         self,
         task_max_concurrent: int | None = None,
     ) -> BoundedConcurrency:
-        """Return a shared BoundedConcurrency for the given limit (audit M12).
+        """Return a shared BoundedConcurrency for the given limit (audit M12, L12).
 
         Task-level override takes precedence over the engine default.
         Instances are cached per limit so concurrent callers share one semaphore.
+        Cache is bounded to prevent memory growth from arbitrary limits.
         """
-        limit = task_max_concurrent or self._default_max_concurrent
+        raw_limit = task_max_concurrent if task_max_concurrent is not None else self._default_max_concurrent
+        try:
+            limit = max(1, min(int(raw_limit), 1024))
+        except (ValueError, TypeError):
+            limit = max(1, int(self._default_max_concurrent))
+
         cached = self._concurrency_cache.get(limit)
         if cached is None:
+            if len(self._concurrency_cache) >= self._MAX_CONCURRENCY_CACHE_SIZE:
+                oldest_key = next(iter(self._concurrency_cache))
+                self._concurrency_cache.pop(oldest_key, None)
             cached = BoundedConcurrency(max_concurrent=limit)
             self._concurrency_cache[limit] = cached
         return cached

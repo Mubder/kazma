@@ -762,6 +762,15 @@ def _start_commitment_gc_scheduler() -> None:
                         )
             except Exception:
                 logger.debug("[memory_worker] gate TTL sweep failed", exc_info=True)
+            # Memory task queue retention sweep (audit M2): purge terminal rows (>7d)
+            try:
+                from kazma_core.memory.task_queue import purge_completed_tasks
+
+                purged = await asyncio.to_thread(purge_completed_tasks)
+                if purged:
+                    logger.info("[memory_worker] task queue purge: %d deleted", purged)
+            except Exception:
+                logger.debug("[memory_worker] task queue purge failed", exc_info=True)
             await asyncio.sleep(_COMMITMENT_GC_INTERVAL_MINUTES * 60)
 
     try:

@@ -197,55 +197,70 @@ def resolve(task_id: str, approved: bool) -> None:
     with _lock:
         if _local_results.get(task_id) is True:
             return
-        prev = _load_payload(task_id)
-        if _is_resolved_true(prev):
-            _local_results[task_id] = True
-            _wake(task_id)
-            return
-        if prev.get("status") == "resolved" and prev.get("result") is False:
-            _local_results[task_id] = False
-            _wake(task_id)
-            return
 
-        expected = max(1, int(prev.get("expected_voters") or 1))
-        reject_votes = int(prev.get("reject_votes") or 0)
-        payload = dict(prev) if prev else {}
-        payload.setdefault("created_at", time.time())
-        payload["expected_voters"] = expected
+        def _mutate(prev: Any) -> dict[str, Any]:
+            cur = dict(prev) if isinstance(prev, dict) else {}
+            if _is_resolved_true(cur):
+                return cur
+            if cur.get("status") == "resolved" and cur.get("result") is False:
+                return cur
 
-        if approved:
-            payload.update(
-                {
-                    "status": "resolved",
-                    "result": True,
-                    "resolved_at": time.time(),
-                    "reject_votes": reject_votes,
-                }
-            )
-            _local_results[task_id] = True
-            _save_payload(task_id, payload)
-            _wake(task_id)
-            should_evict = True
-        else:
-            reject_votes += 1
-            payload["reject_votes"] = reject_votes
-            if _should_settle_reject(payload, reject_votes):
+            expected = max(1, int(cur.get("expected_voters") or 1))
+            reject_votes = int(cur.get("reject_votes") or 0)
+            payload = dict(cur)
+            payload.setdefault("created_at", time.time())
+            payload["expected_voters"] = expected
+
+            if approved:
                 payload.update(
                     {
                         "status": "resolved",
-                        "result": False,
+                        "result": True,
                         "resolved_at": time.time(),
+                        "reject_votes": reject_votes,
                     }
                 )
-                _local_results[task_id] = False
-                _save_payload(task_id, payload)
-                _wake(task_id)
-                should_evict = True
             else:
-                payload["status"] = "pending"
-                payload["result"] = None
+                reject_votes += 1
+                payload["reject_votes"] = reject_votes
+                if _should_settle_reject(payload, reject_votes):
+                    payload.update(
+                        {
+                            "status": "resolved",
+                            "result": False,
+                            "resolved_at": time.time(),
+                        }
+                    )
+                else:
+                    payload["status"] = "pending"
+                    payload["result"] = None
+            return payload
+
+        try:
+            from kazma_core.config_store import ConfigStore, get_config_store
+
+            cs = get_config_store()
+            if isinstance(cs, ConfigStore):
+                payload = cs.atomic_update(_key(task_id), _mutate, category="swarm")
+            else:
+                prev = _load_payload(task_id)
+                payload = _mutate(prev)
                 _save_payload(task_id, payload)
-                # Keep waiters parked — a later True can still win.
+        except Exception as exc:
+            logger.debug("[shared_approvals] atomic_update failed, falling back to local: %s", exc)
+            prev = _load_payload(task_id)
+            payload = _mutate(prev)
+            _save_payload(task_id, payload)
+
+        if _is_resolved_true(payload):
+            _local_results[task_id] = True
+            _wake(task_id)
+            should_evict = True
+        elif payload.get("status") == "resolved" and payload.get("result") is False:
+            _local_results[task_id] = False
+            _wake(task_id)
+            should_evict = True
+
     if should_evict:
         _schedule_eviction(task_id)
 

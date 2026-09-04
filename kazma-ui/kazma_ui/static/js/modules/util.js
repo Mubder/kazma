@@ -124,4 +124,23 @@ export const KazmaUtils = {
             showToast('Failed to copy', 'error');
         });
     },
+
+    escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    },
 };
+
+export function escapeHtml(str) {
+    return KazmaUtils.escapeHtml(str);
+}
+
+if (typeof window !== 'undefined') {
+    window.escapeHtml = window.escapeHtml || escapeHtml;
+    window.esc = window.esc || escapeHtml;
+}

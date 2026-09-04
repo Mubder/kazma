@@ -344,6 +344,12 @@ class SupervisorState(TypedDict, total=False):
     chip so the user learns the context was compacted instead of wondering
     why the agent forgot."""
 
+    _gateway: dict[str, Any]
+    """Internal gateway transport metadata (platform, delivery_target, display_name).
+    Carried in the internal routing block so tools can capture it for later async
+    delivery without leaking platform IDs into graph state (AGENTS.md §2).
+    Declared state key so LangGraph does not drop it across node boundaries."""
+
 
 # ── Factory ─────────────────────────────────────────────────────────────
 
@@ -425,4 +431,5 @@ def initial_supervisor_state(
         mission_hard_rounds=_mission_hard if _mode == "mission" else 0,
         recovery_probes=0,
         context_compacted={},
+        _gateway={},
     )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from kazma_gateway.adapters.callback_store import encode_callback_data
+
 __all__ = [
     "build_approval_keyboard",
     "build_model_keyboard",
@@ -28,17 +30,17 @@ def build_approval_keyboard(request_id: str) -> dict[str, Any]:
             [
                 {
                     "text": "✅ Approve",
-                    "callback_data": f"hitl:approve:{request_id}",
+                    "callback_data": encode_callback_data(f"hitl:approve:{request_id}"),
                 },
                 {
                     "text": "❌ Deny",
-                    "callback_data": f"hitl:deny:{request_id}",
+                    "callback_data": encode_callback_data(f"hitl:deny:{request_id}"),
                 },
             ],
             [
                 {
                     "text": "🔓 Approve for task",
-                    "callback_data": f"hitl:approve_task:{request_id}",
+                    "callback_data": encode_callback_data(f"hitl:approve_task:{request_id}"),
                 },
             ],
         ]
@@ -56,7 +58,7 @@ def build_semantic_keyboard(request_id: str, options: list[dict]) -> dict[str, A
         label = opt.get("label", oid)[:60]
         rows.append([{
             "text": label,
-            "callback_data": f"hitl:opt:{oid}:{request_id}",
+            "callback_data": encode_callback_data(f"hitl:opt:{oid}:{request_id}"),
         }])
     return {"inline_keyboard": rows} if rows else build_approval_keyboard(request_id)
 
@@ -65,7 +67,7 @@ def build_personality_keyboard(personalities: list[str]) -> dict[str, Any]:
     """Build an inline keyboard for personality selection (top 3)."""
     return {
         "inline_keyboard": [
-            [{"text": name, "callback_data": f"personality:{name}"}]
+            [{"text": name, "callback_data": encode_callback_data(f"personality:{name}")}]
             for name in personalities[:3]
         ]
     }
@@ -78,7 +80,7 @@ def build_provider_keyboard(providers: list[dict[str, Any]]) -> dict[str, Any]:
     for p in providers:
         name = p.get("name", p.get("display_name", "?"))
         display = p.get("display_name", name)
-        row.append({"text": display, "callback_data": f"model_provider:{name}"})
+        row.append({"text": display, "callback_data": encode_callback_data(f"model_provider:{name}")})
         if len(row) == 2:
             buttons.append(row)
             row = []
@@ -100,6 +102,6 @@ def build_model_keyboard(provider_name: str, models: list[str]) -> dict[str, Any
         if "/" in display:
             display = display.split("/")[-1]
         buttons.append(
-            [{"text": display, "callback_data": f"model_select:{model_id}"}]
+            [{"text": display, "callback_data": encode_callback_data(f"model_select:{model_id}")}]
         )
     return {"inline_keyboard": buttons}

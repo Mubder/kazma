@@ -10,6 +10,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from kazma_core.workspace.binding import (
@@ -95,9 +96,18 @@ async def file_write(path: str, content: str) -> str:
     if not access.allowed:
         return denied_message(path, "write", result=access)
 
-    try:
+    MAX_FILE_WRITE_BYTES = 8 * 1024 * 1024  # 8 MB cap
+    encoded_bytes = content.encode("utf-8")
+    byte_count = len(encoded_bytes)
+    if byte_count > MAX_FILE_WRITE_BYTES:
+        return f"Error: Content exceeds maximum write limit of 8 MB (received {byte_count} bytes)."
+
+    def _write_sync() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(content, encoding="utf-8")
+
+    try:
+        await asyncio.to_thread(_write_sync)
     except PermissionError:
         return _friendly_error(PermissionError(), path)
     except IsADirectoryError:
@@ -106,7 +116,6 @@ async def file_write(path: str, content: str) -> str:
         return _friendly_error(exc, path)
 
     line_count = content.count("\n") + (1 if content and not content.endswith("\n") else 0)
-    byte_count = len(content.encode("utf-8"))
     try:
         from kazma_core.code_index.indexer import notify_file_changed
 

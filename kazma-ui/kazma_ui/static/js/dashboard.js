@@ -103,8 +103,8 @@
       var color = f.color || '#3b82f6';
       return '<div' + dirAttr + ' class="feature-cap-card" style="background:var(--card-bg, var(--bg-panel));border:1px solid var(--border-color, var(--border));border-radius:10px;padding:14px;transition:border-color 0.2s;cursor:default;' + textAlign + '" onmouseover="this.style.borderColor=\'' + color + '\'"; onmouseout="this.style.borderColor=\'var(--border-color, var(--border))\'">' +
         '<div style="color:' + color + ';margin-bottom:8px;display:flex;align-items:center;">' + icon + '</div>' +
-        '<div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">' + f.name + '</div>' +
-        '<div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;">' + f.desc + '</div>' +
+        '<div style="font-weight:600;font-size:0.85rem;margin-bottom:4px;">' + escapeHtml(f.name) + '</div>' +
+        '<div style="font-size:0.72rem;color:var(--text-secondary);line-height:1.3;">' + escapeHtml(f.desc) + '</div>' +
         '</div>';
     }).join('');
     grid.innerHTML = html;
@@ -298,11 +298,11 @@
       '<td style="padding:10px 16px;"><span class="badge ' + badgeClass + '" style="font-size:0.7rem;">' +
         escapeHtml(trace.status || '') + '</span></td>' +
       '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' +
-        (trace.duration_ms || '') + 'ms</td>' +
+        escapeHtml(String(trace.duration_ms || '')) + 'ms</td>' +
       '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;">' +
-        (trace.tokens || '0') + '</td>' +
+        escapeHtml(String(trace.tokens || '0')) + '</td>' +
       '<td style="padding:10px 16px;text-align:right;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-tertiary);">' +
-        (trace.cost || '$0.00') + '</td>';
+        escapeHtml(String(trace.cost || '$0.00')) + '</td>';
 
     tr.style.borderBottom = '1px solid var(--border-subtle)';
     tr.style.animation = 'fadeIn 0.3s ease';
@@ -651,10 +651,11 @@
     setTimeout(function() {
       var loadingEl = document.getElementById('sessions-loading');
       if (loadingEl && loadingEl.style.display !== 'none') {
-        // Still skeleton after 2s — force empty state so page never hangs
+        var tableEl = document.getElementById('sessions-table');
         var emptyEl = document.getElementById('sessions-empty');
-        if (emptyEl) {
-          // only force if table still hidden (load may still be in flight)
+        if (!tableEl || tableEl.style.display === 'none') {
+          loadingEl.style.display = 'none';
+          if (emptyEl) emptyEl.style.display = 'block';
         }
       }
     }, 2500);

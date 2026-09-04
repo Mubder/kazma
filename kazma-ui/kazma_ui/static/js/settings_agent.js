@@ -319,7 +319,7 @@
                     title: 'Rebuild embeddings?',
                     message: 'Re-embed episodes/beliefs for the current model. May take minutes.',
                 })
-                : confirm('Rebuild embeddings?');
+                : await window.confirm('Rebuild embeddings?');
             if (!ok) return;
             try {
                 const resp = await fetch('/api/settings/memory/backends/rebuild', {

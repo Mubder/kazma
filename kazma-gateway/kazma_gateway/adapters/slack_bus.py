@@ -203,8 +203,10 @@ class SlackBusAdapter(BusAdapter):
         await self._post_message({"text": f"ALERT: {title}", "blocks": blocks})
 
     async def request_approval(
-        self, approval: ApprovalRequest, timeout: float = _APPROVAL_TIMEOUT
+        self, approval: ApprovalRequest, timeout: float | None = None
     ) -> bool:
+        if timeout is None:
+            timeout = _APPROVAL_TIMEOUT
         """Post an approval card with Block Kit buttons and await the response.
 
         Button values carry ``swarm_approve_{task_id}`` /

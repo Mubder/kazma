@@ -27,9 +27,9 @@ def create_commitment_router() -> APIRouter:
     @router.get("/api/commitment/soul/pending")
     async def list_pending_soul() -> dict:
         """List needs_confirm soul-delta commitments awaiting confirmation."""
-        from kazma_core.safety.commitment.store import list_pending_soul as _list
+        from kazma_core.safety.commitment.store import async_list_pending_soul as _list
 
-        rows = _list()
+        rows = await _list()
         return {
             "count": len(rows),
             "pending": [
@@ -51,12 +51,12 @@ def create_commitment_router() -> APIRouter:
         """Confirm a soul delta: flip to committed + re-apply (the trigger the
         event-driven apply path needs). Routes through apply_* so the now-
         committed commitment passes the gate."""
-        from kazma_core.safety.commitment.store import get_commitment
+        from kazma_core.safety.commitment.store import async_get_commitment
         from kazma_core.skills.self_improvement import (
             apply_agent_mutation, confirm_soul_delta, get_self_improvement,
         )
 
-        c = get_commitment(commitment_id)
+        c = await async_get_commitment(commitment_id)
         if c is None or c.act != "soul_delta":
             return {"error": "not a soul commitment", "commitment_id": commitment_id}
         if not confirm_soul_delta(commitment_id):
@@ -82,9 +82,9 @@ def create_commitment_router() -> APIRouter:
     @router.post("/api/commitment/soul/{commitment_id}/reject")
     async def reject_soul(commitment_id: str) -> dict:
         """Reject a soul delta: abort the commitment (the delta stays unapplied)."""
-        from kazma_core.safety.commitment.store import update_status
+        from kazma_core.safety.commitment.store import async_update_status
 
-        c = update_status(commitment_id, "aborted", event_type="soul_rejected")
+        c = await async_update_status(commitment_id, "aborted", event_type="soul_rejected")
         if c is None:
             return {"error": "not found", "commitment_id": commitment_id}
         return {"rejected": True, "commitment_id": commitment_id}

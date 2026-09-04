@@ -45,8 +45,14 @@
   // ── Public API ──
   window.KazmaReplay = {
     init: function () {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       this.loadThreads();
       pollTimer = setInterval(this.loadThreads.bind(this), 10000);
+      _registerSoftNavTeardown();
+    },
+
+    destroy: function () {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     },
 
     /** Stop polling + mark the panel as backend-unavailable (404/503). */
@@ -157,7 +163,7 @@
           }
 
           listEl.innerHTML = snaps.map(function (s) {
-            return '<div class="card replay-snap-card" style="padding:12px 16px;cursor:pointer;" onclick="KazmaReplay.viewSnapshot(' + s.iteration + ')">' +
+            return '<div class="card replay-snap-card" style="padding:12px 16px;cursor:pointer;" data-iteration="' + s.iteration + '">' +
               '<div style="display:flex;align-items:center;justify-content:space-between;">' +
                 '<div>' +
                   '<span style="font-weight:600;color:var(--text-primary);">Iteration ' + s.iteration + '</span>' +
@@ -170,6 +176,15 @@
               '</div>' +
             '</div>';
           }).join('');
+          if (!listEl._boundClick) {
+            listEl._boundClick = true;
+            listEl.addEventListener('click', function (e) {
+              var card = e.target.closest('.replay-snap-card');
+              if (card && card.dataset.iteration) {
+                KazmaReplay.viewSnapshot(parseInt(card.dataset.iteration, 10));
+              }
+            });
+          }
         })
         .catch(function (err) {
           listEl.innerHTML = '<div style="padding:1rem;color:var(--error);">Failed to load: ' + esc(err.message) + '</div>';
@@ -293,6 +308,22 @@
       '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">' + esc(a) + '</td>' +
       '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);">' + esc(b) + '</td>' +
       '<td style="text-align:right;padding:8px;border-bottom:1px solid var(--border);font-weight:600;">' + esc(delta) + '</td></tr>';
+  }
+
+  function _registerSoftNavTeardown() {
+    if (typeof window === 'undefined') return;
+    var teardown = function () {
+      if (window.KazmaReplay && typeof window.KazmaReplay.destroy === 'function') {
+        window.KazmaReplay.destroy();
+      }
+    };
+    if (Array.isArray(window.kazmaOnSoftNavLeave)) {
+      window.kazmaOnSoftNavLeave.push(teardown);
+    } else if (typeof window.kazmaOnSoftNavLeave === 'function') {
+      window.kazmaOnSoftNavLeave = [window.kazmaOnSoftNavLeave, teardown];
+    } else {
+      window.kazmaOnSoftNavLeave = [teardown];
+    }
   }
 
   // Auto-init on DOM ready

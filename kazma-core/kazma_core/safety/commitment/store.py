@@ -14,6 +14,7 @@ commitment table must not ship to production. Tests in
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import sqlite3
@@ -35,12 +36,21 @@ __all__ = [
     "get_commitment",
     "update_status",
     "list_by_thread",
+    "list_pending_soul",
     "sweep_expired",
     "enforce_pending_cap",
     "enforce_all_pending_caps",
     "abort_pending_for_thread",
     "delete_retained",
     "run_gc_cycle",
+    "async_create_commitment",
+    "async_get_commitment",
+    "async_update_status",
+    "async_list_by_thread",
+    "async_list_pending_soul",
+    "async_sweep_expired",
+    "async_abort_pending_for_thread",
+    "async_run_gc_cycle",
 ]
 
 # ── statuses / policy decisions ────────────────────────────────────────────
@@ -300,11 +310,39 @@ def update_status(
         )
         resolved_at = now if is_terminal else None
         result_json = json.dumps(result, ensure_ascii=False) if result is not None else row["result_json"]
-        conn.execute(
-            """UPDATE commitments SET status=?, updated_at=?, expires_at=?,
-               resolved_at=?, result_json=? WHERE commitment_id=?""",
-            (status, now, expires_at, resolved_at, result_json, commitment_id),
-        )
+
+        # Atomic CAS update: if transitioning to an active state, refuse if the row
+        # has been moved to 'expired' or 'aborted' concurrently in the DB
+        if status in ("committed", "ready", "needs_confirm", "needs_clarify", "draft"):
+            cur = conn.execute(
+                """UPDATE commitments SET status=?, updated_at=?, expires_at=?,
+                   resolved_at=?, result_json=?
+                   WHERE commitment_id=? AND (status NOT IN ('expired', 'aborted') OR status = ?)""",
+                (status, now, expires_at, resolved_at, result_json, commitment_id, status),
+            )
+        else:
+            cur = conn.execute(
+                """UPDATE commitments SET status=?, updated_at=?, expires_at=?,
+                   resolved_at=?, result_json=?
+                   WHERE commitment_id=?""",
+                (status, now, expires_at, resolved_at, result_json, commitment_id),
+            )
+
+        if cur.rowcount == 0:
+            # Atomic CAS prevented a race condition (e.g. concurrent sweep_expired)
+            current_row = conn.execute(
+                "SELECT * FROM commitments WHERE commitment_id=?", (commitment_id,),
+            ).fetchone()
+            curr_status = current_row["status"] if current_row else "unknown"
+            logger.warning(
+                "[commitment] refused revive of %s %s → %s (concurrent transition)",
+                commitment_id, curr_status, status,
+            )
+            _emit_event(conn, commitment_id, "revive_refused",
+                        {"attempted": status, "current": curr_status})
+            conn.commit()
+            return _row_to_commitment(current_row) if current_row else None
+
         _emit_event(conn, commitment_id, event_type or status, payload or {})
         conn.commit()
     return get_commitment(commitment_id)
@@ -328,14 +366,14 @@ def list_by_thread(thread_id: str, *, status: str | None = None,
     with _connect() as conn:
         if status:
             rows = conn.execute(
-                "SELECT * FROM commitments WHERE thread_id=? AND tenant_id=? AND status=? "
-                "ORDER BY created_at",
-                (thread_id, tenant_id, status),
+                "SELECT * FROM commitments WHERE thread_id=? AND status=? AND tenant_id=? "
+                "ORDER BY created_at DESC",
+                (thread_id, status, tenant_id),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT * FROM commitments WHERE thread_id=? AND tenant_id=? "
-                "ORDER BY created_at",
+                "ORDER BY created_at DESC",
                 (thread_id, tenant_id),
             ).fetchall()
     return [_row_to_commitment(r) for r in rows]
@@ -362,13 +400,14 @@ def sweep_expired(now: float | None = None, *, cfg: dict[str, Any] | None = None
         ).fetchall()
         for r in rows:
             cid = r["commitment_id"]
-            conn.execute(
+            cur = conn.execute(
                 "UPDATE commitments SET status='expired', updated_at=?, resolved_at=?, "
-                "expires_at=? WHERE commitment_id=?",
+                "expires_at=? WHERE commitment_id=? AND status IN ('draft','needs_clarify','needs_confirm','ready')",
                 (now, now, now, cid),
             )
-            _emit_event(conn, cid, "expired", {"swept_at": now})
-            expired_count += 1
+            if cur.rowcount > 0:
+                _emit_event(conn, cid, "expired", {"swept_at": now})
+                expired_count += 1
         conn.commit()
     if expired_count:
         logger.info("[commitment] sweep_expired: %d commitment(s) expired", expired_count)
@@ -515,3 +554,61 @@ def delete_retained(now: float | None = None, *,
     if deleted:
         logger.info("[commitment] delete_retained: hard-deleted %d terminal rows", deleted)
     return deleted
+
+
+# ── Async wrappers (offloading sync SQLite queries from event loop - §26E) ─
+
+async def async_create_commitment(c: Commitment, *, cfg: dict[str, Any] | None = None) -> str:
+    """Async wrapper for create_commitment via asyncio.to_thread."""
+    return await asyncio.to_thread(create_commitment, c, cfg=cfg)
+
+
+async def async_get_commitment(commitment_id: str) -> Commitment | None:
+    """Async wrapper for get_commitment via asyncio.to_thread."""
+    return await asyncio.to_thread(get_commitment, commitment_id)
+
+
+async def async_update_status(
+    commitment_id: str,
+    status: str,
+    *,
+    event_type: str | None = None,
+    payload: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    cfg: dict[str, Any] | None = None,
+) -> Commitment | None:
+    """Async wrapper for update_status via asyncio.to_thread."""
+    return await asyncio.to_thread(
+        update_status,
+        commitment_id,
+        status,
+        event_type=event_type,
+        payload=payload,
+        result=result,
+        cfg=cfg,
+    )
+
+
+async def async_list_by_thread(thread_id: str) -> list[Commitment]:
+    """Async wrapper for list_by_thread via asyncio.to_thread."""
+    return await asyncio.to_thread(list_by_thread, thread_id)
+
+
+async def async_list_pending_soul(tenant_id: str = "default") -> list[Commitment]:
+    """Async wrapper for list_pending_soul via asyncio.to_thread."""
+    return await asyncio.to_thread(list_pending_soul, tenant_id=tenant_id)
+
+
+async def async_sweep_expired(cfg: dict[str, Any] | None = None) -> int:
+    """Async wrapper for sweep_expired via asyncio.to_thread."""
+    return await asyncio.to_thread(sweep_expired, cfg=cfg)
+
+
+async def async_abort_pending_for_thread(thread_id: str, reason: str = "user_aborted") -> int:
+    """Async wrapper for abort_pending_for_thread via asyncio.to_thread."""
+    return await asyncio.to_thread(abort_pending_for_thread, thread_id, reason=reason)
+
+
+async def async_run_gc_cycle(cfg: dict[str, Any] | None = None) -> dict[str, int]:
+    """Async wrapper for run_gc_cycle via asyncio.to_thread."""
+    return await asyncio.to_thread(run_gc_cycle, cfg=cfg)

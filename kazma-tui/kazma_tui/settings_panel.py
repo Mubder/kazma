@@ -119,7 +119,7 @@ class SettingsPanel(VerticalScroll):
         try:
             from kazma_core.runtime.local_api import request_json
 
-            grouped = request_json("GET", "/api/settings")
+            grouped = request_json("GET", "/api/settings", timeout=2.0)
         except Exception:
             logger.debug("TUI settings live GET failed", exc_info=True)
             self._settings_source = "local"
@@ -146,6 +146,7 @@ class SettingsPanel(VerticalScroll):
                 "PUT",
                 "/api/settings/single",
                 {"key": key, "value": value, "category": category},
+                timeout=2.0,
             )
             if self._live_settings is not None:
                 self._live_settings[key] = value

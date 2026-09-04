@@ -44,13 +44,14 @@ def get_http_client() -> httpx.AsyncClient:
 async def close_http_client() -> None:
     """Closes the global persistent httpx.AsyncClient instance if initialized."""
     global _client
-    if _client is not None:
-        with _client_lock:
-            if _client is not None:
-                client_to_close = _client
-                _client = None
-                try:
-                    await client_to_close.aclose()
-                    logger.info("[HTTPPool] Closed global persistent httpx.AsyncClient pool")
-                except Exception as exc:
-                    logger.warning("[HTTPPool] Error closing httpx.AsyncClient: %s", exc)
+    client_to_close = None
+    with _client_lock:
+        if _client is not None:
+            client_to_close = _client
+            _client = None
+    if client_to_close is not None:
+        try:
+            await client_to_close.aclose()
+            logger.info("[HTTPPool] Closed global persistent httpx.AsyncClient pool")
+        except Exception as exc:
+            logger.warning("[HTTPPool] Error closing httpx.AsyncClient: %s", exc)

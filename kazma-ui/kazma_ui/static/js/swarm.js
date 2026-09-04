@@ -119,6 +119,15 @@
       var tid = el.dataset.taskId;
       if (tid) viewTaskDetail(tid);
     });
+
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        var modal = $('task-detail-modal');
+        if (modal && modal.style.display !== 'none') {
+          closeTaskDetail();
+        }
+      }
+    });
   }
 
   // ══════════════════════════════════════════════════════
@@ -1318,15 +1327,25 @@
   // TASK DETAIL VIEW
   // ══════════════════════════════════════════════════════
 
+  var _taskDetailPrevActive = null;
+
   function viewTaskDetail(taskId) {
     var modal = $('task-detail-modal');
     var titleEl = $('task-detail-title');
     var bodyEl = $('task-detail-body');
     if (!modal || !bodyEl) return;
 
+    _taskDetailPrevActive = document.activeElement;
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.dataset.overlayOpen = '1';
+    }
+
     if (titleEl) titleEl.textContent = t('swarm.task_title_prefix') + taskId.slice(0, 20) + '…';
     bodyEl.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);">' + esc(t('common.loading')) + '</div>';
     modal.style.display = 'flex';
+
+    var closeBtn = modal.querySelector('.modal-close');
+    if (closeBtn) closeBtn.focus();
 
     fetch('/api/swarm/tasks/' + encodeURIComponent(taskId))
       .then(function(r) { return r.json(); })
@@ -1344,6 +1363,13 @@
     if (event && event.target !== event.currentTarget) return;
     var modal = $('task-detail-modal');
     if (modal) modal.style.display = 'none';
+    if (typeof document !== 'undefined' && document.documentElement) {
+      delete document.documentElement.dataset.overlayOpen;
+    }
+    if (_taskDetailPrevActive && typeof _taskDetailPrevActive.focus === 'function') {
+      try { _taskDetailPrevActive.focus(); } catch (e) {}
+      _taskDetailPrevActive = null;
+    }
   }
 
   function renderTaskDetailHTML(task) {
@@ -2787,6 +2813,20 @@
   function renderTemplates(templates, instances) {
     var c = $('template-cards-container');
     if (!c) return;
+    if (!c._templatesBound) {
+      c._templatesBound = true;
+      c.addEventListener('click', function(e) {
+        var btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        var act = btn.getAttribute('data-action');
+        var name = btn.getAttribute('data-name');
+        if (act === 'edit-template' && name) {
+          editTemplate(name);
+        } else if (act === 'delete-template' && name) {
+          deleteTemplate(name);
+        }
+      });
+    }
     if (!templates.length) {
       c.innerHTML = '<div style="text-align:center;padding:32px;color:var(--text-muted);">' + (window.t ? t('swarm.no_templates') : 'No templates') + '</div>';
       return;
@@ -2816,8 +2856,8 @@
               (tmpl.system_prompt ? '<div style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">' + KazmaUtils.esc(tmpl.system_prompt.slice(0, 140)) + (tmpl.system_prompt.length > 140 ? '…' : '') + '</div>' : '') +
             '</div>' +
             '<div style="display:flex;gap:4px;">' +
-              '<button class="btn btn-sm btn-secondary" onclick="KazmaSwarm.editTemplate(\'' + tmpl.name.replace(/'/g, "\\'") + '\')" title="Edit"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
-              '<button class="btn btn-sm btn-danger" onclick="KazmaSwarm.deleteTemplate(\'' + tmpl.name.replace(/'/g, "\\'") + '\')" title="Delete"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-secondary" data-action="edit-template" data-name="' + KazmaUtils.esc(tmpl.name) + '" title="Edit"><span class="ki" data-icon="edit" aria-hidden="true"></span></button>' +
+              '<button class="btn btn-sm btn-danger" data-action="delete-template" data-name="' + KazmaUtils.esc(tmpl.name) + '" title="Delete"><span class="ki" data-icon="x" aria-hidden="true"></span></button>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -2891,24 +2931,19 @@
     }
   }
 
-  function deleteTemplate(name) {
-    if (!window.kazmaConfirm) { if (!confirm('Delete template "' + name + '"?')) return; }
-    else {
-      window.kazmaConfirm({ message: 'Delete template "' + name + '"?', danger: true, confirmText: 'Delete' })
-        .then(function(ok) { if (!ok) return; doDelete(); });
-      return;
-    }
-    doDelete();
-    function doDelete() {
-      fetch('/api/swarm/templates/' + encodeURIComponent(name), { method: 'DELETE' })
-        .then(function(r) {
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          if (window.showToast) showToast((window.t ? t('swarm.template_deleted') : 'Template deleted'), 'success');
-          loadTemplates();
-        })
-        .catch(function(e) {
-          if (window.showToast) showToast('Delete failed: ' + e.message, 'error');
-        });
+  async function deleteTemplate(name) {
+    var msg = 'Delete template "' + name + '"?';
+    var ok = window.kazmaConfirm
+      ? await window.kazmaConfirm({ message: msg, danger: true, confirmText: 'Delete' })
+      : await window.confirm(msg);
+    if (!ok) return;
+    try {
+      var r = await fetch('/api/swarm/templates/' + encodeURIComponent(name), { method: 'DELETE' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (window.showToast) showToast((window.t ? t('swarm.template_deleted') : 'Template deleted'), 'success');
+      loadTemplates();
+    } catch (e) {
+      if (window.showToast) showToast('Delete failed: ' + e.message, 'error');
     }
   }
 

@@ -472,7 +472,7 @@ class ChatPanel(Vertical):
         elif cmd == "/reset":
             self.write("system", "Conversation context reset.")
         elif cmd in ("/sessions", "/seasons", "/session", "/season", "/switch"):
-            self._cmd_sessions(text)
+            self.app.call_later(self._cmd_sessions, text)
         elif cmd == "/personality":
             self.app.call_later(self._cmd_personality, text)
         elif cmd == "/config":
@@ -488,7 +488,7 @@ class ChatPanel(Vertical):
         else:
             self.write("system", f"Unknown: {cmd}")
 
-    def _cmd_sessions(self, text: str) -> None:
+    async def _cmd_sessions(self, text: str) -> None:
         """List or switch onto a season shared with Web and the gateways."""
         try:
             from kazma_core.sessions.directory import (
@@ -535,7 +535,7 @@ class ChatPanel(Vertical):
         self._session_id = hit.session_id or hit.thread_id
         self._thread_id = hit.thread_id or self._session_id
         try:
-            n = self._load_season_messages(hit.session_id, thread_id=hit.thread_id)
+            n = await self._load_season_messages(hit.session_id, thread_id=hit.thread_id)
             self._replay_season_log()
         except Exception as exc:
             logger.exception("TUI season load failed for %s", hit.session_id)
@@ -586,12 +586,12 @@ class ChatPanel(Vertical):
                     stamp = raw_ts[11:16] if len(raw_ts) >= 16 else None
             self.write(role, content, ts=stamp)
 
-    def _load_season_messages(
+    async def _load_season_messages(
         self, session_id: str, *, thread_id: str = ""
     ) -> int:
-        from kazma_tui.season_load import load_season_messages
+        from kazma_tui.season_load import load_season_messages_async
 
-        self._messages = load_season_messages(session_id, thread_id)
+        self._messages = await load_season_messages_async(session_id, thread_id)
         return len(self._messages)
 
     async def _api(self, method: str, path: str, payload: Any | None = None) -> Any:
@@ -1087,7 +1087,7 @@ class ChatPanel(Vertical):
             )
             n = int((data or {}).get("message_count") or 0)
             try:
-                loaded = self._load_season_messages(
+                loaded = await self._load_season_messages(
                     self._session_id, thread_id=thread_id
                 )
                 self._replay_season_log()
@@ -1132,7 +1132,7 @@ class ChatPanel(Vertical):
             self._session_id = new_tid
             self._thread_id = new_tid
             try:
-                n = self._load_season_messages(new_tid, thread_id=new_tid)
+                n = await self._load_season_messages(new_tid, thread_id=new_tid)
                 self._replay_season_log()
             except Exception:
                 n = int((data or {}).get("message_count") or 0)
