@@ -208,11 +208,17 @@ def detect_acts(
     try:
         from kazma_core.agent.research_policy import (
             extract_topic_hint,
+            has_extractable_topic,
             is_deep_research_intent,
             is_research_intent,
         )
 
-        if is_deep_research_intent(t):
+        if is_deep_research_intent(t) and has_extractable_topic(t):
+            # RESEARCH_DEEP is on the EXECUTE allowlist — the act fires the
+            # pipeline automatically. Without an extractable SUBJECT the
+            # old fallback fed the raw instruction to the web pipeline as
+            # its own topic (2026-09-04 "reproduce a full report" incident);
+            # no subject → no auto-execute, the normal loop handles it.
             acts.append(IntentAct(
                 kind=ActKind.RESEARCH_DEEP,
                 confidence=HIGH_PRECISION,

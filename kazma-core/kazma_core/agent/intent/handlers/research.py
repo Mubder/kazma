@@ -24,16 +24,34 @@ async def run_research_deep(decision: TurnDecision, state: dict[str, Any], **ctx
 
     topic = primary.slots.get("topic", "")
     if not topic:
-        # Fallback: use the user's message
+        # Subject-extractable fallback ONLY (2026-09-04): a user message is
+        # a usable topic when a research prefix strips off it ("research
+        # cloud security" → "cloud security"). A message with nothing to
+        # strip is an instruction, not a subject — the old verbatim
+        # fallback sent the web pipeline off to research the command string
+        # itself ("reproduce a full report" incident).
+        try:
+            from kazma_core.agent.research_policy import (
+                extract_topic_hint as _hint,
+                has_extractable_topic as _has_topic,
+            )
+        except ImportError:
+            _hint = None  # type: ignore[assignment]
+            _has_topic = None  # type: ignore[assignment]
         for m in reversed(state.get("messages", [])):
-            if m.get("role") == "user" and isinstance(m.get("content"), str):
-                text = m["content"].strip()
-                if len(text) > 10:
-                    topic = text
-                    break
+            if m.get("role") != "user" or not isinstance(m.get("content"), str):
+                continue
+            text = m["content"].strip()
+            if len(text) > 10 and _has_topic and _has_topic(text):
+                topic = _hint(text)
+                break
 
     if not topic:
-        return HandlerResult(ok=False, escalate=True, message="No research topic detected")
+        return HandlerResult(
+            ok=False,
+            escalate=True,
+            message="no_research_topic",
+        )
 
     try:
         from kazma_core.tools.research_session import start_deep_research
