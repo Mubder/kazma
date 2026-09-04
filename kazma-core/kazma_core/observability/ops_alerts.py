@@ -40,7 +40,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["alert", "ops_alerts_enabled", "reset_alert_state", "alert_state"]
+__all__ = [
+    "alert",
+    "ops_alerts_enabled",
+    "reset_alert_state",
+    "alert_state",
+    "bus_send_targets",
+]
 
 # How long the same key stays quiet after being reported. Long enough that a
 # flapping dependency cannot spam, short enough that a NEW outage of the same
@@ -50,13 +56,6 @@ DEFAULT_COOLDOWN_S = float(os.environ.get("KAZMA_OPS_ALERT_COOLDOWN_S", "900"))
 # Body text cap: Telegram hard-limits at 4096, and a wall of stack trace is
 # unreadable on a phone at 3am anyway.
 MAX_DETAIL_CHARS = 600
-
-_ICONS = {
-    "info": "\U0001f535",      # blue circle
-    "warn": "\U0001f7e1",      # yellow circle
-    "error": "\U0001f534",     # red circle
-    "critical": "\U0001f6a8",  # rotating light
-}
 
 
 @dataclass
@@ -126,22 +125,50 @@ def _should_send(key: str, cooldown_s: float) -> tuple[bool, int]:
 
 def _format(severity: str, title: str, detail: str, suppressed: int,
             cooldown_s: float) -> str:
-    icon = _ICONS.get(severity, _ICONS["warn"])
-    text = f'{icon} Kazma — "{severity.title()}"\n{title}'
-    if detail:
-        text += f"\n{detail[:MAX_DETAIL_CHARS]}"
+    from kazma_core.observability.alert_card import format_operator_card
+
+    body = (detail or "")[:MAX_DETAIL_CHARS]
     if suppressed:
         mins = int(cooldown_s // 60) or 1
-        text += (
-            f"\n(+{suppressed} more in the last {mins} min — "
+        note = (
+            f"(+{suppressed} more in the last {mins} min — "
             "further repeats are being counted, not sent)"
         )
-    text += '\nRole: "Ops"'
-    return text
+        body = f"{body}\n{note}" if body else note
+    return format_operator_card("Ops", severity, title, body)
+
+
+def bus_send_targets(adapter: Any, channels: list[str]) -> list[Any]:
+    """Bus adapters that should receive a routed notification.
+
+    Empty ``channels`` means every configured adapter (legacy fan-out).
+    ``telegram-group`` is not a bus adapter and is ignored here — the
+    caller sends that route via ``_telegram_direct(group_route=True)``.
+    Selecting only ``telegram-group`` must not silently fan out to
+    Discord/Slack (empty-after-strip is not "all").
+    """
+    from kazma_core.swarm.bus import FanOutBusAdapter, NullBusAdapter
+
+    if adapter is None or isinstance(adapter, NullBusAdapter):
+        return []
+    if isinstance(adapter, FanOutBusAdapter):
+        targets = list(adapter.adapters)
+    else:
+        targets = [adapter]
+    selected = [str(c).strip().lower() for c in (channels or []) if str(c).strip()]
+    if not selected:
+        return targets
+    channels = [c for c in selected if c != "telegram-group"]
+    if not channels:
+        return []
+    return [
+        a for a in targets
+        if str(getattr(a, "name", "") or "").lower() in channels
+    ]
 
 
 def _ops_channels() -> list[str]:
-    """User-selected delivery platforms for ops alerts (live-read).
+    """User-selected delivery platforms for ops + lifecycle alerts (live-read).
 
     ``notifications.ops.channels`` = e.g. ``["telegram", "discord"]``.
     Empty/missing = ALL configured platforms (the previous fan-out
@@ -247,36 +274,25 @@ async def _deliver(text: str) -> bool:
             )
         except Exception:  # noqa: BLE001
             logger.warning("[ops_alerts] telegram-group delivery failed", exc_info=True)
-        channels = [c for c in channels if c != "telegram-group"]
     try:
         from kazma_core.swarm.bus import (
             BusMessage,
-            FanOutBusAdapter,
             NullBusAdapter,
             get_message_bus,
         )
 
         adapter = get_message_bus().adapter
         if not isinstance(adapter, NullBusAdapter):
-            targets: list[Any] = []
-            if isinstance(adapter, FanOutBusAdapter):
-                targets = list(adapter.adapters)
-            else:
-                targets = [adapter]
-            if channels:
-                targets = [
-                    a for a in targets
-                    if str(getattr(a, "name", "") or "").lower() in channels
-                ]
-                if not targets:
-                    if sent_group:
-                        return True  # group route already delivered
-                    logger.info(
-                        "[ops_alerts] channels %s match no configured "
-                        "adapter — alert not bus-delivered (operator "
-                        "routing choice)", channels,
-                    )
-                    return True  # deliberately routed nowhere on the bus
+            targets = bus_send_targets(adapter, channels)
+            if channels and not targets:
+                if sent_group:
+                    return True  # group route already delivered
+                logger.info(
+                    "[ops_alerts] channels %s match no configured "
+                    "adapter — alert not bus-delivered (operator "
+                    "routing choice)", channels,
+                )
+                return True  # deliberately routed nowhere on the bus
             msg = BusMessage(
                 worker_name="Kazma",
                 worker_role="ops",

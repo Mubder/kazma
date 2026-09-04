@@ -399,14 +399,14 @@
                     </div>
                 </div>
 
-                <!-- Delivery routing -->
+                <!-- Adapters & Routes (Delivery routing) -->
                 <div style="padding:14px;border:1px solid var(--border);border-radius:var(--radius-card);margin-bottom:10px">
-                    <strong style="font-size:0.9rem">Delivery routing</strong>
-                    <p class="text-muted" style="font-size:0.72rem;margin:2px 0 10px">Pick which routes receive each kind of message. A route only delivers when its destination above is set.</p>
+                    <strong style="font-size:0.9rem">Adapters &amp; Routes</strong>
+                    <p class="text-muted" style="font-size:0.72rem;margin:2px 0 10px">Delivery routing — pick which platforms receive each kind of message. A route only delivers when its destination above is set.</p>
                     <div class="two-col-grid">
                         <div>
-                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">Ops alerts go to</label>
-                            <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">Leave ALL unchecked to deliver to every configured platform.</p>
+                            <label class="form-label" style="font-size:0.75rem;margin-bottom:4px">Alerts go to</label>
+                            <p class="text-muted" style="font-size:0.68rem;margin:0 0 6px">Ops pages, MCP outages, and server start/stop. Leave ALL unchecked to deliver to every configured platform.</p>
                             <template x-for="r in ['telegram', 'telegram-group', 'discord', 'slack']" :key="'a' + r">
                                 <label style="display:flex;align-items:center;gap:8px;font-size:0.8rem;padding:2px 0;cursor:pointer">
                                     <input type="checkbox" :checked="(adapterRouting.alertRoutes || []).includes(r)"

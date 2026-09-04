@@ -99,8 +99,14 @@ class DiscordBusAdapter(BusAdapter):
 
     async def send(self, message: BusMessage) -> None:
         """Deliver a log/status line as a plain message."""
-        icon = {"info": "ℹ️", "warning": "⚠️", "error": "🔴"}.get(message.level, "•")
-        text = f"{icon} **{message.worker_name}**: {message.content[:1500]}"
+        from kazma_core.observability.alert_card import is_operator_card
+
+        content = message.content or ""
+        if is_operator_card(content):
+            text = content[:2000]
+        else:
+            icon = {"info": "ℹ️", "warning": "⚠️", "error": "🔴"}.get(message.level, "•")
+            text = f"{icon} **{message.worker_name}**: {content[:1500]}"
         await self._post_message({"content": text[:2000]})
 
     async def send_report(self, report: SwarmReport) -> None:

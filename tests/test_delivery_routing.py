@@ -371,3 +371,141 @@ class TestBusAdapterNames:
         delivered = asyncio.run(ops_alerts._deliver("x"))
         assert delivered is True
         assert sent == ["discord"]
+
+    def test_bus_send_targets_telegram_only_does_not_fan_out(self) -> None:
+        """Selecting Telegram must not still hit Discord/Slack."""
+        from kazma_core.observability.ops_alerts import bus_send_targets
+        import kazma_core.swarm.bus as bus_mod
+
+        class _Named:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        fan = bus_mod.FanOutBusAdapter(
+            [_Named("telegram"), _Named("discord"), _Named("slack")]
+        )
+        names = [a.name for a in bus_send_targets(fan, ["telegram"])]
+        assert names == ["telegram"]
+
+    def test_bus_send_targets_group_only_does_not_mean_all(self) -> None:
+        """telegram-group is not a bus adapter; stripping it must not
+        fall through to empty=all and fan out everywhere."""
+        from kazma_core.observability.ops_alerts import bus_send_targets
+        import kazma_core.swarm.bus as bus_mod
+
+        class _Named:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+        fan = bus_mod.FanOutBusAdapter(
+            [_Named("telegram"), _Named("discord")]
+        )
+        assert bus_send_targets(fan, ["telegram-group"]) == []
+        all_names = {a.name for a in bus_send_targets(fan, [])}
+        assert all_names == {"telegram", "discord"}
+
+
+class TestLifecycleHonorsAlertRoutes:
+    def test_started_event_only_hits_selected_adapter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """2026-09-04: --reload startup used to FanOut to every adapter
+        even when Delivery routing was Telegram-only."""
+        from kazma_core import lifecycle_notifier
+        from kazma_core.observability import ops_alerts
+        import kazma_core.swarm.bus as bus_mod
+
+        sent: list[str] = []
+
+        class _Named:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def send(self, message: Any) -> None:
+                sent.append(self.name)
+
+        fan = bus_mod.FanOutBusAdapter(
+            [_Named("telegram"), _Named("discord"), _Named("slack")]
+        )
+
+        class _Bus:
+            adapter = fan
+
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+        monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: ["telegram"])
+        monkeypatch.setattr(
+            lifecycle_notifier,
+            "get_lifecycle_config",
+            lambda: {
+                "enabled": True,
+                "events": ["starting", "started", "shutting_down", "startup_failed"],
+                "restart_window_seconds": 0,
+            },
+        )
+
+        asyncio.run(lifecycle_notifier.notify_lifecycle("started", detail="Adapters: telegram"))
+        assert sent == ["telegram"]
+
+    def test_empty_channel_list_fans_to_all_configured(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kazma_core import lifecycle_notifier
+        from kazma_core.observability import ops_alerts
+        import kazma_core.swarm.bus as bus_mod
+
+        sent: list[str] = []
+
+        class _Named:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def send(self, message: Any) -> None:
+                sent.append(self.name)
+
+        fan = bus_mod.FanOutBusAdapter(
+            [_Named("telegram"), _Named("discord"), _Named("slack")]
+        )
+
+        class _Bus:
+            adapter = fan
+
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+        monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: [])
+        monkeypatch.setattr(
+            lifecycle_notifier,
+            "get_lifecycle_config",
+            lambda: {
+                "enabled": True,
+                "events": ["starting", "started", "shutting_down", "startup_failed"],
+                "restart_window_seconds": 0,
+            },
+        )
+        asyncio.run(lifecycle_notifier.notify_lifecycle("started"))
+        assert set(sent) == {"telegram", "discord", "slack"}
+
+    def test_ops_deliver_telegram_only_skips_discord_slack(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kazma_core.observability import ops_alerts
+        import kazma_core.swarm.bus as bus_mod
+
+        sent: list[str] = []
+
+        class _Named:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            async def send(self, message: Any) -> None:
+                sent.append(self.name)
+
+        fan = bus_mod.FanOutBusAdapter(
+            [_Named("telegram"), _Named("discord"), _Named("slack")]
+        )
+
+        class _Bus:
+            adapter = fan
+
+        monkeypatch.setattr(bus_mod, "get_message_bus", lambda: _Bus())
+        monkeypatch.setattr(ops_alerts, "_ops_channels", lambda: ["telegram"])
+        assert asyncio.run(ops_alerts._deliver("card")) is True
+        assert sent == ["telegram"]

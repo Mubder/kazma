@@ -14,10 +14,12 @@ platform.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 import sys
 import time
+from email.message import Message
 from pathlib import Path
 
 import pytest
@@ -139,6 +141,42 @@ def test_unparseable_200_is_treated_as_alive(monkeypatch):
     _patch_urlopen(monkeypatch, _Resp(200, "<html>fine</html>"))
     ok, _ = guard.probe("http://x/health/ready", 1)
     assert ok is True
+
+
+def _http_error(code: int, body: str, reason: str = "Service Unavailable"):
+    return guard.urllib.error.HTTPError(
+        "http://x/health/ready",
+        code,
+        reason,
+        hdrs=Message(),
+        fp=io.BytesIO(body.encode("utf-8")),
+    )
+
+
+def test_http_503_json_names_the_failing_check(monkeypatch):
+    """P0: a JSON 503 must name the check, not 'unreachable: Service Unavailable'."""
+    body = json.dumps({
+        "status": "not_ready",
+        "checks": {
+            "database": {"status": "failed", "error": "ping timed out (3s)"},
+            "config_store": {"status": "ok"},
+        },
+    })
+    _patch_urlopen(monkeypatch, _http_error(503, body))
+    ok, detail = guard.probe("http://x/health/ready", 1)
+    assert ok is False
+    assert "database" in detail
+    assert "ping timed out" in detail
+    assert detail != "unreachable: Service Unavailable"
+    assert "unreachable" not in detail.lower()
+
+
+def test_http_503_html_falls_back_to_http_code(monkeypatch):
+    _patch_urlopen(monkeypatch, _http_error(503, "<html>down</html>"))
+    ok, detail = guard.probe("http://x/health/ready", 1)
+    assert ok is False
+    assert "503" in detail
+    assert "unreachable" not in detail.lower()
 
 
 # ── restart policy ────────────────────────────────────────────────────
@@ -610,8 +648,69 @@ def test_failure_alerts_are_attributed_to_the_guard():
     import inspect
 
     src = inspect.getsource(guard.Guard.run)
-    for fragment in ("[guard] Kazma stopped", "[guard] Kazma is crash-looping"):
-        assert fragment in src
+    assert "notify_restart" in src
+    assert "crash-looping" in src
+    card = guard.format_operator_card(
+        "Guard", "warn", "Kazma stopped: unhealthy (database: x)", "Restarting in 15s."
+    )
+    assert card.rstrip().endswith("Guard")
+    assert "[guard]" not in card
+    assert "gaurd" not in card.lower()
+    assert '"Warn"' not in card
+
+
+class _CapNotify:
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+
+    def send(self, text: str) -> None:
+        self.sent.append(text)
+
+
+def _guard_for_pages(tmp_path, cooldown_s: float = 900.0):
+    g = guard.Guard.__new__(guard.Guard)
+    g.log = guard.GuardLog(tmp_path / "g.log")
+    g.notify = _CapNotify()
+    g.restarts = 1
+    g.page_cooldown_s = cooldown_s
+    g._last_page_fp = ""
+    g._last_page_at = 0.0
+    g._awaiting_recovery = ""
+    return g
+
+
+def test_same_detail_restarts_page_once(tmp_path):
+    g = _guard_for_pages(tmp_path, cooldown_s=900)
+    reason = "unhealthy (database: ping timed out (3s))"
+    assert g.notify_restart(reason, 15) is True
+    assert g.notify_restart(reason, 30) is False
+    assert g.notify_restart(reason, 60) is False
+    assert len(g.notify.sent) == 1
+    text = g.notify.sent[0]
+    assert "Guard" in text
+    assert "[guard]" not in text
+    assert '"Warn"' not in text
+    assert "database" in text
+
+
+def test_different_unhealthy_detail_pages_again(tmp_path):
+    g = _guard_for_pages(tmp_path, cooldown_s=900)
+    assert g.notify_restart("unhealthy (database: a)", 15) is True
+    assert g.notify_restart("unhealthy (database: b)", 15) is True
+    assert len(g.notify.sent) == 2
+
+
+def test_recovery_page_after_unhealthy_uses_guard_not_bracket(tmp_path):
+    g = _guard_for_pages(tmp_path, cooldown_s=900)
+    reason = "unhealthy (database: ping timed out (3s))"
+    g.notify_restart(reason, 15)
+    assert g.notify_recovered() is True
+    assert g.notify_recovered() is False  # nothing pending
+    text = g.notify.sent[-1]
+    assert "healthy again" in text.lower()
+    assert text.rstrip().endswith("Guard")
+    assert "[guard]" not in text
+    assert "gaurd" not in text.lower()
 
 
 # ── port-holder reaping ───────────────────────────────────────────────
@@ -676,9 +775,9 @@ def test_python_holder_is_killed(monkeypatch, tmp_path):
 
     def _run(cmd, **kw):
         if cmd and cmd[0] == "tasklist":
-            return type("R", (), {"stdout": "python.exe  4242"})()
+            return type("R", (), {"stdout": "python.exe  4242", "returncode": 0})()
         killed.append(cmd)
-        return type("R", (), {"stdout": ""})()
+        return type("R", (), {"stdout": "", "returncode": 0})()
 
     monkeypatch.setattr(guard.subprocess, "run", _run)
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: False)

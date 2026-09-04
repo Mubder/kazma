@@ -1,18 +1,19 @@
 """Server lifecycle status notifications.
 
-Pushes a status update to every configured platform (Telegram/Discord/Slack)
-when the Kazma server starts, restarts, shuts down, or fails to boot — so an
-operator can tell from chat when something went wrong (hung boot, a crash
-that emits no shutdown message, a bad bot token, etc.).
+Pushes a status update to the operator-selected platforms when the Kazma
+server starts, restarts, shuts down, or fails to boot — so an operator
+can tell from chat when something went wrong (hung boot, a crash that
+emits no shutdown message, a bad bot token, etc.).
 
 Design — reuse the SwarmMessageBus, do NOT build a parallel path:
 - The bus is wired during ``KazmaAppBuilder.build()`` (via
   ``bus.set_adapter(...)``) *before* the lifespan runs, so by the time
   ``_on_startup``'s first line executes the adapter is already in place.
-- ``FanOutBusAdapter`` fans a single ``adapter.send(BusMessage)`` out to
-  every configured platform concurrently; each ``*BusAdapter`` holds its own
-  destination ``chat_id`` / ``channel_id`` (from the existing
-  ``connectors.<platform>.swarm_chat_id`` keys). No new recipient config.
+- Delivery honors ``notifications.ops.channels`` (Settings → Delivery
+  routing). Empty = every configured adapter; a selection filters the
+  FanOut the same way ``ops_alerts`` does. ``telegram-group`` is not a
+  bus adapter and uses the ops-alerts group route. Do NOT construct new
+  adapters.
 - ``NullBusAdapter`` (no platform configured, or under pytest) silently
   drops the message, so the feature self-disables cleanly.
 - The bus adapters are standalone ``httpx`` clients, independent of
@@ -169,7 +170,7 @@ def _consume_recent_shutdown(window_seconds: int) -> float | None:
 
 
 async def notify_lifecycle(event: str, detail: str = "") -> None:
-    """Push a lifecycle status update to every configured platform.
+    """Push a lifecycle status update to the operator-selected platforms.
 
     Args:
         event: One of ``starting``, ``started``, ``shutting_down``,
@@ -181,7 +182,8 @@ async def notify_lifecycle(event: str, detail: str = "") -> None:
     Never raises — a notification failure is logged at debug level and
     swallowed so it can never break boot or shutdown. No-ops silently when
     the feature is disabled, the event isn't in the allow-list, or no
-    platform bus adapter is configured (NullBusAdapter / pytest).
+    platform bus adapter is configured (NullBusAdapter / pytest). Routing
+    is ``notifications.ops.channels`` — the same checkboxes as ops alerts.
     """
     if event not in _CALLER_EVENTS:
         logger.debug("[LifecycleNotifier] unknown event %r — ignoring", event)
@@ -204,32 +206,38 @@ async def notify_lifecycle(event: str, detail: str = "") -> None:
                 detail = f"was down ~{down_for:.1f}s"
 
     spec = _EVENTS[event]
-    # Elegant format with bold key words:
-    # Line 1: 🔵 Kazma — "Info"      (icon + name + level label in quotes)
-    # Line 2: Kazma server starting up   (the label)
-    # Line 3: Role: "System"             (role in quotes)
-    text = f"{spec['icon']} Kazma — \"{spec['level_label']}\"\n{spec['label']}"
-    if detail:
-        text += f"\n{detail}"
-    text += f"\nRole: \"System\""
+    from kazma_core.observability.alert_card import format_operator_card
+
+    text = format_operator_card("System", spec["level"], spec["label"], detail)
 
     try:
-        from kazma_core.swarm.bus import BusMessage, NullBusAdapter, get_message_bus
+        from kazma_core.observability.ops_alerts import (
+            _ops_channels,
+            _telegram_direct,
+            bus_send_targets,
+        )
+        from kazma_core.swarm.bus import BusMessage, get_message_bus
 
-        bus = get_message_bus()
-        adapter = bus.adapter
-        if isinstance(adapter, NullBusAdapter):
-            # No platform configured (or pytest) — nothing to send to.
+        channels = _ops_channels()
+        targets = bus_send_targets(get_message_bus().adapter, channels)
+        msg = BusMessage(
+            worker_name="Kazma",
+            worker_role="system",
+            content=text[:4000],
+            level=spec["level"],
+        )
+        sends: list[Any] = [a.send(msg) for a in targets]
+        if "telegram-group" in channels:
+            loop = asyncio.get_running_loop()
+            sends.append(
+                loop.run_in_executor(
+                    None, lambda t=text: _telegram_direct(t, group_route=True)
+                )
+            )
+        if not sends:
             return
         await asyncio.wait_for(
-            adapter.send(
-                BusMessage(
-                    worker_name="Kazma",
-                    worker_role="system",
-                    content=text[:4000],
-                    level=spec["level"],
-                )
-            ),
+            asyncio.gather(*sends, return_exceptions=True),
             timeout=_SEND_TIMEOUT_SECONDS,
         )
     except Exception as exc:  # noqa: BLE001 — never break boot/shutdown

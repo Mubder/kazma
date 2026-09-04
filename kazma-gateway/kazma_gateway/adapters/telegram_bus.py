@@ -56,6 +56,23 @@ def _escape_md(text: str) -> str:
     return result
 
 
+_CARD_SOURCES = frozenset({"Guard", "Ops", "System"})
+
+
+def _format_operator_card_md(content: str) -> str:
+    """MarkdownV2: bold the header and source lines of an operator card."""
+    lines = (content or "")[:4096].split("\n")
+    out: list[str] = []
+    last = len(lines) - 1
+    for i, line in enumerate(lines):
+        esc = _escape_md(line)
+        if i == 0 or (i == last and line in _CARD_SOURCES):
+            out.append(f"*{esc}*")
+        else:
+            out.append(esc)
+    return "\n".join(out)
+
+
 # ── Adapter ─────────────────────────────────────────────────────────────
 
 
@@ -159,26 +176,16 @@ class TelegramBusAdapter(BusAdapter):
     # ── BusAdapter interface ────────────────────────────────────────
 
     async def send(self, message: BusMessage) -> None:
-        # The content already contains the full formatted message (icon, label,
-        # role). We just bold the quoted segments and post it — no redundant
-        # level icon or worker-name header that would duplicate the content.
-        raw_content = message.content[:300]
+        # Operator cards are finished copy. Do not clip at 300 chars and
+        # do not wrap them in a second worker header. Bold the header
+        # line and the source line (Guard / Ops / System).
+        from kazma_core.observability.alert_card import is_operator_card
 
-        # Convert "quoted" segments to bold for Telegram MarkdownV2.
-        import re as _re
-
-        def _bold_quotes(text: str) -> str:
-            """Replace "word" with *word* (Markdown bold), then escape for MD2."""
-            parts = _re.split(r'"([^"]*)"', text)
-            result = ""
-            for i, part in enumerate(parts):
-                if i % 2 == 1:  # odd index = inside quotes
-                    result += "*" + _escape_md(part) + "*"
-                else:
-                    result += _escape_md(part)
-            return result
-
-        text = _bold_quotes(raw_content)
+        raw = message.content or ""
+        if is_operator_card(raw):
+            text = _format_operator_card_md(raw)
+        else:
+            text = _escape_md(raw[:4096])
         await self._post({
             "chat_id": self._chat_id,
             "text": text[:4096],

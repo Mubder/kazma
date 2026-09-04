@@ -100,6 +100,11 @@ CRASH_LOOP_COUNT = 5
 CRASH_LOOP_WINDOW_S = 600
 CRASH_LOOP_COOLDOWN_S = 1800
 
+# Same-detail restart pages collapse inside this window. Every attempt
+# still lands in guard.log. Crash-loop is a different condition and
+# always pages. Override: KAZMA_GUARD_PAGE_COOLDOWN_S.
+PAGE_COOLDOWN_S = float(os.environ.get("KAZMA_GUARD_PAGE_COOLDOWN_S", "900"))
+
 TERMINATE_GRACE_S = 20.0
 
 # A server whose build.started_at predates our spawn by more than this is
@@ -454,14 +459,85 @@ def server_started_at(ready_url: str, timeout: float) -> float | None:
         return None
 
 
+def format_operator_card(
+    source: str,
+    severity: str,
+    title: str,
+    detail: str = "",
+) -> str:
+    """Operator-visible card. Layout matches kazma_core.observability.alert_card.
+
+    Stdlib-only copy: the guard must not import kazma_core.
+    """
+    sources = {"guard": "Guard", "ops": "Ops", "system": "System"}
+    severities = {
+        "info": "Info",
+        "success": "Success",
+        "warn": "Warn",
+        "error": "Error",
+        "critical": "Critical",
+    }
+    icons = {
+        "info": "\U0001f535",
+        "success": "\U0001f7e2",
+        "warn": "\U0001f7e1",
+        "error": "\U0001f534",
+        "critical": "\U0001f6a8",
+    }
+    src_key = str(source or "").strip().lower().strip("[]")
+    src = sources.get(src_key, str(source or "Guard").strip() or "Guard")
+    if src.lower() == "gaurd":
+        src = "Guard"
+    sev_key = str(severity or "warn").strip().lower()
+    sev = severities.get(sev_key, str(severity or "Warn").strip().title() or "Warn")
+    icon = icons.get(sev_key, icons["warn"])
+    lines = [f"{icon} Kazma — {sev}", str(title or "").strip() or sev]
+    body = str(detail or "").strip()
+    if body:
+        lines.append(body)
+    lines.append(src)
+    return "\n".join(lines)
+
+
+def _failing_checks(data: dict) -> list[str]:
+    """Named failed ready-checks, with error text when the body has it."""
+    parts: list[str] = []
+    for key, val in (data.get("checks") or {}).items():
+        if not isinstance(val, dict):
+            continue
+        if str(val.get("status") or "").lower() != "failed":
+            continue
+        err = str(val.get("error") or val.get("detail") or "").strip()
+        parts.append(f"{key}: {err}" if err else str(key))
+    return parts
+
+
+def _health_failure_detail(raw: str, *, http_status: int = 0) -> str:
+    """One formatter for HTTP 200 not_ready and HTTP 503 JSON bodies."""
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = None
+    if isinstance(data, dict):
+        failing = _failing_checks(data)
+        if failing:
+            return "; ".join(failing[:6])
+        status = str(data.get("status") or "").lower()
+        if status == "not_ready":
+            return "not_ready"
+    if http_status:
+        return f"HTTP {http_status}"
+    return "unparsed body"
+
+
 def probe(url: str, timeout: float) -> tuple[bool, str]:
     """Return (healthy, detail). Any non-200 or exception is unhealthy."""
     try:
         req = urllib.request.Request(url, method="GET")
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            if resp.status != 200:
-                return False, f"HTTP {resp.status}"
             raw = resp.read(4096).decode("utf-8", "replace")
+            if resp.status != 200:
+                return False, _health_failure_detail(raw, http_status=resp.status)
         # HTTP 200 IS the contract. /health/ready returns 503 only when a
         # CRITICAL dependency (config store, database) is gone; a partial
         # failure is reported as "degraded" with 200 and the explicit
@@ -477,11 +553,8 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
             return True, "200 (unparsed body)"
         status = str(data.get("status", "")).lower()
         if status == "not_ready":
-            failing = [
-                k for k, v in (data.get("checks") or {}).items()
-                if isinstance(v, dict) and v.get("status") == "failed"
-            ]
-            return False, f"not_ready failing={failing or '?'}"
+            failing = _failing_checks(data)
+            return False, "; ".join(failing[:6]) if failing else "not_ready"
         degraded = [
             k for k, v in (data.get("checks") or {}).items()
             if isinstance(v, dict)
@@ -493,6 +566,15 @@ def probe(url: str, timeout: float) -> tuple[bool, str]:
             # visible in the guard log instead of passing silently.
             detail = f"{detail} (degraded: {','.join(sorted(degraded)[:4])})"
         return True, detail
+    except urllib.error.HTTPError as exc:
+        # urlopen raises on 503. The JSON body names the failing check;
+        # do not format this as unreachable: Service Unavailable.
+        raw = ""
+        try:
+            raw = exc.read(4096).decode("utf-8", "replace")
+        except Exception:
+            raw = ""
+        return False, _health_failure_detail(raw, http_status=int(exc.code or 0))
     except urllib.error.URLError as exc:
         return False, f"unreachable: {getattr(exc, 'reason', exc)}"
     except Exception as exc:  # noqa: BLE001 -- a probe must never raise
@@ -881,8 +963,64 @@ class Guard:
         # squatter the guard cannot kill repeats every spawn cycle, and
         # paging on each one trains the operator to ignore the channel.
         self._last_stale_holder_notified: int | None = None
+        self._last_page_fp = ""
+        self._last_page_at = 0.0
+        self._awaiting_recovery = ""
+        self.page_cooldown_s = PAGE_COOLDOWN_S
 
     # -- lifecycle ----------------------------------------------------
+
+    def _should_page(self, fingerprint: str) -> bool:
+        """True if this fingerprint is new or the cooldown has elapsed."""
+        now = time.monotonic()
+        if (
+            fingerprint
+            and fingerprint == self._last_page_fp
+            and (now - self._last_page_at) < self.page_cooldown_s
+        ):
+            return False
+        self._last_page_fp = fingerprint
+        self._last_page_at = now
+        return True
+
+    def _page(
+        self,
+        severity: str,
+        title: str,
+        detail: str = "",
+        *,
+        fingerprint: str = "",
+        force: bool = False,
+    ) -> bool:
+        """Send a Guard operator card. Same fingerprint inside the cooldown
+        is logged, not sent. Crash-loop callers pass force=True."""
+        fp = fingerprint or f"{title}\n{detail}"
+        if not force and not self._should_page(fp):
+            self.log("info", "guard.page_suppressed", title=title[:120])
+            return False
+        if force:
+            self._last_page_fp = fp
+            self._last_page_at = time.monotonic()
+        self.notify.send(format_operator_card("Guard", severity, title, detail))
+        return True
+
+    def notify_restart(self, reason: str, delay_s: float) -> bool:
+        """Page a restart. Collapses identical ``reason`` inside the cooldown."""
+        title = f"Kazma stopped: {reason}"
+        detail = f"Restarting in {int(delay_s)}s (attempt {self.restarts})."
+        sent = self._page("warn", title, detail, fingerprint=reason)
+        self._awaiting_recovery = reason
+        return sent
+
+    def notify_recovered(self) -> bool:
+        """One recovery card after a kill/unhealthy restart, if we were waiting."""
+        reason = self._awaiting_recovery
+        if not reason:
+            return False
+        self._awaiting_recovery = ""
+        title = "Kazma is healthy again"
+        detail = f"{reason} recovered."
+        return self._page("success", title, detail, fingerprint=f"recovered:{reason}")
 
     def _install_signals(self) -> None:
         def handler(signum, _frame):
@@ -1010,15 +1148,15 @@ class Guard:
         reap_orphan(self.log)
 
         if self._foreign_server_present():
-            msg = (
-                "[guard] Kazma guard did NOT start: something is already serving "
-                f"{self.health_url}. Stop the existing instance first, then "
-                "start the guard -- otherwise it would supervise a process "
-                "it did not launch."
+            title = "Kazma guard did not start"
+            detail = (
+                f"Something is already serving {self.health_url}. "
+                "Stop the existing instance first, then start the guard — "
+                "otherwise it would supervise a process it did not launch."
             )
             self.log("error", "guard.refused_to_start")
-            self.notify.send(msg)
-            print(msg, file=sys.stderr)
+            self._page("error", title, detail, force=True)
+            print(format_operator_card("Guard", "error", title, detail), file=sys.stderr)
             return 2
 
         first = True
@@ -1048,12 +1186,16 @@ class Guard:
                              port=_port_from_url(self.health_url),
                              note="spawn below cannot bind; old build still serving")
                     try:
-                        self.notify.send(
-                            f"[guard] RESTART DID NOT TAKE EFFECT: pid {_stale_pid} "
-                            f"still owns port {_port_from_url(self.health_url)} and is "
-                            f"serving the OLD build — the guard cannot kill it (likely "
-                            f"elevated). From an ADMIN terminal: taskkill /PID {_stale_pid} /F, "
-                            f"then restart the guard."
+                        port = _port_from_url(self.health_url)
+                        self._page(
+                            "error",
+                            "Restart did not take effect",
+                            f"pid {_stale_pid} still owns port {port} and is "
+                            "serving the old build — the guard cannot kill it "
+                            "(likely elevated). From an admin terminal: "
+                            f"taskkill /PID {_stale_pid} /F, then restart the guard.",
+                            fingerprint=f"stale:{_stale_pid}",
+                            force=True,
                         )
                     except Exception:
                         self.log("debug", "guard.port_still_held.notify_failed")
@@ -1077,6 +1219,7 @@ class Guard:
                 # every message in the operator's Telegram.
                 self.log("info", "guard.supervising",
                          restarts=self.restarts, note="app announces its own start")
+                self.notify_recovered()
                 first = False
                 reason = self._supervise()
             else:
@@ -1108,9 +1251,11 @@ class Guard:
                 # "stopped/restarting" Telegram alerts vanished entirely.
                 # Quiet tone: deliberate maintenance, not a crash.
                 try:
-                    self.notify.send(
-                        f"[guard] Kazma restarting (operator reload: {reason}). "
-                        "Back in a moment — no action needed."
+                    self._page(
+                        "info",
+                        "Kazma restarting (operator reload)",
+                        f"{reason}. Back in a moment — no action needed.",
+                        fingerprint=f"reload:{reason}",
                     )
                 except Exception:
                     self.log("debug", "guard.operator_reload.notify_failed")
@@ -1120,10 +1265,13 @@ class Guard:
             if self._crash_looping():
                 self.log("error", "guard.crash_loop", restarts=self.restarts,
                          window_s=CRASH_LOOP_WINDOW_S)
-                self.notify.send(
-                    f"[guard] Kazma is crash-looping ({CRASH_LOOP_COUNT} restarts in "
-                    f"{CRASH_LOOP_WINDOW_S // 60} min). Last reason: {reason}. "
-                    f"Pausing {CRASH_LOOP_COOLDOWN_S // 60} min -- this needs a human."
+                self._page(
+                    "critical",
+                    f"Kazma is crash-looping ({CRASH_LOOP_COUNT} restarts in "
+                    f"{CRASH_LOOP_WINDOW_S // 60} min)",
+                    f"Last reason: {reason}. Pausing "
+                    f"{CRASH_LOOP_COOLDOWN_S // 60} min — this needs a human.",
+                    force=True,
                 )
                 self.recent.clear()
                 self._sleep(CRASH_LOOP_COOLDOWN_S)
@@ -1132,10 +1280,7 @@ class Guard:
             delay = self._backoff()
             self.log("warn", "guard.restarting", reason=reason, in_s=delay,
                      restarts=self.restarts)
-            self.notify.send(
-                f"[guard] Kazma stopped: {reason}. Restarting in {int(delay)}s "
-                f"(attempt {self.restarts})."
-            )
+            self.notify_restart(reason, delay)
             self._sleep(delay)
 
         if self.proc:
@@ -1162,9 +1307,13 @@ class Guard:
         self.log("warn", "maintenance.active",
                  reason=pause.get("reason"), by=pause.get("by"),
                  expires=human_until, file=str(_pause_path()))
-        self.notify.send(
-            f"[guard] Kazma supervision PAUSED ({pause.get('reason')}). "
-            f"It will not be restarted until resumed. Expires: {human_until}."
+        self._page(
+            "warn",
+            "Kazma supervision paused",
+            f"{pause.get('reason')}. It will not be restarted until resumed. "
+            f"Expires: {human_until}.",
+            fingerprint="pause",
+            force=True,
         )
 
         next_nag = time.monotonic() + PAUSE_NAG_EVERY_S
@@ -1174,17 +1323,23 @@ class Guard:
                 return True
             if read_pause() is None:
                 self.log("info", "maintenance.resumed")
-                self.notify.send(
-                    "[guard] Kazma supervision RESUMED. Restarting the server."
+                self._page(
+                    "info",
+                    "Kazma supervision resumed",
+                    "Restarting the server.",
+                    fingerprint="resume",
+                    force=True,
                 )
                 return True
             if time.monotonic() >= next_nag:
                 next_nag += PAUSE_NAG_EVERY_S
                 mins = int((time.time() - float(pause.get("since") or 0)) / 60)
                 self.log("warn", "maintenance.still_paused", minutes=mins)
-                self.notify.send(
-                    f"[guard] Reminder: Kazma is still PAUSED after {mins} min "
-                    f"and is NOT being supervised."
+                self._page(
+                    "warn",
+                    "Kazma is still paused",
+                    f"Paused for {mins} min and is not being supervised.",
+                    fingerprint=f"pause-nag:{mins // 60}",
                 )
         return True
 
