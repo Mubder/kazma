@@ -660,6 +660,35 @@ def test_failure_alerts_are_attributed_to_the_guard():
     assert '"Warn"' not in card
 
 
+def test_guard_card_matches_core_alert_card_exactly():
+    """The guard's stdlib formatter and kazma_core.observability.alert_card
+    promise layout identity ("Keep the layout identical" — both docstrings).
+    The guard cannot import kazma_core at runtime, so identity is enforced
+    HERE: drift between the two copies silently splits the operator card
+    style (the 2026-09-05 report: guard cards rendered in the old plain
+    format while Ops/System used the professional layout)."""
+    import pytest
+
+    alert_card = pytest.importorskip("kazma_core.observability.alert_card")
+
+    cases = [
+        ("guard", "info", "Kazma is restarting for an operator reload.", "Back in a moment — no action needed."),
+        ("Guard", "warn", "Kazma stopped: unhealthy (database: ping timed out)", "Restarting in 15s (attempt 2)."),
+        ("GUARD", "error", "Kazma failed to start", "kazma serve exited (code 1) after 12.3s"),
+        ("guard", "success", "Kazma is healthy again", "unhealthy recovered."),
+        ("guard", "critical", "Crash loop", ""),
+        ("guard", "", "", ""),  # defaults: warn icon + "Guard" + "Warn" head
+        ("ops", "warn", "MCP server down", "still retrying"),
+        ("system", "info", "Daily digest sent", ""),
+        ("guard", "unknown-severity", "Falls back to warn icon", "body"),
+        ("[Guard]", "warn", "bracketed source normalizes", ""),
+    ]
+    for source, severity, title, detail in cases:
+        assert guard.format_operator_card(source, severity, title, detail) == (
+            alert_card.format_operator_card(source, severity, title, detail)
+        ), f"card drift for source={source!r} severity={severity!r}"
+
+
 class _CapNotify:
     def __init__(self) -> None:
         self.sent: list[str] = []
