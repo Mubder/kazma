@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Fix — Capacity-ack terminal repaint trusts the DOM, not the dedupe map (2026-09-05)
+
+Second follow-up. User reports persisted after both prior fixes, only
+within ~2 minutes of a server restart (reload + session re-mint + WS
+reconnect all racing a send). Root structural weakness: in
+`applyTurnEvent`, the content dedupe key is marked in the turn document
+BEFORE `renderTurn` paints — marking and painting are not atomic. When
+the paint never became visible in that boot-churn window, every later
+identical paint (including the done-frame reroute) was dedupe-dropped
+forever and the "_No response received." watchdog card fired. Not
+reproducible in a controlled tab because the render always succeeds
+there; the user's environment supplies the failing half.
+
+- **chat.js `onDone`:** for capacity acks, the done frame is terminal
+  truth — after the applyEvent attempt, if the open bubble is still
+  EMPTY, paint `data.content` directly (`_paintHTML(ackEl,
+  _renderReplyHTML(...))`). A DOM write cannot be blocked by the dedupe
+  map, so the watchdog card is structurally impossible for capacity
+  acks. Healthy path unchanged (visibility-gated — no double paint).
+- **Tests:** source-order lock that the ack repaint precedes the
+  empty-terminal watchdog, plus the exact repaint call contract.
+
+**Verification:** node checks; streaming/turn-document harnesses green;
+171 tests green across delivery/turn/SSE/WS/S3-2 suites.
+
 ## Fix — Capacity-ack done frame must REPLACE, not append (2026-09-05)
 
 Follow-up to the instant-slash live-delivery fix, found by live
