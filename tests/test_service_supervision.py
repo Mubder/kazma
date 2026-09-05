@@ -679,7 +679,8 @@ def test_guard_card_matches_core_alert_card_exactly():
         ("guard", "critical", "Crash loop", ""),
         ("guard", "", "", ""),  # defaults: warn icon + "Guard" + "Warn" head
         ("ops", "warn", "MCP server down", "still retrying"),
-        ("system", "info", "Daily digest sent", ""),
+        ("ops", "info", "Daily digest sent", ""),
+        ("system", "info", "Snapshot recorded", ""),
         ("guard", "unknown-severity", "Falls back to warn icon", "body"),
         ("[Guard]", "warn", "bracketed source normalizes", ""),
     ]
@@ -687,6 +688,26 @@ def test_guard_card_matches_core_alert_card_exactly():
         assert guard.format_operator_card(source, severity, title, detail) == (
             alert_card.format_operator_card(source, severity, title, detail)
         ), f"card drift for source={source!r} severity={severity!r}"
+
+
+def test_guard_info_cards_are_orange_others_stay_blue():
+    """Guard info cards (reload/restart pulses) use the orange circle so the
+    supervisor's notices are visually distinct from app-level info. Ops and
+    System info cards keep the blue circle (operator request 2026-09-05)."""
+    import pytest
+
+    alert_card = pytest.importorskip("kazma_core.observability.alert_card")
+
+    guard_card = guard.format_operator_card(
+        "guard", "info", "Kazma is restarting for an operator reload."
+    )
+    assert guard_card.startswith("\U0001f7e0 [Guard] ")  # orange circle
+
+    # Ops / System info cards keep blue; non-info Guard cards unchanged.
+    assert alert_card.format_operator_card("ops", "info", "Digest").startswith("\U0001f535 [Ops] ")
+    assert alert_card.format_operator_card("system", "info", "Snapshot").startswith("\U0001f535 [System] ")
+    assert guard.format_operator_card("guard", "warn", "Stopped").startswith("\U0001f7e1 [Guard] ")
+    assert guard.format_operator_card("guard", "success", "Healthy").startswith("\U0001f7e2 [Guard] ")
 
 
 class _CapNotify:

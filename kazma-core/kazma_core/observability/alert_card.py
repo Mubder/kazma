@@ -16,6 +16,14 @@ _ICONS = {
     "critical": "\U0001f6a8",   # rotating light
 }
 
+# Source-scoped icon overrides. Guard info cards (reload/restart pulses)
+# use the ORANGE circle so the supervisor's notices are visually distinct
+# from app-level info at a glance (operator request 2026-09-05). Orange is
+# otherwise unused in the severity palette.
+_SOURCE_ICON_OVERRIDES = {
+    "guard": {"info": "\U0001f7e0"},  # orange circle
+}
+
 _SEVERITY = {
     "info": "Info",
     "success": "Success",
@@ -49,7 +57,7 @@ def format_operator_card(
     if src.lower() == "gaurd":
         src = "Guard"
     sev_key = str(severity or "warn").strip().lower()
-    icon = _ICONS.get(sev_key, _ICONS["warn"])
+    icon = _SOURCE_ICON_OVERRIDES.get(src_key, {}).get(sev_key) or _ICONS.get(sev_key, _ICONS["warn"])
     head = str(title or "").strip() or _SEVERITY.get(sev_key, "Warn")
     lines = [f"{icon} [{src}] {head}"]
     body = str(detail or "").strip()

@@ -484,12 +484,15 @@ def format_operator_card(
         "error": "\U0001f534",
         "critical": "\U0001f6a8",
     }
+    # Source-scoped override, identical to alert_card._SOURCE_ICON_OVERRIDES:
+    # Guard info cards use the ORANGE circle (operator request 2026-09-05).
+    icon_overrides = {"guard": {"info": "\U0001f7e0"}}
     src_key = str(source or "").strip().lower().strip("[]")
     src = sources.get(src_key, str(source or "Guard").strip() or "Guard")
     if src.lower() == "gaurd":
         src = "Guard"
     sev_key = str(severity or "warn").strip().lower()
-    icon = icons.get(sev_key, icons["warn"])
+    icon = icon_overrides.get(src_key, {}).get(sev_key) or icons.get(sev_key, icons["warn"])
     head = str(title or "").strip() or severities.get(sev_key, "Warn")
     lines = [f"{icon} [{src}] {head}"]
     body = str(detail or "").strip()
