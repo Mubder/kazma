@@ -3190,6 +3190,29 @@
             source: 'done',
           });
         }
+        // Capacity ack (slash fast-path): the done frame is TERMINAL TRUTH
+        // — apply the SoT rule "always replace-paint" with a VISIBILITY
+        // check instead of trusting the turn document. applyEvent marks the
+        // content dedupe key BEFORE renderTurn paints; if that paint never
+        // became visible (boot churn after a server restart: reload, session
+        // re-mint, WS reconnect — 2026-09-05 incident), every later identical
+        // paint — including the done-frame reroute — was dedupe-dropped and
+        // the watchdog card below fired. Paint directly when the open bubble
+        // is still empty; dedupe cannot block a DOM write.
+        if (data && data.capacity && data.content && !_awaitingApproval) {
+          try { _pinLiveAssistantBubble(); } catch (ePin) { /* ignore */ }
+          var ackEl = currentMsgEl && currentMsgEl.querySelector('.message-text');
+          if (ackEl && !String(ackEl.textContent || '').trim()) {
+            try {
+              _paintHTML(ackEl, _renderReplyHTML(String(data.content)));
+              tokenAccum = String(data.content);
+              _turnPainted = true;
+              try { scrollToBottom(); } catch (eScroll) { /* ignore */ }
+            } catch (eAck) {
+              diag('capacity-ack-repaint-failed', String(eAck && eAck.message));
+            }
+          }
+        }
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
         // _turnPainted: a late stale terminal must NEVER print this after a
         // successful reply already painted (the trailing "_No response
