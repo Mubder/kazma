@@ -1557,6 +1557,38 @@ success-summary / `native_pg_backup` ops wiring is still deferred:
 `docs/plans/GUARD_OPS_ALERTING_CAUSE_QUALITY.md`. Do not invent a fourth
 notifier, mix ops pages into HITL cards, or page every backup success.
 
+### 34. Calendar / Gmail OAuth — vault is SoT, no silent sandbox
+
+Live 2026-09-08: `list_events(provider=google)` returned
+`Calendar: sandbox, No events found` after a successful Gmail reconnect.
+The calendar router only read `GOOGLE_CALENDAR_TOKEN` from env; its
+`_vault_get` stub always returned `""`. Gmail OAuth stores `email.gmail.*`
+in the vault and does **not** automatically feed Calendar.
+
+**Invariants:**
+- Calendar tokens live in the vault (`calendar.google.*` /
+  `calendar.microsoft.*`) via `kazma_skills.native.calendar.credentials`.
+  Env vars are an override. Never reintroduce a vault stub that returns `""`.
+- A Gmail-only token (`gmail.modify` without `auth/calendar`) must **not**
+  be sent to Calendar. `google_access_token()` reuses the Gmail grant only
+  when `email.gmail.scopes` includes Calendar.
+- Explicit `provider=google` / `outlook` **fails closed**
+  (`CalendarNotConnectedError`) — never silent sandbox. Sandbox is auto
+  fallback only when no account is connected.
+- Connect with Google requests Calendar as a **soft** extra (like
+  `drive.file`): Gmail connect still succeeds if Calendar API is off.
+  Settings → Email → **Connect Calendar** is the dedicated grant (same
+  OAuth client, same `/api/email/oauth/gmail/callback` — dispatch on
+  `state.provider == google_calendar`).
+- Microsoft mail OAuth requests `Calendars.ReadWrite` and copies tokens
+  to `calendar.microsoft.*`. Device-flow client id reads vault via `cred()`,
+  not env-only.
+- Connector health (`check_connectors`) probes Gmail **and** Calendar
+  independently (Testing-mode 7-day expiry). Do not probe Drive as a
+  stand-in for Gmail.
+
+Tests: `tests/test_calendar_connector.py`, `tests/test_connector_health.py`.
+
 ## UI Conventions (Web)
 
 - **Dialogs:** use the unified Promise-based helpers, never native browser

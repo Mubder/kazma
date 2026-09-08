@@ -23,14 +23,20 @@ logger = logging.getLogger(__name__)
 # gmail.send is redundant but listed so consent screen shows "Send email".
 # Do NOT rely on openid/email alone — that yields ACCESS_TOKEN_SCOPE_INSUFFICIENT.
 # drive.file is for the offsite backup provider (cloud_sync.py GoogleDriveSync).
+# calendar is a SOFT extra (like drive.file): Gmail connect still succeeds if
+# Calendar API is off / the user unchecks it; the calendar skill then has its
+# own Connect Calendar flow. Live 2026-09-08: Calendar was never requested, so
+# reconnecting Gmail could never feed list_events.
 GMAIL_MAIL_SCOPES = (
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/drive.file",
 )
+GMAIL_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar"
 GMAIL_SCOPES = " ".join(
     [
         *GMAIL_MAIL_SCOPES,
+        GMAIL_CALENDAR_SCOPE,
         "https://www.googleapis.com/auth/userinfo.email",
         "openid",
     ]
@@ -329,6 +335,40 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
             category="email",
         )
 
+        # Soft-verify Calendar the same way. Never fail Gmail connect.
+        calendar_ok, calendar_reason = False, ""
+        try:
+            from kazma_skills.native.calendar.oauth_google import probe_calendar_api
+            from kazma_skills.native.calendar.credentials import (
+                persist_google_tokens,
+                scopes_include_google_calendar,
+            )
+
+            calendar_ok, calendar_reason = await probe_calendar_api(client, access)
+            # Persist only when the grant actually includes calendar.
+            # A 200 on an unknown URL from a test FakeClient must not
+            # mint calendar.google.* from a gmail.modify-only token.
+            if calendar_ok and scopes_include_google_calendar(scope_str):
+                persist_google_tokens(
+                    access,
+                    refresh,
+                    email_addr,
+                    scope_str,
+                    probe_ok="ok",
+                )
+            else:
+                if calendar_ok and not scopes_include_google_calendar(scope_str):
+                    calendar_ok = False
+                    calendar_reason = "calendar_scope_missing"
+                vault_store(
+                    "calendar.google.ok",
+                    calendar_reason or "missing",
+                    category="calendar",
+                )
+        except Exception as exc:
+            logger.debug("[email.oauth] calendar probe: %s", exc)
+            calendar_ok, calendar_reason = False, str(exc)
+
     persist_gmail_tokens(access, refresh, email_addr, scopes=scope_str)
     return {
         "ok": True,
@@ -337,9 +377,16 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
         "scopes_ok": True if scope_ok else bool(probe.get("ok")),
         "drive_ok": drive_ok,
         "drive_error": None if drive_ok else drive_reason,
+        "calendar_ok": calendar_ok,
+        "calendar_error": None if calendar_ok else calendar_reason,
         "message": (
             f"Gmail connected via OAuth{f' as {email_addr}' if email_addr else ''}. "
             "Mail scopes verified."
+            + (
+                " Google Calendar connected."
+                if calendar_ok
+                else " Google Calendar not granted — Settings → Email → Connect Calendar."
+            )
         ),
     }
 
@@ -437,4 +484,17 @@ async def refresh_gmail_access_token(
         if not access:
             raise RuntimeError("No access_token on Gmail refresh")
         persist_gmail_tokens(access, new_refresh, scopes=scope_str)
+        # Keep the calendar copy of this grant in sync when Calendar is
+        # on the same refresh token (Gmail connect with calendar scope).
+        try:
+            from kazma_skills.native.calendar.credentials import (
+                google_connected,
+                persist_google_tokens,
+                scopes_include_google_calendar,
+            )
+
+            if google_connected() or scopes_include_google_calendar(scope_str):
+                persist_google_tokens(access, new_refresh, scopes=scope_str)
+        except Exception:
+            logger.debug("[email.oauth] calendar token sync on refresh failed", exc_info=True)
         return access, new_refresh

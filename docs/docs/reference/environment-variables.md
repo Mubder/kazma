@@ -188,7 +188,7 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 | `KAZMA_LLM_STREAM` | on | No | `0` falls back to blocking `chat()` (no token SSE). |
 | `KAZMA_TOOL_HOOKS` | on | No | `0` disables PreToolUse / PostToolUse (in-process and command). Empty `agent.hooks.*` lists are a no-op. Hooks cannot skip HITL. |
 | `KAZMA_PLAN_MODE` | on | No | `0` disables `/plan` enter/execute. Plan mode is not a HITL bypass. |
-| `GOOGLE_CALENDAR_TOKEN` / `MS_CALENDAR_TOKEN` | unset | Optional | OAuth token for the calendar skill's Google / Outlook backend. |
+| `GOOGLE_CALENDAR_TOKEN` / `MS_CALENDAR_TOKEN` | unset | Optional | Override only. Calendar tokens normally live in the vault (`calendar.google.*` / `calendar.microsoft.*`) via Settings → Email → Connect Calendar / Connect with Microsoft. |
 | Provider-specific | — | As used | e.g. DeepSeek, Groq, xAI, OpenRouter, Mistral, Together, Cohere, Fireworks, Perplexity, AI21, Google ADC — see Configuration. |
 
 ---

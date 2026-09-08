@@ -46,17 +46,25 @@ A shared headless Chromium context persists across calls for efficiency.
 
 ## Calendar (`calendar`)
 
-Read and manage events. Three backends, selected by credential availability:
+Read and manage events. Three backends, selected by **vault-backed**
+credentials (the same store Gmail uses). Env vars are an override, not
+the source of truth.
 
-- **Google Calendar** — OAuth token via `GOOGLE_CALENDAR_TOKEN` (or
-  `GOOGLE_OAUTH_TOKEN`).
-- **Microsoft Outlook** (MS Graph) — token via `MS_CALENDAR_TOKEN`
-  (or `MS_GRAPH_TOKEN`).
-- **Sandbox** — in-memory local calendar (always available; events persist
-  within the process for testing).
+- **Google Calendar** — Settings → Email → **Connect with Google**
+  (Calendar scope is included) or **Connect Calendar**. Tokens live in
+  the vault as `calendar.google.*`. Enable the **Google Calendar API**
+  in the Cloud project. A Gmail-only token is never sent to Calendar.
+- **Microsoft Outlook** (MS Graph) — Settings → Email → **Connect with
+  Microsoft** (requests `Calendars.ReadWrite`). Reconnect if your grant
+  is mail-only.
+- **Sandbox** — in-memory local calendar when **no** account is
+  connected (`provider=auto`). Explicit `provider="google"` / `"outlook"`
+  **fails closed** with a connect hint — it does not pretend to be an
+  empty real calendar.
 
 ```bash
-export GOOGLE_CALENDAR_TOKEN=ya29...   # or MS_CALENDAR_TOKEN
+# Optional override only — prefer Settings → Email → Connect Calendar
+export GOOGLE_CALENDAR_TOKEN=ya29...
 ```
 
 | Tool | What it does |

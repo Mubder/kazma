@@ -2419,6 +2419,7 @@
                     <!-- OAuth -->
                     <div x-show="emailGmailMode === 'oauth'" x-cloak>
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_gmail_oauth_desc') }}</p>
+                        <p style="font-size:0.8rem;color:var(--text-tertiary);margin:0 0 12px 0;">{{ t('settings.calendar_gmail_oauth_note') }}</p>
                         <p style="font-size:0.8rem;margin:0 0 12px 0;">
                             <span style="color:var(--text-tertiary);">{{ t('settings.email_gmail_oauth_client_status') }}:</span>
                             <span class="badge" style="font-size:0.65rem;margin-left:6px;"
@@ -2572,6 +2573,27 @@
                         <button class="btn btn-secondary btn-sm" @click="disconnectMicrosoft()" :disabled="emailSaving">{{ t('settings.email_disconnect') }}</button>
                     </div>
                 </div>
+            </div>
+
+            <!-- Calendar (Google / Outlook) — same Google OAuth client as Gmail -->
+            <div class="card" style="padding:16px;border:1px solid var(--border-subtle);margin-top:16px;">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:12px;flex-wrap:wrap;">
+                    <h4 style="margin:0;">{{ t('settings.calendar_title') }}</h4>
+                    <span class="badge" :class="calendarStatus.google_connected || calendarStatus.outlook_connected ? 'badge-stdio' : 'badge-basic'" style="font-size:0.7rem;"
+                          x-text="(calendarStatus.google_connected || calendarStatus.outlook_connected) ? t('settings.email_connected') : t('settings.email_not_connected')"></span>
+                </div>
+                <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.calendar_desc') }}</p>
+                <p style="font-size:0.8rem;margin:0 0 12px 0;">
+                    <span style="color:var(--text-tertiary);">{{ t('settings.calendar_active') }}:</span>
+                    <code x-text="calendarStatus.active_provider || 'sandbox'"></code>
+                    <span x-show="calendarStatus.google_address" x-cloak> · <code x-text="calendarStatus.google_address"></code></span>
+                </p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button class="btn btn-primary btn-sm" @click="connectCalendarOAuth()" :disabled="emailSaving">{{ t('settings.calendar_connect_google') }}</button>
+                    <button class="btn btn-secondary btn-sm" x-show="calendarStatus.google_connected" x-cloak
+                            @click="disconnectGoogleCalendar()" :disabled="emailSaving">{{ t('settings.calendar_disconnect') }}</button>
+                </div>
+                <p style="font-size:0.75rem;color:var(--text-tertiary);margin:12px 0 0 0;">{{ t('settings.calendar_outlook_hint') }}</p>
             </div>
 
             <!-- Multi-account list -->

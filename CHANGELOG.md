@@ -1,5 +1,36 @@
 # CHANGELOG
 
+## Fix — Google Calendar silent sandbox + vault-backed OAuth (2026-09-08)
+
+Live: after Disconnect/Reconnect Google (Gmail working), `list_events(provider=google)`
+returned `Calendar: sandbox, No events found`. The calendar router only
+read `GOOGLE_CALENDAR_TOKEN` from process env; `_vault_get` imported the
+HITL vault tool and **always returned `""`**. Connect with Google is a
+Gmail-only grant (`email.gmail.*`) and never requested Calendar scope.
+
+- **Calendar credentials** (`calendar/credentials.py`): vault
+  `calendar.google.*` / `calendar.microsoft.*` is SoT; Gmail access token
+  is reused **only** when `email.gmail.scopes` includes Calendar.
+- **Router honesty:** explicit `provider=google` / `outlook` raises
+  `CalendarNotConnectedError` (tool returns a Connect hint). Auto still
+  sandboxes when nothing is connected.
+- **OAuth:** Connect with Google now requests `…/auth/calendar` as a soft
+  extra (Gmail still succeeds if Calendar API is off). Dedicated
+  **Connect Calendar** reuses the Gmail OAuth client and the Gmail
+  callback (`state.provider == google_calendar`). Microsoft Graph OAuth
+  requests `Calendars.ReadWrite` and copies tokens for Outlook calendar.
+  Device-flow client id reads the vault (`cred()`), not env-only.
+- **401 refresh** on both Google and Outlook calendar backends.
+- **Health:** `check_connectors` probes Gmail profile (not Drive-as-Gmail)
+  and Calendar independently; Testing-mode 7-day expiry alerts for both.
+- **Settings → Email:** Calendar card + Connect Calendar / Disconnect.
+- **Tests:** `tests/test_calendar_connector.py` (no vault stub, no silent
+  sandbox, Gmail finish persists calendar when scope granted, CSRF header
+  on disconnect).
+
+**After pull:** restart, enable **Google Calendar API** in the Cloud
+project, Settings → Email → Connect with Google (or Connect Calendar).
+
 ## Fix — Capacity-ack terminal repaint trusts the DOM, not the dedupe map (2026-09-05)
 
 Second follow-up. User reports persisted after both prior fixes, only

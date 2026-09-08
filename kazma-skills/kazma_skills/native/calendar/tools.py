@@ -1,7 +1,9 @@
 """Calendar Native Skill — list/create/update/delete events + find free slots.
 
 Backends are selected by the router (``router.py``): Google Calendar and
-Microsoft Outlook when an OAuth token is configured, else a local sandbox.
+Microsoft Outlook when a vault/env OAuth token is configured. Explicit
+``provider=google`` / ``outlook`` fail closed (no silent sandbox). Auto
+falls back to the in-memory sandbox when no account is connected.
 All tools return human-readable ``str`` results.
 """
 
@@ -43,12 +45,17 @@ async def list_events(
     provider: str = "auto",
 ) -> str:
     """List upcoming calendar events (ISO 8601 bounds; defaults to next 7 days)."""
-    from kazma_skills.native.calendar.router import get_backend
+    from kazma_skills.native.calendar.router import (
+        CalendarNotConnectedError,
+        get_backend,
+    )
 
     lo, hi = _default_window(time_min, time_max)
     try:
         backend = get_backend(provider)
         events = await backend.list_events(lo, hi, max_results)
+    except CalendarNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not list events — {type(exc).__name__}: {exc}"
     return f"Calendar: {backend.name}\n{_fmt(events)}"
@@ -67,13 +74,18 @@ async def create_event(
         return "Error: event summary is required."
     if not start or not end:
         return "Error: start and end (ISO 8601) are required."
-    from kazma_skills.native.calendar.router import get_backend
+    from kazma_skills.native.calendar.router import (
+        CalendarNotConnectedError,
+        get_backend,
+    )
 
     try:
         backend = get_backend(provider)
         ev = await backend.create_event(
             summary.strip(), start, end, location, description
         )
+    except CalendarNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not create event — {type(exc).__name__}: {exc}"
     return f"Event created ({backend.name}):\n{json.dumps(ev, indent=2, default=str)}"
@@ -87,11 +99,16 @@ async def update_event(
     """Update an event by id. ``fields`` keys: summary, start, end, location, description."""
     if not event_id or not event_id.strip():
         return "Error: event_id is required."
-    from kazma_skills.native.calendar.router import get_backend
+    from kazma_skills.native.calendar.router import (
+        CalendarNotConnectedError,
+        get_backend,
+    )
 
     try:
         backend = get_backend(provider)
         ev = await backend.update_event(event_id.strip(), fields or {})
+    except CalendarNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not update event — {type(exc).__name__}: {exc}"
     return f"Event updated ({backend.name}):\n{json.dumps(ev, indent=2, default=str)}"
@@ -101,11 +118,16 @@ async def delete_event(event_id: str, provider: str = "auto") -> str:
     """Delete a calendar event by id."""
     if not event_id or not event_id.strip():
         return "Error: event_id is required."
-    from kazma_skills.native.calendar.router import get_backend
+    from kazma_skills.native.calendar.router import (
+        CalendarNotConnectedError,
+        get_backend,
+    )
 
     try:
         backend = get_backend(provider)
         ok = await backend.delete_event(event_id.strip())
+    except CalendarNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not delete event — {type(exc).__name__}: {exc}"
     return f"Event {event_id} deleted ({backend.name})." if ok else f"Event {event_id} not found."
@@ -119,11 +141,16 @@ async def find_free_slots(
     """Find free slots of ``duration_minutes`` on ``date`` (YYYY-MM-DD or ISO)."""
     if not date or not date.strip():
         return "Error: date (YYYY-MM-DD) is required."
-    from kazma_skills.native.calendar.router import get_backend
+    from kazma_skills.native.calendar.router import (
+        CalendarNotConnectedError,
+        get_backend,
+    )
 
     try:
         backend = get_backend(provider)
         slots = await backend.find_free_slots(date.strip(), duration_minutes)
+    except CalendarNotConnectedError as exc:
+        return f"Error: {exc.hint}"
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not find free slots — {type(exc).__name__}: {exc}"
     if not slots:

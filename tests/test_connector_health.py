@@ -163,6 +163,29 @@ def test_the_check_is_scheduled_nightly():
     src = inspect.getsource(worker_bootstrap)
     assert 'enqueue_task("connector_health", {})' in src
     assert 'register_handler("connector_health"' in src
+    handler = inspect.getsource(worker_bootstrap._handle_connector_health)
+    assert "check_connectors" in handler
+
+
+def test_calendar_health_is_skipped_when_disconnected(monkeypatch, alerts):
+    monkeypatch.setattr(ch, "_vault_get", lambda k: "")
+    st = asyncio.run(ch.check_google_calendar())
+    assert st.ok is True and st.skipped
+    assert alerts == []
+
+
+def test_calendar_expired_grant_alerts(monkeypatch, alerts):
+    store = {"calendar.google.refresh_token": "rt"}
+
+    monkeypatch.setattr(ch, "_vault_get", lambda k: store.get(k, ""))
+
+    async def _fail():
+        return False, "invalid_grant"
+
+    monkeypatch.setattr(ch, "_probe_google_calendar", _fail)
+    st = asyncio.run(ch.check_google_calendar())
+    assert st.ok is False
+    assert any(a["key"] == "connector.google_calendar_expired" for a in alerts)
 
 
 def test_the_connect_time_is_recorded_on_reconnect():

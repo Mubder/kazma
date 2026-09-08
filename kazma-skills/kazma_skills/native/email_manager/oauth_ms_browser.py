@@ -23,6 +23,7 @@ SCOPES = (
     "https://graph.microsoft.com/Mail.Read "
     "https://graph.microsoft.com/Mail.ReadWrite "
     "https://graph.microsoft.com/Mail.Send "
+    "https://graph.microsoft.com/Calendars.ReadWrite "
     "https://graph.microsoft.com/Files.ReadWrite "
     "offline_access openid profile"
 )
@@ -124,6 +125,14 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
     vault_store("email.microsoft.client_id", cid, category="email")
     os.environ["EMAIL_MS_AUTH"] = "oauth"
     vault_store("email.microsoft.auth", "oauth", category="email")
+    scope_str = str(payload.get("scope") or SCOPES)
+    vault_store("email.microsoft.scopes", scope_str, category="email")
+    try:
+        from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
+
+        persist_microsoft_tokens(access, refresh, scope_str)
+    except Exception:
+        logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
     logger.info("[email.oauth] Microsoft Graph browser OAuth tokens stored")
     return {
         "ok": True,

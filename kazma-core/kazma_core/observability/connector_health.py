@@ -33,7 +33,10 @@ __all__ = [
     "WARN_BEFORE_DAYS",
     "ConnectorStatus",
     "google_grant_age_days",
+    "google_calendar_grant_age_days",
     "check_google",
+    "check_google_calendar",
+    "check_connectors",
 ]
 
 # Google's documented lifetime for refresh tokens issued by a project whose
@@ -174,16 +177,131 @@ async def _probe_google() -> tuple[bool, str]:
     A grant can be revoked from the account's third-party access page long
     before the 7 days are up, and a clock-only check would call that healthy
     right until someone tried to use it.
+
+    Gmail profile is the SoT for this check (the original incident was
+    Gmail going silent). Drive used to be the probe via get_sync_provider;
+    if Drive wasn't the offsite backend the live probe was skipped and
+    only the clock ran.
     """
     try:
-        from kazma_core.backup.cloud_sync import get_sync_provider
+        from kazma_skills.native.email_manager.oauth_gmail import (
+            refresh_gmail_access_token,
+        )
 
-        provider = get_sync_provider()
-        if provider is None:
-            return True, "no Google provider configured"
-        res = await provider.test_connection()
-        if res.get("ok"):
-            return True, str(res.get("message") or "connected")
-        return False, str(res.get("error") or "unknown error")
+        refresh = _vault_get("email.gmail.refresh_token")
+        access = _vault_get("email.gmail.access_token")
+        if refresh:
+            try:
+                access, _ = await refresh_gmail_access_token(refresh)
+            except Exception as exc:  # noqa: BLE001
+                return False, str(exc)[:200]
+        if not access:
+            return False, "no Gmail access token"
+        import httpx
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                headers={"Authorization": f"Bearer {access}"},
+            )
+            if r.status_code < 400:
+                return True, "connected"
+            return False, (r.text or f"HTTP {r.status_code}")[:200]
     except Exception as exc:  # noqa: BLE001
         return False, f"probe failed: {exc}"
+
+
+def google_calendar_grant_age_days(now: float | None = None) -> float | None:
+    raw = _vault_get("calendar.google.connected_at")
+    if not raw:
+        return None
+    try:
+        stamp = float(raw)
+    except ValueError:
+        return None
+    return max(0.0, ((now if now is not None else time.time()) - stamp) / 86400.0)
+
+
+async def check_google_calendar(*, alert_on_findings: bool = True) -> ConnectorStatus:
+    """Probe Google Calendar independently of Gmail. Never raises."""
+    try:
+        return await _check_google_calendar(alert_on_findings=alert_on_findings)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[connector-health] calendar check failed", exc_info=True)
+        return ConnectorStatus(
+            name="google_calendar", ok=False, detail=f"check failed: {exc}"
+        )
+
+
+async def _check_google_calendar(*, alert_on_findings: bool = True) -> ConnectorStatus:
+    st = ConnectorStatus(name="google_calendar")
+    if not _vault_get("calendar.google.refresh_token"):
+        st.ok = True
+        st.skipped = "no Google Calendar connected"
+        return st
+
+    age = google_calendar_grant_age_days()
+    st.age_days = age
+    if age is not None:
+        st.expires_in_days = max(0.0, TESTING_MODE_TTL_DAYS - age)
+
+    live_ok, live_detail = await _probe_google_calendar()
+    st.ok = live_ok
+    st.detail = live_detail
+
+    if not live_ok:
+        if alert_on_findings:
+            _alert(
+                "connector.google_calendar_expired",
+                "Google Calendar sign-in has expired — calendar tools will sandbox.",
+                f"{live_detail[:200]} Reconnect in Settings -> Email -> "
+                "Connect Calendar (or Connect with Google). Gmail is a "
+                "separate grant.",
+                "critical",
+            )
+        return st
+
+    if st.expires_in_days is not None and st.expires_in_days <= WARN_BEFORE_DAYS:
+        if alert_on_findings:
+            _alert(
+                "connector.google_calendar_expiring",
+                "Google Calendar sign-in expires today — reconnect when convenient.",
+                f"OAuth status is Testing, so Google expires the grant every "
+                f"{TESTING_MODE_TTL_DAYS:.0f} days. It is {age:.1f} days old. "
+                "Settings -> Email -> Connect Calendar.",
+                "warn",
+            )
+    return st
+
+
+async def _probe_google_calendar() -> tuple[bool, str]:
+    try:
+        from kazma_skills.native.calendar.oauth_google import (
+            probe_calendar_api,
+            refresh_google_calendar_access_token,
+        )
+
+        refresh = _vault_get("calendar.google.refresh_token")
+        access = _vault_get("calendar.google.access_token")
+        if refresh:
+            try:
+                access, _ = await refresh_google_calendar_access_token(refresh)
+            except Exception as exc:  # noqa: BLE001
+                return False, str(exc)[:200]
+        if not access:
+            return False, "no Calendar access token"
+        import httpx
+
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            ok, reason = await probe_calendar_api(client, access)
+            return ok, reason if ok else (reason or "calendar probe failed")
+    except Exception as exc:  # noqa: BLE001
+        return False, f"probe failed: {exc}"
+
+
+async def check_connectors(*, alert_on_findings: bool = True) -> list[ConnectorStatus]:
+    """Run every connector health check. Failures in one must not skip the rest."""
+    out: list[ConnectorStatus] = []
+    out.append(await check_google(alert_on_findings=alert_on_findings))
+    out.append(await check_google_calendar(alert_on_findings=alert_on_findings))
+    return out

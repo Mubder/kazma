@@ -520,6 +520,38 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "الدردشة تستخدم الوضع التلقائي: حساب حقيقي إن وُجد، وإلا sandbox. تظهر بادئة الوضع في الرد.",
         "en": "Chat uses auto: real account if connected, otherwise sandbox. Banner shows [sandbox|gmail|gmail_pop|microsoft_graph|microsoft_imap|imap|pop] mode.",
     },
+    "settings.calendar_active": {
+        "ar": "المزوّد النشط",
+        "en": "Active backend",
+    },
+    "settings.calendar_connect_google": {
+        "ar": "ربط تقويم Google",
+        "en": "Connect Calendar",
+    },
+    "settings.calendar_desc": {
+        "ar": "يستخدم المهارة الأصلية list_events / create_event تقويم Google الحقيقي عند الاتصال. بدون رمز تقويم كانت الأداة تسقط بصمت إلى sandbox وتبدو كتقويم فارغ.",
+        "en": "The calendar skill (list_events / create_event) uses your real Google Calendar when connected. Without a calendar token it used to fall back silently to an empty sandbox.",
+    },
+    "settings.calendar_disconnect": {
+        "ar": "قطع اتصال التقويم",
+        "en": "Disconnect Calendar",
+    },
+    "settings.calendar_disconnect_confirm": {
+        "ar": "مسح رموز تقويم Google؟ يبقى Gmail متصلاً.",
+        "en": "Clear Google Calendar tokens? Gmail stays connected.",
+    },
+    "settings.calendar_gmail_oauth_note": {
+        "ar": "ربط Google يطلب أيضاً نطاق التقويم. فعّل Google Calendar API في مشروع Cloud.",
+        "en": "Connect with Google also requests Calendar scope. Enable the Google Calendar API in the Cloud project.",
+    },
+    "settings.calendar_outlook_hint": {
+        "ar": "تقويم Outlook يستخدم ربط Microsoft (يُطلب Calendars.ReadWrite). أعد الربط إن كان الرمز للبريد فقط.",
+        "en": "Outlook calendar uses Connect with Microsoft (Calendars.ReadWrite is requested). Reconnect Microsoft if your grant is mail-only.",
+    },
+    "settings.calendar_title": {
+        "ar": "التقويم (Google / Outlook)",
+        "en": "Calendar (Google / Outlook)",
+    },
     "settings.email_connect_google": {
         "ar": "الربط مع Google",
         "en": "Connect with Google",
@@ -609,12 +641,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "OAuth client",
     },
     "settings.email_gmail_oauth_desc": {
-        "ar": "موصى به لـ Google Workspace: تسجيل الدخول عبر Google OAuth (بدون كلمة مرور تطبيق). يستخدم Gmail API.",
-        "en": "Recommended for Google Workspace: sign in with Google OAuth (no app password). Uses Gmail API.",
+        "ar": "موصى به لـ Google Workspace: تسجيل الدخول عبر Google OAuth (بدون كلمة مرور تطبيق). يستخدم Gmail API ويطلب نطاق التقويم.",
+        "en": "Recommended for Google Workspace: sign in with Google OAuth (no app password). Uses Gmail API and requests Calendar so list_events can use your Google Calendar.",
     },
     "settings.email_gmail_oauth_help": {
-        "ar": "Google Cloud Console ← عميل OAuth ويب. يجب أن يتضمن Redirect URI المسار /api/email/oauth/gmail/callback",
-        "en": "Google Cloud Console → OAuth Web client. Authorized redirect URI must include /api/email/oauth/gmail/callback",
+        "ar": "Google Cloud Console ← عميل OAuth ويب. يجب أن يتضمن Redirect URI المسار /api/email/oauth/gmail/callback (التقويم يستخدم نفس المسار). فعّل Gmail API و Google Calendar API.",
+        "en": "Google Cloud Console → OAuth Web client. Authorized redirect URI must include /api/email/oauth/gmail/callback (Calendar uses the same callback). Enable Gmail API and Google Calendar API.",
     },
     "settings.email_gmail_oauth_secret_again": {
         "ar": "أعد إدخال سر العميل (أو امسح المعرّف لاستخدام المحفوظ).",

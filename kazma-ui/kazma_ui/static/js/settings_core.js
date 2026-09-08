@@ -393,6 +393,14 @@
         emailMsPollTimer: null,
         emailLoading: false,
         emailSaving: false,
+        calendarStatus: {
+            google_connected: false,
+            google_address: '',
+            google_ok: '',
+            google_oauth_client_set: false,
+            outlook_connected: false,
+            active_provider: 'sandbox',
+        },
 
         // ── X (Twitter) official API ──
         xStatus: {

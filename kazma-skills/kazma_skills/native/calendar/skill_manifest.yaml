@@ -2,8 +2,10 @@ name: calendar
 version: 0.1.0
 description: >
   Read and manage calendar events — list, create, update, delete, and find
-  free time slots. Supports Google Calendar and Microsoft Outlook (MS Graph),
-  with a local sandbox backend when no account is connected.
+  free time slots. Google Calendar and Microsoft Outlook when connected
+  (vault-backed OAuth; Settings → Email → Connect Calendar / Connect with
+  Microsoft). Local sandbox only when no account is connected — explicit
+  provider=google does not silently sandbox.
 author: Kazma Team
 license: MIT
 

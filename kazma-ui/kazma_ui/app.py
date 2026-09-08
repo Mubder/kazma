@@ -1376,6 +1376,17 @@ class KazmaAppBuilder:
             self._init_errors.append({"subsystem": "email_api", "error": str(e)})
 
         try:
+            from kazma_ui.calendar_api import protected_router as calendar_protected
+            from kazma_ui.calendar_api import router as calendar_router
+
+            self.app.include_router(calendar_router)
+            self.app.include_router(calendar_protected)
+            logger.info("Calendar API router mounted at /api/calendar/*")
+        except Exception as e:
+            logger.warning("Calendar API router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "calendar_api", "error": str(e)})
+
+        try:
             from kazma_ui.x_api import protected_router as x_protected
             from kazma_ui.x_api import router as x_router
 

@@ -984,10 +984,13 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
 async def _handle_connector_health(payload: dict[str, Any]) -> bool:
     """Probe connector credentials and warn before they expire."""
     try:
-        from kazma_core.observability.connector_health import check_google
+        from kazma_core.observability.connector_health import check_connectors
 
-        st = await check_google()
-        logger.info("[memory_worker] connector health: %s", st.as_dict())
+        results = await check_connectors()
+        logger.info(
+            "[memory_worker] connector health: %s",
+            [st.as_dict() for st in results],
+        )
         return True
     except Exception:
         logger.warning("[memory_worker] connector health failed", exc_info=True)

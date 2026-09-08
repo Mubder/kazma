@@ -74,17 +74,19 @@ GET /api/email/presets
 
 ### Gmail OAuth setup (Workspace-friendly)
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → enable **Gmail API**.  
-2. OAuth consent screen → add scopes `gmail.modify`, `gmail.send`, `userinfo.email`.  
+1. [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → enable **Gmail API** and **Google Calendar API**.  
+2. OAuth consent screen → add scopes `gmail.modify`, `gmail.send`, `calendar`, `userinfo.email`.  
 3. Credentials → **OAuth client ID** → type **Web application**.  
-4. Authorized redirect URI (must match your host):
+4. Authorized redirect URI (must match your host; Calendar uses the same callback):
 
 ```text
 http://127.0.0.1:9090/api/email/oauth/gmail/callback
 https://your.domain/api/email/oauth/gmail/callback
 ```
 
-5. Settings → Email → paste Client ID + secret → **Save OAuth client** → **Connect with Google**.
+5. Settings → Email → paste Client ID + secret → **Save OAuth client** → **Connect with Google**. That consent also requests Calendar. If Calendar was skipped or the Calendar API is off, use **Connect Calendar** on the same page (same client, same redirect URI).
+
+Gmail-only tokens cannot list Google Calendar events. The calendar skill used to fall back silently to an empty sandbox; it now fails closed with a connect hint when `provider=google` has no calendar grant.
 
 Env alternative:
 
