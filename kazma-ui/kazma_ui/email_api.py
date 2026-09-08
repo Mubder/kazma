@@ -368,6 +368,24 @@ async def gmail_oauth_callback(
             f"{settings_url}&email_oauth=error&msg={quote('missing_code')}",
             status_code=302,
         )
+    from kazma_skills.native.email_manager.oauth_common import peek_state
+
+    peeked = peek_state(state or "")
+    if peeked and peeked.get("provider") == "google_calendar":
+        from kazma_skills.native.calendar.oauth_google import finish_google_calendar_oauth
+
+        result = await finish_google_calendar_oauth(code, state)
+        if not result.get("ok"):
+            return RedirectResponse(
+                f"{settings_url}&calendar_oauth=error&msg={quote(str(result.get('error') or 'failed'))}",
+                status_code=302,
+            )
+        email = quote(str(result.get("email") or ""))
+        return RedirectResponse(
+            f"{settings_url}&calendar_oauth=ok&provider=google&email={email}",
+            status_code=302,
+        )
+
     from kazma_skills.native.email_manager.oauth_gmail import finish_gmail_oauth
 
     result = await finish_gmail_oauth(code, state)
@@ -377,8 +395,9 @@ async def gmail_oauth_callback(
             status_code=302,
         )
     email = quote(str(result.get("email") or ""))
+    cal = "1" if result.get("calendar_ok") else "0"
     return RedirectResponse(
-        f"{settings_url}&email_oauth=ok&provider=gmail&email={email}",
+        f"{settings_url}&email_oauth=ok&provider=gmail&email={email}&calendar={cal}",
         status_code=302,
     )
 

@@ -260,26 +260,44 @@
         async loadEmailStatus() {
             this.emailLoading = true;
             try {
-                // OAuth callback toast (?email_oauth=ok|error)
+                // OAuth callback toast (?email_oauth=ok|error / ?calendar_oauth=)
                 try {
                     const url = new URL(window.location.href);
                     const oauth = url.searchParams.get('email_oauth');
+                    const calOauth = url.searchParams.get('calendar_oauth');
                     if (oauth === 'ok') {
                         const prov = url.searchParams.get('provider') || 'email';
                         const em = url.searchParams.get('email') || '';
-                        showToast(
-                            (prov === 'gmail' ? 'Gmail' : 'Microsoft') +
-                            ' connected' + (em ? ' as ' + em : ''),
-                            'success'
-                        );
+                        const cal = url.searchParams.get('calendar');
+                        let msg = (prov === 'gmail' ? 'Gmail' : 'Microsoft') +
+                            ' connected' + (em ? ' as ' + em : '');
+                        if (prov === 'gmail' && cal === '0') {
+                            msg += ' — Calendar not granted; use Connect Calendar';
+                        }
+                        showToast(msg, 'success');
                         url.searchParams.delete('email_oauth');
                         url.searchParams.delete('provider');
                         url.searchParams.delete('email');
                         url.searchParams.delete('msg');
+                        url.searchParams.delete('calendar');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     } else if (oauth === 'error') {
                         showToast('OAuth failed: ' + (url.searchParams.get('msg') || 'unknown'), 'error');
                         url.searchParams.delete('email_oauth');
+                        url.searchParams.delete('msg');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    }
+                    if (calOauth === 'ok') {
+                        const em = url.searchParams.get('email') || '';
+                        showToast('Google Calendar connected' + (em ? ' as ' + em : ''), 'success');
+                        url.searchParams.delete('calendar_oauth');
+                        url.searchParams.delete('provider');
+                        url.searchParams.delete('email');
+                        url.searchParams.delete('msg');
+                        history.replaceState(null, '', url.pathname + url.search + url.hash);
+                    } else if (calOauth === 'error') {
+                        showToast('Calendar OAuth failed: ' + (url.searchParams.get('msg') || 'unknown'), 'error');
+                        url.searchParams.delete('calendar_oauth');
                         url.searchParams.delete('msg');
                         history.replaceState(null, '', url.pathname + url.search + url.hash);
                     }
@@ -300,6 +318,8 @@
                 }
                 const acc = await this._fetch('/api/email/accounts');
                 if (acc && Array.isArray(acc.accounts)) this.emailAccounts = acc.accounts;
+                const cal = await this._fetch('/api/calendar/status');
+                if (cal && !cal.error) Object.assign(this.calendarStatus, cal);
             } finally {
                 this.emailLoading = false;
             }
@@ -478,6 +498,55 @@
                 await this.loadEmailStatus();
             } catch (e) {
                 showToast('Gmail connect failed: ' + e.message, 'error');
+            } finally {
+                this.emailSaving = false;
+            }
+        },
+
+        async connectCalendarOAuth() {
+            if (!this.emailStatus.gmail_oauth_client_set && !this.calendarStatus.google_oauth_client_set) {
+                showToast(
+                    window.t
+                        ? t('settings.email_gmail_oauth_client_required')
+                        : 'Paste Google OAuth Client ID + secret on the Gmail card first, then Connect Calendar.',
+                    'error'
+                );
+                return;
+            }
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/calendar/oauth/google/start.json', { credentials: 'same-origin' });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data.ok || !data.authorize_url) {
+                    throw new Error(data.error || 'Could not start Google Calendar OAuth');
+                }
+                window.location.href = data.authorize_url;
+            } catch (e) {
+                showToast('Calendar OAuth failed: ' + e.message, 'error');
+                this.emailSaving = false;
+            }
+        },
+
+        async disconnectGoogleCalendar() {
+            if (!(await window.kazmaConfirm({
+                title: window.t ? t('settings.calendar_disconnect') : 'Disconnect Calendar',
+                message: window.t ? t('settings.calendar_disconnect_confirm') : 'Clear Google Calendar tokens? Gmail stays connected.',
+                confirmText: window.t ? t('settings.email_disconnect') : 'Disconnect',
+                danger: true,
+            }))) return;
+            this.emailSaving = true;
+            try {
+                const resp = await fetch('/api/calendar/oauth/google/disconnect', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.ok === false) throw new Error(data.error || 'Failed');
+                showToast(data.message || 'Google Calendar disconnected', 'success');
+                await this.loadEmailStatus();
+            } catch (e) {
+                showToast('Disconnect failed: ' + e.message, 'error');
             } finally {
                 this.emailSaving = false;
             }

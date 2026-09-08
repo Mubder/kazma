@@ -37,6 +37,7 @@ def test_gmail_start_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "accounts.google.com" in r["authorize_url"]
     assert "gmail/callback" in r["redirect_uri"]
     assert "gmail.modify" in r["authorize_url"]
+    assert "auth%2Fcalendar" in r["authorize_url"] or "auth/calendar" in r["authorize_url"]
     assert "include_granted_scopes" not in r["authorize_url"]
 
 

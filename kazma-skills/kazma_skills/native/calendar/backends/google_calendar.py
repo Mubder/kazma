@@ -1,15 +1,20 @@
 """Google Calendar backend via the Calendar REST API (v3).
 
-Uses an OAuth2 access token resolved from the ``GOOGLE_CALENDAR_TOKEN``
-env var or the secret vault (key ``calendar.google.token``). When no token
-is available, the router falls back to the sandbox backend.
+Tokens come from :mod:`kazma_skills.native.calendar.credentials` (vault +
+env). A 401 triggers one refresh of ``calendar.google.refresh_token``
+(or the Gmail grant when that grant includes Calendar scope).
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 _API = "https://www.googleapis.com/calendar/v3"
+_refresh_lock = asyncio.Lock()
 
 
 class GoogleCalendarBackend:
@@ -17,32 +22,81 @@ class GoogleCalendarBackend:
 
     name = "google"
 
-    def __init__(self, access_token: str) -> None:
+    def __init__(self, access_token: str, refresh_token: str = "") -> None:
         self._token = access_token
+        self._refresh = refresh_token
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
 
+    async def _ensure_token(self) -> None:
+        if self._token and self._token != "pending_refresh":
+            return
+        await self._do_refresh()
+
+    async def _do_refresh(self) -> bool:
+        refresh = self._refresh
+        if not refresh:
+            from kazma_skills.native.calendar.credentials import google_refresh_token
+
+            refresh = google_refresh_token()
+        if not refresh:
+            return False
+        async with _refresh_lock:
+            try:
+                from kazma_skills.native.calendar.oauth_google import (
+                    refresh_google_calendar_access_token,
+                )
+
+                access, new_refresh = await refresh_google_calendar_access_token(refresh)
+                self._token = access
+                self._refresh = new_refresh
+                return True
+            except Exception as exc:
+                logger.warning("[calendar.google] token refresh failed: %s", exc)
+                return False
+
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> Any:
+        import httpx
+
+        await self._ensure_token()
+        async with httpx.AsyncClient(timeout=30.0) as c:
+            r = await c.request(
+                method, url, headers=self._headers(), params=params, json=json
+            )
+            if r.status_code == 401:
+                if await self._do_refresh():
+                    r = await c.request(
+                        method, url, headers=self._headers(), params=params, json=json
+                    )
+            r.raise_for_status()
+            if r.status_code == 204 or not r.content:
+                return None
+            return r.json()
+
     async def list_events(
         self, time_min: str, time_max: str, max_results: int = 25
     ) -> list[dict[str, Any]]:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.get(
-                f"{_API}/calendars/primary/events",
-                headers=self._headers(),
-                params={
-                    "timeMin": time_min,
-                    "timeMax": time_max,
-                    "maxResults": max_results,
-                    "singleEvents": "true",
-                    "orderBy": "startTime",
-                },
-            )
-            r.raise_for_status()
-            items = r.json().get("items", [])
-            return [self._norm(e) for e in items]
+        data = await self._request(
+            "GET",
+            f"{_API}/calendars/primary/events",
+            params={
+                "timeMin": time_min,
+                "timeMax": time_max,
+                "maxResults": max_results,
+                "singleEvents": "true",
+                "orderBy": "startTime",
+            },
+        )
+        items = (data or {}).get("items", [])
+        return [self._norm(e) for e in items]
 
     async def create_event(
         self,
@@ -52,62 +106,54 @@ class GoogleCalendarBackend:
         location: str = "",
         description: str = "",
     ) -> dict[str, Any]:
-        import httpx
-
         body = {
             "summary": summary,
             "location": location,
             "description": description,
-            "start": {"dateTime": start},
-            "end": {"dateTime": end},
+            "start": {"dateTime": start, "timeZone": "UTC"},
+            "end": {"dateTime": end, "timeZone": "UTC"},
         }
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.post(
-                f"{_API}/calendars/primary/events",
-                headers=self._headers(),
-                json=body,
-            )
-            r.raise_for_status()
-            return self._norm(r.json())
+        return self._norm(
+            await self._request("POST", f"{_API}/calendars/primary/events", json=body)
+        )
 
     async def update_event(
         self, event_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]:
-        import httpx
-
         body: dict[str, Any] = {}
         for k in ("summary", "location", "description"):
             if k in fields:
                 body[k] = fields[k]
         if "start" in fields:
-            body["start"] = {"dateTime": fields["start"]}
+            body["start"] = {"dateTime": fields["start"], "timeZone": "UTC"}
         if "end" in fields:
-            body["end"] = {"dateTime": fields["end"]}
-        async with httpx.AsyncClient(timeout=30.0) as c:
-            r = await c.patch(
-                f"{_API}/calendars/primary/events/{event_id}",
-                headers=self._headers(),
-                json=body,
+            body["end"] = {"dateTime": fields["end"], "timeZone": "UTC"}
+        return self._norm(
+            await self._request(
+                "PATCH", f"{_API}/calendars/primary/events/{event_id}", json=body
             )
-            r.raise_for_status()
-            return self._norm(r.json())
+        )
 
     async def delete_event(self, event_id: str) -> bool:
         import httpx
 
+        await self._ensure_token()
         async with httpx.AsyncClient(timeout=30.0) as c:
             r = await c.delete(
                 f"{_API}/calendars/primary/events/{event_id}",
                 headers=self._headers(),
             )
+            if r.status_code == 401 and await self._do_refresh():
+                r = await c.delete(
+                    f"{_API}/calendars/primary/events/{event_id}",
+                    headers=self._headers(),
+                )
             return r.status_code in (204, 200)
 
     async def find_free_slots(
         self, date: str, duration_minutes: int = 30
     ) -> list[dict[str, str]]:
-        # Google's freeBusy API requires a timeMin/timeMax; fall back to a
-        # client-side computation from listed events to keep this simple.
-        from datetime import datetime, timedelta, timezone
+        from datetime import timedelta
 
         from kazma_skills.native.calendar.backends.sandbox import _parse_iso
 
@@ -116,7 +162,8 @@ class GoogleCalendarBackend:
         events = await self.list_events(day.isoformat(), day_end.isoformat(), max_results=50)
         busy = []
         for e in events:
-            s = _parse_iso(e["start"]); en = _parse_iso(e["end"])
+            s = _parse_iso(e["start"])
+            en = _parse_iso(e["end"])
             if s.date() == day.date():
                 busy.append((s, en))
         busy.sort()

@@ -35,6 +35,16 @@ def new_state(provider: str, **extra: Any) -> str:
     return state
 
 
+def peek_state(state: str) -> dict[str, Any] | None:
+    """Read OAuth state without consuming it (callback dispatch)."""
+    meta = _oauth_states.get((state or "").strip())
+    if not meta:
+        return None
+    if time.time() - meta.get("created_at", 0) > _STATE_TTL:
+        return None
+    return dict(meta)
+
+
 def pop_state(state: str) -> dict[str, Any] | None:
     meta = _oauth_states.pop((state or "").strip(), None)
     if not meta:

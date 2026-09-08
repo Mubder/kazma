@@ -17,6 +17,7 @@ SCOPES = (
     "https://graph.microsoft.com/Mail.Read "
     "https://graph.microsoft.com/Mail.ReadWrite "
     "https://graph.microsoft.com/Mail.Send "
+    "https://graph.microsoft.com/Calendars.ReadWrite "
     "https://graph.microsoft.com/Files.ReadWrite "
     "offline_access "
     "openid "
@@ -28,11 +29,15 @@ _pending: dict[str, dict[str, Any]] = {}
 
 
 def _client_id() -> str:
-    return (os.environ.get("EMAIL_MS_CLIENT_ID") or "").strip()
+    from kazma_skills.native.email_manager.credentials import cred
+
+    return cred("EMAIL_MS_CLIENT_ID", "email.microsoft.client_id")
 
 
 def _tenant() -> str:
-    return (os.environ.get("EMAIL_MS_TENANT_ID") or "common").strip() or "common"
+    from kazma_skills.native.email_manager.credentials import cred
+
+    return cred("EMAIL_MS_TENANT_ID", "") or "common"
 
 
 async def start_device_code_flow() -> dict[str, Any]:
@@ -129,6 +134,14 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
     vault_store("email.microsoft.client_id", client_id, category="email")
     os.environ["EMAIL_MS_AUTH"] = "oauth"
     vault_store("email.microsoft.auth", "oauth", category="email")
+    scope_str = str(payload.get("scope") or SCOPES)
+    vault_store("email.microsoft.scopes", scope_str, category="email")
+    try:
+        from kazma_skills.native.calendar.credentials import persist_microsoft_tokens
+
+        persist_microsoft_tokens(access, refresh, scope_str)
+    except Exception:
+        logger.debug("[email.oauth] calendar token copy skipped", exc_info=True)
 
     _pending.pop(device_code, None)
     logger.info("[email.oauth] Microsoft Graph tokens stored (vault + env)")
