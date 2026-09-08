@@ -189,6 +189,12 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
 - Process-wide singleton: `get_config_store()` — all components MUST use this, not `ConfigStore()` directly
 - Multi-key writes MUST use `batch_set()` or `transaction()` for atomicity
 - Never construct `ConfigStore()` in gateway/core code — use `get_config_store()`
+- **GET nested vault walk is resolve-only.** `_resolve_vault_value` decrypts
+  `vault://` pointers inside dicts/lists. Lazy-migrate of plaintext secrets
+  is **only** for the exact string key `get()` was called with. Nested
+  `api_key` fields inside `providers.list` must not share
+  `cfg:providers.list.api_key` — that ping-ponged `vault.store` on every
+  registry read and stalled SSE (2026-09-08 `_No response received._`).
 
 ### 9. SwarmEngine Module Structure (P2-1 refactor — 3 extractions)
 

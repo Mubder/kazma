@@ -149,3 +149,49 @@ def test_lazy_migrate_plaintext_on_get(vault_env, tmp_path: Path):
         assert is_vault_ref(raw)
     finally:
         store.close()
+
+
+def test_get_providers_list_does_not_migrate_nested_api_keys(vault_env, tmp_path: Path):
+    """JSON blobs with nested api_keys must not lazy-migrate on get().
+
+    Negative control (old behavior): walking ``providers.list`` treated
+    every provider's ``api_key`` as synthetic key ``providers.list.api_key``.
+    Two different keys ping-ponged ``vault.store`` on every read and
+    stalled SSE (2026-09-08 ``_No response received._``).
+    """
+    store = ConfigStore(
+        db_path=str(tmp_path / "settings.db"),
+        yaml_path=str(tmp_path / "missing.yaml"),
+    )
+    names: list[str] = []
+    orig = vault_env.store
+
+    def _capture(name: str, value: str, **kwargs: object) -> object:
+        names.append(name)
+        return orig(name, value, **kwargs)
+
+    vault_env.store = _capture  # type: ignore[method-assign]
+    try:
+        store._write_db_value(
+            "providers.list",
+            [
+                {"name": "a", "api_key": "sk-aaa-distinct"},
+                {"name": "b", "api_key": "sk-bbb-distinct"},
+            ],
+            category="providers",
+        )
+        for _ in range(20):
+            got = store.get("providers.list")
+            assert got[0]["api_key"] == "sk-aaa-distinct"
+            assert got[1]["api_key"] == "sk-bbb-distinct"
+        assert "cfg:providers.list.api_key" not in names
+        assert vault_env.retrieve("cfg:providers.list.api_key") is None
+        with store._lock:
+            sibling = store._get_conn().execute(
+                "SELECT value FROM settings WHERE key = ?",
+                ("providers.list.api_key",),
+            ).fetchone()
+        assert sibling is None
+    finally:
+        vault_env.store = orig  # type: ignore[method-assign]
+        store.close()
