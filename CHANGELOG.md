@@ -1,5 +1,26 @@
 # CHANGELOG
 
+## Fix — done-frame reply paints without refresh; watchdog is not the answer (2026-09-08)
+
+Live after the vault-migrate pull+restart: `list_events` finished a 1155-char
+reply (`SSE turn_complete content_len=1155`) but the UI stamped
+`_No response received._`. Refresh replayed that stamp instead of the
+persisted answer.
+
+Same class as the 2026-09-05 capacity-ack hole: `applyEvent` records the
+content dedupe key before `renderTurn` paints; post-restart churn misses
+the DOM; later identical paints (including `done`) no-op; the watchdog
+fires. The capacity path had a DOM bypass; **regular replies did not**.
+
+- **`_forcePaintDoneContent`:** any `done` frame with content writes the
+  DOM when the bubble is empty or still showing the watchdog.
+- **empty-terminal:** resyncs SessionStore first; only stamps the
+  watchdog if still empty. Hydrate on refresh overwrites the stamp.
+- **Tests:** `test_capacity_ack_terminal_repaint_from_visible_state`.
+
+**After pull:** reload the web UI (static JS). No server restart required
+for this file, but a refresh of the chat tab picks it up.
+
 ## Fix — ConfigStore nested vault migrate stalled SSE (2026-09-08)
 
 Live: after Calendar reconnect, `list_events` finished a 2402-char reply
