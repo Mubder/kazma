@@ -1,5 +1,24 @@
 # CHANGELOG
 
+## Fix — ConfigStore nested vault migrate stalled SSE (2026-09-08)
+
+Live: after Calendar reconnect, `list_events` finished a 2402-char reply
+but the UI showed `_No response received._`. `kazma.log` was a tight loop
+of `[Vault] Stored secret 'cfg:providers.list.api_key'` (hundreds/sec).
+
+`get("providers.list")` walks the JSON list and lazy-migrated every
+provider `api_key` under the **same** synthetic key. Two API keys
+ping-ponged `vault.store` + a sibling DB row on every registry read,
+pinning the event loop so SSE tokens never painted.
+
+- **`_resolve_vault_value`:** nested dict/list walks resolve `vault://`
+  pointers only. Lazy-migrate stays on the exact string key `get()` was
+  called with (legacy plaintext `llm.api_key` / GitHub token still
+  encrypt on first read).
+- **Test:** `test_get_providers_list_does_not_migrate_nested_api_keys`.
+
+**After pull:** restart. The vault storm stops; chat replies paint again.
+
 ## Fix — Google Calendar silent sandbox + vault-backed OAuth (2026-09-08)
 
 Live: after Disconnect/Reconnect Google (Gmail working), `list_events(provider=google)`

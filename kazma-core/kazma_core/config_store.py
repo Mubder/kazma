@@ -763,15 +763,29 @@ class ConfigStore:
             target[parts[-1]] = json.loads(row["value"])
         return result
 
-    def _resolve_vault_value(self, key: str, val: Any) -> Any:
-        """Resolve vault:// pointers; optionally migrate plaintext secrets into vault."""
+    def _resolve_vault_value(
+        self, key: str, val: Any, *, migrate: bool = True
+    ) -> Any:
+        """Resolve vault:// pointers; optionally migrate plaintext secrets into vault.
+
+        Nested dict/list walks **resolve pointers only**. Lazy-migrate is
+        restricted to the exact string value ``get()`` was called with.
+        Walking ``providers.list`` used to treat every provider's
+        ``api_key`` as the same synthetic key ``providers.list.api_key``,
+        ping-ponging ``vault.store`` on every read and pinning the SSE
+        event loop (2026-09-08 live ``_No response received._``).
+        """
         if isinstance(val, dict):
             return {
-                sub_k: self._resolve_vault_value(f"{key}.{sub_k}" if key else sub_k, sub_v)
+                sub_k: self._resolve_vault_value(
+                    f"{key}.{sub_k}" if key else sub_k, sub_v, migrate=False
+                )
                 for sub_k, sub_v in val.items()
             }
         if isinstance(val, list):
-            return [self._resolve_vault_value(key, item) for item in val]
+            return [
+                self._resolve_vault_value(key, item, migrate=False) for item in val
+            ]
 
         if is_vault_ref(val):
             vault = _try_get_vault()
@@ -787,9 +801,11 @@ class ConfigStore:
 
         # Lazy migrate: plaintext sensitive value + vault available → encrypt
         # Guard against re-migration loops: only migrate if the vault doesn't
-        # already have this secret (or has a different value).
+        # already have this secret (or has a different value). Nested walks
+        # pass migrate=False — do not invent sibling keys for JSON blobs.
         if (
-            is_sensitive_config_key(key)
+            migrate
+            and is_sensitive_config_key(key)
             and isinstance(val, str)
             and val
             and not is_masked_secret_placeholder(val)
