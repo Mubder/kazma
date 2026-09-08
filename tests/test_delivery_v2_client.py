@@ -243,23 +243,26 @@ class TestV2ArchitecturePresent:
         assert "callbacks.onToken({ content: data.content })" in src
 
     def test_capacity_ack_terminal_repaint_from_visible_state(self):
-        """onDone must repaint a capacity ack's content DIRECTLY when the
-        open bubble is still empty. applyEvent marks the content dedupe
-        key BEFORE renderTurn paints; when that paint never became visible
+        """onDone must repaint done-frame content DIRECTLY when the open
+        bubble is still empty. applyEvent marks the content dedupe key
+        BEFORE renderTurn paints; when that paint never became visible
         (post-restart boot churn: reload, session re-mint, WS reconnect —
-        2026-09-05 incident), every later identical paint — including the
-        done-frame reroute — was dedupe-dropped and the empty-terminal
-        watchdog card fired. The terminal frame is SoT: trust the DOM,
-        not the dedupe map."""
+        2026-09-05 capacity acks, 2026-09-08 calendar reply), every later
+        identical paint was dedupe-dropped and the empty-terminal watchdog
+        card fired. The terminal frame is SoT: trust the DOM, not the
+        dedupe map. This applies to ALL done content, not only capacity."""
         src = _CHAT_JS.read_text(encoding="utf-8")
-        assert "data.capacity && data.content" in src
-        assert "_paintHTML(ackEl, _renderReplyHTML(String(data.content)))" in src
+        assert "function _forcePaintDoneContent(raw)" in src
+        assert "function _isWatchdogNotice(text)" in src
+        assert "data.content && !_awaitingApproval" in src
+        assert "_forcePaintDoneContent(data.content)" in src
         # The visibility check must run BEFORE the empty-terminal watchdog.
-        at_ack = src.index("data.capacity && data.content && !_awaitingApproval")
+        at_ack = src.index("if (data && data.content && !_awaitingApproval)")
         at_watchdog = src.index("if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {")
         assert at_ack < at_watchdog, (
-            "capacity ack repaint must precede the empty-terminal fallback"
+            "done-content force-paint must precede the empty-terminal fallback"
         )
+        assert "_resyncDelivery('empty-terminal')" in src
 
     def test_terminal_push_suppressed_for_capacity_acks(self, monkeypatch):
         """The done-frame content fallback must not mint a Web Push for

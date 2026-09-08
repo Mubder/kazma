@@ -484,6 +484,7 @@
             interrupted: !!(data && data.interrupted),
             source: 'done',
           });
+          _forcePaintDoneContent(data.content);
         }
         if (hasInlineApprovalCard() || _awaitingApproval) {
           refreshSessionsSoon();
@@ -692,6 +693,10 @@
           open: lastMsg.open,
           pending: lastMsg.pending,
         });
+        // Refresh/pageshow must replace a leftover watchdog stamp with the
+        // persisted reply (2026-09-08: replay showed "_No response received._"
+        // while SessionStore already had the 1155-char answer).
+        _forcePaintDoneContent(lastMsg.content);
         return;
       }
 
@@ -3190,54 +3195,45 @@
             source: 'done',
           });
         }
-        // Capacity ack (slash fast-path): the done frame is TERMINAL TRUTH
-        // — apply the SoT rule "always replace-paint" with a VISIBILITY
-        // check instead of trusting the turn document. applyEvent marks the
-        // content dedupe key BEFORE renderTurn paints; if that paint never
-        // became visible (boot churn after a server restart: reload, session
-        // re-mint, WS reconnect — 2026-09-05 incident), every later identical
-        // paint — including the done-frame reroute — was dedupe-dropped and
-        // the watchdog card below fired. Paint directly when the open bubble
-        // is still empty; dedupe cannot block a DOM write.
-        if (data && data.capacity && data.content && !_awaitingApproval) {
-          try { _pinLiveAssistantBubble(); } catch (ePin) { /* ignore */ }
-          var ackEl = currentMsgEl && currentMsgEl.querySelector('.message-text');
-          if (ackEl && !String(ackEl.textContent || '').trim()) {
-            try {
-              _paintHTML(ackEl, _renderReplyHTML(String(data.content)));
-              tokenAccum = String(data.content);
-              _turnPainted = true;
-              try { scrollToBottom(); } catch (eScroll) { /* ignore */ }
-            } catch (eAck) {
-              diag('capacity-ack-repaint-failed', String(eAck && eAck.message));
-            }
-          }
+        // Terminal frame is SoT. applyEvent can no-op (dedupe) after a
+        // post-restart paint miss; write the DOM directly when the bubble
+        // is still empty or still showing the watchdog. Covers capacity
+        // acks AND real replies (2026-09-08 calendar turn: 1155 chars
+        // persisted, UI stamped "_No response received._", refresh
+        // replayed the stamp).
+        if (data && data.content && !_awaitingApproval) {
+          _forcePaintDoneContent(data.content);
         }
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
         // _turnPainted: a late stale terminal must NEVER print this after a
         // successful reply already painted (the trailing "_No response
         // received." under the posted-tweets answer, 2026-08-26).
-        // `!currentMsgEl` used to gate this. Any open bubble — including the
-        // blank one a progress frame minted — suppressed the diagnosis, so a
-        // turn that died on an unanswered gate showed nothing at all. What
-        // matters is that the bubble is EMPTY, not that it is absent.
+        // Do not stamp the watchdog until resync has had a chance — the
+        // server often already persisted the reply.
         if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {
           diag('empty-terminal');
           dumpDiagnostics();
-          _pinLiveAssistantBubble();
-          var emptyEl = currentMsgEl && currentMsgEl.querySelector('.message-text');
-          if (emptyEl && !String(emptyEl.textContent || '').trim()) {
-            var retryHtml = '';
-            if (lastSentUserText || (messagesEl.querySelector('.message-user'))) {
-              retryHtml = ' <button class="btn btn-secondary btn-sm" '
-                + 'style="margin-left:8px;" '
-                + 'onclick="window.KazmaChat && window.KazmaChat.retry && window.KazmaChat.retry()">'
-                + '↻ Retry</button>';
+          _resyncDelivery('empty-terminal');
+          var emptyTurnEl = currentMsgEl;
+          setTimeout(function() {
+            if (tokenAccum || _turnPainted || _awaitingApproval) return;
+            try { _pinLiveAssistantBubble(); } catch (ePin2) { /* ignore */ }
+            var host = emptyTurnEl || currentMsgEl;
+            var emptyEl = host && host.querySelector('.message-text');
+            var shown = String((emptyEl && emptyEl.textContent) || '').trim();
+            if (emptyEl && (!shown || _isWatchdogNotice(shown))) {
+              var retryHtml = '';
+              if (lastSentUserText || (messagesEl.querySelector('.message-user'))) {
+                retryHtml = ' <button class="btn btn-secondary btn-sm" '
+                  + 'style="margin-left:8px;" '
+                  + 'onclick="window.KazmaChat && window.KazmaChat.retry && window.KazmaChat.retry()">'
+                  + '↻ Retry</button>';
+              }
+              emptyEl.innerHTML = (KS.markdown
+                ? KS.markdown('_No response received._ Check server logs or Pending Approvals.')
+                : '<em>No response received.</em>') + retryHtml;
             }
-            emptyEl.innerHTML = (KS.markdown
-              ? KS.markdown('_No response received._ Check server logs or Pending Approvals.')
-              : '<em>No response received.</em>') + retryHtml;
-          }
+          }, 600);
         }
         if (data) {
           updateSessionStats(data.tokens, data.cost, data.session_tokens, data.session_cost);
@@ -7323,6 +7319,39 @@
     } finally {
       currentMsgEl = prev || el;
     }
+  }
+
+  function _isWatchdogNotice(text) {
+    return /No response received/i.test(String(text || ''));
+  }
+
+  /**
+   * Terminal-frame SoT: write *raw* into the open bubble when it is still
+   * empty (or still showing the empty-terminal watchdog). applyEvent marks
+   * the content dedupe key BEFORE renderTurn paints; after a server
+   * restart (reload / session re-mint / WS reconnect) that paint can miss
+   * the DOM, every later identical paint is dropped, and the watchdog
+   * card fires — then a refresh *replays the watchdog* instead of the
+   * persisted reply (2026-09-05 capacity acks, 2026-09-08 calendar turn).
+   */
+  function _forcePaintDoneContent(raw) {
+    var text = String(raw || '');
+    if (!text.trim() || _awaitingApproval) return false;
+    try { _pinLiveAssistantBubble(); } catch (ePin) { /* ignore */ }
+    var el = currentMsgEl && currentMsgEl.querySelector('.message-text');
+    var visible = String((el && el.textContent) || '').trim();
+    if (el && (!visible || _isWatchdogNotice(visible))) {
+      try {
+        _paintHTML(el, _renderReplyHTML(text));
+        try { el.setAttribute('data-md', text); } catch (eMd) { /* ignore */ }
+      } catch (ePaint) {
+        try { el.textContent = text; } catch (eTxt) { /* ignore */ }
+      }
+      try { scrollToBottom(); } catch (eScroll) { /* ignore */ }
+    }
+    tokenAccum = text;
+    _turnPainted = true;
+    return true;
   }
 
   /**
