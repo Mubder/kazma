@@ -1632,8 +1632,20 @@ class AsyncMCPManager:
         if proc is None or not getattr(proc, "stderr", None):
             return ""
         try:
-            # Use asyncio.to_thread to avoid blocking the event loop
             stderr = proc.stderr
+            # asyncio StreamReader: read() is a COROUTINE — the old sync
+            # thread path str()'d the coroutine object itself, so failure
+            # alerts showed "<coroutine object StreamReader.read at 0x…>"
+            # instead of the server's actual error text. Await it directly.
+            if asyncio.iscoroutinefunction(getattr(stderr, "read", None)):
+                try:
+                    data = await asyncio.wait_for(stderr.read(max_bytes), timeout=0.25)
+                except TimeoutError:
+                    return ""
+                if isinstance(data, (bytes, bytearray)):
+                    return bytes(data).decode("utf-8", errors="replace")
+                return str(data or "")
+
             read_result: dict[str, str] = {"data": ""}
 
             def _sync_read() -> None:
@@ -1677,7 +1689,7 @@ class AsyncMCPManager:
             # was time-bounded; the write side was not) — audit L-30.
             try:
                 await asyncio.wait_for(
-                    self._write_stdin(proc, raw), timeout=(timeout or handle.timeout)
+                    self._write_stdin(proc, raw), timeout=handle.timeout
                 )
             except TimeoutError:
                 raise MCPBridgeError(
