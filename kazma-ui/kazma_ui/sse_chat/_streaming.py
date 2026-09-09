@@ -128,11 +128,17 @@ def _hitl_persist_parts(
     hitl_payload: dict[str, Any] | None,
     *,
     state: str | None = None,
+    streamed: str = "",
 ) -> list[dict[str, Any]] | None:
-    """SessionStore parts so refresh can rebuild the HITL card."""
+    """SessionStore parts so refresh can rebuild the HITL card.
+
+    *streamed* is the superseded narration (multi-hop text accumulation).
+    When it differs from the terminal *content*, it lands in a ``reasoning``
+    part — preserved for the CoT accordion instead of replacing the answer.
+    """
     from kazma_ui.turn_document import parts_from_stream
 
-    parts = parts_from_stream(streamed=content or "", final=content or "")
+    parts = parts_from_stream(streamed=streamed or content or "", final=content or "")
     if hitl_payload:
         payload = dict(hitl_payload)
         iid = str(payload.get("interrupt_id") or "")
@@ -342,6 +348,9 @@ async def _stream_langgraph_events(
     total_cost = 0.0
     turn_start = time.monotonic()
     content_acc = ""  # accumulated assistant text for the done event
+    # Streamed narration superseded by the terminal synthesis — persisted as
+    # a reasoning part instead of being silently discarded (2026-09-09).
+    _narration_acc = ""
     # True between an on_chat_model_start and its first streamed token — used
     # to insert a paragraph break BETWEEN LLM invocations of one turn.
     _first_token_of_model_call = False
@@ -834,12 +843,24 @@ async def _stream_langgraph_events(
                 # Checkpoint last-hop vs streamed concat: the token stream
                 # glues hop-0 ```plan onto the final answer (````Saved.``).
                 # done.content is SoT — pick the best user-facing payload.
+                # Terminal authority (2026-09-09 duplication incident): when
+                # the graph is NOT paused, the checkpoint synthesis IS the
+                # final answer and wins even when the streamed narration is
+                # longer; a paused turn keeps the narration (this turn's row
+                # while the checkpoint holds the previous answer).
+                _snap_next = getattr(snapshot, "next", None) or ()
                 try:
                     vals = getattr(snapshot, "values", None) or {}
                     msgs = vals.get("messages") if isinstance(vals, dict) else None
                     ckpt_text = _last_assistant_text(msgs or [])
-                    chosen = _user_facing_reply(ckpt_text, content_acc)
+                    if ckpt_text and not _snap_next:
+                        chosen = _user_facing_reply(ckpt_text)
+                    else:
+                        chosen = _user_facing_reply(ckpt_text, content_acc)
                     if chosen and chosen != content_acc:
+                        # Superseded narration → reasoning part on the final
+                        # persist (audit trail, CoT accordion — not lost).
+                        _narration_acc = content_acc
                         # Do NOT re-yield as tokens when we already streamed —
                         # the client applies done.content as a replace paint.
                         if not content_acc:
@@ -1094,7 +1115,10 @@ async def _stream_langgraph_events(
                 tokens=total_tokens,
                 cost=total_cost,
                 parts=_hitl_persist_parts(
-                    content_acc, interrupted, _hitl_payload_saved
+                    content_acc,
+                    interrupted,
+                    _hitl_payload_saved,
+                    streamed=_narration_acc,
                 ),
             )
             if interrupted:

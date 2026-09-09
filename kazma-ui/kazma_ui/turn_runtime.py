@@ -323,7 +323,10 @@ async def close_turn(
         if interrupted and str(streamed_text or "").strip():
             text = str(streamed_text).strip()
         else:
-            text = resolve_reply_text(asst, streamed_text)
+            # Terminal authority: a COMPLETED turn's respond-node synthesis
+            # is the answer even when the streamed narration is longer —
+            # longer-wins stays only for cancelled turns (2026-08-27).
+            text = resolve_reply_text(asst, streamed_text, terminal=not interrupted)
         if not text and not interrupted:
             text = (
                 "⚠️ Your previous turn finished without producing a reply "
