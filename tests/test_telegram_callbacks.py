@@ -14,7 +14,10 @@ def test_hitl():
 def test_swarm_in_process():
     a = parse_callback_data("swarm_approve_abc")
     assert a.kind == "swarm"
-    assert a.handled_in_process is True
+    # The raw callback data rides to the swarm bus (swarm_data), which each
+    # adapter resolves in-process — the old handled_in_process flag was
+    # removed from CallbackAction.
+    assert a.swarm_data == "swarm_approve_abc"
 
 
 def test_model_and_personality():
@@ -27,4 +30,6 @@ def test_sys_install():
     a = parse_callback_data("sys_install:numpy")
     assert a.kind == "sys_install"
     assert a.package_name == "numpy"
-    assert a.handled_in_process is True
+    # sys_install is handled in-process by the adapter (admin-gated) — the
+    # old handled_in_process flag was removed from CallbackAction.
+    assert not a.text  # never forwarded as a synthetic message

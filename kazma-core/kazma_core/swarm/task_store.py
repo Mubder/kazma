@@ -58,7 +58,11 @@ CREATE INDEX IF NOT EXISTS idx_swarm_tasks_status ON swarm_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_type ON swarm_tasks(type);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_completed_at ON swarm_tasks(completed_at);
 CREATE INDEX IF NOT EXISTS idx_swarm_tasks_created_at ON swarm_tasks(created_at);
-CREATE INDEX IF NOT EXISTS idx_swarm_tasks_sort_at ON swarm_tasks(sort_at DESC);
+-- NOTE: idx_swarm_tasks_sort_at is created AFTER the migration block below,
+-- not here — on a DB created before the sort_at column existed, this script
+-- runs against the OLD table (CREATE TABLE IF NOT EXISTS is a no-op) and an
+-- index on a missing column aborts the whole _init_db ("no such column:
+-- sort_at"), taking the SwarmManager down at boot.
 
 CREATE TABLE IF NOT EXISTS swarm_worker_metrics (
     worker TEXT NOT NULL,
