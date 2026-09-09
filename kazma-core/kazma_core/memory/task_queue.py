@@ -209,7 +209,11 @@ class _MemoryWorker:
         sem = asyncio.Semaphore(self.max_concurrency)
         while self._running:
             try:
-                claimed = self._claim_batch()
+                # Claim off the event loop (audit M-P4): _claim_batch does a
+                # sync BEGIN IMMEDIATE round-trip with busy_timeout=5000 —
+                # inline it used to pin the loop (every SSE/WS stream) for
+                # up to 5s per tick under contention. Same for the acks.
+                claimed = await asyncio.to_thread(self._claim_batch)
                 for task in claimed:
                     await sem.acquire()
                     t = asyncio.create_task(self._process(sem, task))
@@ -328,16 +332,26 @@ class _MemoryWorker:
                 handler = _HANDLERS.get(task_type)
                 if handler is None:
                     logger.warning("[task_queue] no handler for type %s — failing", task_type)
-                    self._ack(task, success=False, error=f"no handler for {task_type}")
+                    await asyncio.to_thread(
+                        self._ack, task, success=False, error=f"no handler for {task_type}"
+                    )
                     return
                 try:
                     payload = json.loads(task["payload_json"] or "{}")
                 except Exception:
                     payload = {}
                 success = await handler(payload)
-                self._ack(task, success=bool(success), error=None if success else "handler returned False")
+                await asyncio.to_thread(
+                    self._ack, task,
+                    success=bool(success),
+                    error=None if success else "handler returned False",
+                )
             except Exception as exc:
-                self._ack(task, success=False, error=f"{type(exc).__name__}: {exc}")
+                await asyncio.to_thread(
+                    self._ack, task,
+                    success=False,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
         finally:
             self._leases.pop(task_id, None)
             sem.release()

@@ -265,19 +265,28 @@ class TestRetryModuleInternals:
         assert cfg["min_wait"] == MIN_WAIT
         assert cfg["max_wait"] == MAX_WAIT
 
-    def test_log_retry_executes(self) -> None:
-        """_log_retry runs without error."""
-        from kazma_core.retry import _log_retry
+    def test_dead_tenacity_decorators_removed(self) -> None:
+        """The unused tenacity decorators stay removed (audit follow-up).
 
-        mock_state = MagicMock()
-        mock_state.outcome.exception.return_value = ConnectionError("test")
-        mock_state.attempt_number = 1
+        They were exported but never applied; re-adding them invites
+        double-retrying calls the supervisor already retries.
+        """
+        import kazma_core.retry as retry_mod
 
-        # Should not raise
-        with patch(
-            "kazma_core.retry.load_retry_config", return_value={"max_attempts": 3, "min_wait": 2, "max_wait": 10}
-        ):
-            _log_retry(mock_state)
+        assert not hasattr(retry_mod, "retry_llm_call")
+        assert not hasattr(retry_mod, "retry_tool_call")
+
+    def test_status_text_detection_is_anchored(self) -> None:
+        """Bare '401' substrings no longer classify as auth failures."""
+        from kazma_core.retry import _extract_http_status_code
+
+        # Request id / count containing the digits must NOT match.
+        assert _extract_http_status_code(RuntimeError("request 20260401-x")) is None
+        # Anchored provider error text must match.
+        assert (
+            _extract_http_status_code(RuntimeError("LLM API error (HTTP 401): bad key"))
+            == 401
+        )
 
     def test_friendly_llm_error_generic(self) -> None:
         """Generic exceptions pass through with message."""

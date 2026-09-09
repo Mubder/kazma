@@ -544,6 +544,22 @@ class SQLiteCronStore:
         )
         await self._db.commit()
 
+    async def claim_job(self, job_id: str) -> bool:
+        """Atomically claim a due job: pending→running. False if lost the race.
+
+        Cross-process safety (audit M-P5): two app instances sharing cron.db
+        both used to execute the same due job (duplicate reminders). The
+        conditional UPDATE is a compare-and-set — only one rowcount wins.
+        """
+        if self._db is None:
+            raise RuntimeError("CronDB not initialized")
+        cursor = await self._db.execute(
+            "UPDATE cron_jobs SET status = 'running' WHERE job_id = ? AND status = 'pending'",
+            (job_id,),
+        )
+        await self._db.commit()
+        return bool(cursor.rowcount)
+
     async def update_result(self, job_id: str, result: str) -> None:
         """Update a job's last result."""
         if self._db is None:
@@ -948,6 +964,26 @@ class CronScheduler:
                     if len(self._in_flight) >= self._max_concurrent:
                         break
                     if job.next_run and self._is_due(job.next_run, now):
+                        # Stale one-shot cutoff (audit M-P5): a job that came
+                        # due during long downtime used to fire immediately on
+                        # the next poll — a reminder from three days ago
+                        # arriving unannounced. Skip (mark done, honest note)
+                        # instead of delivering arbitrarily old pings.
+                        if self._is_stale_one_shot(job, now):
+                            try:
+                                await self._store.update_result(
+                                    job.job_id,
+                                    "Skipped: job came due more than "
+                                    f"{self._stale_hours()}h ago (downtime).",
+                                )
+                                await self._store.update_status(job.job_id, JobStatus.DONE)
+                                logger.info(
+                                    "[CronScheduler] skipped stale one-shot %s (due %s)",
+                                    job.job_id, job.next_run,
+                                )
+                            except Exception:
+                                logger.debug("[CronScheduler] stale skip failed", exc_info=True)
+                            continue
                         self._in_flight.add(job.job_id)
                         exec_task = asyncio.create_task(
                             self._execute_bounded(job, sem),
@@ -990,9 +1026,43 @@ class CronScheduler:
         except (ValueError, TypeError):
             return False
 
+    @staticmethod
+    def _stale_hours() -> float:
+        """Grace window for late one-shot delivery (env-tunable)."""
+        import os as _os
+
+        try:
+            return max(1.0, float(_os.environ.get("KAZMA_CRON_STALE_HOURS") or 24.0))
+        except ValueError:
+            return 24.0
+
+    def _is_stale_one_shot(self, job: ScheduledJob, now: datetime) -> bool:
+        """True for a NON-recurring job due more than the grace window ago.
+
+        Recurring (daily) jobs always run — the cadence self-corrects.
+        """
+        timing = (job.timing or "").strip().lower()
+        if timing.startswith("daily"):
+            return False
+        try:
+            due = datetime.fromisoformat(str(job.next_run))
+            if due.tzinfo is None:
+                due = due.replace(tzinfo=UTC)
+            age = (now - due).total_seconds()
+            return age > self._stale_hours() * 3600.0
+        except (ValueError, TypeError):
+            return False
+
     async def _execute(self, job: ScheduledJob) -> None:
         """Execute a scheduled job via LangGraph."""
-        await self._store.update_status(job.job_id, JobStatus.RUNNING)
+        # Cross-process CAS claim (audit M-P5): two app instances sharing
+        # cron.db used to both pass the in-process _in_flight check and
+        # execute the same due job (duplicate delivery). The claim flips
+        # pending→running atomically; losing the race skips the job.
+        claimed = await self._store.claim_job(job.job_id)
+        if not claimed:
+            logger.debug("[CronScheduler] %s claimed by another instance — skipping", job.job_id)
+            return
         logger.info("[CronScheduler] Executing %s: %.80s", job.job_id, job.prompt)
 
         # Bind the cron-parent context for the whole execution: jobs the
@@ -1048,10 +1118,16 @@ class CronScheduler:
             summary = (_turn.text or "")[:2000]
 
             await self._store.update_result(job.job_id, summary)
-            await self._finalize(job, failed=False)
 
-            # Deliver result
+            # Deliver BEFORE finalizing (audit M-P5): the old order
+            # (result → finalize → deliver) lost the reminder when the
+            # process died between finalize and deliver — the job was
+            # terminal with no retry. With delivery first, a crash leaves
+            # the job RUNNING and boot recovery terminates it; worst case
+            # is a duplicate on a very narrow recovery window, never a
+            # silent loss.
             await self._deliver(job, summary)
+            await self._finalize(job, failed=False)
             logger.info("[CronScheduler] %s completed", job.job_id)
 
         except TimeoutError:

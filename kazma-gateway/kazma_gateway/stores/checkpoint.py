@@ -12,7 +12,9 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 from collections import OrderedDict
 from collections.abc import Sequence
 from pathlib import Path
@@ -68,6 +70,9 @@ class CheckpointManager(BaseCheckpointSaver):
         self._max_locks = max_locks
         self._tenant_savers: dict[str, AsyncSqliteSaver] = {}
         self._saver_lock = asyncio.Lock()
+        # Set when the saver came from the shared pool — close() releases
+        # instead of closing (audit M-G5).
+        self._shared_db_path: str | None = None
 
     async def _get_saver(self) -> AsyncSqliteSaver:
         """Resolve the appropriate AsyncSqliteSaver for the current tenant.
@@ -80,13 +85,22 @@ class CheckpointManager(BaseCheckpointSaver):
         if tenant_id == "default":
             return self._saver
 
+        # Sanitize the tenant id for use as a FILENAME (audit M-G3): raw
+        # ids like "telegram:12345" contain ':' (illegal on Windows — every
+        # checkpoint write for that tenant failed) and could carry '/'/'..'
+        # path traversal. Hash-mangled, stable per tenant, and bounded.
+        safe_tenant = re.sub(r"[^A-Za-z0-9_-]+", "_", tenant_id).strip("_") or "x"
+        if len(safe_tenant) > 48:
+            digest = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()[:16]
+            safe_tenant = f"{safe_tenant[:32]}_{digest}"
+
         async with self._saver_lock:
             if tenant_id not in self._tenant_savers:
-                db_path = Path("kazma-data") / f"checkpoints_{tenant_id}.db"
+                db_path = Path("kazma-data") / f"checkpoints_{safe_tenant}.db"
                 db_path.parent.mkdir(parents=True, exist_ok=True)
                 conn = await aiosqlite.connect(str(db_path))
                 await apply_sqlite_pragmas_async(conn)
-                
+
                 # Copy the serde from self._saver or use JsonPlusSerializer with custom settings
                 serde = getattr(self._saver, "serde", None)
                 if serde is None:
@@ -96,12 +110,25 @@ class CheckpointManager(BaseCheckpointSaver):
                             ("kazma_core.agent.intent.types", "ActKind"),
                         ]
                     )
-                
+
                 saver = AsyncSqliteSaver(conn, serde=serde)
                 await saver.setup()
                 self._tenant_savers[tenant_id] = saver
+                # Bound the saver cache (audit M-G3): one open SQLite
+                # connection per tenant, never evicted, used to grow without
+                # limit under per-user tenants. Keep the most recent 32.
+                while len(self._tenant_savers) > 32:
+                    oldest = next(iter(self._tenant_savers))
+                    if oldest == tenant_id:
+                        break
+                    dropped = self._tenant_savers.pop(oldest, None)
+                    if dropped is not None:
+                        try:
+                            await dropped.conn.close()
+                        except Exception:
+                            pass
                 logger.info("[Checkpoint] Dynamic CheckpointManager created for tenant %s at %s", tenant_id, db_path)
-            
+
             return self._tenant_savers[tenant_id]
 
     def _get_lock(self, thread_id: str) -> asyncio.Lock:
@@ -196,8 +223,22 @@ class CheckpointManager(BaseCheckpointSaver):
         return saver.conn if saver and hasattr(saver, "conn") else None
 
     async def close(self) -> None:
-        """Close the underlying database connection."""
-        if hasattr(self._saver, "conn") and self._saver.conn:
+        """Close the underlying database connection.
+
+        A SHARED saver (default checkpoints.db via checkpoints_shared) is
+        RELEASED, not closed — the process-wide cache keeps serving it to
+        other holders (audit M-G5); the connection closes only when the
+        last holder releases. Owned/tenant savers close directly.
+        """
+        if getattr(self, "_shared_db_path", None):
+            try:
+                from kazma_core.checkpoints_shared import release_shared_checkpoints
+
+                await release_shared_checkpoints(self._shared_db_path)
+            except Exception:
+                logger.debug("[Checkpoint] shared release failed", exc_info=True)
+            self._shared_db_path = None
+        elif hasattr(self._saver, "conn") and self._saver.conn:
             await self._saver.conn.close()
         for saver in self._tenant_savers.values():
             if hasattr(saver, "conn") and saver.conn:
@@ -510,17 +551,25 @@ async def create_checkpoint_manager(
         pass
 
     # ── SQLite checkpointer (default) ──────────────────────────────
-    db_path = Path(path).expanduser().resolve()
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Route through the process-wide shared saver (audit M-G5) so the
+    # server graphs and KazmaAgent.run() never hold two independent
+    # writers on the same checkpoints.db; CheckpointManager adds the
+    # per-thread logical locks on top.
+    from kazma_core.checkpoints_shared import (
+        get_shared_sqlite_saver,
+        retain_shared_checkpoints,
+    )
 
-    conn = await aiosqlite.connect(str(db_path))
-    await apply_sqlite_pragmas_async(conn)
-
-    saver = AsyncSqliteSaver(conn, serde=serde)
-    await saver.setup()
+    saver = await get_shared_sqlite_saver(str(path), serde=serde)
+    # Lifetime retention (audit M-G5): the server's CheckpointManager holds
+    # this saver for the process lifetime and never releases — transient
+    # holders (KazmaAgent) can release without closing it out from under
+    # the live graphs. close() releases this retention.
+    retain_shared_checkpoints(str(path))
 
     manager = CheckpointManager(saver)
-    logger.info("[Checkpoint] CheckpointManager initialized at %s (per-thread locking)", db_path)
+    manager._shared_db_path = str(path)
+    logger.info("[Checkpoint] CheckpointManager initialized at %s (per-thread locking)", path)
     return manager
 
 

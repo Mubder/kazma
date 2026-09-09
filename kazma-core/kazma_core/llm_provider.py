@@ -101,7 +101,13 @@ def hoist_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]
 
 
 def retry_after_seconds(headers: Any, default: float = 30.0) -> float:
-    """Parse a Retry-After header, floored at 1.0s so a ``0`` cannot spin."""
+    """Parse a Retry-After header, clamped to [1.0, 60.0] seconds.
+
+    A hostile or misbehaving server sending ``Retry-After: 3600`` used to
+    stall a turn for hours — the sleep was honored unbounded and was
+    invisible to httpx timeouts. The cap keeps backoff useful without
+    surrendering the turn to an arbitrary header value.
+    """
     retry_after = default
     if headers is not None:
         try:
@@ -112,7 +118,7 @@ def retry_after_seconds(headers: Any, default: float = 30.0) -> float:
                 retry_after = float(raw)
         except (TypeError, ValueError, AttributeError):
             pass
-    return max(1.0, float(retry_after))
+    return min(max(1.0, float(retry_after)), 60.0)
 
 
 # ── Configuration ─────────────────────────────────────────────────────
@@ -139,11 +145,23 @@ class LLMConfig:
     # LiteLLM router support
     router: str | None = None
     fallback_model: str | None = None
+    # Optional per-provider API version (Azure ``api-version``). Most
+    # OpenAI-compatible providers ignore it; Azure passes it as a query
+    # parameter on every request.
+    api_version: str = ""
 
     def __post_init__(self) -> None:
         """Normalize base_url on construction — catches ALL code paths."""
         if self.base_url:
             self.base_url = normalize_provider_url(self.base_url)
+        # httpx treats a timeout of 0 as "no timeout" — a config ``timeout: 0``
+        # would silently disable every deadline on the client. Clamp
+        # non-positive values back to the default.
+        try:
+            if float(self.timeout) <= 0:
+                self.timeout = 60.0
+        except (TypeError, ValueError):
+            self.timeout = 60.0
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LLMConfig:
@@ -171,6 +189,7 @@ class LLMConfig:
             output_cost_per_1m=d.get("output_cost_per_1m", cls.output_cost_per_1m),
             router=d.get("router", cls.router),
             fallback_model=d.get("fallback_model", cls.fallback_model),
+            api_version=str(d.get("api_version", cls.api_version) or ""),
         )
 
 
@@ -263,11 +282,20 @@ class LLMProvider:
         self.reconfigure(base_url=url, api_key=key)
 
     def _resolve_api_key(self) -> None:
-        """Resolve API key from config or environment."""
+        """Resolve API key from config or environment.
+
+        The ``OPENAI_API_KEY`` / ``KAZMA_API_KEY`` env fallback applies ONLY
+        to the generic OpenAI-compatible client. Native subclasses
+        (Anthropic/Azure/Bedrock/Gemini) resolve their own vendor env keys in
+        their constructors — inheriting an OpenAI key here would silently
+        send it to the wrong vendor's endpoint as ``x-api-key`` / ``api-key``
+        (opaque 401s; audit finding H-10).
+        """
         key = self.config.api_key
-        if not key:
+        is_generic = type(self) is LLMProvider
+        if not key and is_generic:
             key = os.getenv("OPENAI_API_KEY", "")
-        if not key:
+        if not key and is_generic:
             key = os.getenv("KAZMA_API_KEY", "")
         # LM Studio / Ollama don't need a real key
         if not key:
@@ -293,7 +321,8 @@ class LLMProvider:
     # (e.g. "ollama/llama3.2", "openai/local-model"). These identify the
     # provider inside kazma's registry/router but must NOT be sent to the
     # provider's API — Ollama/LM Studio expect the bare model name.
-    # NOTE: only LOCAL providers (ollama, lm-studio) get a kazma-internal
+    # NOTE: only LOCAL providers (ollama, lm-studio, and localhost
+    # OpenAI-compatible servers tagged "openai/") get a kazma-internal
     # routing prefix that must be stripped. Hosted providers (groq, openai,
     # anthropic, bedrock, azure) use model ids where the prefix is part of
     # the real upstream name (e.g. Groq's "groq/compound-mini") — stripping
@@ -301,13 +330,19 @@ class LLMProvider:
     _ROUTING_PREFIXES = ("ollama/", "lm-studio/")
 
     @staticmethod
-    def _strip_routing_prefix(model: str) -> str:
+    def _strip_routing_prefix(model: str, base_url: str = "") -> str:
         """Strip kazma's internal provider routing prefix from a model name.
 
         ``normalize_model_name()`` tags local models with a provider prefix
-        ("ollama/", "lm-studio/") for routing, but the upstream local API
-        (Ollama, LM Studio, …) expects the bare name ("qwen2.5:7b"). Sending
-        "ollama/qwen2.5:7b" makes Ollama reply 404 "model not found".
+        ("ollama/", "lm-studio/", "openai/") for routing, but the upstream
+        local API (Ollama, LM Studio, …) expects the bare name
+        ("qwen2.5:7b"). Sending "ollama/qwen2.5:7b" or "openai/qwen3" makes
+        the local server reply 404 "model not found".
+
+        The ``openai/`` prefix is stripped ONLY when the base URL points at
+        a local OpenAI-compatible server that is not a LiteLLM proxy —
+        LiteLLM (port 4000) routes BY that prefix ("openai/gpt-4o" is a
+        real LiteLLM model id), so it must be preserved there.
 
         Hosted providers are NOT stripped: Groq's ``groq/compound-mini`` and
         similar ids include the prefix as part of the real upstream name.
@@ -317,28 +352,46 @@ class LLMProvider:
         for prefix in LLMProvider._ROUTING_PREFIXES:
             if model.startswith(prefix):
                 return model[len(prefix):]
+        if model.startswith("openai/") and LLMProvider._is_bare_local_server(base_url):
+            return model[len("openai/"):]
         return model
+
+    @staticmethod
+    def _is_bare_local_server(base_url: str) -> bool:
+        """True when ``base_url`` is a local server expecting bare model ids.
+
+        Mirrors the ``normalize_model_name()`` tagging rules (localhost /
+        LM Studio, port 1234) minus the LiteLLM proxy (port 4000), whose
+        "openai/<model>" ids are meaningful upstream route names.
+        """
+        if not base_url:
+            return False
+        try:
+            from urllib.parse import urlparse as _up
+
+            parsed = _up(base_url)
+            host = (parsed.hostname or "").lower()
+            port = parsed.port
+        except ValueError:
+            return False
+        if port == 4000 or "litellm" in host:
+            return False
+        return host in ("localhost", "127.0.0.1", "0.0.0.0") or "lm-studio" in host or "lmstudio" in host
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazy-init the HTTP client."""
         if self._http is None or self._http.is_closed:
-            base = self.config.base_url.rstrip("/")
-
-            # HARD ASSERT: /v1 must be in the path for OpenAI-compatible APIs
-            # This prevents the "empty bubble" bug where requests go to
-            # /chat/completions instead of /v1/chat/completions
-            from urllib.parse import urlparse as _up
-
-            parsed = _up(base)
-            # Check if the path ALREADY ends with /v1 (e.g. /openai/v1 for Groq)
-            if not parsed.path.rstrip("/").endswith("/v1"):
-                port = parsed.port
-                # Skip assertion for Ollama (11434) and LiteLLM (4000)
-                if port not in (11434, 4000):
-                    # Force /v1
-                    base = base.rstrip("/") + "/v1"
-                    self.config.base_url = base
-                    logger.warning("LLMProvider: /v1 was missing — forced to %s", base)
+            # Reuse the single normalization SoT (url_utils) instead of a
+            # second, independent /v1-append here — the inline copy exempted
+            # only ports 11434/4000 and re-mutated already-normalized custom
+            # gateway URLs (e.g. https://gw.example.com/api → /api/v1).
+            base = normalize_provider_url(self.config.base_url)
+            if base != self.config.base_url:
+                logger.warning(
+                    "LLMProvider: /v1 was missing — forced to %s", base
+                )
+                self.config.base_url = base
+            base = base.rstrip("/")
 
             logger.debug("Creating httpx client: base_url=%s", base)
             api_key = self.config.api_key or ""
@@ -820,6 +873,13 @@ class LLMProvider:
                         "[LLMProvider] Truncation retry succeeded (finish_reason=%s)",
                         retry_response.finish_reason,
                     )
+                    # The first (truncated) attempt was still billed — merge
+                    # its usage/cost into the retry response so cost tracking
+                    # doesn't undercount the turn.
+                    retry_response.usage = self._merge_usage(
+                        response.usage, retry_response.usage
+                    )
+                    retry_response.cost_usd += response.cost_usd
                     response = retry_response
                 else:
                     logger.warning(
@@ -827,6 +887,12 @@ class LLMProvider:
                         "truncated response; tool worker will guide chunked writes",
                         retry_cap,
                     )
+                    # Both attempts billed: fold the retry's usage into the
+                    # truncated response we keep.
+                    response.usage = self._merge_usage(
+                        retry_response.usage, response.usage
+                    )
+                    response.cost_usd += retry_response.cost_usd
 
         if cache_enabled and response.finish_reason != "length":
             try:
@@ -846,6 +912,25 @@ class LLMProvider:
 
     # ── Streaming (OpenAI-compatible SSE, including LiteLLM proxy) ──
 
+    @staticmethod
+    def _merge_usage(base: dict[str, int], into: dict[str, int]) -> dict[str, int]:
+        """Sum two provider usage dicts (keys missing from either are kept).
+
+        Used when a turn needed more than one billed attempt (truncation
+        retry) so the reported usage reflects what was actually paid.
+        """
+        if not base:
+            return dict(into or {})
+        if not into:
+            return dict(base)
+        merged = dict(into)
+        for key, val in base.items():
+            try:
+                merged[key] = int(merged.get(key, 0)) + int(val)
+            except (TypeError, ValueError):
+                continue
+        return merged
+
     def _chat_payload(
         self,
         messages: list[dict[str, Any]],
@@ -857,7 +942,9 @@ class LLMProvider:
     ) -> dict[str, Any]:
         """Build the OpenAI-compatible request body (hoist applied)."""
         payload: dict[str, Any] = {
-            "model": LLMProvider._strip_routing_prefix(model or self.config.model),
+            "model": LLMProvider._strip_routing_prefix(
+                model or self.config.model, self.config.base_url
+            ),
             "messages": hoist_system_messages(messages),
             "max_tokens": max_tokens or self.config.max_tokens,
             "temperature": temperature if temperature is not None else self.config.temperature,
@@ -1292,15 +1379,6 @@ class LLMProvider:
         if base_url is not None:
             normalized = normalize_provider_url(base_url)
             logger.info("reconfigure: raw=%s normalized=%s", base_url, normalized)
-            # HARD FORCE /v1 for non-Ollama endpoints
-            if normalized:
-                from urllib.parse import urlparse as _up
-
-                parsed = _up(normalized)
-                port = parsed.port
-                if port not in (11434, 4000) and not normalized.rstrip("/").endswith("/v1"):
-                    normalized = normalized.rstrip("/") + "/v1"
-                    logger.info("reconfigure: forced /v1 → %s", normalized)
             self.config.base_url = normalized
             changed = True
         if model is not None:

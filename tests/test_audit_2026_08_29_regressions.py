@@ -28,11 +28,20 @@ def clean_auth_env(monkeypatch):
 
 
 class _FakeRequest:
-    """Minimal Request stand-in for the auth helpers (they only touch these)."""
+    """Minimal Request stand-in for the auth helpers (they only touch these).
+
+    HTTP/1.1 always carries a ``Host`` header, so default it to the peer —
+    the DNS-rebinding Host guard (audit H-7) must see a realistic loopback
+    request. Override it with an explicit headers entry to simulate a
+    rebound origin.
+    """
 
     def __init__(self, peer: str, headers: dict[str, str] | None = None):
         self.client = type("C", (), {"host": peer})()
-        self.headers = headers or {}
+        merged = {"host": peer}
+        for key, value in (headers or {}).items():
+            merged[key.lower()] = value
+        self.headers = merged
         self.cookies: dict[str, str] = {}
 
 
@@ -50,6 +59,31 @@ def test_loopback_peer_not_trusted_when_proxy_declared(clean_auth_env, monkeypat
     monkeypatch.setenv("KAZMA_TRUSTED_PROXIES", "127.0.0.1")
     assert _peer_trust_allowed(req) is False
     assert _should_auto_issue_cookie(req, "regression-test-secret") is False
+
+
+def test_loopback_autologin_requires_local_host_header(clean_auth_env):
+    """H-7: DNS rebinding — loopback peer + attacker Host must NOT auto-login.
+
+    Under rebinding the attacker's domain resolves to 127.0.0.1: the peer
+    is loopback and Origin matches Host (both attacker-controlled), so only
+    requiring the Host itself to name the local machine stops the cookie
+    from being minted for the attacker's origin.
+    """
+    from kazma_ui.auth import _should_auto_issue_cookie, websocket_is_authenticated
+
+    rebound = _FakeRequest("127.0.0.1", {"host": "attacker.example:9090"})
+    assert _should_auto_issue_cookie(rebound, "regression-test-secret") is False
+
+    local = _FakeRequest("127.0.0.1", {"host": "127.0.0.1:9090"})
+    assert _should_auto_issue_cookie(local, "regression-test-secret") is True
+
+    localhost_name = _FakeRequest("127.0.0.1", {"host": "localhost:9090"})
+    assert _should_auto_issue_cookie(localhost_name, "regression-test-secret") is True
+
+    # Same guard on the WebSocket handshake.
+    ws_rebound = _FakeRequest("127.0.0.1", {"host": "attacker.example:9090"})
+    ws_rebound.query_params = {}
+    assert websocket_is_authenticated(ws_rebound) is False
 
 
 def test_undeclared_proxy_revokes_peer_trust(clean_auth_env, monkeypatch):

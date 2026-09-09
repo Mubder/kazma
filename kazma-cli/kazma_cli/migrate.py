@@ -150,15 +150,16 @@ def _cmd_verify(args: list[str]) -> None:
 
 
 def _cmd_import(args: list[str]) -> None:
-    """``kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run]``."""
+    """``kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run] [--force]``."""
     bundle_path = _positional(args, index=0)
     if not bundle_path:
-        print("\n  [ERROR] usage: kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run]\n")
+        print("\n  [ERROR] usage: kazma migrate import BUNDLE [--workspace PATH] [--reset-vault-key] [--dry-run] [--force]\n")
         sys.exit(1)
 
     workspace = _flag_value(args, "--workspace", default=None)
     reset_vault_key = "--reset-vault-key" in args
     dry_run = "--dry-run" in args
+    force = "--force" in args
 
     if not workspace and not dry_run:
         workspace = str(Path.cwd())
@@ -180,6 +181,7 @@ def _cmd_import(args: list[str]) -> None:
             target_workspace_root=workspace,
             reset_vault_key=reset_vault_key,
             dry_run=dry_run,
+            force=force,
             progress=progress,
         )
     except Exception as exc:

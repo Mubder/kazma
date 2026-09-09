@@ -158,14 +158,27 @@ class KazmaAgent:
         self._graph: Any = None
         self._checkpointer: AsyncSqliteSaver | None = None
         self._checkpoint_conn: aiosqlite.Connection | None = None
+        # Set when the checkpointer came from the shared pool (default
+        # checkpoints.db) — close releases the retention instead of closing.
+        self._checkpointer_shared_path: str | None = None
         self._thread_id: str = ""
 
         # Serializes _ensure_graph so two concurrent first run() calls build
         # the graph once instead of racing (leaked checkpointer connection).
         self._graph_build_lock = asyncio.Lock()
 
-        # Time Travel — snapshot recorder (lazy-init in _ensure_graph).
+        # Time Travel — snapshot recorder. Created EAGERLY here (audit L-34):
+        # it used to exist only after _ensure_graph/get_streaming_graph ran,
+        # so CLI `ask` (which reads getattr(agent, "_snapshot_recorder")) and
+        # early child graphs always saw None and recorded no snapshots. The
+        # lazy blocks below keep their guard but now find it already built.
         self._snapshot_recorder: Any = None
+        try:
+            from kazma_core.time_travel import create_recorder
+
+            self._snapshot_recorder = create_recorder(config=self.config.raw)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Snapshot recorder unavailable: %s", exc)
 
         # Streaming graph for SSE path (built lazily, cached).
         # Separate from _graph which includes a checkpointer for run().
@@ -981,12 +994,36 @@ class KazmaAgent:
                 )
 
             if self._checkpointer is None:
-                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-                self._checkpoint_conn = await aiosqlite.connect(db_path)
-                await apply_sqlite_pragmas_async(self._checkpoint_conn)
-                self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
-                await self._checkpointer.setup()
-                logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
+                # Shared process-wide saver for the DEFAULT checkpoints DB
+                # only (audit M-G5): a second, unwrapped AsyncSqliteSaver on
+                # the same checkpoints.db as the server's CheckpointManager
+                # could interleave checkpoint sequences for one thread when
+                # agent.run() is invoked in the server process. Custom
+                # checkpoint paths (tests, isolated CLI runs) keep an OWNED
+                # connection with the historical close-on-shutdown contract.
+                _default_resolved = str(Path(CHECKPOINT_DB).resolve())
+                _own_resolved = str(Path(db_path).expanduser().resolve())
+                if _own_resolved == _default_resolved:
+                    from kazma_core.checkpoints_shared import (
+                        get_shared_sqlite_saver,
+                        retain_shared_checkpoints,
+                    )
+
+                    self._checkpointer = await get_shared_sqlite_saver(db_path)
+                    retain_shared_checkpoints(db_path)
+                    self._checkpointer_shared_path = db_path
+                    self._checkpoint_conn = None  # shared: process-lifetime
+                    logger.info(
+                        "KazmaAgent checkpointer: shared AsyncSqliteSaver path=%s", db_path
+                    )
+                else:
+                    self._checkpointer_shared_path = None
+                    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+                    self._checkpoint_conn = await aiosqlite.connect(db_path)
+                    await apply_sqlite_pragmas_async(self._checkpoint_conn)
+                    self._checkpointer = AsyncSqliteSaver(self._checkpoint_conn)
+                    await self._checkpointer.setup()
+                    logger.info("KazmaAgent checkpointer: AsyncSqliteSaver path=%s", db_path)
 
             # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
             # apply on the run path the same way as the streaming graph.
@@ -1168,8 +1205,20 @@ class KazmaAgent:
         """Close the current checkpointer's resources (SQLite conn / PG pool).
 
         Only safe once no live graph references it (self._graph is None).
-        Idempotent.
+        Idempotent. A SHARED saver is released, not closed — it stays alive
+        while any other holder (the server's CheckpointManager) retains it.
         """
+        shared_path = getattr(self, "_checkpointer_shared_path", None)
+        if shared_path:
+            try:
+                from kazma_core.checkpoints_shared import release_shared_checkpoints
+
+                await release_shared_checkpoints(shared_path)
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Error releasing shared checkpointer: %s", e)
+            self._checkpointer_shared_path = None
+            self._checkpointer = None
+            return
         if self._checkpoint_conn is not None:
             try:
                 await self._checkpoint_conn.close()
@@ -1177,14 +1226,18 @@ class KazmaAgent:
                 logger.debug("Error closing stale checkpointer connection: %s", e)
             self._checkpoint_conn = None
         elif self._checkpointer is not None:
-            # Postgres path: the saver wraps an AsyncConnectionPool.
-            pool = getattr(self._checkpointer, "conn", None)
-            aclose = getattr(pool, "aclose", None)
-            if aclose is not None:
-                try:
-                    await aclose()
-                except Exception as e:  # noqa: BLE001
-                    logger.debug("Error closing stale PG checkpointer pool: %s", e)
+            # Postgres path ONLY: the saver wraps an AsyncConnectionPool.
+            # The shared/default-path AsyncSqliteSaver must never be closed
+            # here — it is process-lifetime (audit M-G5) — and an owned
+            # SQLite conn is handled by the branch above.
+            if type(self._checkpointer).__name__ != "AsyncSqliteSaver":
+                pool = getattr(self._checkpointer, "conn", None)
+                aclose = getattr(pool, "aclose", None)
+                if aclose is not None:
+                    try:
+                        await aclose()
+                    except Exception as e:  # noqa: BLE001
+                        logger.debug("Error closing stale PG checkpointer pool: %s", e)
         self._checkpointer = None
 
     async def shutdown(self) -> None:

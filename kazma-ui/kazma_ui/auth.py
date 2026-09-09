@@ -26,6 +26,7 @@ from __future__ import annotations
 import hmac
 import logging
 import os
+import socket
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -209,13 +210,29 @@ def _client_host(request: Request) -> str:
     ``X-Forwarded-For`` — but *only* from a peer the operator listed in
     ``KAZMA_TRUSTED_PROXIES``, so a spoofed header from a direct client is
     still ignored.
+
+    Parsing is rightmost-untrusted-hop, NOT leftmost: with the common nginx
+    ``$proxy_add_x_forwarded_for`` (append) config, the leftmost entry is
+    client-controlled, so trusting it let a client spoof an arbitrary
+    address (fresh rate-limit buckets, and — behind a declared proxy with
+    loopback auto-login enabled — a spoofed ``127.0.0.1``). We walk from
+    the right, skip entries owned by trusted proxies, and take the first
+    address the proxies did not write.
     """
     peer = _peer_host(request)
     if not peer or peer not in trusted_proxies():
         return peer
-    # Left-most entry is the original client; the proxy appends its own view.
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    return forwarded.lower() or peer
+    raw = (request.headers.get("x-forwarded-for") or "").strip()
+    if not raw:
+        return peer
+    entries = [e.strip().lower() for e in raw.split(",") if e.strip()]
+    trusted = trusted_proxies()
+    for entry in reversed(entries):
+        if entry in trusted:
+            continue
+        return entry
+    # Every entry was a trusted proxy — the chain gives us nothing new.
+    return peer
 
 
 def _is_loopback_client(request: Request) -> bool:
@@ -378,18 +395,58 @@ def _peer_trust_allowed(request: Request) -> bool:
     return _peer_host(request) not in trusted_proxies()
 
 
+_AUTOLOGIN_EXTRA_HOSTS_ENV_VAR = "KAZMA_AUTOLOGIN_HOSTS"
+
+
+def _host_is_local_name(request: Request) -> bool:
+    """True when the request's own ``Host`` header names the local machine.
+
+    DNS-rebinding defense (audit H-7): loopback auto-login mints an admin
+    cookie for a loopback *peer*. Under a rebinding attack the attacker's
+    domain resolves to 127.0.0.1, so the peer IS loopback while ``Host``
+    (and Origin) carry the attacker's domain — and every existing guard
+    compares Origin to Host, so both match. Requiring the Host itself to
+    be a loopback name (or the machine's hostname / an operator-declared
+    extra) closes the loop: the rebinding page's Host is never local.
+
+    Extra hostnames for LAN access (e.g. ``kazma.lan``) can be declared via
+    ``KAZMA_AUTOLOGIN_HOSTS`` (comma-separated, exact host[:port]).
+    """
+    try:
+        host = (request.headers.get("host") or "").strip().lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    hostname = host.split(":")[0].strip("[]") if not host.startswith("[") else host.split("]")[0].lstrip("[")
+    local_names = {"localhost", "127.0.0.1", "::1", "[::1]", "0.0.0.0"}
+    machine = socket.gethostname().lower() if hasattr(socket, "gethostname") else ""
+    if machine:
+        local_names.add(machine)
+        # Windows often addresses itself as <hostname>.local / <hostname>.lan
+        for suffix in (".local", ".lan"):
+            local_names.add(machine + suffix)
+    extras = {
+        h.strip().lower().split(":")[0]
+        for h in os.environ.get(_AUTOLOGIN_EXTRA_HOSTS_ENV_VAR, "").split(",")
+        if h.strip()
+    }
+    return hostname in local_names or hostname in extras or host in extras
+
+
 def _should_auto_issue_cookie(request: Request, expected: str) -> bool:
     """Whether to Set-Cookie the secret without an explicit login.
 
     - Loopback clients: yes, when peer trust applies (see
-      :func:`_peer_trust_allowed`).
+      :func:`_peer_trust_allowed`) AND the Host header names the local
+      machine (DNS-rebinding guard, audit H-7).
     - Private LAN when ``KAZMA_TRUST_LAN=1``: same condition.
     - Remote clients with a valid X-Kazma-Secret header: yes.
     - Public internet clients: no — must use /login.
     """
     if not expected:
         return False
-    if _peer_trust_allowed(request):
+    if _peer_trust_allowed(request) and _host_is_local_name(request):
         if _is_loopback_client(request):
             return True
         if _trust_lan_enabled() and _is_private_lan_client(request):
@@ -828,13 +885,21 @@ def websocket_is_authenticated(websocket: Any, expected_secret: str = "") -> boo
     # with websocket.close(code=1008, ...) on this policy-violation path;
     # credentialed clients still authenticate via the checks below.
     if _peer_trust_allowed(websocket):
-        if _is_loopback_client(websocket) and _ws_origin_allowed(websocket):
+        # Host check closes DNS rebinding (audit H-7): under rebinding the
+        # peer is loopback AND Origin matches Host (both attacker-controlled)
+        # — only requiring the Host itself to be a local name stops it.
+        if (
+            _is_loopback_client(websocket)
+            and _host_is_local_name(websocket)
+            and _ws_origin_allowed(websocket)
+        ):
             return True
 
         # Private LAN peers (WSL bridge, Docker, 192.168.x.x) — only if TRUST_LAN enabled
         if (
             _is_private_lan_client(websocket)
             and _trust_lan_enabled()
+            and _host_is_local_name(websocket)
             and _ws_origin_allowed(websocket)
         ):
             return True
@@ -1049,6 +1114,28 @@ def create_auth_middleware(
                     },
                 )
             return await call_next(request)
+
+        # 0b. KAZMA_AUTH_DISABLED is honored by the core secret resolver
+        # (get_kazma_secret returns "" → the gate opens). It is documented
+        # as production-blocked like DEMO_MODE; enforce that here so the
+        # docstring and the behaviour agree (audit L-3).
+        if (
+            os.environ.get("KAZMA_AUTH_DISABLED", "").lower() in ("1", "true", "yes")
+            and os.environ.get("KAZMA_PRODUCTION", "").lower() in ("1", "true", "yes")
+        ):
+            logger.error(
+                "[Auth] KAZMA_AUTH_DISABLED and KAZMA_PRODUCTION are both set — "
+                "refusing to disable auth; returning 503."
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": (
+                        "KAZMA_AUTH_DISABLED cannot be combined with "
+                        "KAZMA_PRODUCTION — refusing to disable auth."
+                    )
+                },
+            )
 
         # 1. Read-only & page routes always pass through.
         # Cookie auto-issue only for loopback or when secret header is present

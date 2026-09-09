@@ -122,12 +122,59 @@ class ImportReport:
         self.warnings.append(msg)
 
 
+def _live_server_detected() -> tuple[bool, str]:
+    """Detect a running Kazma server before swapping live DBs (audit M-P6).
+
+    Primary signal: a fresh ``system.heartbeat.epoch`` in ConfigStore (the
+    app stamps it every 60s; <120s old = live process sharing THIS data
+    dir — exactly the process whose WAL frames a swap would discard).
+
+    Optional signal (``KAZMA_MIGRATE_CHECK_PORT=1``): something listening
+    on KAZMA_PORT/PORT (default 9090). Off by default because port probes
+    are environment-wide (a dev server on 9090 would block imports of
+    unrelated test data dirs).
+
+    Returns ``(detected, why)``.
+    """
+    try:
+        from kazma_core.config_store import get_config_store
+
+        hb = get_config_store().get("system.heartbeat.epoch", None)
+        if hb is not None:
+            try:
+                import time as _time
+
+                if _time.time() - float(hb) < 120:
+                    return True, "fresh heartbeat (system.heartbeat.epoch <120s old)"
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        pass
+    import os as _os
+
+    if (_os.environ.get("KAZMA_MIGRATE_CHECK_PORT") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    ):
+        import socket as _socket
+
+        try:
+            port = int(_os.environ.get("KAZMA_PORT") or _os.environ.get("PORT") or 9090)
+            with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                if s.connect_ex(("127.0.0.1", port)) == 0:
+                    return True, f"a process is listening on 127.0.0.1:{port}"
+        except Exception:
+            pass
+    return False, ""
+
+
 def import_bundle(
     bundle_path: str | Path,
     *,
     target_workspace_root: str | None = None,
     reset_vault_key: bool = False,
     dry_run: bool = False,
+    force: bool = False,
     progress: Callable[[str], None] | None = None,
 ) -> ImportReport:
     """Import a migration bundle into the current installation.
@@ -159,6 +206,26 @@ def import_bundle(
     bundle = KazmaBundle(bundle_path)
     data_dir = paths.data_dir()
     report.target_data_dir = str(data_dir)
+
+    # ── 0. Live-server gate (audit M-P6) ───────────────────────────────
+    # Swapping DB files under a live process discards WAL frames and fails
+    # on Windows (os.replace over open handles). Detect a running server
+    # and abort unless the operator explicitly passes force.
+    if not dry_run:
+        live, why = _live_server_detected()
+        if live and not force:
+            report.error(
+                f"Refusing import: a live Kazma server was detected ({why}). "
+                "Stop the server (or kazma_guard) first, or pass --force to "
+                "proceed at your own risk — uncheckpointed WAL frames will "
+                "be discarded."
+            )
+            return report
+        if live and force:
+            report.warnings.append(
+                f"Live server detected ({why}) — proceeding anyway (--force); "
+                "uncheckpointed WAL frames may be discarded."
+            )
 
     # ── 1. Verify ──────────────────────────────────────────────────────
     _log("Verifying bundle integrity…")

@@ -99,4 +99,8 @@ def parse_callback_data(data: str) -> CallbackAction:
             package_name=data.split(":", 1)[1],
         )
 
-    return CallbackAction(kind="unknown", text=data)
+    # Unknown callback data is IGNORED, not turned into a synthetic user
+    # message: the presser used to inject arbitrary text into the chat as
+    # themselves — an unexpected ingestion path (audit L-29). Only buttons
+    # Kazma itself rendered can carry data, so unknown means stale/foreign.
+    return CallbackAction(kind="unknown", text="")

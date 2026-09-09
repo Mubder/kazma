@@ -1039,7 +1039,34 @@ async def tool_worker_node(
         # ── Execute safe tools in parallel ────────────────────────────
         results.extend(list(constraint_blocked_results) + list(semantic_blocked))
         if safe_tools:
-            results.extend(await asyncio.gather(*(_exec_one(tc) for tc in safe_tools)))
+            # return_exceptions (audit M-G2): one raising tool used to
+            # propagate out of gather() and discard every sibling result
+            # that had already completed — the whole turn errored instead
+            # of reporting the one failure. Convert exceptions to error
+            # tool results bound to the failing call's id (an orphan ""
+            # tool_call_id would 400 on strict providers).
+            gathered = await asyncio.gather(
+                *(_exec_one(tc) for tc in safe_tools), return_exceptions=True
+            )
+            for tc, outcome in zip(safe_tools, gathered):
+                if isinstance(outcome, BaseException):
+                    logger.error(
+                        "[ToolWorker] tool %s raised: %s", tc.get("name"), outcome,
+                        exc_info=True,
+                    )
+                    results.append(
+                        ToolResult(
+                            tool_call_id=str(tc.get("id") or ""),
+                            name=str(tc.get("name") or "tool"),
+                            content=(
+                                f"Tool execution crashed: {type(outcome).__name__}: "
+                                f"{str(outcome)[:400]}"
+                            ),
+                            is_error=True,
+                        )
+                    )
+                else:
+                    results.append(outcome)
 
         # ── Execute/deny danger tools ─────────────────────────────────
         if danger_tools:

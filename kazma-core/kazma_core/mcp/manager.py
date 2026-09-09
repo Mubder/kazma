@@ -1074,6 +1074,20 @@ class AsyncMCPManager:
 
             content = "\n".join(content_parts) if content_parts else json.dumps(result, ensure_ascii=False)
 
+            # Fence untrusted tool output before it reaches the model: MCP
+            # servers are external processes whose output is the largest
+            # prompt-injection channel in the system. Every comparable path
+            # (resources, web fetch, documents, skills) fences; tools/call
+            # used to be the one unfenced exception (audit M-P8).
+            try:
+                from kazma_core.safety.prompt_fence import fence_untrusted
+
+                content = fence_untrusted(
+                    content, source=f"mcp_tool:{server_name}/{raw_tool_name}"
+                )
+            except Exception:
+                logger.debug("[MCP] prompt fence unavailable — raw content", exc_info=True)
+
             logger.info(
                 "[MCP] Tool '%s' on '%s' → %.0fms (error=%s)",
                 tool_name,
@@ -1205,13 +1219,94 @@ class AsyncMCPManager:
         return result
 
     def get_server_trust(self, server_name: str) -> str:
-        """Return the trust level for a server (``trusted`` or ``approval_required``)."""
+        """Return the trust level for a server (``trusted`` or ``approval_required``).
+
+        In production (``KAZMA_PRODUCTION=1``), ``trusted`` is honored only
+        when the operator explicitly opts in via ``KAZMA_MCP_TRUSTED_IN_PROD=1``
+        — every other enforcement layer (YOLO, demo mode) refuses to weaken
+        in production, and a flag that silently disables HITL for an entire
+        external server should not be the exception (audit L-31).
+        """
         handle = self._servers.get(server_name)
-        return handle.trust if handle else "approval_required"
+        trust = handle.trust if handle else "approval_required"
+        if trust == "trusted" and not self._trusted_allowed_in_prod():
+            return "approval_required"
+        return trust
+
+    @staticmethod
+    def _trusted_allowed_in_prod() -> bool:
+        if (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() not in (
+            "1", "true", "yes", "on",
+        ):
+            return True
+        return (os.environ.get("KAZMA_MCP_TRUSTED_IN_PROD") or "").strip().lower() in (
+            "1", "true", "yes", "on",
+        )
 
     # ════════════════════════════════════════════════════════════════
     # Internal: stdio transport (pure asyncio)
     # ════════════════════════════════════════════════════════════════
+
+    # Minimal environment for stdio MCP children (audit H-4). The old
+    # ``{**os.environ, **cfg env}`` handed EVERY process secret — LLM API
+    # keys, KAZMA_SECRET (the skill-signing HMAC key), vault keys, OAuth
+    # tokens — to any configured server subprocess, so one approved
+    # MCP-server config write was arbitrary-code-execution with all
+    # secrets. Children get the safe basics plus whatever the operator
+    # explicitly put in the server's own ``env``/``auth`` config.
+    # ``KAZMA_MCP_INHERIT_ENV=1`` restores full inheritance for servers
+    # that genuinely need exotic parent variables.
+    _MCP_CHILD_ENV_ALLOWLIST = (
+        "PATH",
+        "PATHEXT",
+        "SYSTEMROOT",
+        "SYSTEMDRIVE",
+        "COMSPEC",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "LANG",
+        "LC_ALL",
+        "TERM",
+        "SHELL",
+        "TZ",
+        "XDG_DATA_HOME",
+        "XDG_CONFIG_HOME",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+    )
+
+    @classmethod
+    def _build_child_env(cls, name: str, cfg: dict[str, Any]) -> dict[str, str]:
+        """Construct the subprocess environment for a stdio MCP server."""
+        if (os.environ.get("KAZMA_MCP_INHERIT_ENV") or "").strip().lower() in (
+            "1", "true", "on", "yes",
+        ):
+            env = dict(os.environ)
+        else:
+            env = {k: v for k, v in os.environ.items() if k.upper() in cls._MCP_CHILD_ENV_ALLOWLIST}
+        # The server's own configured env always wins (operator intent),
+        # then the declared auth env var.
+        for key, value in (cfg.get("env") or {}).items():
+            if isinstance(key, str) and isinstance(value, (str, int, float, bool)):
+                env[key] = str(value)
+        auth = cfg.get("auth") or {}
+        if auth.get("type") == "env" and auth.get("name") and auth.get("value"):
+            env[str(auth["name"])] = str(auth["value"])
+        dropped = len(os.environ) - len(env)
+        if dropped > 0:
+            logger.debug(
+                "[MCP] stdio server '%s': scrubbed %d inherited env vars (allowlist mode)",
+                name, dropped,
+            )
+        return env
 
     async def _connect_stdio(self, name: str, cfg: dict[str, Any]) -> int:
         """Spawn an MCP server as a subprocess and perform the handshake."""
@@ -1219,16 +1314,16 @@ class AsyncMCPManager:
         if not command:
             raise MCPBridgeError(f"stdio server '{name}' requires a 'command' list")
 
-        env = {**os.environ, **cfg.get("env", {})}
+        env = self._build_child_env(name, cfg)
         working_dir = cfg.get("working_dir")
 
         # ── MCP stdio auth: inject auth into environment ────────────────
         # MCP stdio servers can receive auth via environment variables
-        # or via command-line arguments (e.g., --api-key)
+        # or via command-line arguments (e.g. --api-key)
         auth = cfg.get("auth", {})
         if auth.get("type") == "env" and auth.get("name") and auth.get("value"):
-            # Set auth token in environment for the subprocess
-            env[auth["name"]] = auth["value"]
+            # Already applied in _build_child_env.
+            pass
         elif auth.get("type") == "arg" and auth.get("name") and auth.get("value"):
             # Inject as command-line argument (--arg value)
             # Find insertion point after executable, before other args
@@ -1562,6 +1657,12 @@ class AsyncMCPManager:
         except Exception:
             return ""
 
+    @staticmethod
+    async def _write_stdin(proc: Any, raw: str) -> None:
+        """Write one JSON-RPC line to a stdio server's stdin and drain."""
+        proc.stdin.write(raw.encode())
+        await proc.stdin.drain()
+
     async def _notify(self, handle: MCPServerHandle, method: str, params: dict[str, Any]) -> None:
         """Send a JSON-RPC notification (no response expected)."""
         msg = {"jsonrpc": "2.0", "method": method, "params": params}
@@ -1571,8 +1672,17 @@ class AsyncMCPManager:
             proc = handle.process
             if proc is None or proc.stdin is None:
                 return
-            proc.stdin.write(raw.encode())
-            await proc.stdin.drain()
+            # Bounded write: a server that stops reading stdin used to park
+            # the call forever once the pipe buffer filled (the read side
+            # was time-bounded; the write side was not) — audit L-30.
+            try:
+                await asyncio.wait_for(
+                    self._write_stdin(proc, raw), timeout=(timeout or handle.timeout)
+                )
+            except TimeoutError:
+                raise MCPBridgeError(
+                    f"Server '{handle.name}' is not reading stdin (write timeout)"
+                )
         elif handle.transport == "sse" and handle.http is not None:
             await handle.http.post("/notifications", content=raw, headers={"Content-Type": "application/json"})
         elif handle.transport == "streamable_http" and handle.http is not None:
@@ -1606,8 +1716,11 @@ class AsyncMCPManager:
         read_timeout = timeout or handle.timeout
         async with handle.read_lock:
             try:
-                proc.stdin.write(raw.encode())
-                await proc.stdin.drain()
+                # Bounded write (audit L-30): a hung server that stops
+                # reading stdin must not park the call forever.
+                await asyncio.wait_for(
+                    self._write_stdin(proc, raw), timeout=read_timeout
+                )
                 while True:
                     line = await asyncio.wait_for(
                         proc.stdout.readline(),

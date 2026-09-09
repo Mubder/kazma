@@ -1,34 +1,22 @@
-"""Retry utilities with exponential backoff for LLM calls and tool executions.
+"""Retry configuration + friendly error mapping.
 
-Uses tenacity for configurable retry logic with friendly error mapping.
-
-Usage:
-    from kazma_core.retry import retry_llm_call, retry_tool_call, RETRYABLE_EXCEPTIONS
-
-    # Decorator for LLM calls
-    @retry_llm_call
-    async def call_llm(...): ...
-
-    # Decorator for tool executions
-    @retry_tool_call
-    async def execute_tool(...): ...
+The live retry loops are owned by the callers (the supervisor's
+``_call_llm_with_retry`` and the tool registry's backoff) — they read
+``load_retry_config()`` for their budgets. There are deliberately NO
+tenacity decorators here anymore: ``retry_llm_call`` / ``retry_tool_call``
+were exported but never applied anywhere, and a future caller wrapping a
+call the supervisor already retries would double-retry with the wrong
+classification (removed in audit follow-up).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
-from tenacity import (
-    RetryCallState,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_exponential,
-)
-
-__all__ = ["MAX_ATTEMPTS", "MAX_WAIT", "MIN_WAIT", "RETRYABLE_EXCEPTIONS", "friendly_llm_error", "friendly_tool_error", "load_retry_config", "retry_llm_call", "retry_tool_call"]
+__all__ = ["MAX_ATTEMPTS", "MAX_WAIT", "MIN_WAIT", "RETRYABLE_EXCEPTIONS", "friendly_llm_error", "friendly_tool_error", "load_retry_config"]
 
 logger = logging.getLogger(__name__)
 
@@ -88,66 +76,13 @@ def load_retry_config() -> dict[str, Any]:
         }
 
 
-def _log_retry(retry_state: RetryCallState) -> None:
-    """Log each retry attempt."""
-    exc = retry_state.outcome.exception() if retry_state.outcome else None
-    attempt = retry_state.attempt_number
-    cfg = load_retry_config()
-    max_att = cfg["max_attempts"]
-    logger.warning(
-        "Retry attempt %d/%d failed: %s",
-        attempt,
-        max_att,
-        exc,
-    )
-
-
-# ── Decorators ───────────────────────────────────────────────────────
-
-
-def retry_llm_call(fn: Any) -> Any:
-    """Decorator: retry LLM calls with exponential backoff on network errors.
-
-    Does NOT retry on 4xx (bad request, auth) — only on network/5xx errors.
-    """
-    cfg = load_retry_config()
-    retryable = _get_retryable()
-
-    return retry(
-        stop=stop_after_attempt(cfg["max_attempts"]),
-        wait=wait_exponential(
-            multiplier=1,
-            min=cfg["min_wait"],
-            max=cfg["max_wait"],
-        ),
-        retry=retry_if_exception_type(retryable),
-        before_sleep=_log_retry,
-        reraise=True,
-    )(fn)
-
-
-def retry_tool_call(fn: Any) -> Any:
-    """Decorator: retry tool executions with exponential backoff on network errors.
-
-    Does NOT retry on tool logic errors (ValueError, TypeError, etc.).
-    """
-    cfg = load_retry_config()
-    retryable = _get_retryable()
-
-    return retry(
-        stop=stop_after_attempt(cfg["max_attempts"]),
-        wait=wait_exponential(
-            multiplier=1,
-            min=cfg["min_wait"],
-            max=cfg["max_wait"],
-        ),
-        retry=retry_if_exception_type(retryable),
-        before_sleep=_log_retry,
-        reraise=True,
-    )(fn)
-
-
 # ── Friendly error mapping ───────────────────────────────────────────
+
+# Auth-status detection from exception TEXT must be pattern-anchored: a
+# bare ``"401" in message`` matched request ids, byte counts, and model
+# names that happen to contain the digits, misreporting unrelated failures
+# as invalid-API-key.
+_STATUS_TEXT_RE = re.compile(r"(?:HTTP|status[ _-]?code|Error)\D{0,4}(401|403)\b", re.IGNORECASE)
 
 
 def _extract_http_status_code(exc: Exception) -> int | None:
@@ -163,11 +98,9 @@ def _extract_http_status_code(exc: Exception) -> int | None:
         if isinstance(status_code, int):
             return status_code
 
-        message = str(current)
-        if "401" in message:
-            return 401
-        if "403" in message:
-            return 403
+        match = _STATUS_TEXT_RE.search(str(current))
+        if match:
+            return int(match.group(1))
 
         current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
 

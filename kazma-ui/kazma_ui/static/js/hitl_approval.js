@@ -105,6 +105,7 @@
 
     list.innerHTML = pending.map(function (item) {
       var threadId = escapeHtml(item.thread_id || '');
+      var interruptId = escapeHtml(item.interrupt_id || '');
       var toolName = escapeHtml(item.tool_name || item.tool || 'unknown');
       if (toolName === 'undefined' || toolName === 'null') toolName = 'unknown';
       var message = item.message != null ? String(item.message) : '';
@@ -126,7 +127,7 @@
                  escapeHtml(o.label || o.id) + '</button>';
         }).join(' ');
         return (
-          '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
+          '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '">' +
           '  <div class="hitl-approval-header"><span class="hitl-tool-name">❓ Clarification</span>' +
             (threadId ? '<span class="hitl-thread-id">' + threadId + '</span>' : '') + '</div>' +
           '  <div class="hitl-approval-message" dir="auto">' + _sq + '</div>' +
@@ -139,7 +140,7 @@
       // hide the button so YOLO never reads as "approve once".
       var yoloOk = item.yolo_allowed !== false;
       return (
-        '<div class="hitl-approval-card" data-thread-id="' + threadId + '">' +
+        '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '">' +
         '  <div class="hitl-approval-header">' +
         '    <span class="hitl-tool-name">' +
         (icon ? icon + ' ' : '') + toolName + '</span>' +
@@ -201,6 +202,10 @@
         var act = card ? card.querySelector('.hitl-approval-actions') : null;
         if (act) act.innerHTML = '<span>Resolving…</span>';
         var payload = { action: optId === 'cancel' ? 'deny' : 'approve', scope: 'once', choices: {} };
+        // Bind the decision to THIS gate — without interrupt_id a stale card
+        // could approve a newly raised, different gate on the same thread.
+        var iid = card ? (card.getAttribute('data-interrupt-id') || '') : '';
+        if (iid) payload.interrupt_id = iid;
         payload.choices[tcid] = optId;
         fetch('/api/approve/' + encodeURIComponent(tid), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -231,6 +236,9 @@
       scope: scope,
       tool: tool,
     };
+    // Bind the decision to THIS gate (stale-card protection, audit M-W1).
+    var interruptId = card ? (card.getAttribute('data-interrupt-id') || '') : '';
+    if (interruptId) payload.interrupt_id = interruptId;
 
     var url = '/api/approve/' + encodeURIComponent(threadId);
 

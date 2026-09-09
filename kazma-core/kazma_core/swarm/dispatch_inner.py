@@ -262,28 +262,45 @@ async def dispatch_inner(
         except Exception:
             logger.debug("[SwarmEngine] autoscaler spawn-by-name failed", exc_info=True)
 
+    _created_adhoc = False
     if worker is None:
         # Fallback 2: create a default worker from the active model profile.
-        try:
-            from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
-            from kazma_core.model_registry import get_model_registry
-
-            reg = get_model_registry()
-            profile = reg.get_active_profile()
-            default_cfg = WorkerConfig(
-                name=worker_name,
-                type="in_process",
-                model=profile.get("model", ""),
-                provider=profile.get("provider", ""),
-                role=worker_name,
-                capabilities=WorkerCapabilities(expertise=[worker_name]),
+        # BOUNDED (audit M-S4): auto-created workers used to register
+        # FOREVER, so typos and adversarial chat input ("swarm fake-<n> do
+        # X") grew the registry without limit and polluted future broadcast
+        # fan-outs. Only a small pool of concurrent ad-hoc workers exists,
+        # and each is auto-reaped after the dispatch completes.
+        _MAX_ADHOC_WORKERS = 10
+        _adhoc_active = getattr(engine, "_adhoc_worker_count", 0)
+        if _adhoc_active >= _MAX_ADHOC_WORKERS:
+            logger.warning(
+                "[SwarmEngine] Auto-create of '%s' refused: %d ad-hoc workers "
+                "already active (cap %d) — likely typos or adversarial input",
+                worker_name, _adhoc_active, _MAX_ADHOC_WORKERS,
             )
-            worker = engine.add_worker(default_cfg)
-            logger.info("[SwarmEngine] Auto-created default worker '%s' (model=%s)",
-                        worker_name, profile.get("model", "?"))
-        except Exception as exc:
-            logger.warning("[SwarmEngine] Could not auto-create worker '%s': %s",
-                           worker_name, exc)
+        else:
+            try:
+                from kazma_core.swarm.config import WorkerConfig, WorkerCapabilities
+                from kazma_core.model_registry import get_model_registry
+
+                reg = get_model_registry()
+                profile = reg.get_active_profile()
+                default_cfg = WorkerConfig(
+                    name=worker_name,
+                    type="in_process",
+                    model=profile.get("model", ""),
+                    provider=profile.get("provider", ""),
+                    role=worker_name,
+                    capabilities=WorkerCapabilities(expertise=[worker_name]),
+                )
+                worker = engine.add_worker(default_cfg)
+                engine._adhoc_worker_count = _adhoc_active + 1
+                _created_adhoc = True
+                logger.info("[SwarmEngine] Auto-created default worker '%s' (model=%s)",
+                            worker_name, profile.get("model", "?"))
+            except Exception as exc:
+                logger.warning("[SwarmEngine] Could not auto-create worker '%s': %s",
+                               worker_name, exc)
 
     if worker is None:
         msg = f"Worker '{worker_name}' not found and could not be auto-created."
@@ -304,45 +321,61 @@ async def dispatch_inner(
         task, blackboard=dispatch_blackboard
     )
 
-    # Dispatch the primary worker (returns all results including handoffs).
-    all_worker_results = await engine._dispatch_worker(
-        worker,
-        task.prompt,
-        dispatch_context,
-        timeout=task.timeout,
-        validation_schema=task.validation_schema,
-        trace_id=task_span.trace_id,
-    )
-    worker_result = all_worker_results[-1]
-
-    # Execute fallback chain if the primary failed and a chain is configured.
-    # NOTE: this top-level call does NOT thread _visited/_depth (unlike the
-    # mid-chain call in engine._dispatch_worker_by_name, which does — M13).
-    # That is correct BY CONSTRUCTION: at top level no handoffs have occurred
-    # yet, so the hop budget starts fresh. Do not "helpfully" thread state
-    # from here without also propagating it from the top-level dispatch —
-    # otherwise A→B→fallback→A could reset visit counts (audit finding).
-    if worker_result.status != "success" and task.fallback_chain:
-        fallback_result, fallback_all = await engine._execute_fallback_chain(
-            worker_result,
-            task.fallback_chain,
-            prompt=task.prompt,
-            context=dispatch_context,
+    # Track whether THIS dispatch auto-created its worker so it can be
+    # reaped in the finally below (audit M-S4 — ad-hoc workers must not
+    # accumulate in the registry forever).
+    _adhoc_name = worker.name if _created_adhoc else None
+    try:
+        # Dispatch the primary worker (returns all results including handoffs).
+        all_worker_results = await engine._dispatch_worker(
+            worker,
+            task.prompt,
+            dispatch_context,
             timeout=task.timeout,
             validation_schema=task.validation_schema,
+            trace_id=task_span.trace_id,
         )
-        all_worker_results = fallback_all
-        worker_result = fallback_result
+        worker_result = all_worker_results[-1]
 
-    # Determine overall status: if fallbacks ran, the final result's
-    # status determines the outcome (intermediate failures are expected).
-    if len(all_worker_results) > 1 and task.fallback_chain:
-        result_status = (
-            "success" if worker_result.status == "success" else "failed"
-        )
-    else:
-        result_status = engine._overall_status(all_worker_results)
-    aggregated_output = worker_result.output if worker_result.status == "success" else None
+        # Execute fallback chain if the primary failed and a chain is configured.
+        # NOTE: this top-level call does NOT thread _visited/_depth (unlike the
+        # mid-chain call in engine._dispatch_worker_by_name, which does — M13).
+        # That is correct BY CONSTRUCTION: at top level no handoffs have occurred
+        # yet, so the hop budget starts fresh. Do not "helpfully" thread state
+        # from here without also propagating it from the top-level dispatch —
+        # otherwise A→B→fallback→A could reset visit counts (audit finding).
+        if worker_result.status != "success" and task.fallback_chain:
+            fallback_result, fallback_all = await engine._execute_fallback_chain(
+                worker_result,
+                task.fallback_chain,
+                prompt=task.prompt,
+                context=dispatch_context,
+                timeout=task.timeout,
+                validation_schema=task.validation_schema,
+            )
+            all_worker_results = fallback_all
+            worker_result = fallback_result
+
+        # Determine overall status: if fallbacks ran, the final result's
+        # status determines the outcome (intermediate failures are expected).
+        if len(all_worker_results) > 1 and task.fallback_chain:
+            result_status = (
+                "success" if worker_result.status == "success" else "failed"
+            )
+        else:
+            result_status = engine._overall_status(all_worker_results)
+        aggregated_output = worker_result.output if worker_result.status == "success" else None
+    finally:
+        # Reap the ad-hoc worker created for this dispatch (unless a handoff
+        # or fallback left it registered deliberately via the registry).
+        if _adhoc_name is not None:
+            try:
+                engine._workers.pop(_adhoc_name, None)
+                engine._adhoc_worker_count = max(
+                    0, getattr(engine, "_adhoc_worker_count", 1) - 1
+                )
+            except Exception:
+                pass
 
     span_status = "ok" if result_status in ("success", "partial") else "error"
     engine._tracing_emitter.end_span(task_span, status=span_status)

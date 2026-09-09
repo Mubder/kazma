@@ -488,11 +488,24 @@ async def _dispatch_swarm_from_chat(
     await _send_swarm_reply(msg, store, manager, thread_id,
         f"🐝 Dispatching to {worker_label} ({pattern})...")
 
+    # Whole-task wait budget (audit M-S3): a flat 300s cap cancelled
+    # legitimate multi-step patterns — the engine deliberately budgets
+    # per-step patterns at ``timeout × steps + 30`` (mirrored in
+    # reap_stale_tasks). Use the SAME formula here so the gateway cap is
+    # never tighter than the engine's own deadline; simple dispatches keep
+    # the flat 300s.
+    _per_step_types = {"pipeline", "fanout", "consult", "conditional"}
+    if pattern in _per_step_types:
+        step_budget = max(len(workers) if workers else 1, 2)
+        wait_budget = SWARM_DISPATCH_TIMEOUT_SECONDS * step_budget + 30.0
+    else:
+        wait_budget = float(SWARM_DISPATCH_TIMEOUT_SECONDS)
+
     # Dispatch synchronously (the engine handles concurrency internally)
     try:
         result = await asyncio.wait_for(
             engine.dispatch(swarm_task),
-            timeout=SWARM_DISPATCH_TIMEOUT_SECONDS
+            timeout=wait_budget
         )
 
         # Format result for chat
@@ -545,9 +558,16 @@ async def _dispatch_swarm_from_chat(
             )
 
     except asyncio.TimeoutError:
-        logger.error("[agent-handler] Swarm dispatch timed out after %ds for thread %s",
-                     SWARM_DISPATCH_TIMEOUT_SECONDS, thread_id)
-        error_reply = "⚠️ Swarm task timed out after 5 minutes. The task may still be running in background."
+        logger.error("[agent-handler] Swarm dispatch timed out after %.0fs for thread %s",
+                     wait_budget, thread_id)
+        # Honest status (audit M-S3): the engine finalizes a cancelled task
+        # as CANCELLED — its workers' partial work is discarded, nothing runs
+        # in the background. The old "may still be running" message lied.
+        error_reply = (
+            f"⚠️ Swarm task cancelled after {wait_budget / 60:.0f} minutes "
+            "(gateway wait budget). Partial work was discarded — re-dispatch "
+            "with a narrower prompt or fewer steps."
+        )
         await _send_swarm_reply(msg, store, manager, thread_id, error_reply)
         await _maybe_send_to_output_target(
             manager, error_reply, target_override, origin=msg

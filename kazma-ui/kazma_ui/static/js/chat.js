@@ -5878,6 +5878,10 @@
       function submitApproval(action, scope) {
       scope = scope || 'once';
       var hitlState = action === 'deny' ? 'denied' : 'approved';
+      var confirmedLabel = scope === 'yolo'
+        ? ti('yolo_on', 'YOLO on ✓')
+        : (scope === 'tool' ? ti('tool_allowed', 'Tool allowed ✓')
+          : (action === 'deny' ? ti('denied', 'Denied ✗') : ti('approved', 'Approved ✓')));
       _clearStoreApproval();
       // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
       tokenAccum = '';
@@ -5888,10 +5892,11 @@
       _awaitingApproval = true;
       // THIS card only — a sibling card is a different, still-pending gate.
       _freezeHitlButtons(card);
-      setCardState('approved', scope === 'yolo'
-        ? ti('yolo_on', 'YOLO on ✓')
-        : (scope === 'tool' ? ti('tool_allowed', 'Tool allowed ✓')
-          : ti('approved', 'Approved ✓')));
+      // Honest in-flight paint: the server has NOT accepted the decision
+      // yet. Painting "Approved ✓" optimistically left the card lying when
+      // the fetch failed/network dropped (audit M-W2) — the confirmed state
+      // is painted in the .then() below.
+      setCardState('inflight', ti('sending_decision', 'Sending decision…'));
       // Record the decision itself so the log reads as one continuous story
       // (…tool proposed → you approved → tool ran → answer) instead of
       // restarting at "Thinking…".
@@ -5922,7 +5927,7 @@
 
       applyTurnEvent({
         type: 'hitl',
-        state: hitlState,
+        state: 'inflight',
         tool: data.tool || '',
         interrupt_id: data.interrupt_id || '',
         payload: data,
@@ -5979,6 +5984,14 @@
           });
           return;
         }
+        // Decision ACCEPTED by the server — now paint the confirmed state
+        // (the optimistic pre-fetch paint is gone; audit M-W2).
+        setCardState(hitlState, confirmedLabel);
+        applyTurnEvent({
+          type: 'hitl', state: hitlState, tool: data.tool || '',
+          interrupt_id: data.interrupt_id || '',
+          payload: data, turn_id: _liveTurnId, source: 'approve-accepted',
+        });
         // Decision accepted — the graph is running again. Clear the HITL
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
         // Unless another card is still live: deciding gate A does not mean

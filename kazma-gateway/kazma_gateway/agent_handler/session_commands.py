@@ -142,6 +142,23 @@ async def try_session_command(
         )
         return True
 
+    # Ownership gate (audit H-3): without it, any allowlisted sender could
+    # bind to ANY season — inheriting its history AND its pending HITL
+    # gates (the in-thread approve path checks no sender identity).
+    from kazma_core.sessions.directory import sender_may_take_over
+
+    allowed, owner = sender_may_take_over(sender, hit.thread_id)
+    if not allowed:
+        await _reply(
+            f"🔒 That season belongs to another user (`{owner[:6]}…`).\n"
+            f"Take-over is limited to your own seasons."
+        )
+        logger.warning(
+            "[session-cmd] take-over DENIED sender=%s thread=%s owner=%s",
+            sender, hit.thread_id, owner,
+        )
+        return True
+
     await bind_sender_to_thread(
         sender,
         hit.thread_id,

@@ -104,10 +104,33 @@ async def file_write(path: str, content: str) -> str:
 
     def _write_sync() -> None:
         p.parent.mkdir(parents=True, exist_ok=True)
+        # TOCTOU guard part 1 (audit L-33): ``p`` was already ``resolve()``d
+        # above, so any symlink present NOW was swapped in after the access
+        # check — writing would follow it outside the vetted target.
+        if p.is_symlink():
+            raise PermissionError(
+                "destination became a symlink after the access check — refusing to write"
+            )
         p.write_text(content, encoding="utf-8")
 
     try:
         await asyncio.to_thread(_write_sync)
+        # TOCTOU guard part 2: re-run the access policy against the resolved
+        # destination; if it escaped (race won between lstat and open),
+        # remove the written file and fail loudly.
+        try:
+            post = check_path_access(p.resolve(), "write")
+        except Exception:
+            post = None
+        if post is not None and not post.allowed:
+            try:
+                await asyncio.to_thread(p.unlink)
+            except Exception:
+                pass
+            return (
+                "Error: destination changed between access check and write "
+                f"(symlink swap?) — {path}"
+            )
     except PermissionError:
         return _friendly_error(PermissionError(), path)
     except IsADirectoryError:

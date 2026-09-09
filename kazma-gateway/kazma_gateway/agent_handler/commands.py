@@ -1767,6 +1767,17 @@ async def _try_model_command(
 
     # ── /_models_select: Switch active model ──────────────────────
     if cmd == "/_models_select":
+        # Global model switch is admin-grade (audit H-8): it changes the
+        # active model for EVERY user and platform.
+        from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+        if not _sender_is_gateway_admin(msg):
+            await _send_model_reply(
+                msg, store, manager, thread_id,
+                "⛔ Switching the active model is admin-only. Set "
+                "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
+            )
+            return True
         model_id = text.split(None, 1)[1].strip() if len(text.split(None, 1)) > 1 else ""
         if not model_id:
             return True
@@ -1907,6 +1918,17 @@ async def _try_skill_command(
                     msg, store, manager, thread_id,
                     "⚠️ Usage: `/skill install <owner/repo>`\n"
                     "Example: `/skill install shadcn/improve`",
+                )
+                return True
+            # Skill install pulls an arbitrary GitHub bundle whose body is
+            # injected into every later system prompt — admin-only (audit H-8).
+            from kazma_gateway.agent_handler.graph import _sender_is_gateway_admin
+
+            if not _sender_is_gateway_admin(msg):
+                await _send_model_reply(
+                    msg, store, manager, thread_id,
+                    "⛔ Installing skills is admin-only. Set "
+                    "`KAZMA_GATEWAY_ADMINS` or join the platform user allowlist.",
                 )
                 return True
             from kazma_core.agent_skills.tools import install_agent_skill

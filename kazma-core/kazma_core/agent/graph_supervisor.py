@@ -1775,6 +1775,14 @@ async def supervisor_node(
                 )
                 if nudge_response.content and nudge_response.content.strip():
                     content = nudge_response.content.strip()
+                    # The first (empty) attempt was still billed — fold its
+                    # usage/cost into the nudge response so cost tracking
+                    # reflects both calls (audit: cost-breaker undercount).
+                    if response is not None:
+                        nudge_response.usage = LLMProvider._merge_usage(
+                            response.usage, nudge_response.usage
+                        )
+                        nudge_response.cost_usd += response.cost_usd
                     response = nudge_response  # update for tracing/cost
                     logger.info("[Supervisor] Nudge retry succeeded — content recovered (%d chars)", len(content))
                 else:

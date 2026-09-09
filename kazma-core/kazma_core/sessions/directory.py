@@ -105,6 +105,94 @@ def remember_sender_thread(sender_id: str, thread_id: str) -> None:
         logger.warning("[sessions] persist active_thread failed", exc_info=True)
 
 
+_OWNER_KEY_PREFIX = "session.owner."
+_OPEN_TAKEOVER_ENV = "KAZMA_SESSION_OPEN_TAKEOVER"
+
+
+def _open_takeover_enabled() -> bool:
+    """Shared-team opt-in: any allowlisted sender may take over any season."""
+    import os
+
+    return (os.environ.get(_OPEN_TAKEOVER_ENV) or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
+def record_thread_owner(thread_id: str, sender_id: str) -> None:
+    """Record the owning sender of a thread — FIRST writer wins.
+
+    Setdefault semantics: never overwritten, so a later ``/session``
+    take-over cannot transfer ownership to the taking-over sender. Called
+    at thread-creation sites (named seasons, forks, first bind).
+    """
+    if not thread_id or not sender_id:
+        return
+    try:
+        from kazma_core.config_store import get_config_store
+
+        key = f"{_OWNER_KEY_PREFIX}{thread_id}"
+        store = get_config_store()
+        if not store.get(key, ""):
+            store.set(key, sender_id)
+    except Exception:
+        logger.debug("[sessions] owner record failed", exc_info=True)
+
+
+def thread_owner(thread_id: str) -> str:
+    """The sender that owns *thread_id* ("" when unowned/derivable-none).
+
+    Explicit registry first; deterministic per-DM ids (``gw-<plat>-<id>``
+    with no minted uuid suffix) derive their owner from the id itself, so
+    pre-ownership-registry threads keep working with no migration.
+    """
+    if not thread_id:
+        return ""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        owner = str(
+            get_config_store().get(f"{_OWNER_KEY_PREFIX}{thread_id}", "") or ""
+        ).strip()
+        if owner:
+            return owner
+    except Exception:
+        logger.debug("[sessions] owner read failed", exc_info=True)
+    # Deterministic DM form: gw-<platform>-<tail> with no trailing uuid
+    # segment (named/fork ids end in '-<8 hex>'). Sender ids on every
+    # supported platform are alphanumeric/underscore.
+    m = re.match(r"^gw-([a-z0-9_]+)-([A-Za-z0-9_]+)$", thread_id)
+    if m and not re.search(r"-[0-9a-f]{8}$", thread_id):
+        return f"{m.group(1)}:{m.group(2)}"
+    return ""
+
+
+def sender_may_take_over(sender_id: str, thread_id: str) -> tuple[bool, str]:
+    """Whether *sender_id* may bind their mouth to *thread_id*.
+
+    Audit H-3: ``/session <id>`` used to let ANY allowlisted sender take
+    over ANY season — including another user's — which also defeated the
+    HITL cross-thread owner check (after take-over, the victim's gate is
+    on the attacker's "own" thread). Now: the owner must match. Seasons
+    with no derivable owner (web-created, legacy, uuid fallback) remain
+    open, and shared-team deployments can opt in via
+    ``KAZMA_SESSION_OPEN_TAKEOVER=1``.
+    """
+    if not sender_id or not thread_id:
+        return True, ""
+    if _open_takeover_enabled():
+        return True, ""
+    owner = thread_owner(thread_id)
+    if not owner:
+        return True, ""
+    if owner == sender_id:
+        return True, ""
+    logger.warning(
+        "[sessions] take-over denied: sender=%s thread=%s owner=%s",
+        sender_id, thread_id, owner,
+    )
+    return False, owner
+
+
 def find_mouth_thread(
     sender_id: str,
     *,
@@ -471,6 +559,10 @@ async def bind_sender_to_thread(
     if not sender_id or not thread_id:
         return None
     remember_sender_thread(sender_id, thread_id)
+    # First binder becomes the owner of previously-unowned threads (web /
+    # legacy); setdefault semantics — an existing owner is never replaced,
+    # so a take-over cannot transfer ownership (audit H-3).
+    record_thread_owner(thread_id, sender_id)
 
     if session_store is not None and delivery_ctx is not None:
         try:
@@ -522,6 +614,8 @@ def create_named_session(
     nice = (title or "").strip()[:120]
     if not nice:
         nice = f"{plat.capitalize()} session"
+    if sender_id:
+        record_thread_owner(sid, sender_id)
     _ensure_web_row(session_id=sid, thread_id=sid, title=nice, platform=plat)
     return SessionEntry(
         session_id=sid,

@@ -15,7 +15,10 @@ from kazma_ui.auth import websocket_is_authenticated
 class _FakeWS:
     def __init__(self, query=None, headers=None, cookies=None):
         self.query_params = query if query is not None else {}
-        self.headers = headers if headers is not None else {}
+        merged = {"host": "localhost"}  # HTTP/1.1 handshakes always carry Host
+        for key, value in (headers or {}).items():
+            merged[key.lower()] = value
+        self.headers = merged
         self.cookies = cookies if cookies is not None else {}
 
 

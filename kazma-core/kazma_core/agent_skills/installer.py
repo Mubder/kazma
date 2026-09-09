@@ -244,6 +244,15 @@ async def _download_github_zip(
     zip_path = tmp / "repo.zip"
     last_err: Exception | None = None
 
+    # Zip-bomb / resource caps (audit M-P11): the whole zipball used to be
+    # buffered in memory and extractall() ran with no member-count,
+    # expanded-size, or compression-ratio limits — a hostile repo could DoS
+    # memory/disk through a HITL-approved install.
+    _MAX_ZIP_BYTES = 100 * 1024 * 1024       # compressed download cap
+    _MAX_MEMBERS = 5_000
+    _MAX_EXPANDED_BYTES = 500 * 1024 * 1024  # total uncompressed cap
+    _MAX_RATIO = 200                          # per-member compression ratio
+
     async with httpx.AsyncClient(
         timeout=60.0,
         follow_redirects=True,
@@ -254,11 +263,22 @@ async def _download_github_zip(
     ) as client:
         for url in candidates:
             try:
-                resp = await client.get(url)
-                if resp.status_code == 404:
-                    continue
-                resp.raise_for_status()
-                zip_path.write_bytes(resp.content)
+                size = 0
+                with zip_path.open("wb") as fh:
+                    async with client.stream("GET", url) as resp:
+                        if resp.status_code == 404:
+                            fh.close()
+                            continue
+                        resp.raise_for_status()
+                        async for chunk in resp.aiter_bytes(65536):
+                            size += len(chunk)
+                            if size > _MAX_ZIP_BYTES:
+                                raise RuntimeError(
+                                    f"Skill bundle exceeds {_MAX_ZIP_BYTES} bytes download cap"
+                                )
+                            fh.write(chunk)
+                if size == 0:
+                    raise RuntimeError("Empty skill bundle download")
                 break
             except Exception as exc:
                 last_err = exc
@@ -273,6 +293,33 @@ async def _download_github_zip(
     extract_dir = tmp / "extract"
     extract_dir.mkdir()
     with zipfile.ZipFile(zip_path, "r") as zf:
+        members = zf.infolist()
+        if len(members) > _MAX_MEMBERS:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise RuntimeError(
+                f"Skill bundle has too many members ({len(members)} > {_MAX_MEMBERS})"
+            )
+        total_expanded = 0
+        for info in members:
+            total_expanded += max(0, info.file_size)
+            if total_expanded > _MAX_EXPANDED_BYTES:
+                shutil.rmtree(tmp, ignore_errors=True)
+                raise RuntimeError("Skill bundle expands beyond the size cap")
+            if info.file_size > 0 and info.compress_size > 0:
+                if (info.file_size / info.compress_size) > _MAX_RATIO:
+                    shutil.rmtree(tmp, ignore_errors=True)
+                    raise RuntimeError(
+                        f"Skill bundle member '{info.filename}' has an extreme "
+                        "compression ratio (zip bomb)"
+                    )
+            # Symlink members are never materialized (extraction below only
+            # writes regular members); flag them explicitly.
+            mode = getattr(info, "external_attr", 0) >> 16
+            if (mode & 0o170000) == 0o120000:
+                shutil.rmtree(tmp, ignore_errors=True)
+                raise RuntimeError(
+                    f"Skill bundle member '{info.filename}' is a symlink — refused"
+                )
         zf.extractall(extract_dir)
 
     # GitHub zipballs have a single top-level folder owner-repo-sha/

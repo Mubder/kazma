@@ -95,6 +95,10 @@ class SlackAdapter(BaseAdapter):
         # = allow all members of allowed channels; populated = drop non-listed.
         self._allowed_users: set[str] = set(allowed_users or [])
         self._allow_all: bool = allow_all
+        # Per-channel serial chains for heavy event work (file download +
+        # STT) — keeps them OFF the Socket-Mode reader loop while preserving
+        # per-channel arrival order (audit L-27).
+        self._event_chains: dict[str, asyncio.Task] = {}
 
         if not self._bot_token:
             logger.warning("[Slack] No bot token — adapter will stay STOPPED")
@@ -271,6 +275,56 @@ class SlackAdapter(BaseAdapter):
                     return False
 
         return True
+
+    def _chain_channel_work(self, channel_id: str, coro) -> None:
+        """Run *coro* in a per-channel serial chain (never blocks the reader).
+
+        Mirrors Telegram's ``_chat_chains``: work within one channel keeps
+        arrival order, while different channels proceed in parallel and the
+        Socket-Mode WS reader returns immediately.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            coro.close()
+            return
+        prev = self._event_chains.get(channel_id)
+
+        async def _run() -> None:
+            if prev is not None and not prev.done():
+                try:
+                    await prev
+                except Exception:
+                    pass
+            try:
+                await coro
+            except Exception:
+                logger.exception("[Slack] Channel work failed (ch=%s)", channel_id)
+
+        task = loop.create_task(_run())
+        self._event_chains[channel_id] = task
+        if len(self._event_chains) > 64:
+            done = [k for k, t in self._event_chains.items() if t.done()]
+            for k in done:
+                self._event_chains.pop(k, None)
+
+    async def _finalize_event(self, msg: IncomingMessage, event: dict) -> None:
+        """Heavy tail of an accepted event: file prefetch, STT, enqueue."""
+        try:
+            msg = await self._prefetch_private_files(msg)
+            msg = await self._maybe_transcribe_audio(msg)
+            try:
+                self._queue.put_nowait(msg)
+                logger.debug(
+                    "[Slack] ← event: type=%s user=%s text=%.80s",
+                    event.get("type", "?"),
+                    event.get("user", "?"),
+                    event.get("text", ""),
+                )
+            except asyncio.QueueFull:
+                logger.warning("[Slack] Queue full — dropping event")
+        except Exception:
+            logger.exception("[Slack] Event finalize failed")
 
     async def _prefetch_private_files(self, msg: IncomingMessage) -> IncomingMessage:
         """Download Slack ``url_private_download`` with the bot token (audit M-5).
@@ -528,6 +582,31 @@ class SlackAdapter(BaseAdapter):
 
                         msg_type = msg.get("type", "")
 
+                        # Team (workspace) allowlist — previously stored but
+                        # never enforced (dead config, audit L-2). Socket Mode
+                        # envelopes carry the team on the payload; when the
+                        # operator configured allowed teams, drop everything
+                        # else (fail-closed).
+                        if self._allowed_teams and msg_type in ("interactive", "events_api"):
+                            _env_team = str(
+                                (msg.get("payload") or {}).get("team_id")
+                                or (msg.get("payload") or {}).get("team", {}).get("id")
+                                or ""
+                            )
+                            if _env_team and _env_team not in self._allowed_teams:
+                                logger.info(
+                                    "[Slack] Dropping %s from non-allowed team %s",
+                                    msg_type, _env_team,
+                                )
+                                # Still ACK envelopes so Slack stops retrying.
+                                _env_ack = msg.get("envelope_id", "")
+                                if _env_ack:
+                                    try:
+                                        await ws.send(json.dumps({"envelope_id": _env_ack}))
+                                    except Exception:
+                                        pass
+                                continue
+
                         if msg_type == "hello":
                             logger.info("[Slack] Socket Mode handshake confirmed")
                             continue
@@ -577,6 +656,17 @@ class SlackAdapter(BaseAdapter):
                                         )
                                         continue
                                     if action.kind in ("sys_install", "install_dep"):
+                                        # Admin gate (audit H-8): the allowlist
+                                        # check above bounds who may interact at
+                                        # all; installs additionally need admin.
+                                        from kazma_gateway.allowlists import is_gateway_admin
+
+                                        if not is_gateway_admin(f"slack:{_ia_user_id}", "slack"):
+                                            logger.info(
+                                                "[Slack] Ignoring install interaction (admin required) user=%s",
+                                                _ia_user_id,
+                                            )
+                                            continue
                                         package_name = action.package_name
                                         from kazma_core.system.runtime_manager import (
                                             trigger_package_promotion,
@@ -750,17 +840,15 @@ class SlackAdapter(BaseAdapter):
                                     if not _uid or _uid not in self._allowed_users:
                                         logger.info("[Slack] Dropping event from non-allowed user %s — skipping", _uid)
                                         continue
-                                incoming = await self._prefetch_private_files(incoming)
-                                # Voice: transcribe any audio attachment.
-                                incoming = await self._maybe_transcribe_audio(incoming)
-                                try:
-                                    self._queue.put_nowait(incoming)
-                                    logger.debug("[Slack] ← event: type=%s user=%s text=%.80s",
-                                                 event.get("type", "?"),
-                                                 event.get("user", "?"),
-                                                 event.get("text", ""))
-                                except asyncio.QueueFull:
-                                    logger.warning("[Slack] Queue full — dropping event")
+                                # Heavy per-event work (private file download up
+                                # to 20MB + STT) runs OFF the Socket-Mode reader
+                                # loop via a per-channel serial chain — inline it
+                                # used to stall every event, interaction card,
+                                # and channel behind one slow file (audit L-27).
+                                self._chain_channel_work(
+                                    cid or "",
+                                    self._finalize_event(incoming, event),
+                                )
                             continue
 
                         logger.debug("[Slack] Socket Mode: unhandled message type: %s", msg_type)
@@ -869,6 +957,17 @@ class SlackAdapter(BaseAdapter):
         if self._allowed_channels and channel_id not in self._allowed_channels:
             logger.debug("[Slack] Message from non-whitelisted channel %s — skipping", channel_id)
             return
+        # Enforce the USER allowlist on the polling path too (audit H-2):
+        # the socket-mode path checks actor_allowed(), but this path only
+        # checked channels — any workspace member posting in a polled
+        # channel had full agent access. Fail closed: no allowlist and no
+        # allow_all means reject everyone (same rule as the socket path).
+        user_id = msg.get("user", "")
+        if not self.actor_allowed(user_id):
+            logger.debug(
+                "[Slack] Polling message from non-whitelisted user %r — skipping", user_id
+            )
+            return
 
         text = msg.get("text", "").strip()
         raw_files = msg.get("files") or []
@@ -877,7 +976,6 @@ class SlackAdapter(BaseAdapter):
         if not text and not raw_files:
             return
 
-        user_id = msg.get("user", "")
         username = f"slack_{user_id}" if user_id else "slack_unknown"
 
         attachments: list[Attachment] = []

@@ -22,7 +22,7 @@ from typing import Any
 
 import httpx
 
-from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,16 @@ class AzureProvider(LLMProvider):
             os.getenv("AZURE_OPENAI_ENDPOINT", "")
             or self.config.base_url
         ).rstrip("/")
+        # The generic URL normalization appends "/v1" to every base URL —
+        # Azure's path form is ``/openai/deployments/<dep>`` with NO /v1
+        # segment, so ``.../v1/openai/deployments/...`` 404s on every call.
+        # Strip exactly that appended suffix (audit finding H-6).
+        if endpoint.endswith("/v1"):
+            endpoint = endpoint[: -len("/v1")].rstrip("/")
         self._endpoint = endpoint
         self._api_version = (
             os.getenv("AZURE_OPENAI_API_VERSION", "")
-            or getattr(self.config, "api_version", "")
+            or self.config.api_version
             or _DEFAULT_API_VERSION
         )
         if not self.config.api_key or self.config.api_key == "not-needed":
@@ -60,13 +66,19 @@ class AzureProvider(LLMProvider):
     async def _get_client(self) -> httpx.AsyncClient:
         """Return an httpx client whose base_url points at the deployment."""
         if self._http is None:
+            if not self._endpoint:
+                # Fail loud with a clear, actionable error instead of
+                # silently posting an Azure api-key header to
+                # api.openai.com (guaranteed 401, wrong vendor).
+                raise LLMError(
+                    "Azure provider requires an endpoint. Set "
+                    "AZURE_OPENAI_ENDPOINT (e.g. https://myresource.openai.azure.com) "
+                    "or the provider base_url in Settings.",
+                    transient=False,
+                )
             # Build the deployment-scoped base URL so the LLMProvider.chat()
             # payload posts to .../chat/completions?api-version=...
-            base = (
-                f"{self._endpoint}/openai/deployments/{self._deployment}"
-                if self._endpoint
-                else "https://api.openai.com/v1"
-            )
+            base = f"{self._endpoint}/openai/deployments/{self._deployment}"
             self._http = httpx.AsyncClient(
                 base_url=base,
                 headers={

@@ -79,7 +79,24 @@ def _safe_import(name, globals=None, locals=None, fromlist=(), level=0,
     return _imp(name, globals, locals, fromlist, level)
 
 _b.__import__ = _safe_import
-del _b, _real_import, _safe_import
+
+# The import blocklist is worthless while exec/eval/compile stay reachable:
+# a snippet needs ZERO imports to run arbitrary logic through them
+# (defense-in-depth for the documented not-a-jail local fallback,
+# audit M-P10).
+def _blocked_builtin(_name):
+    def _deny(*_a, **_kw):
+        raise RuntimeError(
+            f"{{_name}}() is disabled in the code_exec sandbox"
+        )
+    return _deny
+
+_b.exec = _blocked_builtin("exec")
+_b.eval = _blocked_builtin("eval")
+_b.compile = _blocked_builtin("compile")
+_b.breakpoint = _blocked_builtin("breakpoint")
+
+del _b, _real_import, _safe_import, _blocked_builtin
 '''
 
 # Cached docker availability probe
