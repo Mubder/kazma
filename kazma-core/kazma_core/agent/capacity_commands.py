@@ -120,6 +120,7 @@ def apply_capacity_command(
                 max_iterations=parsed.get("max_iterations"),
                 with_yolo=bool(parsed.get("yolo")),
                 remaining_turns=int(parsed.get("remaining_turns") or 1),
+                unified=bool(parsed.get("unified")),
             )
     except Exception:
         logger.exception("[capacity] apply failed thread=%s action=%s", thread_id[:12], action)
@@ -228,13 +229,14 @@ def _parse(text: str) -> dict[str, Any] | None:
             return {"action": "off_both"}
         if sub in _STATUS:
             return {"action": "status"}
-        # Default unrestricted = mission budget + YOLO (the power preset).
+        # Unified /unrestricted: mission + YOLO on ONE sliding clock, no
+        # turn metering — armed until /unrestricted off or idle timeout.
         return {
             "action": "on",
             "mode": "mission",
             "preset": "mission",
             "yolo": True,
-            "remaining_turns": 3,
+            "unified": True,
         }
 
     if cmd in _MISSION_CMDS or cmd.lstrip("/") == "mission":
@@ -309,6 +311,7 @@ def _enable(
     max_iterations: int | None,
     with_yolo: bool,
     remaining_turns: int,
+    unified: bool = False,
 ) -> CapacityCommandResult:
     from kazma_core.agent.long_task import enable_long_task
     from kazma_core.safety.yolo import YoloDisabledError, enable_yolo
@@ -320,7 +323,58 @@ def _enable(
         max_iterations=max_iterations,
         mode=mode,
         remaining_turns=remaining_turns,
+        unified=unified,
     )
+
+    if unified:
+        # ── Unified /unrestricted: ONE clock, no turn metering ──────────
+        yolo_blocked = False
+        yolo_note = ""
+        unified_ttl = st.get("ttl_seconds")
+        if with_yolo:
+            try:
+                enable_yolo(
+                    thread_id, actor=actor,
+                    ttl_seconds=int(unified_ttl) if unified_ttl else 0,
+                )
+                urem = st.get("remaining_seconds")
+                clock = (
+                    f"Expires after **~{int(urem) // 60}m of inactivity** — every "
+                    "message you send refreshes the clock."
+                    if urem is not None
+                    else "**No auto-expiry** — until `/unrestricted off`."
+                )
+                yolo_note = (
+                    f"\n🚀 **YOLO ON** — danger tools run without approval.\n"
+                    f"⏱️ One clock for both: {clock}\n"
+                    "🔢 **No turn limit** — the mode stays armed for this chat.\n"
+                    "Disable both: `/unrestricted off` (YOLO only: `/yolo off`)."
+                )
+            except YoloDisabledError as yde:
+                yolo_blocked = True
+                yolo_note = (
+                    f"\n🛡️ YOLO blocked: {yde}\n"
+                    "Mission budget is still ON. Approvals remain required."
+                )
+            except Exception:
+                logger.exception("[capacity] enable_yolo failed thread=%s", thread_id[:12])
+                yolo_note = "\n⚠️ Could not enable YOLO; mission budget is still ON."
+        head = (
+            "🔥 **UNRESTRICTED ON** — run until done "
+            f"(hard wall **{st.get('mission_hard_rounds', st.get('max_iterations'))}** "
+            f"tool rounds · ~**{st.get('recursion_limit')}** graph steps)."
+        )
+        reply = f"{head}{yolo_note}"
+        flags = _flags(thread_id)
+        return CapacityCommandResult(
+            handled=True,
+            action="on",
+            reply=reply,
+            yolo_blocked=yolo_blocked,
+            extra={"long": st},
+            **flags,
+        )
+
     rem = st.get("remaining_seconds")
     ttl_note = (
         f"Budget auto-expires in ~{int(rem) // 60}m."
@@ -395,7 +449,9 @@ def _help_text() -> str:
         "  `/long` · `/long on` · `/long deep` · `/long research` · `/long 50`\n"
         "  `/long mission` or `/mission on` — run-until-done (hard wall ~500)\n"
         "  `/long yolo` — research budget **and** skip danger-tool approvals\n"
-        "  `/unrestricted` — mission **and** YOLO (full power this chat)\n"
+        "  `/unrestricted` — mission **and** YOLO, **one clock**: armed for the\n"
+        "     chat, no turn limit, expires only after ~60m of *inactivity*\n"
+        "     (every message refreshes it)\n"
         "  `/long off` — budget only · `/yolo off` — HITL only\n"
         "  `/unrestricted off` or `/long yolo off` — both off\n"
         "  `/long status` — show both knobs"

@@ -1422,8 +1422,27 @@ def create_graph_handler(
                 from kazma_core.agent.long_task import consume_long_task_turn
                 from kazma_core.agent.turn_input import build_turn_messages
 
-                # Consume long_task turn-budget at the start of each new message.
-                consume_long_task_turn(thread_id)
+                # Consume long_task turn-budget at the start of each new
+                # message. A unified /unrestricted record that JUST expired
+                # (idle TTL) returns a loud-once notice — surface it to the
+                # user instead of silently degrading to a normal turn.
+                _unrestricted_notice = consume_long_task_turn(thread_id)
+                if _unrestricted_notice:
+                    try:
+                        _n_ctx = await _store.get(thread_id) or msg.context_metadata
+                        _n_out, _n_out_ctx = _prepare_tg_outbound(
+                            msg, _unrestricted_notice, _n_ctx
+                        )
+                        await manager.send(OutboundMessage(
+                            target_id=_build_target_id(msg.platform, _n_ctx),
+                            text=_n_out,
+                            context_metadata=_n_out_ctx,
+                        ))
+                    except Exception:
+                        logger.debug(
+                            "[agent-handler] unrestricted expiry notice send failed",
+                            exc_info=True,
+                        )
 
                 user_text = ""
                 for m in reversed(list(state.get("messages") or [])):

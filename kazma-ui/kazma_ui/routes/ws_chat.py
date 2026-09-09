@@ -1590,8 +1590,25 @@ def create_ws_chat_router(
 
                     # Consume a long_task turn-budget at the START of each new
                     # user message — so a /long from a previous task doesn't
-                    # haunt this thread with max_iterations=100 forever.
-                    consume_long_task_turn(thread_id)
+                    # haunt this thread with max_iterations=100 forever. A
+                    # unified /unrestricted record that JUST expired (idle
+                    # TTL) returns a loud-once notice — tell the user via a
+                    # telemetry frame instead of silently degrading.
+                    _unrestricted_notice = consume_long_task_turn(thread_id)
+                    if _unrestricted_notice:
+                        try:
+                            await websocket.send_json(
+                                {
+                                    "type": "status_update",
+                                    "data": {"content": _unrestricted_notice},
+                                    "thread_id": thread_id,
+                                }
+                            )
+                        except Exception:
+                            logger.debug(
+                                "[WS-Chat] unrestricted notice send failed",
+                                exc_info=True,
+                            )
 
                     # Async facade — offloads blocking git probes off the event loop.
                     env_block = await build_env_context()

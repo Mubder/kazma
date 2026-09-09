@@ -66,6 +66,9 @@ PRESETS: dict[str, int] = {
 }
 
 _DEFAULT_TTL_SECONDS = 30 * 60  # 30 min — a /long from hours ago must NOT haunt the thread
+# Unified /unrestricted: ONE clock for mission+YOLO, sliding (refreshed on
+# every user turn), default 60 min of INACTIVITY. 0/off = until-disabled.
+_UNRESTRICTED_DEFAULT_TTL = 3600
 _MIN_ITER = 5
 _MAX_ITER = 100  # budget-mode soft ceiling
 _MIN_RECURSION = 50
@@ -115,6 +118,21 @@ def _ttl_seconds() -> int:
     return _DEFAULT_TTL_SECONDS
 
 
+def unrestricted_ttl_seconds() -> int:
+    """Single sliding TTL for unified /unrestricted (mission + YOLO).
+
+    Env ``KAZMA_UNRESTRICTED_TTL_SECONDS`` (0/off = until /unrestricted off).
+    The clock refreshes on every user turn — it expires after N minutes of
+    INACTIVITY, never mid-conversation.
+    """
+    raw = (os.environ.get("KAZMA_UNRESTRICTED_TTL_SECONDS") or "").strip()
+    if raw.isdigit():
+        return max(60, int(raw)) if int(raw) > 0 else 0
+    if raw in ("0", "off", "none", "infinite"):
+        return 0
+    return _UNRESTRICTED_DEFAULT_TTL
+
+
 def _env_max_iter_cap() -> int:
     raw = (os.environ.get("KAZMA_LONG_TASK_MAX_ITER") or "").strip()
     if raw.isdigit():
@@ -162,6 +180,7 @@ def enable_long_task(
     max_iterations: int | None = None,
     mode: str = "budget",
     remaining_turns: int | None = None,
+    unified: bool = False,
 ) -> dict[str, Any]:
     """Enable long-task mode for *thread_id*. Returns status dict.
 
@@ -172,6 +191,14 @@ def enable_long_task(
         and LangGraph recursion are set to the mission hard wall (default
         500 rounds / ~2500 steps). Not literally infinite (cost, process
         lifetime, hard wall) but no soft 40-round PARTIAL stop.
+      - ``unified=True`` (mission + YOLO via /unrestricted): ONE clock for
+        both knobs — a single sliding TTL (default 60 min of inactivity,
+        refreshed on every user turn; ``KAZMA_UNRESTRICTED_TTL_SECONDS``,
+        0 = until disabled). No per-turn metering: the turn counter is not
+        enforced, so "unrestricted" cannot run out of covered turns. The
+        paired YOLO record is armed with the same expiry by the caller
+        (capacity_commands) and re-slid together in
+        :func:`consume_long_task_turn`.
     """
     from kazma_core.config_store import get_config_store
 
@@ -217,7 +244,10 @@ def enable_long_task(
         hard = mi
 
     now = time.time()
-    ttl = _ttl_seconds()
+    if unified:
+        ttl = unrestricted_ttl_seconds()
+    else:
+        ttl = _ttl_seconds()
     if remaining_turns is None:
         # Mission is a multi-follow-up job; budget /long is one task turn.
         turns = 3 if mode_key == "mission" else 1
@@ -226,6 +256,10 @@ def enable_long_task(
             turns = max(1, min(20, int(remaining_turns)))
         except (TypeError, ValueError):
             turns = 1
+    if unified:
+        # Turn metering is OFF under /unrestricted — the sliding TTL is the
+        # only clock. Large sentinel so legacy decrement paths are no-ops.
+        turns = 100_000
     payload = {
         "enabled": True,
         "mode": mode_key,
@@ -237,6 +271,7 @@ def enable_long_task(
         "actor": actor,
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
+        "unified": bool(unified),
         # Slots for upcoming user turns. consume() decrements at the START of
         # a real prompt; expire when a new turn finds remaining <= 0. Do NOT
         # expire in long_task_status() on 0 — that used to kill the budget
@@ -268,30 +303,76 @@ def disable_long_task(thread_id: str, *, actor: str = "unknown") -> None:
     logger.info("[long_task] DISABLED thread=%s actor=%s", thread_id, actor)
 
 
-def consume_long_task_turn(thread_id: str | None) -> None:
-    """Decrement the long_task turn counter at the START of a new user turn.
+def consume_long_task_turn(thread_id: str | None) -> str | None:
+    """Account one real user turn against the long_task budget.
 
-    This is the structural fix for stale-budget runaway: a /long applies to
-    the turn it was set for, NOT every subsequent conversation. After the turn
-    resolves, the NEXT user message decrements remaining_turns; when it hits 0,
-    the long_task auto-expires and max_iterations resets to baseline.
+    Returns a user-facing notice string when a **unified /unrestricted**
+    record JUST expired (loud-once); None otherwise.
+
+    Non-unified (budget/mission): decrements ``remaining_turns`` at the START
+    of a new user turn — the structural fix for stale-budget runaway. After
+    the turn resolves, the NEXT user message decrements remaining_turns; when
+    it hits 0, the long_task auto-expires and max_iterations resets to
+    baseline.
+
+    Unified (/unrestricted): NO turn metering — instead the single sliding
+    TTL is refreshed (both this record and the paired YOLO grant move to
+    ``now + ttl``), so an active chat never hits the wall. Expiry fires only
+    after N minutes of inactivity, and the discovering turn returns the
+    notice so the transport can tell the user once.
 
     Call this from EVERY entry point (ws_chat, sse_chat, gateway) before
-    initial_supervisor_state resolves the budget.
+    initial_supervisor_state resolves the budget — all call sites are past
+    the slash intercepts, so parser-eaten command replies never consume.
     """
     if not thread_id:
-        return
+        return None
     try:
         from kazma_core.config_store import get_config_store
 
         cs = get_config_store()
         raw = cs.get(f"long_task.{thread_id}")
         if not raw or not isinstance(raw, dict) or not raw.get("enabled"):
-            return
+            return None
         # Paused after a Partial — no turns are eaten while idle; a later
         # /long re-enable or TTL expiry resolves the record.
         if raw.get("paused"):
-            return
+            return None
+
+        if raw.get("unified"):
+            expires = raw.get("expires_at")
+            if expires is not None:
+                try:
+                    if time.time() > float(expires):
+                        cs.delete(f"long_task.{thread_id}")
+                        logger.info(
+                            "[long_task] UNRESTRICTED EXPIRED thread=%s (inactivity TTL)",
+                            thread_id[:12],
+                        )
+                        return (
+                            "⚠️ **Unrestricted expired** (idle timeout) — this turn ran "
+                            "as a normal one. Send `/unrestricted` to re-arm full power."
+                        )
+                except (TypeError, ValueError):
+                    pass
+            # Slide the single clock: both records to now + ttl.
+            ttl = int(raw.get("ttl_seconds") or unrestricted_ttl_seconds())
+            if ttl > 0:
+                new_expiry = time.time() + ttl
+                raw["expires_at"] = new_expiry
+                cs.set(f"long_task.{thread_id}", raw, category="agent")
+                try:
+                    from kazma_core.safety.yolo import slide_yolo_expiry
+
+                    slide_yolo_expiry(thread_id, new_expiry)
+                except Exception:
+                    logger.debug("[long_task] yolo slide skipped", exc_info=True)
+                logger.debug(
+                    "[long_task] unrestricted clock refreshed thread=%s (+%ss)",
+                    thread_id[:12], ttl,
+                )
+            return None
+
         remaining = int(raw.get("remaining_turns", 1))
         # Enabling /long is intercepted (no consume). The first real prompt
         # after enable must still receive the raised budget. Expire only when
@@ -302,15 +383,17 @@ def consume_long_task_turn(thread_id: str | None) -> None:
                 "[long_task] EXPIRED thread=%s (turn-count exhausted at consume)",
                 thread_id[:12],
             )
-            return
+            return None
         raw["remaining_turns"] = remaining - 1
         cs.set(f"long_task.{thread_id}", raw, category="agent")
         logger.info(
             "[long_task] turn consumed thread=%s remaining_turns=%d",
             thread_id[:12], remaining - 1,
         )
+        return None
     except Exception:
         logger.debug("[long_task] consume_long_task_turn failed", exc_info=True)
+        return None
 
 
 def is_long_task_active(thread_id: str | None) -> bool:
@@ -367,7 +450,8 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
     # Turn-count is owned by consume_long_task_turn() (expire at the *next*
     # prompt when remaining already hit 0). Status must stay active for the
     # turn that just consumed the last slot, or /long never applies.
-    remaining_turns = int(raw.get("remaining_turns", 1))
+    unified = bool(raw.get("unified"))
+    remaining_turns = None if unified else int(raw.get("remaining_turns", 1))
 
     remaining = None
     if expires is not None:
@@ -411,6 +495,7 @@ def long_task_status(thread_id: str) -> dict[str, Any]:
         "thread_id": thread_id,
         "mode": mode,
         "preset": raw.get("preset", "research"),
+        "unified": unified,
         "max_iterations": mi,
         "recursion_limit": recursion,
         "mission_hard_rounds": hard,
@@ -494,6 +579,22 @@ def format_status_message(thread_id: str) -> str:
         )
     rem = st.get("remaining_seconds")
     ttl_note = f"Expires in ~{rem // 60}m." if rem is not None else "No auto-expiry."
+    if st.get("unified"):
+        hard = st.get("mission_hard_rounds", mission_hard_rounds())
+        return (
+            "🔥 **UNRESTRICTED ON** — mission + YOLO, one clock.\n"
+            f"Tool rounds: **{st['max_iterations']}** · "
+            f"graph steps ~**{st['recursion_limit']}** · "
+            f"hard wall: **{hard}**.\n"
+            "**No turn limit** — the mode stays armed for this chat.\n"
+            + (
+                f"Expires after **~{int(rem) // 60}m of inactivity** "
+                "(every message refreshes the clock)."
+                if rem is not None
+                else "No auto-expiry — until `/unrestricted off`."
+            )
+            + "\nDanger tools run without approval. Disable both: `/unrestricted off`"
+        )
     if st.get("mode") == "mission":
         hard = st.get("mission_hard_rounds", mission_hard_rounds())
         return (
