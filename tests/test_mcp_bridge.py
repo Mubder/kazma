@@ -99,6 +99,52 @@ class TestAsyncMCPManager:
         await manager.shutdown()  # should not raise
 
     @pytest.mark.asyncio
+    async def test_notify_stdio_writes_bounded(self):
+        """The stdio notification path writes AND terminates (regression).
+
+        The MCP handshake sends ``notifications/initialized`` through
+        ``_notify`` right after the initialize response — a NameError in
+        this method (bare ``timeout`` reference, fixed 2026-09-09) killed
+        EVERY stdio server's handshake at boot while the whole test suite
+        stayed green, because nothing exercised notifications.
+        """
+
+        class _FakeStdin:
+            def __init__(self) -> None:
+                self.written = b""
+
+            def write(self, data: bytes) -> None:
+                self.written += data
+
+            async def drain(self) -> None:
+                return None
+
+        class _FakeProc:
+            def __init__(self) -> None:
+                self.stdin = _FakeStdin()
+
+        handle = MCPServerHandle(name="probe", transport="stdio")
+        handle.timeout = 2.0
+        handle.process = _FakeProc()
+
+        manager = AsyncMCPManager()
+        await manager._notify(handle, "notifications/initialized", {})
+
+        payload = json.loads(handle.process.stdin.written.decode())
+        assert payload["method"] == "notifications/initialized"
+        assert payload["jsonrpc"] == "2.0"
+
+        # Hung-server side: a stdin that never drains must surface the
+        # bounded-write error, not park forever.
+        class _StuckStdin(_FakeStdin):
+            async def drain(self) -> None:
+                await asyncio.sleep(30)
+
+        handle.process.stdin = _StuckStdin()
+        with pytest.raises(MCPBridgeError):
+            await manager._notify(handle, "notifications/cancelled", {})
+
+    @pytest.mark.asyncio
     async def test_execute_on_disconnected_server(self):
         manager = AsyncMCPManager()
         result = await manager.execute_mcp_tool("nonexistent", "tool", {})
