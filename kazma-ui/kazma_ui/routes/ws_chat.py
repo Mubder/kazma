@@ -701,7 +701,14 @@ def create_ws_chat_router(
             try:
                 from kazma_core.agent.plan_fence import pick_user_facing_text
 
-                chosen = pick_user_facing_text(ckpt_text, text)
+                # Terminal authority (2026-09-09 duplication incident): a
+                # completed turn's checkpoint synthesis wins over the longer
+                # streamed narration; a paused graph keeps the narration.
+                _ws_next = getattr(snapshot, "next", None) or () if snapshot is not None else ()
+                if ckpt_text and not _ws_next:
+                    chosen = pick_user_facing_text(ckpt_text)
+                else:
+                    chosen = pick_user_facing_text(ckpt_text, text)
                 if chosen:
                     text = chosen
                 elif not text:

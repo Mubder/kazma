@@ -221,18 +221,33 @@ def reset_reply_turns() -> None:
 # ══════════════════════════════════════════════════════════════════════
 
 
-def resolve_reply_text(checkpoint_text: str = "", streamed_text: str = "") -> str:
+def resolve_reply_text(
+    checkpoint_text: str = "",
+    streamed_text: str = "",
+    *,
+    terminal: bool = False,
+) -> str:
     """Best user-facing reply from the checkpoint and the streamed concat.
 
     Single implementation of a choice both transports used to make their own
     way. Two rules, each earned from an incident:
 
-    * the plan fence is un-glued via ``pick_user_facing_text`` so a trailing
-      ```` ```plan ```` closer cannot swallow the answer;
-    * a LONGER streamed accumulation wins over the checkpoint, because a
-      cancelled/stopped turn leaves the checkpoint holding only its last
-      interim segment (2026-08-27: a 96-second sweep persisted as a 158-char
-      fragment while 2,272 streamed chars were discarded).
+    * **Terminal authority** (``terminal=True``, the turn COMPLETED and the
+      checkpoint holds the respond-node synthesis): the checkpoint text IS
+      the answer — it wins regardless of length. The streamed accumulation
+      (multi-hop narration, progress notes) is superseded: the caller routes
+      it into ``reasoning`` parts via ``parts_from_stream`` so nothing is
+      lost, but it can no longer out-length the final. Without this rule a
+      6,455-char progress narration replaced a 2,813-char final synthesis
+      and the user read the answer twice (live 2026-09-09).
+    * **Cancelled-turn recovery** (``terminal=False``, the 2026-08-27 rule):
+      no completed synthesis exists, so a LONGER streamed accumulation wins
+      over the checkpoint, because a cancelled turn leaves the checkpoint
+      holding only its last interim segment (the 96-second sweep persisted
+      as a 158-char fragment while 2,272 streamed chars were discarded).
+
+    The plan fence is un-glued via ``pick_user_facing_text`` in both paths
+    so a trailing ```` ```plan ```` closer cannot swallow the answer.
     """
     ckpt = str(checkpoint_text or "").strip()
     streamed = str(streamed_text or "").strip()
@@ -240,11 +255,17 @@ def resolve_reply_text(checkpoint_text: str = "", streamed_text: str = "") -> st
     try:
         from kazma_core.agent.plan_fence import pick_user_facing_text
 
+        if terminal and ckpt:
+            # Final synthesis is authoritative; do not even offer the
+            # streamed concat as a candidate (prose-length scoring would
+            # let narration beat the answer again).
+            chosen = pick_user_facing_text(ckpt) or ckpt
+            return chosen.strip()
         chosen = pick_user_facing_text(ckpt, streamed) or ""
     except Exception:
         logger.debug("[reply_sink] plan_fence pick failed", exc_info=True)
         chosen = ckpt or streamed
-    if streamed and len(streamed) > len(chosen.strip()):
+    if not terminal and streamed and len(streamed) > len(chosen.strip()):
         chosen = streamed
     return chosen.strip()
 
