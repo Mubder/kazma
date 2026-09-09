@@ -16,6 +16,7 @@ __all__ = [
     "disable_yolo",
     "enable_yolo",
     "is_yolo_active",
+    "slide_yolo_expiry",
     "try_enable_yolo",
     "yolo_allowed",
     "yolo_block_reason",
@@ -91,8 +92,13 @@ def _ttl_seconds() -> int:
 
 def enable_yolo(
     thread_id: str, *, actor: str = "unknown", force: bool = False,
+    ttl_seconds: int | None = None,
 ) -> dict[str, Any]:
     """Enable YOLO for *thread_id*. Returns status dict for the user message.
+
+    ``ttl_seconds`` overrides the env default — used by unified
+    ``/unrestricted`` so the YOLO grant and the mission budget share ONE
+    expiry clock (and are re-slid together on every user turn).
 
     Raises:
         YoloDisabledError: When ``/yolo`` is blocked by policy, unless
@@ -112,22 +118,49 @@ def enable_yolo(
 
     cs = get_config_store()
     now = time.time()
-    ttl = _ttl_seconds()
+    if ttl_seconds is None:
+        ttl = _ttl_seconds()
+    else:
+        ttl = max(0, int(ttl_seconds))
     payload = {
         "enabled": True,
         "since": now,
         "actor": actor,
         "ttl_seconds": ttl,
         "expires_at": (now + ttl) if ttl > 0 else None,
+        "unified": ttl_seconds is not None,
     }
     cs.set(f"yolo.{thread_id}", payload, category="safety")
     logger.warning(
-        "[SECURITY] YOLO ENABLED thread=%s actor=%s ttl=%ss",
+        "[SECURITY] YOLO ENABLED thread=%s actor=%s ttl=%ss%s",
         thread_id,
         actor,
         ttl or "none",
+        " (unified clock)" if ttl_seconds is not None else "",
     )
     return yolo_status(thread_id)
+
+
+def slide_yolo_expiry(thread_id: str, expires_at: float) -> None:
+    """Move a unified YOLO grant's expiry (quiet refresh — no log spam).
+
+    Called from long_task.consume_long_task_turn so the YOLO window and the
+    mission budget always expire as ONE clock under /unrestricted. No-op for
+    missing/non-unified grants (a standalone /yolo keeps its own TTL).
+    """
+    if not thread_id:
+        return
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        raw = cs.get(f"yolo.{thread_id}")
+        if not isinstance(raw, dict) or not raw.get("enabled") or not raw.get("unified"):
+            return
+        raw["expires_at"] = float(expires_at)
+        cs.set(f"yolo.{thread_id}", raw, category="safety")
+    except Exception:
+        logger.debug("[yolo] slide_yolo_expiry failed", exc_info=True)
 
 
 def disable_yolo(thread_id: str, *, actor: str = "unknown") -> None:

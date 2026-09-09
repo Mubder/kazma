@@ -728,8 +728,21 @@ def create_sse_chat_router(
         from kazma_core.agent.long_task import consume_long_task_turn
         from kazma_core.agent.turn_input import build_turn_messages
 
-        # Consume a long_task turn-budget at the START of each new user message.
-        consume_long_task_turn(thread_id)
+        # Consume a long_task turn-budget at the START of each new user
+        # message. A unified /unrestricted record that JUST expired (idle
+        # TTL) returns a loud-once notice — inject it as a system note so
+        # the reply tells the user instead of silently degrading. (This
+        # function is NOT a generator here — it returns StreamingResponse —
+        # so the notice rides the model's reply, not an SSE frame.)
+        _unrestricted_notice = consume_long_task_turn(thread_id)
+        if _unrestricted_notice:
+            system_msgs.append({
+                "role": "system",
+                "content": (
+                    _unrestricted_notice
+                    + " Begin your reply with this notice verbatim."
+                ),
+            })
 
         current_graph = _get_graph()
         # If user sent a new message while HITL is waiting, auto-deny so
