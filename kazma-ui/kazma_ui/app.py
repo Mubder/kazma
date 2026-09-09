@@ -15,6 +15,7 @@ os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 import asyncio
 import logging
+import time
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 from contextlib import asynccontextmanager
@@ -614,6 +615,14 @@ class KazmaAppBuilder:
             return latest
 
         def _js_version() -> int:
+            # Cached scan (10s TTL): rglob over the whole JS tree — including
+            # a 3.3MB vendored bundle — on every HTML render was a hidden
+            # per-request filesystem walk and a cheap DoS multiplier. A
+            # 10-second staleness window is far below any deploy cadence.
+            now = time.monotonic()
+            cached = getattr(_js_version, "_cached", None)
+            if cached is not None and (now - cached[0]) < 10.0:
+                return cached[1]
             latest = 1
             try:
                 for path in _js_root.rglob("*.js"):
@@ -623,6 +632,7 @@ class KazmaAppBuilder:
                         pass
             except Exception:
                 pass
+            _js_version._cached = (now, latest)
             return latest
 
         self.templates.env.globals["css_version"] = _css_version
@@ -754,8 +764,48 @@ class KazmaAppBuilder:
                             len(recovery["requeued"]),
                             len(recovery["failed"]),
                         )
+                    # Consume what the recovery produced (audit H-9): the
+                    # requeued PENDING rows used to have no reader at all.
+                    self.swarm_manager.engine.redispatch_recovered_tasks()
             except Exception as e:
                 logger.warning("[Swarm] Orphan task recovery failed: %s", e)
+
+            # Periodic maintenance watchdog (audit H-9): stale-task reaping
+            # and idle-worker reaping used to run ONLY inside dispatch() —
+            # with no traffic, a stuck task held its admission slot forever.
+            try:
+                self.swarm_manager.engine.start_maintenance_loop()
+            except Exception as e:
+                logger.warning("[Swarm] Maintenance loop start failed: %s", e)
+
+            # Checkpoint retention sweep (audit M-G1): checkpoints.db grows a
+            # full-state row per superstep with no deleter — bound it daily.
+            try:
+                from kazma_core.checkpoint_retention import (
+                    start_checkpoint_retention_loop,
+                )
+
+                start_checkpoint_retention_loop()
+            except Exception as e:
+                logger.warning("[app] Checkpoint retention loop failed to start: %s", e)
+
+            # Liveness heartbeat (audit M-P6): `kazma migrate import` refuses
+            # to swap live DBs when this key is fresh — a swap under a live
+            # process discards uncheckpointed WAL frames / fails on Windows.
+            async def _heartbeat_loop() -> None:
+                while True:
+                    try:
+                        from kazma_core.config_store import get_config_store
+                        import time as _time
+
+                        get_config_store().set(
+                            "system.heartbeat.epoch", _time.time(), category="system"
+                        )
+                    except Exception:
+                        pass
+                    await asyncio.sleep(60)
+
+            spawn_background(_heartbeat_loop(), name="liveness-heartbeat")
 
         except Exception as e:
             logger.warning("[Swarm] SwarmManager not available: %s", e)
@@ -2069,6 +2119,18 @@ class KazmaAppBuilder:
                 except Exception:
                     engine = None
             if engine is not None:
+                try:
+                    engine.stop_maintenance_loop()
+                except Exception:
+                    pass
+                try:
+                    from kazma_core.checkpoint_retention import (
+                        stop_checkpoint_retention_loop,
+                    )
+
+                    stop_checkpoint_retention_loop()
+                except Exception:
+                    pass
                 handles = getattr(engine, "_task_handles", None) or {}
                 for _tid, handle in list(handles.items()):
                     if handle is not None and hasattr(handle, "done") and not handle.done():

@@ -232,6 +232,23 @@ def _eval_js_sync(expression: str) -> Any:
 # ── tool surface (unchanged signatures) ────────────────────────────────────
 
 
+def _fence_page_text(text: str, source: str) -> str:
+    """Wrap browser-extracted page text in the untrusted prompt fence.
+
+    Page content is the classic prompt-injection vector; every other web
+    path (read_url, web_search, MCP resources) fences — the browser tools
+    used to be the raw exception (audit M-P8). Best-effort: if the fence
+    helper is unavailable the text still returns (bounded by MAX_TEXT_CHARS).
+    """
+    try:
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        return fence_untrusted(text, source=source)
+    except Exception:
+        logger.debug("prompt fence unavailable for browser text", exc_info=True)
+        return text
+
+
 async def browser_navigate(url: str) -> str:
     """Open *url* in the headless browser and return title + visible text.
 
@@ -257,7 +274,10 @@ async def browser_navigate(url: str) -> str:
     except Exception as exc:  # noqa: BLE001
         await _run_sync(_close_sync)
         return f"Error: navigation failed — {type(exc).__name__}: {exc}"
-    return f"Navigated to {url}\nTitle: {title}\n\n{text[:MAX_TEXT_CHARS]}"
+    return (
+        f"Navigated to {url}\nTitle: {title}\n\n"
+        + _fence_page_text(text[:MAX_TEXT_CHARS], source=f"browser:{url}")
+    )
 
 
 async def browser_click(selector: str) -> str:
@@ -271,7 +291,9 @@ async def browser_click(selector: str) -> str:
     except Exception as exc:  # noqa: BLE001
         await _run_sync(_close_sync)
         return f"Error: click failed — {type(exc).__name__}: {exc}"
-    return f"Clicked '{selector}'.\n\n{text[:MAX_TEXT_CHARS]}"
+    return f"Clicked '{selector}'.\n\n" + _fence_page_text(
+        text[:MAX_TEXT_CHARS], source="browser:click"
+    )
 
 
 async def browser_extract_text(selector: str = "") -> str:
@@ -283,7 +305,7 @@ async def browser_extract_text(selector: str = "") -> str:
     except Exception as exc:  # noqa: BLE001
         await _run_sync(_close_sync)
         return f"Error: extraction failed — {type(exc).__name__}: {exc}"
-    return text[:MAX_TEXT_CHARS]
+    return _fence_page_text(text[:MAX_TEXT_CHARS], source="browser:extract")
 
 
 async def browser_screenshot(full_page: bool = True) -> str:

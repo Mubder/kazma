@@ -30,7 +30,11 @@ from kazma_core.llm_stream import StreamDelta
 
 logger = logging.getLogger(__name__)
 
-_SERVICE = "bedrock"
+# The Converse/ConverseStream APIs live on the bedrock-runtime (data-plane)
+# client. The "bedrock" client is the control plane (ListFoundationModels,
+# etc.) and has no converse method — using it made every chat call raise
+# AttributeError (audit finding H-1).
+_SERVICE = "bedrock-runtime"
 
 # Approx cost per 1M tokens (USD) for common Bedrock models. Input/Output.
 _MODEL_COSTS: dict[str, tuple[float, float]] = {

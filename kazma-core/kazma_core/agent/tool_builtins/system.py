@@ -387,35 +387,45 @@ def register_system_tools(registry: Any) -> None:
                     )
                 args = [resolved, *args[1:]]
 
-            # Reject absolute paths outside workspace (audit H4)
+            # Reject absolute paths outside workspace (audit H4).
+            # Flag-prefixed args carry paths too (``--file=../../x``,
+            # ``-oC:\out``) — check the value after ``=`` and short-flag
+            # payloads, not just bare operands (audit L-14).
             for a in args[1:]:
-                if not a or a.startswith("-"):
+                if not a:
                     continue
-                # Rough path detection
-                looks_path = (
-                    a.startswith("/")
-                    or a.startswith("\\")
-                    or (len(a) > 2 and a[1] == ":" and a[0].isalpha())
-                    or ".." in a.replace("\\", "/")
-                )
-                if not looks_path:
-                    continue
-                try:
-                    import os as _os
-
-                    cand = _os.path.realpath(
-                        a if _os.path.isabs(a) else _os.path.join(cwd_s, a)
+                candidates_a = [a]
+                if a.startswith("-") and "=" in a:
+                    candidates_a.append(a.split("=", 1)[1])
+                for check in candidates_a:
+                    if not check or check.startswith("-"):
+                        continue
+                    # Rough path detection
+                    looks_path = (
+                        check.startswith("/")
+                        or check.startswith("\\")
+                        or (len(check) > 2 and check[1] == ":" and check[0].isalpha())
+                        or ".." in check.replace("\\", "/")
                     )
-                    root_n = _os.path.realpath(cwd_s)
-                    if _os.name == "nt":
-                        cand, root_n = cand.lower(), root_n.lower()
-                    if cand != root_n and not cand.startswith(root_n + _os.sep):
-                        return (
-                            f"Error: path '{a}' is outside the workspace "
-                            f"({cwd_s}). Absolute paths must stay inside the workspace."
+                    if not looks_path:
+                        continue
+                    try:
+                        import os as _os
+
+                        cand = _os.path.realpath(
+                            check if _os.path.isabs(check) else _os.path.join(cwd_s, check)
                         )
-                except Exception:
-                    pass
+                        root_n = _os.path.realpath(cwd_s)
+                        if _os.name == "nt":
+                            cand, root_n = cand.lower(), root_n.lower()
+                        if cand != root_n and not cand.startswith(root_n + _os.sep):
+                            return (
+                                f"Error: path '{check}' (argument '{a}') is outside "
+                                f"the workspace ({cwd_s}). Absolute paths must stay "
+                                "inside the workspace."
+                            )
+                    except Exception:
+                        pass
 
             # Per-binary argument policy (audit F-03).
             #

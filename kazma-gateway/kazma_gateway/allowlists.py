@@ -4,20 +4,33 @@ Adapters expose ``set_allowed_users`` (and Slack team/channel setters).
 Settings writes ``connectors.<platform>.allowed_users`` (and Slack
 ``allowed_teams`` / ``allowed_channels``); this module pushes those values
 onto the running adapter without requiring a process restart.
+
+Also home of :func:`is_gateway_admin` — the admin gate for admin-grade
+chat commands and alert-card buttons (audit H-8): "everyone may chat"
+(allow_all) must never imply "everyone may install packages or change
+global config".
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "GATEWAY_ADMINS_ENV",
     "apply_adapter_allowlists",
     "apply_gateway_allowlists",
+    "is_gateway_admin",
     "split_ids",
 ]
+
+#: Comma-separated admin identities (platform user ids or full ``platform:id``
+#: sender ids). When set, it is the AUTHORITATIVE admin set — the per-platform
+#: user allowlist no longer grants admin on its own.
+GATEWAY_ADMINS_ENV = "KAZMA_GATEWAY_ADMINS"
 
 
 def split_ids(raw: Any) -> list[str]:
@@ -27,6 +40,59 @@ def split_ids(raw: Any) -> list[str]:
     if isinstance(raw, (list, tuple, set)):
         return [str(x).strip() for x in raw if str(x).strip()]
     return [s.strip() for s in str(raw).split(",") if s.strip()]
+
+
+def _candidate_tokens(sender_id: str) -> set[str]:
+    """Both the full sender id and its platform-local tail."""
+    tokens = {sender_id}
+    if ":" in sender_id:
+        tail = sender_id.split(":", 1)[1]
+        if tail:
+            tokens.add(tail)
+    return tokens
+
+
+def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
+    """Whether this platform identity may use admin-grade gateway actions.
+
+    Sources, in order:
+
+    1. ``KAZMA_GATEWAY_ADMINS`` env (comma list of user ids or
+       ``platform:id`` sender ids). When set it is authoritative.
+    2. Membership in the platform's configured ``allowed_users`` list —
+       the operator explicitly curated those users.
+    3. Otherwise: NOT admin. In the default allow_all posture (empty
+       allowlist) every workspace member may chat, and none of them may
+       install packages, flip global config, or switch the global model.
+    """
+    sender_id = (sender_id or "").strip()
+    if not sender_id:
+        return False
+    candidates = _candidate_tokens(sender_id)
+
+    env_raw = (os.environ.get(GATEWAY_ADMINS_ENV) or "").strip()
+    if env_raw:
+        env_tokens: set[str] = set()
+        for part in split_ids(env_raw):
+            env_tokens |= _candidate_tokens(part)
+        return bool(candidates & env_tokens)
+
+    plat = (platform or "").strip().lower()
+    if not plat and ":" in sender_id:
+        plat = sender_id.split(":", 1)[0].strip().lower()
+    if plat:
+        try:
+            from kazma_core.config_store import get_config_store
+
+            raw = get_config_store().get(f"connectors.{plat}.allowed_users", "")
+        except Exception:
+            logger.debug("[allowlists] admin allowlist read failed", exc_info=True)
+            return False
+        allow_tokens: set[str] = set()
+        for part in split_ids(raw):
+            allow_tokens |= _candidate_tokens(part)
+        return bool(candidates & allow_tokens)
+    return False
 
 
 def _cs_get(config_store: Any, key: str, default: str = "") -> Any:

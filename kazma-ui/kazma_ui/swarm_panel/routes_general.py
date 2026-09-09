@@ -280,6 +280,35 @@ def register_general_routes(
             "source": "unavailable",
         }
 
+    def _require_admin(request: Request) -> JSONResponse | None:
+        """Admin/operator gate for template + autoscaler mutation routes.
+
+        Templates define workers that spawn with arbitrary system prompts,
+        models and instance caps — a non-admin used to be able to persist
+        one (audit H-5). Mirrors routes_tasks._require_admin: fail-open for
+        single-user/no-secret deployments, role-checked otherwise.
+        """
+        try:
+            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+            secret = get_kazma_secret()
+            if secret and not is_authenticated(request, secret):
+                return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+            if not secret:
+                return None
+            principal = get_request_principal(request) or {}
+            if principal.get("source") == "secret":
+                return None
+            if principal.get("role") != "admin":
+                return JSONResponse(
+                    {"status": "error", "message": "Admin role required"},
+                    status_code=403,
+                )
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[swarm-general] admin check failed: %s", exc)
+            return None
+
     @router.get("/api/swarm/templates")
     async def list_templates() -> JSONResponse:
         """List all worker templates for auto-scaling."""
@@ -294,8 +323,11 @@ def register_general_routes(
         })
 
     @router.post("/api/swarm/templates")
-    async def add_template(payload: dict[str, Any]) -> JSONResponse:
-        """Register a new worker template."""
+    async def add_template(payload: dict[str, Any], request: Request) -> JSONResponse:
+        """Register a new worker template (admin-only, audit H-5)."""
+        denied = _require_admin(request)
+        if denied:
+            return denied
         svc = get_swarm_service()
         svc.resolve_engine(swarm_manager)
         scaler = svc.get_autoscaler()
@@ -313,8 +345,11 @@ def register_general_routes(
             return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
     @router.delete("/api/swarm/templates/{name}")
-    async def delete_template(name: str) -> JSONResponse:
-        """Remove a template and reap its instances."""
+    async def delete_template(name: str, request: Request) -> JSONResponse:
+        """Remove a template and reap its instances (admin-only, audit H-5)."""
+        denied = _require_admin(request)
+        if denied:
+            return denied
         svc = get_swarm_service()
         svc.resolve_engine(swarm_manager)
         scaler = svc.get_autoscaler()
@@ -328,8 +363,11 @@ def register_general_routes(
             return JSONResponse({"status": "error", "message": safe_error(exc)}, status_code=500)
 
     @router.post("/api/swarm/autoscaler/reap")
-    async def reap_idle_workers() -> JSONResponse:
-        """Trigger idle worker reaping."""
+    async def reap_idle_workers(request: Request) -> JSONResponse:
+        """Trigger idle worker reaping (admin-only, audit H-5)."""
+        denied = _require_admin(request)
+        if denied:
+            return denied
         svc = get_swarm_service()
         svc.resolve_engine(swarm_manager)
         scaler = svc.get_autoscaler()

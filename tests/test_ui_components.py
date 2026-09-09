@@ -125,9 +125,16 @@ class TestBaseTemplate:
         assert "theme()" in base_html
 
     def test_brand_webfonts_are_ibm_plex(self, base_html):
-        """UI, docs, and generated documents share IBM Plex; Inter must not load."""
-        assert "IBM+Plex+Sans" in base_html
-        assert "IBM+Plex+Sans+Arabic" in base_html
+        """UI, docs, and generated documents share IBM Plex; Inter must not load.
+
+        Fonts are served LOCALLY (static/fonts, OFL) — the old Google Fonts
+        CDN link was an external dependency + IP leak for a local-first app
+        (audit L-10). Assert the local stylesheet and zero external font hosts.
+        """
+        assert "/static/css/fonts.css" in base_html
+        assert "IBM Plex Sans Arabic" in base_html
+        assert "fonts.googleapis.com" not in base_html
+        assert "fonts.gstatic.com" not in base_html
         assert "family=Inter" not in base_html
 
     def test_brand_mark_is_favicon_and_apple_touch(self, base_html):

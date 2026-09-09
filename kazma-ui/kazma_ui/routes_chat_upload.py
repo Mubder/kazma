@@ -34,6 +34,42 @@ def _classify(mime: str) -> str:
     return "file"
 
 
+def _sniff_mime(data: bytes, declared: str) -> str:
+    """Lightweight magic-byte check for common upload types (audit L-13).
+
+    The client-declared Content-Type used to be stored verbatim; a renamed
+    executable or a mislabelled file kept its false label downstream. Only
+    OVERRIDES on a confident signature mismatch — unknown bytes keep the
+    declared type (no false positives for rare formats).
+    """
+    sig = data[:16]
+    checks = (
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"\xff\xd8\xff", "image/jpeg"),
+        (b"GIF87a", "image/gif"),
+        (b"GIF89a", "image/gif"),
+        (b"RIFF", None),  # handled below (WEBP/WAV/AVI by extension bytes)
+        (b"%PDF-", "application/pdf"),
+        (b"PK\x03\x04", None),  # zip-family (docx/xlsx/epub…) — keep declared
+        (b"\x1a\x45\xdf\xa3", "video/webm"),  # often matroska; webm common
+        (b"ID3", "audio/mpeg"),
+        (b"OggS", "audio/ogg"),
+        (b"fLaC", "audio/flac"),
+        (b"\x00\x00\x00\x18ftyp", "video/mp4"),
+        (b"\x00\x00\x00\x20ftyp", "video/mp4"),
+    )
+    for prefix, mime in checks:
+        if sig.startswith(prefix):
+            if prefix == b"RIFF" and data[8:12] == b"WEBP":
+                return "image/webp"
+            return mime or declared
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return "image/tiff"
+    if sig.startswith(b"BM") and declared.startswith("image/"):
+        return "image/bmp"
+    return declared
+
+
 @router.post("/upload", dependencies=[Depends(rate_limit("chat_upload", 20))])
 async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
     """Persist an uploaded file and return an attachment descriptor.
@@ -52,7 +88,8 @@ async def upload_attachment(file: UploadFile = File(...)) -> dict[str, Any]:
             detail=f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)",
         )
 
-    mime = (file.content_type or "application/octet-stream").lower()
+    declared = (file.content_type or "application/octet-stream").lower()
+    mime = _sniff_mime(data, declared)
     kind = _classify(mime)
     original = file.filename or "upload"
     attach_id = store_uploaded_attachment(data, original)

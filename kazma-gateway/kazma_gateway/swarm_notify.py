@@ -401,6 +401,7 @@ async def maybe_notify_dispatch(
     """
     if not (os.environ.get("SWARM_BOT_TOKEN") or "").strip():
         return False
+    notifier = None
     try:
         notifier = SwarmNotifier.from_env()
         body = (
@@ -413,3 +414,12 @@ async def maybe_notify_dispatch(
     except Exception:
         logger.debug("[SwarmNotify] dispatch notify skipped", exc_info=True)
         return False
+    finally:
+        # Close the client it created (audit L-8): from_env() constructs a
+        # new httpx.AsyncClient per call, and leaving it to GC leaked a
+        # socket per notification whenever SWARM_BOT_TOKEN is set.
+        if notifier is not None:
+            try:
+                await notifier.close()
+            except Exception:
+                pass

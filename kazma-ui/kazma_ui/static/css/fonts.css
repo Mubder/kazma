@@ -1,0 +1,30 @@
+/* Local web fonts — IBM Plex Sans Arabic (OFL), vendored so the UI has
+   ZERO external font requests (the old Google Fonts CDN link leaked
+   visitor IPs to a third party and was render-blocking for a local-first
+   app). Latin text falls back to the system stack via --font-sans; the
+   Arabic face is the same one generated documents and the docs use.
+   License: OFL-IBM-Plex.txt alongside the TTFs in /static/fonts/. */
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSansArabic-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSansArabic-Bold.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'IBM Plex Sans Arabic';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/static/fonts/IBMPlexSansArabic-Bold.ttf') format('truetype');
+}

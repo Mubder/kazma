@@ -114,6 +114,25 @@ def build_path_map(
 # ── Text substitution ────────────────────────────────────────────────────
 
 
+def _boundary_aware_replace(text: str, source: str, target: str) -> tuple[str, int]:
+    """Replace *source* only at path boundaries (audit L-17).
+
+    A bare substring replace turned an unregistered sibling like
+    ``/home/u/kazma-backup`` into ``<target>-backup`` when only
+    ``/home/u/kazma`` was registered. A match counts only when the char
+    before it is start/``/``/``\\``/``:`` (drive colon) and the char after
+    it is end/``/``/``\\`` — i.e. the source is a complete path prefix, not
+    a lexical substring of a longer name.
+    """
+    import re as _re
+
+    pattern = _re.compile(
+        r"(?<![A-Za-z0-9_.-])" + _re.escape(source) + r"(?![A-Za-z0-9_.-])"
+    )
+    out, count = pattern.subn(target.replace("\\", "\\\\"), text)
+    return out, count
+
+
 def rewrite_text(text: str, path_map: PathMap) -> tuple[str, int]:
     """Apply path substitutions to a text blob. Returns (new_text, replacement_count).
 
@@ -121,6 +140,7 @@ def rewrite_text(text: str, path_map: PathMap) -> tuple[str, int]:
     separator variants of ``source`` (forward-slash and backslash) with the
     target in its native form. Backslash variants only apply when the source
     actually contains a backslash form (Linux paths won't, Windows paths will).
+    Matches are path-boundary anchored (see :func:`_boundary_aware_replace`).
     """
     if not isinstance(text, str) or path_map.is_empty():
         return text, 0
@@ -136,15 +156,13 @@ def rewrite_text(text: str, path_map: PathMap) -> tuple[str, int]:
         fs_source = source.replace("\\", "/")
         fs_target = target.replace("\\", "/")
         if fs_source and fs_source in out:
-            count = out.count(fs_source)
-            out = out.replace(fs_source, fs_target)
+            out, count = _boundary_aware_replace(out, fs_source, fs_target)
             total += count
         bs_source = source.replace("/", "\\")
         if bs_source and bs_source != fs_source:
             bs_target = target.replace("/", "\\")
             if bs_source in out:
-                count = out.count(bs_source)
-                out = out.replace(bs_source, bs_target)
+                out, count = _boundary_aware_replace(out, bs_source, bs_target)
                 total += count
     return out, total
 

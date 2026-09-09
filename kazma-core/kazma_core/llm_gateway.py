@@ -173,8 +173,27 @@ def resolve_generic_egress(
         return direct_url, direct_key, False
     if is_local_openai_compat(direct_url) and not gw.include_local:
         return direct_url, direct_key, False
-    key = gw.api_key or direct_key
-    return gw.url, key, True
+    if gw.api_key:
+        return gw.url, gw.api_key, True
+    # Gateway configured but without a master key: forwarding the real
+    # provider key (OpenAI/DeepSeek/…) to a remote gateway URL would hand a
+    # vendor credential to an arbitrary third-party host — an env/config
+    # change is all it takes to redirect it. Only a local/loopback gateway
+    # (the common unauthenticated LiteLLM dev setup, which passes provider
+    # keys through by design) may receive it; anything else routes direct.
+    try:
+        _parsed = urlparse(gw.url if "://" in gw.url else f"http://{gw.url}")
+        _gw_host = (_parsed.hostname or "").lower()
+    except Exception:
+        _gw_host = ""
+    if _gw_host in _LOOPBACK:
+        return gw.url, direct_key, True
+    logger.warning(
+        "LiteLLM gateway %s has no master key and is not loopback — "
+        "routing this call direct instead of forwarding the provider key",
+        _gw_host or "(unknown)",
+    )
+    return direct_url, direct_key, False
 
 
 def gateway_status() -> dict[str, Any]:

@@ -1105,6 +1105,23 @@ def create_ws_chat_router(
                     text = payload.get("text", "").strip()
                     if not text:
                         continue
+                    # Application-level cap (audit M-W4): frame-level limits
+                    # bound the transport, not what the graph/checkpointer
+                    # is asked to hold. Mirrors the SSE cap.
+                    if len(text) > 512_000:
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "data": {
+                                    "content": (
+                                        "Message too large (over 512,000 "
+                                        "characters). Split it into parts."
+                                    ),
+                                },
+                                "thread_id": thread_id,
+                            }
+                        )
+                        continue
 
                     if not ws_graph_enabled():
                         client_msg_id = str(

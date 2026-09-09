@@ -351,12 +351,18 @@ class SwarmEngine:
 
         # Global admission control (audit M11): reject when at capacity so
         # chat→swarm / panel spam cannot unbounded-grow _active_tasks + LLM spend.
+        # PAUSED tasks do NOT count against the cap (audit M-S2): ten
+        # pipelines parked at HITL checkpoints must not block all new swarm
+        # work with "Swarm at capacity".
         max_active = self._max_concurrent_tasks()
-        if len(self._active_tasks) >= max_active:
+        active_non_paused = sum(
+            1 for t in self._active_tasks.values() if t.status != TaskStatus.PAUSED
+        )
+        if active_non_paused >= max_active:
             logger.warning(
                 "[SwarmEngine] Admission denied task=%s active=%d max=%d",
                 task.id,
-                len(self._active_tasks),
+                active_non_paused,
                 max_active,
             )
             return TaskResult(
@@ -382,6 +388,19 @@ class SwarmEngine:
         except Exception:
             pass
         self._active_tasks[task.id] = task  # track in-flight
+
+        # Persist the RUNNING row immediately (audit H-9): tasks used to be
+        # persisted only at terminal/paused states, so a crash mid-task left
+        # NO DB row and the boot-time requeue_orphaned_running recovery had
+        # nothing to recover — "crash recovery" was decorative.
+        if self._task_store is not None:
+            try:
+                self._task_store.persist_task(task)
+            except Exception:
+                logger.debug(
+                    "[SwarmEngine] failed to persist RUNNING task '%s'", task.id,
+                    exc_info=True,
+                )
 
         self._emit_sse(task.id, "task_started", {
             "task_id": task.id,
@@ -566,9 +585,104 @@ class SwarmEngine:
                         duration_seconds=elapsed,
                     )
                     reaped += 1
+                    # Drop any dangling checkpoint pause entry: without this
+                    # the panel kept offering Approve on a task that was
+                    # already finalized TIMEOUT, and a late approve would
+                    # re-execute the remaining steps only for the result to
+                    # be discarded by the terminal-state guard (audit M-S1).
+                    try:
+                        self._checkpoint_handler._paused.pop(tid, None)
+                    except Exception:
+                        pass
             except Exception as exc:
                 logger.debug("[SwarmEngine] Error checking task age for %s: %s", tid, exc)
         return reaped
+
+    def redispatch_recovered_tasks(self, max_tasks: int = 5) -> int:
+        """Re-dispatch crash-recovered PENDING tasks from the TaskStore.
+
+        ``requeue_orphaned_running`` (boot) rewrites crash-orphaned 'running'
+        rows to 'pending' — but nothing ever consumed them, so the recovery
+        was decorative (audit H-9). This dispatches them again in the
+        background, bounded by *max_tasks* per boot.
+        """
+        if self._task_store is None:
+            return 0
+        try:
+            rows = self._task_store.list_tasks(status="pending", page_size=max_tasks)
+            tasks = rows[0] if isinstance(rows, tuple) else rows
+        except Exception:
+            logger.debug("[SwarmEngine] pending-task recovery read failed", exc_info=True)
+            return 0
+        count = 0
+        for task in tasks[:max_tasks]:
+            # Only tasks that carry a recovery marker (crash survivors), not
+            # rows that some future producer may enqueue for other reasons.
+            if not (task.metadata or {}).get("recovery_count"):
+                continue
+            if task.id in self._active_tasks:
+                continue
+            count += 1
+
+            async def _redispatch(t: SwarmTask = task) -> None:
+                try:
+                    # Fresh dispatch resets status/started_at; recovery_count
+                    # stays for the bounded-crash-loop cap in the store.
+                    t.status = TaskStatus.PENDING
+                    await self.dispatch(t)
+                except Exception:
+                    logger.warning(
+                        "[SwarmEngine] recovered-task re-dispatch failed for %s",
+                        t.id,
+                        exc_info=True,
+                    )
+
+            from kazma_core.background import spawn_background
+
+            spawn_background(_redispatch(), name=f"swarm-recover:{task.id}")
+        if count:
+            logger.info("[SwarmEngine] Re-dispatching %d crash-recovered task(s)", count)
+        return count
+
+    def start_maintenance_loop(self, interval_seconds: float = 60.0) -> None:
+        """Start the background watchdog (stale-task reap + idle reap).
+
+        Previously ``reap_stale_tasks()`` only ran inside ``dispatch()`` — a
+        stuck or paused task held an admission slot FOREVER until some other
+        dispatch happened to trigger the sweep (audit H-9). This loop makes
+        reaping periodic and independent of traffic.
+        """
+        if getattr(self, "_maintenance_task", None) is not None:
+            return
+
+        async def _loop() -> None:
+            import asyncio as _aio
+
+            while True:
+                await _aio.sleep(max(15.0, interval_seconds))
+                try:
+                    self.reap_stale_tasks()
+                except Exception:
+                    logger.debug("[SwarmEngine] maintenance reap failed", exc_info=True)
+                try:
+                    scaler = self.get_autoscaler()
+                    if scaler is not None:
+                        scaler.reap_idle()
+                except Exception:
+                    logger.debug("[SwarmEngine] maintenance idle-reap failed", exc_info=True)
+
+        from kazma_core.background import spawn_background
+
+        self._maintenance_task = spawn_background(
+            _loop(), name="swarm-maintenance"
+        )
+
+    def stop_maintenance_loop(self) -> None:
+        """Stop the background maintenance watchdog (idempotent)."""
+        task = getattr(self, "_maintenance_task", None)
+        if task is not None:
+            task.cancel()
+            self._maintenance_task = None
 
     async def _dispatch_inner(self, task: SwarmTask, started: float, task_span: Any) -> TaskResult:
         """Inner dispatch logic, wrapped by dispatch() for catch-all safety."""
@@ -1190,6 +1304,29 @@ class SwarmEngine:
         Returns the final ``TaskResult`` after the remaining pipeline steps
         complete, or ``None`` if no active checkpoint exists for *task_id*.
         """
+        # Terminal-state guard (audit M-S1): a task reaped as TIMEOUT by the
+        # watchdog used to keep its paused entry approvable — the approve
+        # re-executed the remaining steps (real LLM spend) and the fresh
+        # result was then silently discarded by _finalize_task's idempotency
+        # guard. refuse to approve anything already terminal.
+        _terminal_statuses = {
+            TaskStatus.COMPLETED,
+            TaskStatus.FAILED,
+            TaskStatus.CANCELLED,
+            TaskStatus.TIMEOUT,
+        }
+        try:
+            existing = self._task_store.get_task(task_id) if self._task_store else None
+        except Exception:
+            existing = None
+        if existing is not None and getattr(existing, "status", None) in _terminal_statuses:
+            logger.warning(
+                "[SwarmEngine] approve_checkpoint refused for terminal task %s "
+                "(status=%s) — stale card", task_id, existing.status,
+            )
+            self._checkpoint_handler._paused.pop(task_id, None)
+            return existing.result if getattr(existing, "result", None) is not None else None
+
         entry = self._checkpoint_handler.try_claim(task_id, "approving")
         if entry is None:
             return None

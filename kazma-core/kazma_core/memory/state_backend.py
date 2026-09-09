@@ -926,6 +926,11 @@ def backfill_state_mirror(*, tenant_id: str = "default") -> dict[str, Any]:
 
         conn = sqlite3.connect(primary_memory_db())
         conn.row_factory = sqlite3.Row
+        # Shared pragma set (audit L-23): a bare connect without
+        # busy_timeout can raise "database is locked" under WAL contention.
+        from kazma_core.config_store import apply_sqlite_pragmas
+
+        apply_sqlite_pragmas(conn)
         ep_rows = conn.execute(
             """
             SELECT id, tenant_id, session_id, turn_number, user_text,

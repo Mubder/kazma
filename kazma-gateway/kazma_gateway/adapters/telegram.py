@@ -966,6 +966,17 @@ class TelegramAdapter(BaseAdapter):
             if not file_path:
                 return None
             file_url = f"https://api.telegram.org/file/bot{self._token}/{file_path}"
+            # Size pre-check from Content-Length (the voice path already did
+            # this): the old post-hoc check downloaded the whole file into
+            # memory first — bounded by Telegram's 20MB cap, but the header
+            # check avoids the spike entirely (audit L-12).
+            head_resp = await self._http.head(file_url)
+            declared = head_resp.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > MAX_MEDIA_BYTES:
+                logger.warning(
+                    "[telegram] media file too large (declared): %s bytes", declared
+                )
+                return None
             dl_resp = await self._http.get(file_url)
             dl_resp.raise_for_status()
             if len(dl_resp.content) > MAX_MEDIA_BYTES:
@@ -1449,19 +1460,24 @@ class TelegramAdapter(BaseAdapter):
             return
 
         if action.kind == "sys_install":
-            if self._allowed_users:
-                user_id = from_user.get("id", 0)
-                if user_id not in self._allowed_users:
-                    logger.warning(
-                        "[telegram] Non-whitelisted user %d tried to trigger installation.",
-                        user_id,
+            # Admin gate (audit H-8): package installation is admin-grade.
+            # The old check was nested inside ``if self._allowed_users:``,
+            # so in the default allow_all posture (empty allowlist) ANYONE
+            # pressing the button triggered a package install.
+            from kazma_gateway.allowlists import is_gateway_admin
+
+            _tg_sender = f"telegram:{from_user.get('id', '')}"
+            if not is_gateway_admin(_tg_sender, "telegram"):
+                logger.warning(
+                    "[telegram] Non-admin user %s tried to trigger installation.",
+                    from_user.get("id"),
+                )
+                self._spawn(
+                    self._answer_callback_query(
+                        cb_id, "Not authorized: Admin privilege required."
                     )
-                    self._spawn(
-                        self._answer_callback_query(
-                            cb_id, "Not authorized: Admin privilege required."
-                        )
-                    )
-                    return
+                )
+                return
             from kazma_core.system.runtime_manager import trigger_package_promotion
 
             self._spawn(trigger_package_promotion(action.package_name))
@@ -1484,6 +1500,23 @@ class TelegramAdapter(BaseAdapter):
             return
 
         if action.kind == "install_dep":
+            # Admin gate (audit H-8): this branch previously had NO admin
+            # check on any platform — anyone could click "Install" on an
+            # alert card.
+            from kazma_gateway.allowlists import is_gateway_admin
+
+            _dep_sender = f"telegram:{from_user.get('id', '')}"
+            if not is_gateway_admin(_dep_sender, "telegram"):
+                logger.warning(
+                    "[telegram] Non-admin user %s tried to install a dependency.",
+                    from_user.get("id"),
+                )
+                self._spawn(
+                    self._answer_callback_query(
+                        cb_id, "Not authorized: Admin privilege required."
+                    )
+                )
+                return
             package_name = action.package_name
             from kazma_core.system import asynchronous_install_package
             self._spawn(asynchronous_install_package(package_name))

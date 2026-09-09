@@ -95,6 +95,11 @@ class DiscordAdapter(BaseAdapter):
         self._heartbeat_task: asyncio.Task[None] | None = None
         self._sequence: int | None = None
         self._session_id: str | None = None
+        # Per-channel serial chains for message processing (voice fetch +
+        # STT): keeps arrival order within a channel so a slow transcription
+        # can no longer enqueue AFTER a later text message and swap turn
+        # order (audit L-28; same pattern as Telegram's _chat_chains).
+        self._channel_chains: dict[str, asyncio.Task] = {}
 
     def set_allowed_users(self, user_ids: list[str] | set[str]) -> None:
         """Replace the user allowlist at runtime (mirrors Telegram).
@@ -313,7 +318,30 @@ class DiscordAdapter(BaseAdapter):
                                 except Exception:
                                     logger.exception("[discord] Failed to process message in background")
 
-                            spawn_background(_process_and_enqueue(parsed), name="discord-msg-process")
+                            # Per-channel serial chain (audit L-28): a voice
+                            # message queued behind a slow transcription used
+                            # to enqueue AFTER a later text message from the
+                            # same channel, attaching turns out of order.
+                            _chain_key = str(
+                                (parsed.context_metadata or {}).get("channel_id")
+                                or (parsed.context_metadata or {}).get("user_id")
+                                or "?"
+                            )
+                            _prev = self._channel_chains.get(_chain_key)
+
+                            async def _chained() -> None:
+                                if _prev is not None and not _prev.done():
+                                    try:
+                                        await _prev
+                                    except Exception:
+                                        pass
+                                await _process_and_enqueue(parsed)
+
+                            _task = asyncio.get_running_loop().create_task(_chained())
+                            self._channel_chains[_chain_key] = _task
+                            if len(self._channel_chains) > 64:
+                                for _k in [k for k, t in self._channel_chains.items() if t.done()]:
+                                    self._channel_chains.pop(_k, None)
 
                     elif op == 0 and t == "INTERACTION_CREATE":
                         # HITL approval button press — route to the active
@@ -406,6 +434,26 @@ class DiscordAdapter(BaseAdapter):
             return
 
         if is_install_action(custom_id):
+            # Admin gate (audit H-8): package installs are admin-grade; the
+            # allowlist check above only bounds who may chat/click at all.
+            from kazma_gateway.allowlists import is_gateway_admin
+
+            if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
+                logger.info(
+                    "[discord] Ignoring install interaction (admin required) user=%s",
+                    _ia_user_id,
+                )
+                await _ack(
+                    {
+                        "type": 7,
+                        "data": {
+                            "content": "⛔ Admin privilege required to install packages.",
+                            "embeds": [],
+                            "components": [],
+                        },
+                    }
+                )
+                return
             package_name = package_from_install(custom_id)
             from kazma_core.system.runtime_manager import trigger_package_promotion
 

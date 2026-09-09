@@ -97,7 +97,11 @@ async def test_engine_dispatch_missing_worker_auto_creates(empty_config):
     # The missing worker was auto-created (not "not found") and dispatched.
     assert result.status == "success"
     assert result.aggregated_output == "ghost output"
-    assert engine.get_worker("ghost") is not None
+    # Ad-hoc workers are reaped after their dispatch (audit M-S4): the old
+    # permanent registration let typos and adversarial names grow the
+    # registry forever and pollute future broadcast fan-outs.
+    assert engine.get_worker("ghost") is None
+    assert getattr(engine, "_adhoc_worker_count", 0) == 0
 
 
 @pytest.mark.asyncio

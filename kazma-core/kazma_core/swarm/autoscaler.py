@@ -68,16 +68,33 @@ class WorkerTemplate:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WorkerTemplate:
         caps_data = data.get("capabilities") or {}
+        # Clamp untrusted values (audit H-5): templates arrive from the API,
+        # and an unclamped max_instances could promise thousands of LLM
+        # workers; a giant system_prompt is stored verbatim into
+        # swarm_templates.json and injected into every spawned worker.
+        _MAX_INSTANCES_CAP = 50
+        _MAX_PROMPT_CHARS = 20_000
+        try:
+            min_i = int(data.get("min_instances", 0))
+        except (TypeError, ValueError):
+            min_i = 0
+        try:
+            max_i = int(data.get("max_instances", 5))
+        except (TypeError, ValueError):
+            max_i = 5
+        min_i = max(0, min(min_i, _MAX_INSTANCES_CAP))
+        max_i = max(1, min(max_i, _MAX_INSTANCES_CAP))
+        max_i = max(max_i, min_i) if min_i >= 1 else max_i
         return cls(
-            name=str(data.get("name", "")),
-            role=str(data.get("role", "")),
-            model=str(data.get("model", "")),
-            provider=str(data.get("provider", "")),
-            worker_type=str(data.get("worker_type", "in_process")),
+            name=str(data.get("name", ""))[:120],
+            role=str(data.get("role", ""))[:200],
+            model=str(data.get("model", ""))[:200],
+            provider=str(data.get("provider", ""))[:60],
+            worker_type=str(data.get("worker_type", "in_process"))[:40],
             capabilities=WorkerCapabilities.from_dict(caps_data) if caps_data else WorkerCapabilities(),
-            min_instances=int(data.get("min_instances", 0)),
-            max_instances=int(data.get("max_instances", 5)),
-            system_prompt=str(data.get("system_prompt", "")),
+            min_instances=min_i,
+            max_instances=max_i,
+            system_prompt=str(data.get("system_prompt", ""))[:_MAX_PROMPT_CHARS],
         )
 
     def to_dict(self) -> dict[str, Any]:

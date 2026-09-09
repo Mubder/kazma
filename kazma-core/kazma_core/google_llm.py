@@ -36,14 +36,33 @@ import logging
 from typing import Any
 
 import httpx
-import vertexai
-from vertexai.generative_models import GenerativeModel, GenerationConfig
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse
 
 __all__ = ["GeminiAPIError", "GeminiProvider", "GoogleGeminiClient"]
 
 logger = logging.getLogger(__name__)
+
+
+def _import_vertexai() -> Any:
+    """Import the optional ``vertexai`` SDK lazily with a clear failure.
+
+    A hard module-level import made selecting the Google provider crash
+    with a raw ``ImportError`` through ``get_client()`` on any machine
+    without the SDK (unlike Bedrock's guarded boto3 import). The SDK is
+    only needed by :class:`GoogleGeminiClient` — the HTTP-based
+    :class:`GeminiProvider` uses ADC tokens directly.
+    """
+    try:
+        import vertexai  # type: ignore
+        from vertexai.generative_models import GenerationConfig, GenerativeModel  # type: ignore
+
+        return vertexai, GenerativeModel, GenerationConfig
+    except ImportError as exc:
+        raise ImportError(
+            "The Google provider needs the optional vertexai SDK. "
+            "Install it with: pip install google-cloud-aiplatform"
+        ) from exc
 
 # ── Defaults ────────────────────────────────────────────────────────
 _DEFAULT_LOCATION: str = "us-central1"
@@ -83,6 +102,7 @@ class GoogleGeminiClient:
 
         # ── Bootstrap Vertex AI with ADC ───────────────────────────
         try:
+            vertexai, _GenerativeModel, _GenerationConfig = _import_vertexai()
             vertexai.init(project=project_id, location=location)
         except Exception as exc:
             raise GeminiAPIError(
@@ -124,6 +144,7 @@ class GoogleGeminiClient:
                 invalid, or the response contains no text.
         """
         model_name = model or self._default_model
+        _vertexai, GenerativeModel, GenerationConfig = _import_vertexai()
         gen_model = GenerativeModel(model_name)
         config = GenerationConfig(temperature=temperature)
 
@@ -278,13 +299,21 @@ class GeminiProvider(LLMProvider):
             token = self.config.api_key
         else:
             try:
+                import asyncio
+
                 import google.auth
                 import google.auth.transport.requests
 
-                credentials, _project = google.auth.default()
-                auth_req = google.auth.transport.requests.Request()
-                credentials.refresh(auth_req)
-                token = credentials.token
+                def _refresh() -> str:
+                    credentials, _project = google.auth.default()
+                    auth_req = google.auth.transport.requests.Request()
+                    credentials.refresh(auth_req)
+                    return credentials.token or ""
+
+                # credentials.refresh() does blocking network I/O — run it
+                # off the event loop (the server serves every SSE/WS stream
+                # on it).
+                token = await asyncio.to_thread(_refresh)
             except Exception as exc:
                 logger.exception("Failed to obtain ADC credentials")
                 raise RuntimeError(
@@ -380,6 +409,7 @@ class GeminiProvider(LLMProvider):
                 capture_output=True,
                 text=True,
                 check=False,
+                timeout=30,
             )
             if res.returncode == 0:
                 gcloud_project = res.stdout.strip()

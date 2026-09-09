@@ -35,6 +35,27 @@ from kazma_core.llm_stream import StreamDelta
 
 logger = logging.getLogger(__name__)
 
+# Per-model output-token ceilings (Anthropic 400s when max_tokens exceeds
+# the model's cap). Kazma's global default (16384) is over the cap for the
+# Claude 3 family, so clamp before sending. Unknown models pass through.
+_MAX_OUTPUT_TOKENS: dict[str, int] = {
+    "claude-3-haiku": 4096,
+    "claude-3-sonnet": 4096,
+    "claude-3-opus": 4096,
+    "claude-3-5-haiku": 8192,
+    "claude-3-5-sonnet": 8192,
+    "claude-3-7-sonnet": 64000,
+}
+
+
+def _clamp_max_tokens(model: str, requested: int) -> int:
+    """Clamp ``max_tokens`` to the model's output ceiling when known."""
+    m = (model or "").lower()
+    for prefix, cap in _MAX_OUTPUT_TOKENS.items():
+        if m.startswith(prefix):
+            return min(int(requested), cap)
+    return int(requested)
+
 _API_BASE = "https://api.anthropic.com/v1"
 _ANTHROPIC_VERSION = "2023-06-01"
 
@@ -181,6 +202,14 @@ class AnthropicProvider(LLMProvider):
                             "type": "image",
                             "source": {"type": "base64", "media_type": media, "data": b64},
                         })
+                    elif url.startswith(("http://", "https://")):
+                        # Anthropic Messages accepts remote image sources
+                        # ({"type": "url"}). Dropping them silently made
+                        # vision requests lose every non-inline image.
+                        blocks.append({
+                            "type": "image",
+                            "source": {"type": "url", "url": url},
+                        })
                 elif btype == "tool_result":
                     blocks.append(b)
                 elif btype == "tool_use":
@@ -270,7 +299,9 @@ class AnthropicProvider(LLMProvider):
         ]
         payload: dict[str, Any] = {
             "model": model or self.config.model,
-            "max_tokens": max_tokens or self.config.max_tokens,
+            "max_tokens": _clamp_max_tokens(
+                model or self.config.model, max_tokens or self.config.max_tokens
+            ),
             "temperature": temperature if temperature is not None else self.config.temperature,
             "messages": self._merge_consecutive(
                 [self._convert_message(m) for m in convo]
@@ -417,7 +448,9 @@ class AnthropicProvider(LLMProvider):
         ]
         payload: dict[str, Any] = {
             "model": model or self.config.model,
-            "max_tokens": max_tokens or self.config.max_tokens,
+            "max_tokens": _clamp_max_tokens(
+                model or self.config.model, max_tokens or self.config.max_tokens
+            ),
             "temperature": temperature if temperature is not None else self.config.temperature,
             "messages": self._merge_consecutive(
                 [self._convert_message(m) for m in convo]
@@ -438,6 +471,11 @@ class AnthropicProvider(LLMProvider):
         stop_reason = ""
         usage_in = 0
         usage_out = 0
+        # Duplicated-prefix invariant (§29F): once any user-visible delta has
+        # been emitted, a recovery attempt of the same call must not emit
+        # content again — the authoritative text arrives via the final
+        # response / turn_complete replace-paint.
+        _emitted_any = False
 
         try:
             async with client.stream("POST", "/messages", json=payload) as resp:
@@ -472,7 +510,14 @@ class AnthropicProvider(LLMProvider):
                     if not isinstance(data, dict):
                         continue
                     etype = event_name or str(data.get("type") or "")
-                    if etype == "content_block_start":
+                    if etype == "message_start":
+                        # Anthropic reports input tokens on message_start only
+                        # (message_delta carries output tokens) — reading them
+                        # here keeps streamed usage/cost from undercounting.
+                        msg_usage = (data.get("message") or {}).get("usage") or {}
+                        if msg_usage.get("input_tokens") is not None:
+                            usage_in = int(msg_usage.get("input_tokens") or 0)
+                    elif etype == "content_block_start":
                         block = data.get("content_block") or {}
                         if block.get("type") == "tool_use":
                             current_tool = {
@@ -487,6 +532,7 @@ class AnthropicProvider(LLMProvider):
                             piece = str(delta.get("text") or "")
                             if piece:
                                 text_parts.append(piece)
+                                _emitted_any = True
                                 yield StreamDelta(content=piece)
                         elif dtype == "input_json_delta" and current_tool is not None:
                             current_tool["arguments"] += str(delta.get("partial_json") or "")
@@ -530,8 +576,13 @@ class AnthropicProvider(LLMProvider):
             ) from exc
         except Exception as exc:  # noqa: BLE001
             logger.warning("[Anthropic] stream failed (%s) — falling back to chat()", exc)
-            resp = await self.chat(messages, tools, max_tokens, temperature, model)
-            if resp.content:
+            resp = await self.chat(
+                messages, tools, max_tokens, temperature, model, response_format
+            )
+            # Only emit the full text when NOTHING was streamed yet;
+            # re-yielding after partial deltas duplicated the prefix
+            # (§29F duplicated-prefix invariant).
+            if resp.content and not _emitted_any:
                 yield StreamDelta(content=resp.content)
             yield StreamDelta(response=resp)
             return

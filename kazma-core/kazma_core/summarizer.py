@@ -70,7 +70,12 @@ def _normalize_msg(msg: Any) -> dict[str, Any]:
 
 
 def estimate_tokens(messages: list[Any]) -> int:
-    """Estimate token count from messages using a chars/4 heuristic.
+    """Estimate token count from messages using a script-aware heuristic.
+
+    Latin text runs ~4 chars/token, but Arabic (this product's core
+    audience) runs ~2.5 chars/token — a flat chars/4 undercounted
+    Arabic-heavy conversations, letting them exceed the trim budget until
+    the provider 400'd (caught downstream by compaction, but degraded).
 
     Args:
         messages: List of message dicts, tuples, or objects.
@@ -78,22 +83,48 @@ def estimate_tokens(messages: list[Any]) -> int:
     Returns:
         Estimated token count.
     """
-    total_chars = 0
+    total = 0
     for raw_msg in messages:
         msg = _normalize_msg(raw_msg)
         content = msg.get("content", "")
         if isinstance(content, str):
-            total_chars += len(content)
+            total += _estimate_text_tokens(content)
         # Account for tool calls
         tool_calls = msg.get("tool_calls", [])
         for tc in tool_calls:
             if isinstance(tc, dict):
                 if "name" in tc and "function" not in tc:
-                    total_chars += len(str(tc.get("name", ""))) + len(str(tc.get("args", "")))
+                    total += _estimate_text_tokens(str(tc.get("name", "")) + str(tc.get("args", "")))
                 else:
                     fn = tc.get("function", {})
-                    total_chars += len(str(fn.get("name", ""))) + len(str(fn.get("arguments", "")))
-    return total_chars // 4
+                    total += _estimate_text_tokens(
+                        str(fn.get("name", "")) + str(fn.get("arguments", ""))
+                    )
+    return total
+
+
+_ARABIC_RANGES = (
+    (0x0600, 0x06FF),   # Arabic
+    (0x0750, 0x077F),   # Arabic Supplement
+    (0x08A0, 0x08FF),   # Arabic Extended-A
+    (0xFB50, 0xFDFF),   # Arabic Presentation Forms-A
+    (0xFE70, 0xFEFF),   # Arabic Presentation Forms-B
+)
+
+
+def _estimate_text_tokens(text: str) -> int:
+    """Estimate tokens for one string: chars/4 for Latin, ~2.5 for Arabic."""
+    if not text:
+        return 0
+    arabic = 0
+    for ch in text:
+        cp = ord(ch)
+        for lo, hi in _ARABIC_RANGES:
+            if lo <= cp <= hi:
+                arabic += 1
+                break
+    other = len(text) - arabic
+    return (other // 4) + (arabic * 2) // 5
 
 
 def prune_tool_outputs(

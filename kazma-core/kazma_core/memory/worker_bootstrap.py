@@ -556,7 +556,7 @@ def _start_macro_sleep_scheduler() -> None:
                 # (shared) mode _distinct_tenants() returns ["default"] —
                 # unchanged from the old hardcoded behavior.
                 for tenant in _distinct_tenants():
-                    enqueue_task("macro_sleep", {"tenant_id": tenant, "live_config": True})
+                    await asyncio.to_thread(enqueue_task, "macro_sleep", {"tenant_id": tenant, "live_config": True})
                 logger.debug("[memory_worker] enqueued periodic macro_sleep")
             except Exception:
                 logger.debug("[memory_worker] macro_sleep enqueue failed", exc_info=True)
@@ -619,29 +619,29 @@ def _start_backup_export_scheduler() -> None:
                 from kazma_core.memory.task_queue import enqueue_task
                 from kazma_core.db.pg_backup import pg_backup_enabled
 
-                enqueue_task("native_backup", {"retention": 10})
+                await asyncio.to_thread(enqueue_task, "native_backup", {"retention": 10})
                 # Universal backup (all DBs + assets + PG) — separate task so
                 # the native_backup handler stays fast (<300s) and doesn't
                 # trigger the queue's processing-reclaim.
-                enqueue_task("universal_backup", {})
+                await asyncio.to_thread(enqueue_task, "universal_backup", {})
                 # Postgres shared-state dump (self-disables on SQLite installs
                 # or the backups.pg.enabled kill-switch — checked live here).
                 if pg_backup_enabled():
-                    enqueue_task("native_pg_backup", {})
+                    await asyncio.to_thread(enqueue_task, "native_pg_backup", {})
                 # Retention + verification for the restic repositories. Kept
                 # separate from the snapshot itself (which rides along with
                 # universal_backup) because forget/prune rewrites the repo and
                 # check reads it: neither belongs in the path that has to
                 # finish before the next backup can start.
-                enqueue_task("restic_maintenance", {})
+                await asyncio.to_thread(enqueue_task, "restic_maintenance", {})
                 # Connector credentials. The Google grant expires every
                 # 7 days on this install (OAuth status: Testing), so the
                 # useful check is the one that warns a day early.
-                enqueue_task("connector_health", {})
+                await asyncio.to_thread(enqueue_task, "connector_health", {})
                 # Export per-tenant so each tenant's beliefs/graph land in
                 # their own file (not overwritten by "default").
                 for tenant in _distinct_tenants():
-                    enqueue_task("nightly_export", {"tenant_id": tenant})
+                    await asyncio.to_thread(enqueue_task, "nightly_export", {"tenant_id": tenant})
                 logger.debug("[memory_worker] enqueued nightly backup + export")
             except Exception:
                 logger.debug("[memory_worker] backup/export enqueue failed", exc_info=True)
@@ -804,7 +804,8 @@ def _start_reconsolidation_scheduler() -> None:
 
                 # Fan dedup/re-embed over all active tenants.
                 for tenant in _distinct_tenants():
-                    enqueue_task(
+                    await asyncio.to_thread(
+                        enqueue_task,
                         "global_reconsolidation",
                         {"tenant_id": tenant, "max_merges": 50, "reembed_limit": 100},
                     )

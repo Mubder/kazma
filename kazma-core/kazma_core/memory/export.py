@@ -18,6 +18,23 @@ logger = logging.getLogger(__name__)
 __all__ = ["export_nightly_snapshots"]
 
 
+def _dump_rows_jsonl(path: Path, rows) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        for r in rows:
+            f.write(json.dumps(dict(r), ensure_ascii=False, default=str) + "\n")
+
+
+def _atomic_write(path: Path, writer) -> None:
+    """Write via tmp + rename so a crash never leaves a truncated "latest"
+    snapshot (audit L-15) — every other backup path in the repo already
+    does tmp+rename; this was the odd one out."""
+    import os
+
+    tmp = path.with_name(path.name + ".tmp")
+    writer(tmp)
+    os.replace(tmp, path)
+
+
 def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
     """Export active beliefs (JSON-L) + entity graph (GraphML).
 
@@ -44,9 +61,7 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
             # name for backward compat with existing tooling).
             jsonl_name = "kazma_beliefs_latest.jsonl" if tenant_id == "default" else f"kazma_beliefs_{tenant_id}.jsonl"
             jsonl_path = out_dir / jsonl_name
-            with open(jsonl_path, "w", encoding="utf-8") as f:
-                for b in beliefs:
-                    f.write(json.dumps(dict(b), ensure_ascii=False, default=str) + "\n")
+            _atomic_write(jsonl_path, lambda p: _dump_rows_jsonl(p, beliefs))
             result["jsonl"] = jsonl_path
 
             # M-16: episodes / archive / merge ledger (native .db backups
@@ -82,9 +97,7 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
                 )
                 path = out_dir / fname
                 try:
-                    with open(path, "w", encoding="utf-8") as f:
-                        for r in rows:
-                            f.write(json.dumps(dict(r), ensure_ascii=False, default=str) + "\n")
+                    _atomic_write(path, lambda p: _dump_rows_jsonl(p, rows))
                     result[key] = path
                 except Exception:
                     logger.debug("[export] %s write skipped", table, exc_info=True)
@@ -108,7 +121,7 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
                     g.add_edge(edge["subject"], edge["object"], predicate=edge["predicate"])
                 graphml_name = "kazma_graph_latest.graphml" if tenant_id == "default" else f"kazma_graph_{tenant_id}.graphml"
                 graphml_path = out_dir / graphml_name
-                nx.write_graphml(g, graphml_path)
+                _atomic_write(graphml_path, lambda p: nx.write_graphml(g, p))
                 result["graphml"] = graphml_path
             except Exception:
                 logger.debug("[export] GraphML step skipped", exc_info=True)
@@ -137,9 +150,7 @@ def export_nightly_snapshots(*, tenant_id: str = "default") -> dict[str, Path]:
                 else f"kazma_audit_{tenant_id}.jsonl"
             )
             audit_path = out_dir / audit_name
-            with open(audit_path, "w", encoding="utf-8") as f:
-                for r in audits:
-                    f.write(json.dumps(dict(r), ensure_ascii=False, default=str) + "\n")
+            _atomic_write(audit_path, lambda p: _dump_rows_jsonl(p, audits))
             result["audit"] = audit_path
         finally:
             ops.close()

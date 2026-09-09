@@ -61,11 +61,45 @@ def resolve_channel_id(
 
 
 def chunk_message(text: str, limit: int = DISCORD_MAX_MESSAGE_LEN) -> list[str]:
-    """Split *text* into Discord-safe chunks.
+    """Split *text* into Discord-safe, code-fence-aware chunks.
 
     Empty text yields NO chunks — the old ``[""]`` made Discord 400 on empty
     content and blocked the attachments sent after the text.
+
+    Splitting happens on line boundaries (never mid-word/mid-URL), and when
+    a split lands inside a ``` code fence the fence is closed at the chunk
+    end and reopened at the next chunk's start — the old fixed-width slice
+    cut mid-token, producing broken markup and half-URLs on every long
+    reply (audit L-11).
     """
     if not text:
         return []
-    return [text[i : i + limit] for i in range(0, len(text), limit)]
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+
+        window = remaining[:limit]
+        # Prefer the last newline inside the window (keeps words/URLs whole).
+        cut = window.rfind("\n")
+        if cut < limit // 2:
+            cut = window.rfind(" ")
+        if cut < limit // 2:
+            cut = limit
+
+        chunk = remaining[:cut]
+        remaining = remaining[cut:].lstrip("\n") if remaining[cut:].startswith("\n") else remaining[cut:]
+
+        # Fence repair: count unclosed ``` fences in the emitted chunk; if
+        # odd, close it here and reopen in the next chunk.
+        if chunk.count("```") % 2 == 1:
+            chunk += "\n```"
+            if remaining:
+                remaining = "```\n" + remaining
+        chunks.append(chunk)
+    return chunks or [text]

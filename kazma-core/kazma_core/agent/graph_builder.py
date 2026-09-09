@@ -184,6 +184,24 @@ def build_supervisor_graph(
         except Exception:
             pass
         allow_interrupt = (checkpointer is not None) and not (hitl_config and hitl_config.get("auto_deny"))
+        # Structural guard (audit L-35): interrupt() on a checkpointer-less
+        # graph is unresumable — the turn would hang forever. When HITL is
+        # configured but no checkpointer exists, auto-deny danger tools
+        # instead of relying on every caller remembering to.
+        if hitl_config and checkpointer is None and not hitl_config.get("auto_deny"):
+            logger.warning(
+                "[graph_builder] HITL enabled without a checkpointer — forcing "
+                "auto_deny (interrupt() would be unresumable)"
+            )
+            _hitl_cfg = dict(hitl_config)
+            _hitl_cfg["auto_deny"] = True
+            return await tool_worker_node(
+                state,
+                tool_executor=tool_executor,
+                tracer=tracer,
+                hitl_config=_hitl_cfg,
+                allow_interrupt=False,
+            )
         return await tool_worker_node(
             state,
             tool_executor=tool_executor,

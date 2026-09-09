@@ -154,6 +154,10 @@ def _read_references(db_path: Path) -> tuple[list[tuple[str, str]], list[tuple[s
     conn = sqlite3.connect(str(db_path))
     try:
         conn.row_factory = sqlite3.Row
+        # Shared pragma set (audit L-23): busy_timeout under WAL contention.
+        from kazma_core.config_store import apply_sqlite_pragmas
+
+        apply_sqlite_pragmas(conn)
         for row in conn.execute(
             """
             SELECT DISTINCT b.sha256 AS sha256, b.storage_kind AS storage_kind

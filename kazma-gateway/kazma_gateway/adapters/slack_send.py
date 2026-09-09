@@ -54,12 +54,41 @@ def resolve_channel_id(
 
 
 def chunk_message(text: str, limit: int = SLACK_MAX_MESSAGE_LEN) -> list[str]:
-    """Split *text* into Slack-safe chunks.
+    """Split *text* into Slack-safe, boundary-aware chunks.
 
     Empty text yields NO chunks — the old ``[""]`` made Slack reject the
     message (``must_not_be_blank``) and the attachments after it were never
     sent (same fix as Telegram/Discord; deep-audit 2026-08-19).
+
+    Splitting happens on line/word boundaries (never mid-token/mid-URL),
+    and a split landing inside a ``` code fence is closed and reopened
+    across chunks — the old fixed-width slice cut mid-markup (audit L-11).
     """
     if not text:
         return []
-    return [text[i : i + limit] for i in range(0, len(text), limit)]
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            chunks.append(remaining)
+            break
+
+        window = remaining[:limit]
+        cut = window.rfind("\n")
+        if cut < limit // 2:
+            cut = window.rfind(" ")
+        if cut < limit // 2:
+            cut = limit
+
+        chunk = remaining[:cut]
+        remaining = remaining[cut:].lstrip("\n") if remaining[cut:].startswith("\n") else remaining[cut:]
+
+        if chunk.count("```") % 2 == 1:
+            chunk += "\n```"
+            if remaining:
+                remaining = "```\n" + remaining
+        chunks.append(chunk)
+    return chunks or [text]

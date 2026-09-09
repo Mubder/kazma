@@ -239,7 +239,17 @@ class ModelRegistry:
         # without saving them in the UI.
         if not api_key and provider_name:
             env_key = f"{provider_name.upper().replace('-', '_')}_API_KEY"
-            api_key = os.getenv(env_key, "") or os.getenv("KAZMA_API_KEY", "")
+            api_key = os.getenv(env_key, "")
+            # KAZMA_API_KEY is a generic operator key — only reuse it for
+            # Bearer/OpenAI-compatible providers. Sending it to a native
+            # provider (Anthropic x-api-key, Azure api-key) sends one
+            # vendor's credential to another vendor's endpoint (audit H-10).
+            if not api_key:
+                _preset_auth = PROVIDER_PRESETS.get(
+                    (provider_name or "").strip().lower(), {}
+                ).get("auth_header", "Bearer")
+                if _preset_auth == "Bearer":
+                    api_key = os.getenv("KAZMA_API_KEY", "")
 
         return provider_name, base_url, api_key, effective_model
 
@@ -688,13 +698,20 @@ class ModelRegistry:
             logger.warning("discover_models: SSRF validation unavailable — blocking request for safety")
             return []
 
-        # Build auth header
+        # Build auth headers per the provider's auth style. Non-Bearer
+        # vendors (Anthropic ``x-api-key``, Azure ``api-key``) use their own
+        # header names — stuffing the scheme into ``Authorization`` produced
+        # ``Authorization: x-api-key <key>``, a guaranteed 401 (audit M-6).
         auth_header_type = preset.get("auth_header", "Bearer")
         headers: dict[str, str] = {}
-        if api_key and auth_header_type:
-            headers["Authorization"] = f"{auth_header_type} {api_key}"
-        elif api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        if api_key:
+            if auth_header_type == "Bearer" or not auth_header_type:
+                headers["Authorization"] = f"Bearer {api_key}"
+            elif auth_header_type == "x-api-key":
+                headers["x-api-key"] = api_key
+                headers.setdefault("anthropic-version", "2023-06-01")
+            else:
+                headers[auth_header_type] = api_key
 
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:

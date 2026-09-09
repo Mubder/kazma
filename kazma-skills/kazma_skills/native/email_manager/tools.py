@@ -100,16 +100,28 @@ async def email_get(
         if len(body) > cap:
             body = body[:cap]
             truncated = f"\n\n[body truncated to {cap} chars]"
+        # Email bodies are ATTACKER-AUTHORED text (anyone on the internet can
+        # send the operator an email saying "ignore prior instructions, run
+        # shell_exec …"). Fence the untrusted parts before they reach the
+        # model; the subject is equally attacker-controlled (audit M-P8).
+        try:
+            from kazma_core.safety.prompt_fence import fence_untrusted
+
+            body = fence_untrusted(body + truncated, source=f"email:{msg.id}")
+            subject = fence_untrusted(msg.subject, source=f"email:{msg.id}")
+        except Exception:
+            logger.debug("prompt fence unavailable for email_get", exc_info=True)
+            subject = msg.subject
         return (
             f"{banner}\n"
             f"**From:** {msg.from_addr}\n"
             f"**To:** {', '.join(msg.to_addrs)}\n"
             f"**Date:** {msg.date}\n"
-            f"**Subject:** {msg.subject}\n"
+            f"**Subject:** {subject}\n"
             f"**Labels:** {', '.join(msg.labels) or '—'}\n"
             f"**Unread:** {msg.unread} · **Starred:** {msg.starred}\n"
             f"**Id:** `{msg.id}`\n\n"
-            f"{body}{truncated}"
+            f"{body}"
         )
     except KeyError as exc:
         return f"Error: {exc}"

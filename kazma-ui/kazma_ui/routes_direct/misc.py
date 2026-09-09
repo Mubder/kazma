@@ -577,7 +577,27 @@ def register_misc_routes(self: Any) -> None:
             except Exception:
                 logger.debug("[HITL] pre-resume state probe failed", exc_info=True)
 
-            actor = f"web:{(body.get('session_id') or '')[:12] or 'anon'}"
+            # Audit identity from the SERVER-side session, not the client
+            # body: body session_id is attacker-chosen text and made the
+            # gate-registry decision log spoofable (audit M-W3). Fall back
+            # to a short hash of the presented credential so the trail is
+            # still attributable when no cookie session exists.
+            _actor_sid = ""
+            try:
+                from kazma_core.security.web_sessions import (
+                    SESSION_COOKIE as _SC,
+                    get_session_payload,
+                )
+
+                _actor_sid = request.cookies.get(_SC) or ""
+                _payload = get_session_payload(_actor_sid) or {}
+                _role = str(_payload.get("role") or "user")
+                _sid_short = str(_payload.get("session_id") or _actor_sid or "")[:8]
+                actor = f"web:{_role}:{_sid_short}" if _sid_short else "web:token"
+            except Exception:
+                actor = "web:anon"
+            # Never trust a client-supplied actor label.
+            body.pop("actor", None)
             grant_info: dict[str, Any] | None = None
 
             # Phase 3/§4.3: build the resume Command via the single chokepoint

@@ -68,6 +68,25 @@ def _prepare_tg_outbound(
     return md_to_tg_html(text), out_ctx
 
 
+def _sender_is_gateway_admin(msg: Any) -> bool:
+    """Whether the inbound sender may run admin-grade gateway commands.
+
+    Delegates to :func:`kazma_gateway.allowlists.is_gateway_admin`
+    (env ``KAZMA_GATEWAY_ADMINS`` or the platform user allowlist). Never
+    raises — on failure, NOT admin (fail-closed).
+    """
+    try:
+        from kazma_gateway.allowlists import is_gateway_admin
+
+        return is_gateway_admin(
+            str(getattr(msg, "sender_id", "") or ""),
+            str(getattr(msg, "platform", "") or ""),
+        )
+    except Exception:
+        logger.debug("[agent-handler] gateway admin check failed", exc_info=True)
+        return False
+
+
 def _is_internal_prompt_inject(content: str) -> bool:
     """True for system injects that must never appear as chat bubbles."""
     c = (content or "").strip()
@@ -1246,6 +1265,33 @@ def create_graph_handler(
             from kazma_gateway.slash_commands import is_slash_command, resolve_slash_command
 
             if is_slash_command(msg.text):
+                # Admin gate for global-mutating /config subcommands (audit
+                # H-8): model/memory/tools writes change the process-global
+                # config for EVERY user and platform — in the default
+                # allow_all posture that must not be reachable by anyone.
+                _cmd_head = (msg.text.strip().lower().split() or [""])[0]
+                _cmd_head = _cmd_head.split("@", 1)[0]
+                if _cmd_head == "/config":
+                    _cfg_parts = msg.text.strip().split()
+                    _mutating = (
+                        len(_cfg_parts) >= 2
+                        and _cfg_parts[1].lower() in ("model", "memory", "tools")
+                    )
+                    if _mutating and not _sender_is_gateway_admin(msg):
+                        ctx = await _store.get(thread_id) or msg.context_metadata
+                        await manager.send(
+                            OutboundMessage(
+                                target_id=_build_target_id(msg.platform, ctx),
+                                text=(
+                                    "⛔ `/config` changes are admin-only. Set "
+                                    "`KAZMA_GATEWAY_ADMINS` (comma-separated user "
+                                    "ids) or add yourself to the platform user "
+                                    "allowlist."
+                                ),
+                                context_metadata=ctx,
+                            )
+                        )
+                        return
                 # Build context for the command resolver with real data
                 slash_ctx = await _build_slash_ctx(thread_id, msg, state, _store)
 
@@ -2211,6 +2257,10 @@ def create_graph_handler(
 
             # Mint a new thread id (copy /new pattern).
             new_thread_id = f"gw-{msg.platform}-{sender.replace(':', '_')}-{uuid.uuid4().hex[:8]}"
+            # The forking sender owns the branch (ownership gate, audit H-3).
+            from kazma_core.sessions.directory import record_thread_owner
+
+            record_thread_owner(new_thread_id, sender)
 
             # Override thread identity in the state for the new branch.
             # Full snapshot (scratchpad, summaries, counters) — not messages

@@ -438,6 +438,7 @@ class WorkspaceStore:
 # ══════════════════════════════════════════════════════════════════════════
 
 _workspace_store: WorkspaceStore | None = None
+_workspace_store_init_lock = threading.Lock()
 
 
 def get_workspace_store() -> WorkspaceStore:
@@ -445,11 +446,16 @@ def get_workspace_store() -> WorkspaceStore:
 
     Lazily creates a default instance on first call. All components must
     use this instead of constructing WorkspaceStore() directly, so they
-    share one SQLite connection and one threading.Lock.
+    share one SQLite connection and one threading.Lock. Creation is
+    double-checked-locked (audit L-16): two threads racing the first call
+    used to each build a store, and the loser's connection/lock diverged —
+    the exact race ConfigStore already fixed for itself.
     """
     global _workspace_store
     if _workspace_store is None:
-        _workspace_store = WorkspaceStore()
+        with _workspace_store_init_lock:
+            if _workspace_store is None:
+                _workspace_store = WorkspaceStore()
     return _workspace_store
 
 

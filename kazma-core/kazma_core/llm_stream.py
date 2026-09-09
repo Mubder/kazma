@@ -181,17 +181,37 @@ async def bridged_event_stream(
     Token emits from ``invoke_llm_chat`` land on the same queue the
     consumer reads, so EventBridge / SSE see ``on_chat_model_stream``.
     """
-    queue: asyncio.Queue[Any] = asyncio.Queue()
+    # Bounded: a slow consumer (SSE backpressure) used to grow this queue
+    # without bound. The terminal frame has replace semantics, so dropping
+    # the oldest buffered event on overflow loses at most a transient
+    # token delta, never the final text.
+    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1000)
     register_delta_queue(thread_id, queue)
+
+    def _drop_oldest(item: Any) -> None:
+        try:
+            queue.put_nowait(item)
+        except asyncio.QueueFull:
+            try:
+                queue.get_nowait()  # drop the oldest buffered event
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                queue.put_nowait(item)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "[llm_stream] bridged queue overflow (thread=%s) — event dropped",
+                    thread_id,
+                )
 
     async def _pump() -> None:
         try:
             async for ev in source:
-                await queue.put(ev)
+                _drop_oldest(ev)
         except Exception as exc:  # noqa: BLE001 — forwarded to consumer
-            await queue.put(exc)
+            _drop_oldest(exc)
         finally:
-            await queue.put(_SENTINEL)
+            _drop_oldest(_SENTINEL)
 
     pump = asyncio.create_task(_pump())
     try:

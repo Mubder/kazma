@@ -81,6 +81,17 @@ _URL_BEARING_NAME_WORDS = frozenset({
     "redis",
     "postgres",
     "postgresql",
+    # Audit L-25: same credential-bearing class, missing from the original
+    # word set — a mongo://user:pass@ DSN sat in plaintext.
+    "mongo",
+    "mongodb",
+    "mysql",
+    "mssql",
+    "amqp",
+    "rabbitmq",
+    "elastic",
+    "elasticsearch",
+    "oracle",
 })
 _LOCATOR_LAST_SEGMENTS = frozenset({
     "url",
@@ -553,6 +564,30 @@ class _InMemoryStore:
                 self._data[key] = value
                 self._timestamps[key] = time.monotonic()
             return len(items)
+
+    def atomic_update(self, key: str, updater: Callable[[Any], Any], category: str = "general") -> Any:
+        """Read-modify-write under the lock (protocol parity, audit L-24).
+
+        The volatile fallback used to omit this method even though
+        ``ConfigStoreProtocol`` declares it — callers (e.g. swarm
+        shared-approvals) got AttributeError and silently degraded to
+        per-process coordination.
+        """
+        with self._lock:
+            self._evict_expired()
+            curr = self._data.get(key)
+            new_val = updater(curr)
+            if len(self._data) >= self._max_entries:
+                self._evict_oldest()
+            self._data[key] = new_val
+            self._timestamps[key] = time.monotonic()
+            return new_val
+
+    def transaction(self):
+        """Volatile store is already atomic per-call — a no-op context."""
+        import contextlib
+
+        return contextlib.nullcontext(self)
     
     def _evict_oldest(self) -> None:
         """Evict the oldest 10% of entries."""
@@ -642,6 +677,12 @@ class ConfigStore:
         self._lock = threading.Lock()
         self._yaml_cache: dict[str, Any] | None = None
         self._cache: dict[str, Any] = {}
+        # Cache write timestamps (audit M-P2): the read cache had no TTL, so
+        # in multi-replica (Postgres) deployments replica B never saw replica
+        # A's writes until restart. Entries older than _CACHE_TTL_SECONDS are
+        # re-read from the backing store. Single-process behavior is
+        # unchanged (local writes still invalidate immediately).
+        self._cache_at: dict[str, float] = {}
         self._pg = None  # lazy PostgresPool
         self._init_db()
 
@@ -728,7 +769,7 @@ class ConfigStore:
         """Force re-read of kazma.yaml (+ local) on next access."""
         self._yaml_cache = None
         with self._lock:
-            self._cache.clear()
+            self._clear_cache()
 
     def reload_from_root(self, root_path: str | Path) -> None:
         """Update the yaml_path to the new workspace root and invalidate cache."""
@@ -843,21 +884,85 @@ class ConfigStore:
                     (key, json.dumps(value), category, now),
                 )
                 conn.execute("COMMIT")
-                self._cache.clear()
+                self._clear_cache()
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
+
+    # One-shot latches for the plaintext-fallback warnings (audit M-P7):
+    # the fallbacks are deliberate (keep Kazma working without a vault) but
+    # must be LOUD — a silent downgrade is indistinguishable from "encrypted".
+    _warned_plaintext_vault_off = False
+    _warned_plaintext_vault_err = False
+
+    def _encrypt_nested_sensitive(self, value: Any, path: str) -> Any:
+        """Vault-encrypt sensitive-named string values INSIDE dicts/lists.
+
+        Audit M-P1: nested secrets (``providers.list[].api_key``,
+        ``connectors.x.credentials.password``) used to be stored as
+        plaintext JSON even with the vault on — only top-level exact-string
+        keys were encrypted. This runs on the WRITE path only; the GET side
+        already resolves nested ``vault://`` pointers (resolve-only walk,
+        no lazy migration — see _resolve_vault_value), so there is no
+        read-side ping-pong.
+        """
+        if isinstance(value, dict):
+            return {
+                k: self._encrypt_nested_sensitive(v, f"{path}.{k}" if path else k)
+                for k, v in value.items()
+            }
+        if isinstance(value, list):
+            return [self._encrypt_nested_sensitive(item, path) for item in value]
+        if not isinstance(value, str) or not value:
+            return value
+        if is_vault_ref(value) or is_masked_secret_placeholder(value):
+            return value
+        if not path or not is_sensitive_config_key(path):
+            return value
+        vault = _try_get_vault()
+        if vault is None:
+            self._note_plaintext_fallback(path, vault_off=True)
+            return value
+        try:
+            vname = _vault_secret_name(path)
+            if vault.retrieve(vname) != value:
+                vault.store(vname, value, category="config")
+            return _vault_ref_for_key(path)
+        except Exception as exc:
+            self._note_plaintext_fallback(path, vault_off=False, exc=exc)
+            return value
+
+    def _note_plaintext_fallback(self, key: str, *, vault_off: bool, exc: Exception | None = None) -> None:
+        if vault_off and not ConfigStore._warned_plaintext_vault_off:
+            ConfigStore._warned_plaintext_vault_off = True
+            logger.warning(
+                "[ConfigStore] Sensitive key %s stored in PLAINTEXT — no vault "
+                "is configured. Set KAZMA_VAULT_KEY to encrypt secrets at rest "
+                "(this warning logs once per process).",
+                key,
+            )
+        elif not vault_off and not ConfigStore._warned_plaintext_vault_err:
+            ConfigStore._warned_plaintext_vault_err = True
+            logger.error(
+                "[ConfigStore] Sensitive key %s stored in PLAINTEXT — the vault "
+                "STORE failed (%s). Treat at-rest encryption as broken until "
+                "investigated (this logs once per process).",
+                key, exc,
+            )
 
     def _prepare_value_for_storage(self, key: str, value: Any) -> Any | None:
         """Return value to persist, or None to skip write (masked placeholder).
 
         Sensitive values go to the vault when available; DB stores vault:// ref.
+        Sensitive values NESTED in dicts/lists are encrypted too (M-P1).
         """
         if is_masked_secret_placeholder(value):
             # UI re-saved a masked field — keep existing secret untouched.
             return None
 
         if not is_sensitive_config_key(key):
+            if isinstance(value, (dict, list)):
+                return self._encrypt_nested_sensitive(value, key)
             return value
 
         if value is None or value == "":
@@ -866,12 +971,18 @@ class ConfigStore:
         if is_vault_ref(value):
             return value
 
+        if isinstance(value, (dict, list)):
+            # Sensitive container key (e.g. connectors.x.credentials) —
+            # encrypt the sensitive-named leaves inside, store the structure.
+            return self._encrypt_nested_sensitive(value, key)
+
         if not isinstance(value, str):
             # Non-string secrets still stored as JSON (rare)
             return value
 
         vault = _try_get_vault()
         if vault is None:
+            self._note_plaintext_fallback(key, vault_off=True)
             return value  # plaintext fallback when vault disabled
 
         try:
@@ -879,11 +990,27 @@ class ConfigStore:
             vault.store(vname, value, category="config")
             return _vault_ref_for_key(key)
         except Exception as exc:
-            logger.warning(
-                "[ConfigStore] Vault store failed for %s — falling back to plaintext: %s",
-                key, exc,
-            )
+            self._note_plaintext_fallback(key, vault_off=False, exc=exc)
             return value
+
+    # Read-cache TTL (audit M-P2). Local writes clear/refresh entries
+    # immediately; the TTL only matters for values written by ANOTHER
+    # process (multi-replica Postgres) — 15s of staleness there beats
+    # serving a value from boot forever.
+    _CACHE_TTL_SECONDS = 15.0
+
+    def _clear_cache(self) -> None:
+        """Drop the read cache AND its timestamps (local write invalidation)."""
+        self._cache.clear()
+        self._cache_at.clear()
+
+    def _cache_fresh(self, key: str) -> bool:
+        ts = self._cache_at.get(key)
+        return ts is not None and (time.monotonic() - ts) < self._CACHE_TTL_SECONDS
+
+    def _cache_put(self, key: str, value: Any) -> None:
+        self._cache[key] = value
+        self._cache_at[key] = time.monotonic()
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get a setting. DB overrides YAML.
@@ -898,7 +1025,7 @@ class ConfigStore:
         decrypts them when the vault is enabled.
         """
         with self._lock:
-            if key in self._cache:
+            if key in self._cache and self._cache_fresh(key):
                 cached = self._cache[key]
                 if cached is _MISSING:
                     return default
@@ -917,11 +1044,11 @@ class ConfigStore:
                         )
                         if row is not None:
                             raw = json.loads(row["value"]) if isinstance(row["value"], str) else row["value"]
-                            self._cache[key] = raw
+                            self._cache_put(key, raw)
                         else:
                             merged = self._collect_prefixed_pg(pool, key)
                             if merged:
-                                self._cache[key] = merged
+                                self._cache_put(key, merged)
                                 raw = merged
                             else:
                                 raw = _MISSING
@@ -930,12 +1057,12 @@ class ConfigStore:
                     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
                     if row is not None:
                         raw = json.loads(row["value"])
-                        self._cache[key] = raw
+                        self._cache_put(key, raw)
                     else:
                         # Re-merge flattened children (e.g. from import_yaml round-trip).
                         merged = self._collect_prefixed(conn, key)
                         if merged:
-                            self._cache[key] = merged
+                            self._cache_put(key, merged)
                             raw = merged
                         else:
                             raw = _MISSING
@@ -959,9 +1086,9 @@ class ConfigStore:
 
         with self._lock:
             if val is not None:
-                self._cache[key] = val
+                self._cache_put(key, val)
             else:
-                self._cache[key] = _MISSING
+                self._cache_put(key, _MISSING)
                 return default
         return self._resolve_vault_value(key, val)
 
@@ -998,7 +1125,7 @@ class ConfigStore:
                             (key, json.dumps(to_store), category, now),
                         )
                     conn.commit()
-                self._cache.clear()
+                self._clear_cache()
             else:
                 conn = self._get_conn()
                 try:
@@ -1009,7 +1136,7 @@ class ConfigStore:
                         (key, json.dumps(to_store), category, now),
                     )
                     conn.execute("COMMIT")
-                    self._cache.clear()
+                    self._clear_cache()
                 except Exception:
                     logger.debug("set() write failed, rolling back for key=%s", key)
                     conn.execute("ROLLBACK")
@@ -1176,7 +1303,12 @@ class ConfigStore:
                                 curr = row[0]
                         new_val = updater(curr)
                         to_store = self._prepare_value_for_storage(key, new_val)
-                        val_str = json.dumps(to_store) if not isinstance(to_store, str) else to_store
+                        # Serialize EXACTLY like set() (audit M-P3): a plain
+                        # string used to be stored unquoted here while get()
+                        # unconditionally json.loads — a string-valued key
+                        # mutated through atomic_update crashed every later
+                        # read with JSONDecodeError.
+                        val_str = json.dumps(to_store)
                         cur.execute(
                             """
                             INSERT INTO kazma_settings (key, value, category, updated_at)
@@ -1189,7 +1321,7 @@ class ConfigStore:
                             (key, val_str, category, now_iso),
                         )
                     conn.commit()
-                self._cache[key] = new_val
+                self._cache_put(key, new_val)
                 return new_val
             else:
                 conn = self._get_conn()
@@ -1208,14 +1340,14 @@ class ConfigStore:
                             curr = row[0]
                     new_val = updater(curr)
                     to_store = self._prepare_value_for_storage(key, new_val)
-                    val_str = json.dumps(to_store) if not isinstance(to_store, str) else to_store
+                    val_str = json.dumps(to_store)
                     conn.execute(
                         """INSERT OR REPLACE INTO settings (key, value, category, updated_at)
                            VALUES (?, ?, ?, ?)""",
                         (key, val_str, category, now_iso),
                     )
                     conn.execute("COMMIT")
-                    self._cache[key] = new_val
+                    self._cache_put(key, new_val)
                     return new_val
                 except Exception:
                     conn.execute("ROLLBACK")
@@ -1265,7 +1397,7 @@ class ConfigStore:
                                 (key, json.dumps(value), category, now),
                             )
                     conn.commit()
-                self._cache.clear()
+                self._clear_cache()
             else:
                 conn = self._get_conn()
                 try:
@@ -1277,7 +1409,7 @@ class ConfigStore:
                             (key, json.dumps(value), category, now),
                         )
                     conn.execute("COMMIT")
-                    self._cache.clear()
+                    self._clear_cache()
                 except Exception:
                     conn.execute("ROLLBACK")
                     raise
@@ -1303,7 +1435,7 @@ class ConfigStore:
             try:
                 yield conn
                 conn.execute("COMMIT")
-                self._cache.clear()
+                self._clear_cache()
             except Exception:
                 conn.execute("ROLLBACK")
                 raise
@@ -1393,7 +1525,7 @@ class ConfigStore:
                         deleted = cur.rowcount > 0
                     conn.commit()
                 if deleted:
-                    self._cache.clear()
+                    self._clear_cache()
             else:
                 conn = self._get_conn()
                 try:
@@ -1402,7 +1534,7 @@ class ConfigStore:
                     conn.execute("COMMIT")
                     deleted = cursor.rowcount > 0
                     if deleted:
-                        self._cache.clear()
+                        self._clear_cache()
                 except Exception:
                     conn.execute("ROLLBACK")
                     raise
@@ -1596,14 +1728,14 @@ class ConfigStore:
                         cur.execute("DELETE FROM kazma_settings")
                         deleted = cur.rowcount
                     conn.commit()
-                self._cache.clear()
+                self._clear_cache()
                 return int(deleted or 0)
             conn = self._get_conn()
             try:
                 conn.execute("BEGIN")
                 cursor = conn.execute("DELETE FROM settings")
                 conn.execute("COMMIT")
-                self._cache.clear()
+                self._clear_cache()
                 return cursor.rowcount
             except Exception:
                 conn.execute("ROLLBACK")

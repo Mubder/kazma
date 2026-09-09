@@ -300,6 +300,20 @@ def create_sse_chat_router(
             )
 
         user_message = (body.get("message") or "").strip()
+        # Application-level prompt cap: uvicorn/ws frame limits bound the
+        # transport, but an authenticated client could still hand a giant
+        # body to the graph (memory pressure, checkpoint bloat). 512 KB is
+        # far beyond any sane prompt and matches the WS side.
+        if len(user_message) > 512_000:
+            return StreamingResponse(
+                iter([
+                    _sse_frame("error", {
+                        "content": "Message too large (over 512,000 characters). Split it into parts.",
+                    })
+                ]),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
         # Optional attachments uploaded via /api/chat/upload. The upload ID,
         # not a client filesystem path, is the server-side byte reference.
         raw_attachments = body.get("attachments") or []

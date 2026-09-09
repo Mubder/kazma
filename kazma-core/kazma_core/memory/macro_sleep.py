@@ -107,6 +107,15 @@ def run_macro_sleep(
                FROM episodes WHERE tenant_id=?""",
             (tenant_id,),
         ).fetchall()
+        # Batched writes (audit L-22): transitions are collected per bucket
+        # and applied with executemany after the scan — one round trip per
+        # transition class instead of one per row (a multi-year tenant used
+        # to pay N executes inside one transaction every 6h sweep).
+        _to_episodic: list[str] = []
+        _to_recall: list[str] = []
+        _archive_recall: list[str] = []
+        _idle_to_episodic: list[str] = []
+        _archive_episodic: list[str] = []
         for r in rows:
             eid = r["id"]
             tier = r["tier"]
@@ -130,15 +139,11 @@ def run_macro_sleep(
 
             # Working-tier TTL → episodic (active buffer must not grow forever)
             if tier == "working" and created_age > working_ttl:
-                primary_conn.execute(
-                    "UPDATE episodes SET tier='episodic' WHERE id=?", (eid,)
-                )
+                _to_episodic.append(eid)
                 stats["demoted_working"] += 1
             # Promote episodic→recall when important + accessed
             elif tier == "episodic" and importance >= promote_min_importance and access >= promote_min_access:
-                primary_conn.execute(
-                    "UPDATE episodes SET tier='recall' WHERE id=?", (eid,)
-                )
+                _to_recall.append(eid)
                 stats["promoted_to_recall"] += 1
             # Demote recall→archived by pure age (recall_ttl_days) — bounds
             # long-term recall growth even for frequently-idle items that
@@ -156,29 +161,37 @@ def run_macro_sleep(
                 and age > recall_ttl
                 and importance < promote_min_importance
             ):
-                primary_conn.execute(
-                    "UPDATE episodes SET tier='archived', "
-                    "summary_text=COALESCE(summary_text, SUBSTR(user_text, 1, 200)), "
-                    "user_text=NULL, assistant_text=NULL WHERE id=?",
-                    (eid,),
-                )
+                _archive_recall.append(eid)
                 stats["demoted_recall"] += 1
             # Demote recall→episodic when idle past the threshold
             elif tier == "recall" and age > recall_idle:
-                primary_conn.execute(
-                    "UPDATE episodes SET tier='episodic' WHERE id=?", (eid,)
-                )
+                _idle_to_episodic.append(eid)
                 stats["demoted_recall"] += 1
             # Demote episodic→archived when past TTL + low importance
             elif tier == "episodic" and (now - float(r["created_at"] or now)) > episodic_ttl and importance < promote_min_importance:
                 # Drop raw text, keep summary (or synthesize a stub)
-                primary_conn.execute(
-                    """UPDATE episodes SET tier='archived',
-                       summary_text=COALESCE(summary_text, SUBSTR(user_text, 1, 200)),
-                       user_text=NULL, assistant_text=NULL WHERE id=?""",
-                    (eid,),
-                )
+                _archive_episodic.append(eid)
                 stats["demoted_episodic"] += 1
+
+        if _to_episodic or _idle_to_episodic:
+            primary_conn.executemany(
+                "UPDATE episodes SET tier='episodic' WHERE id=?",
+                [(eid,) for eid in _to_episodic + _idle_to_episodic],
+            )
+        if _to_recall:
+            primary_conn.executemany(
+                "UPDATE episodes SET tier='recall' WHERE id=?",
+                [(eid,) for eid in _to_recall],
+            )
+        _archive_sql = (
+            "UPDATE episodes SET tier='archived', "
+            "summary_text=COALESCE(summary_text, SUBSTR(user_text, 1, 200)), "
+            "user_text=NULL, assistant_text=NULL WHERE id=?"
+        )
+        if _archive_recall:
+            primary_conn.executemany(_archive_sql, [(eid,) for eid in _archive_recall])
+        if _archive_episodic:
+            primary_conn.executemany(_archive_sql, [(eid,) for eid in _archive_episodic])
 
         # ── Archive old superseded beliefs ──
         old_superseded = primary_conn.execute(

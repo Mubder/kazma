@@ -1244,6 +1244,7 @@ class KnowledgeStore:
 # ══════════════════════════════════════════════════════════════════════════
 
 _knowledge_store: KnowledgeStore | None = None
+_knowledge_store_init_lock = threading.Lock()
 
 
 def get_knowledge_store() -> KnowledgeStore:
@@ -1251,11 +1252,15 @@ def get_knowledge_store() -> KnowledgeStore:
 
     Lazily creates a default instance on first call.  All components must
     use this instead of constructing ``KnowledgeStore()`` directly, so they
-    share one SQLite connection and one ``threading.Lock``.
+    share one SQLite connection and one ``threading.Lock``. Creation is
+    double-checked-locked (audit L-16): two threads racing the first call
+    used to each build a store, and the loser's connection/lock diverged.
     """
     global _knowledge_store
     if _knowledge_store is None:
-        _knowledge_store = KnowledgeStore()
+        with _knowledge_store_init_lock:
+            if _knowledge_store is None:
+                _knowledge_store = KnowledgeStore()
     return _knowledge_store
 
 

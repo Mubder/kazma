@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.responses import JSONResponse as _JSONResponse
 from kazma_core.background import spawn_background
 from kazma_core.errors import safe_error
@@ -20,6 +20,34 @@ from kazma_ui.rate_limit import rate_limit
 logger = logging.getLogger(__name__)
 
 __all__ = ["register_backup_routes"]
+
+
+def _require_admin(request: Request) -> _JSONResponse | None:
+    """Admin/operator gate for backup mutation + download routes.
+
+    A backup archive is a full snapshot of every DB and secret-bearing
+    file — deleting/archiving/downloading one is an admin operation.
+    Mirrors documents_api._require_admin: no secret configured (local
+    single-operator mode) passes; the shared secret principal passes;
+    cookie/API principals need the admin role.
+    """
+    try:
+        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+
+        secret = get_kazma_secret()
+        if not secret:
+            return None
+        if not is_authenticated(request, secret):
+            return _JSONResponse({"error": "Unauthorized"}, status_code=401)
+        principal = get_request_principal(request) or {}
+        if principal.get("source") == "secret":
+            return None
+        if principal.get("role") != "admin":
+            return _JSONResponse({"error": "Admin role required"}, status_code=403)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[backup] admin check failed: %s", exc)
+        return None
 
 
 def register_backup_routes(self: Any) -> None:
@@ -89,20 +117,29 @@ def register_backup_routes(self: Any) -> None:
 
         return {"backups": list_universal_backups()}
     @self.app.delete("/api/backup/{dir_name}")
-    async def _backup_delete(dir_name: str) -> Any:
+    async def _backup_delete(dir_name: str, request: Request) -> Any:
         """Delete a universal backup by its directory name (timestamp)."""
+        denied = _require_admin(request)
+        if denied:
+            return denied
         from kazma_core.backup.universal import delete_universal_backup
 
         return delete_universal_backup(dir_name)
     @self.app.post("/api/backup/{dir_name}/archive", dependencies=[Depends(rate_limit("backup", 3))])
-    async def _backup_archive(dir_name: str) -> Any:
+    async def _backup_archive(dir_name: str, request: Request) -> Any:
         """Archive a universal backup into a downloadable .zip."""
+        denied = _require_admin(request)
+        if denied:
+            return denied
         from kazma_core.backup.universal import archive_universal_backup
 
         return archive_universal_backup(dir_name)
     @self.app.get("/api/backup/{dir_name}/download")
-    async def _backup_download(dir_name: str) -> Any:
+    async def _backup_download(dir_name: str, request: Request) -> Any:
         """Download an archived backup (.zip)."""
+        denied = _require_admin(request)
+        if denied:
+            return denied
         import re
 
         from fastapi.responses import FileResponse
