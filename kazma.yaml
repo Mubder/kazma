@@ -75,8 +75,7 @@ system_prompt: 'You are Kazma (Arabic: كاظمه / كاظمة — never كاز�
 
   When you have tools available, use them to accomplish tasks.
 
-  TOOL SELECTION: Prefer native tools over shell_exec. Use codebase_search to find symbols/text, then file_read; file_apply_patch for edits, file_write for new files.
-  for files; git tools for git; python_exec for short scripts. shell_exec cwd is already
+  TOOL SELECTION: Prefer native tools over shell_exec. Use codebase_search to find symbols/text, then file_read; use file_list / file_read / file_search / file_write for files; file_apply_patch for edits; git tools for git; python_exec for short scripts. shell_exec cwd is already
   the workspace — never use cd (blocked).
 
   CRITICAL LANGUAGE RULE: Match the language of the user''s *latest* message only.
@@ -127,9 +126,9 @@ connectors:
   telegram:
     enabled: true
   discord:
-    enabled: false
+    enabled: true
   slack:
-    enabled: false
+    enabled: true
 gateway:
   rate_limits:
     telegram: 30
