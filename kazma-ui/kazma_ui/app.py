@@ -789,27 +789,39 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[app] Checkpoint retention loop failed to start: %s", e)
 
-            # Liveness heartbeat (audit M-P6): `kazma migrate import` refuses
-            # to swap live DBs when this key is fresh — a swap under a live
-            # process discards uncheckpointed WAL frames / fails on Windows.
-            async def _heartbeat_loop() -> None:
-                while True:
-                    try:
-                        from kazma_core.config_store import get_config_store
-                        import time as _time
-
-                        get_config_store().set(
-                            "system.heartbeat.epoch", _time.time(), category="system"
-                        )
-                    except Exception:
-                        pass
-                    await asyncio.sleep(60)
-
-            spawn_background(_heartbeat_loop(), name="liveness-heartbeat")
-
         except Exception as e:
             logger.warning("[Swarm] SwarmManager not available: %s", e)
             self.swarm_manager = None
+
+        # Liveness heartbeat (audit M-P6): `kazma migrate import` refuses to
+        # swap live DBs when this key is fresh. Deliberately OUTSIDE the swarm
+        # try-block above: a heartbeat failure must never take the SwarmManager
+        # down with it (live 2026-09-09: a missing spawn_background import
+        # here disabled the entire swarm subsystem at boot).
+        if not getattr(KazmaAppBuilder, "_heartbeat_started", False):
+            KazmaAppBuilder._heartbeat_started = True
+            try:
+                from kazma_core.background import spawn_background
+
+                async def _heartbeat_loop() -> None:
+                    import time as _time
+
+                    while True:
+                        try:
+                            from kazma_core.config_store import get_config_store
+
+                            # atomic_update (not set): set() logs every write
+                            # at INFO — once a minute forever is log spam.
+                            get_config_store().atomic_update(
+                                "system.heartbeat.epoch", lambda _v: _time.time()
+                            )
+                        except Exception:
+                            pass
+                        await asyncio.sleep(60)
+
+                spawn_background(_heartbeat_loop(), name="liveness-heartbeat")
+            except Exception as e:
+                logger.warning("[app] Liveness heartbeat failed to start: %s", e)
 
         if self.swarm_manager is not None:
             container = get_container()
