@@ -186,7 +186,7 @@ class TestSidebarRendersOnPages:
         app = create_app()
         return TestClient(app)
 
-    @pytest.mark.parametrize("route", ["/", "/chat", "/settings", "/agents"])
+    @pytest.mark.parametrize("route", ["/chat", "/settings", "/agents", "/dashboard"])
     def test_page_returns_200_with_sidebar(self, client: TestClient, route: str) -> None:
         resp = client.get(route)
         assert resp.status_code == 200

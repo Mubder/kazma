@@ -64,6 +64,84 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--text-primary);
 }
 
+/* Hands 0.11 — More disclosure.
+   NEVER set display:flex (or any display) on details.nav-more itself:
+   that overrides UA closed-details hiding (2026-08-26 revert). */
+.nav-more {
+  margin-top: var(--sp-2);
+  border: 0;
+}
+.nav-more-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  min-height: var(--tap);
+}
+.nav-more-summary::-webkit-details-marker { display: none; }
+.nav-more-summary::before {
+  content: "";
+  width: 0.45em;
+  height: 0.45em;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  flex-shrink: 0;
+}
+.nav-more[open] > .nav-more-summary::before {
+  transform: rotate(45deg);
+}
+.nav-more-body {
+  display: none;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-inline-start: 2px;
+}
+.nav-more[open] > .nav-more-body {
+  display: flex;
+}
+
+/* Hands 0.11 first-run wall — no inline display; x-cloak + x-show own hide. */
+.chat-container { position: relative; }
+.setup-wall {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  padding: var(--sp-6);
+}
+.setup-wall[x-cloak],
+.setup-wall[hidden] {
+  display: none !important;
+}
+.setup-wall-card {
+  width: min(28rem, 100%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  box-shadow: var(--shadow);
+}
+.setup-wall-card h2 { margin: 0; font-size: 1.25rem; }
+.setup-wall-card p { margin: 0; color: var(--text-muted); font-size: 0.9rem; }
+.setup-wall-label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
+.setup-wall-error { color: var(--error); font-size: 0.85rem; }
+.setup-wall-hint { font-size: 0.75rem; }
+
 /* Model selector — softer pill */
 .sidebar-model-dropdown {
   border-radius: 10px;

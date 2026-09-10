@@ -24,11 +24,8 @@ def _sidebar_hrefs_by_section() -> dict[str, list[str]]:
         if "nav.primary" in line:
             current = "work"
             sections.setdefault(current, [])
-        elif "nav.activity" in line:
-            current = "activity"
-            sections.setdefault(current, [])
-        elif "nav.configuration" in line:
-            current = "settings"
+        elif "nav-more-body" in line:
+            current = "more"
             sections.setdefault(current, [])
         if 'href="/' in line and "nav-link" in line:
             start = line.index('href="') + 6
@@ -37,15 +34,15 @@ def _sidebar_hrefs_by_section() -> dict[str, list[str]]:
     return sections
 
 
-def test_sidebar_groups_match_the_six_improvements() -> None:
+def test_sidebar_groups_match_hands_work_and_more() -> None:
     groups = _sidebar_hrefs_by_section()
-    assert "/dashboard" in groups["work"]
-    assert "/agents" in groups["work"]
-    assert "/replay" in groups["activity"]
-    assert "/dashboard" not in groups["settings"]
-    assert "/agents" not in groups["settings"]
-    assert "/replay" not in groups["settings"]
-    assert groups["settings"] == ["/settings", "/skills", "/mcp"]
+    assert groups["work"] == ["/chat", "/workspace", "/ide", "/settings"]
+    assert "/dashboard" in groups["more"]
+    assert "/agents" in groups["more"]
+    assert "/replay" in groups["more"]
+    assert "/skills" in groups["more"]
+    assert "/mcp" in groups["more"]
+    assert "/dashboard" not in groups["work"]
 
 
 def test_bottom_nav_uses_dashboard_not_memory() -> None:

@@ -123,11 +123,10 @@ class TestMCPRoutes:
 
 
 class TestRootRoutes:
-    def test_root_serves_workspace(self, client: TestClient) -> None:
-        resp = client.get("/")
-        assert resp.status_code == 200
-        # Root serves the dashboard (index.html was deleted in P4 — orphaned)
-        assert "Kazma" in resp.text
+    def test_root_redirects_to_chat(self, client: TestClient) -> None:
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code == 303
+        assert "/chat" in (resp.headers.get("location") or "")
 
     def test_chat_page(self, client: TestClient) -> None:
         resp = client.get("/chat")

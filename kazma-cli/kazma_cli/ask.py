@@ -8,6 +8,7 @@ import sys
 from typing import Any
 
 from kazma_core.cli.ask import (
+    apply_repl_line,
     ask_help_text,
     parse_ask_argv,
     run_acp_stdio,
@@ -69,6 +70,8 @@ def run(argv: list[str]) -> int:
         opts.prompt = prompt
         stdin_consumed = True
     if not (prompt or "").strip():
+        if sys.stdin.isatty():
+            return _run_repl(opts)
         print(ask_help_text(), file=sys.stderr)
         return 2
 
@@ -132,3 +135,63 @@ def run(argv: list[str]) -> int:
         elif result.error:
             print(result.error, file=sys.stderr)
     return 0 if result.ok else 1
+
+
+def _run_repl(opts: Any) -> int:
+    """Multi-turn ask on a TTY. Reuses one thread_id until /new."""
+    import uuid as _uuid
+
+    thread_id = (opts.thread_id or "").strip() or f"cli-{_uuid.uuid4()}"
+    print(f"kazma ask  thread_id={thread_id}  (/exit /quit /new)", file=sys.stderr)
+    opts.thread_id = thread_id
+    while True:
+        try:
+            raw = input("kazma> ")
+        except (EOFError, KeyboardInterrupt):
+            print("", file=sys.stderr)
+            return 0
+        thread_id, prompt = apply_repl_line(raw, thread_id)
+        opts.thread_id = thread_id
+        if prompt is None:
+            if raw.strip().lower() == "/new":
+                print(f"thread_id={thread_id}", file=sys.stderr)
+            continue
+        if prompt == "":
+            return 0
+
+        def on_event(ev: dict[str, Any]) -> None:
+            if opts.json_out:
+                print(json.dumps(ev, ensure_ascii=False), flush=True)
+                return
+            kind = ev.get("event")
+            if kind == "token" and ev.get("text"):
+                sys.stdout.write(str(ev["text"]))
+                sys.stdout.flush()
+            elif kind in ("tool_start", "tool_end"):
+                _print_tool_line(ev)
+            elif kind == "error" and ev.get("text"):
+                print(str(ev["text"]), file=sys.stderr)
+
+        hitl_decide = None
+        if not opts.yolo:
+            def hitl_decide(payload: dict[str, Any]) -> dict[str, Any]:
+                return _hitl_decide_tty(payload, stdin_consumed=False)
+
+        try:
+            result = asyncio.run(
+                run_ask(
+                    prompt,
+                    opts,
+                    on_event=on_event if opts.stream else None,
+                    hitl_decide=hitl_decide,
+                )
+            )
+        except KeyboardInterrupt:
+            print("\nInterrupted.", file=sys.stderr)
+            continue
+        if not opts.json_out:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+            if result.error and not result.text:
+                print(result.error, file=sys.stderr)
+    return 0

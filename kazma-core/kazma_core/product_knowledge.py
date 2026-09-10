@@ -143,7 +143,7 @@ Project data lives under **`kazma-data/`** (settings, checkpoints, swarm tasks, 
 - **Deep work:** raise **Settings → Agent → Max tool rounds** (presets: Chat 15, Deep 30, Research 40) so long audits do not hit the cap mid-task.
 
 ### Danger tools (require approval unless YOLO)
-Typical list: `file_write`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, tools run with host power — be careful what you propose.
+Typical list: `file_write`, `file_apply_patch_set`, `file_delete`, `shell_exec`, `code_exec` / `python_exec`, `email_send`, `email_delete`, `email_categorize`. Swarm also treats spawn/schedule tools as extended danger. After approval, `python_exec` runs in Docker when `KAZMA_CODE_EXEC_DOCKER=force` (no network); otherwise it may fall back to the host. `shell_exec` is host-allowlisted after Approve — the Hands demo uses tests/`python_exec`, not shell, for the red-test fix.
 
 ### Approval-card delivery (facts — never invent throttles)
 - Web chat approval cards have **no rate limit**: every gate surfaces immediately, however many in a batch.

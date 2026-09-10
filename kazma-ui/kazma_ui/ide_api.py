@@ -103,6 +103,35 @@ def create_ide_router() -> APIRouter:
             logger.warning("[ide_api] apply_patch failed: %s", exc)
             return {"ok": False, "error": safe_error(exc), "path": path}
 
+    @router.post("/apply_patch_set")
+    async def apply_patch_set(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        patches = payload.get("patches")
+        if not isinstance(patches, list) or not patches:
+            return {"ok": False, "error": "Missing 'patches'"}
+        try:
+            return await _service().apply_patch_set(list(patches))
+        except Exception as exc:
+            logger.warning("[ide_api] apply_patch_set failed: %s", exc)
+            return {"ok": False, "error": safe_error(exc)}
+
+    @router.get("/checkpoints")
+    async def list_checkpoints() -> dict[str, Any]:
+        from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
+
+        try:
+            items = get_file_checkpoint_store().list_for_workspace()
+            return {"ok": True, "checkpoints": items}
+        except Exception as exc:
+            return {"ok": False, "error": safe_error(exc)}
+
+    @router.post("/checkpoints/{checkpoint_id}/restore")
+    async def restore_checkpoint_route(checkpoint_id: str) -> dict[str, Any]:
+        try:
+            return await _service().restore_file_checkpoint(checkpoint_id)
+        except Exception as exc:
+            logger.warning("[ide_api] restore checkpoint failed: %s", exc)
+            return {"ok": False, "error": safe_error(exc)}
+
     # ── POST /api/ide/delete ───────────────────────────────────────────
     @router.post("/delete")
     async def delete_file(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:

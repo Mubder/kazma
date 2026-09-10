@@ -28,6 +28,8 @@ services:
       KAZMA_HOST: "0.0.0.0"
       KAZMA_TRUST_LAN: "${KAZMA_TRUST_LAN:-0}"
       KAZMA_PRODUCTION: "${KAZMA_PRODUCTION:-1}"
+      # Hands 0.11: python_exec stays in the jail. shell_exec is still host
+      # power after Approve — the demo uses pytest / python_exec, not shell.
       KAZMA_CODE_EXEC_DOCKER: "${KAZMA_CODE_EXEC_DOCKER:-force}"
       KAZMA_VECTOR_PATH: "/home/kazma/.kazma/vector_memory"
       # When running with profile `search`, point at the compose service DNS name.

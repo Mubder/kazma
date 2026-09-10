@@ -159,6 +159,7 @@ safety:
     - email_send
     - file_append
     - file_apply_patch
+    - file_apply_patch_set
     - file_delete
     - file_write
     - git_checkout

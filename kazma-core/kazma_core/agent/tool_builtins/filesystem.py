@@ -93,6 +93,21 @@ def register_filesystem_tools(registry: Any) -> None:
         )
     @registry.register(
         description=(
+            "Apply several surgical edits in one step (one HITL card). Each item "
+            "is {path, old_string, new_string} or {path, patch}. Prefer this over "
+            "N× file_apply_patch / file_write for a multi-file fix. Max 20 hunks. "
+            "Failed hunks restore a workspace checkpoint."
+        ),
+        category="filesystem",
+    )
+    async def file_apply_patch_set(patches: list[dict] | None = None) -> str:
+        from kazma_core.tools.file_apply_patch import (
+            file_apply_patch_set as _set_tool,
+        )
+
+        return await _set_tool(patches)
+    @registry.register(
+        description=(
             "Append content to the end of a local file. Creates the file and parent "
             "directories if needed. Use this to build LARGE files in chunks — one "
             "file_write to create, then file_append for each subsequent section — "

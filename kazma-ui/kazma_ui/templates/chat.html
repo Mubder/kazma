@@ -13,6 +13,33 @@
 
 {% block content %}
 <div class="chat-container">
+<div class="setup-wall" id="setup-wall"
+     x-data="setupWall()"
+     x-init="init()"
+     x-cloak
+     x-show="show">
+  <div class="setup-wall-card">
+    <h2>{{ t('chat.setup_title') }}</h2>
+    <p>{{ t('chat.setup_subtitle') }}</p>
+    <label class="setup-wall-label" for="setup-provider">{{ t('chat.setup_provider') }}</label>
+    <select id="setup-provider" class="form-select" x-model="provider">
+      <template x-for="p in presets" :key="p.id">
+        <option :value="p.id" x-text="p.name"></option>
+      </template>
+    </select>
+    <label class="setup-wall-label" for="setup-key">{{ t('chat.setup_api_key') }}</label>
+    <input id="setup-key" class="form-input" type="password" autocomplete="off" x-model="apiKey"
+           :placeholder="tKeyHint">
+    <label class="setup-wall-label" for="setup-model">{{ t('chat.setup_model') }}</label>
+    <input id="setup-model" class="form-input" type="text" x-model="model"
+           placeholder="gpt-4.1, claude-sonnet-4-5, …">
+    <p class="setup-wall-error" x-cloak x-show="error" x-text="error"></p>
+    <button type="button" class="btn btn-primary" @click="submit()" :disabled="busy">
+      {{ t('chat.setup_start') }}
+    </button>
+    <p class="setup-wall-hint">{{ t('chat.setup_settings_hint') }}</p>
+  </div>
+</div>
   <!-- ── Mobile chat-sidebar backdrop ── -->
   <div class="sidebar-backdrop" x-show="mobileChatSidebarOpen" x-transition.opacity
        @click="closeMobileChatSidebar()" x-cloak></div>
@@ -221,6 +248,57 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+function setupWall() {
+  return {
+    show: false,
+    busy: false,
+    provider: "openai",
+    apiKey: "",
+    model: "",
+    error: "",
+    presets: [],
+    tKeyHint: {{ t('chat.setup_key_placeholder') | tojson }},
+    async init() {
+      try {
+        const r = await fetch("/api/setup/status");
+        if (!r.ok) { this.show = false; return; }
+        const d = await r.json();
+        this.presets = d.presets || [];
+        this.show = d.ready === false;
+      } catch (e) {
+        this.show = false;
+      }
+    },
+    async submit() {
+      this.busy = true;
+      this.error = "";
+      try {
+        const r = await fetch("/api/setup/bootstrap", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider: this.provider,
+            api_key: this.apiKey,
+            model: this.model,
+          }),
+        });
+        const d = await r.json();
+        if (d.error) {
+          this.error = d.error;
+          return;
+        }
+        this.show = d.ready === false;
+        if (d.ready) this.apiKey = "";
+      } catch (e) {
+        this.error = "setup_failed";
+      } finally {
+        this.busy = false;
+      }
+    },
+  };
+}
+</script>
 <script>
   /* Localized CoT / Activity strings for chat.js + agentStore.js */
   window.CHAT_I18N = {

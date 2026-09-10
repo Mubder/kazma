@@ -5,6 +5,8 @@ sidebar_label: Quickstart
 description: Kazma Quickstart — code-audited reference (unified docs, v0.9+)
 ---
 > Get Kazma running and answering messages in under 10 minutes. This guide is the install source of truth — keep it in lockstep with `pyproject.toml`, `setup.ps1` / `setup.sh`, and Settings → Packages.
+>
+> After `kazma serve`, open **`/` — that is chat**, not the dashboard. First-run asks for one provider key and one model. Inspectors live under **More**.
 
 ---
 

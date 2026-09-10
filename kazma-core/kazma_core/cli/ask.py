@@ -38,6 +38,7 @@ __all__ = [
     "extract_hitl_interrupt",
     "handle_acp_request",
     "map_permission_outcome",
+    "apply_repl_line",
     "parse_ask_argv",
     "prompt_from_acp_blocks",
     "run_acp_stdio",
@@ -149,9 +150,24 @@ def ask_help_text() -> str:
         "  --model NAME          Switch model for this process\n"
         "  --acp                 Agent Client Protocol stdio server\n"
         "\n"
+        "No prompt on a TTY enters a multi-turn REPL (same thread). /exit /quit "
+        "leave; /new starts a fresh thread.\n"
         "HITL: on a TTY, danger tools prompt y/N. Not a TTY → deny unless --yolo.\n"
         "ACP: session/request_permission so the editor can approve.\n"
     )
+
+
+def apply_repl_line(line: str, thread_id: str) -> tuple[str, str | None]:
+    """REPL meta commands. Returns (thread_id, prompt_or_None)."""
+    text = (line or "").strip()
+    if not text:
+        return thread_id, None
+    low = text.lower()
+    if low in ("/exit", "/quit"):
+        return thread_id, ""
+    if low == "/new":
+        return f"cli-{uuid.uuid4()}", None
+    return thread_id, text
 
 
 def prompt_from_acp_blocks(prompt: Any) -> str:

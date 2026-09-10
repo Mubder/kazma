@@ -105,3 +105,13 @@ class TestRegistry:
     def test_no_handler_not_execute(self):
         route, _, reason, _ = _decide("reproduce this PDF")
         assert route != RouteKind.EXECUTE
+
+
+class TestHandsCodingNote:
+    def test_code_constrain_mentions_patch_set(self):
+        from kazma_core.agent.intent.policy import _plan_note_for
+        from kazma_core.agent.intent.types import EntitySet
+
+        note = _plan_note_for(ActKind.CODE_EXEC, {}, EntitySet())
+        assert "file_apply_patch" in note
+        assert "HITL" in note
