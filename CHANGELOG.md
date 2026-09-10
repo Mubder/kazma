@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.11 Hands — real remaining promises
+
+- **Coding loop:** `file_apply_patch_set(verify=true)` runs nearby pytest after apply; `TESTS PASSED` / `TESTS FAILED` in the tool result. IDE review uses unified diffs and per-file reject.
+- **Jail:** `KAZMA_CODE_EXEC_DOCKER=force` disables host `shell_exec` unless `KAZMA_HOST_SHELL=1`. python_exec stays Docker-or-fail.
+- **Usefulness eval:** `tests/test_hands_outcome.py` patches hands-demo until pytest is green (no live LLM).
+
 ## 0.11 ACP daily driver
 
 Editor permission prompts carry structured `diff` content for

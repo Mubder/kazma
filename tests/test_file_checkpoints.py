@@ -31,6 +31,22 @@ def test_checkpoint_restore_roundtrip(tmp_path: Path, monkeypatch: pytest.Monkey
     assert target.read_text(encoding="utf-8").strip() == "n = 1"
 
 
+def test_restore_one_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("KAZMA_FILE_CHECKPOINTS_DB", str(tmp_path / "ck.db"))
+    _pin(tmp_path, monkeypatch)
+    a = tmp_path / "a.py"
+    b = tmp_path / "b.py"
+    a.write_text("a=1\n", encoding="utf-8")
+    b.write_text("b=1\n", encoding="utf-8")
+    store = FileCheckpointStore(tmp_path / "ck.db")
+    cid = store.create([str(a), str(b)], reason="two")
+    a.write_text("a=2\n", encoding="utf-8")
+    b.write_text("b=2\n", encoding="utf-8")
+    store.restore_one(cid, str(a))
+    assert a.read_text(encoding="utf-8").strip() == "a=1"
+    assert b.read_text(encoding="utf-8").strip() == "b=2"
+
+
 def test_checkpoint_skips_outside_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KAZMA_FILE_CHECKPOINTS_DB", str(tmp_path / "ck.db"))
     ws = tmp_path / "ws"

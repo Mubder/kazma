@@ -145,10 +145,20 @@ def create_ide_router() -> APIRouter:
                         after = p.read_text(encoding="utf-8")
                 except Exception:
                     after = ""
+            import difflib
+
+            hunks = list(difflib.unified_diff(
+                before.splitlines(),
+                after.splitlines(),
+                fromfile="a/" + _Path(path).name,
+                tofile="b/" + _Path(path).name,
+                lineterm="",
+            ))
             files.append({
                 "path": path,
                 "before": before,
                 "after": after,
+                "diff": "\n".join(hunks[:200]),
                 "changed": before != after,
             })
         return {
@@ -157,6 +167,19 @@ def create_ide_router() -> APIRouter:
             "reason": rec.get("reason") or "",
             "files": files,
         }
+
+    @router.post("/checkpoints/{checkpoint_id}/restore-path")
+    async def restore_one_path(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
+
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            return {"ok": False, "error": "Missing 'path'"}
+        try:
+            restored = get_file_checkpoint_store().restore_one(checkpoint_id, path)
+            return {"ok": True, "path": restored, "checkpoint_id": checkpoint_id}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
     @router.post("/checkpoints/{checkpoint_id}/restore")
     async def restore_checkpoint_route(checkpoint_id: str) -> dict[str, Any]:

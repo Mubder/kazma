@@ -151,7 +151,10 @@
     </div>
     <template x-for="file in review.files" :key="file.path">
       <div class="ide-review-file" x-show="file.changed" x-cloak>
-        <div class="ide-review-path" x-text="file.path"></div>
+        <div class="ide-review-path">
+          <span x-text="file.path"></span>
+          <button class="btn btn-xs btn-danger" @click="rejectFile(file.path)" :disabled="busy">{{ t('ide.review_reject_file') }}</button>
+        </div>
         <div class="hitl-diff" x-html="reviewHunkHtml(file)"></div>
       </div>
     </template>

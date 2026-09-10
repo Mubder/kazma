@@ -262,6 +262,14 @@ def register_system_tools(registry: Any) -> None:
     async def shell_exec(command: str, timeout: int = 30) -> str:
         import asyncio
         import shlex
+        from kazma_core.safety.post_hitl import host_shell_allowed
+
+        if not host_shell_allowed():
+            return (
+                "Error: host shell_exec is disabled while KAZMA_CODE_EXEC_DOCKER=force "
+                "(attention jail). Use python_exec (Docker, no network) or set "
+                "KAZMA_HOST_SHELL=1 as an explicit escape hatch."
+            )
         # Log all shell_exec invocations — this is a dangerous tool
         logger.warning(
             "[SECURITY] shell_exec called: %s",

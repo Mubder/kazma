@@ -162,6 +162,15 @@ class TestDockerJailConfig:
         host = jail_note_for_tool("shell_exec")
         assert "HOST" in host
 
+    def test_host_shell_blocked_under_docker_force(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from kazma_core.safety.post_hitl import host_shell_allowed
+
+        monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "force")
+        monkeypatch.delenv("KAZMA_HOST_SHELL", raising=False)
+        assert host_shell_allowed() is False
+        monkeypatch.setenv("KAZMA_HOST_SHELL", "1")
+        assert host_shell_allowed() is True
+
     def test_hitl_note_names_host_when_local(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from kazma_core.tools.code_exec import jail_note_for_tool
 

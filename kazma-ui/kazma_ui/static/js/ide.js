@@ -668,12 +668,25 @@ function ideApp() {
     },
 
     reviewHunkHtml(file) {
+      var esc = function (s) {
+        return String(s || ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      };
+      var diff = String((file && file.diff) || '');
+      if (diff) {
+        return diff.split('\n').slice(0, 120).map(function (ln) {
+          var cls = 'hitl-diff-ctx';
+          if (ln.charAt(0) === '+' && ln.charAt(1) !== '+') cls = 'hitl-diff-add';
+          else if (ln.charAt(0) === '-' && ln.charAt(1) !== '-') cls = 'hitl-diff-del';
+          else if (ln.indexOf('@@') === 0 || ln.indexOf('diff ') === 0 || ln.indexOf('---') === 0 || ln.indexOf('+++') === 0) cls = 'hitl-diff-meta';
+          return '<div class="' + cls + '">' + esc(ln) + '</div>';
+        }).join('');
+      }
       var lines = [];
       String((file && file.before) || '').split('\n').slice(0, 40).forEach(function (ln) {
-        lines.push('<div class="hitl-diff-del">- ' + (ln || ' ').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>');
+        lines.push('<div class="hitl-diff-del">- ' + esc(ln) + '</div>');
       });
       String((file && file.after) || '').split('\n').slice(0, 40).forEach(function (ln) {
-        lines.push('<div class="hitl-diff-add">+ ' + (ln || ' ').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>');
+        lines.push('<div class="hitl-diff-add">+ ' + esc(ln) + '</div>');
       });
       return lines.join('');
     },
@@ -698,6 +711,37 @@ function ideApp() {
 
     acceptReview() {
       this.reviewOpen = false;
+    },
+
+    async rejectFile(path) {
+      if (!this.review.id || !path) return;
+      var ok = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: 'Reject this file',
+            message: 'Restore this file from the pre-patch checkpoint?',
+            confirmText: 'Restore file',
+            danger: true,
+          })
+        : true;
+      if (!ok) return;
+      this.busy = true;
+      try {
+        var data = await this._post(
+          '/api/ide/checkpoints/' + encodeURIComponent(this.review.id) + '/restore-path',
+          { path: path }
+        );
+        if (data.ok) {
+          this.toast('Restored ' + path, true);
+          await this.openLatestReview();
+          if (this.currentFile) this.openFile(this.currentFile);
+        } else {
+          this.toast('Restore failed', false);
+        }
+      } catch (err) {
+        this.toast('Restore failed', false);
+      } finally {
+        this.busy = false;
+      }
     },
 
     async rejectReview() {

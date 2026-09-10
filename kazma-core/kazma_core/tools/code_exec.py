@@ -161,6 +161,16 @@ def jail_note_for_tool(tool: str) -> str:
     """One line for HITL cards: Docker vs host. Empty for non-exec tools."""
     name = (tool or "").strip()
     if name == "shell_exec":
+        try:
+            from kazma_core.safety.post_hitl import host_shell_allowed
+
+            if not host_shell_allowed():
+                return (
+                    "BLOCKED: host shell is off under Docker force. "
+                    "Use python_exec or set KAZMA_HOST_SHELL=1."
+                )
+        except Exception:
+            pass
         return "This command runs on the HOST after Approve (allowlisted binaries)."
     if name not in ("python_exec", "code_exec"):
         return ""

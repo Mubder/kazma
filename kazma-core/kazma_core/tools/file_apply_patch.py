@@ -228,8 +228,59 @@ async def file_apply_patch(
     )
 
 
-async def file_apply_patch_set(patches: list[dict] | None = None) -> str:
-    """Apply several surgical edits under one HITL card. Rolls back on failure."""
+def _nearby_tests(paths: list[str]) -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        try:
+            d = Path(raw).expanduser().resolve().parent
+        except OSError:
+            continue
+        if not d.is_dir():
+            continue
+        for pat in ("test_*.py", "*_test.py"):
+            for hit in d.glob(pat):
+                key = str(hit)
+                if key not in seen:
+                    seen.add(key)
+                    found.append(key)
+    return found
+
+
+def _run_pytest(test_files: list[str], cwd: Path) -> str:
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, "-m", "pytest", "-q", "--tb=line", *test_files]
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return "TESTS TIMEOUT (90s)"
+    except OSError as exc:
+        return f"TESTS ERROR: {exc}"
+    out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+    if proc.returncode == 0:
+        return "TESTS PASSED\n" + out[-2000:]
+    return "TESTS FAILED\n" + out[-4000:]
+
+
+async def file_apply_patch_set(
+    patches: list[dict] | None = None,
+    verify: bool = True,
+) -> str:
+    """Apply several surgical edits under one HITL card. Rolls back on failure.
+
+    When ``verify`` is true (default), runs nearby pytest files after a
+    successful apply so the coding loop is apply → tests, not a plan note.
+    Test failure does **not** restore the checkpoint — the model must patch again.
+    """
     items = list(patches or [])
     if not items:
         return "Error: patches is empty."
@@ -275,7 +326,19 @@ async def file_apply_patch_set(patches: list[dict] | None = None) -> str:
         except Exception:
             pass
         return f"Error: patch set aborted — {exc} (restored checkpoint {checkpoint_id})"
-    return "\n".join(lines) + f"\ncheckpoint={checkpoint_id}"
+    summary = "\n".join(lines) + f"\ncheckpoint={checkpoint_id}"
+    if not verify:
+        return summary + "\nverify=skipped"
+    tests = _nearby_tests(paths)
+    if not tests:
+        return summary + "\nverify: no test_*.py next to patched files"
+    from kazma_core.workspace.binding import resolve_active_root
+
+    cwd = resolve_active_root()
+    import asyncio
+
+    result = await asyncio.to_thread(_run_pytest, tests, cwd)
+    return summary + "\n" + result
 
 
 def _touch_index(path: Path) -> None:

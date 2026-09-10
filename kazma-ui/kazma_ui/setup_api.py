@@ -111,10 +111,14 @@ def create_setup_router() -> APIRouter:
             if isinstance(result, dict) and result.get("error"):
                 return {"error": str(result["error"]), "ready": False}
 
-            if body.model.strip():
+            switched = switch_active_provider(
+                pid,
+                model=body.model.strip(),
+                api_key=api_key,
+                registry=registry,
+            )
+            if not switched.ok and body.model.strip():
                 switched = switch_active_model(body.model.strip(), registry=registry)
-            else:
-                switched = switch_active_provider(pid, api_key=api_key, registry=registry)
             if not switched.ok:
                 return {
                     "error": switched.error or "switch_failed",
