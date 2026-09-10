@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — IDE file click hung the browser (2026-09-10)
+
+Monaco `automaticLayout` fought the flex pane (CPU peg, fan spin) on
+every file open. Alpine `x-for="(file.hunks || [])"` could also tight-loop.
+Layout is now explicit; review panel is `x-if` and hunk HTML is precomputed.
+
 ## 0.11 Hands — remaining code gaps
 
 Per-hunk reject on the IDE review stack. Supervisor will not RESPOND after

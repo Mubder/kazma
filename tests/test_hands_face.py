@@ -37,9 +37,12 @@ def test_ide_review_panel_markers() -> None:
     assert 'class="ide-review' in html
     assert "t('ide.review_accept')" in html
     assert "t('ide.review_reject')" in html
-    assert 'x-show="reviewOpen"' in html
+    assert 'x-if="reviewOpen"' in html
+    assert "(file.hunks || [])" not in html
+    assert "automaticLayout: false" in js
     assert "openLatestReview" in js
     assert "rejectReview" in js
+    assert "rejectHunk" in js
 
 
 def test_sidebar_work_links_outside_more() -> None:

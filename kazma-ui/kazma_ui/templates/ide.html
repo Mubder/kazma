@@ -143,7 +143,8 @@
     </div>
   </div>
 
-  <div class="ide-review card" x-cloak x-show="reviewOpen">
+  <template x-if="reviewOpen">
+  <div class="ide-review card">
     <div class="ide-review-head">
       <h3>{{ t('ide.review_title') }}</h3>
       <button class="btn btn-sm btn-success" @click="acceptReview()" :disabled="busy">{{ t('ide.review_accept') }}</button>
@@ -155,16 +156,16 @@
           <span x-text="file.path"></span>
           <button class="btn btn-xs btn-danger" @click="rejectFile(file.path)" :disabled="busy">{{ t('ide.review_reject_file') }}</button>
         </div>
-        <template x-for="hunk in (file.hunks || [])" :key="file.path + ':' + hunk.index">
+        <template x-for="hunk in file.hunks" :key="hunk.index">
           <div class="ide-review-hunk">
             <button class="btn btn-xs btn-danger" @click="rejectHunk(file.path, hunk.index)" :disabled="busy">{{ t('ide.review_reject_hunk') }}</button>
-            <div class="hitl-diff" x-html="reviewHunkHtml({diff: hunk.diff})"></div>
+            <div class="hitl-diff" x-html="hunk.html"></div>
           </div>
         </template>
-        <div class="hitl-diff" x-show="!(file.hunks && file.hunks.length)" x-cloak x-html="reviewHunkHtml(file)"></div>
       </div>
     </template>
   </div>
+  </template>
 
   <div class="ide-layout" :class="{ 'with-chat': chatOpen }">
     <!-- ── File Tree ── -->
