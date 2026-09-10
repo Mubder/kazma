@@ -6,8 +6,8 @@ Kazma uses a **fixed public base** plus a **live git commit id**.
 
 | Piece | Example | Meaning |
 |-------|---------|---------|
-| Public base (files) | `0.10.0` | Root `pyproject.toml` / `kazma.yaml` / package versions |
-| Display version | `0.10.0+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
+| Public base (files) | `0.11.0` | Root `pyproject.toml` / `kazma.yaml` / package versions |
+| Display version | `0.11.0+g4d37b2c` | What CLI, banner, FastAPI, and UI show |
 | `+g……` | PEP 440 **local** segment | Short git SHA (`g` = git) |
 
 Why not bump `0.10.0` → `0.10.1` on every merge? That turned into
@@ -18,16 +18,16 @@ build identity; the base is a human milestone.
 
 | Location | Role |
 |----------|------|
-| Root `pyproject.toml` → `project.version` | **Public base only** (`0.10.0`) |
+| Root `pyproject.toml` → `project.version` | **Public base only** (`0.11.0`) |
 | `kazma.yaml` → `agent.version` | Same public base |
 | `kazma_core.version.get_version()` | **Runtime display**: `base+gSHA` |
-| Git tag `v0.10.0` | Optional milestone marker (no `+`) |
+| Git tag `v0.11.0` | Optional milestone marker (no `+`) |
 
 ```python
 from kazma_core.version import get_version, get_base_version
 
-get_base_version()  # "0.10.0"
-get_version()       # "0.10.0+g4d37b2c"  (when git / CI SHA available)
+get_base_version()  # "0.11.0"
+get_version()       # "0.11.0+g4d37b2c"  (when git / CI SHA available)
 ```
 
 ### SHA resolution order

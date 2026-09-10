@@ -220,6 +220,24 @@
         "interrupt": true,
         "tool_not_executed": true
       }
+    },
+    {
+      "id": "remind_rewrite_fire_at",
+      "kind": "commitment_remind",
+      "tool": "schedule_task",
+      "user": "remind me before the copilot monthly reset in 2 days",
+      "request_at": "2026-08-11T10:00:00+00:00",
+      "memory_beliefs": [
+        { "predicate": "copilot_next_reset", "object": "2026-09-01" }
+      ],
+      "arguments": {
+        "timing": "2026-08-13T10:00:00+00:00",
+        "prompt": "reset soon"
+      },
+      "expect": {
+        "decision": "allow",
+        "timing_prefix": "2026-08-30"
+      }
     }
   ]
 }

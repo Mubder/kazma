@@ -143,6 +143,30 @@ def test_args_are_readable_not_a_python_repr():
     assert '"command"' in out, "JSON, so a human can read nested args"
 
 
+def test_patch_set_card_shows_minus_plus_hunks() -> None:
+    out = _format_args_for_approval(
+        "file_apply_patch_set",
+        {
+            "patches": [
+                {
+                    "path": "examples/hands-demo/app.py",
+                    "old_string": "return a + b + 1",
+                    "new_string": "return a + b",
+                }
+            ]
+        },
+    )
+    assert "examples/hands-demo/app.py" in out
+    assert "- return a + b + 1" in out
+    assert "+ return a + b" in out
+    assert "old_string" not in out
+    js = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    assert "function formatPatchPreview(" in js
+
+
 def test_unserialisable_args_still_render():
     class Weird:
         def __repr__(self) -> str:

@@ -6999,12 +6999,38 @@
   // the same defect that was fixed on the Telegram side and missed here. The
   // args block is scrollable (max-height in kazma.css), so the whole thing is
   // reachable without the card swallowing the page.
+  function formatPatchPreview(tool, args) {
+    if (tool !== 'file_apply_patch' && tool !== 'file_apply_patch_set') return null;
+    if (!args || typeof args !== 'object') return null;
+    var patches = tool === 'file_apply_patch' ? [args] : args.patches;
+    if (!Array.isArray(patches) || !patches.length) return null;
+    var out = [patches.length + ' file(s):'];
+    patches.slice(0, 20).forEach(function (item, i) {
+      if (!item || typeof item !== 'object') return;
+      out.push('\n' + (i + 1) + '. ' + (item.path || '?'));
+      var patch = String(item.patch || '').trim();
+      if (patch) {
+        out = out.concat(patch.split('\n').slice(0, 80));
+        return;
+      }
+      String(item.old_string || '').split('\n').slice(0, 40).forEach(function (ln) {
+        out.push('- ' + ln);
+      });
+      String(item.new_string || '').split('\n').slice(0, 40).forEach(function (ln) {
+        out.push('+ ' + ln);
+      });
+    });
+    return out.join('\n');
+  }
+
   function formatApprovalArgs(tool, args) {
-    var text;
-    try {
-      text = JSON.stringify(args || {}, null, 2);
-    } catch (e) {
-      text = String(args);
+    var text = formatPatchPreview(tool, args);
+    if (text == null) {
+      try {
+        text = JSON.stringify(args || {}, null, 2);
+      } catch (e) {
+        text = String(args);
+      }
     }
     if (text.length <= 20000) return text;
     var hidden = text.length - 20000;
