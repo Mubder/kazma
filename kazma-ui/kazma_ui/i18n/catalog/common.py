@@ -164,6 +164,22 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "غير محفوظ",
         "en": "unsaved",
     },
+    "ide.review_title": {
+        "ar": "مراجعة التعديلات",
+        "en": "Review patches",
+    },
+    "ide.review_accept": {
+        "ar": "قبول الكل",
+        "en": "Accept all",
+    },
+    "ide.review_reject": {
+        "ar": "رفض واستعادة",
+        "en": "Reject and restore",
+    },
+    "ide.undo_patch": {
+        "ar": "تراجع عن الرقعة",
+        "en": "Undo patch",
+    },
     "lang.toggle_to_arabic": {
         "ar": "ع",
         "en": "ع",

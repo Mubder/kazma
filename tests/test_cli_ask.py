@@ -61,6 +61,16 @@ class TestRepl:
         assert tid3 == "cli-1"
         assert prompt3 == "fix the tests"
 
+    def test_two_prompts_share_thread_id(self) -> None:
+        seen: list[str] = []
+        opts = AskOptions(thread_id="cli-fixed")
+        for line in ("fix the tests", "now run them"):
+            tid, prompt = apply_repl_line(line, opts.thread_id)
+            assert prompt
+            opts.thread_id = tid
+            seen.append(opts.thread_id)
+        assert seen == ["cli-fixed", "cli-fixed"]
+
 
 class TestToolKind:
     def test_kinds(self) -> None:

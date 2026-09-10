@@ -374,8 +374,18 @@ def _format_hitl_message(tool: str, args: Any) -> str:
     """
     summary = _summarize_args_for_hitl(args)
     if summary:
-        return f"Agent wants to run: {tool}({summary})"
-    return f"Agent wants to run: {tool}()"
+        base = f"Agent wants to run: {tool}({summary})"
+    else:
+        base = f"Agent wants to run: {tool}()"
+    try:
+        from kazma_core.tools.code_exec import jail_note_for_tool
+
+        note = jail_note_for_tool(tool)
+    except Exception:
+        note = ""
+    if note:
+        return f"{base}\n{note}"
+    return base
 
 
 # ══════════════════════════════════════════════════════════════════════════

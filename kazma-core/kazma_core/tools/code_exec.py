@@ -29,7 +29,17 @@ from typing import Any
 
 import kazma_core.tools.file_write as _fw
 
-__all__ = ["DEFAULT_DOCKER_IMAGE", "DEFAULT_TIMEOUT", "MAX_OUTPUT_CHARS", "MEMORY_LIMIT_MB", "docker_available", "python_exec", "reset_docker_probe", "use_docker_jail"]
+__all__ = [
+    "DEFAULT_DOCKER_IMAGE",
+    "DEFAULT_TIMEOUT",
+    "MAX_OUTPUT_CHARS",
+    "MEMORY_LIMIT_MB",
+    "docker_available",
+    "jail_note_for_tool",
+    "python_exec",
+    "reset_docker_probe",
+    "use_docker_jail",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +155,21 @@ def local_exec_forbidden() -> bool:
     if raw in ("force", "required", "1", "true", "on", "yes", "docker"):
         return True
     return _production_or_multi_user()
+
+
+def jail_note_for_tool(tool: str) -> str:
+    """One line for HITL cards: Docker vs host. Empty for non-exec tools."""
+    name = (tool or "").strip()
+    if name == "shell_exec":
+        return "This command runs on the HOST after Approve (allowlisted binaries)."
+    if name not in ("python_exec", "code_exec"):
+        return ""
+    try:
+        if use_docker_jail():
+            return "This runs in Docker after Approve (no network)."
+    except Exception:
+        logger.debug("[code_exec] jail note probe failed", exc_info=True)
+    return "This runs on the HOST after Approve."
 
 
 def use_docker_jail() -> bool:

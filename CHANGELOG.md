@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 0.11.0 Hands — exec leftovers (WP6/WP7/WP8)
+
+IDE review panel: file list + diffs, Accept all / Reject-and-restore (EN+AR).
+HITL exec cards name Docker vs host. REPL test: two prompts keep one thread id.
+
 ## 0.11.0 Hands — review-stack HITL (2026-09-10)
 
 Patch approvals render as a colored `-/+` stack on Web chat and the

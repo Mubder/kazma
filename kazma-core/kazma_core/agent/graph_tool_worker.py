@@ -994,6 +994,12 @@ async def tool_worker_node(
             from kazma_core.safety.hitl import ALWAYS_HITL_TOOLS as _ALWAYS_HITL
 
             _batch_always = any(tc["name"] in _ALWAYS_HITL for tc in danger_tools)
+            try:
+                from kazma_core.tools.code_exec import jail_note_for_tool as _jail_note
+
+                _jail = _jail_note(primary_tool if len(danger_tools) == 1 else "")
+            except Exception:
+                _jail = ""
             approval_input = {
                 "type": "hitl_approval",
                 "kind": "security",  # self-describing (§4.3): every payload carries kind
@@ -1001,6 +1007,7 @@ async def tool_worker_node(
                 "args": primary_args,
                 "tools": tools_payload,
                 "message": message,
+                "jail_note": _jail,
                 "yolo_allowed": _yolo_allowed() and not _batch_always,
             }
 

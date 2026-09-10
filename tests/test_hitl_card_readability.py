@@ -167,6 +167,16 @@ def test_patch_set_card_shows_minus_plus_hunks() -> None:
     assert "function formatPatchPreview(" in js
 
 
+def test_python_exec_approval_args_include_jail_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.tools.code_exec import reset_docker_probe
+
+    monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "force")
+    reset_docker_probe()
+    out = _format_args_for_approval("python_exec", {"code": "print(1)"})
+    assert "Docker" in out
+    assert "print(1)" in out
+
+
 def test_unserialisable_args_still_render():
     class Weird:
         def __repr__(self) -> str:

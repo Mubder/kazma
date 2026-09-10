@@ -325,6 +325,14 @@ def _format_args_for_approval(
             text = json.dumps(args, ensure_ascii=False, indent=2, default=str)
         except Exception:  # noqa: BLE001
             text = str(args)
+    try:
+        from kazma_core.tools.code_exec import jail_note_for_tool
+
+        note = jail_note_for_tool(tool)
+        if note:
+            text = f"{text}\n\n{note}"
+    except Exception:
+        pass
 
     if len(text) <= budget:
         return text

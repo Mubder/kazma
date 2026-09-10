@@ -37,6 +37,8 @@ function ideApp() {
     chatBusy: false,
     chatSessionId: '',
     chatStream: null,
+    reviewOpen: false,
+    review: { id: '', files: [] },
 
     // ── i18n-safe toast ──
     toast(msg, ok) {
@@ -665,6 +667,69 @@ function ideApp() {
       }
     },
 
+    reviewHunkHtml(file) {
+      var lines = [];
+      String((file && file.before) || '').split('\n').slice(0, 40).forEach(function (ln) {
+        lines.push('<div class="hitl-diff-del">- ' + (ln || ' ').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>');
+      });
+      String((file && file.after) || '').split('\n').slice(0, 40).forEach(function (ln) {
+        lines.push('<div class="hitl-diff-add">+ ' + (ln || ' ').replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</div>');
+      });
+      return lines.join('');
+    },
+
+    async openLatestReview() {
+      try {
+        var listed = await this._get('/api/ide/checkpoints');
+        var items = (listed && listed.checkpoints) || [];
+        if (!items.length) return;
+        var cid = items[0].id;
+        var data = await this._get('/api/ide/checkpoints/' + encodeURIComponent(cid) + '/review');
+        if (!data || !data.ok) return;
+        var changed = (data.files || []).filter(function (f) { return f.changed; });
+        if (!changed.length) {
+          this.reviewOpen = false;
+          return;
+        }
+        this.review = { id: data.id, files: changed };
+        this.reviewOpen = true;
+      } catch (err) { /* ignore */ }
+    },
+
+    acceptReview() {
+      this.reviewOpen = false;
+    },
+
+    async rejectReview() {
+      var ok = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: 'Reject patches',
+            message: 'Restore the pre-patch checkpoint? This overwrites files on disk.',
+            confirmText: 'Restore',
+            danger: true,
+          })
+        : true;
+      if (!ok || !this.review.id) return;
+      this.busy = true;
+      try {
+        var data = await this._post(
+          '/api/ide/checkpoints/' + encodeURIComponent(this.review.id) + '/restore',
+          {}
+        );
+        if (data.ok) {
+          this.toast('Restored checkpoint', true);
+          this.reviewOpen = false;
+          if (this.currentFile) this.openFile(this.currentFile);
+        } else {
+          this.toast('Restore failed', false);
+        }
+      } catch (err) {
+        this.toast('Restore failed', false);
+      } finally {
+        this.busy = false;
+      }
+    },
+
     // ── Restore last workspace file checkpoint (Hands 0.11) ──
     async restoreLastCheckpoint() {
       var ok = window.kazmaConfirm
@@ -899,6 +964,7 @@ function ideApp() {
           onDone: function () {
             self.chatBusy = false;
             self.chatStream = null;
+            self.openLatestReview();
           },
           onError: function (errMsg) {
             self.chatMessages[asstIdx].content += '\n\n[!] ' + (errMsg || 'Stream error');

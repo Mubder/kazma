@@ -5814,6 +5814,9 @@
           ? '<p><strong>Args:</strong></p><div class="hitl-approval-args">' + renderApprovalArgsHtml(data.tool, data.args) + '</div>'
           : toolsHtml) +
         proposalHtml +
+        (data.jail_note
+          ? '<p class="hitl-jail-note">' + escapeHtml(String(data.jail_note)) + '</p>'
+          : '') +
         '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
         '<p class="hitl-scope-hint" style="font-size:0.72rem;color:var(--text-muted);margin-top:6px;">' +
           (yoloOk
