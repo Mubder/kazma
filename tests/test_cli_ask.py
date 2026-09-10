@@ -10,6 +10,7 @@ from kazma_core.cli.ask import (
     ACP_PROTOCOL_VERSION,
     AcpSessionState,
     AskOptions,
+    acp_tool_call_content,
     apply_repl_line,
     extract_hitl_interrupt,
     handle_acp_request,
@@ -76,6 +77,7 @@ class TestToolKind:
     def test_kinds(self) -> None:
         assert tool_kind_for("file_write") == "edit"
         assert tool_kind_for("file_apply_patch") == "edit"
+        assert tool_kind_for("file_apply_patch_set") == "edit"
         assert tool_kind_for("shell_exec") == "execute"
         assert tool_kind_for("file_read") == "read"
         assert tool_kind_for("codebase_search") == "search"
@@ -217,6 +219,46 @@ class TestAcp:
             {"jsonrpc": "2.0", "method": "session/cancel", "params": {}},
             st,
         ) is None
+
+    def test_cancel_sets_session_event(self) -> None:
+        st = AcpSessionState()
+        ev = st.reset_cancel("sess-1")
+        handle_acp_request(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/cancel",
+                "params": {"sessionId": "sess-1"},
+            },
+            st,
+        )
+        assert ev.is_set()
+
+    def test_patch_set_emits_acp_diffs(self) -> None:
+        blocks = acp_tool_call_content(
+            "file_apply_patch_set",
+            {
+                "patches": [
+                    {
+                        "path": "app.py",
+                        "old_string": "return a + b + 1",
+                        "new_string": "return a + b",
+                    }
+                ]
+            },
+            workspace="/tmp/ws",
+        )
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "diff"
+        assert blocks[0]["path"].endswith("app.py")
+        assert "a + b + 1" in (blocks[0].get("oldText") or "")
+        assert blocks[0]["newText"] == "return a + b"
+
+    def test_file_write_diff_old_text_null(self) -> None:
+        blocks = acp_tool_call_content(
+            "file_write", {"path": "new.py", "content": "print(1)\n"}, workspace="/tmp"
+        )
+        assert blocks[0]["oldText"] is None
+        assert "print(1)" in blocks[0]["newText"]
 
 
 class TestRunAsk:

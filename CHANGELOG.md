@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 0.11 ACP daily driver
+
+Editor permission prompts carry structured `diff` content for
+`file_apply_patch(_set)` / `file_write`, plus Docker-vs-host jail notes.
+`session/cancel` aborts the in-flight turn (and pending permission).
+Zed `agent_servers` snippet in the CLI reference.
+
 ## 0.11.0 Hands — exec leftovers (WP6/WP7/WP8)
 
 IDE review panel: file list + diffs, Accept all / Reject-and-restore (EN+AR).

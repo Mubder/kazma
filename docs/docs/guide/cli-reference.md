@@ -113,11 +113,30 @@ Agent Client Protocol JSON-RPC on stdio (`initialize`, `session/new`,
 `session/prompt`, `session/cancel`). Streams `session/update`
 (`agent_message_chunk`, `tool_call`, `tool_call_update`) and asks the
 editor to approve danger tools via `session/request_permission`.
+Patch tools send ACP `diff` content (`oldText` / `newText`) so Zed can
+render a review stack. `session/cancel` aborts the in-flight turn.
 
 ```bash
 kazma acp
 kazma ask --acp --workspace /path/to/repo
 ```
+
+Zed — `~/.config/zed/settings.json` (Windows: `%APPDATA%\Zed\settings.json`):
+
+```json
+{
+  "agent_servers": {
+    "Kazma": {
+      "type": "custom",
+      "command": "kazma",
+      "args": ["acp"]
+    }
+  }
+}
+```
+
+Open the Agent Panel, pick **Kazma**, start a thread. Danger tools prompt
+in the editor (Allow once / Allow for this session / Reject).
 
 ---
 
