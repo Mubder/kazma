@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fix — IDE hang: Monaco was on the Alpine proxy (2026-09-10)
+
+The editor instance was a field on `ideApp()`. Alpine proxied the whole
+Monaco object; every click/caret walked it and re-rendered the page
+(fan-spin). Monaco now lives outside Alpine. File-tree icons are CSS,
+not `x-html` SVG per row.
+
 ## Fix — Telegram REJECTED git status on restart (2026-09-10)
 
 `IdeService.git("status -sb")` went through danger `shell_exec`, so IDE

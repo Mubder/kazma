@@ -52,7 +52,20 @@
     .ide-tree-active { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
     .ide-tree-up { color: var(--text-secondary); }
     .ide-tree-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .ide-tree-icon svg { width: 14px; height: 14px; }
+    .ide-file-glyph {
+      width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0;
+      font-size: 7px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+      background: var(--bg-deep); color: var(--text-muted);
+    }
+    .ide-file-glyph[data-ext="dir"]::after { content: "▸"; font-size: 10px; color: var(--accent); }
+    .ide-file-glyph[data-ext="up"]::after { content: "↑"; font-size: 10px; }
+    .ide-file-glyph[data-ext="py"]::after { content: "py"; color: #3776ab; }
+    .ide-file-glyph[data-ext="js"]::after { content: "js"; color: #b8860b; }
+    .ide-file-glyph[data-ext="ts"]::after { content: "ts"; color: #3178c6; }
+    .ide-file-glyph[data-ext="md"]::after { content: "md"; }
+    .ide-file-glyph[data-ext="json"]::after { content: "{}"; }
+    .ide-file-glyph:not([data-ext])::after,
+    .ide-file-glyph[data-ext=""]::after { content: "·"; }
     .ide-tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .ide-tree-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
     /* ── Chat panel ── */
@@ -185,13 +198,13 @@
       </div>
       <div>
         <div x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row ide-tree-up">
-          <span class="ide-tree-icon" x-html="KazmaIcons['arrow-up']({class:'icon-sm'})"></span>
+          <span class="ide-file-glyph" data-ext="up">..</span>
           <span>..</span>
         </div>
         <template x-for="item in tree" :key="item.path">
           <div class="ide-tree-row" :class="{ 'ide-tree-active': item.path === activeTabPath }" @click="navigate(item)">
-            <span class="ide-tree-icon" x-html="item.is_dir ? KazmaIcons.folder({class:'icon-sm'}) : KazmaIcons.file({class:'icon-sm'})"></span>
-            <span class="ide-tree-name" x-text="item.name" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
+            <span class="ide-file-glyph" :data-ext="item.ext"></span>
+            <span class="ide-tree-name" x-text="item.name"></span>
           </div>
         </template>
         <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">Empty</div>
