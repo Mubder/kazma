@@ -41,7 +41,7 @@
     {% block head_extra %}{% endblock %}
 </head>
 <body>
-    <div class="app-layout{% if active_page == 'chat' %} is-chat{% endif %}{% if active_page == 'ide' %} is-ide{% endif %}">
+    <div class="app-layout{% if active_page == 'chat' %} is-chat{% endif %}">
         {# Mobile nav backdrop — fades in when drawer is open (≤768px) #}
         <div class="sidebar-backdrop" x-show="mobileNavOpen" x-transition.opacity
              @click="closeMobileNav()" x-cloak></div>

@@ -39,17 +39,6 @@ function ideApp() {
     chatStream: null,
     reviewOpen: false,
     review: { id: '', files: [] },
-    activity: 'explorer',
-    sidebarHidden: false,
-    bottomOpen: true,
-    bottomTab: 'output',
-    paletteOpen: false,
-    paletteQ: '',
-    paletteHits: [],
-    paletteIx: 0,
-    gitBranch: '',
-    gitStatus: '',
-    grepHits: [],
 
     // ── i18n-safe toast ──
     toast(msg, ok) {
@@ -64,10 +53,7 @@ function ideApp() {
       this.loadTree('');
       this.loadSkills();
       this.initChat();
-      this.refreshGit();
       var self = this;
-      this._onKey = function (e) { self._hotkeys(e); };
-      document.addEventListener('keydown', this._onKey);
       window.kazmaOnSoftNavLeave = function () { self.destroy(); };
     },
 
@@ -76,11 +62,10 @@ function ideApp() {
       this.chatStream = null;
       try { if (this._themeObs) this._themeObs.disconnect(); } catch (e) {}
       this._themeObs = null;
-      this._onWinResize = null;
       try {
-        if (this._onKey) document.removeEventListener('keydown', this._onKey);
+        if (this._onWinResize) window.removeEventListener('resize', this._onWinResize);
       } catch (e) {}
-      this._onKey = null;
+      this._onWinResize = null;
       try { if (this._lspDiagTimer) clearTimeout(this._lspDiagTimer); } catch (e) {}
       this._lspDiagTimer = null;
       (this._lspDisposables || []).forEach(function (d) {
@@ -175,23 +160,50 @@ function ideApp() {
       }
       if (!host) return;
 
-      var vsRoot = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs';
+      function editorOptions() {
+        return {
+          value: ta ? (ta.value || '') : '',
+          language: 'plaintext',
+          theme: self._monacoTheme(),
+          automaticLayout: false,
+          lineNumbers: 'on',
+          lineNumbersMinChars: 4,
+          glyphMargin: true,
+          folding: true,
+          foldingHighlight: true,
+          matchBrackets: 'always',
+          bracketPairColorization: { enabled: true },
+          minimap: { enabled: true, maxColumn: 100 },
+          wordWrap: 'off',
+          fontSize: 14,
+          lineHeight: 22,
+          letterSpacing: 0.3,
+          fontLigatures: true,
+          fontFamily: "Consolas, 'Cascadia Code', 'Courier New', monospace",
+          renderLineHighlight: 'all',
+          renderWhitespace: 'selection',
+          renderLineHighlightOnlyWhenFocus: false,
+          cursorBlinking: 'smooth',
+          cursorSmoothCaretAnimation: 'on',
+          smoothScrolling: true,
+          scrollBeyondLastLine: false,
+          tabSize: 4,
+          insertSpaces: true,
+          detectIndentation: true,
+          rulers: [80, 120],
+          padding: { top: 8, bottom: 8 },
+          scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+          overviewRulerBorder: false,
+          links: true,
+          mouseWheelZoom: true,
+          guides: { indentation: true, bracketPairs: true },
+        };
+      }
 
       function onReady() {
         try {
-          self.cm = monaco.editor.create(host, {
-            value: ta ? (ta.value || '') : '',
-            language: 'plaintext',
-            theme: self._monacoTheme(),
-            automaticLayout: false,
-            minimap: { enabled: false },
-            wordWrap: 'on',
-            fontSize: 13,
-            fontFamily: 'var(--font-mono), Consolas, monospace',
-            scrollBeyondLastLine: false,
-            renderLineHighlight: 'line',
-            tabSize: 4,
-          });
+          if (host && host.offsetHeight < 80) host.style.minHeight = '420px';
+          self.cm = monaco.editor.create(host, editorOptions());
           self.cm.onDidChangeModelContent(function () {
             if (self._settingContent) return;
             var dirty = self.cm.getValue() !== self.originalContent;
@@ -200,13 +212,6 @@ function ideApp() {
             if (tab && tab.dirty !== dirty) tab.dirty = dirty;
             self._scheduleLspDiagnostics();
           });
-          self.cm.onDidChangeCursorPosition(function (ev) {
-            if (!ev || !ev.position) return;
-            var el = document.getElementById('ide-cursor');
-            if (el) {
-              el.textContent = 'Ln ' + ev.position.lineNumber + ', Col ' + ev.position.column;
-            }
-          });
           self.cmReady = true;
           self._bindLsp();
           self._themeObs = new MutationObserver(function () { self._syncMonacoTheme(); });
@@ -214,6 +219,7 @@ function ideApp() {
             attributes: true,
             attributeFilter: ['data-theme'],
           });
+          requestAnimationFrame(function () { self._layoutEditor(); });
         } catch (err) {
           console.warn('[ide] Monaco init failed, falling back to textarea', err);
           self.cm = null;
@@ -221,19 +227,35 @@ function ideApp() {
         }
       }
 
+      function loadFrom(vsRoot, thenFail) {
+        var s = document.createElement('script');
+        s.src = vsRoot + '/loader.js';
+        s.onload = function () {
+          try {
+            var req = window.require;
+            if (!req || !req.config) { thenFail(); return; }
+            req.config({ paths: { vs: vsRoot } });
+            req(['vs/editor/editor.main'], onReady);
+          } catch (err) {
+            console.warn('[ide] Monaco loader config failed', err);
+            thenFail();
+          }
+        };
+        s.onerror = thenFail;
+        document.head.appendChild(s);
+      }
+
       if (window.monaco && monaco.editor) {
         onReady();
         return;
       }
-      if (typeof require === 'function' && require.config) {
-        try {
-          require.config({ paths: { vs: vsRoot } });
-          require(['vs/editor/editor.main'], onReady);
-          return;
-        } catch (err) {
-          console.warn('[ide] Monaco loader failed', err);
-        }
-      }
+      var cdns = [
+        'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs',
+        'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs',
+      ];
+      loadFrom(cdns[0], function () { loadFrom(cdns[1], function () {
+        console.warn('[ide] Monaco CDN blocked — using textarea');
+      }); });
     },
 
     getContent() {
@@ -467,11 +489,7 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._get('/api/workspace/files?path=' + encodeURIComponent(path || ''));
-        this.tree = (data.files || []).map(function (f) {
-          var name = String(f.name || f.path || '');
-          f.ext = f.is_dir ? 'dir' : (name.split('.').pop() || '').toLowerCase();
-          return f;
-        });
+        this.tree = data.files || [];
         this.treePath = data.path || '';
       } catch (err) {
         this.toast('Failed to list files', false);
@@ -515,7 +533,7 @@ function ideApp() {
           return;
         }
         var filePath = data.path || path;
-        var lang = data.lang || 'plaintext';
+        var lang = data.lang || this._langFromName(filePath);
         // Capture any edits in the current tab before creating a new one.
         this._captureToTab();
         this.tabs.push({
@@ -560,7 +578,9 @@ function ideApp() {
       }
       this.activeTabPath = tab.path;
       this.currentFile = tab.path;
-      this.currentLang = tab.lang;
+      this.currentLang = (tab.lang && tab.lang !== 'plaintext')
+        ? tab.lang
+        : this._langFromName(tab.path);
       if (this.cm && window.monaco && monaco.editor && this.cm.getModel) {
         try {
           monaco.editor.setModelLanguage(this.cm.getModel(), this._cmMode(tab.lang));
@@ -638,9 +658,16 @@ function ideApp() {
 
     _langFromName(name) {
       var ext = (name.split('.').pop() || '').toLowerCase();
-      return {py:'python',js:'javascript',ts:'typescript',html:'html',css:'css',
-              json:'json',md:'markdown',sh:'bash',yml:'yaml',yaml:'yaml',
-              toml:'toml',sql:'sql',rs:'rust',go:'go'}[ext] || 'plaintext';
+      return {py:'python',pyw:'python',js:'javascript',mjs:'javascript',cjs:'javascript',
+              ts:'typescript',tsx:'typescript',jsx:'javascript',
+              html:'html',htm:'html',css:'css',scss:'scss',less:'less',
+              json:'json',md:'markdown',markdown:'markdown',
+              sh:'shell',bash:'shell',zsh:'shell',ps1:'powershell',
+              yml:'yaml',yaml:'yaml',toml:'ini',ini:'ini',
+              sql:'sql',rs:'rust',go:'go',java:'java',kt:'kotlin',
+              c:'c',h:'c',cpp:'cpp',hpp:'cpp',cs:'csharp',
+              xml:'xml',svg:'xml',rb:'ruby',php:'php',
+              dockerfile:'dockerfile'}[ext] || 'plaintext';
     },
 
     // ── Delete current file (HITL-gated) ──
@@ -966,8 +993,6 @@ function ideApp() {
         var url = '/api/ide/grep?pattern=' + encodeURIComponent(pat) +
                   '&glob=' + encodeURIComponent(this.grepGlob || '*');
         var data = await this._get(url);
-        this.grepHits = data.ok ? (data.matches || []) : [];
-        this.activity = 'search';
         this.showResult('Grep: ' + pat,
           data.ok ? ((data.matches || []).join('\n') || '(no matches)') : (data.error || ''));
       } catch (err) {
@@ -1010,10 +1035,6 @@ function ideApp() {
     showResult(title, text) {
       this.resultTitle = title;
       this.result = (text === undefined || text === null) ? '' : String(text);
-      this.bottomOpen = true;
-      this.bottomTab = 'output';
-      var self = this;
-      this.$nextTick(function () { self._layoutEditor(); });
     },
 
     // ════════════════════════════════════════════════════════════════
@@ -1220,7 +1241,7 @@ function ideApp() {
     startResize(pane, e) {
       e.preventDefault();
       var self = this;
-      var layout = document.querySelector('.ide-workbench') || document.querySelector('.ide-body');
+      var layout = document.querySelector('.ide-layout');
       if (!layout) return;
       var startX = e.clientX;
       var startTree = parseInt(getComputedStyle(layout).getPropertyValue('--ide-tree-w') || '260');
@@ -1245,135 +1266,10 @@ function ideApp() {
         document.body.style.userSelect = '';
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
-        self._layoutEditor();
       }
 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
-    },
-
-    setActivity(name) {
-      if (this.activity === name && !this.sidebarHidden) {
-        this.sidebarHidden = true;
-      } else {
-        this.activity = name;
-        this.sidebarHidden = false;
-      }
-      var self = this;
-      this.$nextTick(function () { self._layoutEditor(); });
-    },
-
-    activityTitle() {
-      return { explorer: 'Explorer', search: 'Search', scm: 'Source Control' }[this.activity] || 'Explorer';
-    },
-
-    async refreshGit() {
-      try {
-        var data = await this._post('/api/ide/git', { subcommand: 'status -sb' });
-        this.gitStatus = data.ok ? (data.output || '(clean)') : (data.error || '');
-        var line = String(this.gitStatus).split('\n')[0] || '';
-        var m = line.match(/^##\s+([^\s.]+)/);
-        this.gitBranch = m ? m[1] : '';
-      } catch (e) {
-        this.gitStatus = '';
-      }
-    },
-
-    openGrepHit(hit) {
-      var text = String(hit || '');
-      var m = text.match(/^([^:]+):(\d+)/);
-      if (m) this.open(m[1].trim());
-    },
-
-    _hotkeys(e) {
-      var t = e.target;
-      var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
-      var meta = e.ctrlKey || e.metaKey;
-      if (e.key === 'Escape') {
-        this.paletteOpen = false;
-        return;
-      }
-      if (!meta) return;
-      if (e.key === 's') {
-        e.preventDefault();
-        this.save();
-        return;
-      }
-      if (e.key === 'p' && !e.shiftKey) {
-        e.preventDefault();
-        this.openPalette();
-        return;
-      }
-      if (e.key === '`') {
-        e.preventDefault();
-        this.bottomOpen = !this.bottomOpen;
-        var self = this;
-        this.$nextTick(function () { self._layoutEditor(); });
-        return;
-      }
-      if (e.key === 'b' && !typing) {
-        e.preventDefault();
-        this.sidebarHidden = !this.sidebarHidden;
-        var self2 = this;
-        this.$nextTick(function () { self2._layoutEditor(); });
-      }
-    },
-
-    openPalette() {
-      this.paletteOpen = true;
-      this.paletteQ = '';
-      this.paletteIx = 0;
-      this.filterPalette();
-      var self = this;
-      this.$nextTick(function () {
-        if (self.$refs.paletteInput) self.$refs.paletteInput.focus();
-      });
-    },
-
-    closePalette() {
-      this.paletteOpen = false;
-    },
-
-    filterPalette() {
-      var q = String(this.paletteQ || '').trim().toLowerCase();
-      var hits = [];
-      if (q.charAt(0) === '>') {
-        var cq = q.slice(1).trim();
-        var cmds = [
-          { id: 'save', label: 'Save', hint: 'Ctrl+S', run: function (s) { s.save(); } },
-          { id: 'run', label: 'Run file', hint: '', run: function (s) { s.runFile(); } },
-          { id: 'term', label: 'Toggle terminal', hint: 'Ctrl+`', run: function (s) { s.bottomOpen = !s.bottomOpen; } },
-          { id: 'chat', label: 'Toggle agent chat', hint: '', run: function (s) { s.toggleChat(); } },
-          { id: 'git', label: 'Git status', hint: '', run: function (s) { s.setActivity('scm'); s.refreshGit(); } },
-        ];
-        hits = cmds.filter(function (c) { return !cq || c.label.toLowerCase().indexOf(cq) !== -1; });
-      } else {
-        hits = (this.tree || []).filter(function (f) {
-          return !q || String(f.name || '').toLowerCase().indexOf(q) !== -1;
-        }).slice(0, 30).map(function (f) {
-          return { id: f.path, label: f.name, hint: f.path, path: f.path, is_dir: f.is_dir };
-        });
-      }
-      this.paletteHits = hits;
-      this.paletteIx = 0;
-    },
-
-    paletteMove(d) {
-      var n = this.paletteHits.length;
-      if (!n) return;
-      this.paletteIx = (this.paletteIx + d + n) % n;
-    },
-
-    runPalette(hit) {
-      hit = hit || this.paletteHits[this.paletteIx];
-      this.paletteOpen = false;
-      if (!hit) return;
-      if (typeof hit.run === 'function') {
-        hit.run(this);
-        return;
-      }
-      if (hit.is_dir) this.loadTree(hit.path);
-      else if (hit.path) this.open(hit.path);
     },
   };
 }
