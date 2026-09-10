@@ -47,8 +47,6 @@ function ideApp() {
     paletteQ: '',
     paletteHits: [],
     paletteIx: 0,
-    cursorLine: 1,
-    cursorCol: 1,
     gitBranch: '',
     gitStatus: '',
     grepHits: [],
@@ -78,9 +76,6 @@ function ideApp() {
       this.chatStream = null;
       try { if (this._themeObs) this._themeObs.disconnect(); } catch (e) {}
       this._themeObs = null;
-      try {
-        if (this._onWinResize) window.removeEventListener('resize', this._onWinResize);
-      } catch (e) {}
       this._onWinResize = null;
       try {
         if (this._onKey) document.removeEventListener('keydown', this._onKey);
@@ -199,20 +194,21 @@ function ideApp() {
           });
           self.cm.onDidChangeModelContent(function () {
             if (self._settingContent) return;
-            self.dirty = self.cm.getValue() !== self.originalContent;
+            var dirty = self.cm.getValue() !== self.originalContent;
+            if (self.dirty !== dirty) self.dirty = dirty;
             var tab = self._activeTab();
-            if (tab) tab.dirty = self.dirty;
+            if (tab && tab.dirty !== dirty) tab.dirty = dirty;
             self._scheduleLspDiagnostics();
           });
           self.cm.onDidChangeCursorPosition(function (ev) {
             if (!ev || !ev.position) return;
-            self.cursorLine = ev.position.lineNumber;
-            self.cursorCol = ev.position.column;
+            var el = document.getElementById('ide-cursor');
+            if (el) {
+              el.textContent = 'Ln ' + ev.position.lineNumber + ', Col ' + ev.position.column;
+            }
           });
           self.cmReady = true;
           self._bindLsp();
-          self._onWinResize = function () { self._layoutEditor(); };
-          window.addEventListener('resize', self._onWinResize);
           self._themeObs = new MutationObserver(function () { self._syncMonacoTheme(); });
           self._themeObs.observe(document.documentElement, {
             attributes: true,
@@ -265,9 +261,12 @@ function ideApp() {
 
     _layoutEditor() {
       var self = this;
+      if (this._layoutLock) return;
       if (!this.cm || typeof this.cm.layout !== 'function') return;
+      this._layoutLock = true;
       requestAnimationFrame(function () {
         try { self.cm.layout(); } catch (e) { /* ignore */ }
+        self._layoutLock = false;
       });
     },
 
@@ -1246,6 +1245,7 @@ function ideApp() {
         document.body.style.userSelect = '';
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
+        self._layoutEditor();
       }
 
       document.addEventListener('mousemove', onMove);

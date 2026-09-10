@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — IDE freeze + status bar (2026-09-10)
+
+Cursor position no longer hits Alpine (was re-rendering the whole workbench
+on every caret move). Monaco layout is locked against resize feedback.
+Status bar is a 22px flex footer of the workbench, full width.
+
 ## 0.11 IDE workbench
 
 `/ide` is a workbench, not a form: activity bar (Files / Find / Git / AI),
