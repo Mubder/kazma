@@ -28,6 +28,7 @@ description: Complete catalog of built-in agent tools and native skill tools
 | `file_read` | filesystem | safe/read | Read a file from the local filesystem. |
 | `file_write` | filesystem | **danger** | Write content to a local file (full overwrite). Creates parent directories if needed. Prefer file_apply_patch for edits to files that already exist. |
 | `file_apply_patch` | filesystem | **danger** | Surgically edit an existing workspace file. Prefer this over file_write for changes to files that already exist — send a unique old_string plus new_string (Aider-style), or a unified diff / Morph Begi |
+| `file_apply_patch_set` | filesystem | **danger** | Apply several `file_apply_patch` edits as **one HITL card**. Optional `verify=true` runs nearby pytest after apply (`TESTS PASSED` / `TESTS FAILED`). Prefer this for a multi-file change. |
 | `file_append` | filesystem | safe/read |  |
 | `file_delete` | filesystem | **danger** | Delete a file or directory. Directories are removed recursively. Restricted to the workspace. Danger-tier (requires HITL approval). |
 | `file_list` | filesystem | safe/read | List files and directories at a path. Returns names sorted alphabetically. |
@@ -253,6 +254,7 @@ From `kazma_core/safety/hitl.py` → `CANONICAL_DANGER_TOOLS` (also mirrored in 
 - `email_delete`
 - `email_send`
 - `file_apply_patch`
+- `file_apply_patch_set`
 - `file_delete`
 - `file_write`
 - `git_commit`

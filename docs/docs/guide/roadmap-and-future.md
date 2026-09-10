@@ -2,9 +2,9 @@
 id: roadmap-and-future
 title: Roadmap & Future
 sidebar_label: Roadmap & Future
-description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.10+)
+description: Kazma Roadmap & Future — code-audited reference (unified docs, v0.11+)
 ---
-> An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Anchored to the v0.10+ codebase.
+> An honest separation of what Kazma does today from what is planned, aspirational, or partially wired. Anchored to the v0.11+ codebase.
 
 ---
 
@@ -154,7 +154,7 @@ Other open items:
 1. **429 backoff** — done 2026-08-25 (generic + Anthropic; see leftover GOAL).
 2. **Resolve the OpenTelemetry question** — dead OTel code + `[tracing]` extra removed; Langfuse + Console remain. Re-add only if OTLP export is required. **Wontfix here** (D5).
 3. **Hosted vector DB** — **pgvector is now the default dense engine when Postgres is on** (industry stack part 6). Pick **Qdrant** in Settings if recall latency becomes the bottleneck. Do not grow Chroma as production memory.
-4. **IDE chrome** — **Monaco + `file_apply_patch`** (industry stack part 7). **Codebase index** (ripgrep + symbols) shipped 2026-08-25. **LSP** (hover/complete/definition/diagnostics) shipped 2026-08-25. **`kazma ask` + ACP stdio** shipped 2026-08-25 (live tokens, TTY HITL, `session/request_permission`).
+4. **IDE chrome** — **CodeMirror 5 `fromTextArea` + `file_apply_patch` / `file_apply_patch_set`** (Hands 0.11). Monaco was tried and reverted (hang / empty tabs). **Codebase index** (ripgrep + symbols) shipped 2026-08-25. `/api/ide/lsp` still exists; the Web editor is syntax-only. **`kazma ask` + ACP stdio** (live tokens, TTY HITL, `session/request_permission`, structured diffs, `session/cancel`).
 5. **E2B + Temporal** — **opt-in adapters** (industry stack part 8). Untrusted `python_exec` via Firecracker; durable swarm steps via Temporal. Planner and HITL stay Kazma.
 
 ---
@@ -163,4 +163,4 @@ Other open items:
 
 - This file intentionally resists over-promising. Where README/marketing copy describes a feature that is only partially wired, the status column says 🟡 with the specific reason.
 - The "Suggested next steps" are the audit's opinionated recommendations, prioritized by impact-to-effort ratio. They are not commitments.
-- This file reflects code reality as of v0.10+, not marketing futures.
+- This file reflects code reality as of v0.11+, not marketing futures.

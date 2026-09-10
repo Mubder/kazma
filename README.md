@@ -9,8 +9,8 @@
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
-    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-5%2C608%20Passing-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
-    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-2%2C430%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
+    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-7%2C892-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-3%2C147%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
@@ -38,7 +38,7 @@ Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before dan
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
 |---|---|---|---|
-| **~315K LOC** (252K Python code + 28K JS) | **5,608 automated tests** (394 test suites) | **2,430+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
+| **~409K LOC** (328K Python code + 36K JS) | **7,892 automated tests** (563 test files) | **3,147+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Kazma Observability Dashboard & Control Plane" width="100%">

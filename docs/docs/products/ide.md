@@ -9,20 +9,24 @@ description: Transport-agnostic coding IDE — Web, TUI, and /ide slash commands
 
 Kazma’s IDE is a **transport-agnostic coding backend**: one service for Web, TUI, chat `/ide` commands, and the in-process CLI (`kazma ask` / `kazma acp`). Mutations always go through **`LocalToolRegistry`** so HITL cannot be bypassed.
 
-**Web editor (2026-08-25):** Monaco (the VS Code engine) on `/ide`, with a
-plain `<textarea>` if the CDN is offline. Agent edits to existing files
-should use **`file_apply_patch`** (unique `old_string`/`new_string` or a
-unified diff), not a whole-file `file_write`.
+**Web editor (Hands 0.11):** CodeMirror 5 `fromTextArea` on `/ide` (nord
+theme, `--bg-deep`). File bytes are written into a `<textarea>` first, then
+CodeMirror wraps it for line numbers and syntax. If the CDN is blocked, the
+file is still visible as plain text. Monaco+Alpine was a dead end (browser
+hang / empty tabs) and is gone. Agent edits to existing files should use
+**`file_apply_patch`** or **`file_apply_patch_set`** (unique
+`old_string`/`new_string` or a unified diff), not a whole-file `file_write`.
 
 **Codebase index:** `codebase_search` (and `GET /api/ide/codebase?q=`) finds
 definitions via a per-workspace SQLite symbol index (tree-sitter if you
 `pip install 'kazma[index]'`, else regex) plus live ripgrep. Install `rg`
 for faster text hits. Kill-switch `KAZMA_CODE_INDEX=0`.
 
-**Language intelligence (2026-08-25):** Monaco registers hover, complete,
-Ctrl+click definition, outline, and syntax markers via `POST /api/ide/lsp`.
-Python/JSON diagnostics are in-process (`ast` / `json`); symbols reuse the
-code index. Not a pylsp daemon. Kill-switch `KAZMA_IDE_LSP=0`.
+**Language intelligence:** the Web editor is **syntax-only** (CodeMirror
+modes). `POST /api/ide/lsp` still exists for hover/complete/definition/
+diagnostics (Python/JSON in-process; symbols reuse the code index) but is
+not bound in the CodeMirror UI. Kill-switch `KAZMA_IDE_LSP=0`. For an
+industrial editor loop, use `kazma acp` in Zed.
 
 ## Components
 
@@ -68,11 +72,12 @@ grant, so the loop is smooth rather than a hard failure.
 |--------|------|-------|
 | Read / list / search | Usually safe | Workspace-scoped |
 | Codebase search | Safe | `codebase_search` / `GET /api/ide/codebase` — symbols + ripgrep |
-| Language intelligence | Safe | `GET/POST /api/ide/lsp` — hover, complete, definition, diagnostics |
+| Language intelligence | Safe | `/api/ide/lsp` backend exists; Web editor is syntax-only CodeMirror |
 | Write / delete | Danger tools | Graph or bus approval |
-| Apply patch | Danger (`file_apply_patch`) | Search-replace or unified diff; same HITL as write |
-| Run / run_file / shell | Danger | `shell_exec` / `python_exec` policy |
-| Git commit / push / PR | Danger | Native git skill tools |
+| Apply patch | Danger (`file_apply_patch` / `file_apply_patch_set`) | Search-replace or unified diff; one HITL card for a set; same HITL as write |
+| Run / run_file / shell | Danger | `shell_exec` / `python_exec` policy; Docker `force` blocks host shell unless `KAZMA_HOST_SHELL=1` |
+| Git status / diff / log | Safe | Read-only git is a workspace subprocess (not HITL `shell_exec`) |
+| Git commit / push / clean | Danger | Native git skill tools |
 | Send to swarm | — | Attaches env context for workers |
 
 ## AI chat from IDE

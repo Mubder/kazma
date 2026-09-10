@@ -8,7 +8,7 @@ description: Map of all Kazma documentation — start here
 
 # Kazma documentation
 
-**Single source of truth** for the Kazma agent framework (v0.10+).  
+**Single source of truth** for the Kazma agent framework (v0.11+).  
 Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historical audits live in [`docs/audits/archive/`](https://github.com/Mubder/kazma/tree/main/docs/audits/archive).
 
 ## Start here

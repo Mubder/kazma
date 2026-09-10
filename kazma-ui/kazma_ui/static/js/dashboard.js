@@ -88,7 +88,7 @@
       { id: 'culture', name: 'Arabic & RTL', desc: 'Khaleeji dialect, RTL UI, Majlis, i18n', color: '#ec4899' },
       { id: 'cua', name: 'Computer use', desc: 'Screenshot→action; Anthropic CUA / Gemini when active', color: '#22d3ee' },
       { id: 'voice', name: 'Voice duplex', desc: 'LiveKit AEC + barge-in; graph still owns meaning', color: '#a78bfa' },
-      { id: 'ide', name: 'IDE + code index', desc: 'Monaco, apply-patch, codebase_search', color: '#34d399' },
+      { id: 'ide', name: 'IDE + code index', desc: 'CodeMirror, apply-patch, codebase_search', color: '#34d399' },
       { id: 'mcp', name: 'MCP + skills', desc: 'MCP tools/resources; sampling HITL; agentskills.io', color: '#fb7185' },
     ];
     var features = (window.DASH_CAPS && window.DASH_CAPS.length)

@@ -1,7 +1,8 @@
 /* ═══════════════════════════════════════════════════════
    Kazma IDE — Web transport for the transport-agnostic
-   IdeService. File tree, Monaco editor (CDN, with a
-   graceful <textarea> fallback), save/run/git/grep/swarm.
+   IdeService. File tree, CodeMirror 5 fromTextArea (CDN;
+   textarea still shows the file if the CDN is blocked),
+   save/run/git/grep/swarm.
    All writes/execs flow through /api/ide/* which reuses the
    shared HITL/safety chain — no parallel un-gated path.
    ═══════════════════════════════════════════════════════ */
