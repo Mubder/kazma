@@ -46,6 +46,8 @@ def test_ide_review_panel_markers() -> None:
     assert "_langFromName(filePath)" in js
     assert "var _ideMonaco = null" in js
     assert "cm: null" not in js
+    assert 'id="ide-monaco-host"' in html
+    assert "x-ignore" in html
     assert "openLatestReview" in js
     assert "rejectReview" in js
 

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — IDE tabs opened empty (2026-09-10)
+
+Alpine re-rendered the editor pane on every tab open (`busy`/`tabs`),
+replacing the Monaco host. setValue wrote into a detached node. The
+editor wrap is `x-ignore` and addressed by id.
+
 ## Fix — IDE hang: Monaco was on the Alpine proxy (2026-09-10)
 
 The editor instance was a field on `ideApp()`. Alpine proxied the whole
