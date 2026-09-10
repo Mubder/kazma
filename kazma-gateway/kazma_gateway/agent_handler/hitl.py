@@ -257,6 +257,44 @@ EXEC_TOOLS = frozenset({
 #: reply instructions and the tool name.
 _ARGS_BUDGET = 3200
 _MULTI_BUDGET = 600
+_PATCH_TOOLS = frozenset({"file_apply_patch", "file_apply_patch_set"})
+
+
+def _hunk_lines(old: str, new: str, *, limit: int = 40) -> list[str]:
+    lines: list[str] = []
+    for ln in str(old or "").splitlines()[:limit]:
+        lines.append(f"- {ln}")
+    for ln in str(new or "").splitlines()[:limit]:
+        lines.append(f"+ {ln}")
+    return lines
+
+
+def _format_patch_preview(tool: str, args: Any) -> str | None:
+    """Human diff for apply-patch tools. None → fall back to JSON."""
+    if tool not in _PATCH_TOOLS or not isinstance(args, dict):
+        return None
+    patches = args.get("patches")
+    if tool == "file_apply_patch":
+        patches = [args]
+    if not isinstance(patches, list) or not patches:
+        return None
+    out: list[str] = [f"{len(patches)} file(s):"]
+    for i, item in enumerate(patches[:20], 1):
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "?")
+        out.append(f"\n{i}. {path}")
+        patch = str(item.get("patch") or "").strip()
+        if patch:
+            out.extend(patch.splitlines()[:80])
+        else:
+            out.extend(
+                _hunk_lines(
+                    str(item.get("old_string") or ""),
+                    str(item.get("new_string") or ""),
+                )
+            )
+    return "\n".join(out)
 
 
 def _format_args_for_approval(
@@ -279,10 +317,14 @@ def _format_args_for_approval(
     """
     import json
 
-    try:
-        text = json.dumps(args, ensure_ascii=False, indent=2, default=str)
-    except Exception:  # noqa: BLE001
-        text = str(args)
+    preview = _format_patch_preview(tool, args)
+    if preview is not None:
+        text = preview
+    else:
+        try:
+            text = json.dumps(args, ensure_ascii=False, indent=2, default=str)
+        except Exception:  # noqa: BLE001
+            text = str(args)
 
     if len(text) <= budget:
         return text

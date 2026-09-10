@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.11.0 Hands — tape follow-through (2026-09-10)
+
+HITL cards for `file_apply_patch` / `file_apply_patch_set` show `-/+` hunks
+(not a JSON blob). Honesty pack locks the Copilot-class remind rewrite
+(`remind_rewrite_fire_at`). Public base **0.10.0 → 0.11.0**.
+
 ## 0.11.0 Hands — chat is home, patch-set HITL, honesty pack (2026-09-10)
 
 Kazma is the self-hosted agent that can edit your repo, message your team, and

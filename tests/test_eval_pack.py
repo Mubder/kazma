@@ -137,7 +137,9 @@ async def _run_supervisor(case: dict[str, Any], llm: Any) -> dict[str, Any]:
 @pytest.mark.eval
 @pytest.mark.parametrize("case", _load_cases(), ids=lambda c: c["id"])
 @pytest.mark.asyncio
-async def test_eval_pack_case(case: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_eval_pack_case(
+    case: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     kind = case["kind"]
     expect = case.get("expect") or {}
 
@@ -323,6 +325,34 @@ async def test_eval_pack_case(case: dict[str, Any], monkeypatch: pytest.MonkeyPa
         msg = friendly_llm_error(LLMError("boom", transient=False))
         if expect.get("content_prefix"):
             assert msg.startswith(expect["content_prefix"])
+
+    elif kind == "commitment_remind":
+        monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "1")
+        monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(tmp_path / "ops.db"))
+        from datetime import datetime, timezone
+
+        from kazma_core.safety.commitment import authorize_effect
+
+        request_at = datetime.fromisoformat(
+            str(case.get("request_at") or "2026-08-11T10:00:00+00:00")
+        )
+        if request_at.tzinfo is None:
+            request_at = request_at.replace(tzinfo=timezone.utc)
+        d = authorize_effect(
+            str(case.get("tool") or "schedule_task"),
+            dict(case.get("arguments") or {}),
+            user_text=str(case.get("user") or ""),
+            request_at=request_at,
+            memory_beliefs=list(case.get("memory_beliefs") or []),
+            thread_id=f"eval-{case['id']}",
+            turn_id="turn1",
+        )
+        assert d.decision == expect.get("decision")
+        if expect.get("timing_prefix"):
+            assert d.rewritten_args is not None
+            assert str(d.rewritten_args.get("timing") or "").startswith(
+                expect["timing_prefix"]
+            )
 
     else:
         pytest.fail(f"unknown eval kind: {kind}")
