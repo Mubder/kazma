@@ -180,6 +180,10 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "رفض هذا الملف",
         "en": "Reject this file",
     },
+    "ide.review_reject_hunk": {
+        "ar": "رفض هذا الجزء",
+        "en": "Reject hunk",
+    },
     "ide.undo_patch": {
         "ar": "تراجع عن الرقعة",
         "en": "Undo patch",

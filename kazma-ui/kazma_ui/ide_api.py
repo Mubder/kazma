@@ -154,11 +154,15 @@ def create_ide_router() -> APIRouter:
                 tofile="b/" + _Path(path).name,
                 lineterm="",
             ))
+            diff_text = "\n".join(hunks[:400])
+            from kazma_core.ide.hunks import split_hunks
+
             files.append({
                 "path": path,
                 "before": before,
                 "after": after,
-                "diff": "\n".join(hunks[:200]),
+                "diff": diff_text,
+                "hunks": split_hunks(diff_text),
                 "changed": before != after,
             })
         return {
@@ -167,6 +171,53 @@ def create_ide_router() -> APIRouter:
             "reason": rec.get("reason") or "",
             "files": files,
         }
+
+    @router.post("/checkpoints/{checkpoint_id}/restore-hunk")
+    async def restore_hunk(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        from pathlib import Path as _Path
+
+        from kazma_core.ide.file_checkpoints import get_file_checkpoint_store
+        from kazma_core.ide.hunks import apply_reverse_hunk, split_hunks
+
+        path = str(payload.get("path") or "").strip()
+        try:
+            idx = int(payload.get("hunk_index"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "Missing hunk_index"}
+        if not path:
+            return {"ok": False, "error": "Missing 'path'"}
+        rec = get_file_checkpoint_store().get(checkpoint_id)
+        if rec is None:
+            return {"ok": False, "error": "unknown checkpoint"}
+        before = ""
+        for item in rec.get("files") or []:
+            if str(item.get("path") or "") == path:
+                before = str(item.get("content") or "")
+                break
+        try:
+            after = _Path(path).read_text(encoding="utf-8")
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+        import difflib
+
+        diff_text = "\n".join(difflib.unified_diff(
+            before.splitlines(),
+            after.splitlines(),
+            fromfile="a",
+            tofile="b",
+            lineterm="",
+        ))
+        hunks = split_hunks(diff_text)
+        if idx < 0 or idx >= len(hunks):
+            return {"ok": False, "error": "hunk_index out of range"}
+        header = str(hunks[idx].get("header") or "")
+        body = str(hunks[idx].get("diff") or "").splitlines()[1:]
+        try:
+            rewritten = apply_reverse_hunk(after, header, body)
+            _Path(path).write_text(rewritten, encoding="utf-8")
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "path": path, "hunk_index": idx}
 
     @router.post("/checkpoints/{checkpoint_id}/restore-path")
     async def restore_one_path(checkpoint_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:

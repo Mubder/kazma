@@ -223,6 +223,9 @@ class SupervisorState(TypedDict, total=False):
     consecutive_tool_failures: int
     """Counter for consecutive empty/failed results from tools."""
 
+    test_fail_retries: int
+    """Nearby-pytest verify failures this turn (cap 3 supervisor re-hops)."""
+
     circuit_breaker_tripped: bool
     """Flag indicating whether the tool execution circuit breaker has tripped."""
 
@@ -412,6 +415,7 @@ def initial_supervisor_state(
         snapshot_iteration=-1,
         created_at=now,
         consecutive_tool_failures=0,
+        test_fail_retries=0,
         circuit_breaker_tripped=False,
         tool_signatures=[],
         auto_continue=False,

@@ -66,7 +66,7 @@ def compute_setup_status(registry: Any | None = None) -> dict[str, Any]:
 class BootstrapBody(BaseModel):
     provider: str = Field(min_length=1, max_length=64)
     api_key: str = ""
-    model: str = ""
+    model: str = Field(min_length=1, max_length=200)
 
 
 def create_setup_router() -> APIRouter:

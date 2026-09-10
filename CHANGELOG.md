@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.11 Hands — remaining code gaps
+
+Per-hunk reject on the IDE review stack. Supervisor will not RESPOND after
+`TESTS FAILED` (up to 3 re-hops). First-run requires a model name. Opt-in
+live eval: `KAZMA_LIVE_EVAL=1`.
+
 ## 0.11 Hands — real remaining promises
 
 - **Coding loop:** `file_apply_patch_set(verify=true)` runs nearby pytest after apply; `TESTS PASSED` / `TESTS FAILED` in the tool result. IDE review uses unified diffs and per-file reject.

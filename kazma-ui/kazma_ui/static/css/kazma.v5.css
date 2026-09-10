@@ -193,6 +193,7 @@ html[data-theme="light"] { color-scheme: only light; }
   font-size: 0.8rem;
   font-weight: 600;
 }
+.ide-review-hunk { margin: 8px 0; }
 
 /* Model selector — softer pill */
 .sidebar-model-dropdown {

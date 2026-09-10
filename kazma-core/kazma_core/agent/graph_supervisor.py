@@ -48,6 +48,20 @@ _LOOP_BREAK_MIN_ITERATION = 6
 _failover_clients: dict[str, Any] = {}
 _failover_cooldowns: dict[str, float] = {}
 
+def _last_tool_tests_failed(messages: list[Any]) -> bool:
+    """True when the most recent tool result is a failed nearby-pytest verify."""
+    for msg in reversed(messages or []):
+        if not isinstance(msg, dict):
+            continue
+        role = str(msg.get("role") or "")
+        if role == "tool":
+            content = str(msg.get("content") or "")
+            return "TESTS FAILED" in content
+        if role == "user":
+            return False
+    return False
+
+
 async def supervisor_node(
     state: SupervisorState,
     *,
@@ -1893,6 +1907,33 @@ async def supervisor_node(
                 "last_tokens": response.usage.get("total_tokens", 0),
                 "last_cost_usd": response.cost_usd,
             }
+
+        # TESTS FAILED after verify=true patch-set: do not synthesize a
+        # victory lap. Force another supervisor hop so the model patches again.
+        if _last_tool_tests_failed(messages):
+            retries = int(state.get("test_fail_retries") or 0)
+            if retries < 3:
+                note = {
+                    "role": "system",
+                    "content": (
+                        "TESTS FAILED after file_apply_patch_set. Do not answer the "
+                        "user yet. Call file_apply_patch_set again to fix the remaining "
+                        "failures. Stop only when the tool result contains TESTS PASSED."
+                    ),
+                }
+                assistant_msg = {"role": "assistant", "content": content}
+                return {
+                    **breaker_reset,
+                    **intent_patch,
+                    **_mission_carry,
+                    "messages": messages + [assistant_msg, note],
+                    "next_node": NodeName.SUPERVISOR,
+                    "iteration": iteration + 1,
+                    "test_fail_retries": retries + 1,
+                    "last_model": response.model,
+                    "last_tokens": response.usage.get("total_tokens", 0),
+                    "last_cost_usd": response.cost_usd,
+                }
 
         # Pure text response → RESPOND. Mark completed when focus was open
         # and this turn is not mid multi-step tool work.

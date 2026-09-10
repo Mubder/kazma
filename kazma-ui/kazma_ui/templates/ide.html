@@ -155,7 +155,13 @@
           <span x-text="file.path"></span>
           <button class="btn btn-xs btn-danger" @click="rejectFile(file.path)" :disabled="busy">{{ t('ide.review_reject_file') }}</button>
         </div>
-        <div class="hitl-diff" x-html="reviewHunkHtml(file)"></div>
+        <template x-for="hunk in (file.hunks || [])" :key="file.path + ':' + hunk.index">
+          <div class="ide-review-hunk">
+            <button class="btn btn-xs btn-danger" @click="rejectHunk(file.path, hunk.index)" :disabled="busy">{{ t('ide.review_reject_hunk') }}</button>
+            <div class="hitl-diff" x-html="reviewHunkHtml({diff: hunk.diff})"></div>
+          </div>
+        </template>
+        <div class="hitl-diff" x-show="!(file.hunks && file.hunks.length)" x-cloak x-html="reviewHunkHtml(file)"></div>
       </div>
     </template>
   </div>
