@@ -31,10 +31,10 @@
     <input id="setup-key" class="form-input" type="password" autocomplete="off" x-model="apiKey"
            :placeholder="tKeyHint">
     <label class="setup-wall-label" for="setup-model">{{ t('chat.setup_model') }}</label>
-    <input id="setup-model" class="form-input" type="text" x-model="model"
+    <input id="setup-model" class="form-input" type="text" x-model="model" required
            placeholder="gpt-4.1, claude-sonnet-4-5, …">
     <p class="setup-wall-error" x-cloak x-show="error" x-text="error"></p>
-    <button type="button" class="btn btn-primary" @click="submit()" :disabled="busy">
+    <button type="button" class="btn btn-primary" @click="submit()" :disabled="busy || !(model && String(model).trim())">
       {{ t('chat.setup_start') }}
     </button>
     <p class="setup-wall-hint">{{ t('chat.setup_settings_hint') }}</p>

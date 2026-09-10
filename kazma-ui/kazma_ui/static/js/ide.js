@@ -713,6 +713,28 @@ function ideApp() {
       this.reviewOpen = false;
     },
 
+    async rejectHunk(path, hunkIndex) {
+      if (!this.review.id || !path) return;
+      this.busy = true;
+      try {
+        var data = await this._post(
+          '/api/ide/checkpoints/' + encodeURIComponent(this.review.id) + '/restore-hunk',
+          { path: path, hunk_index: hunkIndex }
+        );
+        if (data.ok) {
+          this.toast('Hunk restored', true);
+          await this.openLatestReview();
+          if (this.currentFile) this.openFile(this.currentFile);
+        } else {
+          this.toast('Hunk restore failed', false);
+        }
+      } catch (err) {
+        this.toast('Hunk restore failed', false);
+      } finally {
+        this.busy = false;
+      }
+    },
+
     async rejectFile(path) {
       if (!this.review.id || !path) return;
       var ok = window.kazmaConfirm
