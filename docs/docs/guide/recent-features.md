@@ -2,7 +2,7 @@
 id: recent-features
 title: Recent features guide
 sidebar_label: Recent features
-description: Operator guide for recent Kazma features — Turn Delivery, HITL registry, research, KB, memory, documents, X Studio
+description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror IDE, Turn Delivery, HITL registry, research, KB, memory, documents, X Studio
 ---
 
 # Recent features guide
@@ -11,6 +11,13 @@ This page is the **operator-facing tour** of the features landed in the
 research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
+
+**New in 2026-09-10 (Hands 0.11):** Chat is home (`/` → `/chat`; first-run
+asks for one provider key + model). `file_apply_patch_set` is one HITL card
+(optional `verify=true` runs nearby pytest). Web `/ide` is CodeMirror 5
+`fromTextArea` (nord) — Monaco is gone. Read-only git is not a danger tool.
+`kazma acp` sends structured diffs and honours `session/cancel`. Docker
+`force` blocks host `shell_exec` unless `KAZMA_HOST_SHELL=1`.
 
 **New in 2026-09-01/02:** Turn Delivery V2 (journal + `close_turn`; the chat
 bubble **projects**). HITL Gate Registry (`hitl_gates.db` — one card, one
@@ -47,6 +54,8 @@ resolution + git-write blast radius), transcript recall fallback
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Hands 0.11 (2026-09-10)** | Chat is home. `file_apply_patch_set` (one HITL card, `-/+` hunks, optional pytest verify). Supervisor re-hops on `TESTS FAILED` (cap 3). ACP diffs + `session/cancel`. Docker jail `force`. | [IDE](../products/ide); [CLI](./cli-reference); `examples/hands-demo/` |
+| **Web `/ide` CodeMirror (2026-09-10)** | File pane is CodeMirror 5 `fromTextArea` (nord, `--bg-deep`). Textarea-first so a blocked CDN still shows the file. Read-only git is a subprocess, not HITL. | `/ide`; [IDE](../products/ide) |
 | **Turn Delivery + HITL registry (2026-09)** | Chat journal is SoT; `close_turn` is the only closer; client projects. One HITL row in `hitl_gates.db` (`pending` = live buttons; second claim **409**). FanOut is tri-state. | [Security](./security-and-safety); [Diagnosis map](../ops/diagnosis-map); AGENTS.md §30–§31 |
 | **SSRF pin-IP (Wave 8)** | Direct scrape connects to the validated public IP; private peer abort. Skip pin when a proxy is set. | [Security](./security-and-safety); `KAZMA_JINA_READER=1` still opt-in |
 | **Context integrity (2026-08-30)** | Scratchpad merges; drafts live in `agent_artifacts.db`; trim always summarizes dropped turns; only an **explicit** topic pivot disarms recall. | [Memory](./memory-and-rag); AGENTS.md §29 |
@@ -60,13 +69,13 @@ resolution + git-write blast radius), transcript recall fallback
 | **LiteLLM optional gateway (2026-08-25)** | `KAZMA_LITELLM_URL` (or `llm.gateway.url`) sends OpenAI-compatible calls through a LiteLLM proxy. Native Anthropic/Azure/Bedrock/Gemini stay direct. Locals stay direct. Not exclusive. | [FAQ](./faq#do-i-need-litellm); `KAZMA_LITELLM=0` |
 | **Computer use + leftover polish (2026-08-25)** | `computer_use` screenshot→action loop (HITL). Langfuse **auto-on** with keys. Hosted embed fleet (`KAZMA_EMBED_FLEET=1`). Docling/LlamaParse salvage for hard PDFs. Voice is **turn-based**, not Realtime. | [Tools](../reference/tools-catalog); `KAZMA_COMPUTER_USE=0`; [Voice](./voice-and-media) |
 | **kazma ask + ACP (2026-08-25)** | `kazma ask "…"` runs the graph without the web server. Tokens stream; TTY HITL (`y/N`). `kazma acp` is ACP stdio with `session/update` + `session/request_permission`. `--yolo` is headless. | [Quickstart](./quickstart); `kazma ask --help` |
-| **IDE LSP (2026-08-25)** | Monaco hover, complete, Ctrl+click definition, Python/JSON diagnostics. Workspace-scoped; uses the code index. | `/ide`; `KAZMA_IDE_LSP=0`; [IDE](../products/ide) |
+| **IDE LSP backend (2026-08-25)** | `/api/ide/lsp` hover/complete/definition/diagnostics still exist. The Web editor is CodeMirror syntax-only; the industrial editor loop is `kazma acp`. | `/ide`; `KAZMA_IDE_LSP=0`; [IDE](../products/ide) |
 | **Plan mode (2026-08-25)** | `/plan on` inspects (write/exec blocked). `/plan go` or **Proceed** executes. HITL still on. | Plan pill; [Slash commands](../reference/slash-commands); `KAZMA_PLAN_MODE=0` |
 | **Pre/Post tool hooks (2026-08-25)** | Claude Code–style PreToolUse / PostToolUse (deny, rewrite, observe). Not a permission system — HITL still gates danger tools. | `agent.hooks.*`; `KAZMA_TOOL_HOOKS=0`; [Architecture](./architecture#56-tool-hooks) · [Security](./security-and-safety) |
 | **Strict tool schemas (2026-08-25)** | Tool JSON Schema is closed (`additionalProperties: false`). OpenAI `strict` tools + `response_format` are opt-in. | `KAZMA_STRICT_TOOLS=1`; [Tools catalog](../reference/tools-catalog); [Architecture](./architecture#55-strict-schemas--structured-outputs) |
 | **Codebase index (2026-08-25)** | `codebase_search` finds functions/classes (tree-sitter or regex) plus live ripgrep. Index refreshes on write/patch. | extra `kazma[index]`; `KAZMA_CODE_INDEX=0`; [IDE](../products/ide) |
 | **E2B + Temporal (2026-08-25)** | Opt-in Firecracker `python_exec` (`E2B_API_KEY`) and Temporal-wrapped swarm dispatch (`KAZMA_TEMPORAL_HOST`). Defaults unchanged. | extras `kazma[sandbox]` / `kazma[durable]`; [env vars](../reference/environment-variables) |
-| **Monaco + apply-patch (2026-08-25)** | `/ide` uses the VS Code Monaco engine (textarea fallback). Agent edits use `file_apply_patch` (HITL) instead of rewriting whole files. | `/ide`; [IDE](../products/ide); [Tools catalog](../reference/tools-catalog) |
+| **apply-patch (2026-08-25; Hands 0.11 set)** | Agent edits use `file_apply_patch` / `file_apply_patch_set` (HITL) instead of rewriting whole files. Web `/ide` is CodeMirror 5, not Monaco. | `/ide`; [IDE](../products/ide); [Tools catalog](../reference/tools-catalog) |
 | **pgvector memory search (2026-08-25)** | When Postgres is on, dense recall uses pgvector (auto). Postgres-primary is ILIKE + vector RRF, not ILIKE-only. `KAZMA_PGVECTOR=0` keeps sqlite-vec. | Settings → Memory; [Memory & RAG](./memory-and-rag); [Postgres & SaaS](../ops/postgres-and-saas) |
 | **Memory system audit (2026-08-24)** | Ego-graph hub anchors (no more floating concept nodes), PG-mirror tombstones + `scripts/reconcile_memory_mirror.py`, tenant-scoped graph-clear (no all-tenants wipe), FTS drift rebuild on the 6h sweep, merge-ledger archive, Ungroup, honest truncation banner | `/memory`; restart after `git pull` |
 | **Universal backup** | One unified backup of ALL data: every SQLite DB (WAL-safe), all assets (document-store, workspace, attachments, vectors). Auto **6h** + manual; **checks** PG dump freshness (does not dump twice). Progress bar, delete/archive/download | Settings → **Backup tab**; `POST /api/backup/now` |
@@ -83,7 +92,7 @@ without a restart (CLI; tokens stream, TTY HITL). Restart the server to activate
 **X Studio** (`/x`), the IBM Plex / letterhead-K brand, the `--reload` backoff
 skip (restart **KazmaAgent** once so the *guard* is on the new code),
 **computer_use**, **Langfuse auto-on**, Docling/LlamaParse salvage,
-**IDE LSP** (hover/complete on `/ide`), **plan mode** (`/plan on` · Plan
+**Hands 0.11** (`file_apply_patch_set`, CodeMirror `/ide`, ACP diffs), **plan mode** (`/plan on` · Plan
 pill), **tool hooks** (`agent.hooks.*`;
 `KAZMA_TOOL_HOOKS=0` disables), the
 **closed tool schemas** (`additionalProperties: false`; optional

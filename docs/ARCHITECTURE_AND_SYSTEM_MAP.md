@@ -377,7 +377,7 @@ kazma/
 | App factory | FastAPI + lifespan shutdown drain |
 | Auth | Secret / opaque session / API token / OIDC |
 | Chat | SSE primary (`/api/chat/stream`); WS graph off unless `KAZMA_WS_GRAPH=1`; client **projects** TurnDocument |
-| IDE | `/ide` page + `/api/ide/*` + Monaco `ide.js` |
+| IDE | `/ide` page + `/api/ide/*` + CodeMirror `ide.js` |
 | Swarm panel | `/swarm` + `/api/swarm/*` |
 | Settings | Alpine + `mask_deep` + `kazmaConfirm`/`kazmaPrompt` |
 | Health | `/health/live` + `/health/ready` public; `/health/details` **auth** (L-1); `/health/deep` canary |
@@ -575,7 +575,7 @@ Cross-reference: `docs/audits/REMEDIATION_PLAN_2026-07-21.md` (all WP 0.x–4.x 
 | Feature area | Modules / surfaces |
 |--------------|-------------------|
 | Command Center / swarm live | `swarm.html`, `swarm.js`, `swarm_panel/*`, `swarm_sse.py` |
-| IDE Monaco editor | `ide.html`, `ide.js`, `ide_api.py`, `ide/service.py`, `tools/file_apply_patch.py` |
+| IDE CodeMirror editor | `ide.html`, `ide.js`, `ide_api.py`, `ide/service.py`, `tools/file_apply_patch.py` |
 | SSE streaming chat | `sse_chat/` package, `chat.js` projector, `turn_runtime.close_turn` |
 | HITL Gate Registry | `safety/hitl_gates.py`, `hitl_status.py`, `chat.js` `_serverGates` |
 | WebSocket voice | `routes_voice_ws.py`, `voice.js` |

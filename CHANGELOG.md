@@ -1,101 +1,42 @@
 # CHANGELOG
 
-## Fix — drop Monaco; CodeMirror fromTextArea (2026-09-10)
+## 0.11.0 Hands (2026-09-10)
 
-Monaco+Alpine was a dead end (hang, empty tabs). The file pane now writes
-bytes into a textarea first, then CodeMirror 5 wraps it (line numbers +
-syntax). If CM does not load, the file is still visible as plain text.
-
-## Fix — IDE tabs opened empty (2026-09-10)
-
-Alpine re-rendered the editor pane on every tab open (`busy`/`tabs`),
-replacing the Monaco host. setValue wrote into a detached node. The
-editor wrap is `x-ignore` and addressed by id.
-
-## Fix — IDE hang: Monaco was on the Alpine proxy (2026-09-10)
-
-The editor instance was a field on `ideApp()`. Alpine proxied the whole
-Monaco object; every click/caret walked it and re-rendered the page
-(fan-spin). Monaco now lives outside Alpine. File-tree icons are CSS,
-not `x-html` SVG per row.
-
-## Fix — Telegram REJECTED git status on restart (2026-09-10)
-
-`IdeService.git("status -sb")` went through danger `shell_exec`, so IDE
-init (and Status) posted HITL cards to Telegram that auto-rejected. Read-only
-git now runs as a workspace subprocess; push/commit/clean still HITL.
-
-## Fix — restore IDE chrome; Monaco is the file editor (2026-09-10)
-
-Workbench chrome (activity bar / status bar) reverted — that was not the
-ask. The centre pane is Monaco with line numbers, folding, bracket colors,
-minimap, and language from the file extension (API never sent `lang`, so
-everything was plaintext). Editor host stays in layout so Monaco is not
-created at 0×0.
-
-## Fix — IDE freeze + status bar (2026-09-10)
-
-Cursor position no longer hits Alpine (was re-rendering the whole workbench
-on every caret move). Monaco layout is locked against resize feedback.
-Status bar is a 22px flex footer of the workbench, full width.
-
-## 0.11 IDE workbench
-
-`/ide` is a workbench, not a form: activity bar (Files / Find / Git / AI),
-explorer with type glyphs, command palette (Ctrl+P), status bar, and a
-collapsible terminal/output dock. Ctrl+S save, Ctrl+` terminal.
-
-## Fix — IDE file click hung the browser (2026-09-10)
-
-Monaco `automaticLayout` fought the flex pane (CPU peg, fan spin) on
-every file open. Alpine `x-for="(file.hunks || [])"` could also tight-loop.
-Layout is now explicit; review panel is `x-if` and hunk HTML is precomputed.
-
-## 0.11 Hands — remaining code gaps
-
-Per-hunk reject on the IDE review stack. Supervisor will not RESPOND after
-`TESTS FAILED` (up to 3 re-hops). First-run requires a model name. Opt-in
-live eval: `KAZMA_LIVE_EVAL=1`.
-
-## 0.11 Hands — real remaining promises
-
-- **Coding loop:** `file_apply_patch_set(verify=true)` runs nearby pytest after apply; `TESTS PASSED` / `TESTS FAILED` in the tool result. IDE review uses unified diffs and per-file reject.
-- **Jail:** `KAZMA_CODE_EXEC_DOCKER=force` disables host `shell_exec` unless `KAZMA_HOST_SHELL=1`. python_exec stays Docker-or-fail.
-- **Usefulness eval:** `tests/test_hands_outcome.py` patches hands-demo until pytest is green (no live LLM).
-
-## 0.11 ACP daily driver
-
-Editor permission prompts carry structured `diff` content for
-`file_apply_patch(_set)` / `file_write`, plus Docker-vs-host jail notes.
-`session/cancel` aborts the in-flight turn (and pending permission).
-Zed `agent_servers` snippet in the CLI reference.
-
-## 0.11.0 Hands — exec leftovers (WP6/WP7/WP8)
-
-IDE review panel: file list + diffs, Accept all / Reject-and-restore (EN+AR).
-HITL exec cards name Docker vs host. REPL test: two prompts keep one thread id.
-
-## 0.11.0 Hands — review-stack HITL (2026-09-10)
-
-Patch approvals render as a colored `-/+` stack on Web chat and the
-dashboard pending list (not a JSON `<pre>`). Eval pack:
-`tool_trace_patch_then_test`.
-
-## 0.11.0 Hands — tape follow-through (2026-09-10)
-
-HITL cards for `file_apply_patch` / `file_apply_patch_set` show `-/+` hunks
-(not a JSON blob). Honesty pack locks the Copilot-class remind rewrite
-(`remind_rewrite_fire_at`). Public base **0.10.0 → 0.11.0**.
-
-## 0.11.0 Hands — chat is home, patch-set HITL, honesty pack (2026-09-10)
+Public base **0.10.0 → 0.11.0**. Display remains `{base}+gSHORTSHA`.
 
 Kazma is the self-hosted agent that can edit your repo, message your team, and
 schedule your life — and that will stop, ask, or fail honestly rather than
 invent an answer.
 
-- **Face:** `GET /` redirects to `/chat`. Sidebar Work is Chat / Workspace / IDE / Settings; inspectors live under More (CSS hides `.nav-more-body`, never `display:flex` on `<details>`). First-run wall on chat: one provider key + model (`/api/setup/*`). README leads with that sentence.
-- **Hands:** `file_apply_patch_set` (one HITL card, YAML + CANONICAL + TOOL_TIERS). Workspace file checkpoints + IDE **Undo patch**. `kazma ask` REPL on a TTY (`/exit` `/new`). Coding constrain note prefers patch-set then tests.
-- **Honesty:** eval pack adds `shell_exec` and `file_apply_patch_set` interrupt cases. Prompt-cache hits bill at 0.1× input (`cost_from_usage`). `native_pg_backup` failures page `ops_alerts`. Demo: `examples/hands-demo/`.
+### Chat is home
+`GET /` redirects to `/chat`. Sidebar Work is Chat / Workspace / IDE / Settings;
+inspectors live under More. First-run wall on chat: one provider key + model
+(`/api/setup/*`). `kazma ask` REPL on a TTY (`/exit` `/new`).
+
+### Hands (coding loop)
+- `file_apply_patch_set` — one HITL card for a multi-file patch (YAML + CANONICAL + TOOL_TIERS).
+- `file_apply_patch_set(verify=true)` runs nearby pytest after apply; `TESTS PASSED` / `TESTS FAILED` in the tool result. Supervisor will not RESPOND after `TESTS FAILED` (up to 3 re-hops).
+- Workspace file checkpoints + IDE Undo patch / per-hunk reject / Accept all.
+- HITL cards for patch tools show a colored `-/+` stack (not a JSON `<pre>`).
+- Demo: `examples/hands-demo/`.
+
+### ACP daily driver
+`kazma acp`: permission prompts carry structured `diff` for
+`file_apply_patch(_set)` / `file_write`. `session/cancel` aborts the in-flight
+turn. Zed `agent_servers` snippet in the CLI reference.
+
+### Web `/ide`
+CodeMirror 5 `fromTextArea` (nord theme, `--bg-deep`). File bytes go into a
+textarea first; syntax colors if the CDN loads, otherwise the file is still
+visible as plain text. Monaco+Alpine was a dead end (browser hang / empty tabs)
+and is gone. Read-only git (`status`, `diff`, `log`) is a workspace subprocess,
+not HITL `shell_exec`. Commit / push / clean still require approval.
+
+### Honesty / jail
+- Eval pack: `shell_exec` and `file_apply_patch_set` interrupt cases; Copilot-class `remind_rewrite_fire_at`; `tests/test_hands_outcome.py`.
+- Opt-in live eval: `KAZMA_LIVE_EVAL=1`.
+- `KAZMA_CODE_EXEC_DOCKER=force` disables host `shell_exec` unless `KAZMA_HOST_SHELL=1`. `python_exec` stays Docker-or-fail.
+- Prompt-cache hits bill at 0.1× input. `native_pg_backup` failures page `ops_alerts`.
 
 Operator: `kazma_guard.py --reload` then Ctrl+F5.
 

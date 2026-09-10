@@ -43,7 +43,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | Metric | Count |
 |---|---:|
 | Test files | **563** |
-| Collected at runtime | n/a |
+| Collected at runtime | **7,892** |
 | `def test_*` functions | 5,435 |
 | `async def test_*` functions | 1,620 |
 | `Test*` classes | 1147 |
@@ -77,7 +77,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | JSON | 19 |
 | SVG | 4 |
 
-| JS LOC (UI static) | **35,983** |
+| JS LOC (UI static) | **35,984** |
 
 ## Git history
 
@@ -85,7 +85,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 |---|---:|
 | Commits | **3,147** |
 | Contributors | 9 |
-| Branches | 1 |
+| Branches | 3 |
 | Tags | 16 |
 
 ## Largest Python files (top 15)

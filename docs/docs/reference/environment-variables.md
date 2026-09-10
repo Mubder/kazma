@@ -159,14 +159,16 @@ and extras `kazma[sandbox]` / `kazma[durable]`.
 |----------|---------|----------------|---------|
 | `KAZMA_E2B_API_KEY` / `E2B_API_KEY` | unset | Untrusted / multi-user code | E2B Firecracker for HITL-approved `python_exec`. |
 | `KAZMA_E2B` | auto if key set | No | `0` keeps Docker/local even with a key. |
-| `KAZMA_CODE_EXEC_DOCKER` | `auto` | Single-operator jail | `1`/`force` Docker; `0` local (ignored when production forbids local). |
+| `KAZMA_CODE_EXEC_DOCKER` | `auto` | Single-operator jail | `1`/`force` Docker; `0` local (ignored when production forbids local). `force` also blocks host `shell_exec` unless `KAZMA_HOST_SHELL=1`. |
+| `KAZMA_HOST_SHELL` | unset | Escape hatch | `1` allows host `shell_exec` even when `KAZMA_CODE_EXEC_DOCKER=force`. |
+| `KAZMA_LIVE_EVAL` | unset | No | `1` runs the opt-in live-model eval (`tests/test_hands_live.py`). CI skips. |
 | `KAZMA_TEMPORAL_HOST` / `TEMPORAL_ADDRESS` | unset | Multi-hour swarm | Temporal frontend (`localhost:7233`). Wraps swarm `_dispatch_inner`. |
 | `KAZMA_TEMPORAL` | auto if host set | No | `0` keeps in-process swarm. |
 | `KAZMA_TEMPORAL_REQUIRED` | unset | Strict HA | `1` = fail the task if Temporal/SDK is down (no in-process fallback). |
 | `KAZMA_TEMPORAL_NAMESPACE` | `default` | No | Temporal namespace. |
 | `KAZMA_TEMPORAL_QUEUE` | `kazma-swarm` | No | Task queue for the in-process Temporal worker. |
 | `KAZMA_CODE_INDEX` | on | No | `0` disables the workspace symbol index + `codebase_search`. |
-| `KAZMA_IDE_LSP` | on | No | `0` disables Monaco hover/complete/definition/diagnostics on `/ide`. |
+| `KAZMA_IDE_LSP` | on | No | `0` disables the `/api/ide/lsp` backend. The Web `/ide` editor is CodeMirror 5 (syntax only); hover/complete UI is not bound. |
 
 ---
 
