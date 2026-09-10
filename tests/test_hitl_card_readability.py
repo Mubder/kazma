@@ -167,6 +167,16 @@ def test_patch_set_card_shows_minus_plus_hunks() -> None:
     assert "function formatPatchPreview(" in js
 
 
+def test_python_exec_approval_args_include_jail_note(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kazma_core.tools.code_exec import reset_docker_probe
+
+    monkeypatch.setenv("KAZMA_CODE_EXEC_DOCKER", "force")
+    reset_docker_probe()
+    out = _format_args_for_approval("python_exec", {"code": "print(1)"})
+    assert "Docker" in out
+    assert "print(1)" in out
+
+
 def test_unserialisable_args_still_render():
     class Weird:
         def __repr__(self) -> str:
@@ -434,6 +444,14 @@ def test_the_web_card_does_not_truncate_the_command():
         "authorise what they cannot read"
     )
     assert "function formatApprovalArgs" in js
+    assert "function renderApprovalArgsHtml" in js
+    assert "hitl-diff-del" in js
     assert "MORE CHARACTERS ARE NOT SHOWN" in js, (
         "if it must elide, it has to say so rather than trail off"
     )
+    v5 = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.v5.css"
+    ).read_text(encoding="utf-8")
+    assert ".hitl-diff-del" in v5
+    assert ".hitl-diff-add" in v5

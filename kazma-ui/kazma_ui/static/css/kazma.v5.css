@@ -142,6 +142,58 @@ html[data-theme="light"] { color-scheme: only light; }
 .setup-wall-error { color: var(--error); font-size: 0.85rem; }
 .setup-wall-hint { font-size: 0.75rem; }
 
+/* Hands tape — HITL patch review stack (v5 only; do not copy into kazma.css). */
+.hitl-diff {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-deep);
+  border-radius: 6px;
+}
+.hitl-diff-file {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 6px;
+}
+.hitl-diff-meta { color: var(--text-muted); }
+.hitl-diff-ctx { color: var(--text-tertiary); }
+.hitl-diff-del {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+.hitl-diff-add {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+.hitl-jail-note {
+  font-size: 0.8rem;
+  color: var(--warning);
+  margin: 6px 0;
+}
+.ide-review {
+  margin: 0 0 10px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+}
+.ide-review-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ide-review-head h3 { margin: 0; font-size: 0.95rem; }
+.ide-review-file { margin: 8px 0; }
+.ide-review-path {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 /* Model selector — softer pill */
 .sidebar-model-dropdown {
   border-radius: 10px;

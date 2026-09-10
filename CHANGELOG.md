@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## 0.11 Hands — real remaining promises
+
+- **Coding loop:** `file_apply_patch_set(verify=true)` runs nearby pytest after apply; `TESTS PASSED` / `TESTS FAILED` in the tool result. IDE review uses unified diffs and per-file reject.
+- **Jail:** `KAZMA_CODE_EXEC_DOCKER=force` disables host `shell_exec` unless `KAZMA_HOST_SHELL=1`. python_exec stays Docker-or-fail.
+- **Usefulness eval:** `tests/test_hands_outcome.py` patches hands-demo until pytest is green (no live LLM).
+
+## 0.11 ACP daily driver
+
+Editor permission prompts carry structured `diff` content for
+`file_apply_patch(_set)` / `file_write`, plus Docker-vs-host jail notes.
+`session/cancel` aborts the in-flight turn (and pending permission).
+Zed `agent_servers` snippet in the CLI reference.
+
+## 0.11.0 Hands — exec leftovers (WP6/WP7/WP8)
+
+IDE review panel: file list + diffs, Accept all / Reject-and-restore (EN+AR).
+HITL exec cards name Docker vs host. REPL test: two prompts keep one thread id.
+
+## 0.11.0 Hands — review-stack HITL (2026-09-10)
+
+Patch approvals render as a colored `-/+` stack on Web chat and the
+dashboard pending list (not a JSON `<pre>`). Eval pack:
+`tool_trace_patch_then_test`.
+
 ## 0.11.0 Hands — tape follow-through (2026-09-10)
 
 HITL cards for `file_apply_patch` / `file_apply_patch_set` show `-/+` hunks

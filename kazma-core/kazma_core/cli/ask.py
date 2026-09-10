@@ -41,6 +41,7 @@ __all__ = [
     "apply_repl_line",
     "parse_ask_argv",
     "prompt_from_acp_blocks",
+    "acp_tool_call_content",
     "run_acp_stdio",
     "run_ask",
     "tool_kind_for",
@@ -212,6 +213,76 @@ def tool_kind_for(name: str) -> str:
     if any(k in n for k in ("read", "list", "get", "status", "hover")):
         return "read"
     return "other"
+
+
+def acp_tool_call_content(
+    tool: str, args: dict[str, Any] | None, *, workspace: str = ""
+) -> list[dict[str, Any]]:
+    """ACP ToolCallContent: structured diffs for patch/write tools."""
+    args = dict(args or {})
+    name = (tool or "").strip()
+    patches: list[dict[str, Any]] = []
+    if name == "file_apply_patch":
+        patches = [args]
+    elif name == "file_apply_patch_set":
+        raw = args.get("patches")
+        if isinstance(raw, list):
+            patches = [p for p in raw if isinstance(p, dict)]
+    elif name == "file_write":
+        path = str(args.get("path") or "")
+        return [{
+            "type": "diff",
+            "path": _acp_abs_path(path, workspace),
+            "oldText": None,
+            "newText": str(args.get("content") or "")[:12000],
+        }] if path else []
+    out: list[dict[str, Any]] = []
+    for item in patches[:20]:
+        path = str(item.get("path") or "")
+        if not path:
+            continue
+        abs_path = _acp_abs_path(path, workspace)
+        if str(item.get("patch") or "").strip():
+            out.append({
+                "type": "diff",
+                "path": abs_path,
+                "oldText": "",
+                "newText": str(item.get("patch") or "")[:12000],
+            })
+        else:
+            out.append({
+                "type": "diff",
+                "path": abs_path,
+                "oldText": str(item.get("old_string") or "")[:8000],
+                "newText": str(item.get("new_string") or "")[:8000],
+            })
+    return out
+
+
+def acp_locations(tool: str, args: dict[str, Any] | None, *, workspace: str = "") -> list[dict[str, str]]:
+    content = acp_tool_call_content(tool, args, workspace=workspace)
+    locs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for block in content:
+        path = str(block.get("path") or "")
+        if path and path not in seen:
+            seen.add(path)
+            locs.append({"path": path})
+    if not locs and isinstance(args, dict):
+        p = str(args.get("path") or "")
+        if p:
+            locs.append({"path": _acp_abs_path(p, workspace)})
+    return locs
+
+
+def _acp_abs_path(path: str, workspace: str) -> str:
+    from pathlib import Path
+
+    p = Path(path)
+    if p.is_absolute():
+        return str(p)
+    root = Path(workspace or ".").resolve()
+    return str((root / path).resolve()) if path else str(root)
 
 
 def _hitl_from_value(value: Any) -> dict[str, Any] | None:
@@ -606,6 +677,29 @@ class AcpSessionState:
     sessions: dict[str, str] = field(default_factory=dict)
     yolo: bool = False
     workspace: str = ""
+    _cancel: dict[str, asyncio.Event] = field(default_factory=dict)
+
+    def cancel_event(self, session_id: str) -> asyncio.Event:
+        sid = session_id or "_any"
+        ev = self._cancel.get(sid)
+        if ev is None:
+            ev = asyncio.Event()
+            self._cancel[sid] = ev
+        return ev
+
+    def reset_cancel(self, session_id: str) -> asyncio.Event:
+        ev = asyncio.Event()
+        self._cancel[session_id or "_any"] = ev
+        return ev
+
+    def note_cancel(self, session_id: str = "") -> None:
+        sid = (session_id or "").strip()
+        if sid:
+            self.cancel_event(sid).set()
+            return
+        for ev in self._cancel.values():
+            ev.set()
+        self.cancel_event("_any").set()
 
 
 def handle_acp_request(
@@ -636,7 +730,7 @@ def handle_acp_request(
 
             version = get_version()
         except Exception:
-            version = "0.10.0"
+            version = "0.11.0"
         return {
             "jsonrpc": "2.0",
             "id": msg_id,
@@ -671,6 +765,8 @@ def handle_acp_request(
         return {"jsonrpc": "2.0", "id": msg_id, "result": {"sessionId": sid}}
 
     if method == "session/cancel":
+        sid = str(params.get("sessionId") or "")
+        state.note_cancel(sid)
         return None  # notification
 
     if method == "shutdown":
@@ -707,13 +803,27 @@ def _write_rpc(obj: dict[str, Any], out: TextIO) -> None:
 class _JsonRpcStdio:
     """Bidirectional JSON-RPC over stdio (client requests + our calls)."""
 
-    def __init__(self, stdin: TextIO, stdout: TextIO) -> None:
+    def __init__(
+        self,
+        stdin: TextIO,
+        stdout: TextIO,
+        *,
+        on_notification: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self._stdin = stdin
         self._stdout = stdout
         self._inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._pending: dict[Any, asyncio.Future[dict[str, Any]]] = {}
         self._next_id = 1
         self._eof = False
+        self._on_notification = on_notification
+
+    def fail_pending(self, result: dict[str, Any] | None = None) -> None:
+        payload = result or {"outcome": {"outcome": "cancelled"}}
+        for fut in list(self._pending.values()):
+            if not fut.done():
+                fut.set_result(payload)
+        self._pending.clear()
 
     async def read_loop(self) -> None:
         while True:
@@ -743,6 +853,13 @@ class _JsonRpcStdio:
             if not isinstance(message, dict):
                 continue
             if message.get("method"):
+                if message.get("id") is None and self._on_notification is not None:
+                    try:
+                        self._on_notification(message)
+                    except Exception:
+                        logger.debug("[acp] notification hook failed", exc_info=True)
+                    if str(message.get("method") or "") == "session/cancel":
+                        continue
                 await self._inbox.put(message)
                 continue
             msg_id = message.get("id")
@@ -796,6 +913,15 @@ async def run_acp_stdio(
     state = AcpSessionState(yolo=yolo, workspace=workspace)
     _boot_env(workspace=workspace)
     rpc = _JsonRpcStdio(stdin, stdout)
+
+    def _on_note(msg: dict[str, Any]) -> None:
+        if str(msg.get("method") or "") != "session/cancel":
+            return
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        state.note_cancel(str(params.get("sessionId") or ""))
+        rpc.fail_pending()
+
+    rpc._on_notification = _on_note
     reader = asyncio.create_task(rpc.read_loop())
     try:
         while True:
@@ -814,6 +940,12 @@ async def run_acp_stdio(
                         rpc, state, sid=sid, prompt=prompt, msg_id=msg_id,
                         yolo=yolo, workspace=workspace,
                     )
+                except asyncio.CancelledError:
+                    rpc.reply({
+                        "jsonrpc": "2.0",
+                        "id": msg_id,
+                        "result": {"stopReason": "cancelled"},
+                    })
                 except Exception as exc:
                     logger.error("[acp] session/prompt failed: %s", exc, exc_info=True)
                     rpc.reply({
@@ -852,17 +984,21 @@ async def _acp_run_prompt(
                 },
             })
         elif kind == "tool_start":
-            rpc.notify("session/update", {
-                "sessionId": sid,
-                "update": {
-                    "sessionUpdate": "tool_call",
-                    "toolCallId": str(ev.get("tool_id") or ev.get("tool") or ""),
-                    "title": str(ev.get("tool") or "tool"),
-                    "kind": ev.get("kind") or "other",
-                    "status": "in_progress",
-                    "rawInput": ev.get("args") or {},
-                },
-            })
+            tool = str(ev.get("tool") or "tool")
+            args = ev.get("args") if isinstance(ev.get("args"), dict) else {}
+            update: dict[str, Any] = {
+                "sessionUpdate": "tool_call",
+                "toolCallId": str(ev.get("tool_id") or tool),
+                "title": tool,
+                "kind": ev.get("kind") or tool_kind_for(tool),
+                "status": "in_progress",
+                "rawInput": args,
+                "locations": acp_locations(tool, args, workspace=state.workspace or workspace),
+            }
+            diffs = acp_tool_call_content(tool, args, workspace=state.workspace or workspace)
+            if diffs:
+                update["content"] = diffs
+            rpc.notify("session/update", {"sessionId": sid, "update": update})
         elif kind == "tool_end":
             rpc.notify("session/update", {
                 "sessionId": sid,
@@ -882,27 +1018,43 @@ async def _acp_run_prompt(
         tool_id = ""
         if isinstance(tools, list) and tools and isinstance(tools[0], dict):
             tool_id = str(tools[0].get("id") or "")
-        tool_id = tool_id or str(payload.get("tool") or "tool")
+        tool_name = str(payload.get("tool") or "tool")
+        tool_id = tool_id or tool_name
+        args = payload.get("args") if isinstance(payload.get("args"), dict) else {}
+        ws = state.workspace or workspace
+        diffs = acp_tool_call_content(tool_name, args, workspace=ws)
+        locs = acp_locations(tool_name, args, workspace=ws)
+        try:
+            from kazma_core.tools.code_exec import jail_note_for_tool
+
+            jail = jail_note_for_tool(tool_name)
+        except Exception:
+            jail = ""
+        title = str(payload.get("message") or tool_name or "danger tool")
+        if jail:
+            title = f"{title}\n{jail}"
+        tool_call: dict[str, Any] = {
+            "toolCallId": tool_id,
+            "title": title,
+            "kind": tool_kind_for(tool_name),
+            "status": "pending",
+            "rawInput": args,
+            "locations": locs,
+        }
+        if diffs:
+            tool_call["content"] = diffs
+        elif jail:
+            tool_call["content"] = [{
+                "type": "content",
+                "content": {"type": "text", "text": jail},
+            }]
         rpc.notify("session/update", {
             "sessionId": sid,
-            "update": {
-                "sessionUpdate": "tool_call",
-                "toolCallId": tool_id,
-                "title": str(payload.get("message") or payload.get("tool") or "danger tool"),
-                "kind": tool_kind_for(str(payload.get("tool") or "")),
-                "status": "pending",
-                "rawInput": payload.get("args") or {},
-            },
+            "update": {"sessionUpdate": "tool_call", **tool_call},
         })
         result = await rpc.call("session/request_permission", {
             "sessionId": sid,
-            "toolCall": {
-                "toolCallId": tool_id,
-                "title": str(payload.get("message") or payload.get("tool") or ""),
-                "kind": tool_kind_for(str(payload.get("tool") or "")),
-                "status": "pending",
-                "rawInput": payload.get("args") or {},
-            },
+            "toolCall": tool_call,
             "options": [
                 {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
                 {
@@ -922,9 +1074,37 @@ async def _acp_run_prompt(
         thread_id=sid,
         stream=True,
     )
-    result = await run_ask(
-        prompt, opts, on_event=on_event, hitl_decide=None if yolo else hitl_decide,
+    cancel_ev = state.reset_cancel(sid)
+    ask_task = asyncio.create_task(
+        run_ask(prompt, opts, on_event=on_event, hitl_decide=None if yolo else hitl_decide),
+        name=f"acp-ask-{sid[:8]}",
     )
+    cancel_task = asyncio.create_task(cancel_ev.wait(), name=f"acp-cancel-{sid[:8]}")
+    done, pending = await asyncio.wait(
+        {ask_task, cancel_task}, return_when=asyncio.FIRST_COMPLETED,
+    )
+    for t in pending:
+        t.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            await t
+    if cancel_task in done and not ask_task.done():
+        rpc.fail_pending()
+        rpc.reply({
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {"stopReason": "cancelled"},
+        })
+        return
+    if ask_task.cancelled() or ask_task.exception():
+        if ask_task.cancelled():
+            rpc.reply({
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {"stopReason": "cancelled"},
+            })
+            return
+        raise ask_task.exception()  # type: ignore[misc]
+    result = ask_task.result()
     if not result.streamed and (result.text or result.error):
         rpc.notify("session/update", {
             "sessionId": sid,

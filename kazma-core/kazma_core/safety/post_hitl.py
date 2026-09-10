@@ -17,12 +17,30 @@ import shutil
 from pathlib import Path
 
 __all__ = [
+    "host_shell_allowed",
     "is_production",
     "resolve_shell_binary",
     "restricted_child_env",
     "shell_strict_mode",
     "system_path_dirs",
 ]
+
+
+def host_shell_allowed() -> bool:
+    """False when attention-profile Docker jail is forced and HOST_SHELL is off.
+
+    ``KAZMA_CODE_EXEC_DOCKER=force|required`` means python_exec is containerized.
+    Host ``shell_exec`` is then an escape hatch: opt in with ``KAZMA_HOST_SHELL=1``.
+    """
+    raw = (os.environ.get("KAZMA_HOST_SHELL") or "").strip().lower()
+    if raw in ("1", "true", "on", "yes"):
+        return True
+    if raw in ("0", "false", "off", "no"):
+        return False
+    docker = (os.environ.get("KAZMA_CODE_EXEC_DOCKER") or "").strip().lower()
+    if docker in ("force", "required"):
+        return False
+    return True
 
 
 def is_production() -> bool:

@@ -80,10 +80,11 @@ def _plan_note_for(kind: str, slots: dict, entities: EntitySet) -> str:
         )
     if kind == ActKind.CODE_EXEC:
         return (
-            "INTENT ENGINE: Prefer `file_apply_patch_set` (or `file_apply_patch`) "
-            "for edits to existing files; `file_write` only for new files. Then run "
-            "the project's tests. Do not rewrite whole files. Do not skip HITL. "
-            "Stop when tests pass. Use `python_exec` only for short scripts."
+            "INTENT ENGINE: Prefer `file_apply_patch_set` (verify=true) for edits "
+            "to existing files; `file_write` only for new files. The patch-set tool "
+            "runs nearby pytest after apply — if TESTS FAILED, patch again. Do not "
+            "rewrite whole files. Do not skip HITL. Stop when TESTS PASSED. "
+            "Use `python_exec` only for short scripts."
         )
     if kind == ActKind.FILE_MGMT:
         return (

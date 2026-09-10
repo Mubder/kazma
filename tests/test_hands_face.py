@@ -27,6 +27,21 @@ def test_nav_more_css_does_not_flex_the_details_node() -> None:
     assert "display:" not in chunk
 
 
+def test_ide_review_panel_markers() -> None:
+    html = (
+        _ROOT / "kazma-ui" / "kazma_ui" / "templates" / "ide.html"
+    ).read_text(encoding="utf-8")
+    js = (
+        _ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "ide.js"
+    ).read_text(encoding="utf-8")
+    assert 'class="ide-review' in html
+    assert "t('ide.review_accept')" in html
+    assert "t('ide.review_reject')" in html
+    assert 'x-show="reviewOpen"' in html
+    assert "openLatestReview" in js
+    assert "rejectReview" in js
+
+
 def test_sidebar_work_links_outside_more() -> None:
     html = _SIDEBAR.read_text(encoding="utf-8")
     work, _, more = html.partition('class="nav-more-body"')

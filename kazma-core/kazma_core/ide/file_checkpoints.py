@@ -174,6 +174,28 @@ class FileCheckpointStore:
             restored.append(str(p))
         return restored
 
+    def restore_one(self, checkpoint_id: str, path: str) -> str:
+        rec = self.get(checkpoint_id)
+        if rec is None:
+            raise ValueError(f"unknown checkpoint {checkpoint_id}")
+        want = Path(path).expanduser().resolve()
+        for item in rec["files"]:
+            raw = str(item.get("path") or "")
+            access = check_path_access(raw, "write")
+            if not access.allowed:
+                continue
+            p = Path(access.resolved)
+            if p.resolve() != want:
+                continue
+            if item.get("missing"):
+                if p.is_file():
+                    p.unlink()
+                return str(p)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(str(item.get("content") or ""), encoding="utf-8")
+            return str(p)
+        raise ValueError(f"path not in checkpoint: {path}")
+
     def list_for_workspace(self, root: Path | None = None) -> list[dict[str, Any]]:
         ws = str(root or resolve_active_root())
         with self._connect() as conn:

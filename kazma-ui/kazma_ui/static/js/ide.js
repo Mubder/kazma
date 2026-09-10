@@ -37,6 +37,8 @@ function ideApp() {
     chatBusy: false,
     chatSessionId: '',
     chatStream: null,
+    reviewOpen: false,
+    review: { id: '', files: [] },
 
     // ── i18n-safe toast ──
     toast(msg, ok) {
@@ -665,6 +667,113 @@ function ideApp() {
       }
     },
 
+    reviewHunkHtml(file) {
+      var esc = function (s) {
+        return String(s || ' ').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      };
+      var diff = String((file && file.diff) || '');
+      if (diff) {
+        return diff.split('\n').slice(0, 120).map(function (ln) {
+          var cls = 'hitl-diff-ctx';
+          if (ln.charAt(0) === '+' && ln.charAt(1) !== '+') cls = 'hitl-diff-add';
+          else if (ln.charAt(0) === '-' && ln.charAt(1) !== '-') cls = 'hitl-diff-del';
+          else if (ln.indexOf('@@') === 0 || ln.indexOf('diff ') === 0 || ln.indexOf('---') === 0 || ln.indexOf('+++') === 0) cls = 'hitl-diff-meta';
+          return '<div class="' + cls + '">' + esc(ln) + '</div>';
+        }).join('');
+      }
+      var lines = [];
+      String((file && file.before) || '').split('\n').slice(0, 40).forEach(function (ln) {
+        lines.push('<div class="hitl-diff-del">- ' + esc(ln) + '</div>');
+      });
+      String((file && file.after) || '').split('\n').slice(0, 40).forEach(function (ln) {
+        lines.push('<div class="hitl-diff-add">+ ' + esc(ln) + '</div>');
+      });
+      return lines.join('');
+    },
+
+    async openLatestReview() {
+      try {
+        var listed = await this._get('/api/ide/checkpoints');
+        var items = (listed && listed.checkpoints) || [];
+        if (!items.length) return;
+        var cid = items[0].id;
+        var data = await this._get('/api/ide/checkpoints/' + encodeURIComponent(cid) + '/review');
+        if (!data || !data.ok) return;
+        var changed = (data.files || []).filter(function (f) { return f.changed; });
+        if (!changed.length) {
+          this.reviewOpen = false;
+          return;
+        }
+        this.review = { id: data.id, files: changed };
+        this.reviewOpen = true;
+      } catch (err) { /* ignore */ }
+    },
+
+    acceptReview() {
+      this.reviewOpen = false;
+    },
+
+    async rejectFile(path) {
+      if (!this.review.id || !path) return;
+      var ok = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: 'Reject this file',
+            message: 'Restore this file from the pre-patch checkpoint?',
+            confirmText: 'Restore file',
+            danger: true,
+          })
+        : true;
+      if (!ok) return;
+      this.busy = true;
+      try {
+        var data = await this._post(
+          '/api/ide/checkpoints/' + encodeURIComponent(this.review.id) + '/restore-path',
+          { path: path }
+        );
+        if (data.ok) {
+          this.toast('Restored ' + path, true);
+          await this.openLatestReview();
+          if (this.currentFile) this.openFile(this.currentFile);
+        } else {
+          this.toast('Restore failed', false);
+        }
+      } catch (err) {
+        this.toast('Restore failed', false);
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async rejectReview() {
+      var ok = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: 'Reject patches',
+            message: 'Restore the pre-patch checkpoint? This overwrites files on disk.',
+            confirmText: 'Restore',
+            danger: true,
+          })
+        : true;
+      if (!ok || !this.review.id) return;
+      this.busy = true;
+      try {
+        var data = await this._post(
+          '/api/ide/checkpoints/' + encodeURIComponent(this.review.id) + '/restore',
+          {}
+        );
+        if (data.ok) {
+          this.toast('Restored checkpoint', true);
+          this.reviewOpen = false;
+          if (this.currentFile) this.openFile(this.currentFile);
+        } else {
+          this.toast('Restore failed', false);
+        }
+      } catch (err) {
+        this.toast('Restore failed', false);
+      } finally {
+        this.busy = false;
+      }
+    },
+
     // ── Restore last workspace file checkpoint (Hands 0.11) ──
     async restoreLastCheckpoint() {
       var ok = window.kazmaConfirm
@@ -899,6 +1008,7 @@ function ideApp() {
           onDone: function () {
             self.chatBusy = false;
             self.chatStream = null;
+            self.openLatestReview();
           },
           onError: function (errMsg) {
             self.chatMessages[asstIdx].content += '\n\n[!] ' + (errMsg || 'Stream error');
