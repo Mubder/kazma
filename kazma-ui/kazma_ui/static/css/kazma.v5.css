@@ -512,32 +512,11 @@ html[data-theme="light"] { color-scheme: only light; }
    carries the language toggle and unifies Kazma's look across pages; the
    transcript still fills the column below it). Only the body layout is
    chat-specific now. */
-.app-layout.is-chat .page-body,
-.app-layout.is-ide .page-body {
-  padding: 0 !important;
+.app-layout.is-chat .page-body {
+  padding: 0;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  flex: 1 1 0;
-  min-height: 0;
-}
-.app-layout.is-ide .main-content {
-  overflow: hidden;
-}
-.app-layout.is-ide .ide-container,
-.app-layout.is-ide .ide-workbench {
-  flex: 1 1 0;
-  min-height: 0;
-  width: 100%;
-  max-width: none;
-  display: flex;
-  flex-direction: column;
-}
-.app-layout.is-ide .ide-statusbar {
-  flex: 0 0 22px;
-  width: 100%;
-  margin: 0;
-  box-sizing: border-box;
 }
 .app-layout.is-chat .chat-container {
   height: 100%;

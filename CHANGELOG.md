@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Fix — restore IDE chrome; Monaco is the file editor (2026-09-10)
+
+Workbench chrome (activity bar / status bar) reverted — that was not the
+ask. The centre pane is Monaco with line numbers, folding, bracket colors,
+minimap, and language from the file extension (API never sent `lang`, so
+everything was plaintext). Editor host stays in layout so Monaco is not
+created at 0×0.
+
 ## Fix — IDE freeze + status bar (2026-09-10)
 
 Cursor position no longer hits Alpine (was re-rendering the whole workbench
