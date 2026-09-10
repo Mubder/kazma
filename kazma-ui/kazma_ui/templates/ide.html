@@ -236,9 +236,12 @@
             </div>
           </template>
         </div>
-        <div class="ide-editor-wrap" :class="{ 'has-monaco': cmReady }">
-          <div x-ref="monacoHost" class="ide-monaco" role="textbox" aria-label="Code editor"></div>
-          <textarea x-ref="editor" class="ide-fallback" spellcheck="false"
+        {# x-ignore: Alpine must never morph this subtree. Re-renders from
+           tabs/busy/cmReady were replacing the Monaco host, so setValue
+           wrote into a detached node and every new tab looked empty. #}
+        <div id="ide-editor-wrap" class="ide-editor-wrap" x-ignore>
+          <div id="ide-monaco-host" class="ide-monaco" role="textbox" aria-label="Code editor"></div>
+          <textarea id="ide-fallback" class="ide-fallback" spellcheck="false"
                     placeholder="Open a file from the tree, or type here…"></textarea>
         </div>
       </div>

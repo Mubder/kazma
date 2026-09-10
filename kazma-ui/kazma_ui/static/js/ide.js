@@ -150,8 +150,8 @@ function ideApp() {
     },
 
     initEditor() {
-      var ta = this.$refs.editor;
-      var host = this.$refs.monacoHost;
+      var ta = document.getElementById('ide-fallback');
+      var host = document.getElementById('ide-monaco-host');
       var self = this;
       if (ta) {
         ta.addEventListener('input', function () {
@@ -215,6 +215,8 @@ function ideApp() {
             if (tab && tab.dirty !== dirty) tab.dirty = dirty;
             self._scheduleLspDiagnostics();
           });
+          var wrap = document.getElementById('ide-editor-wrap');
+          if (wrap) wrap.classList.add('has-monaco');
           self.cmReady = true;
           self._bindLsp();
           self._themeObs = new MutationObserver(function () { self._syncMonacoTheme(); });
@@ -270,7 +272,8 @@ function ideApp() {
 
     getContent() {
       if (_ed() && typeof _ed().getValue === 'function') return _ed().getValue();
-      return this.$refs.editor ? this.$refs.editor.value : '';
+      var ta = document.getElementById('ide-fallback');
+      return ta ? ta.value : '';
     },
 
     setContent(text) {
@@ -281,9 +284,9 @@ function ideApp() {
       try {
         if (_ed() && typeof _ed().setValue === 'function') {
           _ed().setValue(text);
-        } else if (this.$refs.editor) {
-          this.$refs.editor.value = text;
         }
+        var ta = document.getElementById('ide-fallback');
+        if (ta) ta.value = text;
       } finally {
         this._settingContent = false;
         this.dirty = false;
@@ -539,7 +542,6 @@ function ideApp() {
         this.switchTab(path);
         return;
       }
-      this.busy = true;
       try {
         var data = await this._get('/api/ide/read?path=' + encodeURIComponent(path));
         if (!data.ok) {
@@ -562,8 +564,6 @@ function ideApp() {
         this._loadFromTab(this._activeTab());
       } catch (err) {
         this.toast('Open failed', false);
-      } finally {
-        this.busy = false;
       }
     },
 
