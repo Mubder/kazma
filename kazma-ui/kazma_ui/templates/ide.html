@@ -10,53 +10,125 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs/loader.min.js"></script>
   <style>
     [x-cloak] { display: none !important; }
-    .ide-container { width: 100%; max-width: 100%; margin: 0; padding: 0 1px; }
-    .ide-layout { display: grid; grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr; gap: 0 8px; height: calc(100vh - 160px); min-height: 480px; }
-    .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 260px) 4px 1fr 4px var(--ide-chat-w, 380px); }
-    .ide-tree { overflow-y: auto; overflow-x: hidden; min-height: 0; padding: 0; }
-    /* IDE panels must not inherit the decorative card hover-lift (translateY) —
-       it shifts the tree/editor on every mouse-enter and feels broken. */
-    .ide-tree:hover, .ide-main > .card:hover, .ide-chat:hover { transform: none !important; }
-    .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
-    .ide-editor-wrap { flex: 1 1 0; min-height: 120px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); position: relative; }
-    .ide-monaco { display: none; height: 100%; width: 100%; min-height: 120px; }
-    .ide-editor-wrap.has-monaco .ide-monaco { display: block; }
-    .ide-editor-wrap.has-monaco .ide-fallback { display: none; }
-    .ide-fallback { width: 100%; height: 100%; min-height: 120px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.85rem; padding: 10px; box-sizing: border-box; }
-    /* ── Toolbar ── */
-    .ide-toolbar { margin-bottom: 16px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    .ide-toolbar-label { color: var(--text-muted); display: flex; align-items: center; }
-    .ide-toolbar-actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; align-items: center; }
-    .ide-dirty-dot { color: var(--warning); display: flex; align-items: center; }
-    .ide-dirty-text { color: var(--warning); font-size: 0.72rem; }
-    .code-chip { font-family: var(--font-mono); font-size: 0.78rem; background: var(--bg-elevated); padding: 3px 8px; border-radius: var(--radius-sm); color: var(--text-secondary); border: 1px solid var(--border-subtle); }
-    .ide-skill-select { max-width: 140px; font-size: 0.78rem; padding: 2px 6px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
-    /* ── Tab bar ── */
-    .ide-tabs { display: flex; gap: 2px; overflow-x: auto; flex-shrink: 0; padding: 0 2px; max-height: 36px; }
-    .ide-tab { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-xs) var(--radius-xs) 0 0; background: var(--bg-elevated); border: 1px solid var(--border-subtle); cursor: pointer; font-size: 0.75rem; white-space: nowrap; max-width: 200px; }
-    .ide-tab.active { background: var(--bg-deep); border-bottom-color: var(--bg-deep); font-weight: 600; color: var(--accent); }
-    .ide-tab:hover { background: var(--bg-hover); }
-    .ide-tab-name { overflow: hidden; text-overflow: ellipsis; }
-    .ide-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 0.9rem; line-height: 1; border-radius: var(--radius-xs); }
-    .ide-tab-close:hover { color: var(--danger, #ef4444); background: var(--bg-hover); }
-    .ide-tab-dot { color: var(--warning); font-size: 0.6rem; }
-    .monaco-editor .suggest-widget { z-index: 20; }
-    /* ── File tree ── */
-    .ide-panel-header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding: 8px 12px; }
-    .ide-panel-title { display: flex; align-items: center; gap: 6px; color: var(--text-muted); }
-    .ide-panel-title h3 { margin: 0; font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
-    .ide-breadcrumb { padding: 5px 10px; background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle); font-size: 0.72rem; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
-    .ide-breadcrumb code { font-family: var(--font-mono); color: var(--accent); }
-    .ide-tree-row { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 0.8rem; transition: background var(--transition-fast); box-sizing: border-box; overflow: hidden; }
+    .ide-container { width: 100%; max-width: 100%; margin: 0; padding: 0; }
+    .ide-workbench {
+      flex: 1; min-height: 0; display: flex; flex-direction: column;
+      background: var(--bg); color: var(--text-primary); position: relative;
+    }
+    .ide-body { flex: 1; min-height: 0; display: flex; }
+    .ide-activity {
+      width: 48px; flex-shrink: 0; display: flex; flex-direction: column;
+      align-items: center; padding: 8px 0; gap: 4px;
+      background: var(--bg-elevated); border-right: 1px solid var(--border-subtle);
+    }
+    .ide-activity-btn {
+      width: 40px; height: 40px; border: 0; background: transparent; color: var(--text-muted);
+      border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+    }
+    .ide-activity-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+    .ide-activity-btn.active { color: var(--accent); box-shadow: inset 2px 0 0 var(--accent); }
+    .ide-sidebar {
+      width: var(--ide-tree-w, 260px); flex-shrink: 0; min-width: 160px; max-width: 480px;
+      display: flex; flex-direction: column; min-height: 0;
+      background: var(--bg-panel, var(--bg-elevated)); border-right: 1px solid var(--border-subtle);
+    }
+    .ide-sidebar.hidden { display: none; }
+    .ide-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border-subtle); }
+    .ide-panel-title { margin: 0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+    .ide-breadcrumb { padding: 6px 12px; font-size: 0.72rem; color: var(--text-secondary); font-family: var(--font-mono); border-bottom: 1px solid var(--border-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ide-tree { flex: 1; min-height: 0; overflow: auto; }
+    .ide-tree:hover, .ide-editor-col:hover, .ide-chat:hover { transform: none !important; }
+    .ide-tree-row { display: flex; align-items: center; gap: 8px; padding: 4px 10px; cursor: pointer; font-size: 0.8rem; }
     .ide-tree-row:hover { background: var(--bg-hover); }
-    .ide-tree-active { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
-    .ide-tree-up { color: var(--text-secondary); }
-    .ide-tree-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-    .ide-tree-icon svg { width: 14px; height: 14px; }
+    .ide-tree-active { background: var(--accent-subtle); box-shadow: inset 2px 0 0 var(--accent); }
     .ide-tree-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
     .ide-tree-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.78rem; }
-    /* ── Chat panel ── */
-    .ide-chat { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+    .ide-file-glyph {
+      width: 18px; height: 18px; border-radius: 3px; flex-shrink: 0;
+      font-size: 8px; font-weight: 700; letter-spacing: -0.04em;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg-deep); color: var(--text-muted);
+    }
+    .ide-file-glyph[data-ext="dir"] { background: #3b82f6; color: #fff; }
+    .ide-file-glyph[data-ext="dir"]::after { content: "dir"; }
+    .ide-file-glyph[data-ext="py"] { background: #3776ab; color: #ffd43b; }
+    .ide-file-glyph[data-ext="py"]::after { content: "py"; }
+    .ide-file-glyph[data-ext="js"] { background: #f7df1e; color: #222; }
+    .ide-file-glyph[data-ext="js"]::after { content: "js"; }
+    .ide-file-glyph[data-ext="ts"] { background: #3178c6; color: #fff; }
+    .ide-file-glyph[data-ext="ts"]::after { content: "ts"; }
+    .ide-file-glyph[data-ext="json"] { background: #8b5cf6; color: #fff; }
+    .ide-file-glyph[data-ext="json"]::after { content: "{ }"; font-size: 7px; }
+    .ide-file-glyph[data-ext="md"] { background: #64748b; color: #fff; }
+    .ide-file-glyph[data-ext="md"]::after { content: "md"; }
+    .ide-file-glyph[data-ext="html"] { background: #e34f26; color: #fff; }
+    .ide-file-glyph[data-ext="html"]::after { content: "html"; font-size: 6px; }
+    .ide-file-glyph[data-ext="css"] { background: #264de4; color: #fff; }
+    .ide-file-glyph[data-ext="css"]::after { content: "css"; }
+    .ide-file-glyph[data-ext="yml"], .ide-file-glyph[data-ext="yaml"] { background: #cb171e; color: #fff; }
+    .ide-file-glyph[data-ext="yml"]::after, .ide-file-glyph[data-ext="yaml"]::after { content: "yml"; }
+    .ide-file-glyph:not([data-ext])::after, .ide-file-glyph[data-ext=""]::after { content: "•"; }
+    .ide-center { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+    .ide-titlebar {
+      display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+      border-bottom: 1px solid var(--border-subtle); background: var(--bg-elevated); min-height: 36px;
+    }
+    .ide-titlebar .btn-icon {
+      width: 32px; height: 28px; border: 0; background: transparent; color: var(--text-secondary);
+      border-radius: 6px; cursor: pointer; font-size: 0.72rem; font-weight: 600;
+    }
+    .ide-titlebar .btn-icon:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .ide-titlebar .btn-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+    .ide-title-path { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); margin-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ide-tabs {
+      display: flex; gap: 0; overflow-x: auto; flex-shrink: 0;
+      background: var(--bg-elevated); border-bottom: 1px solid var(--border-subtle);
+    }
+    .ide-tab {
+      display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+      border: 0; border-right: 1px solid var(--border-subtle);
+      background: transparent; cursor: pointer; font-size: 0.78rem; white-space: nowrap; max-width: 220px;
+      color: var(--text-secondary);
+    }
+    .ide-tab.active { background: var(--bg-deep); color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
+    .ide-tab:hover { background: var(--bg-hover); }
+    .ide-tab-name { overflow: hidden; text-overflow: ellipsis; }
+    .ide-tab-close { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 0 2px; font-size: 0.95rem; line-height: 1; border-radius: 4px; opacity: 0.5; }
+    .ide-tab:hover .ide-tab-close, .ide-tab.active .ide-tab-close { opacity: 1; }
+    .ide-tab-close:hover { color: var(--danger, #ef4444); background: var(--bg-hover); }
+    .ide-tab-dot { color: var(--warning); font-size: 0.55rem; }
+    .ide-editor-wrap { flex: 1 1 0; min-height: 80px; overflow: hidden; background: var(--bg-deep); position: relative; }
+    .ide-monaco { display: none; height: 100%; width: 100%; }
+    .ide-editor-wrap.has-monaco .ide-monaco { display: block; }
+    .ide-editor-wrap.has-monaco .ide-fallback { display: none; }
+    .ide-fallback { width: 100%; height: 100%; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.85rem; padding: 10px; box-sizing: border-box; }
+    .ide-welcome {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 8px; color: var(--text-muted);
+      pointer-events: none;
+    }
+    .ide-welcome kbd { font-size: 0.75rem; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; }
+    .ide-bottom {
+      border-top: 1px solid var(--border-subtle); background: var(--bg-elevated);
+      display: flex; flex-direction: column; flex-shrink: 0;
+      height: var(--ide-bottom-h, 180px); min-height: 120px;
+    }
+    .ide-bottom.collapsed { height: 28px; min-height: 28px; }
+    .ide-bottom-tabs { display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border-subtle); min-height: 28px; }
+    .ide-bottom-tabs button {
+      border: 0; background: transparent; color: var(--text-muted); font-size: 0.72rem;
+      font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 6px 10px; cursor: pointer;
+    }
+    .ide-bottom-tabs button.active { color: var(--text-primary); box-shadow: inset 0 -2px 0 var(--accent); }
+    .ide-results { flex: 1; margin: 0; padding: 8px 12px; overflow: auto; font-family: var(--font-mono); font-size: 0.75rem; background: var(--bg-deep); color: var(--text-primary); white-space: pre-wrap; word-break: break-word; }
+    .ide-term-row { display: flex; gap: 8px; padding: 6px 10px; border-top: 1px solid var(--border-subtle); }
+    .ide-term-row input { flex: 1; font-family: var(--font-mono); font-size: 0.8rem; }
+    .ide-statusbar {
+      display: flex; align-items: center; gap: 12px; padding: 0 10px; min-height: 22px;
+      font-size: 0.7rem; background: var(--accent); color: #fff; flex-shrink: 0;
+    }
+    .ide-statusbar span { opacity: 0.95; }
+    .ide-chat { width: var(--ide-chat-w, 360px); flex-shrink: 0; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--border-subtle); background: var(--bg-panel, var(--bg)); }
     .ide-chat-msgs { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
     .chat-bubble { width: fit-content; max-width: 88%; padding: 6px 12px; border-radius: var(--radius-sm); font-size: 0.82rem; line-height: 1.45; word-break: break-word; }
     .chat-bubble.user { background: var(--accent-subtle); border: 1px solid var(--border-subtle); align-self: flex-end; }
@@ -64,85 +136,35 @@
     .chat-bubble.system { background: transparent; color: var(--text-muted); font-size: 0.72rem; font-style: italic; border: 1px dashed var(--border-subtle); align-self: center; max-width: 100%; width: auto; padding: 4px 10px; }
     .chat-bubble p:first-child { margin-top: 0; } .chat-bubble p:last-child { margin-bottom: 0; }
     .chat-bubble pre { font-size: 0.72rem; max-height: 200px; overflow: auto; white-space: pre-wrap; }
-    .chat-bubble code { font-size: 0.72rem; }
     .chat-tool { width: fit-content; max-width: 88%; font-size: 0.72rem; border-left: 3px solid var(--accent); padding: 5px 10px; background: var(--bg-elevated); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
     .chat-tool pre { margin: 4px 0 0 0; white-space: pre-wrap; font-family: var(--font-mono); font-size: 0.68rem; max-height: 120px; overflow: auto; }
     .chat-input-row { flex-shrink: 0; display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border-subtle); }
-    .ide-results { background: var(--bg-deep); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.78rem; padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
-    /* ── Resizable pane dividers ── */
-    .ide-resizer { width: 4px; cursor: col-resize; background: transparent; position: relative; z-index: 10; flex-shrink: 0; transition: background var(--transition-fast); border-radius: 2px; }
+    .ide-resizer { width: 4px; cursor: col-resize; background: transparent; flex-shrink: 0; }
     .ide-resizer:hover, .ide-resizer.dragging { background: var(--accent); }
-    @media (max-width: 1100px) { .ide-layout.with-chat { grid-template-columns: var(--ide-tree-w, 220px) 4px 1fr 4px var(--ide-chat-w, 320px); } }
-    @media (max-width: 900px) { .ide-layout, .ide-layout.with-chat { grid-template-columns: 1fr; height: auto; } .ide-chat { min-height: 320px; } .ide-resizer { display: none; } }
-    @media (max-width: 768px) {
-      .ide-layout, .ide-layout.with-chat {
-        grid-template-columns: 1fr;
-        height: auto;
-        min-height: 0;
-        gap: 10px;
-      }
-      .ide-tree { max-height: 36vh; }
-      .ide-editor-wrap { min-height: 46vh; }
-      .ide-chat { min-height: 280px; max-height: 50vh; }
-      .ide-toolbar { gap: 6px; padding: 8px 10px; }
-      .ide-toolbar-actions { width: 100%; margin-left: 0; }
-      .ide-toolbar-actions .btn { flex: 1 1 auto; }
+    .ide-palette {
+      position: absolute; left: 50%; top: 12%; transform: translateX(-50%);
+      width: min(560px, 92vw); z-index: 50; background: var(--bg-panel, var(--bg-elevated));
+      border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow, 0 16px 40px rgba(0,0,0,.35));
+    }
+    .ide-palette input { width: 100%; border: 0; border-bottom: 1px solid var(--border-subtle); padding: 12px 14px; background: transparent; color: var(--text-primary); font-size: 0.9rem; }
+    .ide-palette-list { max-height: 320px; overflow: auto; }
+    .ide-palette-item { padding: 8px 14px; cursor: pointer; font-size: 0.82rem; display: flex; justify-content: space-between; gap: 8px; }
+    .ide-palette-item:hover, .ide-palette-item.active { background: var(--accent-subtle); }
+    .ide-search-hit { padding: 6px 12px; font-family: var(--font-mono); font-size: 0.72rem; cursor: pointer; border-bottom: 1px solid var(--border-subtle); }
+    .ide-search-hit:hover { background: var(--bg-hover); }
+    .ide-scm-out { flex: 1; overflow: auto; margin: 0; padding: 8px 12px; font-family: var(--font-mono); font-size: 0.72rem; white-space: pre-wrap; }
+    .monaco-editor .suggest-widget { z-index: 20; }
+    @media (max-width: 900px) {
+      .ide-chat { width: 100%; max-height: 40vh; border-left: 0; border-top: 1px solid var(--border-subtle); }
+      .ide-body { flex-wrap: wrap; }
+      .ide-sidebar { width: 100%; max-height: 28vh; }
     }
   </style>
 {% endblock %}
 
 {% block content %}
 <div class="ide-container" x-data="ideApp()" x-init="init()">
-
-  <!-- ── Toolbar ── -->
-  <div class="card ide-toolbar">
-    <span class="ide-toolbar-label" x-html="KazmaIcons.code({class:'icon-md'})"></span>
-    <code class="code-chip" x-text="currentFile || 'no file open'"></code>
-    <span x-show="dirty" class="ide-dirty-dot" x-cloak x-html="KazmaIcons.alert({class:'icon-sm'})"></span>
-    <span x-show="dirty" class="ide-dirty-text" x-cloak>unsaved</span>
-    <div class="ide-toolbar-actions">
-      <button class="btn btn-sm btn-primary" @click="save()" :disabled="!currentFile || busy">
-        <span x-html="KazmaIcons.save()"></span> Save
-      </button>
-      <button class="btn btn-sm btn-secondary" @click="newFile()" :disabled="busy" title="Create a new file">
-        <span x-html="KazmaIcons['file-plus']()"></span> New
-      </button>
-      <button class="btn btn-sm btn-secondary" @click="deleteFile()" :disabled="!currentFile || busy" title="Delete the open file">
-        <span x-html="KazmaIcons.trash()"></span> Delete
-      </button>
-      <span class="toolbar-sep" aria-hidden="true"></span>
-      <button class="btn btn-sm btn-secondary" @click="runFile()" :disabled="!currentFile || busy">
-        <span x-html="KazmaIcons.play()"></span> Run
-      </button>
-      <button class="btn btn-sm btn-secondary" @click="showDiff()" :disabled="!currentFile || busy">
-        <span x-html="KazmaIcons.diff()"></span> Diff
-      </button>
-      <button class="btn btn-sm btn-secondary" @click="restoreLastCheckpoint()" :disabled="busy"
-              title="{{ t('ide.undo_patch') }}">
-        {{ t('ide.undo_patch') }}
-      </button>
-      <span class="toolbar-sep" aria-hidden="true"></span>
-      <button class="btn btn-sm btn-secondary" @click="gitCmd('status -s')" :disabled="busy">
-        <span x-html="KazmaIcons['git-branch']()"></span> Status
-      </button>
-      <button class="btn btn-sm btn-secondary" @click="gitCmd('diff')" :disabled="busy">
-        <span x-html="KazmaIcons.diff()"></span> Git diff
-      </button>
-      <span class="toolbar-sep" aria-hidden="true"></span>
-      <select class="form-input ide-skill-select" x-model="selectedSkill" x-show="skills.length" x-cloak>
-        <template x-for="s in skills" :key="s.name" :value="s.name">
-          <option :value="s.name" x-text="s.name"></option>
-        </template>
-      </select>
-      <button class="btn btn-sm btn-secondary" @click="runSkill()" :disabled="!currentFile || busy || !skills.length" title="Run selected coding skill via the swarm">
-        <span x-html="KazmaIcons.wrench()"></span> Skill
-      </button>
-      <button class="btn btn-sm" :class="chatOpen ? 'btn-primary' : 'btn-secondary'" @click="toggleChat()" title="Toggle the AI chat panel">
-        <span x-html="KazmaIcons.message()"></span> Chat
-      </button>
-    </div>
-  </div>
-
+  <div class="ide-workbench">
   <template x-if="reviewOpen">
   <div class="ide-review card">
     <div class="ide-review-head">
@@ -167,106 +189,132 @@
   </div>
   </template>
 
-  <div class="ide-layout" :class="{ 'with-chat': chatOpen }">
-    <!-- ── File Tree ── -->
-    <div class="card ide-tree">
-      <div class="ide-panel-header">
-        <div class="ide-panel-title">
-          <span x-html="KazmaIcons.folder({class:'icon-md'})"></span>
-          <h3>Files</h3>
+  <div class="ide-palette" x-cloak x-show="paletteOpen" @keydown.escape.window="closePalette()">
+    <input type="text" x-ref="paletteInput" x-model="paletteQ" @input="filterPalette()"
+           @keydown.enter.prevent="runPalette()" @keydown.arrow-down.prevent="paletteMove(1)"
+           @keydown.arrow-up.prevent="paletteMove(-1)"
+           placeholder="Go to file or type &gt; for commands" aria-label="Command palette">
+    <div class="ide-palette-list">
+      <template x-for="(hit, i) in paletteHits" :key="hit.id">
+        <div class="ide-palette-item" :class="{ active: i === paletteIx }" @click="runPalette(hit)">
+          <span x-text="hit.label"></span>
+          <span x-text="hit.hint" style="color:var(--text-muted);font-size:0.72rem;"></span>
         </div>
-        <button class="btn btn-xs btn-secondary" @click="loadTree(treePath)" title="Refresh">
-          <span x-html="KazmaIcons.refresh()"></span>
-        </button>
+      </template>
+    </div>
+  </div>
+
+  <div class="ide-body">
+    <nav class="ide-activity" aria-label="IDE activity">
+      <button type="button" class="ide-activity-btn" :class="{ active: activity === 'explorer' && !sidebarHidden }"
+              @click="setActivity('explorer')" title="Explorer (Ctrl+Shift+E)">Files</button>
+      <button type="button" class="ide-activity-btn" :class="{ active: activity === 'search' }"
+              @click="setActivity('search')" title="Search (Ctrl+Shift+F)">Find</button>
+      <button type="button" class="ide-activity-btn" :class="{ active: activity === 'scm' }"
+              @click="setActivity('scm')" title="Source Control">Git</button>
+      <button type="button" class="ide-activity-btn" :class="{ active: chatOpen }"
+              @click="toggleChat()" title="Agent chat">AI</button>
+    </nav>
+
+    <aside class="ide-sidebar" :class="{ hidden: sidebarHidden }" aria-label="Sidebar">
+      <div class="ide-panel-header">
+        <h2 class="ide-panel-title" x-text="activityTitle()"></h2>
+        <button type="button" class="btn btn-xs btn-secondary" @click="loadTree(treePath)" x-show="activity === 'explorer'" x-cloak title="Refresh">↻</button>
       </div>
-      <div class="ide-breadcrumb">
-        <span class="ide-breadcrumb-sep">/</span>
-        <code x-text="treePath || '(root)'"></code>
-      </div>
-      <div>
-        <div x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row ide-tree-up">
-          <span class="ide-tree-icon" x-html="KazmaIcons['arrow-up']({class:'icon-sm'})"></span>
+
+      <div x-show="activity === 'explorer'" x-cloak class="ide-tree">
+        <div class="ide-breadcrumb" x-text="treePath || '/'"></div>
+        <div x-show="treePath" x-cloak @click="goUp()" class="ide-tree-row">
+          <span class="ide-file-glyph" data-ext="dir"></span>
           <span>..</span>
         </div>
         <template x-for="item in tree" :key="item.path">
           <div class="ide-tree-row" :class="{ 'ide-tree-active': item.path === activeTabPath }" @click="navigate(item)">
-            <span class="ide-tree-icon" x-html="item.is_dir ? KazmaIcons.folder({class:'icon-sm'}) : KazmaIcons.file({class:'icon-sm'})"></span>
-            <span class="ide-tree-name" x-text="item.name" :style="{ fontWeight: item.is_dir ? '500' : '400' }"></span>
+            <span class="ide-file-glyph" :data-ext="item.ext"></span>
+            <span class="ide-tree-name" x-text="item.name"></span>
           </div>
         </template>
-        <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">Empty</div>
+        <div x-show="tree.length === 0 && !busy" x-cloak class="ide-tree-empty">Empty folder</div>
       </div>
-    </div>
 
-    <!-- ── Resizer: tree | editor ── -->
-    <div class="ide-resizer" @mousedown="startResize('tree', $event)" title="Drag to resize"></div>
-
-    <!-- ── Editor + Panels ── -->
-    <div class="ide-main">
-      <div class="card" style="flex:1;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid var(--border-subtle);min-height:260px;">
-        <div class="card-header" style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border-subtle);padding:6px 8px;">
-          <span style="font-size:0.85rem;font-weight:600;color:var(--text-primary);">Editor</span>
-          <span x-show="!cmReady" style="font-size:0.7rem;color:var(--text-muted);" x-cloak>(plain textarea)</span>
-          <span style="font-size:0.68rem;color:var(--text-muted);margin-left:auto;" x-show="cmReady && currentFile" x-cloak>
-            <span x-cloak x-show="lspReady">Ctrl+click definition · hover · complete · </span>
-            Ctrl+F find · Monaco
-          </span>
+      <div x-show="activity === 'search'" x-cloak class="ide-tree">
+        <div class="ide-term-row">
+          <input class="form-input" type="text" placeholder="Search workspace" x-model="grepPattern" @keydown.enter="grep()">
         </div>
-        <!-- ── Tab bar ── -->
-        <div class="ide-tabs" x-show="tabs.length > 0" x-cloak style="padding:4px 6px 0 6px;">
-          <template x-for="tab in tabs" :key="tab.path">
-            <div class="ide-tab" :class="{ 'active': tab.path === activeTabPath }"
-                 @click="switchTab(tab.path)" @mousedown.middle.prevent="closeTab(tab.path)">
-              <span class="ide-tab-dot" x-show="tab.dirty || (tab.path === activeTabPath && dirty)" x-cloak>●</span>
-              <span class="ide-tab-name" x-text="tab.name" :title="tab.path"></span>
-              <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="Close tab">×</button>
-            </div>
+        <div class="ide-term-row">
+          <input class="form-input" type="text" placeholder="*.py" x-model="grepGlob">
+          <button type="button" class="btn btn-xs btn-secondary" @click="grep()" :disabled="busy">Search</button>
+        </div>
+        <template x-for="hit in grepHits" :key="hit">
+          <div class="ide-search-hit" x-text="hit" @click="openGrepHit(hit)"></div>
+        </template>
+      </div>
+
+      <div x-show="activity === 'scm'" x-cloak class="ide-tree">
+        <div class="ide-term-row">
+          <button type="button" class="btn btn-xs btn-secondary" @click="refreshGit()" :disabled="busy">Refresh</button>
+          <button type="button" class="btn btn-xs btn-secondary" @click="gitCmd('diff')" :disabled="busy">Diff</button>
+        </div>
+        <pre class="ide-scm-out" x-text="gitStatus || 'Click Refresh'"></pre>
+      </div>
+    </aside>
+
+    <div class="ide-resizer" @mousedown="startResize('tree', $event)" title="Resize"></div>
+
+    <div class="ide-center">
+      <div class="ide-titlebar">
+        <button type="button" class="btn-icon" @click="save()" :disabled="!currentFile || busy" title="Save (Ctrl+S)">Save</button>
+        <button type="button" class="btn-icon" @click="newFile()" :disabled="busy" title="New file">New</button>
+        <button type="button" class="btn-icon" @click="runFile()" :disabled="!currentFile || busy" title="Run file">Run</button>
+        <button type="button" class="btn-icon" @click="showDiff()" :disabled="!currentFile || busy" title="Diff">Diff</button>
+        <button type="button" class="btn-icon" @click="restoreLastCheckpoint()" :disabled="busy" title="{{ t('ide.undo_patch') }}">Undo</button>
+        <button type="button" class="btn-icon" @click="deleteFile()" :disabled="!currentFile || busy" title="Delete">Del</button>
+        <button type="button" class="btn-icon" @click="openPalette()" title="Command palette (Ctrl+P)">⌘P</button>
+        <span class="ide-title-path" x-text="currentFile || ''"></span>
+        <span style="margin-left:auto;"></span>
+        <select class="form-input ide-skill-select" x-model="selectedSkill" x-show="skills.length" x-cloak style="max-width:140px;font-size:0.75rem;">
+          <template x-for="s in skills" :key="s.name">
+            <option :value="s.name" x-text="s.name"></option>
           </template>
-        </div>
-        <div class="ide-editor-wrap" :class="{ 'has-monaco': cmReady }">
-          <div x-ref="monacoHost" class="ide-monaco" role="textbox" aria-label="Code editor"></div>
-          <textarea x-ref="editor" class="ide-fallback" spellcheck="false"
-                    placeholder="Open a file from the tree, or type here…"></textarea>
+        </select>
+        <button type="button" class="btn-icon" @click="runSkill()" x-show="skills.length" x-cloak :disabled="!currentFile || busy" title="Run skill">Skill</button>
+      </div>
+      <div class="ide-tabs" x-show="tabs.length > 0" x-cloak>
+        <template x-for="tab in tabs" :key="tab.path">
+          <div class="ide-tab" :class="{ 'active': tab.path === activeTabPath }"
+               @click="switchTab(tab.path)" @mousedown.middle.prevent="closeTab(tab.path)">
+            <span class="ide-tab-dot" x-show="tab.dirty || (tab.path === activeTabPath && dirty)" x-cloak>●</span>
+            <span class="ide-tab-name" x-text="tab.name" :title="tab.path"></span>
+            <button class="ide-tab-close" @click.stop="closeTab(tab.path)" title="Close">×</button>
+          </div>
+        </template>
+      </div>
+      <div class="ide-editor-wrap" :class="{ 'has-monaco': cmReady }">
+        <div x-ref="monacoHost" class="ide-monaco" role="textbox" aria-label="Code editor"></div>
+        <textarea x-ref="editor" class="ide-fallback" spellcheck="false"></textarea>
+        <div class="ide-welcome" x-show="!currentFile" x-cloak>
+          <div>Open a file from the explorer</div>
+          <div><kbd>Ctrl</kbd>+<kbd>P</kbd> Quick Open · <kbd>Ctrl</kbd>+<kbd>S</kbd> Save · <kbd>Ctrl</kbd>+<kbd>`</kbd> Terminal</div>
         </div>
       </div>
-
-      <!-- Command + Grep + Swarm bar -->
-      <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:8px;border:1px solid var(--border-subtle);">
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="Shell command (e.g. pytest -q)"
-                 x-model="command" @keydown.enter="runCommand()" style="flex:1;min-width:180px;font-family:var(--font-mono);font-size:0.8rem;">
-          <button class="btn btn-sm btn-secondary" @click="runCommand()" :disabled="busy">Run command</button>
+      <div class="ide-bottom" :class="{ collapsed: !bottomOpen }">
+        <div class="ide-bottom-tabs">
+          <button type="button" :class="{ active: bottomTab === 'output' }" @click="bottomTab='output'; bottomOpen=true">Output</button>
+          <button type="button" :class="{ active: bottomTab === 'terminal' }" @click="bottomTab='terminal'; bottomOpen=true">Terminal</button>
+          <button type="button" style="margin-left:auto;" @click="bottomOpen = !bottomOpen; $nextTick(() => _layoutEditor())" x-text="bottomOpen ? '▾' : '▴'"></button>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="Grep pattern"
-                 x-model="grepPattern" @keydown.enter="grep()" style="flex:1;min-width:140px;font-size:0.8rem;">
-          <input type="text" class="form-input" placeholder="glob (*.py)"
-                 x-model="grepGlob" style="max-width:120px;font-size:0.8rem;font-family:var(--font-mono);">
-          <button class="btn btn-sm btn-secondary" @click="grep()" :disabled="busy">Grep</button>
+        <pre class="ide-results" x-show="bottomOpen" x-cloak x-text="result || '(no output)'"></pre>
+        <div class="ide-term-row" x-show="bottomOpen && bottomTab === 'terminal'" x-cloak>
+          <span style="font-family:var(--font-mono);color:var(--text-muted);">$</span>
+          <input class="form-input" type="text" x-model="command" @keydown.enter="runCommand()" placeholder="pytest -q">
+          <button type="button" class="btn btn-xs btn-secondary" @click="runCommand()" :disabled="busy">Run</button>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <input type="text" class="form-input" placeholder="Send instruction to swarm…"
-                 x-model="swarmInstruction" @keydown.enter="sendToSwarm()" style="flex:1;min-width:180px;font-size:0.8rem;">
-          <button class="btn btn-sm btn-primary" @click="sendToSwarm()" :disabled="busy"><span class="ki" data-icon="swarm" aria-hidden="true"></span> Send to swarm</button>
-        </div>
-      </div>
-
-      <!-- Results -->
-      <div class="card" style="padding:10px 12px;border:1px solid var(--border-subtle);">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <span style="font-size:0.8rem;font-weight:600;color:var(--text-primary);" x-text="resultTitle || 'Output'"></span>
-          <button class="btn btn-xs btn-secondary" @click="result=''" x-cloak x-show="result">Clear</button>
-        </div>
-        <pre class="ide-results" x-text="result || '(no output yet)'"></pre>
       </div>
     </div>
 
-    <!-- ── Resizer: editor | chat ── -->
-    <div class="ide-resizer" x-show="chatOpen" x-cloak @mousedown="startResize('chat', $event)" title="Drag to resize"></div>
+    <div class="ide-resizer" x-show="chatOpen" x-cloak @mousedown="startResize('chat', $event)"></div>
 
-    <!-- ── AI Chat panel (third column; reuses /api/chat/stream) ── -->
-    <div class="card ide-chat" x-show="chatOpen" x-cloak
-         style="padding:0;border:1px solid var(--border-subtle);flex-direction:column;display:flex;">
+    <aside class="ide-chat" x-show="chatOpen" x-cloak>
       <div class="card-header" style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-subtle);padding:8px 12px;">
         <div style="display:flex;align-items:center;gap:6px;">
           <span><span class="ki" data-icon="message" aria-hidden="true"></span></span>
@@ -328,7 +376,17 @@
           <button class="btn btn-sm btn-secondary" @click="abortChat()" x-show="chatBusy" x-cloak>⏹</button>
         </div>
       </div>
+    </aside>
     </div>
+    <footer class="ide-statusbar">
+      <span x-text="gitBranch ? ('⎇ ' + gitBranch) : 'IDE'"></span>
+      <span x-show="dirty" x-cloak>unsaved</span>
+      <span style="margin-left:auto;" x-text="currentFile || ''"></span>
+      <span x-text="currentLang"></span>
+      <span x-text="'Ln ' + cursorLine + ', Col ' + cursorCol"></span>
+      <span x-text="cmReady ? 'Monaco' : 'Text'"></span>
+      <span x-show="lspReady" x-cloak>LSP</span>
+    </footer>
   </div>
 </div>
 {% endblock %}

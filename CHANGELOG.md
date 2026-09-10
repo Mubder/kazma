@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.11 IDE workbench
+
+`/ide` is a workbench, not a form: activity bar (Files / Find / Git / AI),
+explorer with type glyphs, command palette (Ctrl+P), status bar, and a
+collapsible terminal/output dock. Ctrl+S save, Ctrl+` terminal.
+
 ## Fix — IDE file click hung the browser (2026-09-10)
 
 Monaco `automaticLayout` fought the flex pane (CPU peg, fan spin) on

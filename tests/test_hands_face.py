@@ -35,6 +35,10 @@ def test_ide_review_panel_markers() -> None:
         _ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "ide.js"
     ).read_text(encoding="utf-8")
     assert 'class="ide-review' in html
+    assert 'class="ide-workbench"' in html
+    assert 'class="ide-activity"' in html
+    assert 'class="ide-statusbar"' in html
+    assert 'class="ide-palette"' in html
     assert "t('ide.review_accept')" in html
     assert "t('ide.review_reject')" in html
     assert 'x-if="reviewOpen"' in html
@@ -43,6 +47,8 @@ def test_ide_review_panel_markers() -> None:
     assert "openLatestReview" in js
     assert "rejectReview" in js
     assert "rejectHunk" in js
+    assert "openPalette" in js
+    assert "_hotkeys" in js
 
 
 def test_sidebar_work_links_outside_more() -> None:

@@ -39,6 +39,19 @@ function ideApp() {
     chatStream: null,
     reviewOpen: false,
     review: { id: '', files: [] },
+    activity: 'explorer',
+    sidebarHidden: false,
+    bottomOpen: true,
+    bottomTab: 'output',
+    paletteOpen: false,
+    paletteQ: '',
+    paletteHits: [],
+    paletteIx: 0,
+    cursorLine: 1,
+    cursorCol: 1,
+    gitBranch: '',
+    gitStatus: '',
+    grepHits: [],
 
     // ── i18n-safe toast ──
     toast(msg, ok) {
@@ -53,7 +66,10 @@ function ideApp() {
       this.loadTree('');
       this.loadSkills();
       this.initChat();
+      this.refreshGit();
       var self = this;
+      this._onKey = function (e) { self._hotkeys(e); };
+      document.addEventListener('keydown', this._onKey);
       window.kazmaOnSoftNavLeave = function () { self.destroy(); };
     },
 
@@ -66,6 +82,10 @@ function ideApp() {
         if (this._onWinResize) window.removeEventListener('resize', this._onWinResize);
       } catch (e) {}
       this._onWinResize = null;
+      try {
+        if (this._onKey) document.removeEventListener('keydown', this._onKey);
+      } catch (e) {}
+      this._onKey = null;
       try { if (this._lspDiagTimer) clearTimeout(this._lspDiagTimer); } catch (e) {}
       this._lspDiagTimer = null;
       (this._lspDisposables || []).forEach(function (d) {
@@ -183,6 +203,11 @@ function ideApp() {
             var tab = self._activeTab();
             if (tab) tab.dirty = self.dirty;
             self._scheduleLspDiagnostics();
+          });
+          self.cm.onDidChangeCursorPosition(function (ev) {
+            if (!ev || !ev.position) return;
+            self.cursorLine = ev.position.lineNumber;
+            self.cursorCol = ev.position.column;
           });
           self.cmReady = true;
           self._bindLsp();
@@ -443,7 +468,11 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._get('/api/workspace/files?path=' + encodeURIComponent(path || ''));
-        this.tree = data.files || [];
+        this.tree = (data.files || []).map(function (f) {
+          var name = String(f.name || f.path || '');
+          f.ext = f.is_dir ? 'dir' : (name.split('.').pop() || '').toLowerCase();
+          return f;
+        });
         this.treePath = data.path || '';
       } catch (err) {
         this.toast('Failed to list files', false);
@@ -458,6 +487,10 @@ function ideApp() {
       } else {
         this.open(item.path);
       }
+    },
+
+    openFile(path) {
+      return this.open(path);
     },
 
     goUp() {
@@ -934,6 +967,8 @@ function ideApp() {
         var url = '/api/ide/grep?pattern=' + encodeURIComponent(pat) +
                   '&glob=' + encodeURIComponent(this.grepGlob || '*');
         var data = await this._get(url);
+        this.grepHits = data.ok ? (data.matches || []) : [];
+        this.activity = 'search';
         this.showResult('Grep: ' + pat,
           data.ok ? ((data.matches || []).join('\n') || '(no matches)') : (data.error || ''));
       } catch (err) {
@@ -976,6 +1011,10 @@ function ideApp() {
     showResult(title, text) {
       this.resultTitle = title;
       this.result = (text === undefined || text === null) ? '' : String(text);
+      this.bottomOpen = true;
+      this.bottomTab = 'output';
+      var self = this;
+      this.$nextTick(function () { self._layoutEditor(); });
     },
 
     // ════════════════════════════════════════════════════════════════
@@ -1182,7 +1221,7 @@ function ideApp() {
     startResize(pane, e) {
       e.preventDefault();
       var self = this;
-      var layout = document.querySelector('.ide-layout');
+      var layout = document.querySelector('.ide-workbench') || document.querySelector('.ide-body');
       if (!layout) return;
       var startX = e.clientX;
       var startTree = parseInt(getComputedStyle(layout).getPropertyValue('--ide-tree-w') || '260');
@@ -1211,6 +1250,130 @@ function ideApp() {
 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
+    },
+
+    setActivity(name) {
+      if (this.activity === name && !this.sidebarHidden) {
+        this.sidebarHidden = true;
+      } else {
+        this.activity = name;
+        this.sidebarHidden = false;
+      }
+      var self = this;
+      this.$nextTick(function () { self._layoutEditor(); });
+    },
+
+    activityTitle() {
+      return { explorer: 'Explorer', search: 'Search', scm: 'Source Control' }[this.activity] || 'Explorer';
+    },
+
+    async refreshGit() {
+      try {
+        var data = await this._post('/api/ide/git', { subcommand: 'status -sb' });
+        this.gitStatus = data.ok ? (data.output || '(clean)') : (data.error || '');
+        var line = String(this.gitStatus).split('\n')[0] || '';
+        var m = line.match(/^##\s+([^\s.]+)/);
+        this.gitBranch = m ? m[1] : '';
+      } catch (e) {
+        this.gitStatus = '';
+      }
+    },
+
+    openGrepHit(hit) {
+      var text = String(hit || '');
+      var m = text.match(/^([^:]+):(\d+)/);
+      if (m) this.open(m[1].trim());
+    },
+
+    _hotkeys(e) {
+      var t = e.target;
+      var typing = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      var meta = e.ctrlKey || e.metaKey;
+      if (e.key === 'Escape') {
+        this.paletteOpen = false;
+        return;
+      }
+      if (!meta) return;
+      if (e.key === 's') {
+        e.preventDefault();
+        this.save();
+        return;
+      }
+      if (e.key === 'p' && !e.shiftKey) {
+        e.preventDefault();
+        this.openPalette();
+        return;
+      }
+      if (e.key === '`') {
+        e.preventDefault();
+        this.bottomOpen = !this.bottomOpen;
+        var self = this;
+        this.$nextTick(function () { self._layoutEditor(); });
+        return;
+      }
+      if (e.key === 'b' && !typing) {
+        e.preventDefault();
+        this.sidebarHidden = !this.sidebarHidden;
+        var self2 = this;
+        this.$nextTick(function () { self2._layoutEditor(); });
+      }
+    },
+
+    openPalette() {
+      this.paletteOpen = true;
+      this.paletteQ = '';
+      this.paletteIx = 0;
+      this.filterPalette();
+      var self = this;
+      this.$nextTick(function () {
+        if (self.$refs.paletteInput) self.$refs.paletteInput.focus();
+      });
+    },
+
+    closePalette() {
+      this.paletteOpen = false;
+    },
+
+    filterPalette() {
+      var q = String(this.paletteQ || '').trim().toLowerCase();
+      var hits = [];
+      if (q.charAt(0) === '>') {
+        var cq = q.slice(1).trim();
+        var cmds = [
+          { id: 'save', label: 'Save', hint: 'Ctrl+S', run: function (s) { s.save(); } },
+          { id: 'run', label: 'Run file', hint: '', run: function (s) { s.runFile(); } },
+          { id: 'term', label: 'Toggle terminal', hint: 'Ctrl+`', run: function (s) { s.bottomOpen = !s.bottomOpen; } },
+          { id: 'chat', label: 'Toggle agent chat', hint: '', run: function (s) { s.toggleChat(); } },
+          { id: 'git', label: 'Git status', hint: '', run: function (s) { s.setActivity('scm'); s.refreshGit(); } },
+        ];
+        hits = cmds.filter(function (c) { return !cq || c.label.toLowerCase().indexOf(cq) !== -1; });
+      } else {
+        hits = (this.tree || []).filter(function (f) {
+          return !q || String(f.name || '').toLowerCase().indexOf(q) !== -1;
+        }).slice(0, 30).map(function (f) {
+          return { id: f.path, label: f.name, hint: f.path, path: f.path, is_dir: f.is_dir };
+        });
+      }
+      this.paletteHits = hits;
+      this.paletteIx = 0;
+    },
+
+    paletteMove(d) {
+      var n = this.paletteHits.length;
+      if (!n) return;
+      this.paletteIx = (this.paletteIx + d + n) % n;
+    },
+
+    runPalette(hit) {
+      hit = hit || this.paletteHits[this.paletteIx];
+      this.paletteOpen = false;
+      if (!hit) return;
+      if (typeof hit.run === 'function') {
+        hit.run(this);
+        return;
+      }
+      if (hit.is_dir) this.loadTree(hit.path);
+      else if (hit.path) this.open(hit.path);
     },
   };
 }
