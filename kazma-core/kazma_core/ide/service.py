@@ -81,6 +81,35 @@ def _lang_for_path(path: Path) -> str:
     }.get(ext, "plaintext")
 
 
+def _is_readonly_git(subcommand: str) -> bool:
+    """True for git verbs that do not mutate the repo or remotes."""
+    import shlex
+
+    try:
+        parts = shlex.split(subcommand.strip())
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    cmd, rest = parts[0], parts[1:]
+    if cmd in {
+        "status", "log", "diff", "show", "rev-parse", "blame",
+        "ls-files", "describe", "rev-list", "shortlog", "version",
+    }:
+        return True
+    if cmd == "branch" and not any(
+        a in ("-d", "-D", "-m", "-M", "--delete", "--move") for a in rest
+    ):
+        return True
+    if cmd == "stash" and rest and rest[0] in ("list", "show"):
+        return True
+    if cmd == "remote" and (
+        not rest or rest[0] in ("-v", "--verbose", "show", "get-url")
+    ):
+        return True
+    return False
+
+
 class IdeService:
     """Transport-neutral coding backend.
 
@@ -484,18 +513,57 @@ class IdeService:
         }
 
     async def git(self, subcommand: str, timeout: int = 60) -> dict[str, Any]:
-        """Run a git subcommand inside the workspace (scoped + HITL gated).
+        """Run a git subcommand inside the workspace.
 
-        .. note::
-            ``subcommand`` is intentionally unfiltered — this is an operator
-            tool and the whole path is HITL-gated (``shell_exec`` is a
-            danger tool), so destructive ops like ``push --force`` or
-            ``clean -fdx`` surface an approval prompt before running. The
-            workspace scoping in ``shell_exec`` pins the cwd to the root.
+        Read-only commands (``status``, ``log``, ``diff``, …) run via
+        ``subprocess`` in the workspace cwd — they must **not** go through
+        ``shell_exec`` / HITL (Hands 0.11: ``git status -sb`` on IDE init
+        spammed Telegram REJECTED cards on every restart).
+
+        Mutating commands still use ``run()`` → ``shell_exec`` so HITL
+        fires for push/commit/clean.
         """
         if not subcommand or not subcommand.strip():
             return {"ok": False, "error": "Empty git subcommand", "output": ""}
-        return await self.run(f"git {subcommand}", timeout=timeout)
+        sub = subcommand.strip()
+        if _is_readonly_git(sub):
+            return await self._git_read(sub, timeout=timeout)
+        return await self.run(f"git {sub}", timeout=timeout)
+
+    async def _git_read(self, subcommand: str, timeout: int = 60) -> dict[str, Any]:
+        import asyncio
+        import os
+        import shlex
+        import subprocess
+
+        cwd = str(self.root)
+        try:
+            argv = ["git", *shlex.split(subcommand, posix=os.name != "nt")]
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "output": ""}
+
+        def _run() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                argv,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                timeout=max(1, int(timeout)),
+                check=False,
+            )
+
+        try:
+            proc = await asyncio.to_thread(_run)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "git timed out", "output": ""}
+        except OSError as exc:
+            return {"ok": False, "error": str(exc), "output": ""}
+        out = ((proc.stdout or "") + (proc.stderr or "")).strip()
+        return {
+            "ok": proc.returncode == 0,
+            "error": None if proc.returncode == 0 else (out or f"exit {proc.returncode}"),
+            "output": out,
+        }
 
     async def send_to_swarm(
         self,

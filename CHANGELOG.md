@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — Telegram REJECTED git status on restart (2026-09-10)
+
+`IdeService.git("status -sb")` went through danger `shell_exec`, so IDE
+init (and Status) posted HITL cards to Telegram that auto-rejected. Read-only
+git now runs as a workspace subprocess; push/commit/clean still HITL.
+
 ## Fix — restore IDE chrome; Monaco is the file editor (2026-09-10)
 
 Workbench chrome (activity bar / status bar) reverted — that was not the
