@@ -7,7 +7,7 @@
   {# CodeMirror 5 fromTextArea: file bytes live in the textarea first.
      If the CDN is blocked, the textarea still shows the file. Monaco is gone. #}
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/material-darker.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/nord.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
@@ -34,8 +34,10 @@
     .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
     .ide-editor-wrap { flex: 1 1 0; min-height: 420px; height: min(62vh, 720px); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); position: relative; }
     .ide-fallback { width: 100%; height: 100%; min-height: 420px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: Consolas, 'Courier New', monospace; font-size: 14px; line-height: 1.55; padding: 10px 12px 10px 16px; box-sizing: border-box; tab-size: 4; }
-    .ide-editor-wrap .CodeMirror { height: 100%; font-size: 14px; line-height: 1.55; font-family: Consolas, 'Courier New', monospace; }
-    .CodeMirror-linenumber { padding: 0 8px 0 4px; }
+    .ide-editor-wrap .CodeMirror { height: 100%; font-size: 14px; line-height: 1.55; font-family: Consolas, 'Courier New', monospace; background: var(--bg-deep); }
+    .ide-editor-wrap .CodeMirror-gutters { background: var(--bg-deep); border-right: 1px solid var(--border-subtle); }
+    .ide-editor-wrap .CodeMirror-scroll { background: var(--bg-deep); }
+    .CodeMirror-linenumber { padding: 0 8px 0 4px; color: var(--text-muted); }
     /* ── Toolbar ── */
     .ide-toolbar { margin-bottom: 16px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .ide-toolbar-label { color: var(--text-muted); display: flex; align-items: center; }
