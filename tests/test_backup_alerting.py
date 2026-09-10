@@ -117,3 +117,25 @@ def test_a_fallback_success_is_not_reported_as_a_failure(sent):
 def test_a_clean_primary_upload_stays_silent(sent):
     _alert_on_backup_gaps({"ok": True, "via": "google_drive"}, 0)
     assert not sent
+
+
+@pytest.mark.asyncio
+async def test_native_pg_backup_failure_pages(monkeypatch, sent):
+    from kazma_core.memory import worker_bootstrap as wb
+
+    monkeypatch.setattr(
+        "kazma_core.db.pg_backup.perform_pg_backup",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "kazma_core.db.pg_backup.pg_backup_enabled",
+        lambda: True,
+    )
+
+    async def _to_thread(fn, *a, **k):
+        return fn(*a, **k)
+
+    monkeypatch.setattr("asyncio.to_thread", _to_thread)
+    ok = await wb._handle_native_pg_backup({})
+    assert ok is False
+    assert any(c["key"] == "backup.pg_dump" for c in sent)

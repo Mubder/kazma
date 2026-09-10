@@ -117,6 +117,10 @@
       <button class="btn btn-sm btn-secondary" @click="showDiff()" :disabled="!currentFile || busy">
         <span x-html="KazmaIcons.diff()"></span> Diff
       </button>
+      <button class="btn btn-sm btn-secondary" @click="restoreLastCheckpoint()" :disabled="busy"
+              title="Restore last workspace file checkpoint">
+        Undo patch
+      </button>
       <span class="toolbar-sep" aria-hidden="true"></span>
       <button class="btn btn-sm btn-secondary" @click="gitCmd('status -s')" :disabled="busy">
         <span x-html="KazmaIcons['git-branch']()"></span> Status

@@ -201,22 +201,15 @@ class TestSidebarComponent:
     def test_has_dashboard_link(self, sidebar_html):
         assert 'href="/dashboard"' in sidebar_html
 
-    def test_dashboard_lives_in_work_section(self, sidebar_html):
-        """Dashboard is a Work item, not a Settings item."""
-        work = sidebar_html.find("nav.primary")
+    def test_dashboard_lives_in_more(self, sidebar_html):
+        """Hands 0.11: Dashboard is an inspector under More, not Work."""
+        more = sidebar_html.find('class="nav-more-body"')
         dash = sidebar_html.find('href="/dashboard"')
-        activity = sidebar_html.find("nav.activity")
-        settings = sidebar_html.find("nav.configuration")
-        assert work != -1 and dash != -1 and activity != -1 and settings != -1
-        assert work < dash < activity < settings, (
-            "Dashboard must sit in the Work group (after nav.primary, "
-            "before Activity / Settings)"
-        )
+        settings = sidebar_html.find('href="/settings"')
+        work = sidebar_html.find("nav.primary")
+        assert more != -1 and dash != -1 and settings != -1 and work != -1
+        assert work < settings < more < dash
         assert sidebar_html.count('href="/dashboard"') == 1
-        agents = sidebar_html.find('href="/agents"')
-        replay = sidebar_html.find('href="/replay"')
-        assert work < agents < activity, "Agents belong in Work"
-        assert activity < replay < settings, "Replay belongs in Activity"
 
     def test_has_skills_link(self, sidebar_html):
         assert 'href="/skills"' in sidebar_html
@@ -229,14 +222,9 @@ class TestSidebarComponent:
 
     def test_has_x_studio_link(self, sidebar_html):
         assert 'href="/x"' in sidebar_html
-        activity = sidebar_html.find("nav.activity")
+        more = sidebar_html.find('class="nav-more-body"')
         x_link = sidebar_html.find('href="/x"')
-        scheduled = sidebar_html.find('href="/scheduled"')
-        settings = sidebar_html.find("nav.configuration")
-        assert activity != -1 and x_link != -1 and scheduled != -1
-        assert activity < x_link < scheduled < settings, (
-            "X Studio belongs in Activity, before Scheduled"
-        )
+        assert more != -1 and more < x_link
 
     def test_has_settings_link(self, sidebar_html):
         assert 'href="/settings"' in sidebar_html
@@ -716,8 +704,10 @@ class TestTemplateRendering:
             pytest.skip("kazma_core not available for integration test")
 
     def test_root_renders(self, client):
-        resp = client.get("/")
-        assert resp.status_code in (200, 307)
+        resp = client.get("/", follow_redirects=False)
+        assert resp.status_code in (200, 302, 303, 307)
+        if resp.status_code in (302, 303, 307):
+            assert "/chat" in (resp.headers.get("location") or "")
 
     def test_settings_renders(self, client):
         resp = client.get("/settings")

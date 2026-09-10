@@ -33,6 +33,7 @@ __all__ = [
     "LLMResponse",
     "StreamDelta",
     "ToolCall",
+    "cost_from_usage",
     "hoist_system_messages",
     "retry_after_seconds",
 ]
@@ -98,6 +99,40 @@ def hoist_system_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]
         if not (isinstance(m, dict) and m.get("role") in ("system", "developer"))
     ]
     return head + rest
+
+
+def cost_from_usage(
+    usage: dict[str, Any] | None,
+    *,
+    input_cost_per_1m: float,
+    output_cost_per_1m: float,
+    cache_read_multiplier: float = 0.1,
+) -> float:
+    """USD from token usage. Cached prompt tokens bill at ``cache_read_multiplier``.
+
+    Anthropic cache reads are ~0.1× input; OpenAI cached_tokens are similar.
+    Unknown usage keys are treated as zero. Cached count is clamped to prompt.
+    """
+    usage = usage or {}
+    prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+    completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    cached = 0
+    if isinstance(details, dict):
+        cached = int(details.get("cached_tokens") or details.get("cache_read_input_tokens") or 0)
+    if not cached:
+        cached = int(
+            usage.get("cache_read_input_tokens")
+            or usage.get("cached_tokens")
+            or 0
+        )
+    cached = max(0, min(cached, prompt) if prompt else cached)
+    billable = max(prompt - cached, 0)
+    return (
+        (billable * input_cost_per_1m / 1_000_000)
+        + (cached * input_cost_per_1m * cache_read_multiplier / 1_000_000)
+        + (completion * output_cost_per_1m / 1_000_000)
+    )
 
 
 def retry_after_seconds(headers: Any, default: float = 30.0) -> float:
@@ -1309,9 +1344,10 @@ class LLMProvider:
                 prompt_tokens,
             )
 
-        # Calculate cost
-        cost = (prompt_tokens * self.config.input_cost_per_1m / 1_000_000) + (
-            completion_tokens * self.config.output_cost_per_1m / 1_000_000
+        cost = cost_from_usage(
+            usage,
+            input_cost_per_1m=self.config.input_cost_per_1m,
+            output_cost_per_1m=self.config.output_cost_per_1m,
         )
 
         return LLMResponse(

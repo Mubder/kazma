@@ -19,10 +19,14 @@ from kazma_core.workspace.path_policy import check_path_access, denied_message
 
 __all__ = [
     "PatchError",
+    "MAX_PATCH_SET",
     "apply_search_replace",
     "apply_unified_diff",
     "file_apply_patch",
+    "file_apply_patch_set",
 ]
+
+MAX_PATCH_SET = 20
 
 
 class PatchError(ValueError):
@@ -222,6 +226,56 @@ async def file_apply_patch(
         f"Patched {path} ({old_lines} → {new_lines} lines, {sign}). "
         "Prefer this tool over file_write for further edits."
     )
+
+
+async def file_apply_patch_set(patches: list[dict] | None = None) -> str:
+    """Apply several surgical edits under one HITL card. Rolls back on failure."""
+    items = list(patches or [])
+    if not items:
+        return "Error: patches is empty."
+    if len(items) > MAX_PATCH_SET:
+        return f"Error: at most {MAX_PATCH_SET} patches per set (got {len(items)})."
+
+    paths = [str(p.get("path") or "") for p in items]
+    if any(not p.strip() for p in paths):
+        return "Error: every patch needs a path."
+
+    checkpoint_id = ""
+    try:
+        from kazma_core.ide.file_checkpoints import create_checkpoint, restore_checkpoint
+
+        checkpoint_id = create_checkpoint(paths, reason="file_apply_patch_set")
+    except Exception as exc:
+        return f"Error: could not checkpoint before patch set — {exc}"
+
+    lines: list[str] = []
+    try:
+        for item in items:
+            msg = await file_apply_patch(
+                str(item.get("path") or ""),
+                old_string=str(item.get("old_string") or ""),
+                new_string=str(item.get("new_string") or ""),
+                patch=str(item.get("patch") or ""),
+                replace_all=bool(item.get("replace_all")),
+            )
+            if str(msg).startswith("Error:"):
+                from kazma_core.ide.file_checkpoints import restore_checkpoint as _restore
+
+                _restore(checkpoint_id)
+                return (
+                    f"Error: hunk failed on {item.get('path')}: {msg} "
+                    f"(restored checkpoint {checkpoint_id})"
+                )
+            lines.append(str(msg))
+    except Exception as exc:
+        try:
+            from kazma_core.ide.file_checkpoints import restore_checkpoint as _restore
+
+            _restore(checkpoint_id)
+        except Exception:
+            pass
+        return f"Error: patch set aborted — {exc} (restored checkpoint {checkpoint_id})"
+    return "\n".join(lines) + f"\ncheckpoint={checkpoint_id}"
 
 
 def _touch_index(path: Path) -> None:

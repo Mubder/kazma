@@ -278,6 +278,30 @@ class IdeService:
         res["path"] = rel_path
         return res
 
+    async def apply_patch_set(self, patches: list[dict[str, Any]]) -> dict[str, Any]:
+        """Multi-file surgical edit — one HITL card via file_apply_patch_set."""
+        resolved: list[dict[str, Any]] = []
+        for item in patches or []:
+            rel = str(item.get("path") or "")
+            try:
+                target = self.resolve(rel)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc), "path": rel}
+            row = dict(item)
+            row["path"] = str(target)
+            resolved.append(row)
+        return await self._call_tool("file_apply_patch_set", {"patches": resolved})
+
+    async def restore_file_checkpoint(self, checkpoint_id: str) -> dict[str, Any]:
+        """Restore a workspace checkpoint (in-tool rollback uses the store directly)."""
+        from kazma_core.ide.file_checkpoints import restore_checkpoint
+
+        try:
+            paths = restore_checkpoint(checkpoint_id)
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "paths": paths, "checkpoint_id": checkpoint_id}
+
     async def delete_file(self, rel_path: str) -> dict[str, Any]:
         """Delete a file or directory from the workspace.
 

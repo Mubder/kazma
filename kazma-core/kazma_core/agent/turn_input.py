@@ -647,6 +647,7 @@ WRITE_EXECUTE_TOOL_NAMES = frozenset(
         "python_exec",
         "file_write",
         "file_apply_patch",
+        "file_apply_patch_set",
         "file_create",
         "file_delete",
         "file_edit",

@@ -121,22 +121,28 @@ def test_transcript_wider_measure_small_side_margins() -> None:
     assert "clamp(64px, 12vw, 180px)" not in css
 
 
-def test_sidebar_is_grouped_not_more_disclosure() -> None:
-    """Operator rejected always-on More that hid Work to 3 items."""
+def test_sidebar_work_plus_more_disclosure() -> None:
+    """Hands 0.11: Chat/Workspace/IDE/Settings stay visible; inspectors under More.
+
+    2026-08-26 revert was display:flex on <details> itself (UA closed-hiding
+    lost). The body wrapper is what we hide — never the details node.
+    """
     html = _SIDEBAR.read_text(encoding="utf-8")
-    assert "nav-more" not in html
-    assert "<details" not in html
+    v5 = _V5.read_text(encoding="utf-8")
+    assert "nav-more" in html
+    assert "nav-more-body" in html
+    assert "<details" in html
     assert "nav.primary" in html
-    assert "nav.activity" in html
-    assert "nav.configuration" in html
-    nav_hrefs = [
-        line for line in html.splitlines() if "nav-link" in line and "href=" in line
-    ]
-    joined = "\n".join(nav_hrefs)
+    nav_chunk = html.split("<nav")[1].split("</nav>")[0]
+    assert 'style="display:' not in nav_chunk
+    assert "details.nav-more" not in v5 or ".nav-more {\n  display:" not in v5
+    assert ".nav-more-body {\n  display: none;" in v5
+    assert ".nav-more[open] > .nav-more-body {\n  display: flex;" in v5
+    work, _, more = html.partition('class="nav-more-body"')
+    for href in ("/chat", "/workspace", "/ide", "/settings"):
+        assert f'href="{href}"' in work, href
+        assert f'href="{href}"' not in more, href
     for href in (
-        "/chat",
-        "/workspace",
-        "/ide",
         "/memory",
         "/dashboard",
         "/agents",
@@ -145,11 +151,11 @@ def test_sidebar_is_grouped_not_more_disclosure() -> None:
         "/swarm",
         "/knowledge",
         "/replay",
-        "/settings",
         "/skills",
         "/mcp",
     ):
-        assert joined.count(f'href="{href}"') == 1, href
+        assert f'href="{href}"' in more, href
+        assert f'href="{href}"' not in work, href
 
 
 def test_reduced_motion_and_tap_target() -> None:

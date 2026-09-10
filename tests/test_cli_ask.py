@@ -10,6 +10,7 @@ from kazma_core.cli.ask import (
     ACP_PROTOCOL_VERSION,
     AcpSessionState,
     AskOptions,
+    apply_repl_line,
     extract_hitl_interrupt,
     handle_acp_request,
     map_permission_outcome,
@@ -46,6 +47,19 @@ class TestParse:
 
     def test_help(self) -> None:
         assert parse_ask_argv(["--help"]).help is True
+
+
+class TestRepl:
+    def test_exit_and_new_and_prompt(self) -> None:
+        tid, prompt = apply_repl_line("/exit", "cli-1")
+        assert tid == "cli-1"
+        assert prompt == ""
+        tid2, prompt2 = apply_repl_line("/new", "cli-1")
+        assert tid2 != "cli-1"
+        assert prompt2 is None
+        tid3, prompt3 = apply_repl_line("fix the tests", "cli-1")
+        assert tid3 == "cli-1"
+        assert prompt3 == "fix the tests"
 
 
 class TestToolKind:

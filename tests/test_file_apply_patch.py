@@ -11,6 +11,7 @@ from kazma_core.tools.file_apply_patch import (
     apply_search_replace,
     apply_unified_diff,
     file_apply_patch,
+    file_apply_patch_set,
 )
 
 
@@ -98,3 +99,25 @@ async def test_file_apply_patch_outside_workspace(
     msg = await file_apply_patch(str(outside), old_string="secret = 1", new_string="secret = 2")
     assert "not allowed" in msg.lower() or msg.startswith("Error") or msg.startswith("Safety")
     assert outside.read_text(encoding="utf-8") == "secret = 1\n"
+
+
+@pytest.mark.asyncio
+async def test_patch_set_rolls_back_on_second_hunk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("KAZMA_FILE_CHECKPOINTS_DB", str(tmp_path / "ck.db"))
+    _pin_workspace(tmp_path, monkeypatch)
+    a = tmp_path / "a.py"
+    b = tmp_path / "b.py"
+    a.write_text("n = 1\n", encoding="utf-8")
+    b.write_text("m = 1\n", encoding="utf-8")
+    msg = await file_apply_patch_set(
+        [
+            {"path": str(a), "old_string": "n = 1", "new_string": "n = 2"},
+            {"path": str(b), "old_string": "does-not-exist", "new_string": "m = 9"},
+        ]
+    )
+    assert msg.startswith("Error:")
+    assert "checkpoint" in msg.lower()
+    assert a.read_text(encoding="utf-8").strip() == "n = 1"
+    assert b.read_text(encoding="utf-8").strip() == "m = 1"

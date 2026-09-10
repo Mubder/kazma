@@ -173,26 +173,11 @@ def register_misc_routes(self: Any) -> None:
             logger.debug("WS events handler stopped: %s", exc)
         finally:
             store.unregister_ws(websocket)
-    @self.app.get("/", response_class=HTMLResponse)
-    async def root(request: Request) -> HTMLResponse:
-        return self.templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "config": self.agent.config,
-                "active_page": "dashboard",
-                "cost_current": 0.0,
-                "cost_max": 0.50,
-                "cost_headroom": 0.50,
-                "cost_color": "var(--success)",
-                "breaker_status": "closed",
-                "breaker_color": "var(--success)",
-                "silence_info": "",
-                "tracing_backend": "console",
-                "traces": [],
-                "metrics": {},
-            },
-        )
+    @self.app.get("/")
+    async def root(request: Request) -> RedirectResponse:
+        # Hands 0.11: chat is home. Dashboard stays an inspector at /dashboard.
+        # Auth middleware still gates HTML pages — do not add "/" to ALWAYS_OPEN_PATHS.
+        return RedirectResponse(url="/chat", status_code=303)
     @self.app.get("/workspace", response_class=HTMLResponse)
     async def workspace_page(request: Request) -> HTMLResponse:
         return self.templates.TemplateResponse(

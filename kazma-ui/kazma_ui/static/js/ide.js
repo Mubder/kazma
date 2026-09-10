@@ -665,6 +665,41 @@ function ideApp() {
       }
     },
 
+    // ── Restore last workspace file checkpoint (Hands 0.11) ──
+    async restoreLastCheckpoint() {
+      var ok = window.kazmaConfirm
+        ? await window.kazmaConfirm({
+            title: 'Restore checkpoint',
+            message: 'Restore the last workspace file checkpoint? This overwrites files on disk.',
+            confirmText: 'Restore',
+          })
+        : true;
+      if (!ok) return;
+      this.busy = true;
+      try {
+        var listed = await this._get('/api/ide/checkpoints');
+        var items = (listed && listed.checkpoints) || [];
+        if (!items.length) {
+          this.toast('No checkpoints yet', false);
+          return;
+        }
+        var cid = items[0].id;
+        var data = await this._post('/api/ide/checkpoints/' + encodeURIComponent(cid) + '/restore', {});
+        if (data.ok) {
+          this.toast('Restored ' + cid.slice(0, 8), true);
+          this.showResult('Restore', (data.paths || []).join('\n') || 'OK');
+          if (this.currentFile) this.openFile(this.currentFile);
+        } else {
+          this.toast('Restore failed', false);
+          this.showResult('Restore failed', data.error || 'Unknown error');
+        }
+      } catch (err) {
+        this.toast('Restore failed', false);
+      } finally {
+        this.busy = false;
+      }
+    },
+
     // ── Run current file ──
     async runFile() {
       if (!this.currentFile) return;

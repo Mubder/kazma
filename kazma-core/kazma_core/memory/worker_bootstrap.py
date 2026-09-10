@@ -1135,9 +1135,31 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
             await asyncio.to_thread(_snapshot_pg_to_restic, path)
         if path is None:
             logger.warning("[memory_worker] native_pg_backup produced no dump")
+            try:
+                from kazma_core.observability.ops_alerts import alert
+
+                alert(
+                    "backup.pg_dump",
+                    "Postgres dump failed",
+                    "native_pg_backup produced no dump",
+                    severity="critical",
+                )
+            except Exception:
+                logger.debug("[memory_worker] pg dump alert failed", exc_info=True)
             return False  # real failure — let the queue retry
         logger.info("[memory_worker] native_pg_backup done: %s", path.name)
         return True
     except Exception:
         logger.warning("[memory_worker] native_pg_backup handler failed", exc_info=True)
+        try:
+            from kazma_core.observability.ops_alerts import alert
+
+            alert(
+                "backup.pg_dump",
+                "Postgres dump failed",
+                "native_pg_backup raised",
+                severity="critical",
+            )
+        except Exception:
+            logger.debug("[memory_worker] pg dump alert failed", exc_info=True)
         return False

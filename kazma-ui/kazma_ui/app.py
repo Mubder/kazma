@@ -1258,6 +1258,12 @@ class KazmaAppBuilder:
 
         # Mount routers
         self.app.include_router(chat_router)
+        try:
+            from kazma_ui.setup_api import create_setup_router
+
+            self.app.include_router(create_setup_router())
+        except Exception as exc:
+            logger.warning("[setup] router not available: %s", exc)
         self.app.include_router(settings_router)
         try:
             from kazma_ui.saas_api import create_saas_router

@@ -111,6 +111,7 @@ TOOL_TIERS: dict[str, str] = {
     # Danger — require HITL approval
     "file_write": "danger",
     "file_apply_patch": "danger",
+    "file_apply_patch_set": "danger",
     "file_delete": "danger",
     "shell_exec": "danger",
     "code_exec": "danger",
@@ -286,6 +287,7 @@ AUTO_APPROVED_TIERS: frozenset[str] = frozenset({"read", "write", "safe"})
 CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "file_write",
     "file_apply_patch",
+    "file_apply_patch_set",
     "file_delete",
     "file_append",
     "shell_exec",

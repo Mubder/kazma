@@ -4,7 +4,7 @@
 
   # Kazma Agent Framework
 
-  **Multi-Agent AI System with Bi-Temporal Cognitive Memory, Swarm Orchestration, and Autonomous Reliability**
+  **Kazma is the self-hosted agent that can edit your repo, message your team, and schedule your life — and that will stop, ask, or fail honestly rather than invent an answer.**
 
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
@@ -18,9 +18,22 @@
 
 ---
 
-## ⚡ Executive Summary & Metrics
+## Quick start
 
-Kazma is an open-source, self-hosted multi-agent framework architected for continuous autonomous operation. Built on a LangGraph supervisor core, Kazma integrates a **Pure V2 Cognitive Memory Engine** (bi-temporal belief graph + PPR associative recall), **autonomous swarm orchestration** with dynamic template autoscaling, **triple-wired Human-In-The-Loop (HITL) safety gates**, an **enterprise document intelligence platform**, and **cross-platform dispatch** (Web, TUI, CLI, Telegram, Discord, Slack) with native Arabic and Khaleeji dialect intelligence.
+```powershell
+.\setup.ps1
+kazma serve
+```
+
+Open **`/`** — that is chat (not the dashboard). First-run asks for one provider key and one model. Inspectors (dashboard, swarm, memory, …) live under **More**.
+
+See [Quickstart](docs/docs/guide/quickstart.md).
+
+---
+
+## ⚡ What it is
+
+Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before danger tools, a commitment layer that will not invent a date over your memory, and mouths on Web, TUI, CLI, Telegram, Discord, and Slack. When the model dies it says so (`⚠️`) instead of faking a reply.
 
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |

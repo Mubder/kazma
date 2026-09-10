@@ -196,6 +196,30 @@
         "interrupt": true,
         "tool_not_executed": true
       }
+    },
+    {
+      "id": "danger_shell_exec_interrupt",
+      "kind": "hitl",
+      "tool": "shell_exec",
+      "arguments": { "command": "ls" },
+      "expect": {
+        "interrupt": true,
+        "tool_not_executed": true
+      }
+    },
+    {
+      "id": "danger_patch_set_interrupt",
+      "kind": "hitl",
+      "tool": "file_apply_patch_set",
+      "arguments": {
+        "patches": [
+          { "path": "a.py", "old_string": "n = 1", "new_string": "n = 2" }
+        ]
+      },
+      "expect": {
+        "interrupt": true,
+        "tool_not_executed": true
+      }
     }
   ]
 }

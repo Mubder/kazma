@@ -114,6 +114,8 @@ _PROF: dict[str, tuple[EffectKind, SemanticTier, str | None, tuple[str, ...]]] =
                    ("path", "op")),
     "file_apply_patch": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs",
                          ("path", "op")),
+    "file_apply_patch_set": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs",
+                            ("path", "op")),
     "file_append": (EffectKind.WRITE_FS, SemanticTier.HIGH, "mutate_fs",
                     ("path",)),
     "file_delete": (EffectKind.WRITE_FS, SemanticTier.CRITICAL, "mutate_fs",

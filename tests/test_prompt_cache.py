@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from kazma_core.llm_provider import LLMConfig, hoist_system_messages
+from kazma_core.llm_provider import LLMConfig, cost_from_usage, hoist_system_messages
 from kazma_core.prompt_cache import (
     build_anthropic_system,
     is_dynamic_system,
@@ -105,3 +105,24 @@ async def test_anthropic_chat_sends_cached_system() -> None:
     assert isinstance(payload["system"], list)
     assert payload["system"][0]["cache_control"]["type"] == "ephemeral"
     assert payload["messages"][0]["role"] == "user"
+
+
+def test_cost_from_usage_discounts_cached_tokens() -> None:
+    full = cost_from_usage(
+        {"prompt_tokens": 1000, "completion_tokens": 0},
+        input_cost_per_1m=1.0,
+        output_cost_per_1m=1.0,
+    )
+    cached = cost_from_usage(
+        {"prompt_tokens": 1000, "completion_tokens": 0, "cached_tokens": 1000},
+        input_cost_per_1m=1.0,
+        output_cost_per_1m=1.0,
+    )
+    assert full == pytest.approx(0.001)
+    assert cached == pytest.approx(0.0001)
+    anth = cost_from_usage(
+        {"input_tokens": 1000, "output_tokens": 0, "cache_read_input_tokens": 1000},
+        input_cost_per_1m=3.0,
+        output_cost_per_1m=15.0,
+    )
+    assert anth == pytest.approx(0.0003)

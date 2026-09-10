@@ -512,4 +512,36 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "YOLO مفعّل — جارٍ التشغيل…",
         "en": "YOLO on — running…",
     },
+    "chat.setup_title": {
+        "ar": "ابدأ المحادثة",
+        "en": "Start chatting",
+    },
+    "chat.setup_subtitle": {
+        "ar": "مفتاح واحد ونموذج واحد. يمكنك تغييرهما لاحقاً من الإعدادات.",
+        "en": "One key and one model. You can change them later in Settings.",
+    },
+    "chat.setup_provider": {
+        "ar": "المزوّد",
+        "en": "Provider",
+    },
+    "chat.setup_api_key": {
+        "ar": "مفتاح API",
+        "en": "API key",
+    },
+    "chat.setup_model": {
+        "ar": "النموذج",
+        "en": "Model",
+    },
+    "chat.setup_start": {
+        "ar": "ابدأ",
+        "en": "Start",
+    },
+    "chat.setup_settings_hint": {
+        "ar": "المحليون (Ollama / LM Studio) لا يحتاجون مفتاحاً. الإعدادات تبقى متاحة.",
+        "en": "Local (Ollama / LM Studio) needs no key. Settings stays available.",
+    },
+    "chat.setup_key_placeholder": {
+        "ar": "اختياري للمحلي",
+        "en": "Optional for local",
+    },
 }

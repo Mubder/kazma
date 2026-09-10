@@ -80,13 +80,15 @@ def _plan_note_for(kind: str, slots: dict, entities: EntitySet) -> str:
         )
     if kind == ActKind.CODE_EXEC:
         return (
-            "INTENT ENGINE: Use `python_exec` for short scripts only. For document "
-            "generation use generate_* tools. For file operations use file_* tools."
+            "INTENT ENGINE: Prefer `file_apply_patch_set` (or `file_apply_patch`) "
+            "for edits to existing files; `file_write` only for new files. Then run "
+            "the project's tests. Do not rewrite whole files. Do not skip HITL. "
+            "Stop when tests pass. Use `python_exec` only for short scripts."
         )
     if kind == ActKind.FILE_MGMT:
         return (
-            "INTENT ENGINE: Use `file_list` to see what exists, then `file_*` tools "
-            "for the requested operation. Confirm before bulk deletions."
+            "INTENT ENGINE: Use `file_list` to see what exists. Prefer "
+            "`file_apply_patch_set` for multi-file edits. Confirm before bulk deletions."
         )
     if kind == ActKind.ANALYSIS:
         return (

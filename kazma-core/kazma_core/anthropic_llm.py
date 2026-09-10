@@ -29,6 +29,7 @@ from kazma_core.llm_provider import (
     LLMProvider,
     LLMResponse,
     ToolCall,
+    cost_from_usage,
     retry_after_seconds,
 )
 from kazma_core.llm_stream import StreamDelta
@@ -471,6 +472,7 @@ class AnthropicProvider(LLMProvider):
         stop_reason = ""
         usage_in = 0
         usage_out = 0
+        cache_read = 0
         # Duplicated-prefix invariant (§29F): once any user-visible delta has
         # been emitted, a recovery attempt of the same call must not emit
         # content again — the authoritative text arrives via the final
@@ -562,6 +564,8 @@ class AnthropicProvider(LLMProvider):
                             usage_in = int(usage.get("input_tokens") or 0)
                         if usage.get("output_tokens") is not None:
                             usage_out = int(usage.get("output_tokens") or usage_out)
+                        if usage.get("cache_read_input_tokens") is not None:
+                            cache_read = int(usage.get("cache_read_input_tokens") or 0)
         except LLMError:
             raise
         except (
@@ -594,7 +598,14 @@ class AnthropicProvider(LLMProvider):
             "stop_sequence": "stop",
         }.get(stop_reason, stop_reason or ("tool_calls" if tool_calls else "stop"))
         in_cost, out_cost = _MODEL_COSTS.get(payload["model"], (3.0, 15.0))
-        cost = (usage_in / 1_000_000) * in_cost + (usage_out / 1_000_000) * out_cost
+        usage_blob = {
+            "input_tokens": usage_in,
+            "output_tokens": usage_out,
+            "cache_read_input_tokens": cache_read,
+        }
+        cost = cost_from_usage(
+            usage_blob, input_cost_per_1m=in_cost, output_cost_per_1m=out_cost
+        )
         assembled = LLMResponse(
             content="".join(text_parts),
             tool_calls=tool_calls,
@@ -604,6 +615,7 @@ class AnthropicProvider(LLMProvider):
                 "input_tokens": usage_in,
                 "output_tokens": usage_out,
                 "total_tokens": usage_in + usage_out,
+                "cache_read_input_tokens": usage_blob["cache_read_input_tokens"],
             },
             cost_usd=cost,
             duration_ms=(time.monotonic() - start) * 1000,
@@ -630,8 +642,10 @@ class AnthropicProvider(LLMProvider):
                     )
                 )
 
-        usage_in = (data.get("usage") or {}).get("input_tokens", 0)
-        usage_out = (data.get("usage") or {}).get("output_tokens", 0)
+        usage_raw = data.get("usage") or {}
+        usage_in = usage_raw.get("input_tokens", 0)
+        usage_out = usage_raw.get("output_tokens", 0)
+        cache_read = int(usage_raw.get("cache_read_input_tokens") or 0)
         # Map Anthropic stop_reason → OpenAI finish_reason.
         finish = {
             "end_turn": "stop",
@@ -640,9 +654,16 @@ class AnthropicProvider(LLMProvider):
             "stop_sequence": "stop",
         }.get(stop_reason, stop_reason or "stop")
 
-        # Cost accounting.
         in_cost, out_cost = _MODEL_COSTS.get(model, (3.0, 15.0))
-        cost = (usage_in / 1_000_000) * in_cost + (usage_out / 1_000_000) * out_cost
+        cost = cost_from_usage(
+            {
+                "input_tokens": usage_in,
+                "output_tokens": usage_out,
+                "cache_read_input_tokens": cache_read,
+            },
+            input_cost_per_1m=in_cost,
+            output_cost_per_1m=out_cost,
+        )
 
         return LLMResponse(
             content="".join(text_parts),
@@ -653,6 +674,7 @@ class AnthropicProvider(LLMProvider):
                 "input_tokens": usage_in,
                 "output_tokens": usage_out,
                 "total_tokens": usage_in + usage_out,
+                "cache_read_input_tokens": cache_read,
             },
             cost_usd=cost,
             duration_ms=(time.monotonic() - start) * 1000,

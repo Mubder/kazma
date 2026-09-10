@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 0.11.0 Hands — chat is home, patch-set HITL, honesty pack (2026-09-10)
+
+Kazma is the self-hosted agent that can edit your repo, message your team, and
+schedule your life — and that will stop, ask, or fail honestly rather than
+invent an answer.
+
+- **Face:** `GET /` redirects to `/chat`. Sidebar Work is Chat / Workspace / IDE / Settings; inspectors live under More (CSS hides `.nav-more-body`, never `display:flex` on `<details>`). First-run wall on chat: one provider key + model (`/api/setup/*`). README leads with that sentence.
+- **Hands:** `file_apply_patch_set` (one HITL card, YAML + CANONICAL + TOOL_TIERS). Workspace file checkpoints + IDE **Undo patch**. `kazma ask` REPL on a TTY (`/exit` `/new`). Coding constrain note prefers patch-set then tests.
+- **Honesty:** eval pack adds `shell_exec` and `file_apply_patch_set` interrupt cases. Prompt-cache hits bill at 0.1× input (`cost_from_usage`). `native_pg_backup` failures page `ops_alerts`. Demo: `examples/hands-demo/`.
+
+Operator: `kazma_guard.py --reload` then Ctrl+F5.
+
 ## Fix — done-frame reply paints without refresh; watchdog is not the answer (2026-09-08)
 
 Live after the vault-migrate pull+restart: `list_events` finished a 1155-char

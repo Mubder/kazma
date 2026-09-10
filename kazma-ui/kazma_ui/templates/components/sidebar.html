@@ -31,7 +31,14 @@
         </button>
     </div>
 
-    {# Navigation — Chat is home. Other pages are inspectors of the same agent. #}
+    {# Navigation — Chat is home. Inspectors live under More (Hands 0.11).
+       Never put display:flex on <details class="nav-more"> — that 2026-08-26
+       revert happened because UA closed-details hiding lost to an inline/flex
+       display on the details node itself. Hide via .nav-more-body only. #}
+    {% set more_pages = [
+        'memory', 'dashboard', 'agents', 'research', 'documents', 'swarm',
+        'knowledge', 'replay', 'x_studio', 'scheduled', 'skills', 'mcp',
+    ] %}
     <nav class="nav-links">
         <span class="nav-section-title">{{ t('nav.primary') }}</span>
 
@@ -65,6 +72,20 @@
             <span class="nav-label">{{ t('nav.ide') }}</span>
         </a>
 
+        <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.settings') }}</span>
+            <span class="nav-kbd">⌘,</span>
+        </a>
+
+        <details class="nav-more"{% if active_page in more_pages %} open{% endif %}>
+            <summary class="nav-more-summary">{{ t('nav.more') }}</summary>
+            <div class="nav-more-body">
         <a href="/memory" class="nav-link {{ 'active' if active_page == 'memory' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -94,8 +115,6 @@
             </span>
             <span class="nav-label">{{ t('nav.agents') }}</span>
         </a>
-
-        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.activity') }}</span>
 
         <a href="/research" class="nav-link {{ 'active' if active_page == 'research' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
@@ -174,19 +193,6 @@
             <span class="nav-label">{{ t('nav.scheduled') }}</span>
         </a>
 
-        <span class="nav-section-title" style="margin-top: var(--sp-3)">{{ t('nav.configuration') }}</span>
-
-        <a href="/settings" class="nav-link {{ 'active' if active_page == 'settings' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.settings') }}</span>
-            <span class="nav-kbd">⌘,</span>
-        </a>
-
         <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -206,6 +212,8 @@
             </span>
             <span class="nav-label">{{ t('nav.mcp') }}</span>
         </a>
+            </div>
+        </details>
     </nav>
 
     {# Footer #}
