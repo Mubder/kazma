@@ -6,6 +6,12 @@
    shared HITL/safety chain — no parallel un-gated path.
    ═══════════════════════════════════════════════════════ */
 
+/* Monaco MUST NOT live on the Alpine data object. Proxying the editor
+   is the hang: every caret/click walks the editor graph and re-renders
+   the whole page. */
+var _ideMonaco = null;
+function _ed() { return _ideMonaco; }
+
 function ideApp() {
   return {
     // ── State ──
@@ -22,7 +28,6 @@ function ideApp() {
     swarmInstruction: '',
     result: '',
     resultTitle: '',
-    cm: null,
     cmReady: false,
     lspReady: false,
     skills: [],
@@ -74,13 +79,11 @@ function ideApp() {
       this._lspDisposables = [];
       this.lspReady = false;
       try {
-        if (this.cm) {
-          if (typeof this.cm.dispose === 'function') this.cm.dispose();
-          else if (typeof this.cm.toTextArea === 'function') this.cm.toTextArea();
-          else if (typeof this.cm.destroy === 'function') this.cm.destroy();
+        if (_ideMonaco) {
+          if (typeof _ideMonaco.dispose === 'function') _ideMonaco.dispose();
         }
       } catch (e) {}
-      this.cm = null;
+      _ideMonaco = null;
     },
 
     // ── Chat bootstrap (shared by init + toggleChat) ──
@@ -203,10 +206,10 @@ function ideApp() {
       function onReady() {
         try {
           if (host && host.offsetHeight < 80) host.style.minHeight = '420px';
-          self.cm = monaco.editor.create(host, editorOptions());
-          self.cm.onDidChangeModelContent(function () {
+          _ideMonaco = monaco.editor.create(host, editorOptions());
+          _ideMonaco.onDidChangeModelContent(function () {
             if (self._settingContent) return;
-            var dirty = self.cm.getValue() !== self.originalContent;
+            var dirty = _ed().getValue() !== self.originalContent;
             if (self.dirty !== dirty) self.dirty = dirty;
             var tab = self._activeTab();
             if (tab && tab.dirty !== dirty) tab.dirty = dirty;
@@ -222,7 +225,7 @@ function ideApp() {
           requestAnimationFrame(function () { self._layoutEditor(); });
         } catch (err) {
           console.warn('[ide] Monaco init failed, falling back to textarea', err);
-          self.cm = null;
+          _ideMonaco = null;
           self.cmReady = false;
         }
       }
@@ -249,17 +252,24 @@ function ideApp() {
         onReady();
         return;
       }
-      var cdns = [
-        'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs',
-        'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs',
-      ];
-      loadFrom(cdns[0], function () { loadFrom(cdns[1], function () {
+      var vsRoot = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs';
+      var jsdelivr = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs';
+      if (typeof require === 'function' && require.config) {
+        try {
+          require.config({ paths: { vs: vsRoot } });
+          require(['vs/editor/editor.main'], onReady);
+          return;
+        } catch (err) {
+          console.warn('[ide] Monaco require() failed', err);
+        }
+      }
+      loadFrom(vsRoot, function () { loadFrom(jsdelivr, function () {
         console.warn('[ide] Monaco CDN blocked — using textarea');
       }); });
     },
 
     getContent() {
-      if (this.cm && typeof this.cm.getValue === 'function') return this.cm.getValue();
+      if (_ed() && typeof _ed().getValue === 'function') return _ed().getValue();
       return this.$refs.editor ? this.$refs.editor.value : '';
     },
 
@@ -269,8 +279,8 @@ function ideApp() {
       this.originalContent = text;
       this.dirty = false;
       try {
-        if (this.cm && typeof this.cm.setValue === 'function') {
-          this.cm.setValue(text);
+        if (_ed() && typeof _ed().setValue === 'function') {
+          _ed().setValue(text);
         } else if (this.$refs.editor) {
           this.$refs.editor.value = text;
         }
@@ -284,10 +294,10 @@ function ideApp() {
     _layoutEditor() {
       var self = this;
       if (this._layoutLock) return;
-      if (!this.cm || typeof this.cm.layout !== 'function') return;
+      if (!_ed() || typeof _ed().layout !== 'function') return;
       this._layoutLock = true;
       requestAnimationFrame(function () {
-        try { self.cm.layout(); } catch (e) { /* ignore */ }
+        try { _ed().layout(); } catch (e) { /* ignore */ }
         self._layoutLock = false;
       });
     },
@@ -384,9 +394,9 @@ function ideApp() {
                 };
               }
               return self.open(loc.path).then(function () {
-                if (self.cm && loc.line) {
-                  self.cm.revealLineInCenter(loc.line);
-                  self.cm.setPosition({ lineNumber: loc.line, column: loc.character || 1 });
+                if (_ed() && loc.line) {
+                  _ed().revealLineInCenter(loc.line);
+                  _ed().setPosition({ lineNumber: loc.line, column: loc.character || 1 });
                 }
                 return null;
               });
@@ -445,14 +455,14 @@ function ideApp() {
     },
 
     async _refreshLspDiagnostics() {
-      if (!this.lspReady || !this.cm || !window.monaco) return;
+      if (!this.lspReady || !_ed() || !window.monaco) return;
       var data = await this._lsp('diagnostics', {});
       this._applyLspDiagnostics((data && data.diagnostics) || []);
     },
 
     _applyLspDiagnostics(diags) {
-      if (!this.cm || !window.monaco || !monaco.editor) return;
-      var model = this.cm.getModel && this.cm.getModel();
+      if (!_ed() || !window.monaco || !monaco.editor) return;
+      var model = _ed().getModel && _ed().getModel();
       if (!model) return;
       var markers = (diags || []).map(function (d) {
         var line = d.line || 1;
@@ -489,7 +499,11 @@ function ideApp() {
       this.busy = true;
       try {
         var data = await this._get('/api/workspace/files?path=' + encodeURIComponent(path || ''));
-        this.tree = data.files || [];
+        this.tree = (data.files || []).map(function (f) {
+          var name = String(f.name || '');
+          f.ext = f.is_dir ? 'dir' : (name.split('.').pop() || '').toLowerCase();
+          return f;
+        });
         this.treePath = data.path || '';
       } catch (err) {
         this.toast('Failed to list files', false);
@@ -581,9 +595,9 @@ function ideApp() {
       this.currentLang = (tab.lang && tab.lang !== 'plaintext')
         ? tab.lang
         : this._langFromName(tab.path);
-      if (this.cm && window.monaco && monaco.editor && this.cm.getModel) {
+      if (_ed() && window.monaco && monaco.editor && _ed().getModel) {
         try {
-          monaco.editor.setModelLanguage(this.cm.getModel(), this._cmMode(tab.lang));
+          monaco.editor.setModelLanguage(_ed().getModel(), this._cmMode(this.currentLang));
         } catch (e) { /* unknown language id */ }
       }
       this.setContent(tab.content || '');

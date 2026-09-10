@@ -44,6 +44,8 @@ def test_ide_review_panel_markers() -> None:
     assert "lineNumbers: 'on'" in js
     assert "bracketPairColorization" in js
     assert "_langFromName(filePath)" in js
+    assert "var _ideMonaco = null" in js
+    assert "cm: null" not in js
     assert "openLatestReview" in js
     assert "rejectReview" in js
 
