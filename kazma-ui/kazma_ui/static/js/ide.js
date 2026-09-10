@@ -62,6 +62,10 @@ function ideApp() {
       this.chatStream = null;
       try { if (this._themeObs) this._themeObs.disconnect(); } catch (e) {}
       this._themeObs = null;
+      try {
+        if (this._onWinResize) window.removeEventListener('resize', this._onWinResize);
+      } catch (e) {}
+      this._onWinResize = null;
       try { if (this._lspDiagTimer) clearTimeout(this._lspDiagTimer); } catch (e) {}
       this._lspDiagTimer = null;
       (this._lspDisposables || []).forEach(function (d) {
@@ -164,7 +168,7 @@ function ideApp() {
             value: ta ? (ta.value || '') : '',
             language: 'plaintext',
             theme: self._monacoTheme(),
-            automaticLayout: true,
+            automaticLayout: false,
             minimap: { enabled: false },
             wordWrap: 'on',
             fontSize: 13,
@@ -174,6 +178,7 @@ function ideApp() {
             tabSize: 4,
           });
           self.cm.onDidChangeModelContent(function () {
+            if (self._settingContent) return;
             self.dirty = self.cm.getValue() !== self.originalContent;
             var tab = self._activeTab();
             if (tab) tab.dirty = self.dirty;
@@ -181,6 +186,8 @@ function ideApp() {
           });
           self.cmReady = true;
           self._bindLsp();
+          self._onWinResize = function () { self._layoutEditor(); };
+          window.addEventListener('resize', self._onWinResize);
           self._themeObs = new MutationObserver(function () { self._syncMonacoTheme(); });
           self._themeObs.observe(document.documentElement, {
             attributes: true,
@@ -215,13 +222,28 @@ function ideApp() {
 
     setContent(text) {
       text = text || '';
-      if (this.cm && typeof this.cm.setValue === 'function') {
-        this.cm.setValue(text);
-      } else if (this.$refs.editor) {
-        this.$refs.editor.value = text;
-      }
+      this._settingContent = true;
       this.originalContent = text;
       this.dirty = false;
+      try {
+        if (this.cm && typeof this.cm.setValue === 'function') {
+          this.cm.setValue(text);
+        } else if (this.$refs.editor) {
+          this.$refs.editor.value = text;
+        }
+      } finally {
+        this._settingContent = false;
+        this.dirty = false;
+      }
+      this._layoutEditor();
+    },
+
+    _layoutEditor() {
+      var self = this;
+      if (!this.cm || typeof this.cm.layout !== 'function') return;
+      requestAnimationFrame(function () {
+        try { self.cm.layout(); } catch (e) { /* ignore */ }
+      });
     },
 
     _cmMode(lang) {
@@ -704,6 +726,17 @@ function ideApp() {
           this.reviewOpen = false;
           return;
         }
+        var self = this;
+        changed.forEach(function (f) {
+          f.hunks = (f.hunks || []).map(function (h) {
+            return {
+              index: h.index,
+              header: h.header,
+              diff: h.diff,
+              html: self.reviewHunkHtml({ diff: h.diff }),
+            };
+          });
+        });
         this.review = { id: data.id, files: changed };
         this.reviewOpen = true;
       } catch (err) { /* ignore */ }
