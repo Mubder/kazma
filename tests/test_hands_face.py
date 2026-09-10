@@ -44,6 +44,9 @@ def test_ide_review_panel_markers() -> None:
     assert 'x-if="reviewOpen"' in html
     assert "(file.hunks || [])" not in html
     assert "automaticLayout: false" in js
+    assert "ide-cursor" in html
+    assert "_layoutLock" in js
+    assert "self.cursorLine" not in js
     assert "openLatestReview" in js
     assert "rejectReview" in js
     assert "rejectHunk" in js
