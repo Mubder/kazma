@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — drop Monaco; CodeMirror fromTextArea (2026-09-10)
+
+Monaco+Alpine was a dead end (hang, empty tabs). The file pane now writes
+bytes into a textarea first, then CodeMirror 5 wraps it (line numbers +
+syntax). If CM does not load, the file is still visible as plain text.
+
 ## Fix — IDE tabs opened empty (2026-09-10)
 
 Alpine re-rendered the editor pane on every tab open (`busy`/`tabs`),

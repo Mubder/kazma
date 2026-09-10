@@ -40,14 +40,13 @@ def test_ide_review_panel_markers() -> None:
     assert "t('ide.review_reject')" in html
     assert 'x-if="reviewOpen"' in html
     assert "(file.hunks || [])" not in html
-    assert "automaticLayout: false" in js
-    assert "lineNumbers: 'on'" in js
-    assert "bracketPairColorization" in js
+    assert "fromTextArea" in js
+    assert "CodeMirror" in html
     assert "_langFromName(filePath)" in js
-    assert "var _ideMonaco = null" in js
-    assert "cm: null" not in js
-    assert 'id="ide-monaco-host"' in html
+    assert "var _ideCM = null" in js
+    assert 'id="ide-fallback"' in html
     assert "x-ignore" in html
+    assert "monaco-editor" not in html
     assert "openLatestReview" in js
     assert "rejectReview" in js
 

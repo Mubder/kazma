@@ -6,11 +6,10 @@
    shared HITL/safety chain — no parallel un-gated path.
    ═══════════════════════════════════════════════════════ */
 
-/* Monaco MUST NOT live on the Alpine data object. Proxying the editor
-   is the hang: every caret/click walks the editor graph and re-renders
-   the whole page. */
-var _ideMonaco = null;
-function _ed() { return _ideMonaco; }
+/* CodeMirror instance must stay OFF the Alpine object (same hang as Monaco).
+   File bytes are written to #ide-fallback first; CM wraps that textarea. */
+var _ideCM = null;
+function _ed() { return _ideCM; }
 
 function ideApp() {
   return {
@@ -79,11 +78,9 @@ function ideApp() {
       this._lspDisposables = [];
       this.lspReady = false;
       try {
-        if (_ideMonaco) {
-          if (typeof _ideMonaco.dispose === 'function') _ideMonaco.dispose();
-        }
+        if (_ideCM && typeof _ideCM.toTextArea === 'function') _ideCM.toTextArea();
       } catch (e) {}
-      _ideMonaco = null;
+      _ideCM = null;
     },
 
     // ── Chat bootstrap (shared by init + toggleChat) ──
@@ -137,137 +134,58 @@ function ideApp() {
       }
     },
 
-    // ── Editor (Monaco with textarea fallback) ──
-    _monacoTheme() {
+    // ── Editor: textarea first, CodeMirror if present ──
+    _cmTheme() {
       return document.documentElement.getAttribute('data-theme') === 'light'
-        ? 'vs'
-        : 'vs-dark';
-    },
-
-    _syncMonacoTheme() {
-      if (!this.cmReady || !window.monaco || !monaco.editor) return;
-      try { monaco.editor.setTheme(this._monacoTheme()); } catch (e) { /* ignore */ }
+        ? 'default'
+        : 'material-darker';
     },
 
     initEditor() {
       var ta = document.getElementById('ide-fallback');
-      var host = document.getElementById('ide-monaco-host');
       var self = this;
       if (ta) {
         ta.addEventListener('input', function () {
           if (self.cmReady) return;
           self.dirty = ta.value !== self.originalContent;
           var tab = self._activeTab();
-          if (tab) tab.dirty = self.dirty;
+          if (tab && tab.dirty !== self.dirty) tab.dirty = self.dirty;
         });
       }
-      if (!host) return;
-
-      function editorOptions() {
-        return {
-          value: ta ? (ta.value || '') : '',
-          language: 'plaintext',
-          theme: self._monacoTheme(),
-          automaticLayout: false,
-          lineNumbers: 'on',
-          lineNumbersMinChars: 4,
-          glyphMargin: true,
-          folding: true,
-          foldingHighlight: true,
-          matchBrackets: 'always',
-          bracketPairColorization: { enabled: true },
-          minimap: { enabled: true, maxColumn: 100 },
-          wordWrap: 'off',
-          fontSize: 14,
-          lineHeight: 22,
-          letterSpacing: 0.3,
-          fontLigatures: true,
-          fontFamily: "Consolas, 'Cascadia Code', 'Courier New', monospace",
-          renderLineHighlight: 'all',
-          renderWhitespace: 'selection',
-          renderLineHighlightOnlyWhenFocus: false,
-          cursorBlinking: 'smooth',
-          cursorSmoothCaretAnimation: 'on',
-          smoothScrolling: true,
-          scrollBeyondLastLine: false,
+      if (!ta || !window.CodeMirror) return;
+      try {
+        _ideCM = window.CodeMirror.fromTextArea(ta, {
+          lineNumbers: true,
+          lineWrapping: false,
+          indentUnit: 4,
           tabSize: 4,
-          insertSpaces: true,
-          detectIndentation: true,
-          rulers: [80, 120],
-          padding: { top: 8, bottom: 8 },
-          scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
-          overviewRulerBorder: false,
-          links: true,
-          mouseWheelZoom: true,
-          guides: { indentation: true, bracketPairs: true },
-        };
+          indentWithTabs: false,
+          matchBrackets: true,
+          styleActiveLine: true,
+          theme: self._cmTheme(),
+          mode: 'null',
+        });
+        _ideCM.setSize('100%', '100%');
+        _ideCM.on('change', function () {
+          if (self._settingContent) return;
+          var dirty = _ed().getValue() !== self.originalContent;
+          if (self.dirty !== dirty) self.dirty = dirty;
+          var tab = self._activeTab();
+          if (tab && tab.dirty !== dirty) tab.dirty = dirty;
+        });
+        self.cmReady = true;
+        self._themeObs = new MutationObserver(function () {
+          if (_ed()) _ed().setOption('theme', self._cmTheme());
+        });
+        self._themeObs.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['data-theme'],
+        });
+      } catch (err) {
+        console.warn('[ide] CodeMirror init failed — plain textarea', err);
+        _ideCM = null;
+        self.cmReady = false;
       }
-
-      function onReady() {
-        try {
-          if (host && host.offsetHeight < 80) host.style.minHeight = '420px';
-          _ideMonaco = monaco.editor.create(host, editorOptions());
-          _ideMonaco.onDidChangeModelContent(function () {
-            if (self._settingContent) return;
-            var dirty = _ed().getValue() !== self.originalContent;
-            if (self.dirty !== dirty) self.dirty = dirty;
-            var tab = self._activeTab();
-            if (tab && tab.dirty !== dirty) tab.dirty = dirty;
-            self._scheduleLspDiagnostics();
-          });
-          var wrap = document.getElementById('ide-editor-wrap');
-          if (wrap) wrap.classList.add('has-monaco');
-          self.cmReady = true;
-          self._bindLsp();
-          self._themeObs = new MutationObserver(function () { self._syncMonacoTheme(); });
-          self._themeObs.observe(document.documentElement, {
-            attributes: true,
-            attributeFilter: ['data-theme'],
-          });
-          requestAnimationFrame(function () { self._layoutEditor(); });
-        } catch (err) {
-          console.warn('[ide] Monaco init failed, falling back to textarea', err);
-          _ideMonaco = null;
-          self.cmReady = false;
-        }
-      }
-
-      function loadFrom(vsRoot, thenFail) {
-        var s = document.createElement('script');
-        s.src = vsRoot + '/loader.js';
-        s.onload = function () {
-          try {
-            var req = window.require;
-            if (!req || !req.config) { thenFail(); return; }
-            req.config({ paths: { vs: vsRoot } });
-            req(['vs/editor/editor.main'], onReady);
-          } catch (err) {
-            console.warn('[ide] Monaco loader config failed', err);
-            thenFail();
-          }
-        };
-        s.onerror = thenFail;
-        document.head.appendChild(s);
-      }
-
-      if (window.monaco && monaco.editor) {
-        onReady();
-        return;
-      }
-      var vsRoot = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.52.2/min/vs';
-      var jsdelivr = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs';
-      if (typeof require === 'function' && require.config) {
-        try {
-          require.config({ paths: { vs: vsRoot } });
-          require(['vs/editor/editor.main'], onReady);
-          return;
-        } catch (err) {
-          console.warn('[ide] Monaco require() failed', err);
-        }
-      }
-      loadFrom(vsRoot, function () { loadFrom(jsdelivr, function () {
-        console.warn('[ide] Monaco CDN blocked — using textarea');
-      }); });
     },
 
     getContent() {
@@ -277,16 +195,17 @@ function ideApp() {
     },
 
     setContent(text) {
-      text = text || '';
+      text = text == null ? '' : String(text);
       this._settingContent = true;
       this.originalContent = text;
       this.dirty = false;
       try {
-        if (_ed() && typeof _ed().setValue === 'function') {
-          _ed().setValue(text);
-        }
         var ta = document.getElementById('ide-fallback');
         if (ta) ta.value = text;
+        if (_ed() && typeof _ed().setValue === 'function') {
+          _ed().setValue(text);
+          if (typeof _ed().clearHistory === 'function') _ed().clearHistory();
+        }
       } finally {
         this._settingContent = false;
         this.dirty = false;
@@ -295,13 +214,10 @@ function ideApp() {
     },
 
     _layoutEditor() {
-      var self = this;
-      if (this._layoutLock) return;
-      if (!_ed() || typeof _ed().layout !== 'function') return;
-      this._layoutLock = true;
+      if (!_ed() || typeof _ed().refresh !== 'function') return;
+      var cm = _ed();
       requestAnimationFrame(function () {
-        try { _ed().layout(); } catch (e) { /* ignore */ }
-        self._layoutLock = false;
+        try { cm.refresh(); } catch (e) { /* ignore */ }
       });
     },
 
@@ -309,24 +225,25 @@ function ideApp() {
       return {
         python: 'python',
         javascript: 'javascript',
-        typescript: 'typescript',
-        json: 'json',
-        html: 'html',
+        typescript: 'javascript',
+        json: 'application/json',
+        html: 'htmlmixed',
         css: 'css',
         markdown: 'markdown',
         bash: 'shell',
+        shell: 'shell',
         yaml: 'yaml',
-        toml: 'ini',
         sql: 'sql',
-        rust: 'rust',
-        go: 'go',
-      }[lang] || 'plaintext';
+        c: 'text/x-csrc',
+        cpp: 'text/x-c++src',
+        java: 'text/x-java',
+        csharp: 'text/x-csharp',
+      }[lang] || 'null';
     },
 
     // ── LSP (hover / complete / definition / diagnostics) ─────────
     async _bindLsp() {
-      var self = this;
-      if (this._lspBound || !window.monaco || !monaco.languages) return;
+      return;
       try {
         var st = await this._get('/api/ide/lsp');
         if (!st || !st.enabled) return;
@@ -595,10 +512,8 @@ function ideApp() {
       this.currentLang = (tab.lang && tab.lang !== 'plaintext')
         ? tab.lang
         : this._langFromName(tab.path);
-      if (_ed() && window.monaco && monaco.editor && _ed().getModel) {
-        try {
-          monaco.editor.setModelLanguage(_ed().getModel(), this._cmMode(this.currentLang));
-        } catch (e) { /* unknown language id */ }
+      if (_ed() && typeof _ed().setOption === 'function') {
+        try { _ed().setOption('mode', this._cmMode(this.currentLang)); } catch (e) { /* ignore */ }
       }
       this.setContent(tab.content || '');
       this.originalContent = tab.original || '';
