@@ -138,7 +138,7 @@ function ideApp() {
     _cmTheme() {
       return document.documentElement.getAttribute('data-theme') === 'light'
         ? 'default'
-        : 'material-darker';
+        : 'nord';
     },
 
     initEditor() {
