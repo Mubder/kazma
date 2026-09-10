@@ -142,6 +142,32 @@ html[data-theme="light"] { color-scheme: only light; }
 .setup-wall-error { color: var(--error); font-size: 0.85rem; }
 .setup-wall-hint { font-size: 0.75rem; }
 
+/* Hands tape — HITL patch review stack (v5 only; do not copy into kazma.css). */
+.hitl-diff {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--bg-deep);
+  border-radius: 6px;
+}
+.hitl-diff-file {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 6px;
+}
+.hitl-diff-meta { color: var(--text-muted); }
+.hitl-diff-ctx { color: var(--text-tertiary); }
+.hitl-diff-del {
+  color: var(--error);
+  background: color-mix(in srgb, var(--error) 12%, transparent);
+}
+.hitl-diff-add {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
 /* Model selector — softer pill */
 .sidebar-model-dropdown {
   border-radius: 10px;

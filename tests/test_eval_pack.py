@@ -254,6 +254,9 @@ async def test_eval_pack_case(
         )
         if expect.get("second_node"):
             assert out2.get("next_node") == expect["second_node"]
+        if "second_pending" in expect:
+            pending2 = [p.get("name") for p in (out2.get("tool_calls_pending") or [])]
+            assert pending2 == expect["second_pending"]
         blob = " ".join(
             str(m.get("content") or "")
             for m in (out2.get("messages") or [])

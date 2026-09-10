@@ -5811,7 +5811,7 @@
       '<div class="hitl-approval-body">' +
         '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
         (tools.length <= 1
-          ? '<p><strong>Args:</strong></p><div class="hitl-approval-args"><pre>' + escapeHtml(formatApprovalArgs(data.tool, data.args)) + '</pre></div>'
+          ? '<p><strong>Args:</strong></p><div class="hitl-approval-args">' + renderApprovalArgsHtml(data.tool, data.args) + '</div>'
           : toolsHtml) +
         proposalHtml +
         '<p class="hitl-message">' + escapeHtml(truncateStr(data.message || '', 400)) + '</p>' +
@@ -7021,6 +7021,22 @@
       });
     });
     return out.join('\n');
+  }
+
+  function renderApprovalArgsHtml(tool, args) {
+    var preview = formatPatchPreview(tool, args);
+    if (preview == null) {
+      return '<pre>' + escapeHtml(formatApprovalArgs(tool, args)) + '</pre>';
+    }
+    var lines = preview.split('\n').map(function (ln) {
+      var cls = 'hitl-diff-ctx';
+      if (/^\d+\.\s/.test(ln) || ln.indexOf(' file(s):') !== -1) cls = 'hitl-diff-file';
+      else if (/^(\+\+\+|---|@@|diff )/.test(ln)) cls = 'hitl-diff-meta';
+      else if (ln.charAt(0) === '-') cls = 'hitl-diff-del';
+      else if (ln.charAt(0) === '+') cls = 'hitl-diff-add';
+      return '<div class="' + cls + '">' + escapeHtml(ln || ' ') + '</div>';
+    }).join('');
+    return '<div class="hitl-diff" role="region" aria-label="Patch preview">' + lines + '</div>';
   }
 
   function formatApprovalArgs(tool, args) {

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.11.0 Hands — review-stack HITL (2026-09-10)
+
+Patch approvals render as a colored `-/+` stack on Web chat and the
+dashboard pending list (not a JSON `<pre>`). Eval pack:
+`tool_trace_patch_then_test`.
+
 ## 0.11.0 Hands — tape follow-through (2026-09-10)
 
 HITL cards for `file_apply_patch` / `file_apply_patch_set` show `-/+` hunks

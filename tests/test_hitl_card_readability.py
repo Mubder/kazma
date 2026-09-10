@@ -434,6 +434,14 @@ def test_the_web_card_does_not_truncate_the_command():
         "authorise what they cannot read"
     )
     assert "function formatApprovalArgs" in js
+    assert "function renderApprovalArgsHtml" in js
+    assert "hitl-diff-del" in js
     assert "MORE CHARACTERS ARE NOT SHOWN" in js, (
         "if it must elide, it has to say so rather than trail off"
     )
+    v5 = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.v5.css"
+    ).read_text(encoding="utf-8")
+    assert ".hitl-diff-del" in v5
+    assert ".hitl-diff-add" in v5

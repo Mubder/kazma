@@ -188,6 +188,50 @@
       }
     },
     {
+      "id": "tool_trace_patch_then_test",
+      "kind": "tool_trace",
+      "user": "Fix the failing test in examples/hands-demo.",
+      "llm": [
+        {
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "c_patch",
+              "name": "file_apply_patch_set",
+              "arguments": {
+                "patches": [
+                  {
+                    "path": "app.py",
+                    "old_string": "return a + b + 1",
+                    "new_string": "return a + b"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "c_test",
+              "name": "run_tests",
+              "arguments": { "path": "examples/hands-demo" }
+            }
+          ]
+        }
+      ],
+      "tool_result": {
+        "name": "file_apply_patch_set",
+        "content": "Patched app.py\ncheckpoint=abc"
+      },
+      "expect": {
+        "first_pending": ["file_apply_patch_set"],
+        "second_node": "tool_worker",
+        "second_pending": ["run_tests"]
+      }
+    },
+    {
       "id": "tool_trace_computer_use_hitl",
       "kind": "hitl",
       "tool": "computer_use",

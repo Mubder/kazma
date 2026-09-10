@@ -24,6 +24,47 @@
     _pollTimer = setInterval(refreshPending, POLL_INTERVAL_MS);
   }
 
+  function _hitlPatchArgsHtml(tool, args) {
+    var patches = null;
+    if (tool === 'file_apply_patch' && args && typeof args === 'object') {
+      patches = [args];
+    } else if (tool === 'file_apply_patch_set' && args && Array.isArray(args.patches)) {
+      patches = args.patches;
+    }
+    if (!patches || !patches.length) {
+      try {
+        return '<pre>' + escapeHtml(JSON.stringify(args || {}, null, 2)) + '</pre>';
+      } catch (e) {
+        return '<pre>' + escapeHtml(String(args)) + '</pre>';
+      }
+    }
+    var out = [patches.length + ' file(s):'];
+    patches.slice(0, 20).forEach(function (item, i) {
+      if (!item || typeof item !== 'object') return;
+      out.push('\n' + (i + 1) + '. ' + (item.path || '?'));
+      var patch = String(item.patch || '').trim();
+      if (patch) {
+        out = out.concat(patch.split('\n').slice(0, 80));
+        return;
+      }
+      String(item.old_string || '').split('\n').slice(0, 40).forEach(function (ln) {
+        out.push('- ' + ln);
+      });
+      String(item.new_string || '').split('\n').slice(0, 40).forEach(function (ln) {
+        out.push('+ ' + ln);
+      });
+    });
+    return '<div class="hitl-diff" role="region" aria-label="Patch preview">' +
+      out.join('\n').split('\n').map(function (ln) {
+        var cls = 'hitl-diff-ctx';
+        if (/^\d+\.\s/.test(ln) || ln.indexOf(' file(s):') !== -1) cls = 'hitl-diff-file';
+        else if (/^(\+\+\+|---|@@|diff )/.test(ln)) cls = 'hitl-diff-meta';
+        else if (ln.charAt(0) === '-') cls = 'hitl-diff-del';
+        else if (ln.charAt(0) === '+') cls = 'hitl-diff-add';
+        return '<div class="' + cls + '">' + escapeHtml(ln || ' ') + '</div>';
+      }).join('') + '</div>';
+  }
+
   function t(key, fallback) {
     try {
       if (typeof window.t === 'function') {
@@ -111,7 +152,9 @@
       var message = item.message != null ? String(item.message) : '';
       if (message === 'undefined' || message === 'null') message = '';
       message = escapeHtml(message);
-      var argsStr = escapeHtml(JSON.stringify(item.arguments || item.args || {}, null, 2));
+      var rawArgs = item.arguments || item.args || {};
+      var toolRaw = item.tool_name || item.tool || '';
+      var argsHtml = _hitlPatchArgsHtml(toolRaw, rawArgs);
       var icon = safeIcon('wrench');
       // Phase 3: semantic clarify/confirm → render per-option buttons
       var _kind = item.kind || 'security';
@@ -149,7 +192,7 @@
           : '') +
         '  </div>' +
         (message ? '<div class="hitl-approval-message" dir="auto">' + message + '</div>' : '') +
-        '  <div class="hitl-approval-args"><pre>' + argsStr + '</pre></div>' +
+        '  <div class="hitl-approval-args">' + argsHtml + '</div>' +
         (yoloOk ? '' :
         '  <div class="hitl-approval-message" dir="auto" style="font-size:0.75rem;">' +
         escapeHtml(t('dashboard.hitl_always_note', 'This tool always requires approval — YOLO cannot skip it.')) +
