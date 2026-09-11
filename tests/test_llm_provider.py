@@ -319,3 +319,71 @@ class TestLLMProvider:
         # too) — after the retry, response_format is gone.
         second = mock_client.post.await_args_list[1].kwargs["json"]
         assert "response_format" not in second
+
+
+class TestReconfigureSurvivesTheNextCall:
+    """A runtime credential change must outlive `chat()`.
+
+    `chat()` opens with `_sync_gateway()`, which recomputes egress from
+    `_direct_base_url` / `_direct_api_key` and reconfigures from the result.
+    `reconfigure()` used to update only `config`, so a new key survived exactly
+    until the next call and then silently reverted to the construction-time
+    one — a provider that looked correctly configured in Settings and kept
+    answering 401.
+    """
+
+    @staticmethod
+    def _provider(key: str = "sk-OLDkey000000000000000000000000"):
+        from kazma_core.llm_provider import LLMConfig, LLMProvider
+
+        return LLMProvider(
+            LLMConfig.from_dict(
+                {
+                    "base_url": "https://api.deepseek.com/v1",
+                    "api_key": key,
+                    "model": "deepseek-chat",
+                }
+            )
+        )
+
+    def test_a_new_key_survives_sync_gateway(self):
+        provider = self._provider()
+        provider.reconfigure(api_key="sk-NEWkey000000000000000000000000")
+        provider._sync_gateway()
+        assert provider.config.api_key == "sk-NEWkey000000000000000000000000"
+
+    def test_reconfigure_updates_the_direct_key(self):
+        """The field `_sync_gateway` actually reads."""
+        provider = self._provider()
+        provider.reconfigure(api_key="sk-NEWkey000000000000000000000000")
+        assert provider._direct_api_key == "sk-NEWkey000000000000000000000000"
+
+    def test_a_new_base_url_survives_too(self):
+        provider = self._provider()
+        provider.reconfigure(base_url="https://api.groq.com/openai/v1")
+        provider._sync_gateway()
+        assert "groq" in provider.config.base_url
+        assert "groq" in provider._direct_base_url
+
+    def test_an_egress_rewrite_does_not_overwrite_the_operators_config(self):
+        """The negative control, and the reason this is a flag not a default.
+
+        `_sync_gateway` passes `_egress_only=True` because its values are
+        *derived from* the direct config — a LiteLLM proxy URL and the proxy's
+        key. Writing those back would replace the operator's provider settings
+        with the proxy's and make the next resolve a no-op.
+        """
+        provider = self._provider()
+        provider.reconfigure(
+            base_url="https://proxy.internal/v1",
+            api_key="sk-PROXYkey0000000000000000000",
+            _egress_only=True,
+        )
+        assert provider.config.base_url.startswith("https://proxy.internal")
+        assert provider._direct_base_url == "https://api.deepseek.com/v1"
+        assert provider._direct_api_key == "sk-OLDkey000000000000000000000000"
+
+    def test_model_changes_are_unaffected(self):
+        provider = self._provider()
+        provider.reconfigure(model="deepseek-reasoner")
+        assert provider.config.model == "deepseek-reasoner"

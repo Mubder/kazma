@@ -315,7 +315,10 @@ class LLMProvider:
             url,
             via,
         )
-        self.reconfigure(base_url=url, api_key=key)
+        # Egress rewrite only: `url`/`key` here are derived FROM the direct
+        # values, so writing them back would overwrite the operator's config
+        # with the proxy's and make the next resolve a no-op.
+        self.reconfigure(base_url=url, api_key=key, _egress_only=True)
 
     def _resolve_api_key(self) -> None:
         """Resolve API key from config or environment.
@@ -1451,23 +1454,42 @@ class LLMProvider:
         base_url: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
+        *,
+        _egress_only: bool = False,
     ) -> None:
         """Reconfigure the provider at runtime (e.g. after provider switch).
 
         Closes the existing HTTP client so the next request uses the new config.
         All parameters are optional — only provided values are updated.
+
+        ``base_url`` and ``api_key`` also update the **direct** (pre-gateway)
+        values. That is load-bearing, not bookkeeping: every ``chat()`` starts
+        with :meth:`_sync_gateway`, which recomputes egress from
+        ``_direct_base_url`` / ``_direct_api_key`` and reconfigures from the
+        result. Updating only ``config`` meant a runtime credential change
+        survived exactly until the next call and then silently reverted to the
+        construction-time key — a provider that looked correctly configured and
+        kept answering 401.
+
+        ``_egress_only`` is for :meth:`_sync_gateway` itself, which is applying
+        a *computed* egress rewrite (possibly a LiteLLM proxy URL and its key)
+        and must not overwrite the operator's direct configuration with it.
         """
         changed = False
         if base_url is not None:
             normalized = normalize_provider_url(base_url)
             logger.info("reconfigure: raw=%s normalized=%s", base_url, normalized)
             self.config.base_url = normalized
+            if not _egress_only:
+                self._direct_base_url = normalized
             changed = True
         if model is not None:
             self.config.model = normalize_model_name(model, self.config.base_url)
             changed = True
         if api_key is not None:
             self.config.api_key = api_key
+            if not _egress_only:
+                self._direct_api_key = api_key
             changed = True
 
         if changed:
