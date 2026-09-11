@@ -253,6 +253,59 @@ class ModelRegistry:
 
         return provider_name, base_url, api_key, effective_model
 
+    @staticmethod
+    def _key_is_usable(key: str) -> bool:
+        k = (key or "").strip()
+        return bool(k) and k not in ("not-needed", "***", "****")
+
+    @staticmethod
+    def _url_is_local(url: str) -> bool:
+        u = (url or "").lower()
+        return any(
+            tok in u
+            for tok in ("localhost", "127.0.0.1", "0.0.0.0", "lmstudio", "lm-studio", ":11434")
+        )
+
+    def _first_ready_provider(
+        self, *, exclude: str = "",
+    ) -> tuple[str, str, str, str] | None:
+        """Pick an enabled provider that actually has an API key.
+
+        Prefer ``health=healthy`` (just Tested) so a working DeepSeek key
+        wins over the empty/stale OpenAI default that chat otherwise pins.
+        """
+        exclude_l = (exclude or "").strip().lower()
+        scored: list[tuple[int, str, dict[str, Any]]] = []
+        for p in self.list_providers():
+            if p.get("enabled") is False:
+                continue
+            name = str(p.get("name") or "")
+            if not name or name.lower() == exclude_l:
+                continue
+            _, _url, api_key, _ = self._resolve_provider_config(name, "")
+            if not self._key_is_usable(api_key):
+                continue
+            rank = 0 if str(p.get("health") or "") == "healthy" else 1
+            scored.append((rank, name.lower(), p))
+        if not scored:
+            return None
+        scored.sort()
+        chosen = scored[0][2]
+        name = str(chosen.get("name") or "")
+        _, base_url, api_key, _ = self._resolve_provider_config(name, "")
+        vis = self.get_visible_models(name)
+        models = vis or list(chosen.get("models") or [])
+        model = str(models[0]) if models else ""
+        if not model:
+            model = {
+                "deepseek": "deepseek-chat",
+                "openai": "gpt-4o-mini",
+                "anthropic": "claude-sonnet-4",
+                "google": "gemini-2.0-flash",
+                "groq": "llama-3.3-70b-versatile",
+            }.get(name.lower(), "")
+        return name, base_url, api_key, model
+
     def get_active_profile(self) -> dict[str, str]:
         """Return the active provider profile.
 
@@ -450,6 +503,25 @@ class ModelRegistry:
             _, base_url, api_key, effective_model = self._resolve_provider_config(
                 provider_name, effective_model,
             )
+
+            # Chat pins a model from localStorage (often gpt-4o-mini / OpenAI)
+            # even after the operator only configured DeepSeek. Sending that
+            # to a keyless cloud URL is a 401. If this profile has no key and
+            # is not local, use a provider that actually has one.
+            if not self._key_is_usable(api_key) and not self._url_is_local(base_url):
+                ready = self._first_ready_provider(exclude=provider_name)
+                if ready is not None:
+                    ready_name, ready_url, ready_key, ready_model = ready
+                    logger.warning(
+                        "Profile provider=%s model=%s has no usable API key; "
+                        "using %s/%s which has a configured key",
+                        provider_name,
+                        effective_model,
+                        ready_name,
+                        ready_model,
+                    )
+                    provider_name, base_url, api_key = ready_name, ready_url, ready_key
+                    effective_model = ready_model or effective_model
 
             # Fallback model if still empty
             if not effective_model:

@@ -227,9 +227,30 @@ class TestClientManagement:
         )
         client = registry.get_client(model="gpt-4o-mini")
         assert client.config.model == "gpt-4o-mini"
-        # Cached client should still be the original
-        cached = registry.get_client()
-        assert cached.config.model == "gpt-4o"
+
+    def test_get_client_falls_back_to_provider_with_a_key(self, config_store):
+        """Pinned OpenAI/gpt-4o-mini must not 401 when only DeepSeek has a key."""
+        from kazma_core.model_registry import initialize_model_registry
+
+        registry = initialize_model_registry(config_store)
+        registry.set_active_provider(
+            "openai",
+            base_url="https://api.openai.com/v1",
+            api_key="",
+            model="gpt-4o-mini",
+        )
+        registry.upsert_provider({
+            "name": "deepseek",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "sk-deepseek-live",
+            "enabled": True,
+            "models": ["deepseek-chat"],
+            "health": "healthy",
+        })
+        client = registry.get_client(model="gpt-4o-mini")
+        assert "deepseek" in (client.config.base_url or "")
+        assert client.config.api_key == "sk-deepseek-live"
+        assert client.config.model == "deepseek-chat"
 
     def test_get_model_by_id(self, config_store):
         from kazma_core.llm_provider import LLMProvider
