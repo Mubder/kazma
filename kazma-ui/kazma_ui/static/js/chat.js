@@ -2557,8 +2557,13 @@
             // Build provider groups: [{ name, label, models: [] }]
             var providerGroups = [];
             if (Array.isArray(providers)) {
+              var _localProv = { ollama: 1, 'lm-studio': 1, lmstudio: 1, local: 1 };
               providers.forEach(function(p) {
                 if (!p.enabled) return;
+                var pname = String(p.name || '').toLowerCase();
+                // Keyless cloud providers in the dropdown pin gpt-4o-mini and
+                // 401 chat even after DeepSeek Test succeeded.
+                if (!p.api_key && !_localProv[pname]) return;
                 var models = [];
                 var visible = p.visible_models || [];
                 var disc = p.discovered_models || [];
@@ -2641,9 +2646,15 @@
       html += '</optgroup>';
     });
     modelSelectorEl.innerHTML = html;
-    // Ensure dropdown reflects persisted value
+    // Ensure dropdown reflects persisted value. If localStorage still has a
+    // model that is not in the list (keyless OpenAI default), drop it so
+    // send() does not pin a 401.
     if (selectedModel) {
       modelSelectorEl.value = selectedModel;
+      if (modelSelectorEl.value !== selectedModel) {
+        selectedModel = modelSelectorEl.value || '';
+        try { localStorage.setItem(MODEL_LS_KEY, selectedModel); } catch (eLs) {}
+      }
     }
   }
 

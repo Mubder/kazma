@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fix — chat pinned a keyless OpenAI model over a working DeepSeek key (2026-09-11)
+
+`get_client()` now falls back to a provider that actually has a key
+(preferring `health=healthy` from Test). The chat model dropdown no
+longer lists keyless cloud providers, and a stale localStorage model
+that is not in the list is dropped instead of being sent every turn.
+
 ## Fix — Test succeeds, chat still 401s (2026-09-11)
 
 Provider Test only pings that vendor. Chat uses the *active* model
