@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## Fix — live client resolution was overriding test doubles (2026-09-11)
+
+Follow-up to `b1c36f76`. Resolving the LLM client live per call was the right
+fix; it also silently replaced clients the caller had deliberately supplied.
+Five tests went red across three suites, and one of them tried to POST to the
+`custom` provider whose `base_url` has no scheme.
+
+`resolve_live_client` documented that it leaves a test mock alone, but the
+guard was a bare `isinstance(obj, LLMProvider)` — and `MagicMock(spec=
+LLMProvider)` sets `__class__`, so it *passes* isinstance. `_is_real_provider`
+now checks `unittest.mock` first, which is what the docstring already claimed.
+The swap still happens for genuine clients; that half is untouched.
+
+Two test-side problems surfaced alongside it, both real:
+
+- `tests/unit/test_agent.py` and `tests/integration/test_agent_uses_graph.py`
+  patched `chat` on a single instance. The graph resolves its client per call,
+  so the patch was discarded and the call escaped to a real provider. Patch the
+  class instead.
+- Those same tests patched `chat` while `invoke_llm_chat` prefers
+  `chat_stream` whenever streaming is on — so the mock was bypassed even
+  before live resolution existed. They now set `KAZMA_LLM_STREAM=0`, the same
+  switch `test_eval_pack` uses.
+
+Unrelated, found in the same sweep: `AgentConfig.version` was the literal
+`"0.10.0"` and went stale at the 0.11 bump, so the agent reported a version the
+product had not been on for a release. It derives from `get_base_version()`
+now — the test asserting this had been failing and saying so.
+
 ## Fix — DeepSeek 401 was a stale graph client, not a bad key (2026-09-11)
 
 The operator's DeepSeek key was valid the entire time. The live ledger on

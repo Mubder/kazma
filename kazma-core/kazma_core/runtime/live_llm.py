@@ -94,6 +94,25 @@ def url_is_cloud(url: str) -> bool:
 
 
 def _is_real_provider(obj: Any) -> bool:
+    """True only for a genuine provider whose client we may swap.
+
+    ``resolve_live_client`` promises to leave a test double alone, but an
+    ``isinstance`` check alone does not deliver that: ``MagicMock(spec=
+    LLMProvider)`` sets ``__class__`` and therefore *passes* isinstance. The
+    mock was being replaced by a live registry client, so a caller that had
+    carefully stubbed the LLM got a real HTTP call to whatever provider
+    happened to be active — which is how an integration test ended up dialling
+    the operator's configured endpoint.
+
+    Checking for ``unittest.mock`` first is what makes the docstring true.
+    """
+    try:
+        from unittest.mock import Mock
+
+        if isinstance(obj, Mock):
+            return False
+    except Exception:  # pragma: no cover - stdlib import cannot realistically fail
+        pass
     try:
         from kazma_core.llm_provider import LLMProvider
 

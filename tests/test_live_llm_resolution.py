@@ -199,3 +199,48 @@ class TestUserTaskDefaultOwnerIsAName:
         )
         assert client is not None
         assert client.config.api_key == REAL_KEY
+
+
+class TestMockProvidersAreLeftAlone:
+    """`resolve_live_client` must not swap out a caller's test double.
+
+    The docstring always promised this ("unless *fallback* is a test mock"),
+    but the guard was a bare ``isinstance(obj, LLMProvider)`` — and
+    ``MagicMock(spec=LLMProvider)`` sets ``__class__``, so it *passes*
+    isinstance. Mocks were therefore replaced by a live registry client, and a
+    test that had carefully stubbed the LLM instead dialled whatever provider
+    was configured on the machine running it. Three suites went red that way,
+    one of them by trying to POST to a `custom` provider whose base_url had no
+    scheme.
+    """
+
+    @staticmethod
+    def _mock_provider():
+        from kazma_core.llm_provider import LLMProvider
+
+        return MagicMock(spec=LLMProvider)
+
+    def test_a_spec_mock_still_passes_isinstance(self):
+        """The trap itself — guard against someone 'simplifying' the check."""
+        from kazma_core.llm_provider import LLMProvider
+
+        assert isinstance(self._mock_provider(), LLMProvider) is True
+
+    def test_a_mock_is_not_treated_as_a_real_provider(self):
+        from kazma_core.runtime.live_llm import _is_real_provider
+
+        assert _is_real_provider(self._mock_provider()) is False
+
+    def test_a_genuine_provider_still_is(self):
+        """Negative control: the swap must still happen for real clients."""
+        from kazma_core.llm_provider import LLMProvider
+        from kazma_core.runtime.live_llm import _is_real_provider
+
+        assert _is_real_provider(LLMProvider.__new__(LLMProvider)) is True
+
+    def test_resolve_returns_the_mock_untouched(self):
+        from kazma_core.runtime.live_llm import resolve_live_client
+
+        mock = self._mock_provider()
+        client, _model = resolve_live_client(mock)
+        assert client is mock, "a test double must survive live resolution"

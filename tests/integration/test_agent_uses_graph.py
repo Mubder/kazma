@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from kazma_core.agent import AgentConfig, KazmaAgent
-from kazma_core.llm_provider import LLMResponse, ToolCall
+from kazma_core.llm_provider import LLMProvider, LLMResponse, ToolCall
 
 
 @pytest.fixture
@@ -32,10 +32,20 @@ def agent(tmp_path) -> KazmaAgent:
     return KazmaAgent(config=cfg)
 
 
+@pytest.fixture(autouse=True)
+def _no_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the non-streaming path so a patched ``chat`` is actually used.
+
+    ``invoke_llm_chat`` prefers ``chat_stream`` whenever streaming is enabled,
+    so a test that patches ``chat`` is silently bypassed and the call escapes
+    to a real provider. Same switch ``test_eval_pack`` uses.
+    """
+    monkeypatch.setenv("KAZMA_LLM_STREAM", "0")
+
 class TestAgentUsesGraph:
     async def test_run_goes_through_graph_and_checkpoints(self, agent: KazmaAgent) -> None:
         final = LLMResponse(content="hello from graph", finish_reason="stop", model="stub")
-        with patch.object(agent.llm, "chat", new_callable=AsyncMock, return_value=final):
+        with patch.object(LLMProvider, "chat", new_callable=AsyncMock, return_value=final):
             out = await agent.run("hi")
 
         assert out == "hello from graph"
@@ -70,7 +80,7 @@ class TestAgentUsesGraph:
 
         with (
             patch.dict(TOOL_TIERS, {"my_tool": "read"}),
-            patch.object(agent.llm, "chat", new_callable=AsyncMock, side_effect=[tool_resp, final]),
+            patch.object(LLMProvider, "chat", new_callable=AsyncMock, side_effect=[tool_resp, final]),
             patch.object(agent.tools, "execute", exec_mock),
             patch.object(
                 agent.tools,
@@ -93,7 +103,7 @@ class TestAgentUsesGraph:
 
     async def test_shutdown_closes_checkpointer(self, agent: KazmaAgent) -> None:
         final = LLMResponse(content="x", finish_reason="stop", model="stub")
-        with patch.object(agent.llm, "chat", new_callable=AsyncMock, return_value=final):
+        with patch.object(LLMProvider, "chat", new_callable=AsyncMock, return_value=final):
             await agent.run("hi")
         assert agent._checkpoint_conn is not None
         await agent.shutdown()

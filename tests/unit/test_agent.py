@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from kazma_core.agent import AgentConfig, KazmaAgent, load_config
-from kazma_core.llm_provider import LLMResponse
+from kazma_core.llm_provider import LLMProvider, LLMResponse
 
 
 class TestAgentConfig:
@@ -54,6 +54,16 @@ class TestLoadConfig:
         assert config.version == get_version()
 
 
+@pytest.fixture(autouse=True)
+def _no_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the non-streaming path so a patched ``chat`` is actually used.
+
+    ``invoke_llm_chat`` prefers ``chat_stream`` whenever streaming is enabled,
+    so a test that patches ``chat`` is silently bypassed and the call escapes
+    to a real provider. Same switch ``test_eval_pack`` uses.
+    """
+    monkeypatch.setenv("KAZMA_LLM_STREAM", "0")
+
 class TestKazmaAgent:
     """Tests for KazmaAgent class."""
 
@@ -68,7 +78,7 @@ class TestKazmaAgent:
             usage={"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
             cost_usd=0.001,
         )
-        with patch.object(agent.llm, "chat", new_callable=AsyncMock, return_value=mock_response):
+        with patch.object(LLMProvider, "chat", new_callable=AsyncMock, return_value=mock_response):
             result = await agent.run("شلونك")
             assert "كاظمه" in result or "أساعدك" in result
 
@@ -105,7 +115,7 @@ class TestKazmaAgent:
 
         with (
             patch.dict(TOOL_TIERS, {"test_tool": "read"}),
-            patch.object(agent.llm, "chat", new_callable=AsyncMock, side_effect=[tool_call_response, final_response]),
+            patch.object(LLMProvider, "chat", new_callable=AsyncMock, side_effect=[tool_call_response, final_response]),
             patch.object(agent.tools, "execute", new_callable=AsyncMock, return_value=mock_tool_result),
             patch.object(
                 agent.tools,
