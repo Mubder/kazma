@@ -165,3 +165,70 @@ def test_the_script_makes_no_calls_without_live() -> None:
     assert "Dry run" in proc.stdout
     assert "No calls were made" in proc.stdout
     assert "API calls" in proc.stdout, "the plan must state the cost up front"
+
+
+class TestAnErroredRunIsNotAResult:
+    """The failure this benchmark is most likely to tell a comfortable lie about.
+
+    The first real run returned 84 errors out of 84 calls — every request
+    rejected for a missing key — and the report printed `0%` in both columns
+    with "no payload succeeded against any model with the fence on". That reads
+    exactly like a perfect defense. It was an empty measurement.
+
+    A run of errors is not a run of defended attacks.
+    """
+
+    @staticmethod
+    def _all_errors(n: int = 84):
+        sys.path.insert(0, str(REPO / "scripts"))
+        from injection_live import FENCED, Outcome, ProviderResult
+
+        r = ProviderResult(provider="deepseek", model="deepseek-flash")
+        r.outcomes = [
+            Outcome(f"c{i}", "direct_override", FENCED, attacked=False, error="HTTP 401: no usable API key")
+            for i in range(n)
+        ]
+        return r
+
+    def test_error_rate_is_reported(self):
+        assert self._all_errors().error_rate() == 1.0
+
+    def test_the_table_shows_no_number_when_most_calls_failed(self, capsys):
+        sys.path.insert(0, str(REPO / "scripts"))
+        from injection_live import print_report
+
+        print_report([self._all_errors()], {
+            "cases": 14, "attack_cases": 12, "control_cases": 2,
+            "runs": 3, "temperature": 0.0,
+        })
+        out = capsys.readouterr().out
+        assert "NO RESULT" in out
+        assert "84/84 calls failed" in out
+        assert "no usable API key" in out, "the actual error must be surfaced"
+        assert "no payload succeeded" not in out, (
+            "the reassuring line must not appear when nothing was measured"
+        )
+        # The table row must carry placeholders, not rates. Checked on the row
+        # itself rather than the whole page: the error summary legitimately
+        # contains "(100%)", which naively contains "0%".
+        row = next(line for line in out.splitlines() if line.startswith("deepseek/"))
+        assert "--" in row, f"expected placeholders in the row, got: {row!r}"
+        assert "%" not in row, f"a rate was printed for an unmeasured run: {row!r}"
+
+    def test_a_healthy_run_still_reports_numbers(self, capsys):
+        """Negative control — the guard must not suppress real results."""
+        sys.path.insert(0, str(REPO / "scripts"))
+        from injection_live import FENCED, UNFENCED, Outcome, ProviderResult, print_report
+
+        r = ProviderResult(provider="deepseek", model="deepseek-flash")
+        for i in range(10):
+            r.outcomes.append(Outcome(f"a{i}", "direct_override", UNFENCED, attacked=True))
+            r.outcomes.append(Outcome(f"a{i}", "direct_override", FENCED, attacked=False))
+        r.runs = [{"run": 1, UNFENCED: 100.0, FENCED: 0.0}]
+        print_report([r], {
+            "cases": 10, "attack_cases": 10, "control_cases": 0,
+            "runs": 1, "temperature": 0.0,
+        })
+        out = capsys.readouterr().out
+        assert "NO RESULT" not in out
+        assert "100%" in out and "delta" in out
