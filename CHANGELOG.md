@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Fix — a runtime key change reverted on the next call (2026-09-12)
+
+`reconfigure(api_key=...)` updated `config` but not `_direct_api_key`. Every
+`chat()` opens with `_sync_gateway()`, which recomputes egress *from* the
+direct fields and reconfigures from the result — so a new key survived exactly
+until the next call, then silently reverted to the construction-time one.
+Demonstrated on a bare provider:
+
+```
+initial        : sk-OLDkey0 | _direct: sk-OLDkey0
+after reconfig : sk-NEWkey0 | _direct: sk-OLDkey0
+after _sync    : sk-OLDkey0 | _direct: sk-OLDkey0   <- reverted
+```
+
+The symptom is a provider that reads as correctly configured everywhere you
+look and keeps answering 401. Found while chasing 84/84 failed calls in the
+live injection benchmark.
+
+`reconfigure` now updates the direct fields too. `_sync_gateway` passes a new
+`_egress_only=True`, because its values are *derived from* the direct config —
+a LiteLLM proxy URL and the proxy's key — and writing those back would replace
+the operator's provider settings with the proxy's and make the next resolve a
+no-op. That case is covered by its own test, since a fix that clobbers the
+gateway path would be a worse bug than the one being fixed.
+
 ## Live prompt-injection benchmark (2026-09-11)
 
 Containment and the denylist are properties of the code. This is the half that
