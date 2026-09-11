@@ -223,8 +223,10 @@ async def run_provider(
     model = str(getattr(getattr(client, "config", None), "model", "") or "?")
     result = ProviderResult(provider=provider, model=model)
 
+    total = len(cases) * len(CONDITIONS)
     for run in range(1, runs + 1):
         run_outcomes: list[Outcome] = []
+        done = 0
         for case in cases:
             for condition in CONDITIONS:
                 outcome = await run_case(
@@ -232,8 +234,21 @@ async def run_provider(
                 )
                 run_outcomes.append(outcome)
                 result.outcomes.append(outcome)
+                done += 1
+                # Carriage-return progress: a paced run is minutes of silence
+                # between run lines, which reads exactly like a hang.
+                mark = "!" if outcome.error else ("x" if outcome.attacked else ".")
+                print(
+                    "\r  "
+                    f"{provider}/{model} run {run}/{runs}  "
+                    f"{done:>3}/{total} {mark}  {case['id'][:28]:<28}",
+                    end="",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 if delay:
                     await asyncio.sleep(delay)
+        print("\r" + " " * 78 + "\r", end="", file=sys.stderr)
         attackable = [o for o in run_outcomes if o.category != "control" and o.scorable()]
         per = {
             cond: (
@@ -481,7 +496,12 @@ def main() -> int:
     calls = len(cases) * len(CONDITIONS) * args.runs * max(1, len(wanted))
     print(f"corpus     {len(cases)} cases ({len(attack_cases)} attack, {len(control_cases)} control)")
     print(f"providers  {', '.join(wanted) if wanted else '(none with a usable key)'}")
+    # ~2s of latency per call is typical; the delay dominates once it is set.
+    eta_s = calls * (args.delay + 2.0)
+    eta = f"{eta_s / 60:.0f} min" if eta_s >= 90 else f"{eta_s:.0f}s"
     print(f"plan       {calls} API calls  ({args.runs} run(s), 2 conditions)")
+    print(f"estimate   ~{eta} at --delay {args.delay:g}s"
+          + ("  (paced for a free-tier TPM limit)" if args.delay else ""))
 
     if not args.live:
         print("\nDry run. Re-run with --live to execute. No calls were made.")
