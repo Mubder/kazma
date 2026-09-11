@@ -32,6 +32,7 @@ import httpx
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.providers import PROVIDER_PRESETS
+from kazma_core.runtime.live_llm import coerce_api_key
 
 __all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "lookup_context_window", "reset_model_registry"]
 
@@ -216,12 +217,12 @@ class ModelRegistry:
         effective_model = model
 
         if provider_entry:
-            base_url = str(provider_entry.get("base_url", ""))
-            api_key = str(provider_entry.get("api_key", ""))
+            base_url = str(provider_entry.get("base_url", "") or "")
+            api_key = coerce_api_key(provider_entry.get("api_key", ""))
         else:
             # Fallback: legacy llm.* keys
             base_url = str(self._config_store.get("llm.base_url", "") or "")
-            api_key = str(self._config_store.get("llm.api_key", "") or "")
+            api_key = coerce_api_key(self._config_store.get("llm.api_key", "") or "")
             if not effective_model:
                 effective_model = str(self._config_store.get("llm.model", "") or "")
             # ALWAYS pin to "custom": a named provider with no provider entry
@@ -255,16 +256,15 @@ class ModelRegistry:
 
     @staticmethod
     def _key_is_usable(key: str) -> bool:
-        k = (key or "").strip()
-        return bool(k) and k not in ("not-needed", "***", "****")
+        from kazma_core.runtime.live_llm import key_is_usable
+
+        return key_is_usable(key)
 
     @staticmethod
     def _url_is_local(url: str) -> bool:
-        u = (url or "").lower()
-        return any(
-            tok in u
-            for tok in ("localhost", "127.0.0.1", "0.0.0.0", "lmstudio", "lm-studio", ":11434")
-        )
+        from kazma_core.runtime.live_llm import url_is_local
+
+        return url_is_local(url)
 
     def _first_ready_provider(
         self, *, exclude: str = "",
@@ -594,7 +594,7 @@ class ModelRegistry:
             owner_name = str(owner.get("name", "")).lower()
             config = LLMConfig.from_dict({
                 "base_url": str(owner.get("base_url", "")),
-                "api_key": str(owner.get("api_key", "")),
+                "api_key": coerce_api_key(owner.get("api_key", "")),
                 "model": clean_id,
             })
             if owner_name == "google":
@@ -638,7 +638,7 @@ class ModelRegistry:
             effective_model = self._active_model or "gpt-4o-mini"
         config = LLMConfig.from_dict({
             "base_url": str(entry.get("base_url", "")),
-            "api_key": str(entry.get("api_key", "")),
+            "api_key": coerce_api_key(entry.get("api_key", "")),
             "model": effective_model,
         })
         if provider_name.lower() == "google":
@@ -1098,6 +1098,8 @@ class ModelRegistry:
                         provider["models"] = self._normalize_models(value)
                     elif key == "name":
                         continue
+                    elif key == "api_key":
+                        provider[key] = coerce_api_key(value)
                     else:
                         provider[key] = value
                 if not provider.get("display_name"):
@@ -1105,13 +1107,19 @@ class ModelRegistry:
                 self._save_providers(providers)
                 # Invalidate cached client for this provider
                 self._clients.pop(name, None)
+                try:
+                    from kazma_core.runtime.model_switch import notify_credentials_changed
+
+                    notify_credentials_changed(name)
+                except Exception:
+                    pass
                 return dict(provider)
 
         provider = {
             "name": name,
             "display_name": str(data.get("display_name") or name),
             "base_url": str(data.get("base_url") or ""),
-            "api_key": str(data.get("api_key") or ""),
+            "api_key": coerce_api_key(data.get("api_key") or ""),
             "models": self._normalize_models(data.get("models", [])),
             "enabled": bool(data.get("enabled", True)),
             "health": str(data.get("health") or "unknown"),
@@ -1122,6 +1130,12 @@ class ModelRegistry:
                 provider[key] = val
         providers.append(provider)
         self._save_providers(providers)
+        try:
+            from kazma_core.runtime.model_switch import notify_credentials_changed
+
+            notify_credentials_changed(name)
+        except Exception:
+            pass
         return dict(provider)
 
     def delete_provider(self, name: str) -> None:

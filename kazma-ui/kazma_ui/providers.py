@@ -358,6 +358,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     last_body = resp.text[:200]
                     if resp.status_code == 200:
                         latency = int((time.monotonic() - start) * 1000)
+                        if typed_key:
+                            try:
+                                registry.upsert_provider(
+                                    {"name": name, "api_key": typed_key}
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "[providers] persist tested key failed",
+                                    exc_info=True,
+                                )
                         registry.set_provider_health(name, "healthy")
                         _activate_tested_provider(registry, name)
                         return {"success": True, "latency_ms": latency}

@@ -175,5 +175,7 @@ def get_dummy_api_key(base_url: str, configured_key: str = "") -> str:
             return "sk-litellm-dummy-key"
         return "not-needed"
 
-    # Remote providers need real keys
-    return configured_key or "not-needed"
+    # Remote providers need a real key. Do NOT invent ``not-needed`` here —
+    # that string was sent as ``Authorization: Bearer not-needed`` and
+    # DeepSeek 401'd while Settings > Test (which reads the registry) passed.
+    return (configured_key or "").strip()

@@ -143,9 +143,9 @@ async def respond_node(state: SupervisorState, llm: Any = None) -> dict[str, Any
         _llm = llm
         if _llm is not None:
             try:
-                from kazma_core.runtime.turn_model import resolve_turn_client
+                from kazma_core.runtime.live_llm import resolve_live_client
 
-                _llm, _ = resolve_turn_client(_llm)
+                _llm, _ = resolve_live_client(_llm, state=state)
             except Exception:
                 pass
             try:

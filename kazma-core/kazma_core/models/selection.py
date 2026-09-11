@@ -164,9 +164,11 @@ def user_task_default(
     if isinstance(default_model, str) and default_model.strip():
         target = default_model.strip()
         try:
-            provider_name = registry.find_provider_for_model(target)
-            if provider_name:
-                return (provider_name, target)
+            owner = registry.find_provider_for_model(target)
+            if owner:
+                name = owner.get("name") if isinstance(owner, dict) else str(owner)
+                if name:
+                    return (str(name), target)
         except Exception:  # noqa: BLE001 — best-effort
             pass
     return None
@@ -271,9 +273,11 @@ def find_best_model_for_task(
         target = default_model.strip()
         # Resolve the owning provider for this model id (don't mutate active).
         try:
-            provider_name = registry.find_provider_for_model(target)
-            if provider_name:
-                return (provider_name, target)
+            owner = registry.find_provider_for_model(target)
+            if owner:
+                name = owner.get("name") if isinstance(owner, dict) else str(owner)
+                if name:
+                    return (str(name), target)
         except Exception:  # noqa: BLE001 — best-effort
             pass
 

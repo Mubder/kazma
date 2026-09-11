@@ -22,8 +22,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "SwitchResult",
+    "bind_live_agent",
     "ensure_active_model",
     "maybe_activate_provider_for_chat",
+    "notify_credentials_changed",
     "register_rebind_hook",
     "switch_active_model",
     "switch_active_provider",
@@ -33,6 +35,9 @@ __all__ = [
 # Extra rebind hooks beyond agent.sync_active_model's callback (e.g. tests).
 _extra_hooks: list[Callable[[], None]] = []
 _hooks_lock = threading.Lock()
+# Process-wide agent so a key save (upsert) can rebuild the live client
+# even when the caller has no agent handle (Settings > Providers).
+_live_agent: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,27 @@ class SwitchResult:
         if self.error_code:
             d["error_code"] = self.error_code
         return d
+
+
+def bind_live_agent(agent: Any | None) -> None:
+    """Remember the process agent so a key save can rebind it."""
+    global _live_agent
+    _live_agent = agent
+
+
+def notify_credentials_changed(provider: str = "") -> None:
+    """Rebuild the live agent client after a key save. Never raises."""
+    try:
+        _sync_agent(_live_agent)
+    except Exception as exc:
+        logger.debug(
+            "[model_switch] credential rebind failed (provider=%s): %s",
+            provider, exc,
+        )
+    try:
+        _run_extra_hooks()
+    except Exception as exc:
+        logger.debug("[model_switch] credential rebind hooks failed: %s", exc)
 
 
 def register_rebind_hook(cb: Callable[[], None]) -> None:

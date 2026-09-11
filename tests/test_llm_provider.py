@@ -82,7 +82,7 @@ class TestLLMProvider:
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.delenv("KAZMA_API_KEY", raising=False)
         provider = LLMProvider(LLMConfig(api_key=""))
-        assert provider.config.api_key == "not-needed"
+        assert provider.config.api_key == ""
 
     def test_parse_response_text(self) -> None:
         provider = LLMProvider()

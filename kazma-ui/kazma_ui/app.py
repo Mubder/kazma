@@ -347,6 +347,12 @@ class KazmaAppBuilder:
                 logger.warning("[Memory] V2 embedder pre-warm failed: %s", e)
 
         self.agent = KazmaAgent(self.config)
+        try:
+            from kazma_core.runtime.model_switch import bind_live_agent
+
+            bind_live_agent(self.agent)
+        except Exception:
+            logger.debug("[App] bind_live_agent failed", exc_info=True)
 
         # Configure workspace
         try:

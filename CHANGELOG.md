@@ -1,5 +1,51 @@
 # CHANGELOG
 
+## Fix — DeepSeek 401 was a stale graph client, not a bad key (2026-09-11)
+
+The operator's DeepSeek key was valid the entire time. The live ledger on
+thread `7c5a3568-…` is the proof:
+
+    it=0  model=deepseek-flash  ok     (~4s)
+    it=1  model=                error  (~1.5s, 401 from api.deepseek.com)
+
+Same turn. Same URL. First supervisor iteration used a registry client
+built for the pinned model (good key). Later ReAct iterations lost the
+request-scoped turn pin (a ContextVar) and fell through to the
+**compile-time captured** `llm` object the graph was built with — DeepSeek
+URL, empty/`not-needed` key, `Authorization: Bearer not-needed`.
+
+That is why Settings > Test passed, why `{"model": "deepseek-flash"}`
+streamed, and why a follow-up iteration of the same turn 401'd with:
+
+    ⚠️ The model request was rejected by https://api.deepseek.com/v1
+       due to an invalid or missing API key.
+
+Six prior commits today each fixed a real adjacent bug (wrong Test key,
+masked-field reject, pre-stream check reading the agent snapshot, error
+message not naming the provider). None of them replaced the client the
+graph actually calls on iteration N>0.
+
+Now:
+
+- `resolve_live_client` is the single call-time resolver. Supervisor and
+  respond use it. Model id = pin → checkpointed `last_model` → registry.
+  The captured graph `llm` is only a fallback for tests/mocks.
+- Saving a provider key rebinds the live agent (`notify_credentials_changed`).
+- `str(None)` is no longer sent as `Bearer None` (vault miss). Placeholders
+  (`not-needed`, `sk-real-key`, `***`, unresolved `vault://`) are not
+  treated as credentials.
+- Cloud calls with an unusable key fail closed *before* HTTP, as a
+  permanent 401, instead of shipping junk to DeepSeek.
+- A successful Settings > Test with a typed key persists it (Test used
+  to succeed on a key chat never received).
+- `user_task_default` was passing the whole provider dict into
+  `get_client_by_provider` (which expects a name) — the exception was
+  swallowed and the stale captured client used instead.
+
+`tests/test_live_llm_resolution.py` reproduces the ledger: last_model set,
+pin gone, captured client empty, registry has the real key — the call
+must use the registry key.
+
 ## Fix — a 401 now names the provider that rejected the call (2026-09-11)
 
 An operator hit this repeatedly:

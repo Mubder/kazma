@@ -275,6 +275,7 @@ class LLMProvider:
             self.config.base_url = normalize_provider_url(self.config.base_url)
         self._resolve_api_key()
         self._http: httpx.AsyncClient | None = None
+        self._baked_auth: str | None = None
         # Strong references for fire-and-forget aclose() tasks scheduled by
         # reconfigure(), so CPython doesn't GC them before aclose runs. A set
         # (not a list) so add_done_callback(discard) works.
@@ -326,14 +327,17 @@ class LLMProvider:
         send it to the wrong vendor's endpoint as ``x-api-key`` / ``api-key``
         (opaque 401s; audit finding H-10).
         """
-        key = self.config.api_key
+        from kazma_core.runtime.live_llm import coerce_api_key, url_is_local
+
+        key = coerce_api_key(self.config.api_key)
         is_generic = type(self) is LLMProvider
         if not key and is_generic:
-            key = os.getenv("OPENAI_API_KEY", "")
+            key = coerce_api_key(os.getenv("OPENAI_API_KEY", ""))
         if not key and is_generic:
-            key = os.getenv("KAZMA_API_KEY", "")
-        # LM Studio / Ollama don't need a real key
-        if not key:
+            key = coerce_api_key(os.getenv("KAZMA_API_KEY", ""))
+        # Local servers need a non-empty header; cloud empty stays empty so
+        # chat() can refuse instead of sending ``Bearer not-needed``.
+        if not key and url_is_local(self.config.base_url or ""):
             key = "not-needed"
         self.config.api_key = key
 
@@ -413,8 +417,27 @@ class LLMProvider:
             return False
         return host in ("localhost", "127.0.0.1", "0.0.0.0") or "lm-studio" in host or "lmstudio" in host
 
+    def _require_usable_key(self) -> str:
+        """Return the key to send, or raise a permanent auth error.
+
+        Cloud URLs must not leave this process with ``Bearer not-needed`` /
+        ``Bearer None`` / a vault pointer. Local servers still accept a dummy.
+        """
+        from kazma_core.runtime.live_llm import coerce_api_key, key_is_usable, url_is_cloud
+
+        key = coerce_api_key(self.config.api_key)
+        url = self.config.base_url or ""
+        if url_is_cloud(url) and not key_is_usable(key):
+            raise LLMError(
+                f"LLM call failed (HTTP 401): no usable API key for {url}",
+                transient=False,
+                kind="auth",
+            )
+        return key
+
     async def _get_client(self) -> httpx.AsyncClient:
         """Lazy-init the HTTP client."""
+        self._require_usable_key()
         if self._http is None or self._http.is_closed:
             # Reuse the single normalization SoT (url_utils) instead of a
             # second, independent /v1-append here — the inline copy exempted
@@ -429,7 +452,7 @@ class LLMProvider:
             base = base.rstrip("/")
 
             logger.debug("Creating httpx client: base_url=%s", base)
-            api_key = self.config.api_key or ""
+            api_key = self._require_usable_key()
             safe_key = LLMProvider._strip_non_ascii(api_key)
             if safe_key != api_key:
                 logger.warning(
@@ -445,6 +468,29 @@ class LLMProvider:
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
             )
+            self._baked_auth = f"Bearer {safe_key}"
+        else:
+            # Key changed on this instance without reconfigure() — rebuild.
+            expected = f"Bearer {LLMProvider._strip_non_ascii(self._require_usable_key())}"
+            baked = getattr(self, "_baked_auth", None)
+            if baked is not None and baked != expected:
+                old = self._http
+                self._http = None
+                self._baked_auth = None
+                if old is not None:
+                    try:
+                        import asyncio
+
+                        try:
+                            loop = asyncio.get_running_loop()
+                            task = loop.create_task(old.aclose())
+                            self._pending_closes.add(task)
+                            task.add_done_callback(self._pending_closes.discard)
+                        except RuntimeError:
+                            pass
+                    except Exception:
+                        pass
+                return await self._get_client()
         return self._http
 
     async def get_client(self) -> httpx.AsyncClient:
@@ -1430,6 +1476,7 @@ class LLMProvider:
             # Settings provider switches.
             old = self._http
             self._http = None
+            self._baked_auth = None
             if old is not None:
                 try:
                     import asyncio
