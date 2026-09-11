@@ -673,6 +673,11 @@
             return { ...(defaults[name] || {}) };
         },
 
+        _isMaskedApiKey(value) {
+            const s = String(value || '').trim();
+            return !s || s === '***' || s === '****' || s.includes('****');
+        },
+
         openHubProviderModal(name) {
             this.hubProviderTested = false;
             this.hubShowProviderKey = false;
@@ -680,22 +685,26 @@
             if (name) {
                 const p = this.hubProviders.find(x => x.name === name);
                 if (p) {
+                    const stored = String(p.api_key || '');
                     this.hubEditingProvider = {
                         name: p.name,
                         display_name: p.display_name || '',
                         base_url: p.base_url || '',
-                        api_key: p.api_key || '',
+                        // Never put the masked **** value in the input — Test
+                        // would send dots instead of a key. Blank = keep stored.
+                        api_key: '',
                         models: Array.isArray(p.models) ? p.models.join(', ') : (p.models || ''),
                         enabled: p.enabled !== false,
                         google_mode: p.google_mode || (p.project_id ? 'vertex_ai' : 'ai_studio'),
                         project_id: p.project_id || '',
                         location: p.location || 'us-central1',
                         _existing: true,
+                        _has_stored_key: !!(stored && stored !== '—' && stored !== '***'),
                     };
                     this.hubProviderTested = true; // editing an existing tested provider is acceptable
                 }
             } else {
-                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', _existing: false };
+                this.hubEditingProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true, google_mode: 'ai_studio', project_id: '', location: 'us-central1', _existing: false, _has_stored_key: false };
             }
             this.hubProviderModal = true;
         },
@@ -725,6 +734,7 @@
                     data.models = data.models.split(',').map(m => m.trim()).filter(Boolean);
                 }
                 delete data._existing;
+                delete data._has_stored_key;
                 const resp = await fetch('/api/providers', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -806,6 +816,7 @@
                     temp.models = temp.models.split(',').map(m => m.trim()).filter(Boolean);
                 }
                 delete temp._existing;
+                delete temp._has_stored_key;
                 const upsertResp = await fetch('/api/providers', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
@@ -817,10 +828,15 @@
                     if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
                     throw new Error(errMsg);
                 }
+                const typed = String(temp.api_key || '').trim();
+                const testBody = {};
+                if (typed && !this._isMaskedApiKey(typed)) {
+                    testBody.api_key = typed;
+                }
                 const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-                    body: JSON.stringify({ api_key: String(temp.api_key || '') }),
+                    body: JSON.stringify(testBody),
                 });
                 const result = await resp.json();
                 let success = !!result.success;

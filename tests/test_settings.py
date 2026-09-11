@@ -909,10 +909,11 @@ class TestUnifiedProvidersRouterAPI:
         assert resp.status_code == 200
         assert resp.json()["api_key"] == "****9999"
 
-    def test_provider_test_rejects_masked_body(self, client):
+    def test_provider_test_masked_body_uses_stored_key(self, client):
+        """A still-masked **** body must not block Test; use the stored key."""
         client.post("/api/providers", json={
             "name": "deepseek-mask-test",
-            "base_url": "https://api.deepseek.com/v1",
+            "base_url": "http://127.0.0.1:9",
             "api_key": "sk-real-stored-key",
         })
         resp = client.post(
@@ -921,8 +922,9 @@ class TestUnifiedProvidersRouterAPI:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["success"] is False
-        assert "****" in (data.get("error") or "")
+        err = (data.get("error") or "").lower()
+        assert "field still has the masked" not in err
+        assert "that is not the key" not in err
 
     def test_providers_delete(self, client):
         """DELETE /api/providers/{name} removes a provider."""

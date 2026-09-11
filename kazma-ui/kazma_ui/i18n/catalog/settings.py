@@ -1181,8 +1181,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Long-task mode (default)",
     },
     "settings.masked_placeholder_hint": {
-        "ar": "اترك القيمة المقنعة كما هي للحفاظ على السر الموجود.",
-        "en": "Leave the masked value unchanged to keep the existing secret.",
+        "ar": "اترك الحقل فارغًا للإبقاء على المفتاح الحالي. الصق المفتاح كاملًا فقط عند استبداله.",
+        "en": "Leave blank to keep the current key. Paste a full key only when replacing it.",
     },
     "settings.max_context_tokens": {
         "ar": "أقصى رموز للسياق",
