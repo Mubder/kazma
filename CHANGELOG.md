@@ -23,10 +23,17 @@ localStorage model on every turn. That fix was correct; it just moved traffic
 onto the branch that had been broken all along.
 
 Chat now falls back to the registry when the mounted provider's key is
-unusable. Deliberately narrow: a turn that pins a model still resolves through
-the registry, and a caller that mounts no provider at all is left alone rather
-than having this machine's active profile imposed on it -- the first attempt
-was broader and broke `test_chat_sse_fix`, which mounts no provider on purpose.
+unusable **against a cloud URL**. Every qualifier there is load-bearing, and
+each one was learned by breaking something:
+
+- A caller that mounts no provider is left alone. Reaching for the registry
+  there imposes this machine's active profile on someone who deliberately
+  supplied none -- it broke `test_chat_sse_fix`.
+- `not-needed` on a *local* URL is a working config, not a broken one. Ollama
+  and LM Studio need no credential; treating that as stale and swapping in the
+  active cloud profile breaks local chat outright -- it broke two cases in
+  `test_model_selection_pipeline`.
+- A turn that pins a model still resolves through the registry, unchanged.
 
 `tests/test_chat_key_resolution.py` covers it, with the model-pinned turn as
 the control and two negative controls so a genuinely missing key -- and the

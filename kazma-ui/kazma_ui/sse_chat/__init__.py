@@ -569,13 +569,23 @@ def create_sse_chat_router(
         _mounted_key = (
             getattr(getattr(llm_provider, "config", None), "api_key", "") or ""
         )
+        _mounted_url = (
+            getattr(getattr(llm_provider, "config", None), "base_url", "") or ""
+        )
         # Consult the registry when the turn pinned a model (it names the
-        # provider), or when we have a mounted provider whose key is unusable.
-        # Not when nothing is mounted at all — then there is no stale client to
-        # rescue, and reaching for the registry would impose this machine's
-        # active profile on a caller that deliberately supplied none.
+        # provider), or when the mounted provider is one the check below would
+        # reject anyway — an unusable key against a cloud URL.
+        #
+        # Both extra conditions are load-bearing. Nothing mounted means there is
+        # no stale client to rescue, and reaching for the registry would impose
+        # this machine's active profile on a caller that deliberately supplied
+        # none. And "not-needed" is the correct, working key for a *local*
+        # provider (Ollama, LM Studio) — treating that as broken and swapping in
+        # the active cloud profile breaks local chat outright.
         _needs_registry = bool(requested_model) or (
-            llm_provider is not None and _mounted_key in ("", "not-needed")
+            llm_provider is not None
+            and _mounted_key in ("", "not-needed")
+            and _is_cloud_url(_mounted_url)
         )
         if _needs_registry:
             try:
