@@ -1,5 +1,63 @@
 # CHANGELOG
 
+## `kazma mcp` — Kazma's tools, with the gate, for any agent (2026-09-11)
+
+Point Claude Desktop, an editor, or another agent at `kazma mcp` and it can
+call Kazma's tools — every danger-tier call stopping for a human through the
+same HITL gate the chat window uses.
+
+This is **not** Kazma's first MCP server, which the audit that prompted it got
+wrong. `kazma_gateway.mcp_server` ("kazma-ide", gw-056) has existed since
+August: seven hand-written IDE tools, `KAZMA_SECRET` auth, launched as
+`python -m kazma_gateway.mcp_server`. It stays, and both modules now carry a
+note explaining the split.
+
+The difference that justifies a second one is the gate. The IDE server uses
+`SafetyMiddleware.check_sync()`, which can only ever *block* — a danger tool
+there is refused, never queued. This one routes through
+`LocalToolRegistry.execute()`, whose async path posts an approval request and
+waits for the answer. That is what turns "your tools get a seatbelt" into a
+product rather than a refusal, and it is why the surface is the whole registry
+(155 tools) rather than seven.
+
+The pitch is not "host my brain." It is: **your agent keeps its brain, and its
+dangerous tools acquire a seatbelt.** What an operator distrusts is rarely the
+model's reasoning; it is `shell_exec` running unattended because something
+misread a webpage.
+
+- **No new gate.** `tools/call` hands straight to
+  `LocalToolRegistry.execute()` — the single chokepoint where commitment
+  authorization, PreToolUse hooks, the permissions allowlist and the HITL bus
+  already live. The server holds zero safety logic of its own and must keep
+  holding none; a second gate beside that one is the H-8 collision. Anything
+  that tightens Kazma's gate now applies to MCP clients for free.
+- **Fail closed.** With HITL disabled, `execute()` runs danger tools
+  unattended — defensible for a developer in their own chat window, not for a
+  client calling in with nobody watching. So with no approval path, danger
+  tools are **withheld entirely** (155 tools become 100), not advertised and
+  then refused: a tool a client can see is a tool its model plans around.
+  `KAZMA_MCP_ALLOW_UNGATED=1` opts out, loudly, in the banner.
+- **Honest tool list.** Kazma's tiers map onto MCP's own `destructiveHint` /
+  `readOnlyHint`, so danger tools render as destructive in the client's
+  approval UI without anyone reading our docs.
+- `KAZMA_MCP_TOOLS` narrows the surface, enforced on `tools/call` as well as
+  `tools/list` — a client can call a name it was never offered.
+
+Three protocol details, all found by driving a real subprocess rather than by
+reasoning about it:
+
+- Frames are written with `ensure_ascii=True`. The first run against a real
+  client **crashed after `initialize`**: `ensure_ascii=False` into a cp1252
+  stdout raised `UnicodeEncodeError` on a tool description containing `≥`.
+  Escaped `\uXXXX` is valid JSON, every client decodes it, and no stream
+  encoding can reject it.
+- stdin/stdout are reconfigured to UTF-8, so Arabic paths survive the trip.
+- `sys.stdout` is repointed at stderr while serving, so a stray `print` from
+  any library cannot land between two frames and kill the session.
+
+`docs/MCP_SERVER.md` covers setup and states what this is not: not remote, not
+a sandbox, not a second brain.
+
 ## Releases are now verifiable — signed, attested, with an SBOM (2026-09-11)
 
 `release.yml` created a tag and a notes-only GitHub Release. It published no

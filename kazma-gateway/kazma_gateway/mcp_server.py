@@ -24,6 +24,15 @@ Security (post-audit / S0):
   - Danger tools also route through SafetyMiddleware.check_sync() (fail-closed bus).
   - No full graph interrupt on stdio; use bus adapters for HITL UX.
   - Disable server with KAZMA_MCP_IDE_ENABLED=false.
+
+Scope note (2026-09-11): this is the **narrow IDE** MCP server — seven
+hand-written tools, shared-secret auth, ``check_sync()`` (which can only
+block, never approve). ``kazma_core.mcp.server`` (``kazma mcp``) is the
+**general** one: the whole tool registry routed through
+``LocalToolRegistry.execute()``, where the async HITL path can actually queue
+a call for operator approval instead of refusing it. Pick this module for an
+IDE that wants a fixed, secret-gated file/test surface; pick that one to give
+an arbitrary MCP client Kazma's tools behind the real gate.
 """
 
 from __future__ import annotations
