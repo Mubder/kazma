@@ -46,6 +46,13 @@ Now:
 pin gone, captured client empty, registry has the real key — the call
 must use the registry key.
 
+The self-improvement Meta-Refiner (`_analyze_success` / `_analyze_failure`)
+had the same class of bug: `get_client()` returned a boot-cached DeepSeek
+client with an empty key, so a working chat hop was followed by
+`[SelfImprovement] LLM delta failed: no usable API key`. It now goes
+through `resolve_live_client`, and `get_client()` drops/does not cache a
+cloud client with an unusable key.
+
 ## Fix — a 401 now names the provider that rejected the call (2026-09-11)
 
 An operator hit this repeatedly:

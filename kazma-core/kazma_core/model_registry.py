@@ -497,7 +497,24 @@ class ModelRegistry:
                     )
 
             if model is None and provider_name in self._clients:
-                return self._clients[provider_name]
+                cached = self._clients[provider_name]
+                cached_key = coerce_api_key(
+                    getattr(getattr(cached, "config", None), "api_key", "")
+                )
+                cached_url = str(
+                    getattr(getattr(cached, "config", None), "base_url", "") or ""
+                )
+                # A boot-time client can carry the right URL and an empty key.
+                # Returning it forever is the self-improvement 401 after a
+                # working chat hop (2026-09-11). Rebuild from the store.
+                if self._key_is_usable(cached_key) or self._url_is_local(cached_url):
+                    return cached
+                logger.warning(
+                    "Dropping cached client for %s — unusable key against %s",
+                    provider_name,
+                    cached_url,
+                )
+                self._clients.pop(provider_name, None)
 
             # Resolve provider config (shared with get_active_profile)
             _, base_url, api_key, effective_model = self._resolve_provider_config(
@@ -572,7 +589,9 @@ class ModelRegistry:
             else:
                 client = LLMProvider(config)
 
-            if model is None:
+            if model is None and (
+                self._key_is_usable(api_key) or self._url_is_local(base_url)
+            ):
                 self._clients[provider_name] = client
 
             self._track(client)

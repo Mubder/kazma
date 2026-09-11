@@ -130,6 +130,16 @@ class TestResolveLiveClient:
         )
         assert client is mock
 
+    def test_get_client_drops_unusable_cache(
+        self, registry_with_deepseek,
+    ) -> None:
+        """Boot-cached DeepSeek with an empty key must not be reused."""
+        stale = LLMProvider(LLMConfig(base_url=CLOUD, api_key=""))
+        registry_with_deepseek._clients["deepseek"] = stale
+        client = registry_with_deepseek.get_client()
+        assert client is not stale
+        assert client.config.api_key == REAL_KEY
+
     def test_sk_real_key_placeholder_is_not_sent(
         self, registry_with_deepseek,
     ) -> None:

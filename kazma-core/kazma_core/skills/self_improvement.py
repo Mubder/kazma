@@ -30,6 +30,24 @@ _MAX_DELTA_CHARS = 1000  # per-delta cap so one runaway delta can't blow the pro
 _EVOLUTION_MARKER = "[SelfImprovement]"
 
 
+def _llm_for_delta() -> Any:
+    """Call-time LLM for Meta-Refiner deltas.
+
+    ``get_client()`` can return a boot-cached client with the right URL and
+    an empty key. Chat already rebuilt a live client for the turn; this
+    path must do the same or the success/failure analyzer 401s while the
+    turn itself succeeded (2026-09-11 live ``no usable API key``).
+    """
+    from kazma_core.model_registry import get_model_registry
+    from kazma_core.runtime.live_llm import resolve_live_client
+    from kazma_core.runtime.turn_model import current_turn_model
+
+    model = current_turn_model()
+    fallback = get_model_registry().get_client(model)
+    client, _ = resolve_live_client(fallback, model=model)
+    return client
+
+
 def _cap_evolution_prompt(base_prompt: str, new_delta: str) -> str:
     """Append a SelfImprovement delta, bounded by max chars/blocks.
 
@@ -185,8 +203,7 @@ Focus on what patterns to preserve and strengthen.
 Output ONLY the delta text, no preamble."""
 
         try:
-            from kazma_core.model_registry import get_model_registry
-            provider = get_model_registry().get_client()
+            provider = _llm_for_delta()
             if provider is not None:
                 response = await provider.chat([
                     {"role": "system", "content": "You are a concise meta-learning expert."},
@@ -273,8 +290,7 @@ Focus on what to AVOID and how to improve next time.
 Output ONLY the delta text, no preamble."""
 
         try:
-            from kazma_core.model_registry import get_model_registry
-            provider = get_model_registry().get_client()
+            provider = _llm_for_delta()
             if provider is not None:
                 response = await provider.chat([
                     {"role": "system", "content": "You are a concise meta-learning expert."},
