@@ -299,7 +299,15 @@ def client_for(provider: str) -> Any:
     if not key_is_usable(env_value) or config is None:
         return None
     try:
+        # Both fields, and this is not belt-and-braces. `chat()` opens with
+        # `_sync_gateway()`, which recomputes egress from `_direct_api_key` --
+        # the value captured at construction -- and calls `reconfigure()` with
+        # the result. Setting only `config.api_key` is therefore reverted on
+        # every single call, and the provider refuses with "no usable API key"
+        # while the config in front of you looks correct. `reconfigure()` has
+        # the same gap, so it is no help here either.
         config.api_key = env_value
+        client._direct_api_key = env_value
     except Exception:
         return None
     KEY_SOURCE[provider] = env_key_for(provider)
