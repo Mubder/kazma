@@ -60,6 +60,9 @@ CORPUS = REPO / "tests" / "fixtures" / "injection_live_corpus.json"
 for pkg in ("kazma-core", "kazma-ui"):
     sys.path.insert(0, str(REPO / pkg))
 
+#: provider -> model, from --model on the command line.
+MODEL_OVERRIDES: dict[str, str] = {}
+
 UNFENCED = "unfenced"
 FENCED = "fenced"
 CONDITIONS = (UNFENCED, FENCED)
@@ -171,9 +174,12 @@ async def run_provider(
     from kazma_core.model_registry import get_model_registry
 
     registry = get_model_registry()
-    client = registry.get_client_by_provider(provider)
+    client = client_for(provider)
     if client is None:
-        print(f"  {provider}: no client, skipped", file=sys.stderr)
+        print(
+            f"  {provider}: no usable key (set {env_key_for(provider)} to run it), skipped",
+            file=sys.stderr,
+        )
         return None
     model = str(getattr(getattr(client, "config", None), "model", "") or "?")
     result = ProviderResult(provider=provider, model=model)
@@ -205,17 +211,89 @@ async def run_provider(
     return result
 
 
-def usable_providers() -> list[tuple[str, str]]:
-    """(name, model) for every provider we could actually send a request as.
+def model_for(provider: str) -> str | None:
+    """The model to send for *provider* — its own, never the active one.
 
-    Resolved through ``get_client_by_provider``, not by reading the stored
-    entry. The stored value is often a ``vault://`` pointer, and a key can also
-    arrive from a ``<PROVIDER>_API_KEY`` environment variable that never
-    touches the provider list at all — checking the raw field misses both and
-    reports "no providers" on a machine that is perfectly able to run.
+    `get_client_by_provider` falls back to the globally active model when the
+    provider entry has none. That silently points every provider at whatever
+    chat is using: pointing `deepseek-flash` at Groq is a 404 scored as an
+    error, and a benchmark full of errors looks like a benchmark full of
+    defended attacks.
+
+    Precedence: an explicit `--model provider=id` override, then the provider's
+    own entry, then the first model the operator selected for it in Settings.
     """
+    import os
+
+    override = MODEL_OVERRIDES.get(provider)
+    if override:
+        return override
+
+    from kazma_core.model_registry import get_model_registry
+
+    registry = get_model_registry()
+    entry = registry.get_provider(provider) or {}
+    own = str(entry.get("model") or "").strip()
+    if own:
+        return own
+    try:
+        from kazma_core.config_store import get_config_store
+
+        selected = get_config_store().get(f"providers.{provider}.selected_models")
+        if isinstance(selected, list) and selected:
+            return str(selected[0])
+    except Exception:
+        pass
+    env_model = os.getenv(f"{provider.upper().replace('-', '_')}_MODEL", "")
+    return env_model or None
+
+
+def env_key_for(provider: str) -> str:
+    """``deepseek`` -> ``DEEPSEEK_API_KEY``, matching the registry's convention."""
+    return f"{provider.upper().replace('-', '_')}_API_KEY"
+
+
+def client_for(provider: str) -> Any:
+    """A client for *provider*, with an explicit environment-variable fallback.
+
+    ``get_client_by_provider`` builds its config from the raw stored entry and
+    applies no env fallback — unlike ``get_client``, which does. So a key in
+    ``DEEPSEEK_API_KEY`` is invisible here, and so is a stored ``vault://``
+    pointer this process cannot decrypt (a different data dir, a rotated vault
+    key, a tenant mismatch — all of which happen on a real box).
+
+    Rather than depend on the config layer resolving, take the key from the
+    environment when the registry's client cannot produce a usable one. That
+    makes the benchmark runnable anywhere with two exports and no vault
+    archaeology.
+    """
+    import os
+
     from kazma_core.model_registry import get_model_registry
     from kazma_core.runtime.live_llm import key_is_usable
+
+    registry = get_model_registry()
+    try:
+        client = registry.get_client_by_provider(provider, model=model_for(provider))
+    except Exception:
+        client = None
+    config = getattr(client, "config", None) if client else None
+    if config is not None and key_is_usable(getattr(config, "api_key", "")):
+        return client
+
+    env_value = os.getenv(env_key_for(provider), "")
+    if not key_is_usable(env_value) or config is None:
+        return None
+    try:
+        config.api_key = env_value
+    except Exception:
+        return None
+    return client
+
+
+def usable_providers() -> list[tuple[str, str]]:
+    """(name, model) for every provider we could actually send a request as."""
+    from kazma_core.model_registry import get_model_registry
 
     registry = get_model_registry()
     out: list[tuple[str, str]] = []
@@ -223,13 +301,10 @@ def usable_providers() -> list[tuple[str, str]]:
         name = str(entry.get("name") or "")
         if not name:
             continue
-        try:
-            client = registry.get_client_by_provider(name)
-        except Exception:
-            continue
-        config = getattr(client, "config", None) if client else None
-        if config is not None and key_is_usable(getattr(config, "api_key", "")):
-            out.append((name, str(getattr(config, "model", "") or "")))
+        client = client_for(name)
+        if client is not None:
+            model = str(getattr(getattr(client, "config", None), "model", "") or "")
+            out.append((name, model))
     return out
 
 
@@ -284,8 +359,20 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=3, help="repeats of the full matrix (default 3)")
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--delay", type=float, default=0.0, help="seconds between calls (rate limits)")
+    parser.add_argument(
+        "--model",
+        action="append",
+        default=[],
+        metavar="PROVIDER=MODEL",
+        help="pin a provider's model, e.g. --model groq=openai/gpt-oss-120b",
+    )
     parser.add_argument("--json", default="", help="write machine-readable results here")
     args = parser.parse_args()
+
+    for pair in args.model:
+        if "=" in pair:
+            prov, _, mid = pair.partition("=")
+            MODEL_OVERRIDES[prov.strip()] = mid.strip()
 
     data = json.loads(CORPUS.read_text(encoding="utf-8"))
     cases = data["cases"]
