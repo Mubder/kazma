@@ -531,7 +531,7 @@
                             <div class="form-group" style="margin-bottom: 12px;">
                                 <label>{{ t('settings.api_key') }}</label>
                                 <div class="input-with-toggle">
-                                    <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="AI Studio Key (AIzaSy...)">
+                                    <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="AI Studio Key (AIzaSy...)" autocomplete="off" spellcheck="false">
                                     <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? 'Hide' : 'Show'" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                                 </div>
                             </div>
@@ -570,7 +570,7 @@
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label>{{ t('settings.api_key') }}</label>
                             <div class="input-with-toggle">
-                                <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="sk-...">
+                                <input :type="hubShowProviderKey ? 'text' : 'password'" class="form-input" x-model="hubEditingProvider.api_key" placeholder="sk-..." autocomplete="off" spellcheck="false">
                                 <button class="btn btn-icon" type="button" @click="hubShowProviderKey = !hubShowProviderKey" :title="hubShowProviderKey ? 'Hide' : 'Show'" x-html="hubShowProviderKey ? KazmaIcons.get('eye-off') : KazmaIcons.get('eye')"></button>
                             </div>
                             <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px">{{ t('settings.masked_placeholder_hint') }}</div>

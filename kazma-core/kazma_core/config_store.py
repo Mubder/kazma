@@ -912,7 +912,19 @@ class ConfigStore:
                 for k, v in value.items()
             }
         if isinstance(value, list):
-            return [self._encrypt_nested_sensitive(item, path) for item in value]
+            # Index (or a dict's ``name``) MUST be in the path. Walking
+            # ``providers.list`` as a bare list used the same synthetic key
+            # ``providers.list.api_key`` for every provider, so the vault
+            # stored one secret and Test sent the last-written key to every
+            # vendor (DeepSeek 401 "api key … is invalid" on a brand-new key).
+            out: list[Any] = []
+            for i, item in enumerate(value):
+                ident = ""
+                if isinstance(item, dict):
+                    ident = str(item.get("name") or item.get("id") or "").strip()
+                item_path = f"{path}.{ident}" if ident else f"{path}.{i}"
+                out.append(self._encrypt_nested_sensitive(item, item_path))
+            return out
         if not isinstance(value, str) or not value:
             return value
         if is_vault_ref(value) or is_masked_secret_placeholder(value):

@@ -151,6 +151,50 @@ def test_lazy_migrate_plaintext_on_get(vault_env, tmp_path: Path):
         store.close()
 
 
+def test_set_providers_list_vaults_each_api_key_separately(vault_env, tmp_path: Path):
+    """Each providers.list[].api_key must get its own vault slot.
+
+    A shared ``cfg:providers.list.api_key`` made Test send the last-written
+    key to every vendor (401 on a brand-new DeepSeek key).
+    """
+    store = ConfigStore(
+        db_path=str(tmp_path / "settings.db"),
+        yaml_path=str(tmp_path / "missing.yaml"),
+    )
+    try:
+        store.set(
+            "providers.list",
+            [
+                {"name": "openai", "api_key": "sk-openai-aaaa"},
+                {"name": "deepseek", "api_key": "sk-deepseek-bbbb"},
+            ],
+            category="providers",
+        )
+        got = store.get("providers.list")
+        assert got[0]["api_key"] == "sk-openai-aaaa"
+        assert got[1]["api_key"] == "sk-deepseek-bbbb"
+        assert vault_env.retrieve("cfg:providers.list.openai.api_key") == "sk-openai-aaaa"
+        assert vault_env.retrieve("cfg:providers.list.deepseek.api_key") == "sk-deepseek-bbbb"
+        # The collapsed slot must not be the only copy.
+        shared = vault_env.retrieve("cfg:providers.list.api_key")
+        assert shared in (None, "sk-openai-aaaa", "sk-deepseek-bbbb")
+        assert not (
+            vault_env.retrieve("cfg:providers.list.openai.api_key")
+            == vault_env.retrieve("cfg:providers.list.deepseek.api_key")
+        )
+        with store._lock:
+            row = store._get_conn().execute(
+                "SELECT value FROM settings WHERE key = ?",
+                ("providers.list",),
+            ).fetchone()
+        raw = __import__("json").loads(row["value"])
+        refs = {p["api_key"] for p in raw}
+        assert all(is_vault_ref(r) for r in refs)
+        assert len(refs) == 2
+    finally:
+        store.close()
+
+
 def test_get_providers_list_does_not_migrate_nested_api_keys(vault_env, tmp_path: Path):
     """JSON blobs with nested api_keys must not lazy-migrate on get().
 

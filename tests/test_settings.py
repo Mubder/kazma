@@ -900,6 +900,30 @@ class TestUnifiedProvidersRouterAPI:
         assert len(found) == 1
         assert found[0]["api_key"] == "****cret"
 
+    def test_providers_upsert_strips_quoted_key(self, client):
+        resp = client.post("/api/providers", json={
+            "name": "quoted-key",
+            "base_url": "https://example.com/v1",
+            "api_key": '  "sk-quoted-9999"  ',
+        })
+        assert resp.status_code == 200
+        assert resp.json()["api_key"] == "****9999"
+
+    def test_provider_test_rejects_masked_body(self, client):
+        client.post("/api/providers", json={
+            "name": "deepseek-mask-test",
+            "base_url": "https://api.deepseek.com/v1",
+            "api_key": "sk-real-stored-key",
+        })
+        resp = client.post(
+            "/api/providers/deepseek-mask-test/test",
+            json={"api_key": "****-key"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "****" in (data.get("error") or "")
+
     def test_providers_delete(self, client):
         """DELETE /api/providers/{name} removes a provider."""
         client.post("/api/providers", json={
