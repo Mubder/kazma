@@ -89,6 +89,20 @@ def _is_secret_key(key: str) -> bool:
     return any(hint in lower for hint in _SECRET_KEY_HINTS)
 
 
+def _activate_tested_provider(registry: Any, name: str) -> None:
+    """Point chat at *name* when the active profile has no API key.
+
+    Test-connection success must not leave chat on the empty OpenAI default.
+    Never raises — a failed switch must not fail the Test response.
+    """
+    try:
+        from kazma_core.runtime.model_switch import maybe_activate_provider_for_chat
+
+        maybe_activate_provider_for_chat(name, registry=registry)
+    except Exception:
+        logger.debug("[providers] chat activate after Test failed", exc_info=True)
+
+
 def _mask_provider_entry(provider: dict[str, Any]) -> dict[str, Any]:
     """Return a copy of a provider entry with the API key masked."""
     safe = dict(provider)
@@ -262,6 +276,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     latency = int((time.monotonic() - start) * 1000)
                     if resp.status_code == 200:
                         registry.set_provider_health(name, "healthy")
+                        _activate_tested_provider(registry, name)
                         return {"success": True, "latency_ms": latency}
                     else:
                         registry.set_provider_health(name, "degraded")
@@ -277,6 +292,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         resp = await http_client.get("")
                         latency = int((time.monotonic() - start) * 1000)
                         registry.set_provider_health(name, "healthy")
+                        _activate_tested_provider(registry, name)
                         return {"success": True, "latency_ms": latency}
                     except httpx.ConnectError:
                         registry.set_provider_health(name, "down")
@@ -343,6 +359,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     if resp.status_code == 200:
                         latency = int((time.monotonic() - start) * 1000)
                         registry.set_provider_health(name, "healthy")
+                        _activate_tested_provider(registry, name)
                         return {"success": True, "latency_ms": latency}
                 latency = int((time.monotonic() - start) * 1000)
                 registry.set_provider_health(name, "degraded")

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fix — Test succeeds, chat still 401s (2026-09-11)
+
+Provider Test only pings that vendor. Chat uses the *active* model
+(default empty OpenAI / `gpt-4o-mini`). After a successful Test, if
+chat has no API key, Kazma now switches the active profile to the
+tested provider so the next turn actually uses that key.
+
 ## Fix — provider Test treated **** as a hard error (2026-09-11)
 
 The edit field is pre-filled with a masked `****xxxx` for any saved
