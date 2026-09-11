@@ -267,6 +267,25 @@ async def run_provider(
     return result
 
 
+async def list_models(provider: str) -> list[str]:
+    """Ask the provider what it actually serves.
+
+    Guessing a model id costs a full run: the wrong one 404s on every call,
+    and this box's stored Groq model was `whisper-large-v3` — a speech model
+    that would have failed silently as "errors" rather than "wrong model".
+    """
+    client = client_for(provider)
+    if client is None:
+        return []
+    http = await client._get_client()
+    resp = await http.get("/models")
+    resp.raise_for_status()
+    data = resp.json()
+    rows = data.get("data") if isinstance(data, dict) else data
+    out = [str(r.get("id")) for r in (rows or []) if isinstance(r, dict) and r.get("id")]
+    return sorted(out)
+
+
 def model_for(provider: str) -> str | None:
     """The model to send for *provider* — its own, never the active one.
 
@@ -474,6 +493,11 @@ def main() -> int:
         metavar="PROVIDER=MODEL",
         help="pin a provider's model, e.g. --model groq=openai/gpt-oss-120b",
     )
+    parser.add_argument(
+        "--list-models",
+        action="store_true",
+        help="ask each provider which model ids it serves, then exit",
+    )
     parser.add_argument("--json", default="", help="write machine-readable results here")
     args = parser.parse_args()
 
@@ -481,6 +505,22 @@ def main() -> int:
         if "=" in pair:
             prov, _, mid = pair.partition("=")
             MODEL_OVERRIDES[prov.strip()] = mid.strip()
+
+    if args.list_models:
+        names = [p.strip() for p in args.providers.split(",") if p.strip()] or [
+            n for n, _ in usable_providers()
+        ]
+        for name in names:
+            try:
+                ids = asyncio.run(list_models(name))
+            except Exception as exc:
+                print(f"{name}: {type(exc).__name__}: {str(exc)[:120]}")
+                continue
+            print()
+            print(f"{name}: {len(ids)} models")
+            for mid in ids:
+                print(f"    {mid}")
+        return 0
 
     data = json.loads(CORPUS.read_text(encoding="utf-8"))
     cases = data["cases"]
