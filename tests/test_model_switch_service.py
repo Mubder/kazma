@@ -22,6 +22,7 @@ from kazma_core.config_store import ConfigStore
 from kazma_core.model_registry import ModelRegistry, initialize_model_registry
 from kazma_core.runtime.model_switch import (
     ensure_active_model,
+    maybe_activate_provider_for_chat,
     switch_active_model,
     switch_active_provider,
 )
@@ -114,6 +115,36 @@ class TestSwitchProviderNoMask:
         entry = registry.get_provider("deepseek")
         assert entry is not None
         assert entry.get("api_key") == "sk-real-keep-me"
+
+
+class TestMaybeActivateProviderForChat:
+    def test_activates_when_chat_has_no_key(self, registry):
+        registry.upsert_provider({
+            "name": "openai",
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "",
+            "enabled": True,
+        })
+        registry.set_active_provider(provider="openai", model="gpt-4o-mini")
+        result = maybe_activate_provider_for_chat("deepseek", registry=registry)
+        assert result.ok is True
+        assert registry._active_provider == "deepseek"
+        assert registry._active_model in ("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat")
+
+    def test_does_not_steal_working_active_profile(self, registry):
+        # fixture already has deepseek + key as active
+        registry.upsert_provider({
+            "name": "groq",
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_key": "gsk-other",
+            "enabled": True,
+            "models": ["llama-3.3-70b-versatile"],
+        })
+        before_p, before_m = registry._active_provider, registry._active_model
+        result = maybe_activate_provider_for_chat("groq", registry=registry)
+        assert result.ok is True
+        assert registry._active_provider == before_p
+        assert registry._active_model == before_m
 
 
 class TestMarkdownRendererContracts:

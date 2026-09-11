@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "SwitchResult",
     "ensure_active_model",
+    "maybe_activate_provider_for_chat",
     "register_rebind_hook",
     "switch_active_model",
     "switch_active_provider",
@@ -295,6 +296,83 @@ def switch_active_provider(
         final_model,
     )
     return SwitchResult(ok=True, model=final_model, provider=final_prov)
+
+
+_FALLBACK_CHAT_MODEL = {
+    "deepseek": "deepseek-chat",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4",
+    "google": "gemini-2.0-flash",
+    "groq": "llama-3.3-70b-versatile",
+    "xai": "grok-3",
+    "openrouter": "openai/gpt-4o-mini",
+    "mistral": "mistral-large-latest",
+}
+
+
+def _first_model_for(reg: Any, provider: str) -> str:
+    try:
+        vis = list(reg.get_visible_models(provider) or [])
+        if vis:
+            return str(vis[0])
+    except Exception:
+        pass
+    try:
+        entry = reg.get_provider(provider) or {}
+        models = list(entry.get("models") or [])
+        if models:
+            return str(models[0])
+    except Exception:
+        pass
+    return _FALLBACK_CHAT_MODEL.get((provider or "").strip().lower(), "")
+
+
+def maybe_activate_provider_for_chat(
+    provider: str,
+    *,
+    registry: Any | None = None,
+    agent: Any | None = None,
+) -> SwitchResult:
+    """If chat has no API key, point the active profile at *provider*.
+
+    Provider Test only pings that vendor. Chat uses ``registry.active_provider``.
+    Saving a working DeepSeek key and then chatting still 401s when the
+    active profile is the empty OpenAI/custom default.
+    """
+    clean = (provider or "").strip()
+    if not clean:
+        return SwitchResult(ok=True, model="", provider="")
+
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        reg = registry or get_model_registry()
+    except Exception as exc:
+        return SwitchResult(ok=False, provider=clean, error=str(exc), error_code="error")
+
+    current_provider = str(getattr(reg, "_active_provider", "") or "")
+    current_model = str(getattr(reg, "_active_model", "") or "")
+    try:
+        _, _, current_key, _ = reg._resolve_provider_config(current_provider, current_model)
+    except Exception:
+        current_key = ""
+
+    if str(current_key or "").strip():
+        if current_provider.lower() == clean.lower() and not current_model.strip():
+            model = _first_model_for(reg, clean)
+            if model:
+                return switch_active_model(model, agent=agent, registry=reg)
+        return SwitchResult(ok=True, model=current_model, provider=current_provider)
+
+    try:
+        entry = reg.get_provider(clean) or {}
+    except Exception:
+        entry = {}
+    if not str(entry.get("api_key") or "").strip():
+        return SwitchResult(ok=True, model=current_model, provider=current_provider or clean)
+
+    model = _first_model_for(reg, clean)
+    return switch_active_provider(clean, model=model, agent=agent, registry=reg)
 
 
 def ensure_active_model(
