@@ -356,7 +356,7 @@ def register_filesystem_tools(registry: Any) -> None:
                 if file_path.stat().st_size < 500_000:
                     try:
                         for i, line in enumerate(
-                            file_path.read_text(errors="replace").splitlines(), 1
+                            file_path.read_text(encoding="utf-8", errors="replace").splitlines(), 1
                         ):
                             if regex.search(line):
                                 results.append(f"{file_path}:{i}: {line.strip()}")

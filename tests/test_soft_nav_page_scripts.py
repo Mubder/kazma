@@ -65,7 +65,7 @@ def test_memory_console_and_companions_are_page_scripts() -> None:
             "/static/js/voice.js",
             "/static/js/stores/agentStore.js",
             "/static/js/mermaid.min.js",
-            "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js",
+            "/static/vendor/codemirror/codemirror.bundle.js",
         ]
     )
     assert flags == [True, True, True, True, True, True, True]
