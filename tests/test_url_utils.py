@@ -144,7 +144,7 @@ class TestGetDummyApiKey:
 
     def test_remote_needs_real_key(self):
         result = get_dummy_api_key("https://api.openai.com/v1", "")
-        assert result == "not-needed"
+        assert result == ""
 
     def test_whitespace_key_treated_as_empty(self):
         result = get_dummy_api_key("http://localhost:1234/v1", "   ")

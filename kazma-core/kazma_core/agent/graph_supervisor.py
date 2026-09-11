@@ -892,17 +892,21 @@ async def supervisor_node(
                 model_spec = model_router.route(profile)
                 routed_model = model_spec.model
 
-    # Per-turn pin from the mouth (SSE/WS body.model) wins over the router
-    # and does NOT mutate the process-wide active profile.
+    # Call-time client: never use the compile-time captured ``llm`` when
+    # the registry has current credentials. The turn pin is a ContextVar
+    # and evaporates on later ReAct iterations of the same turn; checkpointed
+    # ``last_model`` is the durable fallback (2026-09-11 DeepSeek 401).
     turn_llm = llm
     try:
-        from kazma_core.runtime.turn_model import resolve_turn_client
+        from kazma_core.runtime.live_llm import resolve_live_client
 
-        turn_llm, _pinned = resolve_turn_client(llm)
-        if _pinned:
-            routed_model = _pinned
+        turn_llm, _chosen = resolve_live_client(
+            llm, state=state, model=routed_model,
+        )
+        if _chosen:
+            routed_model = _chosen
             routed_client = None
-            logger.info("[Supervisor] turn-model pin=%s", _pinned)
+            logger.info("[Supervisor] live client model=%s", _chosen)
         elif routed_client is not None:
             turn_llm = routed_client
     except Exception:
@@ -1650,13 +1654,17 @@ async def supervisor_node(
         except Exception:
             pass
 
-        # Name the endpoint that rejected us. `llm` and `routed_model` are the
-        # ones actually used for this call, so a 401 says which provider to go
-        # fix rather than leaving the operator to guess across a dozen.
+        # Name the endpoint that rejected us. `turn_llm` is the client
+        # actually used for this call (registry-resolved, not the compile-time
+        # capture), so a 401 says which provider to go fix.
         error_content = friendly_llm_error(
             exc,
             model=str(routed_model or ""),
-            base_url=str(getattr(getattr(llm, "config", None), "base_url", "") or ""),
+            base_url=str(
+                getattr(getattr(turn_llm, "config", None), "base_url", "")
+                or getattr(getattr(llm, "config", None), "base_url", "")
+                or ""
+            ),
         )
         # Surface an HONEST failure rather than disguising it as a normal
         # assistant reply. ``turn_failed`` tells respond_node to skip
@@ -1669,6 +1677,7 @@ async def supervisor_node(
             **_mission_carry,
             "next_node": NodeName.RESPOND,
             "turn_failed": True,
+            "last_model": str(routed_model or state.get("last_model") or ""),
             "messages": messages
             + [
                 {
