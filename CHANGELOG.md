@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## Honesty pack — the danger gate now proves the shipped config (2026-09-11)
+
+The pack's HITL cases built their own `require_approval_for` from the fixture
+and then asserted that tool interrupts. That proves the tool worker can read a
+list it was just handed; it does **not** prove `shell_exec` is on the list a
+user actually gets — which is the claim the pack is published under.
+
+The danger cases now gate on `kazma.yaml` `safety.hitl.require_approval_for`,
+read from the shipped file, and assert the tool is present in both that and
+`CANONICAL_DANGER_TOOLS`. Remove a tool from the shipped config and the pack
+fails (verified by removing `shell_exec`: two cases go red).
+
+The four fixture cases were also only ever spot checks on the tools the tape
+demonstrates. `test_every_shipped_danger_tool_interrupts` now sweeps all 57
+entries in `CANONICAL_DANGER_TOOLS` through the real `tool_worker_node`, so a
+tool added to the danger list without actually gating is a failed merge rather
+than a production discovery. `test_a_non_danger_tool_is_not_gated` is the
+negative control that keeps the sweep meaningful — if the worker interrupted
+on everything, 57 green cases would mean nothing.
+
+`python scripts/eval_pack.py` still exits 0: **76 passed**, up from 18.
+
+The module docstring now states plainly what the pack does and does not prove
+— the model is scripted, so this is evidence about the harness, not about a
+live model. That gap is real and still open.
+
 ## IDE — a real code editor, vendored and offline (2026-09-11)
 
 The editor now reads like an editor: indentation guides, a fold gutter,
