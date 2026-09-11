@@ -63,6 +63,10 @@ for pkg in ("kazma-core", "kazma-ui"):
 #: provider -> model, from --model on the command line.
 MODEL_OVERRIDES: dict[str, str] = {}
 
+#: provider -> where its key came from. Printed, because "which key did it
+#: actually send" was the question behind every failed run of this script.
+KEY_SOURCE: dict[str, str] = {}
+
 UNFENCED = "unfenced"
 FENCED = "fenced"
 CONDITIONS = (UNFENCED, FENCED)
@@ -131,6 +135,15 @@ class ProviderResult:
 
     def errors(self) -> int:
         return sum(1 for o in self.outcomes if o.error)
+
+    def error_rate(self) -> float:
+        return self.errors() / len(self.outcomes) if self.outcomes else 1.0
+
+    def top_errors(self, limit: int = 2) -> list[tuple[str, int]]:
+        import collections
+
+        msgs = [o.error for o in self.outcomes if o.error]
+        return collections.Counter(msgs).most_common(limit)
 
 
 # ── Execution ───────────────────────────────────────────────────────────────
@@ -279,6 +292,7 @@ def client_for(provider: str) -> Any:
         client = None
     config = getattr(client, "config", None) if client else None
     if config is not None and key_is_usable(getattr(config, "api_key", "")):
+        KEY_SOURCE[provider] = "registry"
         return client
 
     env_value = os.getenv(env_key_for(provider), "")
@@ -288,6 +302,7 @@ def client_for(provider: str) -> Any:
         config.api_key = env_value
     except Exception:
         return None
+    KEY_SOURCE[provider] = env_key_for(provider)
     return client
 
 
@@ -325,13 +340,34 @@ def print_report(results: list[ProviderResult], meta: dict[str, Any]) -> None:
     print(f"runs        {meta['runs']}   temperature {meta['temperature']}")
     print(f"metric      Attack Success Rate (canary emitted), median across runs")
     print()
-    print(f"{'provider/model':<34}{'unfenced':>10}{'fenced':>9}{'delta':>9}{'err':>6}")
-    print("-" * 72)
+    print(f"{'provider/model':<30}{'key from':<18}{'unfenced':>10}{'fenced':>8}{'delta':>7}{'err':>6}")
+    print("-" * 79)
     for r in results:
         unf, fen, delta = median_delta(r)
-        label = f"{r.provider}/{r.model}"[:33]
-        print(f"{label:<34}{unf:>9.0f}%{fen:>8.0f}%{delta:>8.0f}{r.errors():>6}")
+        label = f"{r.provider}/{r.model}"[:29]
+        rate = r.error_rate()
+        src = KEY_SOURCE.get(r.provider, "?")[:17]
+        if rate >= 0.5:
+            # Refuse to render a rate nothing was measured for. A table of 0%
+            # over 100% errors reads exactly like a perfect defense, which is
+            # how the first real run of this script was nearly misread.
+            print(f"{label:<30}{src:<18}{'--':>10}{'--':>8}{'--':>7}{r.errors():>6}")
+        else:
+            print(f"{label:<30}{src:<18}{unf:>9.0f}%{fen:>7.0f}%{delta:>7.0f}{r.errors():>6}")
     print()
+
+    broken = [r for r in results if r.error_rate() >= 0.5]
+    if broken:
+        print("  NO RESULT — most calls failed, so there is nothing to report:")
+        for r in broken:
+            pct = round(100 * r.error_rate())
+            print(f"    {r.provider}: {r.errors()}/{len(r.outcomes)} calls failed ({pct}%)")
+            for msg, n in r.top_errors(2):
+                print(f"      {n}x {msg[:90]}")
+        print("    A run of errors is not a run of defended attacks. Fix these first;")
+        print(f"    if the key is missing, export {env_key_for(broken[0].provider)} and re-run.")
+        print()
+        return
     for r in results:
         fp = sum(r.false_positives(c) for c in CONDITIONS)
         if fp:
@@ -444,6 +480,10 @@ def main() -> int:
     for r in results:
         if sum(r.false_positives(c) for c in CONDITIONS):
             return 1
+    if any(r.error_rate() >= 0.5 for r in results):
+        return 1
+    if not results:
+        return 1
     return 0
 
 
