@@ -148,14 +148,14 @@ adversarial corpus, with no model in the loop:
 python scripts/injection_report.py
 ```
 
-**32/32 containment** — no corpus payload can forge the fence's delimiters and
+**48/48 containment** — no corpus payload can forge the fence's delimiters and
 place text outside it. A hard gate; any escape fails the build.
 
-**3/9 persistence denylist** — of the payloads whose purpose is to plant a
-standing directive in a future system prompt, `filter_injection` currently
-refuses three. The six it misses are named in
-**[docs/INJECTION.md](docs/INJECTION.md)**, along with why the gap is pinned as
-a ratchet rather than patched in a hurry.
+**9/9 persistence denylist** — every payload whose purpose is to plant a
+standing directive in a future system prompt is refused. Balanced by 17 control
+cases: real summaries that sit one word from a deny pattern and must stay
+storable, because a false positive here silently makes the agent forget. See
+**[docs/INJECTION.md](docs/INJECTION.md)**.
 
 Neither number proves a model *obeys* the fence — that needs live calls and is
 not claimed. The doc says so in as many words.

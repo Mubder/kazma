@@ -161,11 +161,25 @@ def test_denylist_misses_do_not_grow() -> None:
     )
 
 
-def test_benign_text_is_still_storable() -> None:
-    """Negative control. A denylist that eats real summaries is worse than none."""
-    control = next(c for c in ALL_CASES if c["category"] == "control")
-    assert filter_injection(control["payload"]) == control["payload"]
-    assert is_override_delta(control["payload"]) is False
+CONTROLS = [c for c in ALL_CASES if c["category"] == "control"]
+
+
+@pytest.mark.parametrize("case", CONTROLS, ids=_ids(CONTROLS))
+def test_benign_text_is_still_storable(case: dict[str, Any]) -> None:
+    """The counterweight to the denylist, and the more important half.
+
+    A denylist that eats real summaries is worse than none: the agent silently
+    forgets things and nobody gets an error. Several of these deliberately sit
+    one word away from a deny pattern — "forget the old deadline", "Assistant:
+    Understood, I will look into the failing test", "updated the system prompt
+    in Settings", "add to your calendar", "Remember that the meeting is
+    Tuesday". Widening a pattern until one of these trips is not an
+    improvement.
+    """
+    assert filter_injection(case["payload"]) == case["payload"], (
+        f"{case['id']} is legitimate text and must remain storable"
+    )
+    assert is_override_delta(case["payload"]) is False
 
 
 def test_the_corpus_is_internally_consistent() -> None:
