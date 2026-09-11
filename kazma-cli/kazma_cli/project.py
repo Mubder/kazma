@@ -124,7 +124,7 @@ def load_project(path: str | Path = ".") -> dict[str, Any] | None:
         filepath = kazma_dir / name
         if filepath.is_file():
             try:
-                data = yaml.safe_load(filepath.read_text())
+                data = yaml.safe_load(filepath.read_text(encoding="utf-8"))
                 # yaml.safe_load returns None for empty or all-comments files.
                 # Treat as empty dict so show_project displays "(empty)" instead
                 # of "(parse error)".
@@ -134,7 +134,7 @@ def load_project(path: str | Path = ".") -> dict[str, Any] | None:
 
     context_md = kazma_dir / "context.md"
     if context_md.is_file():
-        config["context"] = context_md.read_text()
+        config["context"] = context_md.read_text(encoding="utf-8")
 
     return config
 
@@ -194,7 +194,7 @@ def validate_project(path: str | Path = ".") -> tuple[bool, list[str]]:
         filepath = kazma_dir / name
         if filepath.is_file():
             try:
-                data = yaml.safe_load(filepath.read_text())
+                data = yaml.safe_load(filepath.read_text(encoding="utf-8"))
                 if data is None and name != "personality.yaml":
                     issues.append(f"Empty YAML file: {name}")
             except yaml.YAMLError as exc:
@@ -204,7 +204,7 @@ def validate_project(path: str | Path = ".") -> tuple[bool, list[str]]:
     rules_path = kazma_dir / "rules.yaml"
     if rules_path.is_file():
         try:
-            rules = yaml.safe_load(rules_path.read_text())
+            rules = yaml.safe_load(rules_path.read_text(encoding="utf-8"))
             if isinstance(rules, dict):
                 if "language" not in rules:
                     issues.append("rules.yaml: missing 'language' key")
@@ -230,6 +230,6 @@ def _write_if_missing(filepath: Path, content: str) -> bool:
     Returns True if the file was created, False if it already existed.
     """
     if not filepath.exists():
-        filepath.write_text(content)
+        filepath.write_text(content, encoding="utf-8")
         return True
     return False

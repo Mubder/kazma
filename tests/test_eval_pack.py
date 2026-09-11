@@ -8,6 +8,24 @@ Run just the pack::
 
     python scripts/eval_pack.py
     python -m pytest tests/test_eval_pack.py -q
+
+**What this pack does and does not prove.** Be precise about this, because the
+claim travels further than the code does.
+
+It proves the *harness* cannot lie: that a dead turn is not synthesized over,
+that system notes stay at the head, that a danger tool interrupts before it
+runs, and that the prefix stays stable. The model is scripted — every case
+feeds a canned ``LLMResponse`` list — so none of it proves a *live* model
+behaves. That is a separate, still-open piece of work.
+
+Within the harness the loop is closed end to end. The danger cases gate on the
+list Kazma actually ships (``kazma.yaml`` ``safety.hitl.require_approval_for``,
+read by :func:`shipped_danger_tools`), not on a list the fixture invents, and
+:func:`test_every_shipped_danger_tool_interrupts` sweeps *all* of
+``CANONICAL_DANGER_TOOLS`` rather than the handful the demo happens to use.
+Drop a tool from the shipped config and this pack fails. The un-gated control
+in :func:`test_a_non_danger_tool_is_not_gated` is what keeps that sweep
+meaningful.
 """
 
 from __future__ import annotations
@@ -21,6 +39,22 @@ import pytest
 from kazma_core.llm_provider import LLMError, LLMResponse, ToolCall
 
 GOLDEN = Path(__file__).resolve().parent / "fixtures" / "eval_pack.json"
+SHIPPED_YAML = Path(__file__).resolve().parents[1] / "kazma.yaml"
+
+
+def shipped_danger_tools() -> set[str]:
+    """The danger list Kazma actually ships, read from ``kazma.yaml``.
+
+    The pack used to synthesize ``require_approval_for`` from the fixture — so
+    it proved the tool worker honours a list it was just handed, not that
+    ``shell_exec`` is on the list a user gets. Reading the shipped file is what
+    makes this an end-to-end claim instead of a tautology.
+    """
+    import yaml
+
+    data = yaml.safe_load(SHIPPED_YAML.read_text(encoding="utf-8")) or {}
+    listed = ((data.get("safety") or {}).get("hitl") or {}).get("require_approval_for")
+    return set(listed or ())
 
 
 def _load_cases() -> list[dict[str, Any]]:
@@ -287,9 +321,23 @@ async def test_eval_pack_case(
             "iteration": 1,
             "thread_id": f"eval-{case['id']}",
         }
+        # Close the loop: gate on the list Kazma ships, and prove this tool is
+        # on it. Handing the worker a fixture-built list only ever proved the
+        # worker can read a list.
+        from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+        shipped = shipped_danger_tools()
+        tool = case["tool"]
+        assert tool in shipped, (
+            f"{tool} is an eval-pack danger case but is not in kazma.yaml "
+            f"safety.hitl.require_approval_for — the shipped config would not gate it"
+        )
+        assert tool in CANONICAL_DANGER_TOOLS, (
+            f"{tool} is an eval-pack danger case but is not in CANONICAL_DANGER_TOOLS"
+        )
         hitl = {
             "enabled": True,
-            "require_approval_for": [case["tool"]],
+            "require_approval_for": sorted(shipped),
         }
 
         def _irq(payload: Any) -> Any:
@@ -359,3 +407,117 @@ async def test_eval_pack_case(
 
     else:
         pytest.fail(f"unknown eval kind: {kind}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Whole-surface danger gate
+#
+# The four `hitl` cases in the fixture are spot checks. They prove the tools
+# the tape happens to demonstrate interrupt; they say nothing about the other
+# fifty-three. This sweeps the entire shipped danger list through the real
+# tool worker, so adding a tool to CANONICAL_DANGER_TOOLS without it actually
+# gating is a failed merge rather than a discovery in production.
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _canonical_danger_tools() -> list[str]:
+    from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+    return sorted(CANONICAL_DANGER_TOOLS)
+
+
+@pytest.mark.eval
+@pytest.mark.parametrize("tool", _canonical_danger_tools())
+@pytest.mark.asyncio
+async def test_every_shipped_danger_tool_interrupts(
+    tool: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every tool Kazma ships as dangerous must interrupt before it runs."""
+    from kazma_core.agent.graph_tool_worker import tool_worker_node
+
+    assert tool in shipped_danger_tools(), (
+        f"{tool} is in CANONICAL_DANGER_TOOLS but not in kazma.yaml "
+        f"safety.hitl.require_approval_for"
+    )
+
+    executed: list[str] = []
+
+    class _Exec:
+        async def execute(self, name: str, arguments: dict) -> dict:
+            executed.append(name)
+            return {"content": "ran", "is_error": False}
+
+    state = {
+        "messages": [{"role": "user", "content": f"run {tool}"}],
+        "tool_calls_pending": [{"id": "c1", "name": tool, "arguments": {}}],
+        "iteration": 1,
+        "thread_id": f"eval-danger-{tool}",
+    }
+
+    def _irq(payload: Any) -> Any:
+        raise RuntimeError("HITL_INTERRUPT")
+
+    monkeypatch.setattr("langgraph.types.interrupt", _irq)
+
+    raised = False
+    try:
+        await tool_worker_node(
+            state,
+            tool_executor=_Exec(),
+            tracer=_NoopTracer(),
+            hitl_config={
+                "enabled": True,
+                "require_approval_for": sorted(shipped_danger_tools()),
+            },
+        )
+    except RuntimeError as exc:
+        raised = "HITL_INTERRUPT" in str(exc)
+
+    assert raised, f"{tool} is shipped as danger but did not interrupt for HITL"
+    assert executed == [], f"{tool} executed before approval"
+
+
+@pytest.mark.eval
+@pytest.mark.asyncio
+async def test_a_non_danger_tool_is_not_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Negative control for the sweep above.
+
+    If ``tool_worker_node`` interrupted on everything, the 57 passing cases
+    would prove nothing at all. A read tool must run straight through.
+    """
+    from kazma_core.agent.graph_tool_worker import tool_worker_node
+
+    assert "file_read" not in shipped_danger_tools(), (
+        "file_read is meant to be the un-gated control for this test"
+    )
+
+    executed: list[str] = []
+
+    class _Exec:
+        async def execute(self, name: str, arguments: dict) -> dict:
+            executed.append(name)
+            return {"content": "contents", "is_error": False}
+
+    def _irq(payload: Any) -> Any:
+        raise RuntimeError("HITL_INTERRUPT")
+
+    monkeypatch.setattr("langgraph.types.interrupt", _irq)
+
+    await tool_worker_node(
+        {
+            "messages": [{"role": "user", "content": "read a file"}],
+            "tool_calls_pending": [
+                {"id": "c1", "name": "file_read", "arguments": {"path": "x.txt"}}
+            ],
+            "iteration": 1,
+            "thread_id": "eval-danger-control",
+        },
+        tool_executor=_Exec(),
+        tracer=_NoopTracer(),
+        hitl_config={
+            "enabled": True,
+            "require_approval_for": sorted(shipped_danger_tools()),
+        },
+    )
+
+    assert executed == ["file_read"], "a read tool must not need approval"

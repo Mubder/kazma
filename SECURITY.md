@@ -138,6 +138,24 @@ Report → Acknowledge → Investigate → Patch → Advisory → Notify
 
 Critical fixes may be backported to older supported versions at our discretion.
 
+## Verifying a release (supply chain)
+
+Every release artifact is signed with **Sigstore** (keyless — there is no
+private key to leak or rotate), carries **SLSA build provenance**, and ships a
+**CycloneDX 1.6 SBOM** generated from the committed lockfile.
+
+```bash
+gh attestation verify kazma-<version>-py3-none-any.whl --repo Mubder/kazma
+```
+
+Full instructions, including signature verification and what these guarantees
+do *not* cover, are in **[docs/SUPPLY_CHAIN.md](docs/SUPPLY_CHAIN.md)**.
+
+Two third-party UI assets are vendored rather than fetched at runtime
+(CodeMirror, MIT; IBM Plex Sans Arabic, OFL) so the interface renders with no
+outbound network. A test fails the build if a template starts loading remote
+script or styles again.
+
 ## Hardening checklist (operator recommendations)
 
 These are **recommended** controls for deployments — not an assertion that every

@@ -980,7 +980,7 @@ class SettingsManager:
     def _parse_skill_meta(self, path: Path) -> dict[str, Any]:
         """Parse SKILL.md frontmatter for metadata."""
         try:
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8")
             meta: dict[str, Any] = {"name": path.parent.name, "version": "", "description": "", "category": "", "author": ""}
             if content.startswith("---"):
                 end = content.find("---", 3)

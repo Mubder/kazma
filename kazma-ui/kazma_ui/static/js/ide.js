@@ -1,8 +1,9 @@
 /* ═══════════════════════════════════════════════════════
    Kazma IDE — Web transport for the transport-agnostic
-   IdeService. File tree, CodeMirror 5 fromTextArea (CDN;
-   textarea still shows the file if the CDN is blocked),
-   save/run/git/grep/swarm.
+   IdeService. File tree, CodeMirror 5 fromTextArea (vendored
+   under static/vendor/codemirror — no CDN, works air-gapped;
+   the textarea still shows the file if the bundle fails to
+   load), save/run/git/grep/swarm.
    All writes/execs flow through /api/ide/* which reuses the
    shared HITL/safety chain — no parallel un-gated path.
    ═══════════════════════════════════════════════════════ */
@@ -73,10 +74,8 @@ function ideApp() {
       this._onWinResize = null;
       try { if (this._lspDiagTimer) clearTimeout(this._lspDiagTimer); } catch (e) {}
       this._lspDiagTimer = null;
-      (this._lspDisposables || []).forEach(function (d) {
-        try { if (d && d.dispose) d.dispose(); } catch (e) {}
-      });
-      this._lspDisposables = [];
+      this._lspAnnotations = [];
+      this._lspBound = false;
       this.lspReady = false;
       try {
         if (_ideCM && typeof _ideCM.toTextArea === 'function') _ideCM.toTextArea();
@@ -138,8 +137,34 @@ function ideApp() {
     // ── Editor: textarea first, CodeMirror if present ──
     _cmTheme() {
       return document.documentElement.getAttribute('data-theme') === 'light'
-        ? 'default'
+        ? 'eclipse'
         : 'nord';
+    },
+
+    /* Indentation guides. CodeMirror 5 ships none, so draw one marker per
+       indent level on each rendered line. Only visible lines fire renderLine,
+       so this stays cheap on a big file. */
+    _installIndentGuides(cm) {
+      var unit = cm.getOption('indentUnit') || 4;
+      // Must track .CodeMirror pre.CodeMirror-line's padding-left in ide.html.
+      var LINE_PAD = 8;
+      cm.on('renderLine', function (instance, line, elt) {
+        var lead = /^[ \t]*/.exec(line.text || '')[0];
+        if (!lead) return;
+        var cols = 0;
+        for (var i = 0; i < lead.length; i++) {
+          cols += lead[i] === '\t' ? unit - (cols % unit) : 1;
+        }
+        var levels = Math.floor(cols / unit);
+        if (levels < 1) return;
+        var charW = instance.defaultCharWidth();
+        for (var l = 0; l < levels; l++) {
+          var guide = document.createElement('span');
+          guide.className = 'cm-indent-guide';
+          guide.style.left = LINE_PAD + l * unit * charW + 'px';
+          elt.appendChild(guide);
+        }
+      });
     },
 
     initEditor() {
@@ -161,12 +186,43 @@ function ideApp() {
           indentUnit: 4,
           tabSize: 4,
           indentWithTabs: false,
+          smartIndent: true,
+          electricChars: true,
           matchBrackets: true,
+          autoCloseBrackets: true,
+          autoCloseTags: true,
           styleActiveLine: true,
+          styleSelectedText: true,
+          showTrailingSpace: true,
+          highlightSelectionMatches: { annotateScrollbar: true, delay: 150 },
+          foldGutter: true,
+          gutters: [
+            'CodeMirror-lint-markers',
+            'CodeMirror-linenumbers',
+            'CodeMirror-foldgutter',
+          ],
+          scrollbarStyle: 'overlay',
+          rulers: [{ column: 100, lineStyle: 'dashed' }],
+          // Sublime bindings: Ctrl-D multi-select, Ctrl-/ comment,
+          // Alt-Up/Down move line, Ctrl-Shift-K delete line.
+          keyMap: 'sublime',
+          extraKeys: {
+            'Ctrl-S': function () { self.save(); },
+            'Cmd-S': function () { self.save(); },
+            'Ctrl-F': 'findPersistent',
+            'Cmd-F': 'findPersistent',
+            'Ctrl-Space': function (cm) { self._complete(cm); },
+            'Alt-G': 'jumpToLine',
+            Tab: function (cm) {
+              if (cm.somethingSelected()) return cm.indentSelection('add');
+              return cm.execCommand('insertSoftTab');
+            },
+          },
           theme: self._cmTheme(),
           mode: 'null',
         });
         _ideCM.setSize('100%', '100%');
+        self._installIndentGuides(_ideCM);
         _ideCM.on('change', function () {
           if (self._settingContent) return;
           var dirty = _ed().getValue() !== self.originalContent;
@@ -175,6 +231,9 @@ function ideApp() {
           if (tab && tab.dirty !== dirty) tab.dirty = dirty;
         });
         self.cmReady = true;
+        // Opt-in and self-disabling: returns immediately unless /api/ide/lsp
+        // reports enabled. Nothing below the editor depends on it.
+        self._bindLsp();
         self._themeObs = new MutationObserver(function () {
           if (_ed()) _ed().setOption('theme', self._cmTheme());
         });
@@ -222,8 +281,16 @@ function ideApp() {
       });
     },
 
-    _cmMode(lang) {
-      return {
+    /* Resolve a CodeMirror mode. The filename wins when we have one: meta.js
+       knows far more extensions than the hand-map below, so Rust, Go, TOML,
+       Dockerfile and friends light up without a table entry each. */
+    _cmMode(lang, path) {
+      var CM = window.CodeMirror;
+      if (path && CM && CM.findModeByFileName) {
+        var hit = CM.findModeByFileName(String(path).split(/[\\/]/).pop());
+        if (hit && hit.mode !== 'null') return hit.mime || hit.mode;
+      }
+      var mapped = {
         python: 'python',
         javascript: 'javascript',
         typescript: 'javascript',
@@ -239,111 +306,108 @@ function ideApp() {
         cpp: 'text/x-c++src',
         java: 'text/x-java',
         csharp: 'text/x-csharp',
-      }[lang] || 'null';
+      }[lang];
+      if (mapped) return mapped;
+      if (lang && CM && CM.findModeByName) {
+        var byName = CM.findModeByName(lang);
+        if (byName && byName.mode !== 'null') return byName.mime || byName.mode;
+      }
+      return 'null';
     },
 
-    // ── LSP (hover / complete / definition / diagnostics) ─────────
+    // ── LSP (completion / definition / diagnostics) ───────────────────────
+    /* Ported from Monaco to CodeMirror when the editor was swapped. The server
+       half is `/api/ide/lsp`; when it reports disabled, `lspReady` stays false
+       and every entry point below degrades to plain-editor behaviour. */
     async _bindLsp() {
-      return;
+      if (this._lspBound) return;
       try {
         var st = await this._get('/api/ide/lsp');
         if (!st || !st.enabled) return;
       } catch (e) {
         return;
       }
+      var cm = _ed();
+      if (!cm) return;
+      var self = this;
       this._lspBound = true;
       this.lspReady = true;
-      this._lspDisposables = this._lspDisposables || [];
-      var langs = ['python', 'javascript', 'typescript', 'go', 'rust', 'json'];
-      langs.forEach(function (lang) {
-        self._lspDisposables.push(monaco.languages.registerCompletionItemProvider(lang, {
-          triggerCharacters: ['.', '_'],
-          provideCompletionItems: function (model, position) {
-            var word = model.getWordUntilPosition(position);
-            return self._lsp('complete', {
-              line: position.lineNumber - 1,
-              character: position.column - 1,
-              prefix: word.word || '',
-            }).then(function (data) {
-              var items = (data && data.items) || [];
-              return {
-                suggestions: items.map(function (it) {
-                  return {
-                    label: it.label,
-                    kind: it.kindId != null ? it.kindId : monaco.languages.CompletionItemKind.Text,
-                    insertText: it.insertText || it.label,
-                    detail: it.detail || '',
-                    range: {
-                      startLineNumber: position.lineNumber,
-                      startColumn: word.startColumn,
-                      endLineNumber: position.lineNumber,
-                      endColumn: word.endColumn,
-                    },
-                  };
-                }),
-              };
-            });
-          },
-        }));
-        self._lspDisposables.push(monaco.languages.registerHoverProvider(lang, {
-          provideHover: function (model, position) {
-            return self._lsp('hover', {
-              line: position.lineNumber - 1,
-              character: position.column - 1,
-            }).then(function (data) {
-              if (!data || !data.hover || !data.hover.contents) return null;
-              return { contents: [{ value: data.hover.contents }] };
-            });
-          },
-        }));
-        self._lspDisposables.push(monaco.languages.registerDefinitionProvider(lang, {
-          provideDefinition: function (model, position) {
-            return self._lsp('definition', {
-              line: position.lineNumber - 1,
-              character: position.column - 1,
-            }).then(function (data) {
-              var locs = (data && data.locations) || [];
-              if (!locs.length) return null;
-              var loc = locs[0];
-              if (self._lspSamePath(loc.path)) {
-                return {
-                  uri: model.uri,
-                  range: new monaco.Range(
-                    loc.line || 1, loc.character || 1,
-                    loc.line || 1, (loc.character || 1) + 1
-                  ),
-                };
-              }
-              return self.open(loc.path).then(function () {
-                if (_ed() && loc.line) {
-                  _ed().revealLineInCenter(loc.line);
-                  _ed().setPosition({ lineNumber: loc.line, column: loc.character || 1 });
-                }
-                return null;
-              });
-            });
-          },
-        }));
-        self._lspDisposables.push(monaco.languages.registerDocumentSymbolProvider(lang, {
-          provideDocumentSymbols: function (model) {
-            return self._lsp('documentSymbol', {}).then(function (data) {
-              var SK = monaco.languages.SymbolKind;
-              var map = { function: SK.Function, method: SK.Method, class: SK.Class };
-              return ((data && data.symbols) || []).map(function (s) {
-                var line = s.line || 1;
-                return {
-                  name: s.name,
-                  detail: s.signature || '',
-                  kind: map[s.kind] || SK.Variable,
-                  range: new monaco.Range(line, 1, line, 1),
-                  selectionRange: new monaco.Range(line, 1, line, 1),
-                };
-              });
-            });
-          },
-        }));
+      this._lspAnnotations = [];
+      // The lint addon owns the gutter markers; we only feed it. lintOnChange
+      // is off because diagnostics arrive from the server on our own debounce.
+      cm.setOption('lint', {
+        lintOnChange: false,
+        getAnnotations: function () { return self._lspAnnotations || []; },
       });
       this._scheduleLspDiagnostics();
+    },
+
+    /* Completion source behind Ctrl-Space. Falls back to CodeMirror's
+       any-word hints when the server is off or returns nothing — a dumb
+       popup beats an empty one. */
+    _complete(cm) {
+      var CM = window.CodeMirror;
+      if (!CM || !CM.showHint || !cm) return;
+      var self = this;
+      var anyword = (CM.hint && CM.hint.anyword) || null;
+      if (!this.lspReady) {
+        if (anyword) CM.showHint(cm, anyword, { completeSingle: false });
+        return;
+      }
+      CM.showHint(cm, function (editor, cb) {
+        var cur = editor.getCursor();
+        var token = editor.getTokenAt(cur);
+        var start = /[\w.]/.test(token.string || '') ? token.start : cur.ch;
+        self._lsp('complete', {
+          line: cur.line,
+          character: cur.ch,
+          prefix: editor.getRange({ line: cur.line, ch: start }, cur),
+        }).then(function (data) {
+          var items = (data && data.items) || [];
+          if (!items.length) return cb(anyword ? anyword(editor) : null);
+          return cb({
+            list: items.slice(0, 100).map(function (it) {
+              return {
+                text: it.insertText || it.label || '',
+                displayText: it.label || it.insertText || '',
+              };
+            }),
+            from: { line: cur.line, ch: start },
+            to: cur,
+          });
+        }).catch(function () {
+          cb(anyword ? anyword(editor) : null);
+        });
+      }, { completeSingle: false, async: true });
+    },
+
+    /* Jump to definition. A same-file target just moves the cursor; anything
+       else goes through `open()` so the tab bar and the read path stay in
+       charge of loading it. */
+    async gotoDefinition() {
+      var cm = _ed();
+      if (!this.lspReady || !cm) return;
+      var cur = cm.getCursor();
+      var data = await this._lsp('definition', { line: cur.line, character: cur.ch });
+      var locs = (data && data.locations) || [];
+      if (!locs.length) return;
+      var loc = locs[0];
+      var pos = {
+        line: Math.max(0, (loc.line || 1) - 1),
+        ch: Math.max(0, (loc.character || 1) - 1),
+      };
+      if (this._lspSamePath(loc.path)) {
+        cm.setCursor(pos);
+        cm.scrollIntoView(pos, 120);
+        cm.focus();
+        return;
+      }
+      if (!loc.path) return;
+      await this.open(loc.path);
+      var opened = _ed();
+      if (!opened) return;
+      opened.setCursor(pos);
+      opened.scrollIntoView(pos, 120);
     },
 
     _lspSamePath(rel) {
@@ -376,29 +440,29 @@ function ideApp() {
     },
 
     async _refreshLspDiagnostics() {
-      if (!this.lspReady || !_ed() || !window.monaco) return;
+      if (!this.lspReady || !_ed()) return;
       var data = await this._lsp('diagnostics', {});
       this._applyLspDiagnostics((data && data.diagnostics) || []);
     },
 
     _applyLspDiagnostics(diags) {
-      if (!_ed() || !window.monaco || !monaco.editor) return;
-      var model = _ed().getModel && _ed().getModel();
-      if (!model) return;
-      var markers = (diags || []).map(function (d) {
-        var line = d.line || 1;
-        var col = d.character || 1;
+      var cm = _ed();
+      var CM = window.CodeMirror;
+      if (!cm || !CM || !CM.Pos) return;
+      this._lspAnnotations = (diags || []).map(function (d) {
+        var line = Math.max(0, (d.line || 1) - 1);
+        var ch = Math.max(0, (d.character || 1) - 1);
         return {
-          severity: monaco.MarkerSeverity.Error,
+          from: CM.Pos(line, ch),
+          to: CM.Pos(line, ch + 8),
           message: d.message || 'error',
+          severity: d.severity === 'warning' ? 'warning' : 'error',
           source: d.source || 'kazma',
-          startLineNumber: line,
-          startColumn: col,
-          endLineNumber: line,
-          endColumn: col + 8,
         };
       });
-      monaco.editor.setModelMarkers(model, 'kazma-lsp', markers);
+      if (cm.getOption('lint') && typeof cm.performLint === 'function') {
+        try { cm.performLint(); } catch (e) { /* ignore */ }
+      }
     },
 
     // ── HTTP helpers ──
@@ -514,7 +578,7 @@ function ideApp() {
         ? tab.lang
         : this._langFromName(tab.path);
       if (_ed() && typeof _ed().setOption === 'function') {
-        try { _ed().setOption('mode', this._cmMode(this.currentLang)); } catch (e) { /* ignore */ }
+        try { _ed().setOption('mode', this._cmMode(this.currentLang, tab.path)); } catch (e) { /* ignore */ }
       }
       this.setContent(tab.content || '');
       this.originalContent = tab.original || '';

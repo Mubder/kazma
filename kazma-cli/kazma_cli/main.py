@@ -81,6 +81,9 @@ def main() -> None:
     elif cmd in ("ask", "acp"):
         _run_ask(cmd, sys.argv[2:])
 
+    elif cmd == "mcp":
+        _run_mcp(sys.argv[2:])
+
     elif cmd in ("--help", "-h", "help"):
         from kazma_cli.banner import _get_version
 
@@ -100,6 +103,7 @@ def main() -> None:
         print("  migrate    Export/import a Kazma installation (cross-machine migration)")
         print("  ask        Run the agent on a prompt (no web server)")
         print("  acp        Agent Client Protocol JSON-RPC on stdio (Zed / JetBrains)")
+        print("  mcp        Serve Kazma's tools over MCP (stdio), HITL-gated")
         print("")
         print("Options:")
         print("  serve [port]  Start server on specified port (default: 9090)")
@@ -581,6 +585,17 @@ def _run_ask(cmd: str, args: list[str]) -> None:
     if cmd == "acp" and "--acp" not in argv:
         argv = ["--acp", *argv]
     sys.exit(ask_run(argv))
+
+
+def _run_mcp(args: list[str]) -> None:
+    """Handle ``kazma mcp`` — Kazma's tools as an MCP server on stdio.
+
+    The inverse of the MCP client: other agents call Kazma, and every
+    danger-tier call goes through the same HITL gate the chat path uses.
+    """
+    from kazma_core.mcp.server import main as mcp_main
+
+    sys.exit(mcp_main(list(args)))
 
 
 def _run_migrate(args: list[str]) -> None:

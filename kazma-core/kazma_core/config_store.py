@@ -1619,7 +1619,7 @@ class ConfigStore:
         if not self._yaml_path.exists():
             return 0
 
-        yaml_text = self._yaml_path.read_text()
+        yaml_text = self._yaml_path.read_text(encoding="utf-8")
         data = yaml.safe_load(yaml_text)
         if not isinstance(data, dict):
             return 0

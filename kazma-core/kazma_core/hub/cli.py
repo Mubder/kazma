@@ -754,7 +754,7 @@ def sign(path: str, secret: str | None) -> None:
 
     # Load manifest
     try:
-        manifest = yaml.safe_load(manifest_path.read_text())
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
             click.echo("Error: invalid manifest format", err=True)
             sys.exit(1)
@@ -783,7 +783,7 @@ def sign(path: str, secret: str | None) -> None:
     # Write into manifest
     manifest["checksum"] = actual_hash
     manifest["signature"] = signature
-    manifest_path.write_text(yaml.dump(manifest, default_flow_style=False, allow_unicode=True, sort_keys=False))
+    manifest_path.write_text(yaml.dump(manifest, default_flow_style=False, allow_unicode=True, sort_keys=False), encoding="utf-8")
 
     click.echo(f"Signed {py_file.name} for skill '{manifest.get('name', '?')}'")
     click.echo(f"  checksum:  {actual_hash[:32]}...")

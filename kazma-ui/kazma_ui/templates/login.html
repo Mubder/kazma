@@ -19,9 +19,10 @@
   <title>Kazma — Login</title>
   <link rel="icon" href="/static/img/favicon.png">
   <link rel="apple-touch-icon" href="/static/img/kazma-icon.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  {# Vendored faces, same as every authenticated page. The Google Fonts link
+     that used to sit here leaked the visitor's IP to a third party before
+     they had even signed in, and render-blocked a local-first login. #}
+  <link rel="stylesheet" href="/static/css/fonts.css?v={{ css_version() }}">
   <link rel="stylesheet" href="/static/css/kazma.css?v={{ css_version() }}">
   <link rel="stylesheet" href="/static/css/kazma.v5.css?v={{ css_version() }}">
   <style>

@@ -21,6 +21,11 @@ on:
 
 permissions:
   contents: write
+  # Keyless Sigstore signing and SLSA provenance both mint an OIDC token for
+  # this workflow run — that identity is what a verifier checks against, and
+  # it is why there is no private key to leak or rotate.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -81,6 +86,63 @@ jobs:
             echo "Created ${TAG}"
           fi
 
+      # ── Supply chain ────────────────────────────────────────────────────
+      # A release that is only a tag asks the operator to trust GitHub's copy
+      # of a zip. Enterprise and gov buyers — the third row of the positioning
+      # table — will not do that, and they are right not to. Everything below
+      # exists so a stranger can verify the artifact was built from this repo,
+      # at this commit, by this workflow, and see exactly what is inside it.
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build wheel + sdist
+        run: |
+          set -euo pipefail
+          uv build --out-dir dist
+          ls -la dist
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          set -euo pipefail
+          # From the lockfile, not the build environment: the lock is the exact
+          # pinned set a `uv sync` installs, so the SBOM describes what the user
+          # actually runs rather than whatever the runner happened to resolve.
+          # --frozen is load-bearing. Without it `uv export` re-resolves and can
+          # rewrite uv.lock mid-release, which would mean the SBOM described a
+          # dependency set that was never committed or reviewed.
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt \
+            -o requirements.lock.txt
+          uvx --from cyclonedx-bom cyclonedx-py requirements requirements.lock.txt \
+            --of JSON -o "dist/kazma-${{ steps.ver.outputs.base }}.cdx.json" \
+            --sv 1.6 --output-reproducible
+          python -c "import json,sys; d=json.load(open(sys.argv[1],encoding='utf-8')); print('SBOM components:', len(d.get('components') or []))" \
+            "dist/kazma-${{ steps.ver.outputs.base }}.cdx.json"
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum kazma-*.whl kazma-*.tar.gz kazma-*.cdx.json > SHA256SUMS
+          cat SHA256SUMS
+
+      # Answers "was this really built from Mubder/kazma at this commit?".
+      # Verify with: gh attestation verify <file> --repo Mubder/kazma
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "dist/kazma-*.whl,dist/kazma-*.tar.gz,dist/kazma-*.cdx.json"
+
+      # Keyless signature bundles (*.sigstore.json) next to each artifact.
+      # Verify with: python -m sigstore verify identity ...
+      - name: Sign artifacts with Sigstore
+        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        with:
+          inputs: |
+            ./dist/kazma-*.whl
+            ./dist/kazma-*.tar.gz
+            ./dist/kazma-*.cdx.json
+            ./dist/SHA256SUMS
+
       - name: Create / update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -95,7 +157,22 @@ jobs:
             NOTES="Kazma **${FULL}** (public base tag ${TAG}).
 
           Display version always embeds the commit id: \`{base}+g{shortsha}\`.
-          Digits are not auto-bumped; change the base in \`pyproject.toml\` by hand when you want a new milestone."
+          Digits are not auto-bumped; change the base in \`pyproject.toml\` by hand when you want a new milestone.
+
+          ### Verifying this release
+
+          Every artifact is signed with Sigstore (keyless — no key to leak) and
+          carries SLSA build provenance. See [docs/SUPPLY_CHAIN.md](https://github.com/Mubder/kazma/blob/main/docs/SUPPLY_CHAIN.md).
+
+          \`\`\`bash
+          gh attestation verify kazma-${{ steps.ver.outputs.base }}-py3-none-any.whl --repo Mubder/kazma
+          sha256sum -c SHA256SUMS
+          \`\`\`
+
+          \`kazma-${{ steps.ver.outputs.base }}.cdx.json\` is a CycloneDX 1.6 SBOM of the locked dependency set."
           fi
-          gh release create "${TAG}" --title "${TAG}" --notes "${NOTES}" || \
-            gh release edit "${TAG}" --notes "${NOTES}" || true
+          gh release create "${TAG}" --title "${TAG}" --notes "${NOTES}" \
+            || gh release edit "${TAG}" --notes "${NOTES}" \
+            || true
+          # --clobber so re-running the workflow replaces assets instead of failing.
+          gh release upload "${TAG}" dist/* --clobber
