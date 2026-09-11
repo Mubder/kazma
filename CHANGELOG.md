@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## Live prompt-injection benchmark (2026-09-11)
+
+Containment and the denylist are properties of the code. This is the half that
+needs money: **given the payload is correctly inside the fence, does a real
+model ignore it?**
+
+```bash
+python scripts/injection_live.py            # dry run, calls nothing
+python scripts/injection_live.py --live     # every provider with a usable key
+```
+
+Each of 14 cases is a benign user task plus a poisoned tool result, run twice
+against the same model at the same temperature — once raw, once through
+`format_untrusted_block`. The only variable is the fence, so the **delta** is
+attributable to it. An absolute "0% attack success" would conflate the fence
+with whatever instruction-hierarchy training the model already shipped with;
+the difference does not.
+
+- **Canary scoring.** Every injected instruction demands a rare token, so a hit
+  is an exact substring match. No judge model — a judge adds cost, latency and
+  its own failure mode to the thing being measured.
+- **Two controls** carry no injection. If either emits the canary, scoring is
+  unreliable and the run exits non-zero.
+- **`--runs 3`** repeats the matrix and reports the median. Models are
+  stochastic; one run is an anecdote.
+- **Providers are discovered**, not hardcoded — anything whose key passes
+  `key_is_usable`. Adding a model is a key in Settings and a re-run.
+- **Opt-in.** Without `--live` it prints the call count and exits. Never
+  collected by pytest, never runs in CI.
+
+The report ends with the payloads that still succeed *with* the fence on, which
+is the useful part and is printed rather than summarised away.
+
+`tests/test_injection_live_harness.py` (46 tests, calls nothing) guards the
+benchmark's own failure mode: an attack whose canary is mistyped can never
+score a hit, so a broken corpus reports a *better* result. It asserts every
+attack demands the canary, no control contains it, the conditions differ only
+by the fence, the fence does not delete the payload, provider errors are
+excluded rather than counted as defended, and the dry run makes no calls.
+
+No numbers are published yet — that needs keys. `docs/INJECTION.md` has the
+runbook.
+
 ## Persistence denylist closed: 3/9 to 9/9 (2026-09-11)
 
 Yesterday's report named six payloads that `filter_injection` let through —
