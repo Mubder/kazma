@@ -206,7 +206,14 @@ async def run_provider(
 
 
 def usable_providers() -> list[tuple[str, str]]:
-    """(name, model) for every provider carrying a key we would actually send."""
+    """(name, model) for every provider we could actually send a request as.
+
+    Resolved through ``get_client_by_provider``, not by reading the stored
+    entry. The stored value is often a ``vault://`` pointer, and a key can also
+    arrive from a ``<PROVIDER>_API_KEY`` environment variable that never
+    touches the provider list at all — checking the raw field misses both and
+    reports "no providers" on a machine that is perfectly able to run.
+    """
     from kazma_core.model_registry import get_model_registry
     from kazma_core.runtime.live_llm import key_is_usable
 
@@ -214,8 +221,15 @@ def usable_providers() -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     for entry in registry.list_providers() if hasattr(registry, "list_providers") else []:
         name = str(entry.get("name") or "")
-        if name and key_is_usable(entry.get("api_key")):
-            out.append((name, str(entry.get("model") or "")))
+        if not name:
+            continue
+        try:
+            client = registry.get_client_by_provider(name)
+        except Exception:
+            continue
+        config = getattr(client, "config", None) if client else None
+        if config is not None and key_is_usable(getattr(config, "api_key", "")):
+            out.append((name, str(getattr(config, "model", "") or "")))
     return out
 
 
