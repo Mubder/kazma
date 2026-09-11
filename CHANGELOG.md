@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Chat's key check now shares one definition of "usable" (2026-09-11)
+
+`sse_chat` had its own `key in ("not-needed", "", None)` test, three lines from
+the runtime's `key_is_usable`. Two definitions of the same idea, and the
+narrower one let real problems through: a masked `****`, a `vault://` pointer,
+the literal string `"None"`, a key wrapped in quotes or carrying a BOM. Each of
+those reached a cloud endpoint as a credential and came back a 401 with a worse
+message than the one this gate exists to give.
+
+Both sites in `sse_chat` now call `key_is_usable`.
+
+The URL half is deliberately *not* consolidated. `_is_cloud_url` and
+`url_is_cloud` genuinely disagree — on scheme-less hosts, on LiteLLM `:4000`,
+on LM Studio `:1234` — and this gate wants the more careful local-port list.
+Swapping it would be a behaviour change wearing a refactor's clothes.
+
 ## Fix — live client resolution was overriding test doubles (2026-09-11)
 
 Follow-up to `b1c36f76`. Resolving the LLM client live per call was the right
