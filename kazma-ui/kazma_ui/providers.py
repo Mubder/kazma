@@ -221,8 +221,8 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         """Run a non-destructive health check against the provider's /models endpoint.
 
         Optional JSON body ``{"api_key": "..."}`` tests the typed key (modal
-        Test) instead of the stored one. Empty POST body keeps the old
-        list-row Test behaviour. Masked ``****`` placeholders are not keys.
+        Test) instead of the stored one. Empty or masked ``****`` means
+        "use the stored key" — the edit field is left blank on purpose.
         """
         registry = get_model_registry()
         provider = registry.get_provider(name)
@@ -239,13 +239,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             if isinstance(body, dict):
                 typed_key = _sanitize_api_key(str(body.get("api_key") or ""))
         if typed_key and _is_masked_placeholder(typed_key):
-            return {
-                "success": False,
-                "error": (
-                    "The field still has the masked **** value — that is not "
-                    "the key. Clear it and paste the full key, then Test again."
-                ),
-            }
+            typed_key = ""
         if typed_key:
             provider = dict(provider)
             provider["api_key"] = typed_key
@@ -294,11 +288,15 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         base_url = str(provider.get("base_url", "")).rstrip("/")
         api_key = _sanitize_api_key(str(provider.get("api_key", "") or ""))
         if api_key and _is_masked_placeholder(api_key):
+            api_key = ""
+        local_names = {"ollama", "lm-studio", "lmstudio", "local"}
+        if not api_key and name.lower() not in local_names:
             return {
                 "success": False,
                 "error": (
-                    "Stored key looks masked (****). Paste the full API key "
-                    "into the provider field and Test again."
+                    "No API key stored for this provider. Paste the full key "
+                    "into the field (leave blank only when a key is already saved) "
+                    "and Test again."
                 ),
             }
         if not base_url:

@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — provider Test treated **** as a hard error (2026-09-11)
+
+The edit field is pre-filled with a masked `****xxxx` for any saved
+provider. Test now treats blank/**** as "use the stored key" and does
+not put the dots into the input. Paste a full key only to replace it.
+
 ## Fix — provider Test 401 on a brand-new key (2026-09-11)
 
 DeepSeek (and other OpenAI-compatible vendors) 401 with
