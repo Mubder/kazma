@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Fix — the IDE editor showed the agent's view of a file, not the file (2026-09-11)
+
+Opening any file in the web IDE put this at the top of the buffer:
+
+```
+[ALREADY READ THIS TURN — file_read(...). The content below is IDENTICAL ...]
+1|#!/usr/bin/env python3
+2|"""Kazma serve script ..."""
+```
+
+`IdeService.read_file` returned `file_read` tool output verbatim. `file_read`
+is LLM-facing and reformats deliberately — a `"{LINE_NUM}|"` prefix on every
+line so the model can cite them, and a per-turn dedup banner in place of the
+content on a repeat read. Correct for a model, ruinous for an editor.
+
+The visible symptom was cosmetic. The real one was not: **Save writes the
+buffer back**, so saving a file opened this way would have written the line
+numbers and the banner over the user's source. Switching tabs and back was
+enough to trigger the dedup variant, where the body is replaced by prose.
+
+`read_file` now reads bytes directly, keeping every check the tool applied —
+`resolve()` for symlink-aware containment and `check_path_access` for workspace
+scope and path grants. Writes are untouched and still go through `file_write`
+and its HITL gate. Added: an explicit UTF-8 decode (never the platform locale),
+`errors="replace"` so one bad byte costs a glyph rather than the whole open, a
+binary-file refusal instead of decoding a PNG into a text buffer, and a 2 MB
+editor cap. CRLF is preserved byte-for-byte — silently converting line endings
+would make every save a whole-file diff.
+
+Present since `5bbc81b3` (2026-07-15), when the web IDE was built. Found by
+opening `serve.py` in the live IDE, not by a test; `tests/test_ide_read_raw.py`
+now covers all of it.
+
 ## `kazma mcp` — Kazma's tools, with the gate, for any agent (2026-09-11)
 
 Point Claude Desktop, an editor, or another agent at `kazma mcp` and it can
