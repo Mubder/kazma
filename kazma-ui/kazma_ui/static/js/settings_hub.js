@@ -817,7 +817,11 @@
                     if (typeof errMsg === 'object') errMsg = JSON.stringify(errMsg);
                     throw new Error(errMsg);
                 }
-                const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, { method: 'POST' });
+                const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    body: JSON.stringify({ api_key: String(temp.api_key || '') }),
+                });
                 const result = await resp.json();
                 let success = !!result.success;
                 let errorMsg = result.error || result.detail || (resp.ok ? null : `HTTP ${resp.status}`);

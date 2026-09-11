@@ -13,7 +13,7 @@ import time
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from kazma_core.config_store import ConfigStore, is_vault_ref
 from kazma_core.model_registry import get_model_registry
 
@@ -73,6 +73,14 @@ def _is_masked_placeholder(value: str) -> bool:
     if value == "***" or value == "****" or "****" in value:
         return True
     return False
+
+
+def _sanitize_api_key(raw: str) -> str:
+    """Strip BOM, whitespace, and wrapping quotes from a pasted API key."""
+    key = (raw or "").replace("\ufeff", "").strip()
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in {'"', "'"}:
+        key = key[1:-1].strip()
+    return key
 
 
 def _is_secret_key(key: str) -> bool:
@@ -182,6 +190,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         """
         registry = get_model_registry()
         data = req.model_dump()
+        data["api_key"] = _sanitize_api_key(str(data.get("api_key") or ""))
 
         if _is_masked_placeholder(data.get("api_key", "")):
             existing = registry.get_provider(data["name"])
@@ -208,12 +217,38 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         return {"status": "ok"}
 
     @router.post("/api/providers/{name}/test", response_model=ProviderTestResponse)
-    async def test_provider(name: str) -> dict[str, Any]:
-        """Run a non-destructive health check against the provider's /models endpoint."""
+    async def test_provider(name: str, request: Request) -> dict[str, Any]:
+        """Run a non-destructive health check against the provider's /models endpoint.
+
+        Optional JSON body ``{"api_key": "..."}`` tests the typed key (modal
+        Test) instead of the stored one. Empty POST body keeps the old
+        list-row Test behaviour. Masked ``****`` placeholders are not keys.
+        """
         registry = get_model_registry()
         provider = registry.get_provider(name)
         if not provider:
             return {"success": False, "error": f"Provider '{name}' not found"}
+
+        typed_key = ""
+        ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+        if ctype == "application/json":
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict):
+                typed_key = _sanitize_api_key(str(body.get("api_key") or ""))
+        if typed_key and _is_masked_placeholder(typed_key):
+            return {
+                "success": False,
+                "error": (
+                    "The field still has the masked **** value — that is not "
+                    "the key. Clear it and paste the full key, then Test again."
+                ),
+            }
+        if typed_key:
+            provider = dict(provider)
+            provider["api_key"] = typed_key
 
         if name.lower() == "google":
             # Test Google Provider (either AI Studio or Vertex AI)
@@ -257,7 +292,15 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 return {"success": False, "error": f"Google Provider test failed: {e}"}
 
         base_url = str(provider.get("base_url", "")).rstrip("/")
-        api_key = str(provider.get("api_key", ""))
+        api_key = _sanitize_api_key(str(provider.get("api_key", "") or ""))
+        if api_key and _is_masked_placeholder(api_key):
+            return {
+                "success": False,
+                "error": (
+                    "Stored key looks masked (****). Paste the full API key "
+                    "into the provider field and Test again."
+                ),
+            }
         if not base_url:
             return {"success": False, "error": "No base URL configured"}
 
@@ -312,10 +355,17 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         "latency_ms": latency,
                         "error": f"Cannot connect to {base_url} (connection failed)",
                     }
+                hint = ""
+                if last_status == 401:
+                    hint = (
+                        "Provider rejected the key Kazma sent (401). "
+                        "Paste the full key over the **** dots — Test does "
+                        "not invent a new key from the dashboard. "
+                    )
                 return {
                     "success": False,
                     "latency_ms": latency,
-                    "error": f"HTTP {last_status}: {last_body}",
+                    "error": f"{hint}HTTP {last_status}: {last_body}",
                 }
         except httpx.ConnectError:
             registry.set_provider_health(name, "down")

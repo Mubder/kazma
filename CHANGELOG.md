@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Fix — provider Test 401 on a brand-new key (2026-09-11)
+
+DeepSeek (and other OpenAI-compatible vendors) 401 with
+`Authentication Fails, Your api key: ****xxxx is invalid` when the
+**string Kazma sent** is wrong — a newly created dashboard key is not
+enough if Test never received it.
+
+- Nested `providers.list[].api_key` values each get their own vault slot
+  (they used to share `cfg:providers.list.api_key`, last write wins).
+- Modal Test sends the typed key in the POST body. A still-masked `****`
+  field is rejected instead of re-testing the old stored key.
+- Pasted keys are stripped of quotes/whitespace; the key input is
+  `autocomplete=off`.
+
 ## 0.11.0 Hands (2026-09-10)
 
 Public base **0.10.0 → 0.11.0**. Display remains `{base}+gSHORTSHA`.
