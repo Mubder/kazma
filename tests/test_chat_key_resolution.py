@@ -176,3 +176,49 @@ def test_the_placeholder_key_still_counts_as_missing(
         )
         == "No API key configured"
     )
+
+
+def test_a_local_provider_with_no_key_is_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``not-needed`` against a LOCAL url is a working config, not a broken one.
+
+    Ollama and LM Studio need no credential, and that placeholder is what their
+    profile carries. An earlier version of this fix treated any unusable-looking
+    key as stale and swapped in the registry's active profile — which points at
+    a cloud provider — and broke local chat outright. Caught by
+    ``test_model_selection_pipeline``; kept here because this file is where the
+    fallback rule lives.
+    """
+    # Keyless cloud registry on purpose: that is what the real machine's active
+    # profile looked like when this regression fired. If the fallback wrongly
+    # engages, the local provider is swapped for this and the gate trips — which
+    # is what makes this test discriminating rather than decorative.
+    registry = _Registry(api_key="")
+
+    class _LocalProvider:
+        def __init__(self) -> None:
+            self.config = _Config(
+                base_url="http://localhost:11434/v1", api_key="not-needed"
+            )
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry", lambda: registry
+    )
+    router = create_sse_chat_router(
+        graph=None,
+        llm_provider=_LocalProvider(),
+        llm_provider_getter=_LocalProvider,
+    )
+    app = FastAPI()
+    app.include_router(router)
+
+    resp = TestClient(app).post(
+        "/api/chat/stream", json={"message": "say OK", "session_id": "t-local"}
+    )
+
+    # Absence of the gate is the whole assertion. `registry.calls` is not
+    # checked: the patch here is module-global, and the request legitimately
+    # reaches the registry further downstream, so counting calls would assert
+    # something this test does not mean.
+    assert "No API key configured" not in resp.text
