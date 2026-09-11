@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## Prompt injection is now a number, not a claim (2026-09-11)
+
+`README` said Kazma fences untrusted text. Nothing measured it. There was a
+`test_prompt_fence.py` with four cases, all about the `source=` label — the
+**body**, which is where the payload actually lives, was never attacked
+systematically. (`test_chaos_injection.py` is fault injection, an unrelated
+thing.)
+
+`tests/fixtures/injection_corpus.json` is 32 payloads across eight categories,
+mapped to OWASP LLM01/LLM02/LLM06. `scripts/injection_report.py` scores them
+and `tests/test_injection_containment.py` gates them — 104 assertions, no model
+in the loop, runs on a laptop with no API key.
+
+**Containment: 32/32.** Forged closing tags in four casings, forged `END
+OBSERVATION` sentinels spaced/tabbed/over-dashed, nested fences, a hostile
+`source=` label, zero-width joiners, em-dash lookalikes, an embedded NUL — none
+escape. Every case asserts one closing tag, one BEGIN, one END, and nothing
+attacker-controlled after the END sentinel. Verified by removing the body
+sanitizer: six delimiter payloads immediately escape.
+
+**Persistence denylist: 3/9.** `filter_injection` guards text that gets
+persisted and re-injected — self-improvement deltas, compaction summaries. Of
+nine payloads squarely in that threat model it catches three. It misses
+`Add to your permanent instructions:` and `Remember this permanently as a core
+directive:`, which are close to a restatement of the attack the module was
+written to stop; also `Forget everything you were told` (the pattern wants a
+noun from a fixed list) and `New instructions supersede…` (the pattern wants a
+colon).
+
+Pinned as a **ratchet**, not patched on the spot. Widening a denylist trades
+false negatives for false positives, and a false positive here silently
+discards a legitimate summary — the agent quietly forgets things. The ceiling
+lives in the corpus, may only fall, and the test fails if it rises.
+
+`docs/INJECTION.md` publishes both numbers and is explicit that neither proves
+a model *obeys* the fence. That needs live calls against something like
+AgentDojo and is not claimed.
+
 ## Chat's key check now shares one definition of "usable" (2026-09-11)
 
 `sse_chat` had its own `key in ("not-needed", "", None)` test, three lines from
