@@ -45,6 +45,7 @@ from kazma_ui.sse_chat._helpers import (  # noqa: F401
     _module_store,
     _user_facing_reply,
 )
+from kazma_core.runtime.live_llm import key_is_usable as _key_is_usable
 from kazma_ui.sse_chat._persistence import (  # noqa: F401
     _checkpoint_backfill_unanswered,
     _persist_detached_reply,
@@ -582,9 +583,19 @@ def create_sse_chat_router(
         # none. And "not-needed" is the correct, working key for a *local*
         # provider (Ollama, LM Studio) — treating that as broken and swapping in
         # the active cloud profile breaks local chat outright.
+        # `key_is_usable` is the one definition of "safe to send to a cloud
+        # endpoint" (runtime/live_llm). It catches what a hand-rolled
+        # `in ("", "not-needed")` misses: a masked "***", a `vault://` pointer,
+        # the string "None", and keys carrying a BOM or wrapping quotes. Two
+        # definitions of usable, three lines apart, is how the last divergence
+        # started.
+        #
+        # The URL test stays `_is_cloud_url`: it and `url_is_cloud` genuinely
+        # disagree (scheme-less hosts, LiteLLM :4000, LM Studio :1234), and the
+        # local-service port list here is the more careful one for this gate.
         _needs_registry = bool(requested_model) or (
             llm_provider is not None
-            and _mounted_key in ("", "not-needed")
+            and not _key_is_usable(_mounted_key)
             and _is_cloud_url(_mounted_url)
         )
         if _needs_registry:
@@ -608,7 +619,10 @@ def create_sse_chat_router(
         _cur_url = (
             getattr(llm_provider, "config", None) and getattr(llm_provider.config, "base_url", "")
         ) or _active_profile.get("base_url", "")
-        if _cur_key in ("not-needed", "", None) and _is_cloud_url(_cur_url):
+        # Same one definition as the fallback trigger above. A masked "***" or
+        # a `vault://` pointer reaching a cloud endpoint is a 401 with a worse
+        # message than this one; refuse it here instead.
+        if not _key_is_usable(_cur_key) and _is_cloud_url(_cur_url):
             _help_msg = (
                 "⚠️ No API key configured for "
                 f"{_cur_url}. "

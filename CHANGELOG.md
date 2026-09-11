@@ -1,5 +1,126 @@
 # CHANGELOG
 
+## Persistence denylist closed: 3/9 to 9/9 (2026-09-11)
+
+Yesterday's report named six payloads that `filter_injection` let through —
+text that gets persisted and re-injected into future system prompts. Two of
+them were near-restatements of the attack `prompt_fence` was written to stop:
+`Add to your permanent instructions:` and `Remember this permanently as a core
+directive:`. All six are now caught.
+
+The patterns are deliberately narrow and anchor on *directive framing*, never a
+bare verb:
+
+- `forget everything you were (told|given|instructed)` — not bare "forget
+  everything", which a real summary says.
+- `new (instructions|rules) (supersede|override|replace)` — the old pattern
+  needed a colon straight after the noun.
+- `system (prompt|message) (update|override|revision)` — the update word must
+  directly follow the noun, so "updated the system prompt in Settings" is fine.
+- `remember … as a (core|permanent|standing) (directive|rule)` — the framing is
+  required, so "remember that the meeting is Tuesday" is fine.
+- `(add|append|write) to your … (instructions|directives|persona)`.
+- A forged compliance turn: an assistant line that agrees *and then* promises to
+  comply/obey/ignore. Explicitly **not** a general "looks like a transcript"
+  rule — a compaction summary contains `User: … Assistant: …` constantly, and
+  blocking that shape would stop the agent remembering its own conversations.
+
+**The counterweight is the real work.** A false positive here is silent: a
+legitimate summary is dropped, nothing errors, the agent just forgets. So the
+corpus gained **17 control cases** — real summaries sitting one word from a
+deny pattern ("forget the old deadline", "Assistant: Understood, I will look
+into the failing test", "updated the system prompt in Settings", "add to your
+calendar", "Remember that the board meeting is Tuesday"). All 17 stay storable,
+and each is now a test. Widening a pattern until one trips is not an
+improvement.
+
+Corpus 32 → 48. Containment stays a hard gate at 48/48. The denylist ceiling
+drops 6 → 0: removing any single pattern now fails the build and names the
+payload that regressed.
+
+## Prompt injection is now a number, not a claim (2026-09-11)
+
+`README` said Kazma fences untrusted text. Nothing measured it. There was a
+`test_prompt_fence.py` with four cases, all about the `source=` label — the
+**body**, which is where the payload actually lives, was never attacked
+systematically. (`test_chaos_injection.py` is fault injection, an unrelated
+thing.)
+
+`tests/fixtures/injection_corpus.json` is 32 payloads across eight categories,
+mapped to OWASP LLM01/LLM02/LLM06. `scripts/injection_report.py` scores them
+and `tests/test_injection_containment.py` gates them — 104 assertions, no model
+in the loop, runs on a laptop with no API key.
+
+**Containment: 32/32.** Forged closing tags in four casings, forged `END
+OBSERVATION` sentinels spaced/tabbed/over-dashed, nested fences, a hostile
+`source=` label, zero-width joiners, em-dash lookalikes, an embedded NUL — none
+escape. Every case asserts one closing tag, one BEGIN, one END, and nothing
+attacker-controlled after the END sentinel. Verified by removing the body
+sanitizer: six delimiter payloads immediately escape.
+
+**Persistence denylist: 3/9.** `filter_injection` guards text that gets
+persisted and re-injected — self-improvement deltas, compaction summaries. Of
+nine payloads squarely in that threat model it catches three. It misses
+`Add to your permanent instructions:` and `Remember this permanently as a core
+directive:`, which are close to a restatement of the attack the module was
+written to stop; also `Forget everything you were told` (the pattern wants a
+noun from a fixed list) and `New instructions supersede…` (the pattern wants a
+colon).
+
+Pinned as a **ratchet**, not patched on the spot. Widening a denylist trades
+false negatives for false positives, and a false positive here silently
+discards a legitimate summary — the agent quietly forgets things. The ceiling
+lives in the corpus, may only fall, and the test fails if it rises.
+
+`docs/INJECTION.md` publishes both numbers and is explicit that neither proves
+a model *obeys* the fence. That needs live calls against something like
+AgentDojo and is not claimed.
+
+## Chat's key check now shares one definition of "usable" (2026-09-11)
+
+`sse_chat` had its own `key in ("not-needed", "", None)` test, three lines from
+the runtime's `key_is_usable`. Two definitions of the same idea, and the
+narrower one let real problems through: a masked `****`, a `vault://` pointer,
+the literal string `"None"`, a key wrapped in quotes or carrying a BOM. Each of
+those reached a cloud endpoint as a credential and came back a 401 with a worse
+message than the one this gate exists to give.
+
+Both sites in `sse_chat` now call `key_is_usable`.
+
+The URL half is deliberately *not* consolidated. `_is_cloud_url` and
+`url_is_cloud` genuinely disagree — on scheme-less hosts, on LiteLLM `:4000`,
+on LM Studio `:1234` — and this gate wants the more careful local-port list.
+Swapping it would be a behaviour change wearing a refactor's clothes.
+
+## Fix — live client resolution was overriding test doubles (2026-09-11)
+
+Follow-up to `b1c36f76`. Resolving the LLM client live per call was the right
+fix; it also silently replaced clients the caller had deliberately supplied.
+Five tests went red across three suites, and one of them tried to POST to the
+`custom` provider whose `base_url` has no scheme.
+
+`resolve_live_client` documented that it leaves a test mock alone, but the
+guard was a bare `isinstance(obj, LLMProvider)` — and `MagicMock(spec=
+LLMProvider)` sets `__class__`, so it *passes* isinstance. `_is_real_provider`
+now checks `unittest.mock` first, which is what the docstring already claimed.
+The swap still happens for genuine clients; that half is untouched.
+
+Two test-side problems surfaced alongside it, both real:
+
+- `tests/unit/test_agent.py` and `tests/integration/test_agent_uses_graph.py`
+  patched `chat` on a single instance. The graph resolves its client per call,
+  so the patch was discarded and the call escaped to a real provider. Patch the
+  class instead.
+- Those same tests patched `chat` while `invoke_llm_chat` prefers
+  `chat_stream` whenever streaming is on — so the mock was bypassed even
+  before live resolution existed. They now set `KAZMA_LLM_STREAM=0`, the same
+  switch `test_eval_pack` uses.
+
+Unrelated, found in the same sweep: `AgentConfig.version` was the literal
+`"0.10.0"` and went stale at the 0.11 bump, so the agent reported a version the
+product had not been on for a release. It derives from `get_base_version()`
+now — the test asserting this had been failing and saying so.
+
 ## Fix — DeepSeek 401 was a stale graph client, not a bad key (2026-09-11)
 
 The operator's DeepSeek key was valid the entire time. The live ledger on

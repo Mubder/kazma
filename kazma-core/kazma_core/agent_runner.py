@@ -51,12 +51,28 @@ MAX_ITERATIONS = 10
 # ---------------------------------------------------------------------------
 
 
+def _default_version() -> str:
+    """Public base version, e.g. ``0.11.0``. Falls back rather than raising."""
+    try:
+        from kazma_core.version import get_base_version
+
+        return str(get_base_version())
+    except Exception:  # pragma: no cover - version lookup is best-effort
+        from kazma_core.version import FALLBACK_BASE_VERSION
+
+        return FALLBACK_BASE_VERSION
+
+
 @dataclass
 class AgentConfig:
     """Configuration loaded from kazma.yaml."""
 
     name: str = "kazma"
-    version: str = "0.10.0"
+    # Derived, never a literal. This was hardcoded "0.10.0" and silently went
+    # stale when the public base moved to 0.11.0 — the banner and the /api
+    # version then disagreed with the product for a whole release. The base
+    # is already resolved from pyproject by kazma_core.version; read it.
+    version: str = field(default_factory=lambda: _default_version())
     language: str = "ar"
     rtl: bool = True
     default_model: str = "gpt-4o-mini"

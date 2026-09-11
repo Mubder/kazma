@@ -138,6 +138,28 @@ Report → Acknowledge → Investigate → Patch → Advisory → Notify
 
 Critical fixes may be backported to older supported versions at our discretion.
 
+## Prompt injection — measured, not asserted
+
+Untrusted text (web, tool results, MCP output, skill bodies) is wrapped in a
+labelled data fence before it reaches a model. That claim is scored against an
+adversarial corpus, with no model in the loop:
+
+```bash
+python scripts/injection_report.py
+```
+
+**48/48 containment** — no corpus payload can forge the fence's delimiters and
+place text outside it. A hard gate; any escape fails the build.
+
+**9/9 persistence denylist** — every payload whose purpose is to plant a
+standing directive in a future system prompt is refused. Balanced by 17 control
+cases: real summaries that sit one word from a deny pattern and must stay
+storable, because a false positive here silently makes the agent forget. See
+**[docs/INJECTION.md](docs/INJECTION.md)**.
+
+Neither number proves a model *obeys* the fence — that needs live calls and is
+not claimed. The doc says so in as many words.
+
 ## Verifying a release (supply chain)
 
 Every release artifact is signed with **Sigstore** (keyless — there is no

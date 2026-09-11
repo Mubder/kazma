@@ -222,3 +222,34 @@ def test_a_local_provider_with_no_key_is_left_alone(
     # reaches the registry further downstream, so counting calls would assert
     # something this test does not mean.
     assert "No API key configured" not in resp.text
+
+
+@pytest.mark.parametrize(
+    ("label", "key"),
+    [
+        ("masked placeholder", "****abcd"),
+        ("vault pointer", "vault://cfg/providers/deepseek/api_key"),
+        ("stringified None", "None"),
+        ("quoted empty", '""'),
+    ],
+)
+def test_an_unsendable_key_is_caught_not_sent(
+    label: str, key: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """These all used to read as "a key is present" and get sent to a cloud API.
+
+    The gate was `key in ("not-needed", "", None)`, so a masked `****`, a
+    `vault://` pointer or the literal string "None" sailed through and became a
+    401 with a worse message than this one. It now shares `key_is_usable` with
+    the rest of the runtime, which is the point of having one definition.
+    """
+    registry = _Registry(api_key=key)
+    assert (
+        _key_error(
+            {"message": "say OK", "session_id": f"t-{abs(hash(key))}"},
+            registry,
+            "",
+            monkeypatch,
+        )
+        == "No API key configured"
+    ), f"{label} was treated as a usable credential"
