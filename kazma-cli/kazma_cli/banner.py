@@ -125,7 +125,7 @@ def _load_config(project_root: Path | None = None) -> dict[str, Any]:
     try:
         import yaml
 
-        return yaml.safe_load(config_path.read_text()) or {}
+        return yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     except Exception:
         return {}
 

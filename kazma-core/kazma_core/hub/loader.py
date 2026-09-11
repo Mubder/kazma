@@ -225,7 +225,7 @@ class SkillLoader:
             try:
                 actual_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
                 import yaml
-                manifest = yaml.safe_load(manifest_path.read_text())
+                manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
                 if not isinstance(manifest, dict):
                     manifest = {}
                 stored_hash = manifest.get("checksum", "")

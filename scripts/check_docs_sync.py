@@ -17,7 +17,7 @@ def check_no_services_py_facade() -> list[str]:
     for doc_file in ["architecture.md", "README.md"]:
         path = Path(doc_file)
         if path.exists():
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8")
             # Look for claims that services.py facade EXISTS (not that it was removed)
             if "services.py" in content and "facade" in content.lower():
                 # Check if it's a positive claim (facade exists) vs negative (no facade)

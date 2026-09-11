@@ -1,5 +1,84 @@
 # CHANGELOG
 
+## Honesty pack — the danger gate now proves the shipped config (2026-09-11)
+
+The pack's HITL cases built their own `require_approval_for` from the fixture
+and then asserted that tool interrupts. That proves the tool worker can read a
+list it was just handed; it does **not** prove `shell_exec` is on the list a
+user actually gets — which is the claim the pack is published under.
+
+The danger cases now gate on `kazma.yaml` `safety.hitl.require_approval_for`,
+read from the shipped file, and assert the tool is present in both that and
+`CANONICAL_DANGER_TOOLS`. Remove a tool from the shipped config and the pack
+fails (verified by removing `shell_exec`: two cases go red).
+
+The four fixture cases were also only ever spot checks on the tools the tape
+demonstrates. `test_every_shipped_danger_tool_interrupts` now sweeps all 57
+entries in `CANONICAL_DANGER_TOOLS` through the real `tool_worker_node`, so a
+tool added to the danger list without actually gating is a failed merge rather
+than a production discovery. `test_a_non_danger_tool_is_not_gated` is the
+negative control that keeps the sweep meaningful — if the worker interrupted
+on everything, 57 green cases would mean nothing.
+
+`python scripts/eval_pack.py` still exits 0: **76 passed**, up from 18.
+
+The module docstring now states plainly what the pack does and does not prove
+— the model is scripted, so this is evidence about the harness, not about a
+live model. That gap is real and still open.
+
+## IDE — a real code editor, vendored and offline (2026-09-11)
+
+The editor now reads like an editor: indentation guides, a fold gutter,
+bracket matching and auto-close, active-line highlight with an accented
+line number, selection-match highlighting, a 100-column ruler, trailing
+whitespace marks, overlay scrollbars and Sublime keybindings (`Ctrl-D`,
+`Ctrl-/`, `Alt-↑/↓`). `Ctrl-S` saves, `Ctrl-F` searches, `Ctrl-Space`
+completes. Language is resolved from the filename via CodeMirror's mode
+metadata, so Rust, Go, TOML and Dockerfile highlight without a table entry.
+
+**CodeMirror is now vendored**, not fetched from cdnjs. `ide.html` was the
+only page in the UI that loaded remote script, with no integrity hashes — a
+self-hosted agent must render a file on a box with no route to the internet.
+One 454 KB bundle under `static/vendor/codemirror/`, rebuilt by
+`python scripts/vendor_codemirror.py`. The `<textarea>` fallback still shows
+the file if the bundle fails to load.
+
+`login.html` was also still pulling faces from Google Fonts — the one page
+every user hits before signing in — despite `fonts.css` existing to give the
+UI zero external font requests. It now uses the vendored faces.
+
+## Fix — the IDE's language server was dead code (2026-09-11)
+
+Replacing Monaco with CodeMirror left ~150 lines calling `monaco.languages.*`
+and `monaco.editor.setModelMarkers` behind `if (!window.monaco) return`
+guards, and `_bindLsp()` opened with an unconditional `return`. Nothing threw;
+completion, go-to-definition and diagnostics silently did nothing while the
+UI still offered them.
+
+Ported to CodeMirror: completion through `show-hint` (falling back to
+any-word when the server has nothing), go-to-definition that moves the cursor
+for same-file targets and opens a tab otherwise, and diagnostics rendered in
+the lint gutter. Still opt-in — `/api/ide/lsp` reporting disabled leaves every
+entry point a no-op.
+
+## Fix — config was decoded in the machine's locale (2026-09-11)
+
+`ConfigStore` read `kazma.yaml` with a bare `read_text()`, so Python used the
+platform encoding. On a cp1252 host that does not raise — it silently
+mis-decodes the em-dashes and Arabic in that file and seeds the mojibake into
+the store, and seeded keys are never overwritten afterwards, so first run on a
+non-UTF-8 box corrupts config permanently. `hub/cli.py` had the mirror bug on
+the write side: `yaml.dump(..., allow_unicode=True)` straight into a
+locale-encoded `write_text()`, which *does* raise on Arabic.
+
+Thirteen call sites across `kazma-core`, `kazma-cli` and `scripts` now pass
+`encoding="utf-8"` explicitly.
+
+`tests/test_editor_assets_offline.py` locks all of the above: no template may
+load remote script or styles, `ide.js` may not reference Monaco, the vendored
+bundle must be present with its licence, and no shipped module may read or
+write a file in the platform locale.
+
 ## Fix — chat pinned a keyless OpenAI model over a working DeepSeek key (2026-09-11)
 
 `get_client()` now falls back to a provider that actually has a key

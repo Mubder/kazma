@@ -4,24 +4,14 @@
 {% block page_title %}{{ t('ide.title') }}{% endblock %}
 
 {% block head %}
-  {# CodeMirror 5 fromTextArea: file bytes live in the textarea first.
-     If the CDN is blocked, the textarea still shows the file. Monaco is gone. #}
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/nord.min.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/xml/xml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/css/css.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/htmlmixed/htmlmixed.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/yaml/yaml.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/shell/shell.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/sql/sql.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/clike/clike.min.js"></script>
+  {# CodeMirror 5 fromTextArea: file bytes live in the textarea first, so the
+     file is readable even if the bundle fails to load.
+
+     The bundle is VENDORED, not fetched from a CDN — a self-hosted agent has to
+     work on a box with no route to the internet. Rebuild with
+     `python scripts/vendor_codemirror.py`; see static/vendor/codemirror/LICENSE. #}
+  <link rel="stylesheet" href="/static/vendor/codemirror/codemirror.bundle.css?v={{ css_version() }}">
+  <script src="/static/vendor/codemirror/codemirror.bundle.js?v={{ js_version() }}"></script>
   <style>
     [x-cloak] { display: none !important; }
     .ide-container { width: 100%; max-width: 100%; margin: 0; padding: 0 1px; }
@@ -33,11 +23,111 @@
     .ide-tree:hover, .ide-main > .card:hover, .ide-chat:hover { transform: none !important; }
     .ide-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; gap: 12px; }
     .ide-editor-wrap { flex: 1 1 0; min-height: 420px; height: min(62vh, 720px); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); overflow: hidden; background: var(--bg-deep); position: relative; }
-    .ide-fallback { width: 100%; height: 100%; min-height: 420px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: Consolas, 'Courier New', monospace; font-size: 14px; line-height: 1.55; padding: 10px 12px 10px 16px; box-sizing: border-box; tab-size: 4; }
-    .ide-editor-wrap .CodeMirror { height: 100%; font-size: 14px; line-height: 1.55; font-family: Consolas, 'Courier New', monospace; background: var(--bg-deep); }
-    .ide-editor-wrap .CodeMirror-gutters { background: var(--bg-deep); border-right: 1px solid var(--border-subtle); }
-    .ide-editor-wrap .CodeMirror-scroll { background: var(--bg-deep); }
-    .CodeMirror-linenumber { padding: 0 8px 0 4px; color: var(--text-muted); }
+    /* ── Editor surface ─────────────────────────────────────────────────────
+       One font stack and one line-height shared by the textarea fallback and
+       CodeMirror, so swapping between them does not reflow the file.
+       `--ide-cm-*` are the only knobs; everything below reads them. */
+    .ide-editor-wrap {
+      --ide-cm-font: 'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Fira Code',
+                     'SF Mono', 'Consolas', 'Liberation Mono', monospace;
+      --ide-cm-size: 13.5px;
+      --ide-cm-line: 1.6;
+      --ide-cm-gutter: color-mix(in srgb, var(--bg-deep) 88%, var(--text-primary) 12%);
+      --ide-cm-guide: color-mix(in srgb, var(--bg-deep) 62%, var(--text-primary) 38%);
+      --ide-cm-active: color-mix(in srgb, var(--bg-deep) 93%, var(--text-primary) 7%);
+    }
+    .ide-fallback { width: 100%; height: 100%; min-height: 420px; border: none; resize: none; background: var(--bg-deep); color: var(--text-primary); font-family: var(--ide-cm-font); font-size: var(--ide-cm-size); line-height: var(--ide-cm-line); padding: 8px 12px 8px 16px; box-sizing: border-box; tab-size: 4; }
+    .ide-editor-wrap .CodeMirror {
+      height: 100%;
+      font-family: var(--ide-cm-font);
+      font-size: var(--ide-cm-size);
+      line-height: var(--ide-cm-line);
+      background: var(--bg-deep);
+      color: var(--text-primary);
+      font-variant-ligatures: contextual;
+    }
+    .ide-editor-wrap .CodeMirror-scroll { background: var(--bg-deep); padding-bottom: 40px; }
+    .ide-editor-wrap .CodeMirror-lines { padding: 8px 0; }
+    .ide-editor-wrap .CodeMirror pre.CodeMirror-line,
+    .ide-editor-wrap .CodeMirror pre.CodeMirror-line-like { padding-left: 8px; }
+
+    /* ── Gutters: line numbers, fold arrows, a rule that reads as a margin ── */
+    .ide-editor-wrap .CodeMirror-gutters {
+      background: var(--ide-cm-gutter);
+      border-right: 1px solid var(--border-subtle);
+      padding-right: 2px;
+    }
+    .ide-editor-wrap .CodeMirror-linenumber {
+      padding: 0 10px 0 12px;
+      color: var(--text-muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.92em;
+    }
+    /* The current line's number goes full-contrast — the cheapest orientation
+       cue in an editor, and the one every IDE ships. */
+    .ide-editor-wrap .CodeMirror-activeline .CodeMirror-linenumber,
+    .ide-editor-wrap .CodeMirror-linenumber.CodeMirror-activeline-gutter {
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .ide-editor-wrap .CodeMirror-activeline-background { background: var(--ide-cm-active); }
+    .ide-editor-wrap .CodeMirror-foldgutter { width: 14px; }
+    .ide-editor-wrap .CodeMirror-foldgutter-open,
+    .ide-editor-wrap .CodeMirror-foldgutter-folded { color: var(--text-muted); cursor: pointer; }
+    .ide-editor-wrap .CodeMirror-foldgutter-open:hover,
+    .ide-editor-wrap .CodeMirror-foldgutter-folded:hover { color: var(--accent); }
+    .ide-editor-wrap .CodeMirror-foldmarker {
+      color: var(--accent); text-shadow: none; font-family: var(--ide-cm-font);
+      background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+      border-radius: 3px; padding: 0 5px; font-size: 0.8em;
+    }
+
+    /* ── Indentation guides ──
+       CodeMirror 5 has no built-in guides; ide.js measures each line's leading
+       whitespace and injects one marker per indent level. This styles them. */
+    .ide-editor-wrap .cm-indent-guide {
+      position: absolute; top: 0; bottom: 0; width: 0;
+      border-left: 1px solid var(--ide-cm-guide);
+      pointer-events: none;
+    }
+    .ide-editor-wrap .cm-indent-guide.is-active { border-left-color: var(--accent); opacity: .55; }
+
+    /* ── Selection, brackets, search ── */
+    .ide-editor-wrap .CodeMirror-selected,
+    .ide-editor-wrap .CodeMirror-line::selection { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+    .ide-editor-wrap .CodeMirror-focused .CodeMirror-selected { background: color-mix(in srgb, var(--accent) 32%, transparent); }
+    .ide-editor-wrap .CodeMirror-matchingbracket {
+      color: var(--accent) !important; font-weight: 700;
+      border-bottom: 1px solid var(--accent); background: transparent;
+    }
+    .ide-editor-wrap .CodeMirror-nonmatchingbracket { color: var(--danger, #ef4444) !important; }
+    .ide-editor-wrap .cm-matchhighlight { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 2px; }
+    .ide-editor-wrap .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+    .ide-editor-wrap .cm-trailingspace { background: color-mix(in srgb, var(--danger, #ef4444) 22%, transparent); }
+    .ide-editor-wrap .CodeMirror-ruler { border-left: 1px dashed var(--border-subtle); }
+
+    /* ── Overlay scrollbars + search dialog + completion popup ── */
+    .ide-editor-wrap .CodeMirror-overlayscroll-horizontal div,
+    .ide-editor-wrap .CodeMirror-overlayscroll-vertical div {
+      background: color-mix(in srgb, var(--text-primary) 28%, transparent);
+      border-radius: 4px;
+    }
+    .ide-editor-wrap .CodeMirror-dialog {
+      background: var(--bg-elevated); color: var(--text-primary);
+      border-bottom: 1px solid var(--border-subtle); padding: 6px 10px; font-size: 0.8rem;
+    }
+    .ide-editor-wrap .CodeMirror-dialog input {
+      font-family: var(--ide-cm-font); color: var(--text-primary);
+      background: var(--bg-deep); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-xs); padding: 2px 6px;
+    }
+    .CodeMirror-hints {
+      z-index: 30; font-family: var(--ide-cm-font); font-size: 0.8rem;
+      background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm); box-shadow: 0 8px 24px -8px rgba(0,0,0,.5);
+    }
+    .CodeMirror-hint { color: var(--text-secondary); padding: 3px 8px; }
+    li.CodeMirror-hint-active { background: var(--accent); color: var(--bg-deep); }
     /* ── Toolbar ── */
     .ide-toolbar { margin-bottom: 16px; padding: 8px 16px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .ide-toolbar-label { color: var(--text-muted); display: flex; align-items: center; }
