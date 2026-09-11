@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## Fix — chat reported "No API key configured" for a provider that had one (2026-09-11)
+
+Reported still-broken after four commits that each fixed a real provider/key
+bug. It was a fifth one, on a path none of them touched.
+
+    {"message": "hi"}                            -> No API key configured
+    {"message": "hi", "model": "deepseek-flash"} -> streams fine
+
+Same server, same provider, seconds apart. Settings > Test on that provider
+returned success the whole time, because Test reads the model registry and the
+key was sitting in it.
+
+The pre-stream key check used `_get_llm()` when a turn pinned no model. That is
+the *agent's* provider, which can carry a refreshed `base_url` alongside a
+stale, empty `api_key` -- so the error named the right URL for a provider whose
+key was configured, which is what made it so convincing and so wrong. The
+model-pinned branch already went through the registry and was always fine.
+
+It surfaced now because `abe1099d` stopped `chat.js` echoing a stale
+localStorage model on every turn. That fix was correct; it just moved traffic
+onto the branch that had been broken all along.
+
+Chat now falls back to the registry when the mounted provider's key is
+unusable. Deliberately narrow: a turn that pins a model still resolves through
+the registry, and a caller that mounts no provider at all is left alone rather
+than having this machine's active profile imposed on it -- the first attempt
+was broader and broke `test_chat_sse_fix`, which mounts no provider on purpose.
+
+`tests/test_chat_key_resolution.py` covers it, with the model-pinned turn as
+the control and two negative controls so a genuinely missing key -- and the
+`not-needed` placeholder against a cloud URL -- are still reported honestly.
+
 ## Fix — the IDE editor showed the agent's view of a file, not the file (2026-09-11)
 
 Opening any file in the web IDE put this at the top of the buffer:
