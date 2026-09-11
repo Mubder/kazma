@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## Fix — a 401 now names the provider that rejected the call (2026-09-11)
+
+An operator hit this repeatedly:
+
+    ⚠️ The model request was rejected due to an invalid or missing API key.
+       Go to Settings > Models/Providers and update your credentials.
+
+Their key was fine. Nine of their configured providers carried the literal
+string `sk-real-key` — a placeholder, not a credential — and five of those were
+enabled and feeding models into the chat picker. Every model they chose outside
+the one working provider produced a genuine upstream 401.
+
+The message had the model and the endpoint available at the call site and threw
+both away, so it read as "your credentials are broken" when it meant "*this*
+provider's are". With a dozen providers configured that is not a hint, it is a
+guessing game — it took five rounds of debugging to land on.
+
+Now:
+
+    ⚠️ The model request was rejected by qwen3.8-max /
+       https://dashscope-intl.aliyuncs.com/... due to an invalid or missing
+       API key. Go to Settings > Models/Providers and update the credentials
+       for that provider.
+
+`friendly_llm_error` takes optional `model` / `base_url`; `graph_supervisor`
+passes the ones actually used for the failed call. With no context supplied the
+wording stays clean (no dangling "by"), and non-auth failures are untouched.
+
 ## Fix — chat reported "No API key configured" for a provider that had one (2026-09-11)
 
 Reported still-broken after four commits that each fixed a real provider/key
