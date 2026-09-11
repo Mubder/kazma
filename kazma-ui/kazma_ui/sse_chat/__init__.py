@@ -552,14 +552,40 @@ def create_sse_chat_router(
                 logger.warning("SSE chat: turn-model pin failed: %s", exc)
 
         # Live LLM for key validation (getter, not mount snapshot).
+        #
+        # Resolve through the model registry whether or not this turn pinned a
+        # model. `get_client(None)` uses the active profile — the same source
+        # Settings > Test reads — so the key it returns is the key the operator
+        # saved. `_get_llm()` hands back the agent's provider, which can carry a
+        # refreshed base_url with a stale (empty) api_key; the pre-stream check
+        # below then reports "No API key configured for <correct url>" for a
+        # provider whose key is sitting right there in the registry.
+        #
+        # This only bit turns that send no `model`, which is why it surfaced
+        # after chat.js stopped echoing a stale localStorage pin every turn
+        # (abe1099d): the model-pinned path was already correct, the bare path
+        # never was.
         llm_provider = _get_llm()
-        if requested_model:
+        _mounted_key = (
+            getattr(getattr(llm_provider, "config", None), "api_key", "") or ""
+        )
+        # Consult the registry when the turn pinned a model (it names the
+        # provider), or when we have a mounted provider whose key is unusable.
+        # Not when nothing is mounted at all — then there is no stale client to
+        # rescue, and reaching for the registry would impose this machine's
+        # active profile on a caller that deliberately supplied none.
+        _needs_registry = bool(requested_model) or (
+            llm_provider is not None and _mounted_key in ("", "not-needed")
+        )
+        if _needs_registry:
             try:
                 from kazma_core.model_registry import get_model_registry
 
-                llm_provider = get_model_registry().get_client(requested_model)
-            except Exception:
-                pass
+                _client = get_model_registry().get_client(requested_model or None)
+                if _client is not None:
+                    llm_provider = _client
+            except Exception as exc:
+                logger.debug("[SSE] registry client resolve failed: %s", exc)
 
         # ── Pre-stream API key validation (Bug 4 fix) ───────────────
         # If the provider is a real cloud API but the API key is the

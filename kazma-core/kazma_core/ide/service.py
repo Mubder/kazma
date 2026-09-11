@@ -26,10 +26,15 @@ no parallel, un-gated write/exec path is ever created.
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import logging
 from pathlib import Path
 from typing import Any
+
+#: Cap on what the web editor will open as text. CodeMirror bogs down long
+#: before this, and a multi-MB buffer in a browser tab helps nobody.
+MAX_EDITOR_FILE_BYTES = 2 * 1024 * 1024
 
 __all__ = ["IdeService", "get_ide_service", "reset_ide_service"]
 
@@ -235,7 +240,22 @@ class IdeService:
     # ── IDE operations ─────────────────────────────────────────────────
 
     async def read_file(self, rel_path: str) -> dict[str, Any]:
-        """Read a file from the workspace. Returns content + language hint."""
+        """Read a file from the workspace. Returns raw content + language hint.
+
+        **Not** via the ``file_read`` tool. That tool is LLM-facing and
+        deliberately reformats: every line is prefixed ``"{LINE_NUM}|"`` so the
+        model can cite lines, and a repeat read in the same turn is answered
+        with an ``[ALREADY READ THIS TURN ...]`` banner instead of the bytes.
+        Both are right for a model and catastrophic for an editor — the buffer
+        showed numbered, banner-prefixed text, and saving it would have written
+        that back over the user's file.
+
+        So this reads bytes directly, while keeping every check the tool
+        applied: :meth:`resolve` for symlink-aware containment, and
+        ``check_path_access`` for workspace scope and path grants. Writes still
+        go through ``file_write`` and its HITL gate — only the read shape
+        changed.
+        """
         try:
             target = self.resolve(rel_path)
         except ValueError as exc:
@@ -248,10 +268,45 @@ class IdeService:
                 "lang": _lang_for_path(target),
                 "lines": 0,
             }
-        res = await self._call_tool("file_read", {"path": str(target)})
-        if not res["ok"]:
-            return {"ok": False, "error": res["error"], "content": "", "lang": _lang_for_path(target), "lines": 0}
-        content = res["output"]
+
+        def _fail(message: str) -> dict[str, Any]:
+            return {
+                "ok": False,
+                "error": message,
+                "content": "",
+                "lang": _lang_for_path(target),
+                "lines": 0,
+            }
+
+        # Workspace scope + path grants — the same gate file_read applies.
+        try:
+            from kazma_core.workspace.path_policy import check_path_access, denied_message
+
+            access = check_path_access(target, "read")
+            if not access.allowed:
+                return _fail(denied_message(str(target), "read", result=access))
+        except ImportError:  # pragma: no cover - policy module always ships
+            pass
+
+        try:
+            size = target.stat().st_size
+            if size > MAX_EDITOR_FILE_BYTES:
+                return _fail(
+                    f"File is too large to open in the editor "
+                    f"({size // 1024} KB > {MAX_EDITOR_FILE_BYTES // 1024} KB)."
+                )
+            raw = await asyncio.to_thread(target.read_bytes)
+        except OSError as exc:
+            return _fail(f"Could not read {rel_path}: {exc}")
+
+        # A NUL byte in the first block is the usual binary tell. Showing a
+        # decoded blob invites the user to "save" mojibake over a real binary.
+        if b"\x00" in raw[:8192]:
+            return _fail(f"{rel_path} looks like a binary file; not opening it as text.")
+
+        # errors="replace" so one bad byte shows a glyph instead of failing the
+        # whole open. Explicit encoding, never the platform locale.
+        content = raw.decode("utf-8", errors="replace")
         return {
             "ok": True,
             "error": None,
