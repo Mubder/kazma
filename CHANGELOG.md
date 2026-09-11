@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## Releases are now verifiable — signed, attested, with an SBOM (2026-09-11)
+
+`release.yml` created a tag and a notes-only GitHub Release. It published no
+artifacts at all, so there was nothing for anyone to verify and nothing to
+sign. For the enterprise/gov operator who keeps a vault on the box, "download
+this zip and trust it" is not an answer.
+
+A release now builds a wheel and sdist and attaches:
+
+- **SLSA build provenance** — `gh attestation verify <file> --repo Mubder/kazma`
+  proves the artifact came from this repo, at a named commit, from this
+  workflow. A rebuilt or swapped file cannot be re-attested without write
+  access here.
+- **Sigstore signatures** — keyless, so there is no maintainer private key to
+  leak or rotate; the certified identity is the workflow itself, recorded in
+  the public transparency log. The wheel, sdist, SBOM *and* `SHA256SUMS` are
+  all signed — an unsigned checksum file can just be replaced alongside the
+  artifacts it describes.
+- **A CycloneDX 1.6 SBOM** (137 components) generated from `uv.lock` with
+  `--frozen`, not from the runner's environment. Without `--frozen`,
+  `uv export` re-resolves and can rewrite the lock mid-release, which would
+  mean the SBOM described a dependency set nobody committed — caught while
+  building this, after an export quietly added two dev-only packages.
+
+`docs/SUPPLY_CHAIN.md` is the verification guide, linked from `SECURITY.md`,
+and it states plainly what these guarantees do **not** cover: this is not
+reproducible builds, provenance is not a code review, and an SBOM lists
+dependencies rather than vulnerabilities.
+
+`tests/test_release_supply_chain.py` keeps the workflow honest — dropping a
+signing step, a permission, or `--frozen` fails the build, because otherwise
+the published verification instructions would quietly become false.
+
+The signing and attestation steps themselves can only be exercised by a real
+`workflow_dispatch` on GitHub; everything local (build, export, SBOM) was run
+and verified here.
+
 ## Honesty pack — the danger gate now proves the shipped config (2026-09-11)
 
 The pack's HITL cases built their own `require_approval_for` from the fixture
