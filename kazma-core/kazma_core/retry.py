@@ -107,19 +107,32 @@ def _extract_http_status_code(exc: Exception) -> int | None:
     return None
 
 
-def friendly_llm_error(exc: Exception) -> str:
+def friendly_llm_error(
+    exc: Exception, *, model: str = "", base_url: str = ""
+) -> str:
     """Map LLM call failures to user-friendly messages after retries exhausted.
 
     Prefixed with ``⚠️`` so a failure is never mistaken for a normal model
     reply. Honors the ``transient`` flag on :class:`LLMError` to give an
     actionable hint: transient failures invite a retry, permanent failures
     point at the underlying cause.
+
+    ``model`` / ``base_url`` name the endpoint that actually rejected the call.
+    Pass them whenever the caller knows them: with several providers
+    configured, "update your credentials" does not say *whose*, and an
+    operator with one working provider and eight placeholder keys has no way
+    to tell from the message which model they just picked. That ambiguity cost
+    five rounds of debugging on 2026-09-11 — the key was fine, the provider
+    behind the chosen model was not.
     """
     status_code = _extract_http_status_code(exc)
     if status_code in (401, 403):
+        where = " / ".join(p for p in (model.strip(), base_url.strip()) if p)
+        target = f" by {where}" if where else ""
         return (
-            "⚠️ The model request was rejected due to an invalid or missing API key. "
-            "Go to Settings > Models/Providers and update your credentials."
+            f"⚠️ The model request was rejected{target} due to an invalid or "
+            "missing API key. Go to Settings > Models/Providers and update the "
+            "credentials for that provider."
         )
 
     is_transient = bool(getattr(exc, "transient", False))

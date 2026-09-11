@@ -1650,7 +1650,14 @@ async def supervisor_node(
         except Exception:
             pass
 
-        error_content = friendly_llm_error(exc)
+        # Name the endpoint that rejected us. `llm` and `routed_model` are the
+        # ones actually used for this call, so a 401 says which provider to go
+        # fix rather than leaving the operator to guess across a dozen.
+        error_content = friendly_llm_error(
+            exc,
+            model=str(routed_model or ""),
+            base_url=str(getattr(getattr(llm, "config", None), "base_url", "") or ""),
+        )
         # Surface an HONEST failure rather than disguising it as a normal
         # assistant reply. ``turn_failed`` tells respond_node to skip
         # synthesis (no fabricated final answer over the broken turn) — the

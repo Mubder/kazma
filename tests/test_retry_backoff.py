@@ -294,3 +294,59 @@ class TestRetryModuleInternals:
 
         msg = friendly_llm_error(RuntimeError("something weird"))
         assert "something weird" in msg
+
+
+class TestAuthErrorNamesTheProvider:
+    """A 401 must say WHICH provider rejected the call.
+
+    With several providers configured, "update your credentials" does not say
+    whose. On 2026-09-11 an operator had one working provider and eight
+    carrying a placeholder key; every model they picked outside the working one
+    produced this message, and it took five rounds of debugging to learn that
+    the credential was fine and the *provider behind the chosen model* was not.
+    The message had all the information it needed at the call site and threw it
+    away.
+    """
+
+    @staticmethod
+    def _auth_error():
+        from kazma_core.llm_provider import LLMError
+
+        return LLMError("LLM call failed (HTTP 401): invalid api key", transient=False)
+
+    def test_the_endpoint_and_model_are_named(self):
+        from kazma_core.retry import friendly_llm_error
+
+        msg = friendly_llm_error(
+            self._auth_error(),
+            model="qwen3.8-max",
+            base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        )
+        assert "qwen3.8-max" in msg
+        assert "dashscope-intl.aliyuncs.com" in msg
+
+    def test_it_still_reads_cleanly_with_no_context(self):
+        """Callers that do not know the provider must not emit a dangling 'by'."""
+        from kazma_core.retry import friendly_llm_error
+
+        msg = friendly_llm_error(self._auth_error())
+        assert "invalid or missing API key" in msg
+        assert " by " not in msg
+        assert "rejected due to" in msg
+
+    def test_a_partial_hint_is_still_used(self):
+        from kazma_core.retry import friendly_llm_error
+
+        msg = friendly_llm_error(self._auth_error(), model="nemotron")
+        assert "nemotron" in msg
+        assert "/" not in msg.split("rejected by")[1].split(" due to")[0]
+
+    def test_non_auth_failures_are_unaffected(self):
+        """The hint must not leak into transient/other messages."""
+        from kazma_core.llm_provider import LLMError
+        from kazma_core.retry import friendly_llm_error
+
+        msg = friendly_llm_error(
+            LLMError("connection reset", transient=True), model="qwen3.8-max"
+        )
+        assert "qwen3.8-max" not in msg
