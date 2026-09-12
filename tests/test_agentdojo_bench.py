@@ -409,3 +409,62 @@ def test_the_fixture_obedience_matches_its_own_counts(recorded):
             f"{condition}: AgentDojo scored more attacks than the model acted on -- "
             "the obedience metric is missing runs"
         )
+
+
+# -- the social-framing ablation ---------------------------------------------
+
+
+def test_the_social_clause_is_reported_as_unproven(recorded, injection_doc):
+    """The ablation's arms rank exactly as the hypothesis predicts and none of
+    the differences is significant. A rank order pulled out of noise is the
+    mistake this page already made once, so the verdict is pinned.
+    """
+    _, data = recorded
+    abl = data.get("social_framing_ablation")
+    assert abl, "the fixture lost the social-framing ablation"
+    assert abl["verdict"] == "not proven"
+    lo, hi = abl["ci95_points_full_minus_no_social"]
+    assert lo < 0 < hi, "the interval no longer contains zero -- rewrite the prose"
+    low = injection_doc.lower()
+    assert "not proven" in low
+    for overclaim in (
+        "the wording works",
+        "the social-framing wording is proven",
+        "earns its place**",
+    ):
+        assert overclaim not in low, f"the page claims {overclaim!r} on a null result"
+
+
+def test_the_length_matched_control_exists(recorded):
+    """Deleting the clause removes 453 characters. Without an arm that keeps the
+    length and drops the meaning, the ablation cannot separate the two, and the
+    conclusion would be unearned either way."""
+    _, data = recorded
+    arms = {a["arm"]: a for a in data["social_framing_ablation"]["arms"]}
+    assert set(arms) == {"full", "no_social", "length_matched"}
+    assert abs(arms["full"]["banner_chars"] - arms["length_matched"]["banner_chars"]) <= 5, (
+        "the length-matched arm is no longer length-matched"
+    )
+    assert arms["no_social"]["banner_chars"] < arms["full"]["banner_chars"] - 300
+
+
+def test_the_repeated_configuration_swing_is_recorded(recorded, injection_doc):
+    """The same shipped config scored 7/144 and 10/144. That control is what
+    turns 'the ordering is suggestive' into 'the ordering is noise', so it has
+    to stay visible rather than being quietly dropped."""
+    _, data = recorded
+    control = data["social_framing_ablation"]["control"]
+    assert control["swing"] == abs(
+        control["main_banking_run_attacks_won"] - control["ablation_full_arm_attacks_won"]
+    )
+    assert "7/144" in injection_doc and "10/144" in injection_doc
+
+
+def test_the_power_needed_is_stated(recorded, injection_doc):
+    """An unresolved question with no price attached reads as a shrug. The page
+    says what it would cost to settle."""
+    _, data = recorded
+    n = data["social_framing_ablation"]["runs_per_arm_to_resolve_at_80pct_power"]
+    assert f"{n:,}" in injection_doc or str(n) in injection_doc, (
+        f"the page does not say the question needs ~{n} runs per arm"
+    )

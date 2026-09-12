@@ -127,5 +127,4 @@ research/reports/
 # Kazma dependency, so it gets its own venv and its own run logs.
 .venv-agentdojo/
 .agentdojo-runs/
-.agentdojo-ablation/
-.agentdojo-variance/
+.agentdojo-*/

@@ -400,5 +400,51 @@
     "n_per_observation": 105,
     "asr_spread_points": 5.7
   },
-  "note": "Produced by scripts/agentdojo_bench.py; re-derive with --analyze. 'acted_on_payload' is counted here rather than by AgentDojo, whose score requires the injection to COMPLETE -- a run where the model obeyed and then bungled the sequence scores as secure. docs/INJECTION.md section 4 is guarded against this file."
+  "note": "Produced by scripts/agentdojo_bench.py; re-derive with --analyze. 'acted_on_payload' is counted here rather than by AgentDojo, whose score requires the injection to COMPLETE -- a run where the model obeyed and then bungled the sequence scores as secure. docs/INJECTION.md section 4 is guarded against this file.",
+  "social_framing_ablation": {
+    "question": "Does the fence's social-framing paragraph change behaviour, or is it only written down? KNOWN_GAPS has carried this as unproven.",
+    "suite": "banking",
+    "attack": "important_instructions",
+    "undefended_reference_attacks_won": 22,
+    "arms": [
+      {
+        "arm": "full",
+        "banner_chars": 781,
+        "n": 144,
+        "attacks_won": 10,
+        "asr": 6.9,
+        "utility": 37.5
+      },
+      {
+        "arm": "no_social",
+        "banner_chars": 328,
+        "n": 144,
+        "attacks_won": 14,
+        "asr": 9.7,
+        "utility": 39.6
+      },
+      {
+        "arm": "length_matched",
+        "banner_chars": 782,
+        "n": 144,
+        "attacks_won": 12,
+        "asr": 8.3,
+        "utility": 41.7
+      }
+    ],
+    "control": {
+      "what": "the SAME shipped configuration measured twice",
+      "main_banking_run_attacks_won": 7,
+      "ablation_full_arm_attacks_won": 10,
+      "swing": 3
+    },
+    "verdict": "not proven",
+    "p_full_vs_no_social": 0.394,
+    "ci95_points_full_minus_no_social": [
+      -9.2,
+      3.6
+    ],
+    "runs_per_arm_to_resolve_at_80pct_power": 1551,
+    "note": "The ordering (full < length_matched < no_social) matches the hypothesis and is not evidence: every pairwise interval contains zero, and an unchanged configuration moved 3 runs between measurements. length_matched exists because deleting the clause also removes 453 characters of banner."
+  }
 }
