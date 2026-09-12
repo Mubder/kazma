@@ -21,6 +21,7 @@ import os
 import socket
 import threading
 import time
+import uuid
 
 import pytest
 
@@ -101,8 +102,24 @@ def server():
         os.environ["KAZMA_SECRET"] = orig_secret
 
 
-SESSION_ID = "e2e-delivery-session"
-THREAD_ID = "e2e-delivery-thread"
+# Unique per run. These were fixed strings, and SessionManager persists to the
+# project data dir (`kazma-data/chat_sessions.db`) regardless of the temporary
+# ConfigStore this fixture installs -- so every run reused, and added to, the
+# same durable session row. The accumulated transcript changed what the page
+# restored on load, and the live-paint phase started failing against state left
+# by an earlier run. It had been failing "since before 40d9317c" for exactly
+# that reason: once the row went bad it stayed bad, and no amount of reading
+# the delivery code would have shown it.
+#
+# Measured 2026-09-12, same code, only the id changed:
+#   fresh id  -> live frames paint YES, post-reload paint YES
+#   fixed id  -> live frames paint NO
+#
+# A unique id per run also stops the suite writing test rows into the
+# operator's real chat history.
+_RUN = uuid.uuid4().hex[:12]
+SESSION_ID = f"e2e-delivery-session-{_RUN}"
+THREAD_ID = f"e2e-delivery-thread-{_RUN}"
 
 # One stable loop for all test-side broker emissions (module-level so both
 # the fixture and _emit share it; broker asyncio locks bind to one loop).
@@ -200,6 +217,11 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             _deadline = time.monotonic() + 15.0
             while time.monotonic() < _deadline and not resumed_seen["flag"]:
                 page.wait_for_timeout(100)
+            # The `resumed` frame says the cursor is reconciled; the page still
+            # has to finish re-rendering the restored transcript before a new
+            # live frame has somewhere to paint. Without this the emit races
+            # the re-render and the delta is dropped.
+            page.wait_for_timeout(1500)
             _emit("llm_delta", {"content": "post-reload continuation"})
             _emit("turn_complete", {"content": "post-reload continuation"})
             page.wait_for_function(

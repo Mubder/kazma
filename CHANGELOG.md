@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## Cron turns could not read their own tenant's secrets (2026-09-12)
+
+Reported from the operator's phone: two Telegram alerts at 09:00, both
+
+    LLM call failed (HTTP 401): no usable API key for https://api.deepseek.com/v1
+
+The two alerts were two different jobs — the CoPilot Pro+ and SuperGrok Heavy
+renewal reminders — not one job firing twice. Both failed the same way, and the
+same model had answered a chat turn minutes earlier without complaint.
+
+The key was present the whole time. `Vault.retrieve` resolves a secret by
+trying the current tenant and then the global (NULL) scope:
+
+    for query_tid in ([tid] if tid else []) + [None]:
+
+With no tenant context there is no first step, so a secret stored under tenant
+`'default'` is invisible. Verified directly against the live vault: the row
+exists under `tenant='default'` and a `tenant=None` lookup returns nothing.
+
+Chat sets the tenant from the request. The cron scheduler never did — even
+though `ScheduledJob` has carried `tenant_id` since the multi-tenant migration,
+nothing installed it, so every cron turn ran context-less. The API key is just
+the tenant-scoped read that pages you; every other one in a cron turn had the
+same hole.
+
+`_execute` now installs `job.tenant_id` for the duration and restores it in the
+`finally`. Fixed there rather than by loosening the vault's fallback: a
+global→tenant fallback would let any context-less background task read another
+tenant's credentials.
+
+Five tests, two of which reproduce the root cause against a real vault rather
+than asserting on source text, and one pinning the fallback *direction* —
+global stays readable by anyone, tenant-scoped does not leak to a caller with
+no tenant.
+
+Diagnosis note: the first store read was the stale SQLite `settings.db`, which
+showed deepseek disabled with an empty key. The live install runs
+`KAZMA_DB_BACKEND=postgres`, where the same provider is enabled with a valid
+vault pointer. Reading the wrong store has produced a wrong answer here before.
+
 ## A tripped circuit breaker could never recover (2026-09-12)
 
 Found under `test_audit_wave6`, which had been sitting in the untriaged pile.
