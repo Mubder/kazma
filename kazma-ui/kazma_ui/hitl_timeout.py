@@ -190,6 +190,19 @@ async def _watchdog_loop(
             cfg = get_hitl_config()
             if not cfg.get("enabled"):
                 continue
+
+            # Tell processes with no bus that a human is reachable here.
+            # `kazma mcp` runs as a child of an MCP client and cannot see the
+            # in-process approval bus; it queues into the gate registry
+            # instead, but only while this beat is fresh. Written from the
+            # loop that reads pending gates on purpose -- it is evidence of
+            # the behaviour being relied on, not a claim beside it.
+            try:
+                from kazma_core.safety.bus_bridge import record_watcher
+
+                record_watcher(kind="ui", detail="hitl-timeout-watchdog")
+            except Exception:
+                logger.debug("[HITL-WD] watcher heartbeat skipped", exc_info=True)
             timeout_s = float(cfg.get("approval_timeout_seconds", 300) or 0)
             auto_deny = bool(cfg.get("auto_deny_on_timeout", True))
             if timeout_s <= 0:

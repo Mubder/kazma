@@ -301,6 +301,46 @@ class SafetyMiddleware:
                     "%s (task=%s)", tool_name, task_id,
                 )
                 return True
+            # No bus does not have to mean no human. The gate registry is a
+            # cross-process table and the running instance's dashboard renders
+            # every pending row in it, so a process spawned outside the server
+            # (`kazma mcp`) can still put a card in front of the operator and
+            # wait for the answer. Only engages when a live instance has
+            # recently heartbeat into the same database; otherwise it declines
+            # and we fall through to the denial below, unchanged.
+            try:
+                from kazma_core.safety.bus_bridge import (
+                    live_watcher,
+                    request_approval_via_registry,
+                )
+
+                if live_watcher() is not None:
+                    bridged = await request_approval_via_registry(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        thread_id=tid or task_id or "",
+                        timeout=self.approval_timeout,
+                        origin="bus_bridge",
+                    )
+                    if bridged:
+                        self._approved_count += 1
+                        logger.info(
+                            "[Safety] Danger tool APPROVED via gate registry "
+                            "(no bus): %s (task=%s)", tool_name, task_id,
+                        )
+                        return True
+                    self._rejected_count += 1
+                    logger.warning(
+                        "[Safety] Danger tool REJECTED via gate registry "
+                        "(no bus): %s (task=%s)", tool_name, task_id,
+                    )
+                    await _notify_cron_denial(tool_name, "denied or timed out")
+                    return False
+            except Exception:
+                # The bridge is an extra path to a human, never a new way to
+                # fail open. Anything unexpected falls through to the denial.
+                logger.debug("[Safety] bus bridge unavailable", exc_info=True)
+
             self._rejected_count += 1
             logger.warning(
                 "[Safety] Danger tool '%s' BLOCKED (no approval bus; "

@@ -65,24 +65,49 @@ say, in words the model will read:
 > `[Kazma] Danger-tier: this call pauses for a human approval in Kazma before
 > it runs.`
 
-**Whether a danger call waits or is refused depends on where the approval bus
-is.** `kazma mcp` is a separate process, usually spawned by your MCP client,
-and the bus that carries approval cards lives in the running Kazma server. If
-this process cannot reach one, `safety.check()` does not queue anything — it
-fails closed and **denies**.
+**Whether a danger call waits or is refused depends on whether a human is
+reachable.** `kazma mcp` is a separate process, usually spawned by your MCP
+client, and the bus that carries approval cards lives in the running Kazma
+server. A child process cannot see an in-memory bus in another process.
 
-So danger tools are published *only* when an approval path is actually
-reachable. Otherwise they are withheld, and the banner says why:
+So there is a second path. The gate registry (`hitl_gates` in your data dir) is
+a shared SQLite table, and the dashboard renders every pending row it finds
+there. A bus-less process registers a gate and waits for the row to change
+state; you get the same card, in the same place, and click the same button.
+
+**It only engages when something is actually watching.** A running Kazma
+instance heartbeats into that database from the loop that reads pending gates,
+and `kazma mcp` refuses to queue without a fresh beat — because a card nobody
+will ever see costs the caller the full approval timeout and then denies it
+anyway. So there are two honest outcomes, and the banner tells you which:
 
 ```
-[kazma mcp] 100 tools; HITL is enabled but no approval bus is reachable from
-this process, so danger tools would be denied, not queued
+[kazma mcp] 155 tools; no approval bus, but a live Kazma instance is watching
+the gate registry (14s ago): danger tools queue for approval there
+
+[kazma mcp] 100 tools; HITL is enabled, no approval bus is reachable from this
+process, and no running Kazma instance is watching the gate registry, so
+danger tools would be denied, not queued
 ```
 
-That is the common case for a client-spawned server today, and it is the
-honest one: 55 tools that can only ever be refused would just be something for
-the client's model to plan around and fail on. Connecting a client-spawned
-server to the running instance's bus is real work and is not done.
+In the second case danger tools are withheld rather than published and
+refused: 55 tools that can only ever fail are just something for the client's
+model to plan around and lose turns on.
+
+Start Kazma, and your MCP client gets the write tools. Stop it, and they
+disappear at the next reconnect.
+
+| Variable | Effect |
+|----------|--------|
+| `KAZMA_BUS_BRIDGE=0` | Turn the bridge off. Restores the previous behaviour exactly: no bus, no approval, danger tools withheld. |
+| `KAZMA_WATCHER_STALE_SECONDS` | How old a heartbeat may be and still count (default 120 — four missed watchdog ticks). |
+
+**What the bridge is not.** It carries a decision; it does not make one. There
+is no "approve for the session" and no YOLO on this path: those are properties
+of a chat thread, and a separate process has no thread whose later calls could
+be re-checked against the grant. One decision, one tool call. And it fails
+closed in every direction — no watcher, a stale one, a timeout, a vanished
+row, an unreadable database all deny.
 
 ---
 
@@ -116,7 +141,8 @@ startup banner (on stderr) tells you which mode you are in:
 
 ```
 [kazma mcp] 155 tools; HITL enabled: danger tools require approval
-[kazma mcp] 100 tools; HITL is enabled but no approval bus is reachable from this process, so danger tools would be denied, not queued
+[kazma mcp] 155 tools; no approval bus, but a live Kazma instance is watching the gate registry (14s ago): danger tools queue for approval there
+[kazma mcp] 100 tools; HITL is enabled, no approval bus is reachable from this process, and no running Kazma instance is watching the gate registry, so danger tools would be denied, not queued
 [kazma mcp] 100 tools; HITL is disabled (safety.hitl.enabled), so execute() would run danger tools unattended
 ```
 

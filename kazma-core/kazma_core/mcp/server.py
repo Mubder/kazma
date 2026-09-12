@@ -149,11 +149,33 @@ class ApprovalPath:
                     reason="no approval bus, but allow_headless_danger is set",
                     overridden=True,
                 )
+            # No bus is no longer the end of it. A running Kazma instance
+            # heartbeats into the shared gate registry, and `execute()` will
+            # queue a card there for a human when it sees a fresh beat. This is
+            # a question about the *environment*, asked here only so the banner
+            # and the published tool list can tell the truth about it -- the
+            # gate itself stays in SafetyMiddleware (H-8).
+            try:
+                from kazma_core.safety.bus_bridge import live_watcher
+
+                watcher = live_watcher()
+            except Exception:  # pragma: no cover - defensive
+                watcher = None
+            if watcher is not None:
+                return cls(
+                    gated=True,
+                    reason=(
+                        "no approval bus, but a live Kazma instance is watching "
+                        f"the gate registry ({watcher.age_seconds:.0f}s ago): "
+                        "danger tools queue for approval there"
+                    ),
+                )
             return cls(
                 gated=False,
                 reason=(
-                    "HITL is enabled but no approval bus is reachable from this "
-                    "process, so danger tools would be denied, not queued"
+                    "HITL is enabled, no approval bus is reachable from this "
+                    "process, and no running Kazma instance is watching the "
+                    "gate registry, so danger tools would be denied, not queued"
                 ),
             )
         return cls(gated=True, reason="HITL enabled: danger tools require approval")

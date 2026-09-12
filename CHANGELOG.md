@@ -40,6 +40,42 @@ denylist pattern for a `### system` heading meant a document containing
 `### System Requirements` could never be stored to memory. Narrowed to a bare
 `### System` heading — `## Instructions` is in every README and every recipe.
 
+## `kazma mcp` can reach a human now (2026-09-12)
+
+The previous entry ends "connecting a client-spawned server to the running
+instance's bus is real work and is explicitly not done." This is that work.
+
+The bus is in-memory and lives in the server process, so a child process will
+never see it. But the **gate registry already is a cross-process store** —
+`hitl_gates` is SQLite in the data dir, and the dashboard renders every pending
+row it finds. So `SafetyMiddleware.check()`, on finding no bus, now registers a
+gate and waits for a human to claim it. Same card, same place, same button.
+
+It engages only on proof that someone is watching. A running instance
+heartbeats into that database from the approval-timeout watchdog — the loop
+that *reads pending gates*, so the beat is evidence of the behaviour being
+relied on rather than a separate liveness claim that can drift from it. Without
+a fresh beat the bridge declines immediately and the old refusal stands,
+because queueing a card nobody will see costs the caller the full timeout and
+denies it anyway.
+
+With an instance up, `kazma mcp` publishes 155 tools instead of 100, and the
+banner says which mode it is in. Gates carry `mechanism="bus_bridge"` and an
+explicit tenant (they have no session to inherit one from, and the dashboard
+admits them on tenant match alone). `POST /api/approve/{thread_id}` decides
+them before it looks for a graph, since there is no graph to resume.
+
+Fails closed in every direction: no watcher, a stale one, a timeout, a vanished
+row, an unreadable database, an exception mid-poll. The only path to an
+approval is a row this process wrote reaching `decision == "approve"`. No
+session grants and no YOLO on this path — those are properties of a chat thread
+and there is no thread here. `KAZMA_BUS_BRIDGE=0` restores the old behaviour
+exactly. 22 tests, most of them about the ways it must refuse.
+
+The gate itself did not move: it is still `LocalToolRegistry.execute()` ->
+`SafetyMiddleware`. The MCP server gained no safety logic and still has none
+(H-8) — it only asks what the environment can do, so the banner can say so.
+
 ## Fix — `kazma mcp` published danger tools it could never run (2026-09-12)
 
 Caught by the first real MCP client. Zed connected, the read tools worked, and
