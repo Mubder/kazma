@@ -8,13 +8,14 @@ other direction, and it is the more useful one.
 > seven hand-written IDE tools behind a `KAZMA_SECRET`, gated with
 > `check_sync()` — which can only *block* a danger tool, never queue it for
 > approval. This page is about `kazma mcp`, the general one: the whole tool
-> registry, routed through the real gate, where a danger call waits for you
-> instead of being refused. Use the IDE server for a fixed, secret-gated
-> file/test surface; use this one to hand an arbitrary agent Kazma's tools.
+> registry, routed through the real gate. Use the IDE server for a fixed,
+> secret-gated file/test surface; use this one to hand an arbitrary agent
+> Kazma's tools.
 
 Point any MCP client — Claude Desktop, an editor, another agent — at
-`kazma mcp`, and it can call Kazma's tools. Every dangerous call stops for a
-human first, through the same gate the chat window uses.
+`kazma mcp`, and it can call Kazma's tools. Nothing dangerous happens without
+going through the same gate the chat window uses — and when that gate cannot
+reach a human, the dangerous tools are not offered at all.
 
 That matters because the agent asking is usually not the thing you distrust.
 What you distrust is `shell_exec` running unattended at 2am because a model
@@ -44,7 +45,9 @@ stdio:
 ```
 
 Restart the client. Kazma's tools appear in its tool list. Ask it to read a
-file and it just works; ask it to write one and Kazma asks you first.
+file and it just works. Whether *write* tools appear depends on whether an
+approval path is reachable — see the next section, and check the startup
+banner.
 
 ---
 
@@ -62,8 +65,24 @@ say, in words the model will read:
 > `[Kazma] Danger-tier: this call pauses for a human approval in Kazma before
 > it runs.`
 
-A danger call does not fail. It **waits**, exactly as it would from chat, and
-returns the result once you approve.
+**Whether a danger call waits or is refused depends on where the approval bus
+is.** `kazma mcp` is a separate process, usually spawned by your MCP client,
+and the bus that carries approval cards lives in the running Kazma server. If
+this process cannot reach one, `safety.check()` does not queue anything — it
+fails closed and **denies**.
+
+So danger tools are published *only* when an approval path is actually
+reachable. Otherwise they are withheld, and the banner says why:
+
+```
+[kazma mcp] 100 tools; HITL is enabled but no approval bus is reachable from
+this process, so danger tools would be denied, not queued
+```
+
+That is the common case for a client-spawned server today, and it is the
+honest one: 55 tools that can only ever be refused would just be something for
+the client's model to plan around and fail on. Connecting a client-spawned
+server to the running instance's bus is real work and is not done.
 
 ---
 
@@ -97,6 +116,7 @@ startup banner (on stderr) tells you which mode you are in:
 
 ```
 [kazma mcp] 155 tools; HITL enabled: danger tools require approval
+[kazma mcp] 100 tools; HITL is enabled but no approval bus is reachable from this process, so danger tools would be denied, not queued
 [kazma mcp] 100 tools; HITL is disabled (safety.hitl.enabled), so execute() would run danger tools unattended
 ```
 

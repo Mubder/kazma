@@ -128,6 +128,34 @@ class ApprovalPath:
                 gated=False,
                 reason="HITL is disabled (safety.hitl.enabled), so execute() would run danger tools unattended",
             )
+
+        # HITL enabled is not the same as reachable. This server is a separate
+        # process, usually spawned by the MCP client, and the approval bus lives
+        # in the running Kazma server. With no real adapter, safety.check() does
+        # not queue anything for a human -- it fails closed and DENIES. That is
+        # safe, but publishing 55 danger tools that can only ever be refused is
+        # not honest: the client's model plans around them and every attempt
+        # dies. Withhold them and say why.
+        try:
+            from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
+
+            adapter = get_message_bus()._adapter
+        except Exception as exc:  # pragma: no cover - defensive
+            return cls(gated=False, reason=f"approval bus unavailable ({exc})")
+        if isinstance(adapter, NullBusAdapter):
+            if getattr(safety, "allow_headless_danger", False):
+                return cls(
+                    gated=True,
+                    reason="no approval bus, but allow_headless_danger is set",
+                    overridden=True,
+                )
+            return cls(
+                gated=False,
+                reason=(
+                    "HITL is enabled but no approval bus is reachable from this "
+                    "process, so danger tools would be denied, not queued"
+                ),
+            )
         return cls(gated=True, reason="HITL enabled: danger tools require approval")
 
 
