@@ -238,10 +238,18 @@ class TelegramBusAdapter(BusAdapter):
         callback_id: str,
         button_text: str,
     ) -> None:
-        """Deliver an alert card with inline keyboard button for dependency installation."""
+        """Deliver an alert card, with an install button only if one applies.
+
+        A plain status alert (RAM pressure, disk pressure) has no package to
+        install and gets no button. The card used to promise one either way --
+        "Click below to trigger the remote installation safely" over an empty
+        keyboard -- which is how an operator ends up clicking "resolve" on a
+        memory warning and starting an install.
+        """
         callback_data = callback_id
         if callback_data and not (callback_data.startswith("sys_install:") or callback_data.startswith("install_dependency:")):
             callback_data = f"sys_install:{callback_id}"
+        has_button = bool(callback_id) and status != "ACTIVE"
 
         # If it's a sys_install callback data, use the requested HTML-formatted text block
         if callback_data and "sys_install:" in callback_data:
@@ -252,7 +260,8 @@ class TelegramBusAdapter(BusAdapter):
                 f"<b>Status:</b> {status}\n"
                 f"<b>Reason:</b> {reason}\n"
                 "━━━━━━━━━━━━━━━━━━━━━\n"
-                "Click below to trigger the remote installation safely."
+                + ("Click below to trigger the remote installation safely."
+                   if has_button else "")
             )
             parse_mode = "HTML"
         else:
@@ -267,7 +276,8 @@ class TelegramBusAdapter(BusAdapter):
                 f"*Status:* {safe_status}\n"
                 f"*Reason:* {safe_reason}\n"
                 "━━━━━━━━━━━━━━━━━━━━━\n"
-                "Click below to trigger the remote installation safely\\."
+                + ("Click below to trigger the remote installation safely\\."
+                   if has_button else "")
             )
             parse_mode = "MarkdownV2"
 

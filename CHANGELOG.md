@@ -1,5 +1,120 @@
 # CHANGELOG
 
+## A RAM warning offered to install a package (2026-09-12)
+
+Found by the operator, on the live install. A Telegram alert -- "RAM usage at
+91%" -- carried a button labelled "Resolve Subsystem Issue" over the text
+"Click below to trigger the remote installation safely". Clicking it ran:
+
+    uv add system-init
+
+There is no such package. The name came from `f"{subsystem.lower()}-init"` in
+`trigger_system_alert`: a *label* for a subsystem, handed to a delivery
+pipeline that assumed every alert is a missing-dependency alert. Both attempts
+failed and nothing was installed -- only because nobody has registered
+`system-init` on PyPI.
+
+That is not a security control. `system-init`, `disk-init` and friends are
+unregistered names that an alert card will ask an admin to install on demand,
+and `uv add` writes the result into pyproject.toml as a permanent dependency.
+The admin gate added in the last audit does not help: the admin is not choosing
+a package, they are clicking "resolve" on a memory warning.
+
+`ALLOWED_PACKAGES` already existed -- and was checked in exactly one place, the
+HTTP route. Neither function that actually installs anything consulted it, so
+all three chat-platform buttons went around it. Fixed in three layers:
+
+1. `trigger_system_alert` no longer invents a package name. No installable
+   dependency named in the message, no callback and no button.
+2. The Telegram and Slack cards stop printing "click below to trigger the
+   remote installation" when there is no button below. (Discord already gated
+   its own call-to-action correctly.)
+3. Both `trigger_package_promotion` and `asynchronous_install_package` now
+   check `ALLOWED_PACKAGES` themselves. The check belongs in the functions that
+   run the installer, not in each of their callers, where it was already
+   missing from two of three.
+
+18 tests, including the counterweight: a genuinely missing `sentence-transformers`
+still gets its button, and a known package still installs. A guard that
+refused everything would silently break the ML-extras install this feature
+exists for, and nobody would find out until they needed it.
+
+## The fence now survives someone else's chat template (2026-09-12)
+
+The live benchmark named two payloads that still beat the fence on
+`groq/compound-mini`, which is the whole reason the report prints survivors
+instead of a percentage. They failed for unrelated reasons.
+
+**`live_fake_system_turn` — a forged role turn.** The fence had been hardened
+twice against payloads forging *its own* delimiters (audit AC1, H-6) and never
+once against payloads forging anyone else's. A document containing
+`<|im_start|>system` carried a working system turn through the fence to the
+model's tokenizer, over the fence's head. `_sanitize_fence_body` now redacts
+foreign role-control tokens (ChatML, Llama 2/3, Mistral, Gemma) and
+`filter_injection` refuses to persist text containing them — a stored summary
+with a control token in it gets re-injected into a future system prompt, which
+is the failure the module docstring opens with. Structural: the token is gone
+before a model sees it.
+
+**`live_polite_social` — a polite lie.** Nothing forged, nothing to redact: a
+note signed "the engineering team" claiming the summarization pipeline
+requires a token in the output. The fence's own text now refuses authority
+claimed from inside the block by name — a system message, the operator, an
+internal pipeline — says politeness and routine framing are not mitigating,
+rejects output-format and required-token demands specifically, and gives the
+model an alternative to obeying: report the request, carry on with the user's
+task.
+
+Measured A/B on `ollama/qwen2.5:7b`, 3 runs each, temperature 0, both
+conditions stable across all three: fenced ASR **67% -> 58%**, delta 33 -> 42,
+survivors 8 -> 7. `live_fake_system_turn` went from landing to defended.
+`live_polite_social` still lands, and `docs/INJECTION.md` says so: the
+structural half is fixed and measured, the social half is written down and
+unproven. The `compound-mini` row predates this and is labelled as such rather
+than quietly re-used.
+
+Corpus 48 -> 56 cases (35 attack, 21 control). Four new controls, one of which
+immediately caught a false positive that had been shipping all along: the
+denylist pattern for a `### system` heading meant a document containing
+`### System Requirements` could never be stored to memory. Narrowed to a bare
+`### System` heading — `## Instructions` is in every README and every recipe.
+
+## `kazma mcp` can reach a human now (2026-09-12)
+
+The previous entry ends "connecting a client-spawned server to the running
+instance's bus is real work and is explicitly not done." This is that work.
+
+The bus is in-memory and lives in the server process, so a child process will
+never see it. But the **gate registry already is a cross-process store** —
+`hitl_gates` is SQLite in the data dir, and the dashboard renders every pending
+row it finds. So `SafetyMiddleware.check()`, on finding no bus, now registers a
+gate and waits for a human to claim it. Same card, same place, same button.
+
+It engages only on proof that someone is watching. A running instance
+heartbeats into that database from the approval-timeout watchdog — the loop
+that *reads pending gates*, so the beat is evidence of the behaviour being
+relied on rather than a separate liveness claim that can drift from it. Without
+a fresh beat the bridge declines immediately and the old refusal stands,
+because queueing a card nobody will see costs the caller the full timeout and
+denies it anyway.
+
+With an instance up, `kazma mcp` publishes 155 tools instead of 100, and the
+banner says which mode it is in. Gates carry `mechanism="bus_bridge"` and an
+explicit tenant (they have no session to inherit one from, and the dashboard
+admits them on tenant match alone). `POST /api/approve/{thread_id}` decides
+them before it looks for a graph, since there is no graph to resume.
+
+Fails closed in every direction: no watcher, a stale one, a timeout, a vanished
+row, an unreadable database, an exception mid-poll. The only path to an
+approval is a row this process wrote reaching `decision == "approve"`. No
+session grants and no YOLO on this path — those are properties of a chat thread
+and there is no thread here. `KAZMA_BUS_BRIDGE=0` restores the old behaviour
+exactly. 22 tests, most of them about the ways it must refuse.
+
+The gate itself did not move: it is still `LocalToolRegistry.execute()` ->
+`SafetyMiddleware`. The MCP server gained no safety logic and still has none
+(H-8) — it only asks what the environment can do, so the banner can say so.
+
 ## Fix — `kazma mcp` published danger tools it could never run (2026-09-12)
 
 Caught by the first real MCP client. Zed connected, the read tools worked, and

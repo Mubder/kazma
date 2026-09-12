@@ -351,6 +351,11 @@ def gate_row_to_pending_item(row: Any) -> dict[str, Any]:
         "interrupt_id": str(getattr(row, "gate_id", "") or ""),
         "kind": str(getattr(row, "kind", "") or "security"),
         "items": payload.get("items"),
+        # Carried so the dashboard can admit a gate with no chat session
+        # behind it -- `kazma mcp` queues through the registry from a separate
+        # process and has only its tenant to be recognised by.
+        "mechanism": str(getattr(row, "mechanism", "") or "graph"),
+        "tenant_id": str(getattr(row, "tenant_id", "") or ""),
     }
     # Countdown surface: an unattended card auto-denies at the watchdog
     # deadline — show it counting down instead of dropping silently.

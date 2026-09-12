@@ -40,6 +40,99 @@ def _get_snapshot_store() -> Any:
     return _snapshot_store
 
 
+def _current_tenant() -> str:
+    try:
+        from kazma_core.tenant_context import get_current_tenant_id
+
+        return (get_current_tenant_id() or "default").strip() or "default"
+    except Exception:
+        return "default"
+
+
+def _is_own_bridge_gate(item: dict) -> bool:
+    """True for a bus-bridge gate belonging to this request's tenant.
+
+    Every other pending card is admitted by finding the chat session that owns
+    its thread. A gate queued by `kazma mcp` has no session -- it was written
+    by a different process with no conversation behind it -- so it would be
+    filtered out of the dashboard and the operator would never see the card
+    the MCP client is blocked on.
+
+    Tenancy is the only claim such a row carries, so it is the only thing
+    checked, and it is checked rather than skipped: on a multi-tenant install
+    an unmatched row stays invisible.
+    """
+    if str(item.get("mechanism") or "") != "bus_bridge":
+        return False
+    return str(item.get("tenant_id") or "default") == _current_tenant()
+
+
+async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
+    """Claim a pending bus-bridge gate for *thread_id*, or return ``None``.
+
+    ``None`` means "not a bridge gate" and the caller carries on down the
+    normal graph path untouched. This never guesses: it only acts on a row
+    that is pending, has ``mechanism == "bus_bridge"``, and matches both the
+    thread and this request's tenant.
+
+    Scope is deliberately ignored. "Approve for the session" and YOLO are
+    properties of a chat thread, and the caller here is a separate process
+    with no thread and no way to have its later calls re-checked against a
+    grant. One decision, one tool call.
+    """
+    from kazma_core.safety.hitl_gates import (
+        GateRow,
+        claim_gate_async,
+        gate_registry_enabled,
+        pending_gates_async,
+        settle_gate_async,
+    )
+    if not gate_registry_enabled():
+        return None
+    try:
+        rows: list[GateRow] = await pending_gates_async()
+    except Exception:
+        logger.debug("[HITL] bridge gate lookup failed", exc_info=True)
+        return None
+
+    tenant = _current_tenant()
+    match = next(
+        (
+            r
+            for r in rows
+            if str(getattr(r, "mechanism", "")) == "bus_bridge"
+            and str(getattr(r, "thread_id", "")) == thread_id
+            and str(getattr(r, "tenant_id", "") or "default") == tenant
+        ),
+        None,
+    )
+    if match is None:
+        return None
+
+    decision = "approve" if approved else "deny"
+    actor = str(body.get("actor") or "operator")
+    try:
+        await claim_gate_async(match.gate_id, decision, actor)
+        await settle_gate_async(match.gate_id, decision)
+    except Exception:
+        logger.warning("[HITL] bridge gate claim failed: %s", match.gate_id, exc_info=True)
+        return _JSONResponse({"error": "Approval no longer pending"}, status_code=409)
+
+    logger.info(
+        "[HITL] bus-bridge gate %s %s by %s (tool=%s)",
+        match.gate_id, decision, actor, match.tool,
+    )
+    return _JSONResponse(
+        {
+            "status": "ok",
+            "approved": approved,
+            "bridge": True,
+            "tool": match.tool,
+            "gate_id": match.gate_id,
+        }
+    )
+
+
 def _approve_lock_for(thread_id: str) -> asyncio.Lock:
     import time
     now = time.monotonic()
@@ -425,6 +518,15 @@ def register_misc_routes(self: Any) -> None:
             scope = "tool"
         if scope == "session":
             scope = "yolo"
+
+        # A bus-bridge gate is decided here and goes no further. There is no
+        # graph to resume and no session to own it: the waiting process is
+        # `kazma mcp`, polling the registry row for its answer. Handled before
+        # the graph lookup so an approval does not need a graph that this
+        # request has nothing to do with.
+        decided = await _decide_bridge_gate(thread_id, body, approved)
+        if decided is not None:
+            return decided
 
         graph_ref = _resolve_hitl_graph()
         if graph_ref is None:
@@ -882,6 +984,7 @@ def register_misc_routes(self: Any) -> None:
                         str(item.get("thread_id") or "")
                     )
                     is not None
+                    or _is_own_bridge_gate(item)
                 ]
             else:
                 # Kill-switch / registry outage: checkpoint scan is the
