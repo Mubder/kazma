@@ -220,9 +220,12 @@ def test_partial_pauses_long_task(tmp_path, monkeypatch) -> None:
 
 
 def test_detect_tool_loop() -> None:
-    from kazma_core.agent.long_task import detect_tool_loop, tool_call_signature
+    # `tool_call_signature` was removed as dead code (wave-1-7 audit);
+    # `normalized_tool_signature` is the surviving one. This test only needs a
+    # stable signature string to repeat, so the swap changes nothing it checks.
+    from kazma_core.agent.long_task import detect_tool_loop, normalized_tool_signature
 
-    sig = tool_call_signature("shell_exec", {"command": "ls"})
+    sig = normalized_tool_signature("shell_exec", {"command": "ls"})
     hist = [sig, sig, sig]
     assert detect_tool_loop(hist) == sig
     assert detect_tool_loop([sig, sig]) is None

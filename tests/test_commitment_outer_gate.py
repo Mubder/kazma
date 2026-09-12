@@ -47,10 +47,15 @@ def gate_env(monkeypatch):
     def fake_needs_sem(name: str, *, _calls=calls) -> bool:
         return name in SEMANTIC_TOOLS
 
-    def fake_authz(name, args, **kwargs):
+    def fake_authz(tool_name=None, tool_args=None, **kwargs):
+        # `graph_tool_worker` calls this entirely by keyword
+        # (tool_name=, tool_args=, intent_desc=, requested_at=, constraints=,
+        # tenant_id=). The stub took `(name, args)` positionally, so every call
+        # raised TypeError, the worker's except-block logged "semantic authz
+        # crashed", and three tests failed for a reason that had nothing to do
+        # with what they were testing. Accept the real signature.
+        name = tool_name
         calls.append(name)
-        if isinstance(kwargs.get("_raise_for"), str):
-            pass  # unused; raise behavior set via raises attr below
         raise_for = getattr(fake_authz, "raise_for", None)
         if raise_for is not None and name == raise_for:
             raise RuntimeError(f"policy engine exploded for {name}")
