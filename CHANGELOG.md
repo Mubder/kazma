@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## Fix — `kazma mcp` published danger tools it could never run (2026-09-12)
+
+Caught by the first real MCP client. Zed connected, the read tools worked, and
+`shell_exec` came back *"correctly denied by the HITL approval gate"* —
+**denied**, not queued. `docs/MCP_SERVER.md` claimed a danger call *"does not
+fail. It waits."* That was wrong.
+
+`kazma mcp` is a separate process, spawned by the client. The approval bus
+lives in the running Kazma server, so this process sees a `NullBusAdapter`,
+`safety.check()` fails closed, and every danger call is refused. Safe, but
+`ApprovalPath.detect()` only checked whether HITL was *enabled* — so it
+published 55 tools that could only ever be refused, for the client's model to
+plan around and fail on.
+
+`detect()` now requires a *reachable* approval bus, not just an enabled one.
+With no adapter, danger tools are withheld and the banner says why:
+
+```
+[kazma mcp] 100 tools; HITL is enabled but no approval bus is reachable from
+this process, so danger tools would be denied, not queued
+```
+
+`allow_headless_danger` still overrides, and is reported as an override. The
+doc now describes what actually happens in all three states instead of the one
+that reads best. Connecting a client-spawned server to the running instance's
+bus is real work and is explicitly not done.
+
 ## The injection fence has a live number now (2026-09-12)
 
 12 attack payloads x 2 conditions x 3 runs per model, temperature 0, canary

@@ -365,3 +365,62 @@ def test_non_ascii_arguments_are_accepted() -> None:
     finally:
         reg.get_tool_registry = original  # type: ignore[assignment]
     assert seen["path"] == "مجلد/ملف.txt"
+
+
+class TestApprovalPathNeedsAReachableBus:
+    """HITL *enabled* is not the same as HITL *reachable*.
+
+    `kazma mcp` runs as its own process, spawned by the client. The approval
+    bus lives in the running Kazma server, so with no adapter `safety.check()`
+    fails closed and DENIES — it does not queue anything for a human. Zed
+    reported exactly that on the first real connection: "shell_exec correctly
+    denied by the HITL approval gate".
+
+    Publishing danger tools in that state is dishonest rather than unsafe: the
+    client's model plans around 55 tools that can only ever be refused.
+    """
+
+    @staticmethod
+    def _detect(*, enabled: bool, null_bus: bool, headless: bool = False):
+        from unittest.mock import patch
+
+        from kazma_core.mcp.server import ApprovalPath
+        from kazma_core.swarm.bus import NullBusAdapter
+
+        class _Safety:
+            pass
+
+        safety = _Safety()
+        safety.enabled = enabled
+        safety.allow_headless_danger = headless
+
+        class _Bus:
+            _adapter = NullBusAdapter() if null_bus else object()
+
+        with patch("kazma_core.swarm.safety.get_safety", return_value=safety), patch(
+            "kazma_core.swarm.bus.get_message_bus", return_value=_Bus()
+        ):
+            return ApprovalPath.detect()
+
+    def test_no_bus_means_no_approval_path(self):
+        approval = self._detect(enabled=True, null_bus=True)
+        assert approval.gated is False
+        assert "no approval bus" in approval.reason
+
+    def test_a_real_bus_gates_normally(self):
+        """Negative control: the in-server case must still publish them."""
+        approval = self._detect(enabled=True, null_bus=False)
+        assert approval.gated is True
+
+    def test_headless_override_is_marked_as_an_override(self):
+        approval = self._detect(enabled=True, null_bus=True, headless=True)
+        assert approval.gated is True
+        assert approval.overridden is True
+
+    def test_danger_tools_are_withheld_without_a_bus(self):
+        from kazma_core.mcp.server import build_tool_list
+
+        names = {t["name"] for t in build_tool_list(self._detect(enabled=True, null_bus=True))}
+        assert "shell_exec" not in names
+        assert "file_write" not in names
+        assert "file_read" in names, "read-tier tools stay available"
