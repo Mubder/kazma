@@ -289,6 +289,37 @@ def _parse_tool_count_limit(detail: str) -> int | None:
     return None
 
 
+
+def _otel_system_for(base_url: str | None) -> str:
+    """`gen_ai.system` from the provider URL.
+
+    The convention wants the provider ("openai", "anthropic", "deepseek"), not
+    the gateway hostname. Unknown hosts fall back to "openai" because every one
+    of them is reached over the OpenAI-compatible wire protocol, which is what
+    the attribute is actually describing.
+    """
+    host = (base_url or "").lower()
+    for needle, name in (
+        ("anthropic", "anthropic"),
+        ("deepseek", "deepseek"),
+        ("groq", "groq"),
+        ("openrouter", "openrouter"),
+        ("generativelanguage", "gcp.gemini"),
+        ("googleapis", "gcp.gemini"),
+        ("bedrock", "aws.bedrock"),
+        ("azure", "azure.ai.openai"),
+        ("mistral", "mistral_ai"),
+        ("cohere", "cohere"),
+        ("x.ai", "xai"),
+        ("localhost:11434", "ollama"),
+        ("ollama", "ollama"),
+        ("openai", "openai"),
+    ):
+        if needle in host:
+            return name
+    return "openai"
+
+
 # One SSL context for the whole process, built off the event loop.
 #
 # `httpx.AsyncClient(...)` builds a default SSL context at construction, which
@@ -583,6 +614,49 @@ class LLMProvider:
         return await self._get_client()
 
     async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """Send a chat completion request, wrapped in a GenAI span.
+
+        The span is the OpenTelemetry GenAI convention (R-3): an enterprise
+        already running OTel sees Kazma's LLM calls in the dashboards it has.
+        It is a no-op when `opentelemetry` is not installed, which is the
+        default, and it records metadata only -- never prompts or completions.
+
+        It wraps the whole call rather than each attempt, because a caller who
+        waited 40 seconds across three retries waited 40 seconds; per-attempt
+        spans would report three fast calls and hide the latency that was
+        actually experienced.
+        """
+        from kazma_core.observability.genai_otel import (
+            genai_chat_span,
+            record_chat_response,
+        )
+
+        with genai_chat_span(
+            system=_otel_system_for(self.config.base_url),
+            model=str(model or self.config.model or "unknown"),
+            max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+            temperature=temperature if temperature is not None else self.config.temperature,
+        ) as _span:
+            response = await self._chat_inner(
+                messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                model=model,
+                response_format=response_format,
+            )
+            record_chat_response(_span, response)
+            return response
+
+    async def _chat_inner(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,

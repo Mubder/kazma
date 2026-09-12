@@ -1,5 +1,62 @@
 # CHANGELOG
 
+## OpenTelemetry GenAI spans, and the telemetry that nearly hid every error (2026-09-12)
+
+Audit item R-3. Kazma now emits [OpenTelemetry GenAI
+spans](https://opentelemetry.io/docs/specs/semconv/gen-ai/) for every LLM call
+and every tool execution, so an enterprise already running a collector sees
+Kazma's traces in the dashboards it has, with no integration work.
+
+Wired at the two chokepoints rather than at call sites: `LLMProvider.chat()`
+wraps `_chat_inner()`, and `LocalToolRegistry.execute()` wraps
+`_execute_inner()`. Everything passes through one of those, which is the same
+property the approval gate depends on.
+
+A chat span covers the whole call **including provider-side retries**. A caller
+who waited forty seconds across three attempts waited forty seconds; a span per
+attempt would report three fast calls and hide the latency actually
+experienced.
+
+**No content, and no flag to enable it.** No prompts, no completions, no tool
+arguments, no tool results. The conventions make message capture opt-in
+precisely because it is a data-exfiltration surface, and a product whose pitch
+is *your agent, your box* should not stream conversations to a collector by
+default. Adding a switch is a decision with a privacy argument attached, not a
+config default; a test fails if the message attributes reappear in the module.
+
+### Two bugs found by not trusting the code
+
+**The guard swallowed the caller's exception.** The span body was wrapped in a
+broad `except Exception` meant to absorb failures in the span machinery — and it
+caught the re-raised caller error instead. Every failed LLM call and every
+failed tool would have been reported to its caller as a success. Telemetry that
+hides errors is far worse than telemetry that fails. Two tests caught it before
+it shipped; six now pin the behaviour across the instrumented path, the
+no-OpenTelemetry path, and `BaseException`/`KeyboardInterrupt`.
+
+**The documented setup produced nothing.** The page said to install the SDK, set
+`OTEL_EXPORTER_OTLP_ENDPOINT`, and you were done. Checked rather than assumed:
+
+```
+default provider: ProxyTracerProvider
+span class: NonRecordingSpan | is_recording: False
+```
+
+Until something installs a `TracerProvider` the spans go nowhere, and the usual
+fix is relaunching under `opentelemetry-instrument` — another package, a
+different start command. The instructions would have sent operators to an empty
+dashboard. Kazma now installs the exporter itself on the first span, under two
+rules: nothing happens without an explicit endpoint, and a provider the host
+application installed is never replaced.
+
+Verified against a real HTTP collector, not a mock — 919 bytes of OTLP protobuf
+on the wire carrying `deepseek-flash`, `gen_ai.usage.input_tokens` and
+`execute_tool shell_exec`, and not carrying the model's reply. That check is now
+a test, because a mock cannot answer the question it asks.
+
+`docs/docs/ops/opentelemetry.md`, registered in the sidebar, with guard tests
+asserting every variable it names is one the code reads.
+
 ## The Docker jail had never worked on Windows (2026-09-12)
 
 Set out to close the two hardening flags the threat model had just named as

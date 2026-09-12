@@ -69,6 +69,7 @@ const sidebars = {
       items: [
         'ops/production-checklist',
         'ops/diagnosis-map',
+        'ops/opentelemetry',
         'ops/postgres-and-saas',
         'ops/multi-replica-and-saas',
         'ops/disaster-recovery',

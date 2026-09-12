@@ -77,12 +77,17 @@ def test_a_zero_or_negative_limit_is_ignored():
 
 def test_the_provider_retries_trimmed_before_giving_up():
     """Order matters: the count branch must be tried BEFORE the strip-all
-    fallback, or the trim never happens."""
+    fallback, or the trim never happens.
+
+    Reads `_chat_inner`, not `chat`: the GenAI span work made `chat` a thin
+    wrapper and the retry ladder moved down one level. The invariant is about
+    the ladder, so it follows the ladder.
+    """
     import inspect
 
     from kazma_core.llm_provider import LLMProvider
 
-    src = inspect.getsource(LLMProvider.chat)
+    src = inspect.getsource(LLMProvider._chat_inner)
     trim_at = src.index("_parse_tool_count_limit")
     strip_at = src.index('payload.pop("tools", None)')
     assert trim_at < strip_at, (
