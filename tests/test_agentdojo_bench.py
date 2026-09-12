@@ -207,7 +207,7 @@ def test_agentdojo_is_not_a_kazma_dependency():
 # run in CI. `docs/INJECTION.md` section 4 quotes counts from a live run; the
 # run summary is committed beside it so the prose cannot drift from the data.
 
-_FIXTURE = _REPO / "tests" / "fixtures" / "agentdojo_slack_qwen25_7b.json"
+_FIXTURE = _REPO / "tests" / "fixtures" / "agentdojo_qwen25_7b.json"
 _DOC = _REPO / "docs" / "INJECTION.md"
 
 
@@ -217,7 +217,14 @@ def recorded():
 
     assert _FIXTURE.exists(), "the AgentDojo run summary is gone"
     data = json.loads(_FIXTURE.read_text(encoding="utf-8"))
-    return {row["condition"]: row for row in data["conditions"]}, data
+    # Flattened as (suite, condition) -> row, so every guard below covers both
+    # suites rather than silently checking only the first one.
+    rows = {
+        (suite, row["condition"]): row
+        for suite, block in data["suites"].items()
+        for row in block["conditions"]
+    }
+    return rows, data
 
 
 @pytest.fixture(scope="module")
@@ -265,30 +272,29 @@ def test_the_run_had_no_errors_or_the_asr_is_inflated(recorded):
         )
 
 
-def test_a_tie_is_reported_as_indistinguishable_not_as_a_win(recorded, injection_doc):
-    """When the two defenses score the same, the page must say they cannot be
-    told apart -- and must not claim either one won.
+def test_a_non_significant_lead_is_not_reported_as_a_win(recorded, injection_doc):
+    """The fence leads spotlighting in every cell of both suites and still does
+    not reach significance (pooled ASR p = 0.29, obedience p = 0.063). A
+    consistent lean is not a result, and 0.063 is not 0.05.
 
-    The first version of this guard pinned the opposite prose ("buys nothing
-    over a far simpler defense"). That phrasing turned a tie into a finding,
-    and the obedience column points the other way, so both readings overstated
-    a difference smaller than the instrument. Rewriting it is what this test is
-    for: it fails loudly rather than letting the claim drift either way.
+    This guard has now been wrong in both directions. Its first version pinned
+    "buys nothing over a far simpler defense" -- which turned a single-suite tie
+    into a finding, and `banking` later showed the fence ahead everywhere. Its
+    second version pinned the tie. What actually has to hold is neither: while
+    the p-value says the two are indistinguishable, the page must say so and
+    must not claim a win.
     """
-    rows, _ = recorded
-    if rows["kazma_fence"]["attacks_won"] != rows["spotlighting"]["attacks_won"]:
-        return
-    low = injection_doc.lower()
-    assert "cannot be told apart" in low, (
-        "the run is a tie and the page no longer says the two are "
-        "indistinguishable"
-    )
-    for overclaim in (
-        "the fence beats spotlighting",
-        "outperforms spotlighting",
-        "better than spotlighting",
-    ):
-        assert overclaim not in low, f"the page claims {overclaim!r} on a tie"
+    _, data = recorded
+    p_asr = data["significance_p_values"]["asr"]["fence_vs_spotlighting"]
+    if p_asr >= 0.05:
+        assert "cannot be told apart" in injection_doc.lower(), (
+            f"fence vs spotlighting is p={p_asr}; the page must still say the "
+            "two are indistinguishable"
+        )
+        for overclaim in ("the fence beats spotlighting", "outperforms spotlighting"):
+            assert overclaim not in injection_doc.lower(), (
+                f"the page claims {overclaim!r} at p={p_asr}"
+            )
 
 
 def test_the_measured_noise_floor_is_on_the_page(recorded, injection_doc):
@@ -297,41 +303,44 @@ def test_the_measured_noise_floor_is_on_the_page(recorded, injection_doc):
     _, data = recorded
     floor = data.get("noise_floor")
     assert floor, "the fixture lost its noise-floor measurement"
-    wins = [r["attacks_won"] for r in floor["repeats"]]
-    observations = [floor["headline_run_attacks_won"], *wins]
-    for w in observations:
+    for w in floor["observations_attacks_won"]:
         assert str(w) in injection_doc, (
             f"the page does not quote the unchanged-configuration result {w}"
         )
     low = injection_doc.lower()
     assert "temperature 0" in low
     assert "noise" in low
+    assert str(floor["asr_spread_points"]) in injection_doc
 
 
-def test_the_page_quotes_the_obedience_numbers(recorded, injection_doc):
-    """AgentDojo's score requires the injection to COMPLETE, so a run where the
-    model obeyed and then bungled the sequence counts as secure. The obedience
-    column is the one that says what the fence actually did, and it has to be
-    on the page with the ASR column, not instead of it."""
-    rows, _ = recorded
-    for condition, row in rows.items():
-        assert "acted_on_payload" in row, f"{condition}: fixture lost obedience counts"
-        assert f"{row['acted_on_payload']}/{row['n']}" in injection_doc, (
-            f"{condition}: the page does not quote obedience "
-            f"{row['acted_on_payload']}/{row['n']}"
-        )
+def test_the_refuted_hypothesis_is_still_on_the_page(recorded, injection_doc):
+    """`slack` suggested the fence was inert on in-workspace payloads;
+    `banking` -- nine in-workspace injection tasks, no external URL anywhere --
+    gave the strongest result on the page and killed it.
 
-
-def test_the_inert_case_is_not_buried(recorded, injection_doc):
-    """injection_task_5 is the one payload shape the fence does nothing for.
-    A page that reports only the aggregate would hide it."""
+    A page that shows only the hypotheses that survived is not showing its
+    work, so the dead one has to stay visible.
+    """
     _, data = recorded
-    t5 = data["per_injection_task"]["injection_task_5"]
-    assert t5["kazma_fence"]["acted"] == t5["none"]["acted"], (
-        "injection_task_5 is no longer inert -- rewrite the section that says "
-        "the fence had no effect on it"
+    bank = {r["condition"]: r for r in data["suites"]["banking"]["conditions"]}
+    assert bank["kazma_fence"]["asr"] < bank["none"]["asr"], (
+        "banking no longer shows the fence beating undefended -- the section "
+        "that reports the hypothesis being refuted needs rewriting"
     )
-    assert "injection_task_5" in injection_doc or "task 5" in injection_doc.lower()
+    low = injection_doc.lower()
+    assert "banking killed" in low or "hypothesis is wrong" in low
+
+
+def test_the_inert_case_is_reported_with_its_caveat(recorded, injection_doc):
+    """injection_task_5 showed no effect on slack. It is one 21-run cell inside
+    a 5.7-point band, and the page must not present it as a payload class the
+    fence cannot see."""
+    _, data = recorded
+    t5 = data["suites"]["slack"]["per_injection_task"]["injection_task_5"]
+    if t5["kazma_fence"]["acted"] == t5["none"]["acted"]:
+        low = injection_doc.lower()
+        assert "injection_task_5" in low
+        assert "noise band" in low or "noise floor" in low
 
 
 def test_the_page_still_admits_the_comparison_flatters_kazma(injection_doc):

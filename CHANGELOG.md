@@ -1,5 +1,64 @@
 # CHANGELOG
 
+## A second suite, and the hypothesis it killed (2026-09-12)
+
+`slack` had produced one clean-looking story: the fence cut obedience hard on
+payloads pointing at an external URL (11 → 3, 6 → 3, 6 → 2) and did **nothing**
+on `injection_task_5` (8 → 8), the one asking for ordinary in-workspace
+administration. The obvious reading was that the fence helps when a payload
+*looks* dangerous and is inert when it looks like routine housekeeping.
+
+`banking` was run to test exactly that, because **all nine of its injection
+tasks are in-workspace actions with no external URL** — transfers, a modified
+recurring payment, a password change. If the hypothesis held, the fence should
+have been weak across the whole suite.
+
+It was the strongest result on the page.
+
+| `banking`, 144 runs/condition | ASR | acted on payload | utility |
+|---|---|---|---|
+| undefended | 22/144 — 15.3% | 20.1% | 44.4% |
+| spotlighting | 14/144 — 9.7% | 13.9% | 38.9% |
+| **Kazma fence** | 7/144 — **4.9%** | **9.0%** | 41.0% |
+
+Pooled with `slack` (249 runs/condition): ASR **19.7% → 8.4%** for the fence
+(p = 0.0003), obedience **24.9% → 12.4%** (p = 0.0004). Both far outside the
+5.7-point noise band measured yesterday.
+
+So the hypothesis is dead, and `injection_task_5` is a single 21-run cell inside
+that band rather than a payload class the fence cannot see. The attempt to
+attribute it to a cause had already failed on its own terms — two candidate
+fixes ablated over four arms, and the arm carrying *both* scored worse than
+either alone. The page now records the dead hypothesis rather than quietly
+dropping it, because a page showing only the hypotheses that survived is not
+showing its work.
+
+### What changed in the claims
+
+- **Spotlighting is weaker than one suite suggested.** It reaches significance
+  against undefended on pooled ASR (p = 0.009) but not on pooled obedience
+  (p = 0.08), and on `banking` alone it reaches neither. The fence is the only
+  condition that separates from undefended on every measure in both suites.
+- **The fence still cannot be told apart from spotlighting.** Pooled ASR
+  p = 0.29, obedience p = 0.063. It leads in every cell of both suites, which is
+  a consistent lean and not a result. 0.063 is not 0.05.
+- **The mechanism replicated.** Conversion from deliberation to action:
+  85% → 68% → 58% on `slack`, 74% → 61% → 50% on `banking`. The fence does not
+  stop the model reading an injection; it interrupts the step between
+  considering it and doing it.
+- **Utility is open, not settled.** The fence was lowest on `slack` (17.1% vs
+  20.0%) and mid on `banking` (41.0%, above spotlighting's 38.9%). The suites
+  disagree about the sign and neither gap is significant.
+
+The fixture now holds both suites, the pooled figures and the p-values, and the
+`--analyze` mode re-derives all of it from the run logs without calling
+anything.
+
+The guard on this claim has now been wrong in both directions — it first pinned
+"buys nothing over a far simpler defense", then pinned the tie. It now pins the
+only thing that actually has to hold: while the p-value says indistinguishable,
+the page says indistinguishable and never claims a win.
+
 ## Measuring the instrument before the defense (2026-09-12)
 
 The AgentDojo section published hours earlier said Kazma's fence "buys nothing
