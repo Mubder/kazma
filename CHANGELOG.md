@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## Two errors that pointed at the wrong thing (2026-09-12)
+
+Both from one chat transcript the operator shared. Neither was the failure it
+reported itself as.
+
+**A 413 that never reached compaction.** `groq/compound-mini` rejected an
+over-long prompt with `{"code":"request_too_large","message":"Request Entity
+Too Large"}`. Kazma already handles this: tag it `kind="context_overflow"` and
+the watchdog compacts and retries. But the branch matched on provider
+*wording*, and none of its eight markers appear in Groq's message -- so a
+recoverable overflow surfaced as "the model rejected the request" and the turn
+was lost. Matching vendor prose is a losing game; on a chat-completions
+endpoint the payload *is* the prompt, so a bare 413 now routes to compaction
+with no wording match at all. Groq's phrasing is also recognised on 400/422,
+where some providers send it. Same fix in the Anthropic provider.
+
+**A scheduler denial that blamed the format.** The operator corrected their
+SuperGrok reset date to September 14; memory still held the old one.
+`schedule_task` was called with `timing="2026-09-13T23:18:00+00:00"` and came
+back with:
+
+    no time expression found — ask when to fire
+    Pass schedule_task.timing as Nm/Nh (e.g. 247m) or ISO.
+
+Both halves are false. The expression parses fine -- verified against four ISO
+forms -- and it *was* ISO. The real reason was the CoPilot-overwrite guard:
+`validate_timing_against_memory` returns `conflict` for an absolute timing more
+than two days from every dated belief, and the belief it conflicted with was
+the stale one the user was in the middle of correcting.
+
+The wrong message had a real cost. The model told the operator that "the ISO
+timestamp was not accepted by the scheduler's parser" and offered to retry as
+`2660m` -- the same instant in relative form, which skips the memory check
+entirely. A misleading error talked it into routing around a safety gate.
+Conflicts now say so, and name the belief they conflict with, so the fix is one
+step instead of a hunt.
+
+**Not fixed, and now pinned by a test:** relative timings bypass that guard
+altogether. Closing it is not a one-liner -- `memory_beliefs` is every
+functional belief, unfiltered by topic, so applying the same check to relative
+timings would refuse "remind me in 10 minutes" whenever any unrelated dated
+belief sits more than two days out. That needs a scoping decision, not a quick
+patch, so the gap is documented and will start failing the day someone narrows
+it.
+
 ## A RAM warning offered to install a package (2026-09-12)
 
 Found by the operator, on the live install. A Telegram alert -- "RAM usage at

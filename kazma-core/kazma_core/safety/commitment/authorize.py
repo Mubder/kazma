@@ -73,6 +73,35 @@ class EffectDecision:
     options: list[dict[str, Any]] = field(default_factory=list)
 
 
+def _nearest_belief_hint(timing: str, memory_beliefs: list[dict[str, Any]]) -> str:
+    """`` (nearest: <predicate> = <object>)`` for a conflict message, or ``""``.
+
+    A denial that says "conflicts with memory" and stops is only half an
+    answer -- the operator still has to go and find which belief. Naming it
+    turns a dead end into a one-step fix.
+    """
+    try:
+        from .relative_time import parse_absolute_timing, parse_belief_date
+
+        when = parse_absolute_timing(timing)
+        if when is None:
+            return ""
+        best = None
+        for b in memory_beliefs or []:
+            bd = parse_belief_date(str(b.get("object", "")))
+            if bd is None:
+                continue
+            gap = abs((when - bd).total_seconds())
+            if best is None or gap < best[0]:
+                best = (gap, b)
+        if best is None:
+            return ""
+        b = best[1]
+        return f" (nearest: {b.get('predicate')} = {b.get('object')!r})"
+    except Exception:  # pragma: no cover - a hint must never break a denial
+        return ""
+
+
 def _args_digest(args: dict[str, Any] | None) -> str:
     if not args:
         return ""
@@ -415,6 +444,15 @@ def _resolve_remind_act(
                 rewritten_args=None,
             )
 
+    # Tracked so the denial at the bottom can say what actually happened. A
+    # timing refused by the memory guard used to be reported as "no time
+    # expression found — pass timing as Nm/Nh or ISO", which is false twice
+    # over: the expression parsed fine, and it *was* ISO. The model then told
+    # the operator the scheduler's parser had rejected the ISO timestamp and
+    # offered to retry in relative form (incident 2026-09-12).
+    _consistency = "not_absolute"
+    _matched = None
+
     if _timing_arg and mode != "strict":
         _consistency, _matched = validate_timing_against_memory(_timing_arg, memory_beliefs)
         _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
@@ -532,12 +570,29 @@ def _resolve_remind_act(
                 "[commitment] deny (no actionable clarify options) %s cid=%s — %s",
                 tool_name, cid, res.reason,
             )
-            return EffectDecision(
-                decision="deny",
-                reason=(
+            if _consistency == "conflict":
+                # Say the true thing. The timing parsed; it was refused because
+                # it is more than two days from every dated belief in memory,
+                # which is the CoPilot-overwrite guard doing its job -- or a
+                # stale belief blocking a correction to itself, which is what
+                # happened on 2026-09-12 (memory still held the old reset date).
+                # Telling the model to "pass ISO" here sends it to reformat a
+                # value that was already correct.
+                _reason = (
+                    f"timing {_timing_arg!r} parsed fine but conflicts with memory: "
+                    f"it is not within 2 days of any stored date"
+                    f"{_nearest_belief_hint(_timing_arg, memory_beliefs)}. "
+                    "Reformatting will not help. Either correct the stored "
+                    "belief first, or confirm with the user that the new date "
+                    "supersedes it."
+                )
+            else:
+                _reason = (
                     (res.reason or "no time expression found — ask when to fire")
                     + " Pass schedule_task.timing as Nm/Nh (e.g. 247m) or ISO."
-                ),
+                )
+            return EffectDecision(
+                decision="deny", reason=_reason,
                 profile=profile, audit=audit, commitment_id=cid,
             )
         commitment.status = "needs_clarify"
