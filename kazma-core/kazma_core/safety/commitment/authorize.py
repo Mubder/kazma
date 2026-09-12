@@ -420,29 +420,48 @@ def _resolve_remind_act(
             ):
                 _delta = _abs_from_now - request_at
         if _delta is not None:
-            _fire = request_at + _delta
-            req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
-            _c = Commitment(
-                thread_id=thread_id or "", turn_id=turn_id, act="remind",
-                tool_name=tool_name, goal_text=(user_text or "")[:200],
-                args_digest=_args_digest(args), request_at=req_ts, tenant_id=tenant_id,
-                slots={"fire_at": _fire.isoformat(), "anchor": "request_at"},
-                conflicts=[], confidence=1.0,
+            # A relative offset is not automatically innocent. "2660m" was the
+            # same instant as an ISO timestamp the memory guard had just
+            # refused, so the guard could be sidestepped by writing the time a
+            # different way -- and a misleading error message talked a model
+            # into doing exactly that (2026-09-12). Run the same check here,
+            # now that it can resolve an offset against request_at. Reminders
+            # that name no known subject land on no_memory and are unaffected,
+            # which is nearly all of them.
+            _rel_consistency, _ = validate_timing_against_memory(
+                _timing_arg, memory_beliefs or [],
+                user_text=user_text, request_at=request_at,
+                require_subject_match=True,
             )
-            _c.status = "ready"
-            _c.policy_decision = "allow"
-            _cid = create_commitment(_c, cfg=cfg)
-            logger.info(
-                "[commitment] allow (compact timing) %s fire_at=%s "
-                "delta=%s cid=%s source=%s",
-                tool_name, _fire.isoformat(), _delta, _cid, source,
-            )
-            return EffectDecision(
-                decision="allow",
-                reason=f"scheduler-native timing {_timing_arg!r} → request_at + {_delta}",
-                profile=profile, audit=audit, commitment_id=_cid,
-                rewritten_args=None,
-            )
+            if _rel_consistency == "conflict":
+                logger.info(
+                    "[commitment] compact timing %s conflicts with memory — "
+                    "falling through to the resolver", _timing_arg,
+                )
+            else:
+                _fire = request_at + _delta
+                req_ts = request_at.timestamp() if hasattr(request_at, "timestamp") else time.time()
+                _c = Commitment(
+                    thread_id=thread_id or "", turn_id=turn_id, act="remind",
+                    tool_name=tool_name, goal_text=(user_text or "")[:200],
+                    args_digest=_args_digest(args), request_at=req_ts, tenant_id=tenant_id,
+                    slots={"fire_at": _fire.isoformat(), "anchor": "request_at"},
+                    conflicts=[], confidence=1.0,
+                )
+                _c.status = "ready"
+                _c.policy_decision = "allow"
+                _cid = create_commitment(_c, cfg=cfg)
+                logger.info(
+                    "[commitment] allow (compact timing) %s fire_at=%s "
+                    "delta=%s cid=%s source=%s",
+                    tool_name, _fire.isoformat(), _delta, _cid, source,
+                )
+                return EffectDecision(
+                    decision="allow",
+                    reason=f"scheduler-native timing {_timing_arg!r} → request_at + {_delta}",
+                    profile=profile, audit=audit, commitment_id=_cid,
+                    rewritten_args=None,
+                )
 
     # Tracked so the denial at the bottom can say what actually happened. A
     # timing refused by the memory guard used to be reported as "no time
@@ -454,10 +473,17 @@ def _resolve_remind_act(
     _matched = None
 
     if _timing_arg and mode != "strict":
-        _consistency, _matched = validate_timing_against_memory(_timing_arg, memory_beliefs)
+        _consistency, _matched = validate_timing_against_memory(
+            _timing_arg, memory_beliefs,
+            user_text=user_text, request_at=request_at,
+        )
         _abs_dt = parse_absolute_timing(_timing_arg)  # non-None when not_absolute is False
-        if _abs_dt and _consistency in ("consistent", "no_memory"):
-            _anchor = ("absolute" if _consistency == "no_memory"
+        # "user_asserted" joins the allow set: the operator named this moment
+        # themselves this turn, so the model did not invent it. Without it the
+        # guard blocks the one thing it should never block -- a correction to
+        # the very belief it is checking against (2026-09-12).
+        if _abs_dt and _consistency in ("consistent", "no_memory", "user_asserted"):
+            _anchor = ("absolute" if _consistency in ("no_memory", "user_asserted")
                        else str(_matched.get("predicate") or "absolute") if _matched else "absolute")
             _rewritten = dict(args)
             _rewritten["timing"] = _abs_dt.isoformat()

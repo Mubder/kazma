@@ -206,6 +206,14 @@ _EVENT_ALIASES_AR: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Predicate head tokens too common to identify a subject on their own.
+_GENERIC_PREDICATE_HEADS = frozenset({
+    "user", "owner", "person", "account", "current", "preferred", "default",
+    "primary", "daily", "weekly", "monthly", "yearly", "next", "last",
+    "system", "agent", "session", "email", "phone", "address", "value",
+})
+
+
 def event_aliases(predicate: str, lang: str = "en") -> list[str]:
     """Return text aliases for a belief predicate (derived + canonical)."""
     p = (predicate or "").strip().lower()
@@ -223,6 +231,19 @@ def event_aliases(predicate: str, lang: str = "en") -> list[str]:
         if base and base != p:
             out.append(f"{base} reset")
             out.append(f"{base} renewal")
+        # The predicate spelled out, and its head token. "supergrok_heavy_reset"
+        # matched nothing before: it ends in none of the suffixes above, so it
+        # had no derived alias at all and the subject-scoping that depends on
+        # this could never fire for it (2026-09-12).
+        spelled = p.replace("_", " ").strip()
+        if spelled and spelled != p:
+            out.append(spelled)
+        head = p.split("_", 1)[0]
+        # Only a distinctive head. "user_timezone" → "user" would match almost
+        # any sentence, and a false subject match turns an unrelated reminder
+        # into a conflict.
+        if len(head) >= 5 and head not in _GENERIC_PREDICATE_HEADS:
+            out.append(head)
     # de-dup, preserve order
     seen: set[str] = set()
     return [a for a in out if not (a in seen or seen.add(a))]
@@ -350,30 +371,100 @@ def validate_timing_against_memory(
     memory_beliefs: list[dict[str, Any]],
     *,
     window: timedelta | None = None,
+    user_text: str | None = None,
+    request_at: datetime | None = None,
+    require_subject_match: bool = False,
 ) -> tuple[str, dict[str, Any] | None]:
-    """Validate an absolute ``timing`` arg against stored beliefs (CoPilot guard).
+    """Validate a ``timing`` arg against stored beliefs (CoPilot guard).
 
     Returns ``(consistency, matched_belief)`` where consistency is:
 
-    * ``"not_absolute"`` — timing is relative/absent (caller falls back to chat).
-    * ``"no_memory"``    — timing is absolute but no belief has a parseable date
-      (nothing to contradict → safe to allow).
-    * ``"consistent"``   — timing is within ``window`` (default 2 days) of a
-      belief date → memory-anchored → allow.
-    * ``"conflict"``     — beliefs exist but timing is far from all of them →
-      the model may have invented it → clarify (the CoPilot overwrite class).
+    * ``"not_absolute"``  — timing cannot be resolved to an instant.
+    * ``"user_asserted"`` — the timing matches a date the user stated in this
+      turn → the user is the source, not the model → allow.
+    * ``"no_memory"``     — no belief (in scope) has a parseable date →
+      nothing to contradict → allow.
+    * ``"consistent"``    — within ``window`` (default 2 days) of a belief date.
+    * ``"conflict"``      — a belief about this subject exists and the timing is
+      far from it → the model may have invented it (the CoPilot class).
 
-    The CoPilot incident class (model invents a date, overwrites the user's real
-    belief) is blocked at ``conflict``; a memory-anchored timing (the
-    ZCode case) is allowed here instead of re-parsing a bare "yes".
+    Three things this does that the first version did not, each paid for by a
+    real failure:
+
+    **A date the user just typed is not an invention.** The whole guard exists
+    to catch a model fabricating a date that contradicts what the user told it.
+    When the timing matches a date in the user's own message this turn, that
+    premise does not hold -- and the case where it misfired is precisely the
+    one that matters: the operator *correcting* a stale belief. On 2026-09-12
+    they said the reset had moved to September 14, and the guard refused the
+    new date because it disagreed with the old one. A guard that blocks
+    corrections keeps memory wrong.
+
+    **Only beliefs about the same subject count.** ``memory_beliefs`` is every
+    functional belief the tenant has, so "far from all of them" fired for any
+    genuinely new date, and "near one of them" could be satisfied by an
+    unrelated coincidence. Scoping to beliefs the text actually refers to makes
+    ``conflict`` mean "you gave a date for X that contradicts what I know about
+    X", which is the thing worth blocking.
+
+    **Relative timings are checked too.** ``"2660m"`` was the same instant as
+    the ISO string it was substituted for, and returned ``not_absolute`` --
+    so the guard could be sidestepped by writing the time a different way.
+    Given ``request_at``, a compact offset is resolved and checked like any
+    other. (Without a subject match it lands on ``no_memory`` and is allowed,
+    so "remind me in 10 minutes" stays friction-free.)
     """
+    win = window if window is not None else timedelta(days=2)
+
     abs_dt = parse_absolute_timing(timing)
+    if abs_dt is None and request_at is not None:
+        delta = compact_relative_delta(timing)
+        if delta is not None:
+            abs_dt = _to_utc(request_at) + delta
     if abs_dt is None:
         return ("not_absolute", None)
 
-    win = window if window is not None else timedelta(days=2)
+    # 1. Did the user themselves name this moment in this turn?
+    if user_text:
+        try:
+            for expr in parse_time_expressions(user_text, request_at=request_at):
+                if expr.kind == "absolute" and expr.absolute is not None:
+                    if abs(abs_dt - _to_utc(expr.absolute)) <= win:
+                        return ("user_asserted", None)
+        except Exception:  # pragma: no cover - never fail a check on a parse
+            pass
+
+    # 2. Narrow to beliefs this text is actually about, when it names one.
+    #
+    # When it names none, the default stays conservative -- compare against
+    # everything. That is deliberate and was learned the hard way: the CoPilot
+    # incident's second turn is the user saying a bare "yes" while the model
+    # sends an invented absolute date. "yes" names no subject, but the
+    # conversation is still about the reset, and treating contentless text as
+    # "nothing to contradict" hands the invention straight through.
+    #
+    # `require_subject_match` opts out of that fallback, and only the relative
+    # path uses it. An offset from now ("10m") makes no claim about when an
+    # event happens unless it is tied to a subject, so guarding it against
+    # every unrelated belief would refuse "remind me in 10 minutes" for no
+    # reason. An absolute date is a claim either way, so it keeps the
+    # conservative default.
+    scoped = list(memory_beliefs or [])
+    if user_text:
+        try:
+            preds = {p for p, _, _ in _match_events(user_text, scoped)}
+        except Exception:  # pragma: no cover
+            preds = set()
+        if preds:
+            scoped = [
+                b for b in scoped
+                if str(b.get("predicate") or "").strip().lower() in preds
+            ]
+        elif require_subject_match:
+            return ("no_memory", None)
+
     belief_dates: list[tuple[datetime, dict[str, Any]]] = []
-    for b in memory_beliefs or []:
+    for b in scoped:
         bd = parse_belief_date(str(b.get("object", "")))
         if bd is not None:
             belief_dates.append((bd, b))
@@ -436,6 +527,31 @@ class RemindResolution:
 # request_at or an event — no overwrite risk.
 _RE_ABSOLUTE_DATE = re.compile(
     r"\b(?P<date>\d{4}-\d{2}-\d{2})(?:[ T](?P<time>\d{2}:\d{2}(?::\d{2})?))?"
+)
+
+# The same date written the way people write it: "September 14, 2026 at 2:48 AM",
+# "Sept 14 2026", "14 September 2026".
+#
+# `parse_belief_date` has understood all of these from the start -- it is how
+# belief objects are stored -- but the expression parser only ever matched ISO.
+# So an operator who typed "Weekly SuperGrok Heavy Resets September 14, 2026 at
+# 2:48 AM" was told "no time expression found", while the identical string
+# stored as a belief parsed perfectly (incident 2026-09-12). One module, two
+# date vocabularies, and the narrower one faced the human.
+#
+# This only locates the substring; `parse_belief_date` does the actual parsing,
+# so the two can no longer drift apart.
+_MONTHS = (
+    "january|february|march|april|may|june|july|august|september|october|"
+    "november|december|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec"
+)
+_RE_MONTH_NAME_DATE = re.compile(
+    r"\b(?:"
+    rf"(?:{_MONTHS})\.?\s+\d{{1,2}}(?:st|nd|rd|th)?,?\s+\d{{4}}"  # September 14, 2026
+    rf"|\d{{1,2}}(?:st|nd|rd|th)?\s+(?:{_MONTHS})\.?,?\s+\d{{4}}"  # 14 September 2026
+    r")"
+    r"(?:\s*(?:at|@)?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?",
+    re.IGNORECASE,
 )
 
 
@@ -548,6 +664,19 @@ def parse_time_expressions(
             ))
         except ValueError:
             continue
+
+    # --- absolute dates in month-name form ("September 14, 2026 at 2:48 AM") ---
+    # Parsed by parse_belief_date, the same function that reads belief objects,
+    # so the two can never disagree about what a date looks like again.
+    for m in _RE_MONTH_NAME_DATE.finditer(norm):
+        phrase = m.group(0)
+        if any(phrase in e.phrase or e.phrase in phrase for e in exprs):
+            continue  # an ISO match already covered this span
+        d = parse_belief_date(phrase)
+        if d is not None:
+            exprs.append(TimeExpression(
+                phrase=phrase, kind="absolute", absolute=d, direction="after",
+            ))
 
     return exprs
 

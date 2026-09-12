@@ -12,10 +12,22 @@ real reason was the CoPilot-overwrite guard: an absolute timing more than two
 days from every dated belief in memory is treated as possibly invented. Here
 the belief it conflicted with was the stale one the user was correcting.
 
-The cost of the wrong message is not cosmetic. The model reported to the user
+The cost of the wrong message was not cosmetic. The model reported to the user
 that "the ISO timestamp was not accepted by the scheduler's parser" and offered
-to retry as `2660m` — the same instant in relative form, which skips the memory
-check entirely. A misleading error talked it into routing around a safety gate.
+to retry as `2660m` — the same instant in relative form, which skipped the
+memory check entirely. A misleading error talked it into routing around a
+safety gate.
+
+Four things were wrong, and this file covers all four:
+
+1. The denial blamed the format. It now says what actually happened and names
+   the belief it conflicted with.
+2. `parse_time_expressions` only understood ISO, so "September 14, 2026 at
+   2:48 AM" genuinely *was* "no time expression found" — while
+   `parse_belief_date`, in the same module, has always read that format.
+3. A date the user typed this turn counted as a model invention.
+4. Relative timings skipped the guard entirely, which is where the model was
+   headed next.
 """
 
 from __future__ import annotations
@@ -31,6 +43,7 @@ from kazma_core.safety.commitment.relative_time import (
 NOW = datetime(2026, 9, 12, 2, 58, tzinfo=timezone.utc)
 TIMING = "2026-09-13T23:18:00+00:00"
 STALE = [{"predicate": "supergrok_heavy_reset", "object": "September 7, 2026"}]
+USER_TEXT = "Weekly SuperGrok Heavy Resets September 14, 2026 at 2:48 AM"
 FRESH = [{"predicate": "supergrok_heavy_reset", "object": "September 14, 2026"}]
 
 
@@ -106,26 +119,147 @@ def test_the_denial_text_tells_the_operator_what_to_do():
     assert "supergrok_heavy_reset" in reason
 
 
-# ── the finding this does NOT fix ───────────────────────────────────────────
+# ── the guard, reworked ─────────────────────────────────────────────────────
+#
+# Three changes, each paid for by a case above or below.
 
 
-def test_relative_timing_still_bypasses_the_memory_guard():
-    """Documented, not fixed — and deliberately so.
+def test_a_date_the_user_just_typed_is_not_an_invention():
+    """The incident, fixed at the root.
 
-    `2660m` is the same instant as the ISO string above. The guard returns
-    `not_absolute` for it and the compact-timing branch allows it outright, so
-    the CoPilot-overwrite check the absolute path pays for is skipped entirely
-    by writing the time a different way.
-
-    Closing it is not a one-line change: `memory_beliefs` is every functional
-    belief, unfiltered by topic, so running the same check on relative timings
-    would refuse "remind me in 10 minutes" whenever any unrelated dated belief
-    sits more than two days away. That needs a scoping decision from the
-    operator, not a quick patch. This test exists so the gap is visible and
-    starts failing the day someone narrows it.
+    The guard exists to catch a model fabricating a date that contradicts what
+    the user said. When the timing matches a date in the user's own message
+    this turn, that premise does not hold -- and the case where it misfired is
+    exactly the one that matters: the user correcting a stale belief. A guard
+    that blocks corrections keeps memory wrong forever.
     """
+    c, _ = validate_timing_against_memory(
+        TIMING, STALE, user_text=USER_TEXT, request_at=NOW
+    )
+    assert c == "user_asserted"
+
+
+def test_the_copilot_invention_is_still_blocked():
+    """The negative control, and the reason the fix is narrow.
+
+    The CoPilot incident's second turn is the user saying a bare "yes" while
+    the model sends a date it made up. "yes" names no subject, but the
+    conversation is still about the reset -- so contentless text keeps the
+    conservative comparison against every belief. Treating "nothing named" as
+    "nothing to contradict" would hand the invention straight through.
+    """
+    invented = "2026-11-01T09:00:00+00:00"
+    assert validate_timing_against_memory(invented, STALE, user_text="yes",
+                                          request_at=NOW)[0] == "conflict"
+    assert validate_timing_against_memory(
+        invented, STALE, user_text="remind me about the supergrok reset",
+        request_at=NOW,
+    )[0] == "conflict"
+
+
+def test_the_relative_bypass_is_closed():
+    """`2660m` was the same instant as the ISO string the guard had just
+    refused. The model offered to retry that way, and it would have worked --
+    not by satisfying the gate but by going around it."""
+    c, _ = validate_timing_against_memory(
+        "2660m", STALE,
+        user_text="remind me about the supergrok reset",
+        request_at=NOW, require_subject_match=True,
+    )
+    assert c == "conflict"
+
+
+def test_a_plain_short_reminder_is_not_guarded():
+    """The counterweight to closing the bypass.
+
+    "remind me in 10 minutes" names no subject and makes no claim about when
+    any event happens. Checking it against every dated belief would refuse it
+    whenever an unrelated reset sat more than two days out -- which is a far
+    worse bug than the one being fixed.
+    """
+    c, _ = validate_timing_against_memory(
+        "10m", STALE, user_text="remind me in 10 minutes",
+        request_at=NOW, require_subject_match=True,
+    )
+    assert c == "no_memory"
+
+
+def test_a_subject_is_matched_from_the_predicate_name():
+    """Scoping needs the subject to be findable. `supergrok_heavy_reset` ends
+    in none of the known suffixes, so it had no derived alias at all and the
+    scoping that depends on it could never fire."""
+    from kazma_core.safety.commitment.relative_time import _match_events, event_aliases
+
+    assert "supergrok" in event_aliases("supergrok_heavy_reset")
+    hits = _match_events("remind me about the supergrok reset", STALE)
+    assert [p for p, _, _ in hits] == ["supergrok_heavy_reset"]
+
+
+def test_a_generic_predicate_head_is_not_a_subject():
+    """`user_timezone` must not make the word "user" a subject match -- a false
+    subject turns an unrelated reminder into a conflict."""
+    from kazma_core.safety.commitment.relative_time import _match_events, event_aliases
+
+    assert "user" not in event_aliases("user_timezone")
+    assert _match_events("remind the user to call mum",
+                         [{"predicate": "user_timezone", "object": "Asia/Kuwait"}]) == []
+
+
+def test_the_old_signature_still_behaves_the_old_way():
+    """Callers that pass neither user_text nor request_at must be unaffected."""
+    assert validate_timing_against_memory(TIMING, STALE)[0] == "conflict"
+    assert validate_timing_against_memory(TIMING, FRESH)[0] == "consistent"
+    assert validate_timing_against_memory(TIMING, [])[0] == "no_memory"
     assert validate_timing_against_memory("2660m", STALE)[0] == "not_absolute"
-    assert validate_timing_against_memory("44h", STALE)[0] == "not_absolute"
+
+
+# ── the parser gap underneath all of it ─────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "text,expected_day",
+    [
+        ("Weekly SuperGrok Heavy Resets September 14, 2026 at 2:48 AM", 14),
+        ("September 14, 2026", 14),
+        ("Sept 14 2026", 14),
+        ("14 September 2026", 14),
+        ("remind me on 3 October 2026", 3),
+    ],
+)
+def test_dates_written_the_way_people_write_them_are_found(text, expected_day):
+    """`parse_belief_date` understood all of these from the start -- it is how
+    belief objects are stored -- but the expression parser only matched ISO.
+    One module, two date vocabularies, and the narrower one faced the human:
+    the operator's "September 14, 2026 at 2:48 AM" came back as "no time
+    expression found"."""
+    from kazma_core.safety.commitment.relative_time import parse_time_expressions
+
+    absolutes = [
+        e for e in parse_time_expressions(text, request_at=NOW)
+        if e.kind == "absolute" and e.absolute is not None
+    ]
+    assert absolutes, f"no absolute date found in {text!r}"
+    assert absolutes[0].absolute.day == expected_day
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I spent 14 dollars in May",
+        "the May 2026 report is late",
+        "remind me in 10 minutes",
+        "march the troops to 14 different places",
+    ],
+)
+def test_month_words_alone_are_not_dates(text):
+    """The counterweight. A month name near a number is not a date, and a
+    false absolute would anchor a reminder to a moment nobody asked for."""
+    from kazma_core.safety.commitment.relative_time import parse_time_expressions
+
+    assert not [
+        e for e in parse_time_expressions(text, request_at=NOW)
+        if e.kind == "absolute"
+    ], f"{text!r} was read as an absolute date"
 
 
 # ── the 413 in the same transcript ──────────────────────────────────────────
