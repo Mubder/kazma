@@ -447,12 +447,23 @@ class CircuitBreaker:
             wall = data.get("opened_at_wall")
             if wall is not None:
                 breaker._opened_at_wall = float(wall)
-                # Map remaining cooldown onto local monotonic clock
+                # Map the breaker's TRUE age onto the local monotonic clock.
+                #
+                # This used to reconstruct `cooldown - remaining`, which equals
+                # `min(elapsed, cooldown)` -- it clamped the age at exactly one
+                # cooldown and threw the overshoot away. A breaker open for 60s
+                # with a 0.05s cooldown came back claiming to be 0.05s old,
+                # landing precisely on the `elapsed >= cooldown_seconds`
+                # boundary in `state`, where float rounding decides the answer.
+                #
+                # That is not a rounding curiosity: `check_or_raise` refreshes
+                # from the shared store on EVERY call, so the breaker re-pinned
+                # itself to the boundary each time and could fail to reach
+                # half-open indefinitely -- a tripped breaker that never probes
+                # and never recovers, on exactly the multi-replica deployments
+                # shared breakers exist for.
                 elapsed = max(0.0, time.time() - float(wall))
-                remaining = max(0.0, breaker.cooldown_seconds - elapsed)
-                breaker._opened_at = time.monotonic() - (
-                    breaker.cooldown_seconds - remaining
-                )
+                breaker._opened_at = time.monotonic() - elapsed
             else:
                 breaker._opened_at = time.monotonic()
         return breaker

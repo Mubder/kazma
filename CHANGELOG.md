@@ -1,5 +1,41 @@
 # CHANGELOG
 
+## A tripped circuit breaker could never recover (2026-09-12)
+
+Found under `test_audit_wave6`, which had been sitting in the untriaged pile.
+The test was failing for two reasons at once, and the first one was a real bug.
+
+`CircuitBreaker.from_dict` rebuilt an open breaker's age as
+`cooldown - remaining`, which is `min(elapsed, cooldown)`. It **clamped the age
+at exactly one cooldown and threw the overshoot away**: a breaker open for 60
+seconds with a 0.05s cooldown came back claiming to be 0.05s old, landing
+precisely on the `elapsed >= cooldown_seconds` comparison in `state`, where
+float rounding decides the answer.
+
+That is not a rounding curiosity. `check_or_raise` calls `refresh_from_shared`
+on **every** call, so the breaker re-pinned itself to that boundary each time —
+a tripped breaker that never probes and never recovers, on exactly the
+multi-replica deployments shared breakers exist for. It now maps the breaker's
+true age onto the local monotonic clock. Three regression tests: a reload after
+the cooldown reaches half-open, the age survives the round trip, and repeated
+refreshes do not reset the clock.
+
+The test could not have failed for the right reason either. Its `MagicMock`
+config store answered `hasattr(cs, "set_if_absent")` with `True` and returned a
+truthy `Mock`, so **every** replica "acquired" the single-probe lease — the
+exact thing the test exists to prove impossible. The real `ConfigStore`
+implements `set_if_absent` atomically; the mock now does too.
+
+**`test_audit_wave7`** was a plain staleness: the Slack adapter moved from
+buffering a whole response to `http.stream` with a 20 MB cap, so the mocked
+`http.get` was never called and the attachment came back with `data=None`. The
+test now mocks the streaming API it actually uses.
+
+Baseline: **8 failures, 0 errors** (from 21 + 1 collection error this morning).
+What remains is 4 environmental e2e and 4 tests that grep the UI JavaScript
+source — left alone deliberately, since relaxing them to get a green board
+would hide whatever they are catching.
+
 ## Six more stale tests, and one that was not a bug after all (2026-09-12)
 
 Continuing the baseline triage. The product was correct in every case; the

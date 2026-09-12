@@ -27,6 +27,16 @@ same change (redacting foreign chat-template tokens) *is* proven, and the two
 should not be quoted as one result.
 → `docs/INJECTION.md`, section "2026-09-12b".
 
+**The `poolside/laguna-s-2.1` A/B is unfinished — blocked on quota, not on
+code.** A single hardened-fence run measured 83% unfenced against 17% fenced
+(delta 67, zero errors), with both payloads the 2026-09-12b hardening targets
+defended. That number is **not published**, because there is no matching
+pre-hardening run to attribute it to: the model may simply be resistant. The
+baseline run returned 84 consecutive `Rate limit exceeded: free` errors and the
+harness refused to report anything, which is the NO RESULT guard behaving
+correctly — a run of errors is not a run of defended attacks. Re-run both
+conditions when the free-tier quota resets.
+
 **The `groq/compound-mini` row predates the current fence.**
 42% → 8% was measured before the 2026-09-12b hardening and has not been
 re-measured; the key is not on the machine that runs these. The row is labelled
@@ -91,8 +101,8 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**9 failures, 0 collection errors** (2026-09-12). Was 21 + 1 collection
-error that morning. Twelve were stale tests pinning code that had moved, each
+**8 failures, 0 collection errors** (2026-09-12). Was 21 + 1 collection
+error that morning. Thirteen were stale tests pinning code that had moved, each
 verified against the product before being touched — the product was correct in
 all ten and the tests were repaired, not relaxed:
 
@@ -102,7 +112,7 @@ all ten and the tests were repaired, not relaxed:
   image limit that grew a second threshold, an MCP result that is now fenced,
   and a keyword rename the gate still honours as an alias.
 
-The remaining 9 are **triaged but not fixed**, and deliberately so — several
+The remaining 8 are **triaged but not fixed**, and deliberately so — several
 pin real invariants, and relaxing them to get a green board would hide exactly
 what they exist to catch:
 
@@ -110,8 +120,17 @@ what they exist to catch:
 |---|---|---|
 | 3 × Playwright, 1 × delivery e2e | environmental | needs browser deps in CI |
 | `test_chat_steer_composer` (2), `test_turn_delivery_cqrs`, `test_turn_ledger_abc` | brittle by construction | they grep the UI **JavaScript source** for identifiers. The JS was refactored. Whether each is stale or catching a real regression needs someone who knows the current UI — `_awaitingApproval must not appear in first paint` may well be a live invariant |
-| `test_audit_wave6::test_half_open_probe_lease_blocks_second_replica` | unknown | circuit breaker opens; fails in isolation too, so not test-order pollution |
-| `test_audit_wave7::test_slack_prefetch_fills_bytes_without_token_in_meta` | unknown | attachment arrives with a URL and `data=None` — prefetch not happening, or no token in the test env |
+
+`test_audit_wave6` turned out to be hiding a **real availability bug**, now
+fixed: `CircuitBreaker.from_dict` clamped a reloaded breaker's age at exactly
+one cooldown, discarding the overshoot, so a breaker open for 60s with a 0.05s
+cooldown reloaded claiming to be 0.05s old — landing on the `>=` boundary where
+float rounding decides. `check_or_raise` refreshes on every call, so it re-pinned
+itself there each time: a tripped breaker that never probes and never recovers,
+on exactly the multi-replica deployments shared breakers exist for. Three
+regression tests added. The test could not fail for the right reason either —
+its `MagicMock` store answered `hasattr(cs, "set_if_absent")` with True and
+returned a truthy mock, so every replica "acquired" the single-probe lease.
 
 `test_detached_reply_persist` was flagged here as a possible real bug and was
 not one. Investigated: the test called the persist helper without
