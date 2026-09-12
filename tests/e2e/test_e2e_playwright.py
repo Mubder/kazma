@@ -25,6 +25,35 @@ def get_free_port() -> int:
     return port
 
 
+def _wait_live(base: str, timeout: float = 60.0) -> None:
+    """Poll until uvicorn actually serves, instead of hoping 1.5s was enough.
+
+    The fixture used to `time.sleep(1.5)` and yield the URL. That is fine when
+    this file runs alone and wrong the moment a slow neighbour runs first: on
+    2026-09-12 `test_delivery_v2_e2e` (which times out over ten seconds) left
+    the process busy enough that uvicorn had not bound yet, and every Playwright
+    test in this file died on `net::ERR_CONNECTION_REFUSED` -- two failures
+    caused entirely by a fixed sleep in a fixture, blamed on "environmental,
+    needs browser deps" for weeks. `test_smoke.py` had this readiness poll from
+    the start; this file did not.
+    """
+    import httpx
+
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        try:
+            r = httpx.get(f"{base}/health/live", timeout=2.0)
+            if r.status_code == 200:
+                return
+            last = f"HTTP {r.status_code}"
+        except Exception as exc:  # not up yet
+            last = str(exc)
+        time.sleep(0.25)
+    raise TimeoutError(f"uvicorn did not become live: {last}")
+
+
+
 @pytest.fixture(scope="module")
 def uvicorn_server():
     """Start uvicorn server running the Kazma UI app in a background thread."""
@@ -52,8 +81,7 @@ def uvicorn_server():
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()
 
-        # Let the server spin up
-        time.sleep(1.5)
+        _wait_live(f"http://127.0.0.1:{port}")
 
         yield f"http://127.0.0.1:{port}"
 

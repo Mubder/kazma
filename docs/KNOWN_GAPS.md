@@ -101,8 +101,8 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**4 failures, 0 collection errors** (2026-09-12) — all environmental. Was 21 + 1 collection
-error that morning. Seventeen were stale tests pinning code that had moved, each
+**1 failure, 0 collection errors** (2026-09-12). Was 21 + 1 collection
+error that morning. Twenty were stale tests pinning code that had moved, each
 verified against the product before being touched — the product was correct in
 all ten and the tests were repaired, not relaxed:
 
@@ -112,13 +112,13 @@ all ten and the tests were repaired, not relaxed:
   image limit that grew a second threshold, an MCP result that is now fenced,
   and a keyword rename the gate still honours as an alias.
 
-The remaining 4 are **triaged but not fixed**, and deliberately so — several
+The remaining 1 is **triaged but not fixed**, and deliberately so — several
 pin real invariants, and relaxing them to get a green board would hide exactly
 what they exist to catch:
 
 | Failure | Class | Why it is still open |
 |---|---|---|
-| 3 × Playwright, 1 × delivery e2e | environmental | needs browser deps in CI |
+| `test_delivery_v2_e2e::test_journaled_frames_paint_live_and_resume_handshake` | **open question, possibly a real gap** | live frames paint fine; frames emitted *after a page reload* never appear. Not timing: fixed waits were replaced with real readiness signals (socket `connectionStatus === 'connected'`, then the server's `resumed` handshake frame) and it still fails at the post-reload step. Either the cursor resume does not re-subscribe for live delivery, or the test's synthetic broker frames are outside what resume replays. Worth a look — "live delivery continues seamlessly after reload" is the plan's stated promise |
 
 `test_audit_wave6` turned out to be hiding a **real availability bug**, now
 fixed: `CircuitBreaker.from_dict` clamped a reloaded breaker's age at exactly
@@ -139,6 +139,17 @@ Repaired, and a third case added that actually separates the two rules -- a
 completed turn whose narration is *longer* than its synthesis -- because both
 original cases had the winner also being the longer text and so could not tell
 length-wins from terminal-authority.
+
+The four e2e failures were **not** environmental, which is what they had been
+written off as. Three were test bugs, now fixed: two Playwright fixtures slept
+a fixed 1.5s instead of polling for readiness, so a slow neighbour
+(`test_delivery_v2_e2e`, which times out over ten seconds) left uvicorn unbound
+and every Playwright test died on `ERR_CONNECTION_REFUSED`; and
+`test_smoke` used Puppeteer's `arguments[0]` inside a Playwright
+`page.evaluate`, which raises `ReferenceError: arguments is not defined` in the
+page — so the session id was never stored, the reload had nothing to restore,
+and the failure looked like a UI regression rather than a two-word API
+mismatch.
 
 The four UI-JavaScript tests were investigated rather than left: every
 invariant they guard was intact. Two failed because they sliced *between two
