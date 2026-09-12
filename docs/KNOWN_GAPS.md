@@ -101,8 +101,8 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**8 failures, 0 collection errors** (2026-09-12). Was 21 + 1 collection
-error that morning. Thirteen were stale tests pinning code that had moved, each
+**4 failures, 0 collection errors** (2026-09-12) — all environmental. Was 21 + 1 collection
+error that morning. Seventeen were stale tests pinning code that had moved, each
 verified against the product before being touched — the product was correct in
 all ten and the tests were repaired, not relaxed:
 
@@ -112,14 +112,13 @@ all ten and the tests were repaired, not relaxed:
   image limit that grew a second threshold, an MCP result that is now fenced,
   and a keyword rename the gate still honours as an alias.
 
-The remaining 8 are **triaged but not fixed**, and deliberately so — several
+The remaining 4 are **triaged but not fixed**, and deliberately so — several
 pin real invariants, and relaxing them to get a green board would hide exactly
 what they exist to catch:
 
 | Failure | Class | Why it is still open |
 |---|---|---|
 | 3 × Playwright, 1 × delivery e2e | environmental | needs browser deps in CI |
-| `test_chat_steer_composer` (2), `test_turn_delivery_cqrs`, `test_turn_ledger_abc` | brittle by construction | they grep the UI **JavaScript source** for identifiers. The JS was refactored. Whether each is stale or catching a real regression needs someone who knows the current UI — `_awaitingApproval must not appear in first paint` may well be a live invariant |
 
 `test_audit_wave6` turned out to be hiding a **real availability bug**, now
 fixed: `CircuitBreaker.from_dict` clamped a reloaded breaker's age at exactly
@@ -140,6 +139,15 @@ Repaired, and a third case added that actually separates the two rules -- a
 completed turn whose narration is *longer* than its synthesis -- because both
 original cases had the winner also being the longer text and so could not tell
 length-wins from terminal-authority.
+
+The four UI-JavaScript tests were investigated rather than left: every
+invariant they guard was intact. Two failed because they sliced *between two
+named functions* and new functions had been inserted between them, widening the
+slice into unrelated code; two because the logic moved from `beginTurn` into
+`_resetTurnState`, which `beginTurn` calls. They now slice to the end of the
+function (`tests/_js_source.py`) and assert the invariant where it lives plus
+the call chain that reaches it — so a refactor no longer fails them, and
+deleting the behaviour still does.
 
 A noisy baseline has a cost beyond the failures themselves: proving a *new*
 failure is not yours takes a stash-and-compare against the previous commit

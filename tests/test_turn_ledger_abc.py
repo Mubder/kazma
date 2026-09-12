@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+from tests._js_source import js_function_body
 from kazma_ui import reply_sink
 from kazma_ui.session_manager import SessionManager, set_session_manager
 from kazma_ui.turn_runtime import ensure_session_for_thread, persist_reply
@@ -237,8 +238,15 @@ def test_user_bubble_survives_cot_rescue() -> None:
     assert "closest('.message-user')" in paint
     live = chat.split("function _paintLiveTextNow(textEl, final)", 1)[1].split("\n  function ", 1)[0]
     assert "closest('.message-user')" in live
-    begin = chat.split("function beginTurn(opts)", 1)[1].split("\n  function ", 1)[0]
-    assert "_docs.live" in begin
+    # The live-doc reset moved out of beginTurn into _resetTurnState, which
+    # beginTurn calls. Assert it where it lives and that the chain reaches
+    # it, rather than pinning it inline (2026-09-12).
+    reset = js_function_body(chat, "function _resetTurnState()")
+    assert "_docs.live" in reset
+    begin = js_function_body(chat, "function beginTurn(opts)")
+    assert "_resetTurnState()" in begin, (
+        "beginTurn no longer reaches the live-doc reset"
+    )
     render = chat.split("function renderTurn(doc, meta)", 1)[1].split("\n  function applyTurnEvent", 1)[0]
     assert "_isUserBubble(el)" in render
     # Negative: a rescue that lifts every .message-text under the panel
