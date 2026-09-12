@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -255,6 +256,37 @@ class LLMResponse:
 
 # ── Provider ──────────────────────────────────────────────────────────
 
+
+
+
+
+_TOOL_COUNT_LIMIT_RES = (
+    # Groq: "'tools' : maximum number of items is 128"
+    re.compile(r"maximum number of items is (\d+)", re.I),
+    # Defensive variants seen in the wild / documented by other gateways.
+    re.compile(r"at most (\d+) tools?", re.I),
+    re.compile(r"tools?[^.]{0,40}?maximum(?: of)? (\d+)", re.I),
+)
+
+
+def _parse_tool_count_limit(detail: str) -> int | None:
+    """The tool-array cap a provider just named, or None.
+
+    Only a COUNT limit counts. A malformed-schema rejection also mentions
+    "tool" and must keep falling through to the strip-all path, because there
+    is no number of tools that would make a broken schema valid.
+    """
+    text = str(detail or "")
+    for pattern in _TOOL_COUNT_LIMIT_RES:
+        m = pattern.search(text)
+        if m:
+            try:
+                n = int(m.group(1))
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                return n
+    return None
 
 
 # One SSL context for the whole process, built off the event loop.
@@ -777,6 +809,42 @@ class LLMProvider:
                 status_code in (400, 422)
                 and any(tok in detail_lower for tok in ("tool", "function"))
             )
+            # A COUNT limit is not a schema problem, and must not be treated
+            # as one. Groq caps the tool array at 128; Kazma sends the whole
+            # registry (174 on the operator's box on 2026-09-11), so every call
+            # 400'd with:
+            #
+            #   {"error":{"message":"'tools' : maximum number of items is 128"}}
+            #
+            # That message contains "tool", so it fell into the branch below and
+            # the turn was retried with NO tools at all -- the model answered,
+            # politely and uselessly, having lost every capability it had. A
+            # silent downgrade from "agent" to "chatbot" is worse than an error,
+            # because nothing in the reply says it happened.
+            #
+            # Retry trimmed to the limit the provider just named instead. The
+            # first N is arbitrary, but N tools beat zero tools by a wide margin.
+            tool_cap = _parse_tool_count_limit(detail) if tools else None
+            if tool_cap is not None and len(tools) > tool_cap:
+                logger.warning(
+                    "Provider caps tools at %d and %d were sent (HTTP %s) — "
+                    "retrying with the first %d instead of dropping all of "
+                    "them. Narrow the tool surface for this provider to choose "
+                    "which ones survive.",
+                    tool_cap, len(tools), status_code, tool_cap,
+                )
+                payload["tools"] = list(tools)[:tool_cap]
+                try:
+                    resp = await client.post("/chat/completions", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    duration_ms = (time.monotonic() - start) * 1000
+                    return self._parse_response(data, duration_ms)
+                except httpx.HTTPStatusError:
+                    logger.warning(
+                        "Trimmed retry also rejected — falling back to no tools."
+                    )
+
             if tools and (nim_function_not_found or tool_schema_error):
                 logger.warning(
                     "Provider rejected tool definitions (HTTP %s) — retrying "

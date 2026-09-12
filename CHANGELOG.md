@@ -1,5 +1,38 @@
 # CHANGELOG
 
+## Too many tools silently turned the agent into a chatbot (2026-09-12)
+
+Eight Groq 400s in 24h on the operator's box, with the cause in the body:
+
+```
+{"error":{"message":"'tools' : maximum number of items is 128"}}
+model=groq/compound-mini | tools=174
+```
+
+Groq caps the `tools` array at 128; Kazma sends the whole registry, 174 of
+them. The failure is not that it 400'd — it is what happened next. That message
+contains the word "tool", so it matched the existing tool-schema fallback,
+which retries **with no tools at all**. The model then answered politely and
+uselessly, having lost every capability it had, and nothing in the reply said
+so. A silent downgrade from agent to chatbot is worse than an error, and the
+only trace was a WARNING in a log the operator cannot see.
+
+A count limit is satisfiable by sending fewer tools; a schema rejection is not.
+Kazma now parses the cap the provider named and retries trimmed to it, before
+the strip-all path — `174 -> 128` instead of `174 -> 0`. If the trimmed retry
+also fails, the old behaviour still applies.
+
+Thirteen tests, most of them about what must *not* trim: an invalid function
+schema, a bad `tool_choice`, NVIDIA's "function not found", a context-length
+error. No number of tools makes a broken schema valid, so those keep falling
+through to strip-all, which is correct for them. One test parses the operator's
+exact log line rather than a paraphrase, and one pins the branch order, since
+trimming after the strip-all fallback would never run.
+
+Choosing the first 128 is arbitrary and the warning says so out loud: narrowing
+the tool surface per provider is the real answer, and this keeps the agent
+working until someone does it.
+
 ## An SSL handshake setup was blocking the event loop (2026-09-12)
 
 Found in the operator's own loop-stall dump, not by reading code.
