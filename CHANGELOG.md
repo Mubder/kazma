@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## R-5 — a threat model that says what the sandbox is not (2026-09-12)
+
+The 0.11 audit's last open recommendation: *"Docker shares a kernel. It is a
+blast-radius reducer, not a security boundary against a capable adversary, and
+every safety engineer who watches your tape knows that."*
+
+`docs/THREAT_MODEL.md` goes mechanism by mechanism — HITL approval, the
+code-execution jail, the shell allowlist, the prompt fence, the vault — and for
+each states what it stops and what it does not. It is written to be
+disappointing in the right places:
+
+- **Approval is consent, not containment.** Nothing dangerous happens while you
+  are not looking; everything you approve runs with whatever power it has.
+- **The container is well configured and is still not a jail.** The flags are
+  printed in full, because they *are* the protection: `--network none`,
+  `--read-only`, `--pids-limit 64`, `--user 65534:65534`, workspace mounted
+  `:ro`, `python -I`. Then the sentence that matters: Docker shares your kernel,
+  and a container escape is a kernel bug away.
+- **Two hardening flags are missing** — `--cap-drop=ALL` and
+  `--security-opt=no-new-privileges` — named on the page rather than left for a
+  reviewer to find.
+- **`shell_exec` runs on the host.** The allowlist is a real reduction in
+  surface and not a capability boundary: `git` can push, `uv` executes build
+  hooks, `pytest` runs `conftest.py`.
+- **A configuration table** showing which settings switch each boundary off,
+  and the observation that `DOCKER=0` + `ALLOW_LOCAL=1` + `ALLOW_YOLO=1` is a
+  convenience posture rather than the one the safety claims describe.
+
+Twenty-four tests keep the page honest. This is section 06 of that same audit —
+*"put the season's real invariants in CI"* — pointed at the document: every
+documented container flag must exist, every YOLO-proof tool must be named, no
+shell interpreter may reach the allowlist, and the two flags the page calls
+missing must stay missing or the page has to change. Writing them caught an
+error immediately: the page listed three `ALWAYS_HITL_TOOLS` and there are four.
+
+Linked from `SECURITY.md` and `KNOWN_GAPS.md`.
+
 ## codebase_search was silently searching the wrong tree (2026-09-12)
 
 Chased from a 120-second tool timeout in the operator's log. The timeout was

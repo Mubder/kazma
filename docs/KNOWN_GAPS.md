@@ -165,6 +165,14 @@ anecdote, or raise the limit. Parked, not blocked on code.
 deployments need work that is listed in `SECURITY.md` and not all done.
 Approval is consent, not containment: `shell_exec` after approval is host
 power, and `python_exec` is sandboxed only when `KAZMA_CODE_EXEC_DOCKER=force`.
+Mechanism by mechanism, this is written out in
+**[THREAT_MODEL.md](THREAT_MODEL.md)**.
+
+**The container is missing two hardening flags.** `--cap-drop=ALL` and
+`--security-opt=no-new-privileges` are not passed to `docker run`. Docker's
+default profile already drops many capabilities and applies seccomp, so this is
+a gap rather than a hole — but it is a cheap one to close, and the threat model
+names it rather than leaving it to be found.
 
 ---
 
