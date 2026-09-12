@@ -162,7 +162,8 @@ def test_the_check_is_scheduled_nightly():
 
     src = inspect.getsource(worker_bootstrap)
     # Audit F-06 offloaded the enqueue into a worker thread, so the call is
-    # wrapped: asyncio.to_thread(enqueue_task, "connector_health", {}).
+    # wrapped: asyncio.to_thread(enqueue_task, "connector_health", {}). The
+    # scheduling is what matters here, not which thread performs it.
     assert 'to_thread(enqueue_task, "connector_health", {})' in src
     assert 'register_handler("connector_health"' in src
     handler = inspect.getsource(worker_bootstrap._handle_connector_health)
