@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## Six more stale tests, and one that was not a bug after all (2026-09-12)
+
+Continuing the baseline triage. The product was correct in every case; the
+tests had drifted from it.
+
+- **`test_detached_reply_persist`** — flagged in KNOWN_GAPS as a possible real
+  bug, and it was not one. The test called the persist helper without
+  `interrupted=True`, so a *cancelled* turn looked completed: terminal
+  authority applied and the checkpoint won, discarding the streamed narration.
+  The real caller in `_streaming.py` has always passed
+  `interrupted=interrupted`. Repaired, plus a third case that actually
+  separates the two rules — a completed turn whose narration is *longer* than
+  its synthesis. Both original cases had the winner also being the longer text,
+  so neither could tell length-wins from terminal-authority, which is precisely
+  the confusion that made this look like a product bug.
+- **`test_daily_digest`** — the header stopped saying "Kazma" when the `[Ops]`
+  prefix landed. The test is about a missing log file producing a digest rather
+  than an exception, so it now asserts the digest, not a brand name.
+- **`test_kazma_guard_reload`** — the page still says "Restart did not take
+  effect", it just stopped shouting in capitals. Now case-insensitive: pinning
+  capitalisation failed the build over a style edit while the behaviour was
+  intact.
+- **`test_vision_analyze`** — `analyze_image` grew a second threshold (reject
+  above 2x, resize between 1x and 2x). Patching the limit to a flat 10 put a
+  16x16 PNG past the *reject* line, so the test demanded a resize and got
+  "Image file too large (0.0 MB). Max 0 MB" — the product behaving correctly
+  under an impossible limit. The limit is now derived from the file.
+- **`test_dedup_tool_registries`** — asserted an MCP result equals its raw
+  string, which demanded the F-09 fence be *absent*. Output from somebody
+  else's MCP server is the least trusted input Kazma handles. Now asserts
+  routing and that the payload is inside the fence.
+- **`test_audit_2026_08_31_strengthen`** — the gate is passed
+  `enforce_unknown=`, which `authorize_effect` accepts as an alias for
+  `enforce_unknown_mutators`. Accepts either spelling.
+
+Baseline: 21 + 1 collection error -> **9 failures, 0 errors**. What remains is
+4 environmental e2e, 4 tests that grep the UI JavaScript source (brittle by
+construction, and possibly catching real regressions — left alone rather than
+relaxed into a green board), and `test_audit_wave6` / `test_audit_wave7`, both
+untriaged. Listed in `docs/KNOWN_GAPS.md`.
+
 ## Publishing the gaps, and making the numbers checkable (2026-09-12)
 
 Two changes aimed at the same thing: a reader who has no reason to trust us.

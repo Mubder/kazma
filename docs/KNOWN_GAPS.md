@@ -91,16 +91,36 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**16 failures, 0 collection errors** (7701 passed, 2026-09-12). Down from 21+1
-after five stale tests were repaired. The remainder are **not triaged**:
+**9 failures, 0 collection errors** (2026-09-12). Was 21 + 1 collection
+error that morning. Twelve were stale tests pinning code that had moved, each
+verified against the product before being touched — the product was correct in
+all ten and the tests were repaired, not relaxed:
 
-| Area | Count | Note |
+- a stub with the wrong arity (3 tests), a deleted dead symbol still imported
+  (2, one of which stopped a whole module collecting), a digest header that
+  stopped saying "Kazma", a page message that stopped shouting in caps, an
+  image limit that grew a second threshold, an MCP result that is now fenced,
+  and a keyword rename the gate still honours as an alias.
+
+The remaining 9 are **triaged but not fixed**, and deliberately so — several
+pin real invariants, and relaxing them to get a green board would hide exactly
+what they exist to catch:
+
+| Failure | Class | Why it is still open |
 |---|---|---|
-| `tests/e2e/*` (Playwright, delivery) | 4 | Environmental — browser deps |
-| `test_audit_*` (wave6, wave7, 08_31) | 3 | Untriaged |
-| `test_chat_steer_composer` | 2 | Untriaged |
-| `test_turn_delivery_cqrs`, `test_turn_ledger_abc`, `test_detached_reply_persist` | 3 | Untriaged |
-| `test_daily_digest`, `test_dedup_tool_registries`, `test_kazma_guard_reload`, `test_vision_analyze` | 4 | Untriaged |
+| 3 × Playwright, 1 × delivery e2e | environmental | needs browser deps in CI |
+| `test_chat_steer_composer` (2), `test_turn_delivery_cqrs`, `test_turn_ledger_abc` | brittle by construction | they grep the UI **JavaScript source** for identifiers. The JS was refactored. Whether each is stale or catching a real regression needs someone who knows the current UI — `_awaitingApproval must not appear in first paint` may well be a live invariant |
+| `test_audit_wave6::test_half_open_probe_lease_blocks_second_replica` | unknown | circuit breaker opens; fails in isolation too, so not test-order pollution |
+| `test_audit_wave7::test_slack_prefetch_fills_bytes_without_token_in_meta` | unknown | attachment arrives with a URL and `data=None` — prefetch not happening, or no token in the test env |
+
+`test_detached_reply_persist` was flagged here as a possible real bug and was
+not one. Investigated: the test called the persist helper without
+`interrupted=True`, so a cancelled turn looked completed, terminal authority
+applied, and the checkpoint won. The real caller has always passed the flag.
+Repaired, and a third case added that actually separates the two rules -- a
+completed turn whose narration is *longer* than its synthesis -- because both
+original cases had the winner also being the longer text and so could not tell
+length-wins from terminal-authority.
 
 A noisy baseline has a cost beyond the failures themselves: proving a *new*
 failure is not yours takes a stash-and-compare against the previous commit

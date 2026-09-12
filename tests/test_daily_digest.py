@@ -108,7 +108,11 @@ def test_alert_totals_and_suppressions_are_reported(tmp_path, monkeypatch):
 def test_missing_logs_do_not_raise(tmp_path, monkeypatch):
     monkeypatch.setenv("KAZMA_GUARD_LOG", str(tmp_path / "nope.log"))
     monkeypatch.setenv("KAZMA_LOG_FILE", str(tmp_path / "also-nope.log"))
-    assert "Kazma" in daily_digest.build_digest(hours=24)
+    # The header is "[Ops] Daily digest" -- it stopped carrying the word
+    # "Kazma" when the ops prefix was added. What this test is actually
+    # about is that a missing log file produces a digest instead of an
+    # exception, so assert the digest, not a brand name.
+    assert "Daily digest" in daily_digest.build_digest(hours=24)
 
 
 def test_corrupt_log_lines_are_skipped(tmp_path, monkeypatch):

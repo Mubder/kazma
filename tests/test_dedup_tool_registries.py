@@ -152,10 +152,20 @@ async def test_unified_executor_routes_local_and_mcp() -> None:
     assert local_result["is_error"] is False
     assert local_result["content"] == "local:hi"
 
-    # MCP tool executes via the MCP manager
+    # MCP tool executes via the MCP manager.
+    #
+    # The payload arrives wrapped: audit F-09 fences every tool result before
+    # it reaches a model, and output from somebody else's MCP server is the
+    # least trusted input Kazma handles. Asserting equality with the raw string
+    # meant this test demanded the fence be absent -- so it failed as soon as
+    # the fence arrived, and "fixing" it by unwrapping would have pinned the
+    # wrong behaviour. Assert routing (which is what this test is about) and
+    # that the payload is inside the fence rather than replacing it.
     mcp_result = await executor.execute("remote_tool", {})
     assert mcp_result["is_error"] is False
-    assert mcp_result["content"] == "mcp_result"
+    assert "mcp_result" in mcp_result["content"]
+    assert mcp_result["content"].startswith("<kazma:data ")
+    assert "untrusted=\"true\"" in mcp_result["content"]
 
 
 # ═══════════════════════════════════════════════════════════════════
