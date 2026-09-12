@@ -65,7 +65,22 @@ async def asynchronous_install_package(package_name: str) -> None:
     """Install a package in the background using uv or pip, hot-reload, and update status.
 
     This ensures zero-timeout execution by running as a detached background task.
+
+    **The name must be on :data:`ALLOWED_PACKAGES`.** That list existed from the
+    start but was only ever checked by the HTTP route in
+    ``kazma_ui/routes_direct/system.py`` -- so the chat-platform "Install"
+    buttons, which call this directly, installed whatever name the alert card
+    happened to carry. The check belongs here, where every caller inherits it,
+    rather than in each caller, where it was already missing from two of three
+    (audit 2026-09-12; see ``trigger_package_promotion`` for the incident).
     """
+    if package_name not in ALLOWED_PACKAGES:
+        logger.error(
+            "[Installer] Refusing to install %r: not in ALLOWED_PACKAGES.",
+            package_name,
+        )
+        return
+
     key = f"pkg:{package_name}"
     if key in _active_installations:
         logger.info("[Installer] Installation for %s is already in progress.", package_name)

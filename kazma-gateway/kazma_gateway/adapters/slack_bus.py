@@ -140,10 +140,15 @@ class SlackBusAdapter(BusAdapter):
         callback_id: str,
         button_text: str,
     ) -> None:
-        """Deliver an alert card with Block Kit buttons for dependency installation."""
+        """Deliver an alert card, with an install button only if one applies.
+
+        A plain status alert (RAM pressure, disk pressure) has no package to
+        install and gets no button -- so it must not promise one either.
+        """
         callback_data = callback_id
         if callback_data and not (callback_data.startswith("sys_install:") or callback_data.startswith("install_dependency:")):
             callback_data = f"sys_install:{callback_id}"
+        has_button = bool(callback_id) and status != "ACTIVE"
 
         if callback_data and "sys_install:" in callback_data:
             # Use interactive Block Kit layout containing warning accessory image and context section
@@ -160,7 +165,9 @@ class SlackBusAdapter(BusAdapter):
                         "alt_text": "Warning Accessory"
                     }
                 },
-                {
+            ]
+            if has_button:
+                blocks.append({
                     "type": "context",
                     "elements": [
                         {
@@ -168,8 +175,7 @@ class SlackBusAdapter(BusAdapter):
                             "text": "Click below to trigger the remote installation safely."
                         }
                     ]
-                }
-            ]
+                })
         else:
             text = (
                 f"🚨 *{title}*\n"
@@ -178,7 +184,8 @@ class SlackBusAdapter(BusAdapter):
                 f"*Status:* {status}\n"
                 f"*Reason:* {reason}\n"
                 f"━━━━━━━━━━━━━━━━━━━━━\n"
-                "Click below to trigger the remote installation safely."
+                + ("Click below to trigger the remote installation safely."
+                   if has_button else "")
             )
             blocks = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": text[:2900]}}

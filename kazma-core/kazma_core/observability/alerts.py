@@ -214,9 +214,24 @@ class AlertDispatcher:
         severity: str = "ERROR",
     ) -> None:
         """Trigger a system health alert and broadcast it to active adapters."""
-        title = f"Permission Required: {subsystem} Subsystem" if status == "DEGRADED" else f"KAZMA SYSTEM HEALTH: {subsystem} Active"
-        callback_id = "sentence-transformers" if "sentence-transformers" in message or "sentence_transformers" in message else f"{subsystem.lower()}-init"
-        button_text = "Install ML Dependencies" if "sentence-transformers" in message or "sentence_transformers" in message else "Resolve Subsystem Issue"
+        # Only offer an install button when a real, installable package is
+        # actually named in the message.
+        #
+        # This used to fall back to `f"{subsystem.lower()}-init"` for anything
+        # it did not recognise, which is a *label*, not a package. A RAM-
+        # pressure warning ("System" subsystem) therefore shipped a "Resolve
+        # Subsystem Issue" button that ran `uv add system-init` on the live
+        # install (2026-09-12). There is nothing to install for a full disk or
+        # a full memory bar, and offering a button implies otherwise -- the
+        # operator clicks "resolve" expecting the problem to be resolved.
+        needs_ml = "sentence-transformers" in message or "sentence_transformers" in message
+        title = (
+            f"Permission Required: {subsystem} Subsystem"
+            if status == "DEGRADED" and needs_ml
+            else f"KAZMA SYSTEM HEALTH: {subsystem}"
+        )
+        callback_id = "sentence-transformers" if needs_ml else ""
+        button_text = "Install ML Dependencies" if needs_ml else ""
 
         await cls.broadcast_alert(
             title=title,

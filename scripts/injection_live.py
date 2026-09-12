@@ -59,7 +59,7 @@ CORPUS = REPO / "tests" / "fixtures" / "injection_live_corpus.json"
 
 
 def _load_repo_env() -> None:
-    """Read ``<repo>/.env`` into the environment for the key fallback.
+    """Read provider keys from ``<repo>/.env`` for the key fallback.
 
     ``client_for`` falls back to ``<PROVIDER>_API_KEY``, which until now meant
     exporting keys into a shell — where they land in shell history and in the
@@ -67,6 +67,13 @@ def _load_repo_env() -> None:
     ``.env`` is gitignored and is where every other Kazma key already lives, so
     read that instead. Real environment variables still win: an export is an
     explicit override of a file, not the other way round.
+
+    **Only ``*_API_KEY`` entries, and only from ``main()``.** The first version
+    of this loaded the whole file at import time, which meant that importing
+    this module — as the harness's own test suite does — dropped the operator's
+    real ``KAZMA_DATABASE_URL`` into the environment. conftest caught it and
+    warned, but a guard catching it is not the same as not doing it: the tests
+    were one import away from running against the live database.
     """
     path = REPO / ".env"
     if not path.exists():
@@ -74,23 +81,45 @@ def _load_repo_env() -> None:
     import os
 
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except OSError:
         return
+
+    # Appending a key on Windows is how this file usually grows, and Windows
+    # PowerShell's `>>` writes UTF-16 — so a UTF-8 file acquires a UTF-16 tail
+    # and every value in it carries embedded NULs. `os.environ[...] = ...` then
+    # raises ValueError and the benchmark dies at import, pointing at nothing
+    # useful. Decode what we can, drop what we cannot, and never let this
+    # function be the reason the run does not start.
+    for encoding in ("utf-8", "utf-16", "utf-8-sig"):
+        try:
+            text = raw.decode(encoding)
+            break
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    else:
+        return
+
     for line in text.splitlines():
-        line = line.strip()
+        line = line.strip().lstrip("﻿")
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         key = key.strip()
         if key.startswith("export "):
             key = key[7:].strip()
+        value = value.strip().strip("'\"")
         if not key or key in os.environ:
             continue
-        os.environ[key] = value.strip().strip("'\"")
+        if not key.endswith("_API_KEY"):
+            continue
+        if "\x00" in key or "\x00" in value:
+            # A half-decoded mixed-encoding line. Skipping it loses one key;
+            # raising loses the whole run.
+            print(f"[injection_live] skipping malformed .env entry: {key!r}", file=sys.stderr)
+            continue
+        os.environ[key] = value
 
-
-_load_repo_env()
 
 for pkg in ("kazma-core", "kazma-ui"):
     sys.path.insert(0, str(REPO / pkg))
@@ -577,6 +606,8 @@ def print_report(results: list[ProviderResult], meta: dict[str, Any]) -> None:
 
 
 def main() -> int:
+    # Not at import: this module is imported by its own test suite.
+    _load_repo_env()
     parser = argparse.ArgumentParser(description="Live prompt-injection benchmark")
     parser.add_argument("--live", action="store_true", help="actually call providers (costs money)")
     parser.add_argument("--providers", default="", help="comma-separated subset; default = all with a usable key")

@@ -21,10 +21,44 @@ _active_promotions: Set[str] = set()
 
 async def trigger_package_promotion(package_name: str) -> None:
     """Trigger a safe package promotion (installation) in a fully detached background task.
-    
+
     This ensures zero-timeout execution by running as a detached background task,
     so ASGI servers, WebSockets, or platform polling loops do not block or time out.
+
+    **The name must be on ``ALLOWED_PACKAGES``.** That list existed but was
+    enforced in exactly one place -- the HTTP route -- and neither of the two
+    functions that actually install anything consulted it, so every
+    chat-platform button bypassed it. On 2026-09-12 a
+    RAM-pressure alert produced a "Resolve Subsystem Issue" button that ran
+    ``uv add system-init`` against the live install -- the name came from
+    ``f"{subsystem.lower()}-init"``, a label, not a package. It failed only
+    because nobody has registered `system-init` on PyPI, which is not a
+    security control: the name is now an obvious squat target, and a hit would
+    have installed a stranger's code into the venv and written it into
+    pyproject.toml as a permanent dependency.
+
+    Being admin-gated does not help here. The admin is not choosing a package;
+    they are clicking "resolve" on a disk or memory warning and being handed an
+    installer for a name they never saw.
     """
+    from kazma_core.system.installer import ALLOWED_PACKAGES
+
+    if package_name not in ALLOWED_PACKAGES:
+        logger.error(
+            "[RuntimeManager] Refusing to install %r: not in ALLOWED_PACKAGES. "
+            "An alert asked to install something that is not a known Kazma "
+            "dependency -- this is a bug in whatever built that alert, not a "
+            "package to go and add.",
+            package_name,
+        )
+        try:
+            get_config_store().set(
+                "system.memory.status", "INSTALL_REFUSED", category="system"
+            )
+        except Exception:  # pragma: no cover - status is best-effort
+            logger.debug("[RuntimeManager] status write failed", exc_info=True)
+        return
+
     if package_name in _active_promotions:
         logger.info("[RuntimeManager] Promotion for %s is already in progress.", package_name)
         return

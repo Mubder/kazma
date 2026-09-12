@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## A RAM warning offered to install a package (2026-09-12)
+
+Found by the operator, on the live install. A Telegram alert -- "RAM usage at
+91%" -- carried a button labelled "Resolve Subsystem Issue" over the text
+"Click below to trigger the remote installation safely". Clicking it ran:
+
+    uv add system-init
+
+There is no such package. The name came from `f"{subsystem.lower()}-init"` in
+`trigger_system_alert`: a *label* for a subsystem, handed to a delivery
+pipeline that assumed every alert is a missing-dependency alert. Both attempts
+failed and nothing was installed -- only because nobody has registered
+`system-init` on PyPI.
+
+That is not a security control. `system-init`, `disk-init` and friends are
+unregistered names that an alert card will ask an admin to install on demand,
+and `uv add` writes the result into pyproject.toml as a permanent dependency.
+The admin gate added in the last audit does not help: the admin is not choosing
+a package, they are clicking "resolve" on a memory warning.
+
+`ALLOWED_PACKAGES` already existed -- and was checked in exactly one place, the
+HTTP route. Neither function that actually installs anything consulted it, so
+all three chat-platform buttons went around it. Fixed in three layers:
+
+1. `trigger_system_alert` no longer invents a package name. No installable
+   dependency named in the message, no callback and no button.
+2. The Telegram and Slack cards stop printing "click below to trigger the
+   remote installation" when there is no button below. (Discord already gated
+   its own call-to-action correctly.)
+3. Both `trigger_package_promotion` and `asynchronous_install_package` now
+   check `ALLOWED_PACKAGES` themselves. The check belongs in the functions that
+   run the installer, not in each of their callers, where it was already
+   missing from two of three.
+
+18 tests, including the counterweight: a genuinely missing `sentence-transformers`
+still gets its button, and a known package still installs. A guard that
+refused everything would silently break the ML-extras install this feature
+exists for, and nobody would find out until they needed it.
+
 ## The fence now survives someone else's chat template (2026-09-12)
 
 The live benchmark named two payloads that still beat the fence on
