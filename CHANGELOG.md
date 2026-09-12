@@ -1,5 +1,44 @@
 # CHANGELOG
 
+## An SSL handshake setup was blocking the event loop (2026-09-12)
+
+Found in the operator's own loop-stall dump, not by reading code.
+
+`httpx.AsyncClient(...)` builds a default SSL context at construction, loading
+the system CA store. `LLMProvider._get_client` is `async`, so that load ran on
+the event loop — blocking every other turn, heartbeat and websocket for its
+duration — and was paid again on every client rebuild: a provider switch, a key
+change, a `reconfigure()`.
+
+The dump's thread `0x0000e790` has `base_events._run_once` → `run_forever` →
+uvicorn → `serve.py` at its base, so it is unambiguously the loop thread, and
+its top frames were:
+
+```
+ssl.py                create_default_context
+llm_provider.py       _get_client
+llm_provider.py       chat_stream
+graph_supervisor.py   supervisor_node
+```
+
+One context is now built per process, in a worker thread, and handed to every
+client. Measured locally: **18.70 ms per construction → 0.0005 ms** after the
+first, and the first is off-loop.
+
+**What this does and does not claim.** That the call sat on the loop is proven
+by the stack. That it accounts for the whole 16 seconds the watchdog reported
+is *not* — one sample caught the loop there, and a warm
+`create_default_context` measures ~19ms. It is a real blocking call in the LLM
+hot path, now paid once and off the loop; any remaining stall is a separate
+question to measure rather than assume closed.
+
+Six tests, including the two that matter most: verification stays on
+(`CERT_REQUIRED`, `check_hostname`), and a build failure degrades to httpx's
+own `verify=True` rather than to `False` — a "fix" that quietly disabled
+certificate verification would be far worse than the stall it cured. Plus one
+proving twenty concurrent callers trigger exactly one CA load, since a burst of
+turns on a cold process is precisely when this bites.
+
 ## Two secrets, one name: the vault's divergent duplicates (2026-09-12)
 
 Swept for other instances of the cron tenant bug -- a background path that

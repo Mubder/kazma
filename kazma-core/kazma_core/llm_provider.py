@@ -256,6 +256,51 @@ class LLMResponse:
 # ── Provider ──────────────────────────────────────────────────────────
 
 
+
+# One SSL context for the whole process, built off the event loop.
+#
+# `httpx.AsyncClient(...)` builds a default SSL context at construction, which
+# loads the entire system CA store. On Windows that is slow enough to be
+# visible: the operator's loop-stall watchdog caught a 16-second stall on
+# 2026-09-12 whose stack was
+#
+#   ssl.py create_default_context
+#   llm_provider._get_client
+#   llm_provider.chat_stream
+#   graph_supervisor.supervisor_node
+#
+# `_get_client` is `async`, so that CA load runs ON the event loop and blocks
+# every other turn, heartbeat and websocket for its duration -- and it was paid
+# again on every client rebuild (a provider switch, a key change, a reconfigure).
+#
+# Build it once, in a worker thread, and hand the same context to every client.
+_SSL_CONTEXT: Any = None
+_SSL_CONTEXT_LOCK = asyncio.Lock()
+
+
+async def _shared_ssl_context() -> Any:
+    """The process-wide SSL context, created off-loop on first use.
+
+    Returns ``True`` (httpx's "verify normally" default) if a context cannot be
+    built, so a failure here degrades to the old behaviour rather than
+    disabling verification. Never returns ``False``.
+    """
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is not None:
+        return _SSL_CONTEXT
+    async with _SSL_CONTEXT_LOCK:
+        if _SSL_CONTEXT is not None:
+            return _SSL_CONTEXT
+        try:
+            import ssl
+
+            _SSL_CONTEXT = await asyncio.to_thread(ssl.create_default_context)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("[LLM] shared SSL context unavailable", exc_info=True)
+            _SSL_CONTEXT = True
+        return _SSL_CONTEXT
+
+
 class LLMProvider:
     """OpenAI-compatible LLM client using httpx.
 
@@ -470,6 +515,7 @@ class LLMProvider:
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
+                verify=await _shared_ssl_context(),
             )
             self._baked_auth = f"Bearer {safe_key}"
         else:
