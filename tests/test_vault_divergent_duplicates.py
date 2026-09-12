@@ -92,7 +92,15 @@ def test_a_clean_vault_says_nothing(vault, caplog):
     vault.store("svc.token", "v", tenant_id="default")
     with caplog.at_level(logging.WARNING):
         assert vault.warn_on_divergent_duplicates() == 0
-    assert caplog.records == []
+
+    # Filter by level rather than asserting the list is empty. `caplog.records`
+    # accumulates for the WHOLE test, so `vault.store()` above contributes its
+    # own INFO ("Stored secret ...") -- and whether that is captured depends on
+    # the ambient log level, which other tests in the same worker can change.
+    # The bare `== []` form passed alone and failed in the full suite for that
+    # reason alone; what this test means is "no warning was raised".
+    warnings_raised = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert warnings_raised == []
 
 
 # ── the behaviour the docstring now describes ───────────────────────────────

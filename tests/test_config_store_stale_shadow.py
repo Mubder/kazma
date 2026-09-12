@@ -78,7 +78,10 @@ def test_no_leftover_file_is_silent(store, caplog):
     the operator to ignore the line that matters."""
     with caplog.at_level(logging.WARNING):
         store._warn_if_stale_sqlite_shadow()
-    assert caplog.records == []
+    # Level-filtered, not `== []`: caplog accumulates for the whole test and
+    # any INFO emitted elsewhere in it would fail a bare emptiness check
+    # depending only on the ambient log level another test happened to set.
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
 def test_an_empty_leftover_is_silent(store, tmp_path, caplog):
@@ -86,7 +89,10 @@ def test_an_empty_leftover_is_silent(store, tmp_path, caplog):
     _seed_sqlite(tmp_path / "settings.db", rows=0)
     with caplog.at_level(logging.WARNING):
         store._warn_if_stale_sqlite_shadow()
-    assert caplog.records == []
+    # Level-filtered, not `== []`: caplog accumulates for the whole test and
+    # any INFO emitted elsewhere in it would fail a bare emptiness check
+    # depending only on the ambient log level another test happened to set.
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
 
 
 def test_the_check_never_breaks_boot(store, tmp_path):
