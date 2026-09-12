@@ -424,7 +424,10 @@ def test_maintenance_is_scheduled_with_the_nightly_backups():
     from kazma_core.memory import worker_bootstrap
 
     src = inspect.getsource(worker_bootstrap)
-    assert 'enqueue_task("restic_maintenance", {})' in src
+    # Audit F-06 offloaded the enqueue into a worker thread, so the call is
+    # wrapped: asyncio.to_thread(enqueue_task, "restic_maintenance", {}). The
+    # scheduling is what matters here, not which thread performs it.
+    assert 'to_thread(enqueue_task, "restic_maintenance", {})' in src
     assert 'register_handler("restic_maintenance"' in src
 
 
