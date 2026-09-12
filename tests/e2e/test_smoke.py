@@ -145,8 +145,14 @@ def test_reload_restores_answer_and_cot(live_server: str) -> None:
         try:
             page = browser.new_page()
             page.goto(live_server, timeout=30000, wait_until="domcontentloaded")
+            # Playwright passes the argument to a FUNCTION expression; it does
+            # not provide `arguments` the way Puppeteer's evaluate did. The old
+            # form raised `ReferenceError: arguments is not defined` inside the
+            # page, so the session id was never stored, the reload had nothing
+            # to restore, and the test failed on a locator timeout that looked
+            # like a UI regression rather than a two-word API mismatch.
             page.evaluate(
-                "localStorage.setItem('kazma.chatSessionId', arguments[0])", sid
+                "sid => localStorage.setItem('kazma.chatSessionId', sid)", sid
             )
             page.reload(wait_until="domcontentloaded")
             page.locator("#chat-input").wait_for(state="visible", timeout=15000)

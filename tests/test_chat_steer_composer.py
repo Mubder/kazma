@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._js_source import js_function_body
 from tests._module_source import module_source
 
 _CHAT_JS = (
@@ -225,9 +226,9 @@ def test_auto_steer_requires_live_card_not_fossil_flag() -> None:
 
 def test_hydrate_pending_without_gate_does_not_lock_composer() -> None:
     js = _js()
-    paint = js.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
-        "function renderTurn(doc, meta)", 1
-    )[0]
+    # See tests/_js_source.py: slicing between two named functions widens
+    # silently when anything is inserted between them.
+    paint = js_function_body(js, "function _paintHitlFromDoc(el, doc)")
     assert "renderHitlCard(hitl.payload, { lock: false })" in paint
     assert "_awaitingApproval" not in paint
     assert "function renderHitlCard(data, opts)" in js
@@ -583,9 +584,7 @@ def test_live_placeholder_is_never_a_bubble_identity() -> None:
     reach the DOM.
     """
     js = _js()
-    render = js.split("function renderTurn(doc, meta)", 1)[1].split(
-        "function applyTurnEvent(ev)", 1
-    )[0]
+    render = js_function_body(js, "function renderTurn(doc, meta)")
     assert "if (turnId && turnId !== 'live') {" in render
     # Both halves guarded: the lookup AND the stamp.
     assert render.count("turnId !== 'live'") >= 2, (
@@ -597,12 +596,17 @@ def test_live_placeholder_is_never_a_bubble_identity() -> None:
     assert stamp.rstrip().endswith("{")
     assert "turnId !== 'live'" in stamp.rsplit("if (", 1)[-1]
     # A turn that never got a real id can still leave one behind (older
-    # builds, restored transcripts) — beginTurn releases it.
-    begin = js.split("function beginTurn(opts)", 1)[1].split(
-        "// \u2500\u2500 Turn lifecycle diagnostics", 1
-    )[0]
-    assert '.message-assistant[data-turn-id="live"]' in begin
-    assert "removeAttribute('data-turn-id')" in begin
+    # builds, restored transcripts). beginTurn releases it, now via
+    # _resetTurnState. Assert the invariant where it lives AND that the call
+    # chain still reaches it: pinning it inline in beginTurn failed the build
+    # over a refactor while the behaviour was intact (2026-09-12).
+    reset = js_function_body(js, "function _resetTurnState()")
+    assert '.message-assistant[data-turn-id="live"]' in reset
+    assert "removeAttribute('data-turn-id')" in reset
+    begin = js_function_body(js, "function beginTurn(opts)")
+    assert "_resetTurnState()" in begin, (
+        "beginTurn no longer reaches the stale-live-bubble release"
+    )
 
 
 def test_progress_only_frames_never_mint_an_empty_bubble() -> None:

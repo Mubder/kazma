@@ -249,11 +249,21 @@ async def test_cancelled_turn_persists_full_streamed_narration(monkeypatch):
     assert len(streamed) > len("All 40 lookups done. Next: social sweep")
 
     await sse_chat._persist_detached_reply(
-        graph, {}, "s1", "th1", streamed_text=streamed, reply_turn_id="turn-a"
+        graph, {}, "s1", "th1", streamed_text=streamed, reply_turn_id="turn-a",
+        # The turn was CANCELLED, and saying so is what selects the
+        # 2026-08-27 rule. This argument was missing, so the turn looked
+        # completed, terminal authority applied, and the checkpoint won --
+        # the test failed while the behaviour it describes was intact. The
+        # real caller (`_streaming.py`'s pump done-callback) has always
+        # passed `interrupted=interrupted`; only the test did not.
+        interrupted=True,
     )
     assert session.messages[-1]["content"] == streamed
 
-    # And the checkpoint text still wins when it is the richer one.
+    # And a COMPLETED turn's checkpoint wins — terminal authority, added
+    # 2026-09-09 after a 6,455-char progress narration replaced a 2,813-char
+    # final synthesis. Note it wins because the turn finished, not because it
+    # is longer: the two rules are selected by `interrupted`, not by length.
     session.messages = [{"role": "user", "content": "go", "ts": "t"}]
     long_final = "Full final reply that is longer than the short streamed bit"
     graph = _fake_graph([
@@ -261,9 +271,32 @@ async def test_cancelled_turn_persists_full_streamed_narration(monkeypatch):
         {"role": "assistant", "content": long_final},
     ])
     await sse_chat._persist_detached_reply(
-        graph, {}, "s1", "th1", streamed_text="short", reply_turn_id="turn-b"
+        graph, {}, "s1", "th1", streamed_text="short", reply_turn_id="turn-b",
+        interrupted=False,
     )
     assert session.messages[-1]["content"] == long_final
+
+    # The case that actually separates the two rules: a COMPLETED turn whose
+    # streamed narration is LONGER than the final synthesis. Length would pick
+    # the narration; terminal authority picks the answer. Both cases above have
+    # the winner also being the longer text, so neither would notice if the
+    # rules were selected by length instead of by `interrupted` -- which is
+    # exactly the confusion that made this test look like a product bug.
+    session.messages = [{"role": "user", "content": "go", "ts": "t"}]
+    short_final = "Yes."
+    long_narration = "Checking 40 lookups... still going... nearly there..." * 3
+    assert len(long_narration) > len(short_final)
+    graph = _fake_graph([
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": short_final},
+    ])
+    await sse_chat._persist_detached_reply(
+        graph, {}, "s1", "th1", streamed_text=long_narration,
+        reply_turn_id="turn-c", interrupted=False,
+    )
+    assert session.messages[-1]["content"] == short_final, (
+        "a completed turn's synthesis must beat longer narration"
+    )
 
 
 @pytest.mark.asyncio

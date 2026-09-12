@@ -17,6 +17,8 @@ _UI = _ROOT / "kazma-ui" / "kazma_ui"
 _MISC = _UI / "routes_direct" / "misc.py"
 _STREAMING = _UI / "sse_chat" / "_streaming.py"
 _INIT = _UI / "sse_chat" / "__init__.py"
+from tests._js_source import js_function_body
+
 _CHAT_JS = _UI / "static" / "js" / "chat.js"
 _HITL_JS = _UI / "static" / "js" / "hitl_approval.js"
 _DOC_JS = _UI / "static" / "js" / "modules" / "turn_document.js"
@@ -220,9 +222,12 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     live buttons (2026-09-01).
     """
     chat = _src(_CHAT_JS)
-    paint = chat.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
-        "function renderTurn(doc, meta)", 1
-    )[0]
+    # Sliced to the end of the function, not to the next named one. The old
+    # form swallowed `_isWatchdogNotice` and `_forcePaintDoneContent` once they
+    # were inserted between the two, and failed on an `_awaitingApproval`
+    # reference belonging to a different function while this invariant was
+    # intact (2026-09-12).
+    paint = js_function_body(chat, "function _paintHitlFromDoc(el, doc)")
     assert "_awaitingApproval" not in paint
     assert "_serverGenerating && !_serverPaused" not in paint
     assert "_hitlAlreadyClaimed(hitl)" in paint

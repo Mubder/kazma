@@ -359,8 +359,14 @@ class TestLargeImageResize:
 
         mock_provider = _mock_llm_provider("Resized and analysed.")
 
-        # Patch MAX_IMAGE_BYTES to a tiny value so our small file triggers resize
-        with patch("kazma_core.tools.vision_analyze.MAX_IMAGE_BYTES", 10), \
+        # There are two thresholds, not one: `analyze_image` rejects outright
+        # above MAX_IMAGE_BYTES * 2 and resizes between 1x and 2x. Patching the
+        # limit to a flat 10 put this 16x16 PNG past the *reject* line, so the
+        # test asserted a resize and got "Image file too large (0.0 MB). Max
+        # 0 MB" -- the product behaving correctly under an impossible limit.
+        # Derive the limit from the file so it always lands in the resize band.
+        resize_band = len(png) - 1  # file > 1x (resize) but < 2x (no reject)
+        with patch("kazma_core.tools.vision_analyze.MAX_IMAGE_BYTES", resize_band), \
              patch(
                 "kazma_core.tools.vision_analyze._get_llm_provider",
                 return_value=(mock_provider, "test-active-model", "active-model"),

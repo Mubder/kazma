@@ -24,6 +24,21 @@ def _mock_store() -> tuple[dict, MagicMock]:
     mock = MagicMock()
     mock.get.side_effect = lambda k, d=None: store.get(k, d)
     mock.set.side_effect = lambda k, v, category="general": store.__setitem__(k, v)
+
+    # `set_if_absent` must actually be absent-checked. The real ConfigStore
+    # implements it atomically and the half-open probe lease depends on it:
+    # exactly one replica may hold the lease. A bare MagicMock answers
+    # `hasattr(cs, "set_if_absent")` with True and returns a truthy Mock, so
+    # EVERY replica "acquired" the lease and the test that exists to prove a
+    # second replica is blocked could never fail for the right reason.
+    def _set_if_absent(k, v, ttl=None, category="general") -> bool:
+        if k in store:
+            return False
+        store[k] = v
+        return True
+
+    mock.set_if_absent.side_effect = _set_if_absent
+    mock.delete.side_effect = lambda k: store.pop(k, None) is not None
     return store, mock
 
 
@@ -277,3 +292,78 @@ async def test_read_resource_goes_through_scope_guard(monkeypatch, tmp_path) -> 
     listed = await mgr.list_resources("fs")
     assert listed == []
     mgr._send.assert_not_called()
+
+
+# ── a tripped breaker must actually recover ─────────────────────────────
+#
+# Found 2026-09-12 while triaging the failure above. `from_dict` rebuilt an
+# open breaker's age as `cooldown - remaining`, which is `min(elapsed,
+# cooldown)` -- it CLAMPED the age at exactly one cooldown and discarded the
+# overshoot. A breaker open for 60s with a 0.05s cooldown came back claiming
+# to be 0.05s old, landing precisely on the `elapsed >= cooldown_seconds`
+# boundary in `state`, where float rounding decides the answer.
+#
+# `check_or_raise` refreshes from the shared store on EVERY call, so the
+# breaker re-pinned itself to that boundary each time: a tripped breaker that
+# never probes and never recovers, on exactly the multi-replica deployments
+# shared breakers exist for.
+
+
+def test_a_reloaded_breaker_reaches_half_open_after_its_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KAZMA_SHARED_BREAKERS", "1")
+    store, mock = _mock_store()
+    with patch("kazma_core.config_store.get_config_store", return_value=mock):
+        a = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+        a.record_failure()
+        a.persist_shared("w-recover")
+
+        assert CircuitBreaker.load_shared("w-recover").state is CircuitState.OPEN
+
+        time.sleep(0.12)  # well past the cooldown, not a boundary case
+        reloaded = CircuitBreaker.load_shared("w-recover")
+        assert reloaded.state is CircuitState.HALF_OPEN, (
+            "a breaker whose cooldown elapsed long ago must not reload as open"
+        )
+
+
+def test_reload_preserves_how_long_the_breaker_has_been_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The arithmetic, directly. Clamping the age is what put the comparison
+    on a knife edge, so assert the age survives rather than the state."""
+    monkeypatch.setenv("KAZMA_SHARED_BREAKERS", "1")
+    store, mock = _mock_store()
+    with patch("kazma_core.config_store.get_config_store", return_value=mock):
+        a = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+        a.record_failure()
+        a.persist_shared("w-age")
+
+        time.sleep(0.20)
+        reloaded = CircuitBreaker.load_shared("w-age")
+        age = time.monotonic() - reloaded._opened_at
+        assert age >= 0.15, (
+            f"reloaded age {age:.3f}s was clamped; the breaker has really been "
+            "open for ~0.20s and the overshoot must survive the round trip"
+        )
+
+
+def test_repeated_refresh_does_not_re_pin_the_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """check_or_raise refreshes every call. If each refresh reset the clock,
+    the breaker could never reach half-open no matter how long it waited."""
+    monkeypatch.setenv("KAZMA_SHARED_BREAKERS", "1")
+    store, mock = _mock_store()
+    with patch("kazma_core.config_store.get_config_store", return_value=mock):
+        a = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+        a.record_failure()
+        a.persist_shared("w-repin")
+
+        b = CircuitBreaker(failure_threshold=1, cooldown_seconds=0.05)
+        for _ in range(5):
+            b.refresh_from_shared("w-repin")  # would reset a clamped clock
+            time.sleep(0.03)
+        b.refresh_from_shared("w-repin")
+        assert b.state is CircuitState.HALF_OPEN

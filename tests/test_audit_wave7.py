@@ -135,11 +135,35 @@ async def test_slack_prefetch_fills_bytes_without_token_in_meta() -> None:
     from kazma_gateway.gateway import Attachment, IncomingMessage
 
     adapter = SlackAdapter(bot_token="xoxb-secret")
+
+    # The adapter streams with a 20 MB cap instead of buffering a whole
+    # response, so a mocked `http.get` is never called and the attachment came
+    # back with data=None. Mock the API it actually uses: an async context
+    # manager whose response yields chunks.
+    class _Resp:
+        headers = {"Content-Length": "7"}
+
+        def raise_for_status(self):
+            return None
+
+        async def aiter_bytes(self, chunk_size=65536):
+            yield b"PNG"
+            yield b"DATA"
+
+    class _Stream:
+        def __init__(self, *a, **kw):
+            captured["args"] = a
+            captured["kwargs"] = kw
+
+        async def __aenter__(self):
+            return _Resp()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    captured: dict = {}
     http = MagicMock()
-    resp = MagicMock()
-    resp.content = b"PNGDATA"
-    resp.raise_for_status = MagicMock()
-    http.get = AsyncMock(return_value=resp)
+    http.stream = _Stream
     adapter._http = http
 
     msg = IncomingMessage(
@@ -160,5 +184,6 @@ async def test_slack_prefetch_fills_bytes_without_token_in_meta() -> None:
     assert out.attachments[0].data == b"PNGDATA"
     assert out.attachments[0].url is None
     assert "xoxb-secret" not in str(out.attachments[0].meta)
-    headers = http.get.await_args.kwargs["headers"]
+    headers = captured["kwargs"]["headers"]
     assert headers["Authorization"].startswith("Bearer xoxb-")
+    assert captured["args"][0] == "GET"

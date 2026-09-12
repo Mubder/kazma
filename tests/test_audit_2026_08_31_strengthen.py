@@ -29,7 +29,15 @@ def test_graph_commitment_gate_passes_enforce_unknown_mutators():
         / "agent"
         / "graph_tool_worker.py"
     ).read_text(encoding="utf-8")
-    assert "enforce_unknown_mutators=_enforce_unknown" in src
+    # The call site passes `enforce_unknown=_enforce_unknown`, which
+    # `authorize_effect` accepts as an alias for `enforce_unknown_mutators`.
+    # Pinning one spelling failed the build over a keyword rename while the
+    # value was still being read from config and handed to the gate -- which
+    # is the thing this test is about.
+    assert (
+        "enforce_unknown_mutators=_enforce_unknown" in src
+        or "enforce_unknown=_enforce_unknown" in src
+    ), "the configured enforce-unknown-mutators flag is not passed to the gate"
     assert "get_commitment_config()" in src
 
 

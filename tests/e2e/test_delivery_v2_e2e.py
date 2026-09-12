@@ -128,6 +128,20 @@ def _emit(event_type: str, data: dict) -> None:
     fut.result(timeout=10)
 
 
+def _wait_ws_open(page, timeout: int = 20000) -> None:
+    """Block until the chat page's telemetry socket reports itself connected.
+
+    `Alpine.store('agent').connectionStatus` flips to 'connected' inside the
+    WebSocket's own `onopen`, so it is the transport's own account of itself
+    rather than a guess about how long connecting takes.
+    """
+    page.wait_for_function(
+        "() => window.Alpine && Alpine.store && Alpine.store('agent')"
+        " && Alpine.store('agent').connectionStatus === 'connected'",
+        timeout=timeout,
+    )
+
+
 def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
     """The plan's core promise, end-to-end at the browser level."""
     from playwright.sync_api import sync_playwright
@@ -152,7 +166,13 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
                 ),
             )
             page.goto(f"{server}/chat", timeout=15000)
-            page.wait_for_timeout(800)  # let WS connect + resume handshake fire
+            # Wait for the bus to actually be OPEN, not for 800ms to pass.
+            # `agentStore` sets connectionStatus in the socket's onopen, so
+            # this is the real signal. With the sleep, a slow connect meant the
+            # frames below were emitted into a socket that did not exist yet,
+            # they were dropped, and the test failed on a 10s wait_for_function
+            # that looked like a delivery regression.
+            _wait_ws_open(page)
 
             # ── 1. Live journaled frames paint without any refresh ──
             _emit("status_update", {"status": "thinking"})
@@ -169,8 +189,17 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             #      (Durability of the transcript itself is covered by the
             #      ws/sse integration suites — synthetic broker frames are
             #      not written back to SessionStore.)
+            # The reload must complete the RESUME HANDSHAKE, not merely open a
+            # socket: the client sends ?last_seq=N and the server answers with
+            # a `resumed` frame, and only then is the cursor coherent. Frames
+            # emitted between "socket open" and "resumed" are delivered against
+            # a cursor the client has not reconciled yet.
+            resumed_seen["flag"] = False
             page.reload(timeout=15000)
-            page.wait_for_timeout(1200)
+            _wait_ws_open(page)
+            _deadline = time.monotonic() + 15.0
+            while time.monotonic() < _deadline and not resumed_seen["flag"]:
+                page.wait_for_timeout(100)
             _emit("llm_delta", {"content": "post-reload continuation"})
             _emit("turn_complete", {"content": "post-reload continuation"})
             page.wait_for_function(

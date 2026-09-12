@@ -1,5 +1,150 @@
 # CHANGELOG
 
+## A tripped circuit breaker could never recover (2026-09-12)
+
+Found under `test_audit_wave6`, which had been sitting in the untriaged pile.
+The test was failing for two reasons at once, and the first one was a real bug.
+
+`CircuitBreaker.from_dict` rebuilt an open breaker's age as
+`cooldown - remaining`, which is `min(elapsed, cooldown)`. It **clamped the age
+at exactly one cooldown and threw the overshoot away**: a breaker open for 60
+seconds with a 0.05s cooldown came back claiming to be 0.05s old, landing
+precisely on the `elapsed >= cooldown_seconds` comparison in `state`, where
+float rounding decides the answer.
+
+That is not a rounding curiosity. `check_or_raise` calls `refresh_from_shared`
+on **every** call, so the breaker re-pinned itself to that boundary each time —
+a tripped breaker that never probes and never recovers, on exactly the
+multi-replica deployments shared breakers exist for. It now maps the breaker's
+true age onto the local monotonic clock. Three regression tests: a reload after
+the cooldown reaches half-open, the age survives the round trip, and repeated
+refreshes do not reset the clock.
+
+The test could not have failed for the right reason either. Its `MagicMock`
+config store answered `hasattr(cs, "set_if_absent")` with `True` and returned a
+truthy `Mock`, so **every** replica "acquired" the single-probe lease — the
+exact thing the test exists to prove impossible. The real `ConfigStore`
+implements `set_if_absent` atomically; the mock now does too.
+
+**`test_audit_wave7`** was a plain staleness: the Slack adapter moved from
+buffering a whole response to `http.stream` with a 20 MB cap, so the mocked
+`http.get` was never called and the attachment came back with `data=None`. The
+test now mocks the streaming API it actually uses.
+
+Baseline: **8 failures, 0 errors** (from 21 + 1 collection error this morning).
+What remains is 4 environmental e2e and 4 tests that grep the UI JavaScript
+source — left alone deliberately, since relaxing them to get a green board
+would hide whatever they are catching.
+
+## Six more stale tests, and one that was not a bug after all (2026-09-12)
+
+Continuing the baseline triage. The product was correct in every case; the
+tests had drifted from it.
+
+- **`test_detached_reply_persist`** — flagged in KNOWN_GAPS as a possible real
+  bug, and it was not one. The test called the persist helper without
+  `interrupted=True`, so a *cancelled* turn looked completed: terminal
+  authority applied and the checkpoint won, discarding the streamed narration.
+  The real caller in `_streaming.py` has always passed
+  `interrupted=interrupted`. Repaired, plus a third case that actually
+  separates the two rules — a completed turn whose narration is *longer* than
+  its synthesis. Both original cases had the winner also being the longer text,
+  so neither could tell length-wins from terminal-authority, which is precisely
+  the confusion that made this look like a product bug.
+- **`test_daily_digest`** — the header stopped saying "Kazma" when the `[Ops]`
+  prefix landed. The test is about a missing log file producing a digest rather
+  than an exception, so it now asserts the digest, not a brand name.
+- **`test_kazma_guard_reload`** — the page still says "Restart did not take
+  effect", it just stopped shouting in capitals. Now case-insensitive: pinning
+  capitalisation failed the build over a style edit while the behaviour was
+  intact.
+- **`test_vision_analyze`** — `analyze_image` grew a second threshold (reject
+  above 2x, resize between 1x and 2x). Patching the limit to a flat 10 put a
+  16x16 PNG past the *reject* line, so the test demanded a resize and got
+  "Image file too large (0.0 MB). Max 0 MB" — the product behaving correctly
+  under an impossible limit. The limit is now derived from the file.
+- **`test_dedup_tool_registries`** — asserted an MCP result equals its raw
+  string, which demanded the F-09 fence be *absent*. Output from somebody
+  else's MCP server is the least trusted input Kazma handles. Now asserts
+  routing and that the payload is inside the fence.
+- **`test_audit_2026_08_31_strengthen`** — the gate is passed
+  `enforce_unknown=`, which `authorize_effect` accepts as an alias for
+  `enforce_unknown_mutators`. Accepts either spelling.
+
+Baseline: 21 + 1 collection error -> **9 failures, 0 errors**. What remains is
+4 environmental e2e, 4 tests that grep the UI JavaScript source (brittle by
+construction, and possibly catching real regressions — left alone rather than
+relaxed into a green board), and `test_audit_wave6` / `test_audit_wave7`, both
+untriaged. Listed in `docs/KNOWN_GAPS.md`.
+
+## Publishing the gaps, and making the numbers checkable (2026-09-12)
+
+Two changes aimed at the same thing: a reader who has no reason to trust us.
+
+**`docs/KNOWN_GAPS.md`.** CHANGELOG records what was fixed; nothing recorded
+what was not. Open weaknesses lived in whoever last touched them -- three found
+today alone had to be carried in someone's head. Each entry names its evidence,
+so it can be checked rather than believed, and deleted when the fix lands.
+Linked from `SECURITY.md` and `docs/INJECTION.md`. It opens with the least
+comfortable item: the fence's social-framing defense is written down and
+unproven, and must not be quoted alongside the structural half that is proven.
+
+**A free reproduction path for the live injection numbers.** The offline
+numbers were always reproducible -- no model, no key. The live ones, which are
+the contestable ones, could not be reproduced by anyone without our providers.
+`docs/INJECTION.md` now carries the whole procedure: `ollama pull mistral:7b`
+and one command, ten minutes, no account and no cost, for a delta in the low
+thirties. Plus the worktree recipe for measuring a change against a
+pre-change commit, and what *not* to expect -- a different model gives a
+different number, and a near-zero delta is a finding about that model rather
+than a flaw.
+
+Also corrected stale counts in `docs/INJECTION.md` left by the corpus
+expansion: 48 -> 56 payloads, 17 -> 21 controls.
+
+## `kazma mcp` was reading the wrong database (2026-09-12)
+
+The bridge shipped two entries ago and did not work from an editor. Found by
+probing the real protocol instead of asking an agent.
+
+`get_project_root()` walks up from the **working directory** to find
+`pyproject.toml`. That is right for a CLI the operator runs inside their own
+project, and wrong for a server somebody else spawns: an MCP client starts
+`kazma mcp` with the CWD of whatever folder the editor has open. So Kazma
+looked for `kazma-data` beside an unrelated project, created an empty one,
+found no watcher heartbeat in it, and withheld all 55 danger tools -- while the
+banner reported that no Kazma instance was running. Kazma was running the whole
+time. The two processes were looking at different databases.
+
+Worse than a plain miss: if the editor's folder is any other Python project,
+the CWD walk *succeeds* and silently anchors Kazma's entire data directory --
+memory, checkpoints, vault, gate registry -- beside a stranger's code.
+
+The server now resolves paths from its own package location
+(`installed_project_root()`), before it touches anything, because the root is
+cached on first use and anchoring after a lookup is a no-op that looks like a
+fix. `KAZMA_PROJECT_ROOT` and `KAZMA_DATA_DIR` still win, for a deliberately
+relocated install; a wheel in site-packages declines and keeps the old answer,
+since putting `kazma-data/` inside the Python installation would be worse.
+
+Measured on one unrelated working directory, before and after:
+
+```
+before   100 tools;  0 destructiveHint;  shell_exec/file_write/git_push withheld
+after    155 tools; 55 destructiveHint;  all published, queued for approval
+```
+
+The banner now also names the gate database it is using. That single line turns
+this from an afternoon into five seconds: the old message said no instance was
+watching without ever saying where it had looked.
+
+`scripts/mcp_probe.py` is the tool that found it -- a real
+`initialize` -> `tools/list` handshake that reports the banner, the database in
+use, the tool count and which danger tools are published. Three attempts to get
+this answer by asking an agent produced three different wrong numbers, because
+an agent asked to list its own tools reports the function list in its prompt,
+which is a different thing from the server's response.
+
 ## The date-invention guard stopped blocking the user (2026-09-12)
 
 Follow-up to the scheduler denial in the previous entry, which fixed the

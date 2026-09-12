@@ -155,7 +155,10 @@ def test_supervisor_pages_once_per_surviving_holder() -> None:
     mute theorem) when the port is still held after the pre-spawn clear."""
     src = Path("scripts/service/kazma_guard.py").read_text(encoding="utf-8")
     assert "guard.port_still_held" in src
-    assert "RESTART DID NOT TAKE EFFECT" in src
+    # Case-insensitive on purpose: the page still says "Restart did not
+    # take effect", it just stopped shouting. Pinning the capitalisation
+    # failed the build over a style edit while the behaviour was intact.
+    assert "restart did not take effect" in src.lower()
     assert "_last_stale_holder_notified" in src
     # Dedupe reset when the port frees again.
     assert "self._last_stale_holder_notified = None" in src
