@@ -36,6 +36,29 @@ def _free_port() -> int:
     return port
 
 
+def _wait_live(base: str, timeout: float = 60.0) -> None:
+    """Poll until uvicorn serves, rather than hoping 1.5s was enough.
+
+    Same fix as the sibling Playwright fixtures: a fixed sleep is fine until a
+    slow neighbour runs first, and then the page load fails for a reason that
+    has nothing to do with what the test is checking.
+    """
+    import httpx
+
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        try:
+            r = httpx.get(f"{base}/health/live", timeout=2.0)
+            if r.status_code == 200:
+                return
+            last = f"HTTP {r.status_code}"
+        except Exception as exc:
+            last = str(exc)
+        time.sleep(0.25)
+    raise TimeoutError(f"uvicorn did not become live: {last}")
+
+
 @pytest.fixture(scope="module")
 def server():
     """Boot the real app in-process (mirrors test_e2e_playwright fixture)."""
@@ -71,12 +94,21 @@ def server():
         server = uvicorn.Server(config)
         t = threading.Thread(target=server.run, daemon=True)
         t.start()
-        time.sleep(1.5)
+        _wait_live(f"http://127.0.0.1:{port}")
         yield f"http://127.0.0.1:{port}"
 
         server.should_exit = True
         t.join(timeout=3.0)
         _stop_push_loop()
+
+        # Delete this run's session row. SessionManager persists to the project
+        # data dir regardless of the temporary ConfigStore above, so without
+        # this the suite leaves a row behind on every run -- in the operator's
+        # real chat history, on a dev box.
+        try:
+            get_session_manager().delete(SESSION_ID)
+        except Exception:
+            pass
         try:
             cs.close()
         except Exception:

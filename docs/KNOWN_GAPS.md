@@ -135,6 +135,30 @@ every time. That happened three times on 2026-09-12 alone.
 
 ---
 
+## Operational tripwires
+
+**A Postgres install leaves a dead `kazma-data/settings.db` behind.** Switching
+backends does not remove it, nothing reads it again, and it looks exactly like
+the live configuration. Measured on the operator's box, 2026-09-12:
+
+```
+sqlite settings.db :  90 keys        postgres: 884 keys
+deepseek    sqlite=(disabled, no key)   postgres=(enabled, has key)
+groq        sqlite=(disabled, no key)   postgres=(enabled, has key)
+openrouter  sqlite=(disabled, no key)   postgres=(enabled, has key)
+```
+
+Every provider disagreed. Debugging a credential failure against that file
+gives a confident wrong answer, and it did — twice in this repo's history. The
+ConfigStore now logs one warning at boot naming the file and saying it is not
+read. The file itself is left alone: deleting an operator's data on their
+behalf to fix a diagnostic problem is the wrong trade.
+
+**The injection A/B on OpenRouter's free tier cannot fit in a day.** The limit
+is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two
+conditions) needs 56. Either split it across two days and label each side an
+anecdote, or raise the limit. Parked, not blocked on code.
+
 ## Scope
 
 **Single-operator trusted host.** Multi-user, network-exposed and multi-tenant
