@@ -372,17 +372,26 @@ class AnthropicProvider(LLMProvider):
             # Context overflow must carry kind="context_overflow" so the
             # watchdog routes to compaction instead of failing the turn
             # (mirrors the generic provider's marker list).
-            if status_code in (400, 413, 422) and any(
-                marker in body.lower()
-                for marker in (
-                    "context_length_exceeded",
-                    "maximum context length",
-                    "context window",
-                    "prompt is too long",
-                    "too many tokens",
-                    "input is too long",
-                    "exceeds the context",
-                    "context length",
+            # A bare 413 needs no marker: "Payload Too Large" is what the status
+            # means, and here the payload is the prompt. Mirrors the generic
+            # provider, where matching one vendor's wording missed another's.
+            if status_code == 413 or (
+                status_code in (400, 422)
+                and any(
+                    marker in body.lower()
+                    for marker in (
+                        "context_length_exceeded",
+                        "maximum context length",
+                        "context window",
+                        "prompt is too long",
+                        "too many tokens",
+                        "input is too long",
+                        "exceeds the context",
+                        "context length",
+                        "request too large",
+                        "request_too_large",
+                        "request entity too large",
+                    )
                 )
             ):
                 logger.warning(

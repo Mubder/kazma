@@ -676,17 +676,31 @@ class LLMProvider:
             # supervisor/watchdog can route it to compaction instead of
             # failing the turn or stripping tools.
             detail_lower = detail.lower()
-            if status_code in (400, 413, 422) and any(
-                marker in detail_lower
-                for marker in (
-                    "context_length_exceeded",
-                    "maximum context length",
-                    "context window",
-                    "prompt is too long",
-                    "too many tokens",
-                    "input is too long",
-                    "exceeds the context",
-                    "context length",
+            # A bare 413 needs no marker. "Payload Too Large" is what the status
+            # code *means*, and on a chat-completions endpoint the payload is
+            # the prompt. Groq says `{"code":"request_too_large","message":
+            # "Request Entity Too Large"}`, which matches none of the markers
+            # below, so it fell through to a generic failure and the operator
+            # got "the model rejected the request" instead of a compaction
+            # (2026-09-12). Matching provider wording is a losing game; the
+            # status code is the contract.
+            if status_code == 413 or (
+                status_code in (400, 422)
+                and any(
+                    marker in detail_lower
+                    for marker in (
+                        "context_length_exceeded",
+                        "maximum context length",
+                        "context window",
+                        "prompt is too long",
+                        "too many tokens",
+                        "input is too long",
+                        "exceeds the context",
+                        "context length",
+                        "request too large",
+                        "request_too_large",
+                        "request entity too large",
+                    )
                 )
             ):
                 logger.warning(
