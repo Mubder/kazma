@@ -39,6 +39,8 @@ __all__ = [
     "exports_dir",
     "fts5_memory_path",
     "get_project_root",
+    "installed_project_root",
+    "pin_project_root",
     "hub_registry_db",
     "installed_extras_path",
     "installed_skills_dir",
@@ -95,6 +97,42 @@ def get_project_root() -> Path:
 
 
 # ── Project data paths (portable — inside the project) ────────────────────
+
+
+def installed_project_root() -> Path | None:
+    """The project root that *contains this package*, ignoring the CWD.
+
+    :func:`get_project_root` walks up from the working directory, which is
+    right for a CLI the operator runs inside their project and wrong for a
+    server someone else spawns. An MCP client starts ``kazma mcp`` with the
+    CWD of whatever folder the editor has open, so Kazma went looking for
+    ``kazma-data`` next to an unrelated project, found none, created an empty
+    one, and reported that no Kazma instance was running (2026-09-12). The
+    danger tools were withheld and the banner blamed the wrong thing.
+
+    Returns ``None`` for a non-editable install, where the package sits in
+    ``site-packages`` and there is no project above it — the caller keeps the
+    CWD-based answer in that case.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").exists():
+            # Guard against a stray pyproject inside site-packages.
+            if parent.name in ("site-packages", "dist-packages"):
+                return None
+            return parent
+    return None
+
+
+def pin_project_root(root: Path | str) -> Path:
+    """Fix the project root for this process, overriding the CWD walk.
+
+    For entry points whose working directory belongs to somebody else. Must be
+    called before anything resolves a path, because the answer is cached.
+    """
+    global _project_root
+    _project_root = Path(root).expanduser().resolve()
+    return _project_root
 
 
 def data_dir() -> Path:

@@ -102,6 +102,25 @@ disappear at the next reconnect.
 | `KAZMA_BUS_BRIDGE=0` | Turn the bridge off. Restores the previous behaviour exactly: no bus, no approval, danger tools withheld. |
 | `KAZMA_WATCHER_STALE_SECONDS` | How old a heartbeat may be and still count (default 120 — four missed watchdog ticks). |
 
+**The server anchors to the Kazma install, not your editor's folder.** An MCP
+client spawns `kazma mcp` with the working directory of whatever project it has
+open, and Kazma's paths used to resolve by walking up from there — so it looked
+for `kazma-data` beside an unrelated project, found no heartbeat, and withheld
+every danger tool while reporting that no Kazma instance was running. It now
+resolves from the package's own location. `KAZMA_PROJECT_ROOT` and
+`KAZMA_DATA_DIR` still override, for a deliberately relocated install.
+
+Verify any of this without an editor in the loop:
+
+```bash
+python scripts/mcp_probe.py /path/to/kazma
+```
+
+It performs the real `initialize` → `tools/list` handshake and prints the
+banner, the gate database in use, the tool count, and whether the danger tools
+are published. Asking an agent to describe its own tool surface does not work —
+it reports the function list in its prompt, which is a different thing.
+
 **What the bridge is not.** It carries a decision; it does not make one. There
 is no "approve for the session" and no YOLO on this path: those are properties
 of a chat thread, and a separate process has no thread whose later calls could

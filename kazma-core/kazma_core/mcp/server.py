@@ -96,6 +96,32 @@ def _tool_allowlist() -> set[str] | None:
     return {part.strip() for part in raw.split(",") if part.strip()}
 
 
+def _anchor_project_root() -> None:
+    """Resolve paths from the Kazma install, not the client's working directory.
+
+    An MCP client spawns this server with the CWD of whatever folder the editor
+    has open. `get_project_root()` walks up from the CWD, so Kazma looked for
+    `kazma-data` beside an unrelated project, created an empty one, found no
+    watcher heartbeat in it, and withheld all 55 danger tools while the banner
+    said no Kazma instance was running (2026-09-12). Everything was running;
+    the two processes were simply looking at different databases.
+
+    Explicit configuration still wins: `KAZMA_DATA_DIR` is read later and
+    `KAZMA_PROJECT_ROOT` is honoured here, so an operator who has deliberately
+    relocated either keeps what they set.
+    """
+    import os
+
+    from kazma_core.paths import installed_project_root, pin_project_root
+
+    if (os.environ.get("KAZMA_PROJECT_ROOT") or "").strip():
+        pin_project_root(os.environ["KAZMA_PROJECT_ROOT"])
+        return
+    root = installed_project_root()
+    if root is not None:
+        pin_project_root(root)
+
+
 class ApprovalPath:
     """Whether a danger tool called over MCP can actually reach a human.
 
@@ -407,6 +433,7 @@ async def serve_stdio(
     stdout carries protocol frames and nothing else — a stray ``print`` here
     corrupts the stream, which is why the banner goes to stderr.
     """
+    _anchor_project_root()
     owns_real_stdio = stdout is None
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
@@ -417,6 +444,12 @@ async def serve_stdio(
 
     published = len(build_tool_list(server.approval))
     banner = f"[kazma mcp] {published} tools; {server.approval.reason}"
+    try:
+        from kazma_core.safety.bus_bridge import gate_db_path
+
+        banner += "\n[kazma mcp] gate registry: " + gate_db_path()
+    except Exception:  # pragma: no cover - a banner must never break startup
+        pass
     if server.approval.overridden:
         banner += "  *** ungated by operator override ***"
     print(banner, file=sys.stderr, flush=True)

@@ -1,5 +1,48 @@
 # CHANGELOG
 
+## `kazma mcp` was reading the wrong database (2026-09-12)
+
+The bridge shipped two entries ago and did not work from an editor. Found by
+probing the real protocol instead of asking an agent.
+
+`get_project_root()` walks up from the **working directory** to find
+`pyproject.toml`. That is right for a CLI the operator runs inside their own
+project, and wrong for a server somebody else spawns: an MCP client starts
+`kazma mcp` with the CWD of whatever folder the editor has open. So Kazma
+looked for `kazma-data` beside an unrelated project, created an empty one,
+found no watcher heartbeat in it, and withheld all 55 danger tools -- while the
+banner reported that no Kazma instance was running. Kazma was running the whole
+time. The two processes were looking at different databases.
+
+Worse than a plain miss: if the editor's folder is any other Python project,
+the CWD walk *succeeds* and silently anchors Kazma's entire data directory --
+memory, checkpoints, vault, gate registry -- beside a stranger's code.
+
+The server now resolves paths from its own package location
+(`installed_project_root()`), before it touches anything, because the root is
+cached on first use and anchoring after a lookup is a no-op that looks like a
+fix. `KAZMA_PROJECT_ROOT` and `KAZMA_DATA_DIR` still win, for a deliberately
+relocated install; a wheel in site-packages declines and keeps the old answer,
+since putting `kazma-data/` inside the Python installation would be worse.
+
+Measured on one unrelated working directory, before and after:
+
+```
+before   100 tools;  0 destructiveHint;  shell_exec/file_write/git_push withheld
+after    155 tools; 55 destructiveHint;  all published, queued for approval
+```
+
+The banner now also names the gate database it is using. That single line turns
+this from an afternoon into five seconds: the old message said no instance was
+watching without ever saying where it had looked.
+
+`scripts/mcp_probe.py` is the tool that found it -- a real
+`initialize` -> `tools/list` handshake that reports the banner, the database in
+use, the tool count and which danger tools are published. Three attempts to get
+this answer by asking an agent produced three different wrong numbers, because
+an agent asked to list its own tools reports the function list in its prompt,
+which is a different thing from the server's response.
+
 ## The date-invention guard stopped blocking the user (2026-09-12)
 
 Follow-up to the scheduler denial in the previous entry, which fixed the
