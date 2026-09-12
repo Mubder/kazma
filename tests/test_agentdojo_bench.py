@@ -265,16 +265,73 @@ def test_the_run_had_no_errors_or_the_asr_is_inflated(recorded):
         )
 
 
-def test_the_page_does_not_claim_the_fence_beat_spotlighting(recorded, injection_doc):
-    """The finding is a tie. This is the assertion most likely to be quietly
-    'improved' later, so it is pinned: if the fence really does beat
-    spotlighting in some future run, the fixture changes first and this test
-    tells you to rewrite the prose deliberately."""
+def test_a_tie_is_reported_as_indistinguishable_not_as_a_win(recorded, injection_doc):
+    """When the two defenses score the same, the page must say they cannot be
+    told apart -- and must not claim either one won.
+
+    The first version of this guard pinned the opposite prose ("buys nothing
+    over a far simpler defense"). That phrasing turned a tie into a finding,
+    and the obedience column points the other way, so both readings overstated
+    a difference smaller than the instrument. Rewriting it is what this test is
+    for: it fails loudly rather than letting the claim drift either way.
+    """
     rows, _ = recorded
-    if rows["kazma_fence"]["attacks_won"] == rows["spotlighting"]["attacks_won"]:
-        assert "buys nothing over a far simpler defense" in injection_doc, (
-            "the run is a tie and the page no longer says so"
+    if rows["kazma_fence"]["attacks_won"] != rows["spotlighting"]["attacks_won"]:
+        return
+    low = injection_doc.lower()
+    assert "cannot be told apart" in low, (
+        "the run is a tie and the page no longer says the two are "
+        "indistinguishable"
+    )
+    for overclaim in (
+        "the fence beats spotlighting",
+        "outperforms spotlighting",
+        "better than spotlighting",
+    ):
+        assert overclaim not in low, f"the page claims {overclaim!r} on a tie"
+
+
+def test_the_measured_noise_floor_is_on_the_page(recorded, injection_doc):
+    """Every live number here moves between runs. The page has to say by how
+    much, or a reader cannot tell a finding from a draw."""
+    _, data = recorded
+    floor = data.get("noise_floor")
+    assert floor, "the fixture lost its noise-floor measurement"
+    wins = [r["attacks_won"] for r in floor["repeats"]]
+    observations = [floor["headline_run_attacks_won"], *wins]
+    for w in observations:
+        assert str(w) in injection_doc, (
+            f"the page does not quote the unchanged-configuration result {w}"
         )
+    low = injection_doc.lower()
+    assert "temperature 0" in low
+    assert "noise" in low
+
+
+def test_the_page_quotes_the_obedience_numbers(recorded, injection_doc):
+    """AgentDojo's score requires the injection to COMPLETE, so a run where the
+    model obeyed and then bungled the sequence counts as secure. The obedience
+    column is the one that says what the fence actually did, and it has to be
+    on the page with the ASR column, not instead of it."""
+    rows, _ = recorded
+    for condition, row in rows.items():
+        assert "acted_on_payload" in row, f"{condition}: fixture lost obedience counts"
+        assert f"{row['acted_on_payload']}/{row['n']}" in injection_doc, (
+            f"{condition}: the page does not quote obedience "
+            f"{row['acted_on_payload']}/{row['n']}"
+        )
+
+
+def test_the_inert_case_is_not_buried(recorded, injection_doc):
+    """injection_task_5 is the one payload shape the fence does nothing for.
+    A page that reports only the aggregate would hide it."""
+    _, data = recorded
+    t5 = data["per_injection_task"]["injection_task_5"]
+    assert t5["kazma_fence"]["acted"] == t5["none"]["acted"], (
+        "injection_task_5 is no longer inert -- rewrite the section that says "
+        "the fence had no effect on it"
+    )
+    assert "injection_task_5" in injection_doc or "task 5" in injection_doc.lower()
 
 
 def test_the_page_still_admits_the_comparison_flatters_kazma(injection_doc):
