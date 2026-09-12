@@ -730,6 +730,7 @@ class ConfigStore:
             try:
                 self._pg_pool()
                 logger.info("[ConfigStore] using Postgres backend")
+                self._warn_if_stale_sqlite_shadow()
             except Exception as exc:
                 logger.error(
                     "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
@@ -742,6 +743,47 @@ class ConfigStore:
             conn = self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
+
+    def _warn_if_stale_sqlite_shadow(self) -> None:
+        """Say so when a dead SQLite settings DB is shadowing the live one.
+
+        Switching an install to Postgres leaves the old `kazma-data/settings.db`
+        on disk, frozen at the moment of the switch. It is never read again --
+        and it looks exactly like the live configuration to anyone opening it.
+
+        On the operator's box (2026-09-12) that file reported every provider as
+        disabled with an empty API key, while Postgres had them enabled with
+        valid vault pointers: 90 keys versus 884, and every single provider
+        disagreeing. Debugging a credential failure against it gives a
+        confident, wrong answer, which is precisely what happened while tracing
+        why a cron turn could not see its DeepSeek key.
+
+        One line at boot, best-effort, never fatal.
+        """
+        try:
+            from pathlib import Path as _Path
+
+            stale = _Path(self._db_path)
+            if not stale.exists() or stale.stat().st_size == 0:
+                return
+            import sqlite3 as _sq
+
+            conn = _sq.connect(f"file:{stale.as_posix()}?mode=ro", uri=True)
+            try:
+                n = conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0]
+            finally:
+                conn.close()
+            if n:
+                logger.warning(
+                    "[ConfigStore] %s holds %d row(s) but Postgres is the live "
+                    "backend -- that file is a leftover and is NOT read. Do not "
+                    "debug configuration or credentials against it; it can show "
+                    "providers as disabled with empty keys while the real store "
+                    "has them enabled.",
+                    stale, n,
+                )
+        except Exception:  # pragma: no cover - a hint must never break boot
+            logger.debug("[ConfigStore] stale-shadow check skipped", exc_info=True)
 
     def _load_yaml(self) -> dict[str, Any]:
         """Load and cache shipped YAML + optional ``kazma.local.yaml`` overrides.

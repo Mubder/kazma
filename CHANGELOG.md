@@ -1,5 +1,141 @@
 # CHANGELOG
 
+## Two secrets, one name: the vault's divergent duplicates (2026-09-12)
+
+Swept for other instances of the cron tenant bug -- a background path that
+never installs a tenant -- and found something else instead.
+
+`Vault.retrieve` tries the tenant scope, then global, and returns the first
+hit. Correct isolation. But when a name exists under BOTH scopes with
+DIFFERENT values, the credential a caller gets depends on whether it happens
+to have a tenant context: the same service works in chat and fails in a
+scheduled task, with nothing in either log saying why.
+
+Five on the operator's live install:
+
+```
+cfg:connectors.github.oauth_token   global 07-18  vs  default 07-28
+email.gmail.client_secret           default 08-04 vs  global 08-29
+email.gmail.scopes                  default 08-16 vs  global 09-12
+email.microsoft.access_token        default 08-16 vs  global 08-29
+email.microsoft.refresh_token       default 08-16 vs  global 08-29
+```
+
+`email.gmail.client_secret` is the same key as the 2026-08-16 `invalid_client`
+incident -- and the docstring written *after* that incident claimed "the most
+recently written row wins; a stale row must never shadow a newer value". It
+never did across scopes, and it cannot: handing a tenant a global value because
+the global one is newer defeats the isolation the tenant argument exists for.
+
+So the claim is corrected to what the code actually guarantees (scope beats
+age; newest wins within a scope), and the real hazard is detected instead:
+`find_divergent_duplicates()` reports names whose copies disagree, comparing
+SHA-256 digests and returning names and timestamps only -- never values, so it
+is safe to log. One warning at boot names them.
+
+Eight tests, including the ones that keep it quiet: an *agreeing* duplicate is
+untidy rather than dangerous and must not be reported, or the five that matter
+get buried under the fifty that do not.
+
+## The bus bridge could hang an unrelated test (2026-09-12)
+
+Self-inflicted, found by the full suite. The bridge made
+`SafetyMiddleware.check()` consult the gate registry when no bus adapter is
+wired -- and `hitl_gates` resolves to `kazma-data/hitl_gates.db` in the project,
+which no test fixture isolated. So a watcher heartbeat written by one test made
+an unrelated test register a gate and wait out the whole approval timeout
+instead of failing closed.
+
+`test_always_hitl_tools_blocked_under_yolo` pins "no bus ⇒ blocked" and timed
+out rather than returning False. Reproduced deliberately: write one fresh
+watcher row, run that test, watch it hang; with the fix it passes in 1.3s under
+the identical condition.
+
+conftest now gives every test its own gate registry. That also stops the suite
+reading and writing the operator's real approval registry, which it had been
+doing all along.
+
+## The last failing test had two bugs in it, neither environmental (2026-09-12)
+
+`test_delivery_v2_e2e` had been failing since before `40d9317c` and written off
+as needing browser deps. It needed neither.
+
+**A fixed session id that outlived the run.** `SESSION_ID` was a constant, and
+`SessionManager` persists to the project data dir regardless of the temporary
+ConfigStore the fixture installs — so every run reused, and added to, one
+durable session row. Once that row's transcript went bad it stayed bad, which
+is exactly why the failure looked permanent. Proven by changing nothing but the
+id: fresh id painted, fixed id did not. Now unique per run, which also stops
+the suite writing test rows into the operator's real chat history.
+
+**A pre-set `thread_id` that pytest could invalidate.** The fixture assigned
+`session.thread_id` before `create_app()`, and the function-scoped autouse
+fixtures that swap the ConfigStore and other singletons run *after* a
+module-scoped fixture — leaving the WS handler to resolve a fresh session and
+mint a random uuid thread. The test then emitted frames into a thread nobody
+was listening on:
+
+```
+broker socket threads=['ab6fe66d-...']   session.thread_id=ab6fe66d-...
+expected THREAD_ID   =e2e-delivery-thread-4b40329a6c42
+```
+
+It now asks the broker which thread actually has a live socket and emits to
+that. What the test is about is that a journaled frame reaches the page that is
+listening; asserting the fixture's id won is a different, more fragile claim.
+
+Both hopeful waits are gone too. `wait_for_timeout(800)` became a wait on the
+socket's own `connectionStatus` **and** on `TurnBroker.socket_count()` — the
+server side was the one that mattered, because `emit()` drops a frame when no
+socket is registered, so anything sent between the browser's `onopen` and the
+server's `register_socket` is gone: not queued, not replayed, gone.
+
+Passes 3/3 consecutive runs; the whole `tests/e2e` directory is green.
+
+**Baseline: 0 failures** (from 21 + 1 collection error this morning). Twenty-one
+stale tests repaired, four real product bugs found — every one of them by
+chasing a test that looked merely stale.
+
+## Cron turns could not read their own tenant's secrets (2026-09-12)
+
+Reported from the operator's phone: two Telegram alerts at 09:00, both
+
+    LLM call failed (HTTP 401): no usable API key for https://api.deepseek.com/v1
+
+The two alerts were two different jobs — the CoPilot Pro+ and SuperGrok Heavy
+renewal reminders — not one job firing twice. Both failed the same way, and the
+same model had answered a chat turn minutes earlier without complaint.
+
+The key was present the whole time. `Vault.retrieve` resolves a secret by
+trying the current tenant and then the global (NULL) scope:
+
+    for query_tid in ([tid] if tid else []) + [None]:
+
+With no tenant context there is no first step, so a secret stored under tenant
+`'default'` is invisible. Verified directly against the live vault: the row
+exists under `tenant='default'` and a `tenant=None` lookup returns nothing.
+
+Chat sets the tenant from the request. The cron scheduler never did — even
+though `ScheduledJob` has carried `tenant_id` since the multi-tenant migration,
+nothing installed it, so every cron turn ran context-less. The API key is just
+the tenant-scoped read that pages you; every other one in a cron turn had the
+same hole.
+
+`_execute` now installs `job.tenant_id` for the duration and restores it in the
+`finally`. Fixed there rather than by loosening the vault's fallback: a
+global→tenant fallback would let any context-less background task read another
+tenant's credentials.
+
+Five tests, two of which reproduce the root cause against a real vault rather
+than asserting on source text, and one pinning the fallback *direction* —
+global stays readable by anyone, tenant-scoped does not leak to a caller with
+no tenant.
+
+Diagnosis note: the first store read was the stale SQLite `settings.db`, which
+showed deepseek disabled with an empty key. The live install runs
+`KAZMA_DB_BACKEND=postgres`, where the same provider is enabled with a valid
+vault pointer. Reading the wrong store has produced a wrong answer here before.
+
 ## A tripped circuit breaker could never recover (2026-09-12)
 
 Found under `test_audit_wave6`, which had been sitting in the untriaged pile.

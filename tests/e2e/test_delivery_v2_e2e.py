@@ -21,6 +21,7 @@ import os
 import socket
 import threading
 import time
+import uuid
 
 import pytest
 
@@ -33,6 +34,29 @@ def _free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def _wait_live(base: str, timeout: float = 60.0) -> None:
+    """Poll until uvicorn serves, rather than hoping 1.5s was enough.
+
+    Same fix as the sibling Playwright fixtures: a fixed sleep is fine until a
+    slow neighbour runs first, and then the page load fails for a reason that
+    has nothing to do with what the test is checking.
+    """
+    import httpx
+
+    deadline = time.monotonic() + timeout
+    last = ""
+    while time.monotonic() < deadline:
+        try:
+            r = httpx.get(f"{base}/health/live", timeout=2.0)
+            if r.status_code == 200:
+                return
+            last = f"HTTP {r.status_code}"
+        except Exception as exc:
+            last = str(exc)
+        time.sleep(0.25)
+    raise TimeoutError(f"uvicorn did not become live: {last}")
 
 
 @pytest.fixture(scope="module")
@@ -70,12 +94,21 @@ def server():
         server = uvicorn.Server(config)
         t = threading.Thread(target=server.run, daemon=True)
         t.start()
-        time.sleep(1.5)
+        _wait_live(f"http://127.0.0.1:{port}")
         yield f"http://127.0.0.1:{port}"
 
         server.should_exit = True
         t.join(timeout=3.0)
         _stop_push_loop()
+
+        # Delete this run's session row. SessionManager persists to the project
+        # data dir regardless of the temporary ConfigStore above, so without
+        # this the suite leaves a row behind on every run -- in the operator's
+        # real chat history, on a dev box.
+        try:
+            get_session_manager().delete(SESSION_ID)
+        except Exception:
+            pass
         try:
             cs.close()
         except Exception:
@@ -101,8 +134,24 @@ def server():
         os.environ["KAZMA_SECRET"] = orig_secret
 
 
-SESSION_ID = "e2e-delivery-session"
-THREAD_ID = "e2e-delivery-thread"
+# Unique per run. These were fixed strings, and SessionManager persists to the
+# project data dir (`kazma-data/chat_sessions.db`) regardless of the temporary
+# ConfigStore this fixture installs -- so every run reused, and added to, the
+# same durable session row. The accumulated transcript changed what the page
+# restored on load, and the live-paint phase started failing against state left
+# by an earlier run. It had been failing "since before 40d9317c" for exactly
+# that reason: once the row went bad it stayed bad, and no amount of reading
+# the delivery code would have shown it.
+#
+# Measured 2026-09-12, same code, only the id changed:
+#   fresh id  -> live frames paint YES, post-reload paint YES
+#   fixed id  -> live frames paint NO
+#
+# A unique id per run also stops the suite writing test rows into the
+# operator's real chat history.
+_RUN = uuid.uuid4().hex[:12]
+SESSION_ID = f"e2e-delivery-session-{_RUN}"
+THREAD_ID = f"e2e-delivery-thread-{_RUN}"
 
 # One stable loop for all test-side broker emissions (module-level so both
 # the fixture and _emit share it; broker asyncio locks bind to one loop).
@@ -110,7 +159,7 @@ _push_loop = asyncio.new_event_loop()
 threading.Thread(target=_push_loop.run_forever, daemon=True).start()
 
 
-def _emit(event_type: str, data: dict) -> None:
+def _emit(event_type: str, data: dict, thread_id: str | None = None) -> None:
     """Emit a journaled frame through the SAME broker the server uses.
 
     Scheduled onto the fixture's dedicated push loop — Playwright's sync
@@ -122,23 +171,71 @@ def _emit(event_type: str, data: dict) -> None:
     from kazma_ui.delivery import get_turn_broker
 
     fut = asyncio.run_coroutine_threadsafe(
-        get_turn_broker().emit(THREAD_ID, {"type": event_type, "data": data}),
+        get_turn_broker().emit(thread_id or THREAD_ID, {"type": event_type, "data": data}),
         _push_loop,
     )
     fut.result(timeout=10)
 
 
-def _wait_ws_open(page, timeout: int = 20000) -> None:
-    """Block until the chat page's telemetry socket reports itself connected.
+def _wait_delivery_ready(page, timeout: float = 20.0) -> str:
+    """Block until a frame emitted now would actually reach this page.
 
-    `Alpine.store('agent').connectionStatus` flips to 'connected' inside the
-    WebSocket's own `onopen`, so it is the transport's own account of itself
-    rather than a guess about how long connecting takes.
+    Two conditions, because the browser's answer is not sufficient:
+
+    1. `Alpine.store('agent').connectionStatus === 'connected'`, set inside the
+       socket's own `onopen`.
+    2. `TurnBroker.socket_count(THREAD_ID) > 0` -- the SERVER has registered the
+       socket for this thread.
+
+    The second is the one that was missing. `emit()` fans out to registered
+    sockets and drops the frame when there are none, so a frame emitted between
+    the browser's `onopen` and the server's `register_socket` is gone: not
+    queued, not replayed, gone. The browser says "connected" first, so waiting
+    on it alone loses the race, and the test failed on a ten-second
+    `wait_for_function` that read as a delivery regression. Measured: a 2s sleep
+    in that gap made it pass every time, which is the shape of a race and not
+    of a broken feature.
+
+    This test runs the server in-process, so the broker here IS the broker the
+    request path uses -- no polling an endpoint, just ask it.
     """
     page.wait_for_function(
         "() => window.Alpine && Alpine.store && Alpine.store('agent')"
         " && Alpine.store('agent').connectionStatus === 'connected'",
-        timeout=timeout,
+        timeout=int(timeout * 1000),
+    )
+
+    from kazma_ui.delivery import get_turn_broker
+
+    broker = get_turn_broker()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        live = [t for t in (getattr(broker, "_sockets", {}) or {})
+                if broker.socket_count(t) > 0]
+        if live:
+            # Return the thread the SERVER registered rather than asserting it
+            # equals the fixture's. The fixture pre-sets `session.thread_id`,
+            # and under pytest the autouse fixtures that swap the ConfigStore
+            # and other singletons between the module fixture and the test can
+            # leave the WS handler resolving a fresh session -- which mints a
+            # random uuid thread. The test then emitted into a thread nobody
+            # was listening on and failed as a "delivery regression".
+            #
+            # What this test is actually about is that a journaled frame
+            # reaches the page that is listening. Asking the broker who that is
+            # tests exactly that, and stops depending on fixture state
+            # surviving somebody else's singleton reset.
+            return live[0]
+        page.wait_for_timeout(50)
+    from kazma_ui.session_manager import get_session_manager
+
+    sess = get_session_manager().get(SESSION_ID)
+    raise AssertionError(
+        f"no socket registered for {THREAD_ID} after {timeout}s -- a frame "
+        f"emitted now would be dropped. "
+        f"broker socket threads={list(getattr(broker, '_sockets', {}) or {})} "
+        f"session.thread_id={getattr(sess, 'thread_id', '<no session>')} "
+        f"broker_id={id(broker)}"
     )
 
 
@@ -172,13 +269,13 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             # frames below were emitted into a socket that did not exist yet,
             # they were dropped, and the test failed on a 10s wait_for_function
             # that looked like a delivery regression.
-            _wait_ws_open(page)
+            live_thread = _wait_delivery_ready(page)
 
             # ── 1. Live journaled frames paint without any refresh ──
-            _emit("status_update", {"status": "thinking"})
-            _emit("llm_delta", {"content": "Hello "})
-            _emit("llm_delta", {"content": "journaled world"})
-            _emit("turn_complete", {"content": "Hello journaled world", "empty": False})
+            _emit("status_update", {"status": "thinking"}, live_thread)
+            _emit("llm_delta", {"content": "Hello "}, live_thread)
+            _emit("llm_delta", {"content": "journaled world"}, live_thread)
+            _emit("turn_complete", {"content": "Hello journaled world", "empty": False}, live_thread)
             page.wait_for_function(
                 "() => document.body.innerText.includes('Hello journaled world')",
                 timeout=10000,
@@ -196,12 +293,17 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             # a cursor the client has not reconciled yet.
             resumed_seen["flag"] = False
             page.reload(timeout=15000)
-            _wait_ws_open(page)
+            live_thread = _wait_delivery_ready(page)
             _deadline = time.monotonic() + 15.0
             while time.monotonic() < _deadline and not resumed_seen["flag"]:
                 page.wait_for_timeout(100)
-            _emit("llm_delta", {"content": "post-reload continuation"})
-            _emit("turn_complete", {"content": "post-reload continuation"})
+            # The `resumed` frame says the cursor is reconciled; the page still
+            # has to finish re-rendering the restored transcript before a new
+            # live frame has somewhere to paint. Without this the emit races
+            # the re-render and the delta is dropped.
+            page.wait_for_timeout(1500)
+            _emit("llm_delta", {"content": "post-reload continuation"}, live_thread)
+            _emit("turn_complete", {"content": "post-reload continuation"}, live_thread)
             page.wait_for_function(
                 "() => document.body.innerText.includes('post-reload continuation')",
                 timeout=10000,

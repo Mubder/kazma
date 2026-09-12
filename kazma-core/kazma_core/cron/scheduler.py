@@ -1079,6 +1079,30 @@ class CronScheduler:
                 "thread_id": job.thread_id or "",
             }
         )
+        # Install the job's tenant for the whole execution.
+        #
+        # The job has carried `tenant_id` since the multi-tenant migration and
+        # nothing ever installed it, so every cron turn ran context-less. The
+        # vault resolves a secret by trying the current tenant and then the
+        # global (NULL) scope -- and with no tenant there is no first step, so
+        # a tenant-scoped secret is simply invisible.
+        #
+        # Live consequence (2026-09-12 09:00): both daily reminder jobs failed
+        # with "no usable API key for https://api.deepseek.com/v1" and paged
+        # the operator twice, while the identical model worked fine in chat
+        # minutes earlier. The key was present the whole time, stored under
+        # tenant 'default'; chat sets the tenant from the request and cron did
+        # not. Every other tenant-scoped read in a cron turn had the same hole.
+        #
+        # Fixed here rather than by loosening the vault's fallback: letting a
+        # context-less caller read tenant-scoped secrets would hand any
+        # background task another tenant's credentials.
+        from kazma_core.tenant_context import (
+            reset_current_tenant_id,
+            set_current_tenant_id,
+        )
+
+        tenant_token = set_current_tenant_id(job.tenant_id or "default")
         try:
             if self._graph_builder is None:
                 raise RuntimeError("No graph builder configured")
@@ -1140,6 +1164,7 @@ class CronScheduler:
             await self._store.update_result(job.job_id, f"Error: {str(exc)[:500]}")
             await self._finalize(job, failed=True)
         finally:
+            reset_current_tenant_id(tenant_token)
             _cron_parent_ctx.reset(parent_token)
             self._in_flight.discard(job.job_id)
 

@@ -189,6 +189,49 @@ def _reset_swarm_singletons(tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _isolated_hitl_gate_registry(tmp_path):
+    """Give every test its own gate registry, and keep tests off the real one.
+
+    Two reasons, one of which is a live hazard.
+
+    **Hygiene:** `hitl_gates` resolves to `kazma-data/hitl_gates.db` in the
+    project, so without this every test that touches the HITL path reads and
+    writes the operator's real approval registry.
+
+    **Cross-test bleed:** the bus bridge (2026-09-12) made
+    `SafetyMiddleware.check()` consult that database when no bus adapter is
+    wired -- if a live watcher heartbeat is present it registers a gate and
+    WAITS for a human. A heartbeat written by one test therefore makes an
+    unrelated test hang for the whole approval timeout instead of failing
+    closed immediately. Reproduced exactly:
+    `test_always_hitl_tools_blocked_under_yolo` pins "no bus ⇒ blocked" and
+    timed out rather than returning False, because a stray watcher row was
+    sitting in the shared file.
+
+    An isolated, empty registry has no watcher, so the bridge declines
+    instantly and the fail-closed path behaves as the tests describe.
+    """
+    try:
+        from kazma_core.safety import hitl_gates as _hg
+    except Exception:
+        yield
+        return
+
+    path = str(tmp_path / "hitl_gates.db")
+    _hg.set_db_path_for_tests(path)
+    try:
+        yield
+    finally:
+        _hg.set_db_path_for_tests(None)
+        try:
+            from kazma_core.safety import bus_bridge as _bb
+
+            _bb._schema_ready.discard(path)
+        except Exception:
+            pass
+
+
+@pytest.fixture(autouse=True)
 def _isolated_memory_dbs(tmp_path):
     """Redirect the V2 memory DBs to a temp location for every test.
 
