@@ -57,6 +57,41 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 CORPUS = REPO / "tests" / "fixtures" / "injection_live_corpus.json"
 
+
+def _load_repo_env() -> None:
+    """Read ``<repo>/.env`` into the environment for the key fallback.
+
+    ``client_for`` falls back to ``<PROVIDER>_API_KEY``, which until now meant
+    exporting keys into a shell — where they land in shell history and in the
+    environment of every child process for the rest of the session. The repo's
+    ``.env`` is gitignored and is where every other Kazma key already lives, so
+    read that instead. Real environment variables still win: an export is an
+    explicit override of a file, not the other way round.
+    """
+    path = REPO / ".env"
+    if not path.exists():
+        return
+    import os
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        if not key or key in os.environ:
+            continue
+        os.environ[key] = value.strip().strip("'\"")
+
+
+_load_repo_env()
+
 for pkg in ("kazma-core", "kazma-ui"):
     sys.path.insert(0, str(REPO / pkg))
 

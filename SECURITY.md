@@ -148,20 +148,24 @@ adversarial corpus, with no model in the loop:
 python scripts/injection_report.py
 ```
 
-**48/48 containment** — no corpus payload can forge the fence's delimiters and
-place text outside it. A hard gate; any escape fails the build.
+**56/56 containment** — no corpus payload can forge the fence's delimiters and
+place text outside it, or smuggle another vendor's role-control tokens
+(`<|im_start|>`, `[INST]`, `<<SYS>>`, Gemma turns) through it to the model's
+tokenizer. A hard gate; any escape fails the build.
 
-**9/9 persistence denylist** — every payload whose purpose is to plant a
-standing directive in a future system prompt is refused. Balanced by 17 control
+**13/13 persistence denylist** — every payload whose purpose is to plant a
+standing directive in a future system prompt is refused. Balanced by 21 control
 cases: real summaries that sit one word from a deny pattern and must stay
 storable, because a false positive here silently makes the agent forget. See
 **[docs/INJECTION.md](docs/INJECTION.md)**.
 
-Measured against live models as well (2026-09-12, 3 runs, temperature 0):
-injection compliance on `groq/compound-mini` drops **42% -> 8%** with the fence
-on. `deepseek-flash` complied with nothing in either condition, so the fence's
-effect on it is unmeasurable rather than proven — the doc reports that as a
-non-result instead of a win.
+Measured against live models as well (3 runs each, temperature 0): injection
+compliance on `groq/compound-mini` drops **42% -> 8%** with the fence on, and
+on `ollama/qwen2.5:7b` **100% -> 58%**. `deepseek-flash` complied with nothing
+in either condition, so the fence's effect on it is unmeasurable rather than
+proven — the doc reports that as a non-result instead of a win, along with the
+payloads that still get through and which of the current defenses have been
+measured against a model versus merely written down.
 
 ## Verifying a release (supply chain)
 
