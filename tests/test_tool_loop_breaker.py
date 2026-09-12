@@ -12,11 +12,23 @@ supervisor uses, without driving the full graph.
 
 from __future__ import annotations
 
-from kazma_core.agent.long_task import (
-    detect_tool_loop,
-    normalized_tool_signature,
-    tool_call_signature,
-)
+import json
+
+from kazma_core.agent.long_task import detect_tool_loop, normalized_tool_signature
+
+
+def _exact_signature(name: str, arguments: object) -> str:
+    """The exact-args signature this module's subject replaced.
+
+    `long_task.tool_call_signature` was deleted as dead code in the wave-1-7
+    audit, and `test_audit_2026_09_04_wave7` now asserts it stays gone -- but
+    this file kept importing it, so the whole module failed to collect and its
+    four tests silently stopped running. The contrast it draws is still the
+    justification for `normalized_tool_signature` existing, so it is inlined
+    here rather than deleted: hashing the arguments exactly is what let a
+    paging loop run 26 iterations without ever repeating a signature.
+    """
+    return f"{name}:{json.dumps(arguments, sort_keys=True, default=str)}"
 
 
 def _paging_calls(n: int) -> list[dict]:
@@ -47,7 +59,7 @@ def _paging_calls(n: int) -> list[dict]:
 def test_exact_signature_misses_paging_loop():
     """Sanity: the OLD exact-args signature never repeats on offset paging."""
     sigs = [
-        tool_call_signature(
+        _exact_signature(
             m["tool_calls"][0]["function"]["name"],
             m["tool_calls"][0]["function"]["arguments"],
         )
