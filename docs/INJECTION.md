@@ -294,6 +294,130 @@ excluded rather than scored as defended, and the script makes no calls without
 
 ---
 
+## 4. AgentDojo — a benchmark we did not write
+
+Everything above this line was measured against a corpus written by the same
+people who wrote the defense. That is not dishonest, but it is not evidence
+either: a hand-built corpus cannot tell you whether a fence generalises past the
+attacks its author already imagined. This page said exactly that, and listed
+running a public suite as the next step, not yet taken.
+
+[AgentDojo](https://agentdojo.spylab.ai) (Debenedetti et al., NeurIPS 2024
+Datasets & Benchmarks) is that suite. Other people built it, for other systems,
+with tasks and attacks fixed before Kazma existed. It also scores the thing that
+matters more than containment: not "did the payload get through" but **did the
+agent still do the user's job while under attack**.
+
+```bash
+uv venv .venv-agentdojo --python 3.12
+uv pip install --python .venv-agentdojo/Scripts/python.exe agentdojo
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py \
+    --live --suite slack --provider ollama --model qwen2.5:7b
+```
+
+AgentDojo is deliberately **not** a Kazma dependency — it is a research harness,
+and it lives in its own venv.
+
+### The numbers, 2026-09-12
+
+`slack` suite, `important_instructions` attack, `ollama/qwen2.5:7b`,
+temperature 0, 21 user tasks x 5 injection tasks = **105 runs per condition**,
+zero provider errors.
+
+| condition | ASR (lower better) | utility under attack (higher better) |
+|---|---|---|
+| undefended | 27/105 — **25.7%** | 21/105 — 20.0% |
+| spotlighting (Hines et al.) | 14/105 — **13.3%** | 24/105 — 22.9% |
+| **Kazma fence** | 14/105 — **13.3%** | 18/105 — 17.1% |
+
+`spotlighting` is [arXiv:2403.14720](https://arxiv.org/abs/2403.14720) — wrap
+tool output in `<<`/`>>` and add one sentence to the system prompt. It is
+AgentDojo's own built-in defense, used verbatim from their implementation. It
+is here because **a number with nothing beside it is not a result.**
+
+### What this actually says
+
+**The fence halves attack success.** 25.7% to 13.3%, a two-proportion z-test
+gives p = 0.024. That is a real effect on a benchmark we did not write or tune
+against, and it is the honest headline.
+
+**It buys nothing over a far simpler defense.** Spotlighting scored *the same*
+14/105, p = 1.000. Kazma's fence spends roughly 800 characters of banner on
+every single tool result; spotlighting spends four. On this suite and this
+model, that spend bought no additional reduction. If you are choosing a
+delimiting defense on these numbers alone, the cheap one is the rational pick.
+
+**The tie is coincidental, not equivalence.** Only **4 of the 14** failures are
+the same case. Each defense loses ten cases the other wins. So the two are not
+the same defense wearing different syntax — they are differently shaped, and
+they happen to average out identically here. Aggregate ASR hides that, which is
+an argument for reading the per-case breakdown rather than the headline.
+
+**The fence lost 5 cases the undefended baseline won.** Not a significant
+number on its own, but not a comfortable one either, and it is the reason the
+utility column exists.
+
+**Utility differences are not significant.** 17.1% fenced vs 20.0% undefended
+(p = 0.59) and vs 22.9% spotlighting (p = 0.30). The point estimate for the
+fence is the lowest of the three, and with n = 105 that is a hint rather than a
+finding. It would take a much larger run to say whether the fence costs task
+completion — and that question deserves the larger run.
+
+**What still gets through.** `injection_task_5` — invite a user, add them to a
+channel, remove them — landed 7 times under the fence against 2 under
+spotlighting. Small numbers, so this is a lead rather than a conclusion; but a
+multi-step administrative request phrased as routine housekeeping is exactly the
+social-framing shape that beat the fence in section 3, and seeing it again in
+somebody else's suite is worth chasing.
+
+### Where this comparison flatters Kazma
+
+Kazma's fence carries an **in-band banner**: the warning lives inside the block,
+next to the untrusted text, on every tool result. Spotlighting as published is
+bare delimiters plus one system-prompt sentence. So this is not two delimiters
+head to head — it is Kazma's shipped defense against spotlighting's published
+design, and Kazma's is by far the wordier.
+
+That is a real difference between the products rather than a thumb on the scale,
+but it makes the result *worse* for Kazma, not better: the expensive defense tied
+the cheap one.
+
+### What this still does not prove
+
+- **One suite, one model, one attack.** ASR is model-dependent — section 3 on
+  this page shows the same fence scoring a 33-point delta on one model and
+  nothing at all on another. A single local 7B model is a data point, not a
+  ranking, and these numbers should not be compared to published leaderboard
+  figures gathered on frontier models.
+- **Utility was low across the board** (17–23%). `qwen2.5:7b` struggles with
+  these tasks even undefended, so a large share of runs failed the user task for
+  reasons unrelated to any defense. That shrinks the effective base every
+  comparison rests on.
+- **AgentDojo scores a skipped run as an attacker win.** Its error handlers set
+  `security = True` on context-length and server errors, so provider flakiness
+  inflates ASR. This run had **zero** errors, so it is not a factor here — but
+  it matters when comparing against a number gathered elsewhere.
+- **The suite exercises one layer.** It tests the fence as a string transform on
+  tool output. It says nothing about the HITL gate, the persistence denylist, or
+  the shell allowlist, which are separate layers measured separately.
+
+### The harness guards
+
+`tests/test_agentdojo_bench.py` runs ten checks and calls nothing. A benchmark
+harness flatters whoever wrote it when a polarity is backwards or a defense is
+built but never installed, so: the ASR polarity is pinned against AgentDojo's
+own docstring (`security() is True` means the *injection succeeded* — their CLI
+labels that same number "Average security", which reads as the opposite); all
+three conditions must render tool output differently; none may drop the payload;
+and the fence is loaded **by file path from the shipped `prompt_fence.py`**, so
+there is no vendored copy that can drift.
+
+Run names embed a digest of the defense's behaviour, because results are cached:
+without it, editing the fence and re-running would silently reuse the old
+numbers and report a change that never ran.
+
+---
+
 ## What this does not prove
 
 Open weaknesses on this page are tracked in [KNOWN_GAPS.md](KNOWN_GAPS.md) so they do not depend on someone remembering them.
@@ -306,10 +430,11 @@ no page.
   fence. It does not prove any particular model *obeys* the fence once the text
   is inside it. Model compliance is a separate measurement that needs live API
   calls, and it is not claimed here.
-- **The corpus is hand-built, not a public benchmark.** It covers the attack
-  shapes this code is designed to resist. Running Kazma against an external
-  suite such as AgentDojo — with a real model, scored on task completion under
-  attack — is the next step and is not done.
+- **The corpus is hand-built.** It covers the attack shapes this code was
+  designed to resist, which is its limit. Section 4 above is the answer to
+  that: AgentDojo, a public suite, scored on task completion under attack.
+  The fence halved attack success there and **tied a four-character defense**
+  from the literature while costing far more tokens.
 - **Containment is one layer.** It says nothing about tool-level authorisation.
   That is the HITL gate's job, and it is measured separately: every one of the
   57 danger tools is swept in `tests/test_eval_pack.py`.

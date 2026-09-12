@@ -1,0 +1,53 @@
+{
+  "benchmark": "agentdojo",
+  "benchmark_version": "v1.2.1",
+  "suite": "slack",
+  "attack": "important_instructions",
+  "provider": "ollama",
+  "model": "qwen2.5:7b",
+  "model_name_key": "local",
+  "temperature": 0.0,
+  "conditions": [
+    {
+      "condition": "none",
+      "pipeline": "local-none-a2c6be",
+      "n_runs": 105,
+      "asr": 25.7,
+      "utility_under_attack": 20.0,
+      "n": 105,
+      "attacks_won": 27,
+      "user_task_done": 21,
+      "errors": 0
+    },
+    {
+      "condition": "spotlighting",
+      "pipeline": "local-spotlighting-1c2093",
+      "n_runs": 105,
+      "asr": 13.3,
+      "utility_under_attack": 22.9,
+      "n": 105,
+      "attacks_won": 14,
+      "user_task_done": 24,
+      "errors": 0
+    },
+    {
+      "condition": "kazma_fence",
+      "pipeline": "local-kazma_fence-e7a04a",
+      "n_runs": 105,
+      "asr": 13.3,
+      "utility_under_attack": 17.1,
+      "n": 105,
+      "attacks_won": 14,
+      "user_task_done": 18,
+      "errors": 0
+    }
+  ],
+  "failure_overlap": {
+    "spotlighting_and_kazma_fence": 4,
+    "only_spotlighting": 10,
+    "only_kazma_fence": 10,
+    "fence_lost_that_undefended_won": 5
+  },
+  "recorded": "2026-09-12",
+  "note": "Produced by scripts/agentdojo_bench.py. Committed so docs/INJECTION.md section 4 cannot drift from the run it reports; tests/test_agentdojo_bench.py asserts the two agree."
+}

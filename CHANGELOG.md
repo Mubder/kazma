@@ -1,5 +1,79 @@
 # CHANGELOG
 
+## The fence tied a four-character defense (2026-09-12)
+
+Audit item R-2's real ask. `docs/INJECTION.md` had said for a while that the
+in-repo corpus is hand-built, that it covers the attack shapes this code was
+designed to resist, and that running a public suite was the next step and not
+yet taken. [AgentDojo](https://agentdojo.spylab.ai) (Debenedetti et al.,
+NeurIPS 2024 D&B) is that suite — other people's tasks, other people's attacks,
+fixed before Kazma existed, and scored on whether the agent still did the
+user's job while under attack.
+
+`slack` suite, `important_instructions`, `ollama/qwen2.5:7b`, temperature 0,
+105 runs per condition, zero provider errors:
+
+| condition | ASR | utility under attack |
+|---|---|---|
+| undefended | 27/105 — 25.7% | 20.0% |
+| spotlighting (arXiv:2403.14720) | 14/105 — 13.3% | 22.9% |
+| **Kazma fence** | 14/105 — 13.3% | 17.1% |
+
+**The fence halves attack success** (p = 0.024) on a benchmark we did not write
+or tune against. That is the honest headline and it is real.
+
+**It also buys nothing over a far simpler defense.** Spotlighting — four
+characters of delimiter and one sentence of system prompt — scored the same
+14/105, p = 1.000. Kazma's fence spends ~800 characters of in-band banner on
+every tool result to reach the same number. Spotlighting is included precisely
+so this could come out this way; a number with nothing beside it is not a
+result.
+
+Two things the aggregate hides, both worth chasing:
+
+- **The tie is coincidental.** Only 4 of the 14 failures are the same case;
+  each defense loses ten the other wins. The two are differently shaped and
+  happen to average out identically here.
+- **`injection_task_5` landed 7 times under the fence against 2 under
+  spotlighting.** A multi-step administrative request phrased as routine
+  housekeeping — the same social-framing shape that beat the fence in section 3
+  of the injection page, now showing up in somebody else's suite.
+
+Utility differences are not significant at n = 105 (17.1% vs 20.0% undefended,
+p = 0.59), but the fence's point estimate is the lowest of the three and it lost
+5 cases the undefended baseline won. That deserves a larger run rather than a
+shrug.
+
+### Getting the harness honest
+
+Four things were wrong before any number was trusted, each found by checking
+rather than assuming:
+
+- The attack addresses the victim model **by name**, read from the pipeline
+  name. Unmapped providers now make the runner refuse rather than label
+  DeepSeek as GPT-4 — that fires a different, weaker attack than the score
+  would claim.
+- Results are **cached by pipeline name**, which did not encode the fence's
+  content. Editing the fence and re-running would have silently reused the old
+  numbers and reported a change that never ran. Names now carry a digest of the
+  defense's observable behaviour.
+- The base system message was a **paraphrase** of AgentDojo's that dropped four
+  instruction bullets. It biases all three conditions equally so the comparison
+  would have held, but it breaks comparability with published numbers, which is
+  the whole reason for using their suite. The run was restarted 20 minutes in.
+- AgentDojo's `security=True` means **the injection succeeded**, while their CLI
+  prints that same number labelled "Average security" and their error handlers
+  set it to `True` on API failure. Both read as the opposite. The polarity is
+  now pinned against their own docstring, because getting it backwards reports a
+  wide-open pipeline as perfectly defended.
+
+`tests/test_agentdojo_bench.py` — 16 checks, none of which call a model. The run
+summary is committed at `tests/fixtures/agentdojo_slack_qwen25_7b.json` so the
+page cannot drift from the run it reports, and one test fails if the prose ever
+stops admitting the tie. AgentDojo is deliberately not a Kazma dependency; it
+lives in `.venv-agentdojo`, and a test asserts it never leaks into
+`pyproject.toml`.
+
 ## OpenTelemetry GenAI spans, and the telemetry that nearly hid every error (2026-09-12)
 
 Audit item R-3. Kazma now emits [OpenTelemetry GenAI
