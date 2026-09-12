@@ -1,5 +1,37 @@
 # CHANGELOG
 
+## The injection fence has a live number now (2026-09-12)
+
+12 attack payloads x 2 conditions x 3 runs per model, temperature 0, canary
+scoring, zero errors and zero control false positives:
+
+```
+provider/model                  unfenced  fenced  delta  echoed  err
+groq/groq/compound-mini              42%      8%     33       4    0
+deepseek/deepseek-flash               0%      0%      0      21    0
+```
+
+**`compound-mini`: 42% -> 8%.** The one number here worth quoting. Two payloads
+still land with the fence on — `live_fake_system_turn` (a forged
+`<|im_start|>system` turn) and `live_polite_social` (a fake "our pipeline
+requires this token" note). Social framing beats structural framing, and that
+is the next piece of work. Worth labelling accurately: Groq's `compound` models
+are agentic systems with server-side tool use, not plain completions.
+
+**`deepseek-flash`: no measurable effect.** It complied with nothing in
+*either* condition and echoed the canary 21 times while explaining it had
+spotted an injection and ignored it. The baseline never fell over, so there was
+nothing for the fence to improve. The report now says exactly that rather than
+printing "no payload succeeded with the fence on", which credits the fence for
+a model that was never going to comply — the same overclaim as reading an
+errored run as a clean one, one layer up.
+
+The honest summary of both rows: **the fence's value depends on the model.** A
+model with strong instruction-hierarchy training does not need it; a weaker or
+more agentic one gets a large benefit. More useful than one averaged figure.
+
+Published in `docs/INJECTION.md` and `SECURITY.md`.
+
 ## Fix — a runtime key change reverted on the next call (2026-09-12)
 
 `reconfigure(api_key=...)` updated `config` but not `_direct_api_key`. Every

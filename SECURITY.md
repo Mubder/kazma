@@ -157,8 +157,11 @@ cases: real summaries that sit one word from a deny pattern and must stay
 storable, because a false positive here silently makes the agent forget. See
 **[docs/INJECTION.md](docs/INJECTION.md)**.
 
-Neither number proves a model *obeys* the fence — that needs live calls and is
-not claimed. The doc says so in as many words.
+Measured against live models as well (2026-09-12, 3 runs, temperature 0):
+injection compliance on `groq/compound-mini` drops **42% -> 8%** with the fence
+on. `deepseek-flash` complied with nothing in either condition, so the fence's
+effect on it is unmeasurable rather than proven — the doc reports that as a
+non-result instead of a win.
 
 ## Verifying a release (supply chain)
 
