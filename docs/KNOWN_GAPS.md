@@ -101,64 +101,33 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**1 failure, 0 collection errors** (2026-09-12). Was 21 + 1 collection
-error that morning. Twenty were stale tests pinning code that had moved, each
-verified against the product before being touched — the product was correct in
-all ten and the tests were repaired, not relaxed:
+**0 failures** (2026-09-12, `pytest tests/ -n 4`). Was 21 failures + 1
+collection error that morning.
 
-- a stub with the wrong arity (3 tests), a deleted dead symbol still imported
-  (2, one of which stopped a whole module collecting), a digest header that
-  stopped saying "Kazma", a page message that stopped shouting in caps, an
-  image limit that grew a second threshold, an MCP result that is now fenced,
-  and a keyword rename the gate still honours as an alias.
+Twenty-one were stale tests pinning code that had moved, each verified against
+the product before being touched. Four were real product bugs, every one of
+them found by chasing a test that looked merely stale:
 
-The remaining 1 is **triaged but not fixed**, and deliberately so — several
-pin real invariants, and relaxing them to get a green board would hide exactly
-what they exist to catch:
-
-| Failure | Class | Why it is still open |
-|---|---|---|
-| `test_delivery_v2_e2e::test_journaled_frames_paint_live_and_resume_handshake` | **open question, possibly a real gap** | live frames paint fine; frames emitted *after a page reload* never appear. Not timing: fixed waits were replaced with real readiness signals (socket `connectionStatus === 'connected'`, then the server's `resumed` handshake frame) and it still fails at the post-reload step. Either the cursor resume does not re-subscribe for live delivery, or the test's synthetic broker frames are outside what resume replays. Worth a look — "live delivery continues seamlessly after reload" is the plan's stated promise |
-
-`test_audit_wave6` turned out to be hiding a **real availability bug**, now
-fixed: `CircuitBreaker.from_dict` clamped a reloaded breaker's age at exactly
-one cooldown, discarding the overshoot, so a breaker open for 60s with a 0.05s
-cooldown reloaded claiming to be 0.05s old — landing on the `>=` boundary where
-float rounding decides. `check_or_raise` refreshes on every call, so it re-pinned
-itself there each time: a tripped breaker that never probes and never recovers,
-on exactly the multi-replica deployments shared breakers exist for. Three
-regression tests added. The test could not fail for the right reason either —
-its `MagicMock` store answered `hasattr(cs, "set_if_absent")` with True and
-returned a truthy mock, so every replica "acquired" the single-probe lease.
-
-`test_detached_reply_persist` was flagged here as a possible real bug and was
-not one. Investigated: the test called the persist helper without
-`interrupted=True`, so a cancelled turn looked completed, terminal authority
-applied, and the checkpoint won. The real caller has always passed the flag.
-Repaired, and a third case added that actually separates the two rules -- a
-completed turn whose narration is *longer* than its synthesis -- because both
-original cases had the winner also being the longer text and so could not tell
-length-wins from terminal-authority.
+| Bug | Consequence |
+|---|---|
+| `kazma mcp` resolved its data dir from the client's CWD | the MCP bridge silently withheld all 55 danger tools, and Kazma's entire data dir could anchor beside an unrelated project |
+| `CircuitBreaker.from_dict` clamped a reloaded breaker's age at one cooldown | a tripped breaker could never reach half-open, so it never recovered |
+| the cron scheduler never installed the job's tenant | every scheduled turn ran context-less and could not read tenant-scoped secrets — two 09:00 reminders failed with "no usable API key" |
+| a Playwright fixture slept 1.5s instead of polling | one slow test left uvicorn unbound and broke two neighbours |
 
 The four e2e failures were **not** environmental, which is what they had been
-written off as. Three were test bugs, now fixed: two Playwright fixtures slept
-a fixed 1.5s instead of polling for readiness, so a slow neighbour
-(`test_delivery_v2_e2e`, which times out over ten seconds) left uvicorn unbound
-and every Playwright test died on `ERR_CONNECTION_REFUSED`; and
-`test_smoke` used Puppeteer's `arguments[0]` inside a Playwright
-`page.evaluate`, which raises `ReferenceError: arguments is not defined` in the
-page — so the session id was never stored, the reload had nothing to restore,
-and the failure looked like a UI regression rather than a two-word API
-mismatch.
+written off as. Besides the fixture race above: `test_smoke` used Puppeteer's
+`arguments[0]` inside a Playwright `page.evaluate` (raises
+`ReferenceError` in the page, so the session id was never stored); and
+`test_delivery_v2_e2e` had two distinct faults — a fixed session id that
+persisted to the real `chat_sessions.db` and accumulated state across runs, and
+a pre-set `session.thread_id` that pytest's autouse singleton swaps could leave
+stale, so the WS handler minted a random uuid thread and the test emitted into
+a thread nobody was listening on. It now discovers the live thread from the
+broker, which is what it was always trying to assert.
 
 The four UI-JavaScript tests were investigated rather than left: every
-invariant they guard was intact. Two failed because they sliced *between two
-named functions* and new functions had been inserted between them, widening the
-slice into unrelated code; two because the logic moved from `beginTurn` into
-`_resetTurnState`, which `beginTurn` calls. They now slice to the end of the
-function (`tests/_js_source.py`) and assert the invariant where it lives plus
-the call chain that reaches it — so a refactor no longer fails them, and
-deleting the behaviour still does.
+invariant they guard was intact.
 
 A noisy baseline has a cost beyond the failures themselves: proving a *new*
 failure is not yours takes a stash-and-compare against the previous commit

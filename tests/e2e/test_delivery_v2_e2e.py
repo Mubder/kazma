@@ -127,7 +127,7 @@ _push_loop = asyncio.new_event_loop()
 threading.Thread(target=_push_loop.run_forever, daemon=True).start()
 
 
-def _emit(event_type: str, data: dict) -> None:
+def _emit(event_type: str, data: dict, thread_id: str | None = None) -> None:
     """Emit a journaled frame through the SAME broker the server uses.
 
     Scheduled onto the fixture's dedicated push loop — Playwright's sync
@@ -139,23 +139,71 @@ def _emit(event_type: str, data: dict) -> None:
     from kazma_ui.delivery import get_turn_broker
 
     fut = asyncio.run_coroutine_threadsafe(
-        get_turn_broker().emit(THREAD_ID, {"type": event_type, "data": data}),
+        get_turn_broker().emit(thread_id or THREAD_ID, {"type": event_type, "data": data}),
         _push_loop,
     )
     fut.result(timeout=10)
 
 
-def _wait_ws_open(page, timeout: int = 20000) -> None:
-    """Block until the chat page's telemetry socket reports itself connected.
+def _wait_delivery_ready(page, timeout: float = 20.0) -> str:
+    """Block until a frame emitted now would actually reach this page.
 
-    `Alpine.store('agent').connectionStatus` flips to 'connected' inside the
-    WebSocket's own `onopen`, so it is the transport's own account of itself
-    rather than a guess about how long connecting takes.
+    Two conditions, because the browser's answer is not sufficient:
+
+    1. `Alpine.store('agent').connectionStatus === 'connected'`, set inside the
+       socket's own `onopen`.
+    2. `TurnBroker.socket_count(THREAD_ID) > 0` -- the SERVER has registered the
+       socket for this thread.
+
+    The second is the one that was missing. `emit()` fans out to registered
+    sockets and drops the frame when there are none, so a frame emitted between
+    the browser's `onopen` and the server's `register_socket` is gone: not
+    queued, not replayed, gone. The browser says "connected" first, so waiting
+    on it alone loses the race, and the test failed on a ten-second
+    `wait_for_function` that read as a delivery regression. Measured: a 2s sleep
+    in that gap made it pass every time, which is the shape of a race and not
+    of a broken feature.
+
+    This test runs the server in-process, so the broker here IS the broker the
+    request path uses -- no polling an endpoint, just ask it.
     """
     page.wait_for_function(
         "() => window.Alpine && Alpine.store && Alpine.store('agent')"
         " && Alpine.store('agent').connectionStatus === 'connected'",
-        timeout=timeout,
+        timeout=int(timeout * 1000),
+    )
+
+    from kazma_ui.delivery import get_turn_broker
+
+    broker = get_turn_broker()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        live = [t for t in (getattr(broker, "_sockets", {}) or {})
+                if broker.socket_count(t) > 0]
+        if live:
+            # Return the thread the SERVER registered rather than asserting it
+            # equals the fixture's. The fixture pre-sets `session.thread_id`,
+            # and under pytest the autouse fixtures that swap the ConfigStore
+            # and other singletons between the module fixture and the test can
+            # leave the WS handler resolving a fresh session -- which mints a
+            # random uuid thread. The test then emitted into a thread nobody
+            # was listening on and failed as a "delivery regression".
+            #
+            # What this test is actually about is that a journaled frame
+            # reaches the page that is listening. Asking the broker who that is
+            # tests exactly that, and stops depending on fixture state
+            # surviving somebody else's singleton reset.
+            return live[0]
+        page.wait_for_timeout(50)
+    from kazma_ui.session_manager import get_session_manager
+
+    sess = get_session_manager().get(SESSION_ID)
+    raise AssertionError(
+        f"no socket registered for {THREAD_ID} after {timeout}s -- a frame "
+        f"emitted now would be dropped. "
+        f"broker socket threads={list(getattr(broker, '_sockets', {}) or {})} "
+        f"session.thread_id={getattr(sess, 'thread_id', '<no session>')} "
+        f"broker_id={id(broker)}"
     )
 
 
@@ -189,13 +237,13 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             # frames below were emitted into a socket that did not exist yet,
             # they were dropped, and the test failed on a 10s wait_for_function
             # that looked like a delivery regression.
-            _wait_ws_open(page)
+            live_thread = _wait_delivery_ready(page)
 
             # ── 1. Live journaled frames paint without any refresh ──
-            _emit("status_update", {"status": "thinking"})
-            _emit("llm_delta", {"content": "Hello "})
-            _emit("llm_delta", {"content": "journaled world"})
-            _emit("turn_complete", {"content": "Hello journaled world", "empty": False})
+            _emit("status_update", {"status": "thinking"}, live_thread)
+            _emit("llm_delta", {"content": "Hello "}, live_thread)
+            _emit("llm_delta", {"content": "journaled world"}, live_thread)
+            _emit("turn_complete", {"content": "Hello journaled world", "empty": False}, live_thread)
             page.wait_for_function(
                 "() => document.body.innerText.includes('Hello journaled world')",
                 timeout=10000,
@@ -213,7 +261,7 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             # a cursor the client has not reconciled yet.
             resumed_seen["flag"] = False
             page.reload(timeout=15000)
-            _wait_ws_open(page)
+            live_thread = _wait_delivery_ready(page)
             _deadline = time.monotonic() + 15.0
             while time.monotonic() < _deadline and not resumed_seen["flag"]:
                 page.wait_for_timeout(100)
@@ -222,8 +270,8 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             # live frame has somewhere to paint. Without this the emit races
             # the re-render and the delta is dropped.
             page.wait_for_timeout(1500)
-            _emit("llm_delta", {"content": "post-reload continuation"})
-            _emit("turn_complete", {"content": "post-reload continuation"})
+            _emit("llm_delta", {"content": "post-reload continuation"}, live_thread)
+            _emit("turn_complete", {"content": "post-reload continuation"}, live_thread)
             page.wait_for_function(
                 "() => document.body.innerText.includes('post-reload continuation')",
                 timeout=10000,

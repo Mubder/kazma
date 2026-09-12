@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## The last failing test had two bugs in it, neither environmental (2026-09-12)
+
+`test_delivery_v2_e2e` had been failing since before `40d9317c` and written off
+as needing browser deps. It needed neither.
+
+**A fixed session id that outlived the run.** `SESSION_ID` was a constant, and
+`SessionManager` persists to the project data dir regardless of the temporary
+ConfigStore the fixture installs — so every run reused, and added to, one
+durable session row. Once that row's transcript went bad it stayed bad, which
+is exactly why the failure looked permanent. Proven by changing nothing but the
+id: fresh id painted, fixed id did not. Now unique per run, which also stops
+the suite writing test rows into the operator's real chat history.
+
+**A pre-set `thread_id` that pytest could invalidate.** The fixture assigned
+`session.thread_id` before `create_app()`, and the function-scoped autouse
+fixtures that swap the ConfigStore and other singletons run *after* a
+module-scoped fixture — leaving the WS handler to resolve a fresh session and
+mint a random uuid thread. The test then emitted frames into a thread nobody
+was listening on:
+
+```
+broker socket threads=['ab6fe66d-...']   session.thread_id=ab6fe66d-...
+expected THREAD_ID   =e2e-delivery-thread-4b40329a6c42
+```
+
+It now asks the broker which thread actually has a live socket and emits to
+that. What the test is about is that a journaled frame reaches the page that is
+listening; asserting the fixture's id won is a different, more fragile claim.
+
+Both hopeful waits are gone too. `wait_for_timeout(800)` became a wait on the
+socket's own `connectionStatus` **and** on `TurnBroker.socket_count()` — the
+server side was the one that mattered, because `emit()` drops a frame when no
+socket is registered, so anything sent between the browser's `onopen` and the
+server's `register_socket` is gone: not queued, not replayed, gone.
+
+Passes 3/3 consecutive runs; the whole `tests/e2e` directory is green.
+
+**Baseline: 0 failures** (from 21 + 1 collection error this morning). Twenty-one
+stale tests repaired, four real product bugs found — every one of them by
+chasing a test that looked merely stale.
+
 ## Cron turns could not read their own tenant's secrets (2026-09-12)
 
 Reported from the operator's phone: two Telegram alerts at 09:00, both
