@@ -1,5 +1,49 @@
 # CHANGELOG
 
+## codebase_search was silently searching the wrong tree (2026-09-12)
+
+Chased from a 120-second tool timeout in the operator's log. The timeout was
+the symptom; the real fault was that the search had been answering "no hits"
+for code that plainly exists.
+
+`iter_source_files` stops dead at `MAX_FILES` (4000) and reports nothing.
+Measured on the live workspace:
+
+```
+indexable files: 8697   cap: 4000
+  4579  core/      <- an accidental LibreOffice checkout
+  2453  AppData/   <- a uv cache, from a tool run with APPDATA inside the project
+   552  tests/
+   530  kazma-core/     <- the actual source
+   144  kazma-ui/
+```
+
+`os.walk` is alphabetical, so `AppData` and `core` consumed the entire budget
+and **`kazma-core` was never indexed at all**. Reading 4000 foreign files also
+costs ~30s before parsing, which is where the 120s timeout came from.
+
+Two changes. Windows user-data trees (`AppData`, `Application Data`,
+`Local Settings`) are skipped outright — they should never be inside a project,
+and when they are they are never what you are searching for. That alone takes
+the operator's workspace from 8697 to 6244.
+
+And truncation is now reported. `ensure_index` returns `walked` / `limit` /
+`truncated`, and `format_search` says so on both paths — with hits and without,
+because a caller that got a hit is exactly the one likely to stop looking. "No
+hits" and "I only looked at part of the workspace" are different answers, and
+only one of them is honest.
+
+The cap stays. Removing it trades a wrong answer for a slow one on a genuinely
+huge tree; saying so costs nothing and is true either way. Eight tests,
+including the counterweight that matters most: a complete index must stay
+silent, because a warning on every search is a warning nobody reads, and this
+one needs to be believed the day it appears.
+
+**The operator still has to clean the workspace** — `core/` (LibreOffice) and
+`AppData/` do not belong in the install, and until they go, the cap is still
+reached. The difference is that Kazma now says so instead of returning a
+confident empty answer.
+
 ## Too many tools silently turned the agent into a chatbot (2026-09-12)
 
 Eight Groq 400s in 24h on the operator's box, with the cause in the body:

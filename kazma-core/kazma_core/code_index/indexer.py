@@ -14,7 +14,12 @@ from kazma_core.code_index.store import (
     upsert_file,
 )
 from kazma_core.code_index.symbols import extract_symbols
-from kazma_core.code_index.walk import INDEX_EXTS, iter_source_files, lang_for_path
+from kazma_core.code_index.walk import (
+    INDEX_EXTS,
+    MAX_FILES,
+    iter_source_files,
+    lang_for_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +59,9 @@ def ensure_index(root: Path | None = None) -> dict[str, int]:
     try:
         known = listed_files(conn)
         seen: set[str] = set()
+        walked = 0
         for path in iter_source_files(root):
+            walked += 1
             rel = _rel(root, path)
             if not rel:
                 continue
@@ -85,6 +92,16 @@ def ensure_index(root: Path | None = None) -> dict[str, int]:
         conn.commit()
         out = stats(conn)
         out["updated"] = updated
+        # The walk stops dead at MAX_FILES and says nothing. On the operator's
+        # workspace (2026-09-12) an accidental LibreOffice checkout and a uv
+        # cache sorted alphabetically ahead of `kazma-core`, ate the entire
+        # budget, and the real source was never indexed at all -- so
+        # `codebase_search` answered "no hits" for code that plainly exists.
+        # A search tool that silently searches half a workspace is the precise
+        # failure this project refuses everywhere else.
+        out["walked"] = walked
+        out["limit"] = MAX_FILES
+        out["truncated"] = walked >= MAX_FILES
         return out
     except Exception:
         logger.debug("[code_index] ensure_index failed", exc_info=True)

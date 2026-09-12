@@ -67,11 +67,25 @@ def format_search(result: dict[str, object]) -> str:
     symbols = list(result.get("symbols") or [])
     text = list(result.get("text") or [])
     stats = dict(result.get("stats") or {})
+    # A truncated index must say so, especially when it found nothing: "no
+    # hits" and "I only looked at part of the workspace" are different answers,
+    # and only one of them is honest when the walk stopped at the cap.
+    warning = ""
+    if stats.get("truncated"):
+        warning = (
+            chr(10) + chr(10) + "! Index TRUNCATED at "
+            + str(stats.get("limit"))
+            + " files - the workspace has more indexable files than the cap,"
+            " so some source was never indexed and these results may be"
+            " incomplete. Narrow the workspace root, or remove foreign trees"
+            " (vendored checkouts, caches) from it."
+        )
+
     if not symbols and not text:
         extra = ""
         if stats:
             extra = f" (index: {stats.get('files', 0)} files, {stats.get('symbols', 0)} symbols)"
-        return f"No codebase hits for {q!r}{extra}."
+        return f"No codebase hits for {q!r}{extra}.{warning}"
     lines: list[str] = []
     if symbols:
         lines.append("## Symbols")
@@ -88,7 +102,9 @@ def format_search(result: dict[str, object]) -> str:
     n_files = stats.get("files")
     if n_files:
         lines.append(f"(index {n_files} files / {stats.get('symbols', 0)} symbols)")
-    return "\n".join(lines)
+    # Results from a truncated index are still worth returning -- they are just
+    # not the whole story, and the caller has to be told which it is holding.
+    return "\n".join(lines) + warning
 
 
 def _looks_like_identifier(q: str) -> bool:
