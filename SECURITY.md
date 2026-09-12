@@ -160,8 +160,9 @@ storable, because a false positive here silently makes the agent forget. See
 **[docs/INJECTION.md](docs/INJECTION.md)**.
 
 Measured against live models as well (3 runs each, temperature 0): injection
-compliance on `groq/compound-mini` drops **42% -> 8%** with the fence on, and
-on `ollama/qwen2.5:7b` **100% -> 58%**. `deepseek-flash` complied with nothing
+compliance on `groq/compound-mini` drops **42% -> 8%** with the fence on, on
+`ollama/qwen2.5:7b` **100% -> 58%**, and on `ollama/mistral:7b` **42% -> 8%** —
+three model families, three double-digit deltas. `deepseek-flash` complied with nothing
 in either condition, so the fence's effect on it is unmeasurable rather than
 proven — the doc reports that as a non-result instead of a win, along with the
 payloads that still get through and which of the current defenses have been

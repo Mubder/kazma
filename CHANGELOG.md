@@ -1,5 +1,66 @@
 # CHANGELOG
 
+## The date-invention guard stopped blocking the user (2026-09-12)
+
+Follow-up to the scheduler denial in the previous entry, which fixed the
+message but not the behaviour behind it. Four things were wrong.
+
+**The expression parser only understood ISO.** `parse_belief_date` has read
+"September 14, 2026 at 2:48 AM" from the start -- it is how belief objects are
+stored -- but `parse_time_expressions` matched `YYYY-MM-DD` and nothing else.
+One module, two date vocabularies, and the narrower one faced the human. So
+"no time expression found" was, for the operator's own message, literally
+true. Month-name dates are now located by regex and parsed by
+`parse_belief_date` itself, so the two cannot drift apart again. Guarded by
+controls: "I spent 14 dollars in May" and "the May 2026 report" are not dates.
+
+**A date the user just typed counted as a model invention.** The guard exists
+to catch a model fabricating a date that contradicts what the user said. When
+the timing matches a date in the user's own message this turn, that premise
+does not hold -- and the case where it misfired is the one that matters most:
+the user *correcting* a stale belief. The new `user_asserted` consistency
+allows it. A guard that blocks corrections keeps memory wrong forever.
+
+**Conflicts were computed against every belief the tenant has.** When the text
+names a known subject, only beliefs about that subject are compared, so
+`conflict` now means "you gave a date for X that contradicts what I know about
+X". Subject matching also had a hole: `supergrok_heavy_reset` ends in none of
+the known suffixes, so it had no derived alias and could never be matched at
+all. Predicate names now yield a spelled-out alias and a distinctive head
+token, with a stoplist so `user_timezone` does not make "user" a subject.
+
+When the text names *no* subject the comparison stays conservative, against
+everything. That is deliberate: the CoPilot incident's second turn is the user
+saying a bare "yes" while the model sends an invented date. "yes" names no
+subject but the conversation is still about the reset, and treating contentless
+text as "nothing to contradict" would hand the invention through. The three
+`test_remind_args_first` cases that caught this are why it is written that way.
+
+**Relative timings skipped the guard entirely.** `2660m` was the same instant
+as the ISO string the guard had just refused -- and the model, misled by the
+old error message, was about to retry exactly that way. Compact offsets are now
+resolved against `request_at` and checked like any other timing, but only when
+the text names a known subject: an offset from now makes no claim about when an
+event happens, so "remind me in 10 minutes" stays unguarded.
+
+30 tests.
+
+## A third model lineage for the injection benchmark (2026-09-12)
+
+`ollama/mistral:7b`, 3 runs each side of the fence hardening: **42% -> 8%,
+delta 33, byte-identical before and after.** Both payloads the hardening
+targets were already defended by the old fence on this model, so there was no
+headroom -- a non-result, and listed as one.
+
+What it does support independently is the fence's core claim. A 33-point drop
+on a Mistral model shares no lineage with `compound-mini` (Llama-family
+agentic), `qwen2.5` (Qwen) or `deepseek-flash`, so the delta survives a change
+of model family -- the thing a single-model number cannot tell you.
+
+Run through a git worktree at the pre-hardening commit rather than swapping
+the fence file in place, so the working tree stays clean and a commit mid-run
+cannot corrupt the measurement.
+
 ## Two errors that pointed at the wrong thing (2026-09-12)
 
 Both from one chat transcript the operator shared. Neither was the failure it
