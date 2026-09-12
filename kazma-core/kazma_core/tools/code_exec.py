@@ -473,13 +473,28 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
     image = (os.environ.get("KAZMA_CODE_EXEC_IMAGE") or DEFAULT_DOCKER_IMAGE).strip()
     # Mount work dir read-only; use tmpfs for /tmp. No network. Memory capped.
     # --rm cleans up; --user avoids root when possible (numeric nobody).
-    work_mount = f"{tmp_dir}:/work:ro"
-    mount_args = ["-v", work_mount]
+    # `--mount`, not `-v`. The colon-delimited `-v src:dst:mode` form cannot
+    # express a Windows path: `G:\work` contains a colon, so docker reads
+    # "too many colons" and the daemon refuses with exit 125. That made the
+    # entire Docker jail non-functional on Windows -- every `python_exec` under
+    # `KAZMA_CODE_EXEC_DOCKER=force` failed, silently in the sense that it
+    # looked like a docker problem rather than a Kazma one. Found 2026-09-12 by
+    # running it rather than reading it. `--mount` takes comma-separated
+    # key=value pairs and handles drive letters.
+    mount_args = ["--mount", f"type=bind,src={tmp_dir},dst=/work,ro"]
+    ws_mount_target = ""
     try:
         ws = _fw._get_workspace()
         if ws and ws.exists():
             ws_path = str(ws.resolve())
-            mount_args.extend(["-v", f"{ws_path}:{ws_path}:ro"])
+            # POSIX hosts mount the workspace at its own path so absolute paths
+            # inside a snippet still resolve. A Windows path is not a valid
+            # container path at all, so it lands on /workspace there and the
+            # snippet sees it under that name.
+            ws_mount_target = ws_path if os.name != "nt" else "/workspace"
+            mount_args.extend(
+                ["--mount", f"type=bind,src={ws_path},dst={ws_mount_target},ro"]
+            )
     except Exception:
         pass
 
@@ -491,6 +506,14 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
         "--cpus", "1",
         "--pids-limit", "64",
         "--read-only",
+        # Drop every capability and forbid regaining any. Docker's default
+        # profile already drops most and applies seccomp, so this closes a gap
+        # rather than a hole -- but `python -I` as nobody needs no capability at
+        # all, so there is nothing to trade away. Named as missing in
+        # docs/THREAT_MODEL.md when that page was written; this is it closed.
+        # Verified against docker 29.7.2: the container still runs as 65534.
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
         "--tmpfs", "/var/tmp:rw,noexec,nosuid,size=16m",
         *mount_args,

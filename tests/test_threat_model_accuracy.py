@@ -62,15 +62,21 @@ def test_every_documented_container_flag_is_real(flag, code_exec):
 
 
 def test_the_workspace_is_mounted_read_only(code_exec):
-    assert ":ro" in code_exec, "the page says your code is visible, not writable"
+    """The page says your code is visible, not writable. Written against the
+    old `-v src:dst:ro` form; the `--mount` switch made `,ro` the spelling."""
+    assert ",ro" in code_exec or ":ro" in code_exec
 
 
-@pytest.mark.parametrize("gap", ["cap-drop", "no-new-privileges"])
-def test_the_documented_gaps_are_still_gaps(gap, code_exec):
-    """The page names these two as missing. If someone adds them — good — the
-    page must stop claiming they are absent."""
-    assert gap not in code_exec, (
-        f"{gap} was added: update THREAT_MODEL.md, it still lists this as a gap"
+@pytest.mark.parametrize("flag", ["--cap-drop=ALL", "--security-opt=no-new-privileges"])
+def test_the_hardening_flags_stay_on(flag, code_exec):
+    """These were documented as MISSING when the page was written, and this
+    test asserted their absence. Adding them made it fail -- which is the guard
+    working, not a nuisance: the page and the code cannot drift apart without
+    a build failure in one direction or the other. Now they are present, the
+    assertion is inverted and protects them from silent removal."""
+    assert flag in code_exec, (
+        f"{flag} was removed: the container is weaker and THREAT_MODEL.md "
+        "still lists it as part of the protection"
     )
 
 
@@ -141,3 +147,38 @@ def test_local_fallback_is_described_as_unsandboxed(doc):
 
 def test_approval_is_described_as_consent_not_containment(doc):
     assert "consent, not containment" in doc.lower()
+
+
+# ── the mount syntax, which was broken on Windows for the jail's whole life ──
+
+
+def test_mounts_use_the_mount_flag_not_dash_v(code_exec):
+    """`-v src:dst:mode` cannot express a Windows path.
+
+    `G:\work` contains a colon, so docker reported "too many colons" and the
+    daemon refused with exit 125 -- every `python_exec` under
+    `KAZMA_CODE_EXEC_DOCKER=force` failed on Windows, for as long as the jail
+    has existed. The threat model recommends forcing Docker, so the
+    recommendation was unfollowable on that OS.
+
+    Found 2026-09-12 by running it rather than reading it, which is the only
+    way this class of bug ever surfaces.
+    """
+    assert "--mount" in code_exec, "the jail is back on -v and is broken on Windows"
+    assert 'type=bind' in code_exec
+    assert f'{chr(34)}-v{chr(34)}, work_mount' not in code_exec
+
+
+def test_the_workspace_mount_is_read_only(code_exec):
+    assert "ro" in code_exec.split("type=bind")[1][:120], (
+        "the workspace mount lost its read-only flag"
+    )
+
+
+def test_the_page_states_the_import_blocklist_applies_in_docker(doc):
+    """It is stricter than "a container with a read-only mount" suggests -- a
+    snippet cannot even `import os` -- and a threat model that overstates what
+    a snippet can do is as wrong as one that overstates the boundary."""
+    low = doc.lower()
+    assert "import blocklist" in low
+    assert "container as well as locally" in low or "in the container" in low

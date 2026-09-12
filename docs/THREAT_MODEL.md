@@ -76,6 +76,8 @@ actually is:
 --memory / --memory-swap               no swap escape from the memory cap
 --cpus 1  --pids-limit 64              no CPU monopoly, no fork bomb
 --read-only                            immutable root filesystem
+--cap-drop=ALL                         no Linux capabilities at all
+--security-opt=no-new-privileges       and none can be regained via setuid
 --tmpfs /tmp:noexec,nosuid  (64m)      scratch space that cannot execute
 --user 65534:65534                     runs as nobody, not root
 -v <workspace>:<workspace>:ro          your code is visible, not writable
@@ -86,16 +88,26 @@ That is a serious blast-radius reduction. A snippet cannot phone home, cannot
 write to your disk, cannot exhaust your RAM, and cannot read outside the
 workspace.
 
+**An import blocklist applies on top, in the container as well as locally.**
+`os`, `sys`, `socket`, `subprocess`, `ctypes`, `pathlib`, `pickle` and about
+twenty more are refused, and `exec`/`eval`/`compile` are disabled — an import
+blocklist is worthless while those stay reachable. This is belt-and-braces
+inside Docker, where escape is already the kernel's problem rather than
+Python's, and it is the *only* protection in the local tier below. It also
+means a snippet in the container cannot list the workspace it can see: the
+mount is there, `os.listdir` is not.
+
 **It is still not a security boundary against a capable adversary.** Docker
 shares your kernel. A container escape is a kernel bug away, and kernel bugs
 happen. Anyone who tells you a Docker container contains a determined attacker
 is either selling something or has not thought about it. Use E2B if the code is
 genuinely untrusted.
 
-**Two hardening flags are missing** and should be added: `--cap-drop=ALL` and
-`--security-opt=no-new-privileges`. Docker's default profile already drops many
-capabilities and applies a seccomp filter, so this is a gap rather than a hole —
-but it is a gap, and it is named here rather than left for a reviewer to find.
+**None of that changes the kernel sentence.** `--cap-drop=ALL` and
+`--security-opt=no-new-privileges` were added on 2026-09-12 after this page
+named them as missing — a capability-less, setuid-proof container is still a
+container, and the boundary is still the kernel it shares with you. They are
+worth having and they do not promote Docker to a jail.
 
 **Local fallback — no isolation at all.** With no Docker and no E2B,
 `python_exec` runs as a plain subprocess **as you, on your host**. It is banned

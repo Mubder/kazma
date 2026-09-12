@@ -168,11 +168,10 @@ power, and `python_exec` is sandboxed only when `KAZMA_CODE_EXEC_DOCKER=force`.
 Mechanism by mechanism, this is written out in
 **[THREAT_MODEL.md](THREAT_MODEL.md)**.
 
-**The container is missing two hardening flags.** `--cap-drop=ALL` and
-`--security-opt=no-new-privileges` are not passed to `docker run`. Docker's
-default profile already drops many capabilities and applies seccomp, so this is
-a gap rather than a hole — but it is a cheap one to close, and the threat model
-names it rather than leaving it to be found.
+**~~The container is missing two hardening flags.~~** Closed 2026-09-12:
+`--cap-drop=ALL` and `--security-opt=no-new-privileges` are now passed to
+`docker run`, verified against docker 29.7.2. It does not change the kernel
+argument — a capability-less container is still a container.
 
 ---
 

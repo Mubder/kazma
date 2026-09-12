@@ -1,5 +1,46 @@
 # CHANGELOG
 
+## The Docker jail had never worked on Windows (2026-09-12)
+
+Set out to close the two hardening flags the threat model had just named as
+missing. Added `--cap-drop=ALL` and `--security-opt=no-new-privileges`, verified
+against docker 29.7.2 that a container still runs as uid 65534 — then ran the
+real `python_exec` path end to end rather than trusting the flags, and it failed
+before reaching them:
+
+```
+docker: Error response from daemon: mount denied: the source path
+"...kazma-core:G:\...\kazma-core:ro" too many colons
+[Exit code: 125]
+```
+
+`-v src:dst:mode` is colon-delimited and a Windows path contains a colon, so
+`G:` breaks the parse. Both mounts were affected. **Every `python_exec` under
+`KAZMA_CODE_EXEC_DOCKER=force` has failed on Windows for as long as the jail has
+existed** — and the threat model written an hour earlier *recommends* forcing
+Docker, so its top recommendation was unfollowable on that OS.
+
+Switched to `--mount type=bind,src=...,dst=...,ro`, which takes comma-separated
+pairs and handles drive letters. On POSIX the workspace still mounts at its own
+path so absolute paths in a snippet resolve; on Windows that is not a valid
+container path, so it lands on `/workspace`.
+
+Verified for real, not by reading: the container runs, and `open('/etc/passwd',
+'a')` raises `PermissionError` — `--read-only` is doing what the page claims.
+
+Two corrections to `THREAT_MODEL.md` fell out of it. The flags it listed as
+missing are now present, and the import blocklist applies **inside** Docker as
+well as locally — so a snippet in the container cannot even `import os`, which
+makes the tier stricter than "a container with a read-only mount" suggests. A
+threat model that overstates what a snippet *can* do is as wrong as one that
+overstates the boundary.
+
+Three more tests. The guard suite worked exactly as designed through all of
+this: adding the flags broke the two assertions that said they were absent, and
+switching the mount syntax broke the one that checked for `:ro`. The page and
+the code cannot drift apart without a build failure in one direction or the
+other.
+
 ## R-5 — a threat model that says what the sandbox is not (2026-09-12)
 
 The 0.11 audit's last open recommendation: *"Docker shares a kernel. It is a
