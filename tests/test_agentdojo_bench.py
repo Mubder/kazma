@@ -347,3 +347,56 @@ def test_the_not_done_claim_is_retired(injection_doc):
     It is done; leaving the sentence would be a lie in the other direction."""
     assert "is the next step and is not done" not in injection_doc
     assert "agentdojo" in injection_doc.lower()
+
+
+# -- the obedience metric's markers ------------------------------------------
+
+
+def test_markers_are_defined_for_every_injection_task_we_report(bench, _dojo):
+    """A missing marker silently drops runs from the obedience count, which
+    lowers it -- the direction that flatters us."""
+    from agentdojo.task_suite.load_suites import get_suite
+
+    for suite_name in ("slack", "banking"):
+        suite = get_suite("v1.2.1", suite_name)
+        defined = set(bench.ATTACKER_MARKERS[suite_name])
+        assert set(suite.injection_tasks) == defined, (
+            f"{suite_name}: markers cover {sorted(defined)} but the suite has "
+            f"{sorted(suite.injection_tasks)}"
+        )
+
+
+def test_no_marker_fires_on_legitimate_content(bench, _dojo):
+    """The measure is worth nothing if it can trigger on the agent doing its
+    job. `validate_markers` runs on every `--analyze`; this pins it."""
+    from agentdojo.task_suite.load_suites import get_suite
+
+    for suite_name in ("slack", "banking"):
+        suite = get_suite("v1.2.1", suite_name)
+        assert bench.validate_markers(suite, suite_name) == []
+
+
+def test_analyze_calls_nothing(bench):
+    """`--analyze` reads run logs. It must never reach a provider -- that is the
+    whole reason the numbers can be re-derived by a reviewer for free."""
+    src = _SCRIPT.read_text(encoding="utf-8")
+    head = src[: src.index("def estimate(")]
+    assert "build_llm" not in head.split("def analyze(")[1], (
+        "analyze() builds an LLM client"
+    )
+
+
+def test_the_fixture_obedience_matches_its_own_counts(recorded):
+    """`obedience_rate` must follow from `acted_on_payload`, and the engaged
+    total from its two parts."""
+    rows, _ = recorded
+    for condition, row in rows.items():
+        assert round(100 * row["acted_on_payload"] / row["n"], 1) == row["obedience_rate"], condition
+        assert (
+            row["payload_engaged"]
+            == row["acted_on_payload"] + row["discussed_but_did_not_act"]
+        ), condition
+        assert row["acted_on_payload"] >= row["attacks_won"], (
+            f"{condition}: AgentDojo scored more attacks than the model acted on -- "
+            "the obedience metric is missing runs"
+        )
