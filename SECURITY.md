@@ -168,6 +168,13 @@ proven — the doc reports that as a non-result instead of a win, along with the
 payloads that still get through and which of the current defenses have been
 measured against a model versus merely written down.
 
+## Known gaps
+
+Weaknesses that are open, unproven, or unfinished are listed in
+**[docs/KNOWN_GAPS.md](docs/KNOWN_GAPS.md)**, with the evidence for each. A
+security claim is worth what its author will say against it, so the gaps are
+published beside the numbers rather than left for a reader to find.
+
 ## Verifying a release (supply chain)
 
 Every release artifact is signed with **Sigstore** (keyless — there is no

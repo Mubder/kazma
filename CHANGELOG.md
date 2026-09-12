@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Publishing the gaps, and making the numbers checkable (2026-09-12)
+
+Two changes aimed at the same thing: a reader who has no reason to trust us.
+
+**`docs/KNOWN_GAPS.md`.** CHANGELOG records what was fixed; nothing recorded
+what was not. Open weaknesses lived in whoever last touched them -- three found
+today alone had to be carried in someone's head. Each entry names its evidence,
+so it can be checked rather than believed, and deleted when the fix lands.
+Linked from `SECURITY.md` and `docs/INJECTION.md`. It opens with the least
+comfortable item: the fence's social-framing defense is written down and
+unproven, and must not be quoted alongside the structural half that is proven.
+
+**A free reproduction path for the live injection numbers.** The offline
+numbers were always reproducible -- no model, no key. The live ones, which are
+the contestable ones, could not be reproduced by anyone without our providers.
+`docs/INJECTION.md` now carries the whole procedure: `ollama pull mistral:7b`
+and one command, ten minutes, no account and no cost, for a delta in the low
+thirties. Plus the worktree recipe for measuring a change against a
+pre-change commit, and what *not* to expect -- a different model gives a
+different number, and a near-zero delta is a finding about that model rather
+than a flaw.
+
+Also corrected stale counts in `docs/INJECTION.md` left by the corpus
+expansion: 48 -> 56 payloads, 17 -> 21 controls.
+
 ## `kazma mcp` was reading the wrong database (2026-09-12)
 
 The bridge shipped two entries ago and did not work from an editor. Found by
