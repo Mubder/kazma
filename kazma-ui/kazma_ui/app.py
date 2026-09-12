@@ -1933,6 +1933,21 @@ class KazmaAppBuilder:
         except Exception as e:
             logger.warning("[HITL] gate boot sweep failed: %s", e)
 
+        # ── Vault: same secret, two scopes, two values ────────────────
+        # A name under both the tenant and global scope with DIFFERENT values
+        # means the credential a caller gets depends on whether it has a tenant
+        # context — so a service works in chat and fails in a scheduled task,
+        # with nothing in either log saying why. One line at boot naming them;
+        # never blocks boot, and never logs a secret.
+        try:
+            from kazma_core.security.vault import get_vault
+
+            _v = get_vault()
+            if _v is not None:
+                _v.warn_on_divergent_duplicates()
+        except Exception as e:
+            logger.debug("[Vault] divergence scan skipped: %s", e)
+
         # ── Temporal durable swarm worker (opt-in) ───────────────────
         # Same process as SwarmEngine so activities can call _dispatch_inner.
         # No-ops unless KAZMA_TEMPORAL_HOST is set. Never blocks boot.

@@ -1,5 +1,60 @@
 # CHANGELOG
 
+## Two secrets, one name: the vault's divergent duplicates (2026-09-12)
+
+Swept for other instances of the cron tenant bug -- a background path that
+never installs a tenant -- and found something else instead.
+
+`Vault.retrieve` tries the tenant scope, then global, and returns the first
+hit. Correct isolation. But when a name exists under BOTH scopes with
+DIFFERENT values, the credential a caller gets depends on whether it happens
+to have a tenant context: the same service works in chat and fails in a
+scheduled task, with nothing in either log saying why.
+
+Five on the operator's live install:
+
+```
+cfg:connectors.github.oauth_token   global 07-18  vs  default 07-28
+email.gmail.client_secret           default 08-04 vs  global 08-29
+email.gmail.scopes                  default 08-16 vs  global 09-12
+email.microsoft.access_token        default 08-16 vs  global 08-29
+email.microsoft.refresh_token       default 08-16 vs  global 08-29
+```
+
+`email.gmail.client_secret` is the same key as the 2026-08-16 `invalid_client`
+incident -- and the docstring written *after* that incident claimed "the most
+recently written row wins; a stale row must never shadow a newer value". It
+never did across scopes, and it cannot: handing a tenant a global value because
+the global one is newer defeats the isolation the tenant argument exists for.
+
+So the claim is corrected to what the code actually guarantees (scope beats
+age; newest wins within a scope), and the real hazard is detected instead:
+`find_divergent_duplicates()` reports names whose copies disagree, comparing
+SHA-256 digests and returning names and timestamps only -- never values, so it
+is safe to log. One warning at boot names them.
+
+Eight tests, including the ones that keep it quiet: an *agreeing* duplicate is
+untidy rather than dangerous and must not be reported, or the five that matter
+get buried under the fifty that do not.
+
+## The bus bridge could hang an unrelated test (2026-09-12)
+
+Self-inflicted, found by the full suite. The bridge made
+`SafetyMiddleware.check()` consult the gate registry when no bus adapter is
+wired -- and `hitl_gates` resolves to `kazma-data/hitl_gates.db` in the project,
+which no test fixture isolated. So a watcher heartbeat written by one test made
+an unrelated test register a gate and wait out the whole approval timeout
+instead of failing closed.
+
+`test_always_hitl_tools_blocked_under_yolo` pins "no bus ⇒ blocked" and timed
+out rather than returning False. Reproduced deliberately: write one fresh
+watcher row, run that test, watch it hang; with the fix it passes in 1.3s under
+the identical condition.
+
+conftest now gives every test its own gate registry. That also stops the suite
+reading and writing the operator's real approval registry, which it had been
+doing all along.
+
 ## The last failing test had two bugs in it, neither environmental (2026-09-12)
 
 `test_delivery_v2_e2e` had been failing since before `40d9317c` and written off

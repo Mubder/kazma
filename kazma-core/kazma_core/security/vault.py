@@ -212,13 +212,23 @@ class SecretVault:
     def retrieve(self, name: str, tenant_id: str | None = None) -> str | None:
         """Retrieve and decrypt a secret by name.
 
-        Falls back to global (tenant_id IS NULL) if the tenant-scoped
-        secret doesn't exist. When duplicate rows exist (e.g. a rotated
-        credential stored under two tenants before a cleanup), the most
-        recently written row wins — a stale row must never shadow a newer
-        value (incident 2026-08-16: an old OAuth client secret kept winning
-        over the rotated one and every token refresh failed with
-        ``invalid_client``).
+        Falls back to global (tenant_id IS NULL) if the tenant-scoped secret
+        doesn't exist. **Scope wins over age:** a tenant-scoped row is returned
+        even when the global row is newer. Within one scope the newest row
+        wins, which is what protects a rotation from a stale duplicate
+        (incident 2026-08-16: an old OAuth client secret kept winning over the
+        rotated one and every token refresh failed with ``invalid_client``).
+
+        This docstring used to claim "the most recently written row wins" flatly,
+        across scopes. It never did, and could not: returning a global value to
+        a caller that has its own tenant-scoped one would break the isolation
+        this argument exists for. The real hazard is a *divergent duplicate* —
+        the same name under both scopes with different values, where the answer
+        then depends on whether the caller happens to have a tenant context.
+        That is a data problem, not a lookup problem, so it is surfaced by
+        :meth:`find_divergent_duplicates` rather than papered over here. The
+        operator's install had five when this was written, including
+        ``email.gmail.client_secret`` — the very key from that incident.
 
         Returns:
             The decrypted secret value, or None if not found.
@@ -237,6 +247,74 @@ class SecretVault:
                 if row:
                     return self._decrypt(row["encrypted_value"], row["nonce"])
         return None
+
+    def find_divergent_duplicates(self) -> list[dict[str, Any]]:
+        """Names stored under more than one scope with DIFFERENT values.
+
+        A duplicate that agrees is harmless. A duplicate that disagrees means
+        the value a caller gets depends on whether it happens to have a tenant
+        context -- a background task reading global and a request reading
+        tenant-scoped will use different credentials for the same service, and
+        neither one is obviously wrong from where it stands.
+
+        Returns one entry per divergent name with the scopes and their
+        ``updated_at``, and **never the values**: this is meant to be safe to
+        log. Comparison is over SHA-256 digests for the same reason.
+
+        Found in the wild 2026-09-12: five divergent names on a single install,
+        among them ``email.gmail.client_secret`` (global copy 25 days newer than
+        the tenant copy) and both Microsoft mail tokens.
+        """
+        import hashlib
+        from collections import defaultdict
+
+        by_name: dict[str, list[tuple[str | None, Any]]] = defaultdict(list)
+        with self._lock:
+            for row in self._conn.execute(
+                "SELECT name, tenant_id, updated_at FROM secrets"
+            ).fetchall():
+                by_name[row["name"]].append((row["tenant_id"], row["updated_at"]))
+
+        out: list[dict[str, Any]] = []
+        for name, entries in by_name.items():
+            if len(entries) < 2:
+                continue
+            seen: dict[str, str] = {}
+            for tid, updated in entries:
+                try:
+                    value = self.retrieve(name, tenant_id=tid)
+                except Exception:  # pragma: no cover - unreadable row
+                    value = None
+                seen[str(tid)] = hashlib.sha256((value or "").encode()).hexdigest()
+            if len(set(seen.values())) > 1:
+                out.append({
+                    "name": name,
+                    "scopes": [
+                        {"tenant_id": tid, "updated_at": updated}
+                        for tid, updated in entries
+                    ],
+                })
+        return sorted(out, key=lambda d: d["name"])
+
+    def warn_on_divergent_duplicates(self) -> int:
+        """Log one warning naming every divergent duplicate. Returns the count.
+
+        Best-effort: a diagnostic must never be the reason a boot fails.
+        """
+        try:
+            found = self.find_divergent_duplicates()
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("[Vault] divergence scan skipped", exc_info=True)
+            return 0
+        if found:
+            logger.warning(
+                "[Vault] %d secret name(s) differ between tenant and global "
+                "scope: %s. Which value a caller gets depends on whether it has "
+                "a tenant context, so the same credential can work in chat and "
+                "fail in a background task. Reconcile them.",
+                len(found), ", ".join(d["name"] for d in found),
+            )
+        return len(found)
 
     def list_secrets(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
         """List all secrets (names + categories, NOT values)."""
