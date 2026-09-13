@@ -168,6 +168,15 @@ proven — the doc reports that as a non-result instead of a win, along with the
 payloads that still get through and which of the current defenses have been
 measured against a model versus merely written down.
 
+## Threat model
+
+**[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)** states, mechanism by mechanism,
+what each safeguard stops and what it does not — including that the Docker
+sandbox shares your kernel and is a blast-radius reduction rather than a
+security boundary, that HITL approval is consent rather than containment, and
+which configuration flags turn each of them off. A safeguard described as
+stronger than it is costs more credibility than it buys.
+
 ## Known gaps
 
 Weaknesses that are open, unproven, or unfinished are listed in

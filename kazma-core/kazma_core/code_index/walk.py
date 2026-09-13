@@ -12,6 +12,11 @@ SKIP_DIRS: frozenset[str] = frozenset({
     ".ruff_cache", "build", "dist", ".tox", ".eggs",
     "vector_memory", "site-packages", ".idea", ".vs",
     "target", "coverage", ".next", ".turbo",
+    # Windows user-data trees. These should never sit inside a project, but
+    # they do when a tool runs with APPDATA/HOME pointed at the workspace --
+    # the operator's install had `AppData/Local/uv/cache` with 2,453 indexable
+    # files in it (2026-09-12), which alone ate more than half the walk budget.
+    "AppData", "Application Data", "Local Settings",
 })
 
 INDEX_EXTS: frozenset[str] = frozenset({

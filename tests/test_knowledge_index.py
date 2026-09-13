@@ -15,19 +15,46 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
 
+# The auto-inject getter reaches into the store singleton, so the temp DB
+# must be wired into BOTH the local store and the singleton.  We do that by
+# importing the singleton module globals and pointing them at our temp store.
+import kazma_core.stores.knowledge as _kb_module
+import pytest  # noqa: E402
 from kazma_core.stores.knowledge import (
     KnowledgeStore,
-    get_knowledge_store,
     reset_knowledge_store,
 )
 from kazma_core.stores.knowledge_chunker import chunk_to_dict
 from kazma_core.stores.knowledge_index import KnowledgeIndex, reset_knowledge_index
 
 
-# The auto-inject getter reaches into the store singleton, so the temp DB
-# must be wired into BOTH the local store and the singleton.  We do that by
-# importing the singleton module globals and pointing them at our temp store.
-import kazma_core.stores.knowledge as _kb_module
+@pytest.fixture(autouse=True)
+def _contain_project_root():
+    """Undo `_setup()`'s `KAZMA_PROJECT_ROOT` write after every test here.
+
+    `_setup()` points that variable at a fresh temp directory and never puts it
+    back, so it leaked into the rest of the session. `get_project_root()`
+    consults it only when the CWD walk finds no `pyproject.toml`, which is why
+    this stayed invisible for so long -- but under the right ordering a later
+    test resolves the project root to this file's temp directory and fails.
+    That is how it surfaced: `test_portability.py` asserting the root holds a
+    `pyproject.toml`, and getting `.../Temp/kazma_kbi_test_k3qxyn9i` instead.
+
+    Snapshot and restore, including the cached value the env var feeds.
+    """
+    from kazma_core import paths
+
+    had = "KAZMA_PROJECT_ROOT" in os.environ
+    previous = os.environ.get("KAZMA_PROJECT_ROOT")
+    cached = paths._project_root
+    try:
+        yield
+    finally:
+        if had:
+            os.environ["KAZMA_PROJECT_ROOT"] = previous  # type: ignore[arg-type]
+        else:
+            os.environ.pop("KAZMA_PROJECT_ROOT", None)
+        paths._project_root = cached
 
 
 def _setup():

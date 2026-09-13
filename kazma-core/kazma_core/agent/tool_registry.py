@@ -433,7 +433,7 @@ class LocalToolRegistry:
     # ── Execution ───────────────────────────────────────────────────
 
     async def execute(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Execute a registered tool by name.
+        """Execute a registered tool by name, wrapped in a GenAI span.
 
         Args:
             tool_name: The tool name as registered.
@@ -444,6 +444,28 @@ class LocalToolRegistry:
         Returns:
             Dict with ``content`` (str) and ``is_error`` (bool).
         """
+        # `execute_tool` span per the OpenTelemetry GenAI conventions (R-3).
+        # This is the single tool-execution chokepoint, so one wrapper here
+        # covers every tool, every transport, and the MCP server too -- the
+        # same reason the safety gate lives here and not in each caller.
+        #
+        # No-op without `opentelemetry`. Arguments and results are NOT
+        # recorded: a tool result is untrusted third-party text and an argument
+        # routinely holds a path, a query or a message body.
+        from kazma_core.observability.genai_otel import genai_tool_span
+
+        with genai_tool_span(tool_name) as _span:
+            result = await self._execute_inner(tool_name, arguments)
+            try:
+                if isinstance(result, dict):
+                    _span.set_attribute("kazma.tool.is_error", bool(result.get("is_error")))
+            except Exception:
+                pass
+            return result
+
+    async def _execute_inner(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
         # Strip the private HITL flag from LLM-supplied arguments — it is
         # not a real argument and must not leak into the tool call. We NEVER
         # trust this flag from the arguments dict (prompt-injection risk);

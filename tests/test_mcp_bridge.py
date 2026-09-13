@@ -541,18 +541,24 @@ class TestToolWorkerIntegration:
         local = LocalToolRegistry(include_builtins=False)
 
         call_order: list[str] = []
+        # (name, entered, exited) -- concurrency is proved by overlap, not by a
+        # stopwatch. See the assertion at the end of this test.
+        spans: list[tuple[str, float, float]] = []
+
+        async def _timed(name: str) -> str:
+            entered = asyncio.get_event_loop().time()
+            await asyncio.sleep(0.05)
+            call_order.append(name)
+            spans.append((name, entered, asyncio.get_event_loop().time()))
+            return f"result_{name}"
 
         @local.register(description="Slow tool A")
         async def tool_a() -> str:
-            await asyncio.sleep(0.05)
-            call_order.append("a")
-            return "result_a"
+            return await _timed("a")
 
         @local.register(description="Slow tool B")
         async def tool_b() -> str:
-            await asyncio.sleep(0.05)
-            call_order.append("b")
-            return "result_b"
+            return await _timed("b")
 
         executor = UnifiedToolExecutor(local=local)
         tracer = KazmaTracer(backend="console")
@@ -563,14 +569,28 @@ class TestToolWorkerIntegration:
             PendingToolCall(id="tc_b", name="tool_b", arguments={}),
         ]
 
-        start = asyncio.get_event_loop().time()
         result = await tool_worker_node(state, tool_executor=executor, tracer=tracer)
-        elapsed = asyncio.get_event_loop().time() - start
 
         assert len(result["tool_calls_done"]) == 2
-        # Both should complete — if parallel, < 0.1s; if serial, >= 0.1s
-        assert elapsed < 0.15  # generous margin for CI
         assert set(call_order) == {"a", "b"}
+
+        # Concurrency is proved by OVERLAP, not by a stopwatch.
+        #
+        # This used to assert `elapsed < 0.15` against two 50ms sleeps, leaving
+        # 50ms of headroom for everything else the call does. That measures the
+        # host, not the code: it passed on an idle machine and failed at 0.187s
+        # on the same commit when the box was merely busy. Comparing against a
+        # serial run measured in the same test was no better -- under load the
+        # baseline is just as noisy, and it still failed two runs in three.
+        #
+        # If A entered before B exited, the two were in flight together. That
+        # is the actual invariant and no amount of CPU starvation can make a
+        # correctly-parallel implementation fail it.
+        assert len(spans) == 2, spans
+        (_, a_in, a_out), (_, b_in, b_out) = sorted(spans, key=lambda s: s[1])
+        assert a_in < b_out and b_in < a_out, (
+            f"tool calls did not overlap, so they ran serially: {spans}"
+        )
 
     @pytest.mark.asyncio
     async def test_worker_handles_tool_crash(self):

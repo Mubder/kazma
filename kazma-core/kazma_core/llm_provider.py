@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -256,6 +257,113 @@ class LLMResponse:
 # ── Provider ──────────────────────────────────────────────────────────
 
 
+
+
+
+_TOOL_COUNT_LIMIT_RES = (
+    # Groq: "'tools' : maximum number of items is 128"
+    re.compile(r"maximum number of items is (\d+)", re.I),
+    # Defensive variants seen in the wild / documented by other gateways.
+    re.compile(r"at most (\d+) tools?", re.I),
+    re.compile(r"tools?[^.]{0,40}?maximum(?: of)? (\d+)", re.I),
+)
+
+
+def _parse_tool_count_limit(detail: str) -> int | None:
+    """The tool-array cap a provider just named, or None.
+
+    Only a COUNT limit counts. A malformed-schema rejection also mentions
+    "tool" and must keep falling through to the strip-all path, because there
+    is no number of tools that would make a broken schema valid.
+    """
+    text = str(detail or "")
+    for pattern in _TOOL_COUNT_LIMIT_RES:
+        m = pattern.search(text)
+        if m:
+            try:
+                n = int(m.group(1))
+            except (TypeError, ValueError):
+                continue
+            if n > 0:
+                return n
+    return None
+
+
+
+def _otel_system_for(base_url: str | None) -> str:
+    """`gen_ai.system` from the provider URL.
+
+    The convention wants the provider ("openai", "anthropic", "deepseek"), not
+    the gateway hostname. Unknown hosts fall back to "openai" because every one
+    of them is reached over the OpenAI-compatible wire protocol, which is what
+    the attribute is actually describing.
+    """
+    host = (base_url or "").lower()
+    for needle, name in (
+        ("anthropic", "anthropic"),
+        ("deepseek", "deepseek"),
+        ("groq", "groq"),
+        ("openrouter", "openrouter"),
+        ("generativelanguage", "gcp.gemini"),
+        ("googleapis", "gcp.gemini"),
+        ("bedrock", "aws.bedrock"),
+        ("azure", "azure.ai.openai"),
+        ("mistral", "mistral_ai"),
+        ("cohere", "cohere"),
+        ("x.ai", "xai"),
+        ("localhost:11434", "ollama"),
+        ("ollama", "ollama"),
+        ("openai", "openai"),
+    ):
+        if needle in host:
+            return name
+    return "openai"
+
+
+# One SSL context for the whole process, built off the event loop.
+#
+# `httpx.AsyncClient(...)` builds a default SSL context at construction, which
+# loads the entire system CA store. On Windows that is slow enough to be
+# visible: the operator's loop-stall watchdog caught a 16-second stall on
+# 2026-09-12 whose stack was
+#
+#   ssl.py create_default_context
+#   llm_provider._get_client
+#   llm_provider.chat_stream
+#   graph_supervisor.supervisor_node
+#
+# `_get_client` is `async`, so that CA load runs ON the event loop and blocks
+# every other turn, heartbeat and websocket for its duration -- and it was paid
+# again on every client rebuild (a provider switch, a key change, a reconfigure).
+#
+# Build it once, in a worker thread, and hand the same context to every client.
+_SSL_CONTEXT: Any = None
+_SSL_CONTEXT_LOCK = asyncio.Lock()
+
+
+async def _shared_ssl_context() -> Any:
+    """The process-wide SSL context, created off-loop on first use.
+
+    Returns ``True`` (httpx's "verify normally" default) if a context cannot be
+    built, so a failure here degrades to the old behaviour rather than
+    disabling verification. Never returns ``False``.
+    """
+    global _SSL_CONTEXT
+    if _SSL_CONTEXT is not None:
+        return _SSL_CONTEXT
+    async with _SSL_CONTEXT_LOCK:
+        if _SSL_CONTEXT is not None:
+            return _SSL_CONTEXT
+        try:
+            import ssl
+
+            _SSL_CONTEXT = await asyncio.to_thread(ssl.create_default_context)
+        except Exception:  # pragma: no cover - defensive
+            logger.debug("[LLM] shared SSL context unavailable", exc_info=True)
+            _SSL_CONTEXT = True
+        return _SSL_CONTEXT
+
+
 class LLMProvider:
     """OpenAI-compatible LLM client using httpx.
 
@@ -470,6 +578,7 @@ class LLMProvider:
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
+                verify=await _shared_ssl_context(),
             )
             self._baked_auth = f"Bearer {safe_key}"
         else:
@@ -505,6 +614,49 @@ class LLMProvider:
         return await self._get_client()
 
     async def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        model: str | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """Send a chat completion request, wrapped in a GenAI span.
+
+        The span is the OpenTelemetry GenAI convention (R-3): an enterprise
+        already running OTel sees Kazma's LLM calls in the dashboards it has.
+        It is a no-op when `opentelemetry` is not installed, which is the
+        default, and it records metadata only -- never prompts or completions.
+
+        It wraps the whole call rather than each attempt, because a caller who
+        waited 40 seconds across three retries waited 40 seconds; per-attempt
+        spans would report three fast calls and hide the latency that was
+        actually experienced.
+        """
+        from kazma_core.observability.genai_otel import (
+            genai_chat_span,
+            record_chat_response,
+        )
+
+        with genai_chat_span(
+            system=_otel_system_for(self.config.base_url),
+            model=str(model or self.config.model or "unknown"),
+            max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+            temperature=temperature if temperature is not None else self.config.temperature,
+        ) as _span:
+            response = await self._chat_inner(
+                messages,
+                tools=tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                model=model,
+                response_format=response_format,
+            )
+            record_chat_response(_span, response)
+            return response
+
+    async def _chat_inner(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
@@ -731,6 +883,42 @@ class LLMProvider:
                 status_code in (400, 422)
                 and any(tok in detail_lower for tok in ("tool", "function"))
             )
+            # A COUNT limit is not a schema problem, and must not be treated
+            # as one. Groq caps the tool array at 128; Kazma sends the whole
+            # registry (174 on the operator's box on 2026-09-11), so every call
+            # 400'd with:
+            #
+            #   {"error":{"message":"'tools' : maximum number of items is 128"}}
+            #
+            # That message contains "tool", so it fell into the branch below and
+            # the turn was retried with NO tools at all -- the model answered,
+            # politely and uselessly, having lost every capability it had. A
+            # silent downgrade from "agent" to "chatbot" is worse than an error,
+            # because nothing in the reply says it happened.
+            #
+            # Retry trimmed to the limit the provider just named instead. The
+            # first N is arbitrary, but N tools beat zero tools by a wide margin.
+            tool_cap = _parse_tool_count_limit(detail) if tools else None
+            if tool_cap is not None and len(tools) > tool_cap:
+                logger.warning(
+                    "Provider caps tools at %d and %d were sent (HTTP %s) — "
+                    "retrying with the first %d instead of dropping all of "
+                    "them. Narrow the tool surface for this provider to choose "
+                    "which ones survive.",
+                    tool_cap, len(tools), status_code, tool_cap,
+                )
+                payload["tools"] = list(tools)[:tool_cap]
+                try:
+                    resp = await client.post("/chat/completions", json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    duration_ms = (time.monotonic() - start) * 1000
+                    return self._parse_response(data, duration_ms)
+                except httpx.HTTPStatusError:
+                    logger.warning(
+                        "Trimmed retry also rejected — falling back to no tools."
+                    )
+
             if tools and (nim_function_not_found or tool_schema_error):
                 logger.warning(
                     "Provider rejected tool definitions (HTTP %s) — retrying "
