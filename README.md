@@ -9,7 +9,8 @@
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
-    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-7%2C892-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-7%2C346-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="docs/INJECTION.md"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection benchmark"></a>
     <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-3%2C266%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
@@ -43,6 +44,53 @@ Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before dan
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Kazma Observability Dashboard & Control Plane" width="100%">
 </p>
+
+---
+
+## 🔬 Measured, not asserted
+
+Most agent frameworks describe their safety. Kazma publishes the measurement,
+the method, and the results that do **not** flatter it.
+
+**Prompt injection, on [AgentDojo](https://agentdojo.spylab.ai)** — a public
+benchmark built by other people (Debenedetti et al., NeurIPS 2024), 996 runs per
+condition, every condition measured four times:
+
+| condition | attack success | acted on the payload |
+|---|:---:|:---:|
+| undefended | 18.1% | 24.1% |
+| spotlighting — 4-character delimiter, from the literature | 11.6% | 18.6% |
+| **Kazma's fence** — ~800-character in-band banner | **10.4%** | **14.8%** |
+
+Fencing untrusted tool output **works** (p < 0.001 against undefended). It also
+**cannot be told apart from a four-character delimiter** (p = 0.39). Both
+sentences are on the page, because the second one is the one a reviewer needs.
+
+What that page also reports, because leaving it out would make the rest worth
+less:
+
+- **Two of the four suites measure nothing** on the model used — their
+  undefended baselines sit at 2.9% and 0.3%, so there is no attack success for
+  a defense to reduce.
+- **A result we refused.** On one suite the fence beat spotlighting at
+  p = 0.032 — on a suite where spotlighting scored *worse than no defense at
+  all*. It is shown, and not counted.
+- **A measured noise floor.** Running an unchanged configuration four times
+  gives a 5.7-point spread at temperature 0. Anything smaller than that is not
+  a finding, including ours.
+
+Every figure re-derives from the committed run logs, with no API key:
+
+```bash
+scripts/agentdojo_bench.py --analyze --suite banking   # raw counts + obedience
+scripts/agentdojo_bench.py --report slack,banking      # pooled figures + p-values
+```
+
+| | |
+|---|---|
+| [**Prompt injection: the numbers**](docs/INJECTION.md) | the full measurement, the payloads that still land, and a free offline reproduction |
+| [**Threat model**](docs/THREAT_MODEL.md) | what each boundary stops and — stated plainly — what it does not. Approval is consent, not containment |
+| [**Known gaps**](docs/KNOWN_GAPS.md) | open weaknesses, dated, so they do not depend on someone remembering |
 
 ---
 
@@ -107,7 +155,7 @@ Kazma's architecture reflects those foundational principles:
 - **Associative PPR Graph**: Multi-hop associative recall via Local Ego-Graph Personalized PageRank over belief entities.
 - **Hybrid Episode Retrieval**: Recalls past dialogues and actions using Reciprocal Rank Fusion (RRF) over lexical search (SQLite FTS5, or ILIKE on Postgres-primary) and dense embeddings (`sqlite-vec` on one node, **pgvector** when Postgres is on).
 - **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated backups — WAL-safe SQLite copies, `pg_dump` of Postgres and a JSONL export of the graph, snapshotted into deduplicated, encrypted [restic](https://restic.net) repositories (local + offsite) with time-based retention and a verified one-command restore. See [Disaster Recovery](docs/docs/ops/disaster-recovery.md).
-- **Prompt-Fenced Injection**: Wraps untrusted text in `<kazma:data untrusted>` fences that tell the model the enclosed content is observation data, never instructions. Covers recalled memories, compaction summaries, procedural hints, skill frontmatter, document knowledge, swarm phonebook entries, and — since the 2026-08-29 audit — fetched web pages (`read_url`), search results (`web_search`), saved research chunks, and third-party MCP resource bodies. Note this is a mitigation, not a guarantee: a fence lowers the authority of injected text, it does not make the model immune to it.
+- **Prompt-Fenced Injection**: Wraps untrusted text in `<kazma:data untrusted>` fences that tell the model the enclosed content is observation data, never instructions. Covers recalled memories, compaction summaries, procedural hints, skill frontmatter, document knowledge, swarm phonebook entries, and — since the 2026-08-29 audit — fetched web pages (`read_url`), search results (`web_search`), saved research chunks, and third-party MCP resource bodies. Note this is a mitigation, not a guarantee: a fence lowers the authority of injected text, it does not make the model immune to it — **measured at 18.1% → 10.4% attack success on a public benchmark**, which is a real reduction and not an elimination. See [INJECTION.md](docs/INJECTION.md).
 
 ### 🔁 Operator reload & Windows event loop
 - **Watched host:** after `git pull`, pick up code with `--reload` (see [Quick Start §4](#4-reload--status-watched-host--do-not-skip)). Do not kill `python`/`uvicorn` by hand.
@@ -159,14 +207,18 @@ Kazma's architecture reflects those foundational principles:
 |---|:---:|:---:|:---:|:---:|:---:|
 | **Architecture** | **Full-Stack Autonomous System** | Library / Graph Primitive | Multi-Agent Framework | Autonomous Agent | Workflow Automation |
 | **Cognitive Memory** | ✅ **Bi-temporal + PPR Graph** | ⚠️ Basic Vector Store | ⚠️ Simple RAG | ⚠️ Basic Memory | ❌ None |
-| **HITL Safety Gates** | ✅ **Triple-Wired (Fail-Closed)** | ⚠️ Manual code wiring | ❌ None | ⚠️ Basic prompt | ⚠️ Workflow pause |
+| **HITL Safety Gates** | ✅ **Triple-Wired (fail-closed by default — [what it does not stop](docs/THREAT_MODEL.md))** | ⚠️ Manual code wiring | ❌ None | ⚠️ Basic prompt | ⚠️ Workflow pause |
 | **Swarm Orchestration** | ✅ **6 Patterns + Autoscaler** | ⚠️ Custom Graph | ✅ Role-based | ❌ Single loop | ❌ Node based |
 | **Built-in Web & TUI IDE**| ✅ **Included (Dual Interface)** | ❌ None | ❌ None | ❌ None | ❌ None |
 | **Observability Control Plane**| ✅ **Live Dashboard Included** | ⚠️ External (LangSmith) | ❌ None | ❌ None | ⚠️ Execution log |
 | **Document Intelligence**| ✅ **Quarantine + OCR + Redact**| ⚠️ Ad-hoc loaders | ❌ None | ❌ None | ⚠️ Basic parsers |
 | **Multi-Platform Gateways**| ✅ **Web, TUI, Telegram, Discord, Slack** | ❌ None | ❌ None | ❌ None | ⚠️ Webhook triggers |
 | **Arabic-Native & RTL** | ✅ **Full Native & Dialect Support** | ❌ None | ❌ None | ❌ None | ❌ None |
+| **Published safety measurements** | ✅ **[Public benchmark, noise floor, known gaps](docs/INJECTION.md)** | — | — | — | — |
 | **Self-Hosted License** | ✅ **MIT (100% Open Source)** | ✅ MIT | ✅ MIT | ✅ MIT | ⚠️ Fair-Code |
+
+<sub>“—” means not assessed. We measured Kazma against a public benchmark; we have not
+run the same benchmark against these projects, so we do not claim a result for them.</sub>
 
 ---
 

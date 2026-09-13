@@ -225,8 +225,14 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**0 failures** (2026-09-12, `pytest tests/ -n 4`). Was 21 failures + 1
-collection error that morning.
+**1 failure** (2026-09-13, `pytest tests/`, 7892 passed in 51 min), and it is
+a full-suite-only flake: `tests/e2e/test_smoke.py::test_reload_restores_answer_and_cot`
+passes alone and passes with the whole `tests/e2e/` directory (8/8), failing
+only inside the 7,917-test run. Cross-suite contention under load, not a
+product bug — the day's only product change (`prompt_fence.py`) is never
+called from `kazma-ui/`, so it cannot reach that test. Do not chase it from a
+full-suite report alone; re-run the file first. Was 21 failures + 1
+collection error on the morning of 2026-09-12.
 
 Twenty-one were stale tests pinning code that had moved, each verified against
 the product before being touched. Four were real product bugs, every one of

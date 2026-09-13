@@ -89,6 +89,13 @@ def _is_secret_key(key: str) -> bool:
     return any(hint in lower for hint in _SECRET_KEY_HINTS)
 
 
+# The probe lives in kazma_core.provider_probe so that this route and
+# /api/settings/providers/{name}/test -- which is the one the Settings page
+# actually calls -- cannot drift apart again. Fixing only this copy changed
+# nothing an operator would ever see.
+from kazma_core.provider_probe import probe_chat_completion as _probe_chat_completion
+
+
 def _activate_tested_provider(registry: Any, name: str) -> None:
     """Point chat at *name* when the active profile has no API key.
 
@@ -322,9 +329,10 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         # (Ollama, LM Studio, …) live on localhost / private LAN addresses,
         # so private URLs must be allowed here (they are user-configured
         # endpoints, not untrusted external input).
-        from kazma_core.url_utils import normalize_provider_url
-        from kazma_core.security.ssrf import validate_url
         from urllib.parse import urlparse, urlunparse
+
+        from kazma_core.security.ssrf import validate_url
+        from kazma_core.url_utils import normalize_provider_url
 
         base = normalize_provider_url(base_url, ensure_v1=True)
         root = urlunparse((urlparse(base).scheme, urlparse(base).netloc, "", "", "", ""))
@@ -358,6 +366,30 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     last_body = resp.text[:200]
                     if resp.status_code == 200:
                         latency = int((time.monotonic() - start) * 1000)
+                        # The model list answered. That is NOT the same as the
+                        # provider working, and reporting it as such is how a
+                        # paid provider showed green on this page while every
+                        # message sent to it came back 404. Send a real
+                        # completion on the path the product uses before
+                        # claiming success.
+                        chat = await _probe_chat_completion(
+                            base_url,
+                            typed_key or str(provider.get("api_key") or ""),
+                            str(provider.get("model") or ""),
+                        )
+                        if not chat["ok"]:
+                            registry.set_provider_health(name, "degraded")
+                            return {
+                                "success": False,
+                                "latency_ms": latency,
+                                "reachable": True,
+                                "chat_ok": False,
+                                "error": (
+                                    "Reachable, but chat is failing. The model list "
+                                    f"answered in {latency} ms; a real completion "
+                                    f"returned: {chat['error']}"
+                                ),
+                            }
                         if typed_key:
                             try:
                                 registry.upsert_provider(
@@ -370,7 +402,14 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                                 )
                         registry.set_provider_health(name, "healthy")
                         _activate_tested_provider(registry, name)
-                        return {"success": True, "latency_ms": latency}
+                        return {
+                            "success": True,
+                            "latency_ms": latency,
+                            "reachable": True,
+                            "chat_ok": True,
+                            "chat_ms": chat["ms"],
+                            "chat_model": chat["model"],
+                        }
                 latency = int((time.monotonic() - start) * 1000)
                 registry.set_provider_health(name, "degraded")
                 if last_status is None:

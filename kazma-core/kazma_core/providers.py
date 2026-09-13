@@ -55,6 +55,16 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
         "auth_header": "Bearer",
         "docs": "https://console.x.ai",
     },
+    # Z.AI serves its OpenAI-compatible API at /v4, not /v1. Declared here so
+    # nothing appends a version to it -- the mistake that made every GLM call
+    # 404 while the Settings page reported the provider healthy.
+    "zai": {
+        "name": "Z.AI (GLM)",
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "models_endpoint": "/models",
+        "auth_header": "Bearer",
+        "docs": "https://docs.z.ai",
+    },
     "openrouter": {
         "name": "OpenRouter",
         "base_url": "https://openrouter.ai/api/v1",
@@ -166,3 +176,76 @@ def get_base_url(provider: str) -> str:
     """Get the default base URL for a provider, or empty string."""
     preset = PROVIDER_PRESETS.get(provider)
     return preset["base_url"] if preset else ""
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Capabilities — declared, not inferred
+# ══════════════════════════════════════════════════════════════════════════
+#
+# Phase 2 of docs/plans/PROVIDER_LAYER_PLAN.md.
+#
+# Every provider difference that has broken Kazma was a difference the preset
+# could not express, so it lived as an `if` in the transport instead: ~40
+# vendor branches in llm_provider.py and hostname exemptions in url_utils.py.
+# Three providers 404'd on every call because the API version was guessed
+# rather than declared, and one rejected the `developer` role with nothing
+# anywhere saying it would.
+#
+# `None` means NOT VERIFIED, and it is a first-class value here. Writing
+# `"tools": True` for a provider nobody has tested would trade one silent
+# assumption for another wearing a schema; the UI shows unknowns as unknown,
+# and `scripts/provider_conformance.py --live` is how a None becomes a bool.
+
+#: Applied to every provider unless overridden below.
+CAPABILITY_DEFAULTS: dict[str, object] = {
+    # Which wire format the client speaks. Not a vendor name: several
+    # providers share "openai" and differ only in data.
+    "api_style": "openai",
+    # The role name used for the system turn. OpenAI now also accepts
+    # "developer"; Z.AI rejects it outright with 400.
+    "system_role": "system",
+    "supports": {"tools": None, "streaming": None, "json_mode": None, "vision": None},
+    "max_context": None,
+}
+
+#: Only what is known. An entry here is either structural (the adapter that
+#: serves it) or measured — never assumed.
+CAPABILITY_OVERRIDES: dict[str, dict[str, object]] = {
+    "anthropic": {"api_style": "anthropic"},
+    "bedrock": {"api_style": "bedrock"},
+    "google": {"api_style": "google"},
+    "azure": {"api_style": "azure"},
+    # Measured 2026-09-13 by scripts/provider_conformance.py against
+    # glm-5.3: chat, system turn and tool calling all pass. `developer` is
+    # rejected with `400 Incorrect role information`, so system_role is not a
+    # default here — it is a finding.
+    "zai": {
+        "system_role": "system",
+        "supports": {"tools": True, "streaming": None, "json_mode": None, "vision": None},
+    },
+}
+
+
+def capabilities(provider: str) -> dict[str, object]:
+    """Declared capabilities for *provider*, with unknowns as ``None``.
+
+    Always returns the full shape, so callers never branch on a missing key.
+    """
+    merged: dict[str, object] = {
+        "api_style": CAPABILITY_DEFAULTS["api_style"],
+        "system_role": CAPABILITY_DEFAULTS["system_role"],
+        "supports": dict(CAPABILITY_DEFAULTS["supports"]),  # type: ignore[arg-type]
+        "max_context": CAPABILITY_DEFAULTS["max_context"],
+    }
+    override = CAPABILITY_OVERRIDES.get(provider.lower(), {})
+    for key, value in override.items():
+        if key == "supports" and isinstance(value, dict):
+            merged["supports"].update(value)  # type: ignore[union-attr]
+        else:
+            merged[key] = value
+    return merged
+
+
+def system_role_for(provider: str) -> str:
+    """The role name to use for the system turn. Read this instead of assuming."""
+    return str(capabilities(provider)["system_role"])
