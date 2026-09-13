@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pytest
-
 from kazma_core.safety.prompt_fence import (
     fence_untrusted,
     format_untrusted_block,
