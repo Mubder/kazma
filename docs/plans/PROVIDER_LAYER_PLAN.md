@@ -184,7 +184,8 @@ build a workflow on it.
 | 3 — the UI | `d59b9458` | Test sends a real completion and reports three states. The frontend can finally express *reachable but chat failing*. |
 | 4 — consolidation | `a02e3fa1` | One shared probe. **Phase 3's fix had landed in the endpoint the UI does not call** — the duplication cost exactly what this plan predicted, during the refactor meant to fix it. |
 | 5 — rendering | `528c369f` | The page now paints the three states, capability badges, and the declared wire facts. Found that **none of Phase 3's data had ever reached the browser**: FastAPI serialises the Test route through `ProviderTestResponse`, which did not declare `reachable` or `chat_ok`, so the response model silently deleted both. Every test checked the function's return value; nothing checked the response body. |
-| 6 — adapter table | this commit | The four-way vendor ladder deciding which client class to build existed in three methods of `ModelRegistry`. Replaced by one `api_style` lookup, which is what the capability schema was for. A new wire format is one line; a new provider speaking an existing one is zero. |
+| 6 — adapter table | `4e813d8c` | The four-way vendor ladder deciding which client class to build existed in three methods of `ModelRegistry`. Replaced by one `api_style` lookup, which is what the capability schema was for. A new wire format is one line; a new provider speaking an existing one is zero. |
+| 7 — one API surface | this commit | `/api/settings/providers/*` deleted along with the service layer behind it. And the bug that arrived while deleting it: **Test told a working provider it had no API key** — the runtime resolves a key from the provider row, the legacy `llm.*` settings *or* `<PROVIDER>_API_KEY`, and Test read only the row. The same defect that opened this plan, in a different variable. |
 
 ### What the plan got right
 
@@ -230,10 +231,11 @@ because the user asked exactly that question and the answer was "nothing".
   report now marks an auto-picked model with `*` and says so in a legend,
   because the run that produces a misleading result must be the one that warns
   about it.
-- **`/api/settings/providers/*` now has no UI caller.** The duplicate
-  frontend half is gone — a complete second provider CRUD path
-  (`loadProviders`, `saveProvider`, `testProvider`, …) plus its
-  `ProvidersManager` HTTP wrappers, none of it bound to any template. The
-  routes still serve and are still tested, but nothing in the product calls
-  them; either delete them or make them the documented public API. Leaving
-  them as an unused twin is how this started.
+- *(closed)* **The duplicate API is gone.** `/api/settings/providers/*`, the
+  `providers_router` that carried it, the `SettingsManager` delegation
+  methods, `kazma_core/settings_providers.py` and `ProviderAddRequest` are
+  deleted. `/api/providers/*` — the one the API guide documents — is the only
+  surface. Note the sharp edge: a `DELETE` under the old prefix now falls
+  through to the generic `DELETE /api/settings/{key}` and answers 200 for a
+  key it invents, so the regression test checks the routing table, not a
+  status code.

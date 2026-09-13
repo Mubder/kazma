@@ -982,6 +982,23 @@ class ModelRegistry:
 
         return merged
 
+    def resolve_provider_credentials(self, name: str) -> tuple[str, str]:
+        """The base URL and API key the runtime would actually send for *name*.
+
+        Reading ``get_provider(name)["api_key"]`` is NOT the same question. A
+        key can also come from the legacy ``llm.*`` settings or from
+        ``<PROVIDER>_API_KEY`` in the environment, and chat resolves all of
+        them. The Settings "Test" button read only the stored entry, so a
+        provider configured entirely through a `.env` file worked for every
+        message and reported *"No API key stored for this provider"* when
+        tested -- the check contradicting the thing it was checking.
+
+        Use this anywhere the question is "would this work", rather than
+        "what is written in the provider row".
+        """
+        _, base_url, api_key, _ = self._resolve_provider_config(name)
+        return base_url, api_key
+
     def get_provider(self, name: str) -> dict[str, Any] | None:
         """Return provider entry by name (fuzzy, case-insensitive matching).
 

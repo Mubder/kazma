@@ -318,14 +318,31 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         api_key = _sanitize_api_key(str(provider.get("api_key", "") or ""))
         if api_key and _is_masked_placeholder(api_key):
             api_key = ""
+
+        if not api_key and not typed_key:
+            # The provider row is not the only place a key can live. Chat also
+            # resolves the legacy `llm.*` settings and `<PROVIDER>_API_KEY` from
+            # the environment, so a provider configured entirely through a .env
+            # file answered every message while Test reported
+            # "No API key stored for this provider" — the check contradicting
+            # the thing it checks. Ask the runtime what it would send.
+            resolved_url, resolved_key = registry.resolve_provider_credentials(name)
+            api_key = _sanitize_api_key(resolved_key)
+            if api_key and _is_masked_placeholder(api_key):
+                api_key = ""
+            if not base_url:
+                base_url = str(resolved_url or "").rstrip("/")
+
         local_names = {"ollama", "lm-studio", "lmstudio", "local"}
         if not api_key and name.lower() not in local_names:
+            env_name = f"{name.upper().replace('-', '_')}_API_KEY"
             return {
                 "success": False,
                 "error": (
-                    "No API key stored for this provider. Paste the full key "
-                    "into the field (leave blank only when a key is already saved) "
-                    "and Test again."
+                    "No API key found for this provider. Kazma looked in the "
+                    f"provider's saved key, the legacy llm.* settings, and "
+                    f"${env_name}. Paste the full key into the field (leave it "
+                    "blank only when a key is already saved) and Test again."
                 ),
             }
         if not base_url:
@@ -378,9 +395,13 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         # message sent to it came back 404. Send a real
                         # completion on the path the product uses before
                         # claiming success.
+                        # `api_key`, not the raw provider row: the row may be
+                        # empty while the runtime resolves the key from the
+                        # environment, and the chat probe has to send what a
+                        # real message would send.
                         chat = await _probe_chat_completion(
                             base_url,
-                            typed_key or str(provider.get("api_key") or ""),
+                            typed_key or api_key,
                             str(provider.get("model") or ""),
                         )
                         if not chat["ok"]:

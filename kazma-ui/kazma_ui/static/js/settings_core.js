@@ -425,9 +425,8 @@
             self.loading = true;
             try {
                 // Load all settings in parallel
-                const [settings, providers, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg, nonstopCfg] = await Promise.all([
+                const [settings, personalities, shortcuts, agentCfg, contextCfg, safetyCfg, appearanceCfg, nonstopCfg] = await Promise.all([
                     self._fetch('/api/settings'),
-                    self._fetch('/api/settings/providers'),
                     self._fetch('/api/settings/agent/personalities'),
                     self._fetch('/api/settings/shortcuts'),
                     self._fetch('/api/settings/agent'),
@@ -472,7 +471,6 @@
                     const memTenant = settings.memory && settings.memory['memory.tenant_mode'];
                     if (memTenant) self.memoryTenantMode = memTenant;
                 }
-                if (Array.isArray(providers)) self.providers = providers;
                 if (Array.isArray(personalities)) self.personalities = personalities;
                 if (shortcuts && typeof shortcuts === 'object') self.shortcuts = shortcuts;
 

@@ -1,16 +1,18 @@
-"""One provider health probe, shared by every route that offers "Test".
+"""One provider health probe for the one route that offers "Test".
 
 Phase 4 of ``docs/plans/PROVIDER_LAYER_PLAN.md``.
 
 There were two near-identical ``test_provider`` implementations —
 ``kazma_ui.providers`` behind ``/api/providers/{name}/test`` and
 ``kazma_core.settings_providers`` behind ``/api/settings/providers/{name}/test``
-— and the Settings page calls the second one. Fixing the first therefore
-changed nothing an operator would ever see. Two surfaces for one concept is how
-they drift, and this is what that drift costs.
+— and a fix applied to one of them changed nothing an operator would ever
+see. Two surfaces for one concept is how they drift, and this is what that
+drift costs.
 
-Both now call the function below, so "Test" means the same thing wherever it is
-pressed.
+The duplicate is now deleted rather than merely kept in step: there is one
+``/api/providers/{name}/test``, and it calls the function below. This module
+survives the deletion because the probe is worth naming on its own — what a
+real check has to do is a decision, not an implementation detail.
 
 **What a real check has to do.** Querying the model list answers a different
 question from the one the product asks. Measured on a live provider whose base
