@@ -2914,6 +2914,11 @@ details.kazma-working > summary {
   unicode-bidi: isolate;
   direction: ltr;
 }
+/* A gist-led detail collapses to its first line only. Three lines of raw
+   JSON per tool row is what pushed the reply itself below the fold. */
+.agent-progress-step .step-detail.is-clamped.has-gist {
+  max-height: 1.5em;
+}
 .agent-progress-step .step-detail {
   margin-top: 4px;
   font-size: 0.72rem;
