@@ -65,10 +65,31 @@ def fence_untrusted(content: str, *, source: str, is_error: bool = False) -> str
     try:
         return format_untrusted_block(text, source=source)
     except Exception:  # pragma: no cover - defensive
+        # Fail to a PLACEHOLDER, not to the raw text.
+        #
+        # This used to `return text`, on the reasoning that fencing must never
+        # be the reason a tool fails. That reasoning is right and the
+        # conclusion was wrong: it made the failure path a bypass. Anything
+        # that can make `format_untrusted_block` raise -- a pathological
+        # payload, an encoding edge, memory pressure on a huge body -- would
+        # deliver attacker-controlled text to the model with no fence at all,
+        # which is the same shape as the "Error:" prefix bypass found on
+        # 2026-09-13 and fixed above.
+        #
+        # The tool still succeeds and the model still learns what happened; it
+        # just does not get handed the unwrapped content. Dropping a tool
+        # result is recoverable. An unfenced injection is not.
         logging.getLogger(__name__).warning(
-            "[prompt_fence] fencing failed for source=%s", source, exc_info=True
+            "[prompt_fence] fencing failed for source=%s — withholding %d chars "
+            "rather than passing them through unfenced",
+            source,
+            len(text),
+            exc_info=True,
         )
-        return text
+        return (
+            f"[Kazma withheld {len(text)} characters from {source!r}: the content "
+            "could not be safely fenced. It is untrusted and was NOT read.]"
+        )
 
 
 # Classic prompt-injection override markers. Matched case-insensitively.
