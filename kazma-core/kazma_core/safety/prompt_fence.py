@@ -36,15 +36,31 @@ __all__ = [
 ]
 
 
-def fence_untrusted(content: str, *, source: str) -> str:
+def fence_untrusted(content: str, *, source: str, is_error: bool = False) -> str:
     """Best-effort :func:`format_untrusted_block` for tool return values.
 
     Tool results are plain strings on a hot path, so fencing must never be the
-    reason a tool fails. Errors and empty bodies pass through unchanged;
-    anything else comes back fenced (audit F-09).
+    reason a tool fails. Empty bodies pass through unchanged; anything else
+    comes back fenced (audit F-09).
+
+    ``is_error`` marks content **the caller knows is its own failure message**,
+    which is ours rather than untrusted and is left unfenced so that
+    ``LocalToolRegistry`` can still recognise it by its ``Error:`` prefix.
+
+    This used to sniff ``text.startswith("Error:")`` instead of taking a flag,
+    and that was a complete fence bypass: every caller here forwards
+    attacker-controlled text — a fetched web page, a search snippet, an MCP
+    server's response — so an attacker who began their payload with ``Error:``
+    had it delivered to the model raw. Found 2026-09-13 by an adversarial
+    review of the benchmark harness, which noticed the benchmark measures
+    ``format_untrusted_block`` while production calls this wrapper.
+
+    The lesson is the general one: a trust decision must come from the caller,
+    which knows the provenance, never from the content, which the attacker
+    writes.
     """
     text = content or ""
-    if not text.strip() or text.startswith("Error:"):
+    if not text.strip() or is_error:
         return text
     try:
         return format_untrusted_block(text, source=source)
