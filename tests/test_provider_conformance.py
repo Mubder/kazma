@@ -648,3 +648,68 @@ class TestThereIsOneFrontendProviderPath:
         js = self._read("kazma-ui", "kazma_ui", "static", "js", "settings_hub.js")
         for dead in ("async loadProviders(", "async saveProvider(", "async testProvider("):
             assert dead not in js, f"the duplicate provider path is back: {dead}"
+
+
+class TestTheModelListKeepsItsStyling:
+    """Two visible bugs from one stale selector.
+
+    The discovered-models rules were written as ``.provider-card .x``. When the
+    providers page became master-detail the markup moved out of that card and
+    every one of them silently stopped applying:
+
+    * the list lost ``max-height``/``overflow-y``, so a provider with 120
+      models grew the page by ~3,500 pixels instead of scrolling;
+    * the rows lost ``justify-content: space-between``, so the remove button
+      sat against the model name instead of the right edge.
+
+    CSS has no "undefined name" error — a selector that matches nothing looks
+    exactly like a selector that matches something.
+    """
+
+    @staticmethod
+    def _css() -> str:
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
+        ).read_text(encoding="utf-8")
+
+    @staticmethod
+    def _rule(css: str, selector: str) -> str:
+        start = css.index(selector + " {")
+        return css[start : css.index("}", start)]
+
+    def test_the_rules_are_not_scoped_to_a_card_that_is_gone(self):
+        css = self._css()
+        for cls in ("discovered-models-list", "model-item-row", "model-check-label"):
+            assert f".provider-card .{cls}" not in css, (
+                f".{cls} is scoped to .provider-card again, which no template renders"
+            )
+
+    def test_no_template_renders_a_provider_card(self):
+        """The other half: if the class comes back, the scoping above may be
+        correct again and this test should be the one that changes."""
+        from pathlib import Path
+
+        templates = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui" / "templates"
+        for path in templates.rglob("*.html"):
+            assert "provider-card" not in path.read_text(encoding="utf-8"), path
+
+    def test_the_model_list_is_capped_and_scrolls(self):
+        """Without this a provider with many models grows the page instead of
+        the list."""
+        rule = self._rule(self._css(), ".discovered-models-list")
+        assert "max-height" in rule
+        assert "overflow-y" in rule
+
+    def test_the_remove_button_is_pushed_to_the_right_edge(self):
+        rule = self._rule(self._css(), ".model-item-row")
+        assert "justify-content: space-between" in rule
+
+    def test_the_detail_pane_can_shrink(self):
+        """A grid item's min-width defaults to auto, so one long model id could
+        not shrink and pushed the page wider than the viewport."""
+        css = self._css()
+        assert "min-width: 0" in self._rule(css, ".pc-body")
+        assert ".pc-panel > div" in css
