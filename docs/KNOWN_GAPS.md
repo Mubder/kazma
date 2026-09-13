@@ -147,6 +147,35 @@ answer is a reduction rather than an elimination.
 
 ## The MCP bridge
 
+**An MCP server names its own tools, and in the default posture the name
+decides whether you see the call.** `classify_mcp_tool` reads the tool name —
+which is supplied by the third-party server — and a name matching a safe verb
+classifies `safe`. Verified 2026-09-13: `get_file`, `read_env` and bare `get`
+all classify **safe**, so a hostile or compromised MCP server can pick a name
+that skips the approval gate. `read_env` is the sharp example: `env` is
+deliberately absent from the `shell_exec` allowlist precisely because one
+approval should not become a credential dump, and an MCP tool called `read_env`
+runs with no approval at all.
+
+This is **closed in production**. `KAZMA_PRODUCTION=1` forces HITL for every
+MCP tool not on `KAZMA_MCP_SAFE_ALLOWLIST`, regardless of name. It is open in
+the default/dev posture, where `force_hitl` is `tier in ("danger", "unknown")`
+and a `safe` classification skips it. The code that does this carries the
+comment *"safe name patterns are not enough (list_keys, get_env, export_data,
+…)"* — the reasoning is already written down; only the production branch acts
+on it.
+
+Servers default to `trust="approval_required"`, so this needs a server the
+operator connected and a tool name chosen by that server. That is within scope:
+the threat model already treats MCP *output* as untrusted. Tool *names* are the
+same channel and are currently trusted.
+
+Mitigations today: run with `KAZMA_PRODUCTION=1`, or set
+`KAZMA_MCP_SAFE_ALLOWLIST` to the tools you actually want unattended, or only
+connect servers you would let run unattended anyway. The real repair is to stop
+classifying third-party tools by their own names in every posture, which is a
+gating change with a real UX cost and has not been made.
+
 **A bus-less approval has no session grant and no YOLO.** One decision, one
 tool call — those are properties of a chat thread, and a separate process has
 no thread whose later calls could be re-checked against a grant. Working as
