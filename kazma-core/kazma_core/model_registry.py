@@ -987,6 +987,31 @@ class ModelRegistry:
 
         return merged
 
+    def stored_key_is_undecryptable(self, name: str) -> bool:
+        """True when a key IS saved for *name* but the vault cannot open it.
+
+        "No key" and "a key you cannot read" are different problems with
+        different fixes, and they look identical from the resolved view: both
+        arrive as an empty string. Telling an operator who saved a key that no
+        key is stored sends them to paste it again, which is the one action
+        that cannot help -- the value on disk is fine; ``KAZMA_VAULT_KEY`` is
+        missing or no longer the one it was encrypted with.
+        """
+        from kazma_core.config_store import is_vault_ref
+        from kazma_core.model_registry_store import load_providers_unresolved
+
+        clean = (name or "").strip().lower()
+        for entry in load_providers_unresolved(self._config_store):
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("name", "")).strip().lower() != clean:
+                continue
+            if not is_vault_ref(entry.get("api_key")):
+                return False
+            _, resolved = self.resolve_provider_credentials(name)
+            return not resolved
+        return False
+
     def resolve_provider_credentials(self, name: str) -> tuple[str, str]:
         """The base URL and API key the runtime would actually send for *name*.
 

@@ -156,3 +156,58 @@ class TestAKeyCanStillBeChanged:
             {"name": "ollama", "base_url": "http://127.0.0.1:11434/v1"}
         )
         assert _stored_api_key(store, "ollama") == ""
+
+
+class TestAnUndecryptableKeySaysSo:
+    """"No key" and "a key you cannot read" both arrive as an empty string and
+    need opposite actions. Telling an operator who saved a key to paste it
+    again is the one action that cannot help — the stored value is fine, the
+    vault key is not."""
+
+    def test_a_readable_key_is_not_reported_as_undecryptable(self, registry, store):
+        assert registry.stored_key_is_undecryptable("groq") is False
+
+    def test_a_provider_with_no_key_is_not_reported_as_undecryptable(
+        self, registry, store
+    ):
+        registry.upsert_provider(
+            {"name": "ollama", "base_url": "http://127.0.0.1:11434/v1"}
+        )
+        assert registry.stored_key_is_undecryptable("ollama") is False
+
+    def test_an_unreadable_pointer_is_detected(self, store, monkeypatch):
+        """The state a rotated or missing KAZMA_VAULT_KEY leaves behind: the
+        pointer survives on disk (thanks to the save guard) and resolves to
+        nothing."""
+        import json
+
+        from kazma_core.model_registry import ModelRegistry
+
+        reg = ModelRegistry(store)
+        reg.upsert_provider(
+            {"name": "groq", "base_url": "https://api.groq.com/openai/v1",
+             "api_key": "gsk_REAL_SECRET_VALUE"}
+        )
+        # Force the at-rest form to a pointer regardless of whether this test
+        # environment has a vault, then make it unreadable.
+        entries = json.loads(json.dumps(
+            [dict(e) for e in
+             __import__("kazma_core.model_registry_store", fromlist=["x"])
+             .load_providers_unresolved(store)]
+        ))
+        for e in entries:
+            if e.get("name") == "groq":
+                e["api_key"] = "vault://cfg:providers.list.groq.api_key"
+        store.set("providers.list", entries, category="providers")
+
+        with _no_vault():
+            assert ModelRegistry(store).stored_key_is_undecryptable("groq") is True
+
+    def test_the_test_route_says_which_problem_it_is(self):
+        import inspect
+
+        from kazma_ui import providers as ui_providers
+
+        src = inspect.getsource(ui_providers)
+        assert "stored_key_is_undecryptable" in src
+        assert "KAZMA_VAULT_KEY" in src

@@ -335,6 +335,21 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
         local_names = {"ollama", "lm-studio", "lmstudio", "local"}
         if not api_key and name.lower() not in local_names:
+            # "No key" and "a key I cannot decrypt" arrive here identically —
+            # both as an empty string — and they need opposite actions. Telling
+            # an operator who saved a key to paste it again is the one thing
+            # that cannot help.
+            if registry.stored_key_is_undecryptable(name):
+                return {
+                    "success": False,
+                    "error": (
+                        "A key IS saved for this provider, but the vault cannot "
+                        "decrypt it. KAZMA_VAULT_KEY is missing from this "
+                        "process, or is not the value the key was encrypted "
+                        "with. Restore that variable rather than re-pasting the "
+                        "key — the stored value is intact."
+                    ),
+                }
             # The same helper the resolver uses, so the message names the
             # variable Kazma actually reads. Spelling it locally is how
             # `Z.AI_API_KEY` got told to an operator as something to set.
@@ -345,9 +360,9 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 "success": False,
                 "error": (
                     "No API key found for this provider. Kazma looked in the "
-                    f"provider's saved key, the legacy llm.* settings, and "
-                    f"${env_name}. Paste the full key into the field (leave it "
-                    "blank only when a key is already saved) and Test again."
+                    "provider's saved key (the vault), the legacy llm.* "
+                    f"settings, and ${env_name}. Paste the full key into the "
+                    "field and Test again."
                 ),
             }
         if not base_url:
