@@ -416,6 +416,18 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "المزيد",
         "en": "More",
     },
+    # Sidebar section headings. "Work", "Activity", "Capabilities" and
+    # "Settings" already existed here, unused — the nav had been collapsed to
+    # four links plus a "More" disclosure, so the categories were written and
+    # never shown. These two complete the set.
+    "nav.section_knowledge": {
+        "ar": "المعرفة والذاكرة",
+        "en": "Knowledge & memory",
+    },
+    "nav.section_automation": {
+        "ar": "الأتمتة",
+        "en": "Automation",
+    },
     "nav.primary": {
         "ar": "العمل",
         "en": "Work",

@@ -442,6 +442,11 @@ button { cursor: pointer; font-family: inherit; }
   padding: var(--sp-3) var(--sp-3) var(--sp-1);
   white-space: nowrap;
 }
+/* The first heading sits against the header already — its top padding just
+   opened a gap at the top of the list. */
+.nav-links > .nav-section-title:first-child {
+  padding-top: var(--sp-1);
+}
 .nav-link {
   display: flex;
   align-items: center;

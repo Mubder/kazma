@@ -121,41 +121,27 @@ def test_transcript_wider_measure_small_side_margins() -> None:
     assert "clamp(64px, 12vw, 180px)" not in css
 
 
-def test_sidebar_work_plus_more_disclosure() -> None:
-    """Hands 0.11: Chat/Workspace/IDE/Settings stay visible; inspectors under More.
+def test_sidebar_shows_every_destination_grouped() -> None:
+    """Chat/Workspace/IDE lead; the other thirteen are visible under headings.
 
-    2026-08-26 revert was display:flex on <details> itself (UA closed-hiding
-    lost). The body wrapper is what we hide — never the details node.
+    This asserted the opposite until 2026-09-14: four links plus a
+    `<details class="nav-more">` holding twelve. Two thirds of the product
+    behind a click labelled "More". The operator asked for all of it shown and
+    categorised.
+
+    The 2026-08-26 lesson it also carried is kept: no inline display style
+    inside the nav. That revert happened because `display:flex` on the
+    `<details>` node beat the UA's closed-details hiding — a rule about how
+    fragile display toggling in this nav is, which outlives the disclosure.
     """
     html = _SIDEBAR.read_text(encoding="utf-8")
-    v5 = _V5.read_text(encoding="utf-8")
-    assert "nav-more" in html
-    assert "nav-more-body" in html
-    assert "<details" in html
     assert "nav.primary" in html
     nav_chunk = html.split("<nav")[1].split("</nav>")[0]
+    assert "<details" not in nav_chunk, "a disclosure is back in the nav"
     assert 'style="display:' not in nav_chunk
-    assert "details.nav-more" not in v5 or ".nav-more {\n  display:" not in v5
-    assert ".nav-more-body {\n  display: none;" in v5
-    assert ".nav-more[open] > .nav-more-body {\n  display: flex;" in v5
-    work, _, more = html.partition('class="nav-more-body"')
-    for href in ("/chat", "/workspace", "/ide", "/settings"):
-        assert f'href="{href}"' in work, href
-        assert f'href="{href}"' not in more, href
-    for href in (
-        "/memory",
-        "/dashboard",
-        "/agents",
-        "/research",
-        "/documents",
-        "/swarm",
-        "/knowledge",
-        "/replay",
-        "/skills",
-        "/mcp",
-    ):
-        assert f'href="{href}"' in more, href
-        assert f'href="{href}"' not in work, href
+    # Every destination, each under a heading.
+    assert nav_chunk.count('class="nav-link ') == 16
+    assert nav_chunk.count('class="nav-section-title"') >= 5
 
 
 def test_reduced_motion_and_tap_target() -> None:
