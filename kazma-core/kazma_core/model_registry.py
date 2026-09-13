@@ -31,6 +31,7 @@ from typing import Any, TYPE_CHECKING
 import httpx
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider
+from kazma_core.provider_adapters import build_client
 from kazma_core.providers import PROVIDER_PRESETS
 from kazma_core.runtime.live_llm import coerce_api_key
 
@@ -550,44 +551,13 @@ class ModelRegistry:
                 "model": effective_model,
             })
 
-            # ── Google Vertex AI → use GeminiProvider with ADC auth ──
-            if provider_name.lower() == "google":
-                from kazma_core.google_llm import GeminiProvider
-
-                google_entry = self.get_provider(provider_name)
-                location = str(
-                    google_entry.get("location", "")
-                    if google_entry else ""
-                ) or "us-central1"
-                project_id = str(
-                    google_entry.get("project_id", "")
-                    if google_entry else ""
-                )
-                google_mode = str(
-                    google_entry.get("google_mode", "")
-                    if google_entry else ""
-                )
-                client = GeminiProvider(
-                    config,
-                    project_id=project_id,
-                    location=location,
-                    google_mode=google_mode,
-                )
-            elif provider_name.lower() == "anthropic":
-                # Native Anthropic Messages API (x-api-key + /messages schema).
-                from kazma_core.anthropic_llm import AnthropicProvider
-
-                client = AnthropicProvider(config)
-            elif provider_name.lower() == "azure":
-                from kazma_core.azure_llm import AzureProvider
-
-                client = AzureProvider(config)
-            elif provider_name.lower() == "bedrock":
-                from kazma_core.bedrock_llm import BedrockProvider
-
-                client = BedrockProvider(config)
-            else:
-                client = LLMProvider(config)
+            # The client class comes from the provider's declared `api_style`
+            # (see kazma_core.provider_adapters). This used to be a four-way
+            # branch on the vendor's name, written out again in get_model and
+            # get_client_by_provider.
+            client = build_client(
+                provider_name, config, self.get_provider(provider_name)
+            )
 
             if model is None and (
                 self._key_is_usable(api_key) or self._url_is_local(base_url)
@@ -616,24 +586,7 @@ class ModelRegistry:
                 "api_key": coerce_api_key(owner.get("api_key", "")),
                 "model": clean_id,
             })
-            if owner_name == "google":
-                from kazma_core.google_llm import GeminiProvider
-                return self._track(GeminiProvider(
-                    config,
-                    project_id=str(owner.get("project_id", "")),
-                    location=str(owner.get("location", "")) or "us-central1",
-                    google_mode=str(owner.get("google_mode", "")),
-                ))
-            if owner_name == "anthropic":
-                from kazma_core.anthropic_llm import AnthropicProvider
-                return self._track(AnthropicProvider(config))
-            if owner_name == "azure":
-                from kazma_core.azure_llm import AzureProvider
-                return self._track(AzureProvider(config))
-            if owner_name == "bedrock":
-                from kazma_core.bedrock_llm import BedrockProvider
-                return self._track(BedrockProvider(config))
-            return self._track(LLMProvider(config))
+            return self._track(build_client(owner_name, config, owner))
 
         # Fallback: use active profile with overridden model
         return self.get_client(model=clean_id)
@@ -660,24 +613,7 @@ class ModelRegistry:
             "api_key": coerce_api_key(entry.get("api_key", "")),
             "model": effective_model,
         })
-        if provider_name.lower() == "google":
-            from kazma_core.google_llm import GeminiProvider
-            return self._track(GeminiProvider(
-                config,
-                project_id=str(entry.get("project_id", "")),
-                location=str(entry.get("location", "")) or "us-central1",
-                google_mode=str(entry.get("google_mode", "")),
-            ))
-        if provider_name.lower() == "anthropic":
-            from kazma_core.anthropic_llm import AnthropicProvider
-            return self._track(AnthropicProvider(config))
-        if provider_name.lower() == "azure":
-            from kazma_core.azure_llm import AzureProvider
-            return self._track(AzureProvider(config))
-        if provider_name.lower() == "bedrock":
-            from kazma_core.bedrock_llm import BedrockProvider
-            return self._track(BedrockProvider(config))
-        return self._track(LLMProvider(config))
+        return self._track(build_client(provider_name, config, entry))
 
     def find_provider_for_model(self, model_id: str) -> dict[str, Any] | None:
         """Return the provider entry that owns *model_id*.

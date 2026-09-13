@@ -75,6 +75,11 @@ class ProbeResult:
 class ProviderReport:
     provider: str
     model: str = ""
+    #: True when no --model was pinned and the model was taken from whatever
+    #: the provider's /models happened to list first. A failure under an
+    #: auto-picked model is a fact about that model, not about the provider,
+    #: and the report has to say which it is.
+    model_auto: bool = False
     probes: list[ProbeResult] = field(default_factory=list)
 
     @property
@@ -85,6 +90,7 @@ class ProviderReport:
         return {
             "provider": self.provider,
             "model": self.model,
+            "model_auto": self.model_auto,
             "ok": not self.failed,
             "probes": [vars(p) for p in self.probes],
         }
@@ -354,6 +360,7 @@ async def run_provider(provider: str, model: str | None) -> ProviderReport:
         discovered = await _first_served_model(client)
         if discovered and cfg is not None:
             cfg.model = discovered
+            report.model_auto = True
     report.model = str(getattr(cfg, "model", "") or "?")
 
     for probe in PROBES:
@@ -373,6 +380,17 @@ _MARK = {PASS: "ok  ", FAIL: "FAIL", SKIP: "skip"}
 
 
 def main(argv: list[str] | None = None) -> int:
+    # A Windows console defaults to cp1252, and the failure detail below is
+    # printed with a box-drawing character. The run that surfaced this had
+    # already made every API call and then died formatting the results —
+    # paid for the answer and threw it away. Failures are exactly when this
+    # output matters, so it must not be the line that crashes.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+        except Exception:
+            pass
+
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--live", action="store_true", help="make real API calls")
     ap.add_argument("-p", "--providers", default="", help="comma-separated subset")
@@ -396,7 +414,8 @@ def main(argv: list[str] | None = None) -> int:
     print("-" * 78)
     for r in reports:
         line = "  ".join(f"{_MARK[p.status]} {p.name}" for p in r.probes)
-        print(f"{r.provider:<16} {r.model:<26} {line}")
+        shown = f"{r.model}*" if r.model_auto else r.model
+        print(f"{r.provider:<16} {shown:<26} {line}")
         print(f"{'':<16} key: {KEY_SOURCE.get(r.provider, '?')}")
         for p in r.probes:
             if p.status == FAIL:
@@ -405,6 +424,12 @@ def main(argv: list[str] | None = None) -> int:
 
     broken = [r for r in reports if r.failed]
     print()
+    if any(r.model_auto for r in reports):
+        print("* model auto-picked from the provider's own /models listing.")
+        print("  A failure there may be a property of that model rather than of")
+        print("  the provider. Re-run with --model pinned to a mainstream one")
+        print("  before recording anything in the capability table.")
+        print()
     if broken:
         print(f"{len(broken)} provider(s) failed a required probe: "
               + ", ".join(r.provider for r in broken))

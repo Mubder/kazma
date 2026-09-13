@@ -1,5 +1,72 @@
 # CHANGELOG
 
+## Three copies of the same vendor ladder, replaced by one lookup (2026-09-13)
+
+`ModelRegistry.get_client`, `.get_model` and `.get_client_by_provider` each
+carried the same four-way branch deciding which client class to build:
+
+```python
+if provider_name.lower() == "google":   ... GeminiProvider(...)
+elif provider_name.lower() == "anthropic": ... AnthropicProvider(config)
+elif provider_name.lower() == "azure":  ... AzureProvider(config)
+elif provider_name.lower() == "bedrock": ... BedrockProvider(config)
+else:                                    ... LLMProvider(config)
+```
+
+Adding a provider with its own wire format meant finding all three sites and
+hoping there were only three.
+
+The capability schema already declares the answer, and it declares the right
+thing: `api_style` is the wire format, not the vendor. Several providers share
+one — `groq`, `zai`, `ollama` and `openrouter` are all `openai` — so the
+selection is a lookup on that field rather than a chain of tests on who the
+vendor is. `kazma_core/provider_adapters.py` holds the one table; imports stay
+lazy, so a Kazma that only talks to Ollama still never loads the Google, Azure
+or Bedrock SDKs.
+
+Registering a new wire format is now one line plus its capability declaration.
+Registering a provider that speaks an existing format is zero lines, which was
+the point of declaring capabilities in the first place.
+
+A conformance test asserts every preset's declared `api_style` has an adapter,
+so a typo in the capability table fails in CI rather than as an unexplained
+400 from the wrong protocol. The vendor names that remain in `model_registry`
+are checked and kept: `discover_models` special-cases Google because Vertex AI
+has no `/models` endpoint, and Ollama because its ids carry a `:latest`
+suffix. Those are facts about the APIs, not about which class to construct.
+
+### A second provider page that had stopped existing
+
+Tracing which route the Test button reaches turned up a complete parallel
+frontend: `loadProviders`, `openAddProvider`, `applyProviderPreset`,
+`saveProvider`, `deleteProvider`, `toggleProvider`, `testProvider` in
+`settings_hub.js`, their state in `settings_core.js`, the HTTP wrappers in
+`providers.js`, and a `case 'providers':` tab branch for a tab the template no
+longer has. All of it against `/api/settings/providers`; none of it bound to
+anything rendered. The page runs entirely on the `hub*` functions and
+`/api/providers`.
+
+Deleted. `ProvidersManager` is now pure logic with no endpoint of its own —
+keeping a second client in step with the first is exactly what cost this
+refactor a phase shipped into a route nobody called.
+
+### Two fixes in the conformance harness, found by using it
+
+`openrouter` is now recorded as supporting tools — measured pinned to
+`openai/gpt-4o-mini`. It took two runs, and the first one is the lesson.
+Unpinned, the harness picks whatever the provider's `/models` lists first; for
+OpenRouter that was `inference-net/schematron-v2-turbo`, which ignores the
+system turn and whose upstream serves no tool endpoint. OpenRouter answered
+correctly (`No endpoints found that support tool use`) and the report read as
+though the provider were broken. An auto-picked model is now marked `*` with a
+legend saying to re-run pinned before recording anything — the run that can
+produce a misleading result is the one that has to warn about it.
+
+The other fix: on a Windows console the summary died with a `UnicodeEncodeError`
+formatting the `└─` in a failure detail. It had already made every API call,
+then threw the answers away while printing them. Failures are exactly when that
+output matters, so stdout is now reconfigured to UTF-8 before any work starts.
+
 ## The provider page showed two states while the backend measured three (2026-09-13)
 
 Kazma's Test button had been sending a real completion for several commits,

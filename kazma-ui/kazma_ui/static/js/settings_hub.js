@@ -4,71 +4,15 @@
     root.KazmaSettingsMixins = root.KazmaSettingsMixins || {};
     root.KazmaSettingsMixins.hub = function () {
         return {
-        async loadProviders() {
-            this.providers = await ProvidersManager.loadAll();
-        },
-
-        openAddProvider() {
-            this.newProvider = { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true };
-            this.showProviderModal = true;
-        },
-
-        applyProviderPreset(presetKey) {
-            const preset = ProvidersManager.getPreset(presetKey);
-            if (preset) {
-                this.newProvider.name = presetKey;
-                this.newProvider.display_name = preset.name;
-                this.newProvider.base_url = preset.base_url;
-            }
-        },
-
-        async saveProvider() {
-            if (!this.newProvider.name || !this.newProvider.base_url) {
-                showToast('Name and Base URL are required', 'error');
-                return;
-            }
-            this.saving = true;
-            try {
-                const data = { ...this.newProvider };
-                if (typeof data.models === 'string') {
-                    data.models = data.models.split(',').map(m => m.trim()).filter(Boolean);
-                }
-                await ProvidersManager.add(data);
-                this.showProviderModal = false;
-                await this.loadProviders();
-                showToast('Provider added', 'success');
-            } catch (e) {
-                showToast('Failed to add provider: ' + e.message, 'error');
-            }
-            this.saving = false;
-        },
-
-        async deleteProvider(name) {
-            if (!(await window.kazmaConfirm({
-                title: 'Delete provider',
-                message: `Delete provider "${name}"? This cannot be undone.`,
-                confirmText: 'Delete',
-                danger: true,
-            }))) return;
-            await ProvidersManager.remove(name);
-            await this.loadProviders();
-            showToast('Provider removed', 'success');
-        },
-
-        async toggleProvider(name, enabled) {
-            await ProvidersManager.toggle(name, enabled);
-            await this.loadProviders();
-        },
-
-        async testProvider(name) {
-            this.testingProvider = name;
-            this.providerTestResult = null;
-            const result = await ProvidersManager.test(name);
-            this.providerTestResult = { name, ...result };
-            this.testingProvider = null;
-            // Auto-clear after 8s
-            setTimeout(() => { if (this.providerTestResult?.name === name) this.providerTestResult = null; }, 8000);
-        },
+        // NOTE: a second, complete provider CRUD path used to live here —
+        // loadProviders / openAddProvider / applyProviderPreset / saveProvider
+        // / deleteProvider / toggleProvider / testProvider, all against
+        // /api/settings/providers. No template bound to any of it; the page
+        // runs entirely on the hub* functions below, which call
+        // /api/providers. It was found while tracing which route the Test
+        // button reaches — the same duplication that had already cost this
+        // refactor a phase shipped into the wrong endpoint. Deleted rather
+        // than left as a second thing to keep in step.
 
         async fetchModels() {
             if (!this.currentModel.base_url) { showToast('Enter a base URL first', 'error'); return; }
