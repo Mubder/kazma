@@ -78,11 +78,14 @@ budget. Excluding them the fence's `slack` ASR is 15.9% rather than 13.3%.
 condition; neither figure is excluded from the headline, because dropping runs
 would be its own thumb on the scale.
 
-**Ollama's context window is not pinned in the benchmark.** Fenced `slack`
-conversations reach ~10k characters, past a default `num_ctx` of 2048/4096
-tokens, and Ollama truncates silently rather than erroring. "Zero provider
-errors" therefore does not rule out the fence scoring well partly because the
-payload fell out of the window. Unmeasured.
+**~~Ollama's context window is not pinned in the benchmark.~~** Closed
+2026-09-13: measured rather than assumed. Ollama reported serving
+`qwen2.5:7b` with a 32,768-token window, and the largest conversation in any
+condition was ~18.8k tokens — spotlighting's, not the fence's. No truncation,
+so "zero provider errors" means what it says. `--analyze` now reports
+`max_conversation_tokens_est` per condition and a test fails if any condition
+comes within 20% of the window, because this was clean by luck of
+configuration rather than by design.
 
 **A fenced MCP transport error is no longer flagged as an error.** Closing the
 `Error:` fence bypass (2026-09-13) means `spec_tools`' own failure strings now

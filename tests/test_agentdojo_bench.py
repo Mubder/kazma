@@ -587,3 +587,33 @@ def test_the_two_proportion_test_is_the_one_the_page_names(bench):
     switches test, the fixture's `method` string has to change with it."""
     p = bench.two_proportion_p(7, 144, 22, 144)
     assert p == 0.0033, f"the committed banking p-value no longer reproduces: {p}"
+
+
+def test_no_condition_approaches_the_serving_context_window(bench, _dojo):
+    """If a conversation overflows the provider's context the payload can fall
+    out of the window, and the defense scores well for a reason that has
+    nothing to do with defending.
+
+    The fence adds ~800 characters per tool result, so it was the obvious
+    suspect. Measured 2026-09-13: Ollama served qwen2.5:7b at 32768 tokens and
+    the largest conversation in any condition was ~18.8k (spotlighting, not the
+    fence). Clean -- but only because it was checked.
+    """
+    logdir = _REPO / ".agentdojo-runs"
+    if not logdir.exists():
+        pytest.skip("no run logs on this machine")
+
+    from agentdojo.task_suite.load_suites import get_suite
+
+    served_tokens = 32768  # what Ollama reported loading for this model
+    for suite_name in ("slack", "banking"):
+        rep = bench.analyze(
+            logdir, get_suite("v1.2.1", suite_name), suite_name, "important_instructions"
+        )
+        for row in rep["conditions"]:
+            est = row["max_conversation_tokens_est"]
+            assert est < served_tokens * 0.8, (
+                f"{suite_name}/{row['condition']}: largest conversation ~{est} tokens "
+                f"against a {served_tokens}-token window -- close enough that silent "
+                "truncation may be affecting the result"
+            )
