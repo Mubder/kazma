@@ -61,6 +61,22 @@ async def _notify_cron_denial(tool_name: str, reason: str) -> None:
 # Alias kept so existing imports of _EXTENDED_DANGER keep working.
 _EXTENDED_DANGER: list[str] = list(CANONICAL_DANGER_TOOLS)
 
+
+
+def _grant_tool(thread_id: str, tool: str) -> bool:
+    """Did the operator already allow this tool on this thread?"""
+    from kazma_core.safety.hitl_grants import has_tool_grant
+
+    return bool(has_tool_grant(thread_id, tool))
+
+
+def _grant_task(thread_id: str) -> bool:
+    """Did the operator already allow this whole task?"""
+    from kazma_core.safety.task_grants import has_task_grant
+
+    return bool(has_task_grant(thread_id))
+
+
 # Tools classified as "sensitive reads" — allowed but logged.
 _SENSITIVE_READS = [
     "sqlite_query",
@@ -272,6 +288,34 @@ class SafetyMiddleware:
                     return True
             except Exception:
                 pass
+
+            # The SAME standing approvals `hitl.requires_approval()` honours.
+            #
+            # Two paths gate tools: that one for the agent's own tools, this
+            # one for MCP and swarm workers. Only the first consulted the
+            # grants an operator creates by choosing "allow this tool" or
+            # "allow this task" in the approval card — so an approval given in
+            # the Web UI was invisible here, and the same tool was re-asked on
+            # Telegram/Discord and auto-rejected at the 300s timeout. The
+            # operator had approved it; this path never looked.
+            #
+            # This grants nothing new: every check below is one the other path
+            # already trusts. It stops the two from disagreeing about an answer
+            # the operator already gave.
+            for _check, _label in (
+                (lambda: _grant_task(tid), "task grant"),
+                (lambda: _grant_tool(tid, tool_name), "tool grant"),
+            ):
+                try:
+                    if _check():
+                        logger.info(
+                            "[Safety] %s covers %s on thread=%s — already approved "
+                            "by the operator",
+                            _label, tool_name, tid,
+                        )
+                        return True
+                except Exception:
+                    logger.debug("[Safety] %s check failed", _label, exc_info=True)
 
         if tool_name in _always_set:
             logger.warning(
