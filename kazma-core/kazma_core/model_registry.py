@@ -240,8 +240,13 @@ class ModelRegistry:
         # lets deployments (incl. the public demo) configure keys via env
         # without saving them in the UI.
         if not api_key and provider_name:
-            env_key = f"{provider_name.upper().replace('-', '_')}_API_KEY"
-            api_key = os.getenv(env_key, "")
+            # env_key_for, not a local spelling: replacing only hyphens left a
+            # dot in place and produced `Z.AI_API_KEY`, a name no shell can
+            # export, so this fallback was unreachable for that provider in
+            # both chat and the Test button.
+            from kazma_core.providers import env_key_for
+
+            api_key = os.getenv(env_key_for(provider_name), "")
             # KAZMA_API_KEY is a generic operator key — only reuse it for
             # Bearer/OpenAI-compatible providers. Sending it to a native
             # provider (Anthropic x-api-key, Azure api-key) sends one

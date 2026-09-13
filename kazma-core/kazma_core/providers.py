@@ -1,6 +1,6 @@
 """Provider presets with default base URLs and model discovery endpoints."""
 
-__all__ = ["GEMINI_MODELS", "PROVIDER_PRESETS", "get_base_url", "get_preset", "list_providers"]
+__all__ = ["GEMINI_MODELS", "PROVIDER_PRESETS", "env_key_for", "get_base_url", "get_preset", "list_providers"]
 
 # Well-known Gemini models available via Vertex AI.
 # These are hardcoded because Vertex AI does not expose a static /models
@@ -157,6 +157,24 @@ PROVIDER_PRESETS: dict[str, dict[str, str]] = {
         "docs": "",
     },
 }
+
+
+def env_key_for(provider: str) -> str:
+    """The environment variable Kazma reads a key from. ``Z.AI`` -> ``Z_AI_API_KEY``.
+
+    Every non-alphanumeric character becomes ``_``. Replacing only hyphens left
+    the dot in place and produced ``Z.AI_API_KEY`` -- a name no shell can
+    export -- so the environment fallback was silently unreachable for any
+    provider whose name is not plain alphanumerics. The live-probe script had
+    already hit this and fixed it locally; the runtime that actually resolves
+    keys for chat and for the Test button kept the broken spelling.
+
+    One definition, so a provider that can be configured by env can be
+    configured by env everywhere.
+    """
+    import re
+
+    return f"{re.sub(r'[^A-Z0-9]', '_', provider.upper())}_API_KEY"
 
 
 def get_preset(provider: str) -> dict[str, str] | None:
