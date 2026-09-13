@@ -180,3 +180,102 @@ def test_zai_is_a_preset_not_a_hand_typed_custom_entry():
     entry = PROVIDER_PRESETS["zai"]
     assert entry["base_url"] == "https://api.z.ai/api/paas/v4"
     assert capabilities("zai")["supports"]["tools"] is True
+
+
+# ── the Settings page must test the path the product uses ───────────────────
+
+
+class TestTheTestButtonExercisesChat:
+    """`POST /api/providers/{name}/test` used to query the model list only.
+
+    Measured on a live provider whose base URL had a version segment wrongly
+    appended: `/models` returned 200 while `/chat/completions` returned 404. So
+    the page reported a paid provider as healthy and not one message ever
+    reached it. The operator configured it, tested it, saw green, and it had
+    never worked.
+    """
+
+    def test_the_endpoint_sends_a_completion_before_claiming_success(self):
+        import inspect
+
+        from kazma_ui import providers as mod
+
+        src = inspect.getsource(mod)
+        assert "_probe_chat_completion" in src
+        # and it must be called from the success path, not merely defined
+        assert src.count("_probe_chat_completion") >= 2, (
+            "the chat probe is defined but never called"
+        )
+
+    def test_a_reachable_but_broken_provider_is_not_success(self):
+        """The state that had no representation: model list fine, chat dead."""
+        import inspect
+
+        from kazma_ui import providers as mod
+
+        src = inspect.getsource(mod)
+        assert '"chat_ok": False' in src
+        assert "Reachable, but chat is failing" in src
+        assert '"reachable": True' in src
+
+    def test_the_probe_budgets_tokens_for_a_reasoning_model(self):
+        """glm-5.3 spent 16 reasoning tokens before its first content token. A
+        tight budget returns an empty completion and blames the provider for
+        the probe's own mistake."""
+        import inspect
+
+        from kazma_ui.providers import _probe_chat_completion
+
+        src = inspect.getsource(_probe_chat_completion)
+        assert "max_tokens" in src
+        assert "160" in src, "the probe's token budget is too tight to be safe"
+
+    def test_an_empty_completion_counts_as_a_failure(self):
+        """A 200 with no content is not a working provider."""
+        import inspect
+
+        from kazma_ui.providers import _probe_chat_completion
+
+        assert "empty completion" in inspect.getsource(_probe_chat_completion)
+
+
+# ── the frontend can express the third state ────────────────────────────────
+
+
+class TestTheUIHasThreeStates:
+    """Two states cannot describe a provider that answers its model list and
+    fails every message. That combination is not an edge case — it is what a
+    wrongly-appended API version produces, and it happened three times."""
+
+    @staticmethod
+    def _js() -> str:
+        from pathlib import Path
+
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "static" / "js" / "providers.js"
+        )
+        assert path.exists(), "providers.js is gone"
+        return path.read_text(encoding="utf-8")
+
+    def test_it_classifies_into_three_states(self):
+        js = self._js()
+        for state in ("working", "chat_failing", "unreachable"):
+            assert f"'{state}'" in js, f"the UI cannot express {state!r}"
+
+    def test_chat_failing_is_derived_from_the_backend_fields(self):
+        """Not guessed from a latency or an HTTP code — the backend says so."""
+        js = self._js()
+        assert "result.reachable" in js
+        assert "result.chat_ok === false" in js
+
+    def test_a_working_provider_reports_what_actually_answered(self):
+        """'Working' should show the completion's latency and the model that
+        replied, not the model list's latency. Different call, different
+        number."""
+        js = self._js()
+        assert "chat_ms" in js and "chat_model" in js
+
+    def test_the_status_dot_has_a_colour_for_chat_failing(self):
+        js = self._js()
+        assert "chat_failing:" in js

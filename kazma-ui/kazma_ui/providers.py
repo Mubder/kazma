@@ -89,6 +89,60 @@ def _is_secret_key(key: str) -> bool:
     return any(hint in lower for hint in _SECRET_KEY_HINTS)
 
 
+async def _probe_chat_completion(
+    base_url: str, api_key: str, model: str, timeout: float = 20.0
+) -> dict[str, Any]:
+    """Send one tiny completion on the path the product actually uses.
+
+    The model-list check this sits behind answers a different question. On a
+    real provider whose base URL had a version segment wrongly appended,
+    ``/models`` returned 200 while ``/chat/completions`` returned 404 — so the
+    page reported a paid provider as healthy and not one message ever reached
+    it. A check that does not exercise the path the product uses is not a
+    check.
+
+    ``max_tokens`` is generous because a reasoning model spends tokens thinking
+    before it emits content; a tight budget returns an empty completion and
+    blames the provider for the probe's own mistake.
+    """
+    import httpx
+
+    if not model:
+        return {"ok": False, "ms": None, "model": "", "error": "no model selected"}
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
+        "max_tokens": 160,
+    }
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as http:
+            resp = await http.post(url, headers=headers, json=payload)
+        ms = int((time.monotonic() - start) * 1000)
+        if resp.status_code != 200:
+            detail = resp.text[:160].replace("\n", " ")
+            return {"ok": False, "ms": ms, "model": model,
+                    "error": f"HTTP {resp.status_code} — {detail}"}
+        data = resp.json()
+        choices = data.get("choices") or []
+        content = (choices[0].get("message", {}).get("content") or "").strip() if choices else ""
+        if not content:
+            return {"ok": False, "ms": ms, "model": model,
+                    "error": "the provider returned an empty completion"}
+        return {"ok": True, "ms": ms, "model": data.get("model") or model, "error": ""}
+    except httpx.ConnectError as exc:
+        return {"ok": False, "ms": None, "model": model,
+                "error": f"cannot connect — {exc}"}
+    except Exception as exc:  # pragma: no cover - defensive
+        return {"ok": False, "ms": None, "model": model,
+                "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+
+
 def _activate_tested_provider(registry: Any, name: str) -> None:
     """Point chat at *name* when the active profile has no API key.
 
@@ -322,9 +376,10 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         # (Ollama, LM Studio, …) live on localhost / private LAN addresses,
         # so private URLs must be allowed here (they are user-configured
         # endpoints, not untrusted external input).
-        from kazma_core.url_utils import normalize_provider_url
-        from kazma_core.security.ssrf import validate_url
         from urllib.parse import urlparse, urlunparse
+
+        from kazma_core.security.ssrf import validate_url
+        from kazma_core.url_utils import normalize_provider_url
 
         base = normalize_provider_url(base_url, ensure_v1=True)
         root = urlunparse((urlparse(base).scheme, urlparse(base).netloc, "", "", "", ""))
@@ -358,6 +413,30 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                     last_body = resp.text[:200]
                     if resp.status_code == 200:
                         latency = int((time.monotonic() - start) * 1000)
+                        # The model list answered. That is NOT the same as the
+                        # provider working, and reporting it as such is how a
+                        # paid provider showed green on this page while every
+                        # message sent to it came back 404. Send a real
+                        # completion on the path the product uses before
+                        # claiming success.
+                        chat = await _probe_chat_completion(
+                            base_url,
+                            typed_key or str(provider.get("api_key") or ""),
+                            str(provider.get("model") or ""),
+                        )
+                        if not chat["ok"]:
+                            registry.set_provider_health(name, "degraded")
+                            return {
+                                "success": False,
+                                "latency_ms": latency,
+                                "reachable": True,
+                                "chat_ok": False,
+                                "error": (
+                                    "Reachable, but chat is failing. The model list "
+                                    f"answered in {latency} ms; a real completion "
+                                    f"returned: {chat['error']}"
+                                ),
+                            }
                         if typed_key:
                             try:
                                 registry.upsert_provider(
@@ -370,7 +449,14 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                                 )
                         registry.set_provider_health(name, "healthy")
                         _activate_tested_provider(registry, name)
-                        return {"success": True, "latency_ms": latency}
+                        return {
+                            "success": True,
+                            "latency_ms": latency,
+                            "reachable": True,
+                            "chat_ok": True,
+                            "chat_ms": chat["ms"],
+                            "chat_model": chat["model"],
+                        }
                 latency = int((time.monotonic() - start) * 1000)
                 registry.set_provider_health(name, "degraded")
                 if last_status is None:

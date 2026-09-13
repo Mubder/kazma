@@ -78,14 +78,55 @@ var ProvidersManager = window.ProvidersManager = {
 
     /**
      * Test a provider connection.
+     *
+     * The backend now sends a real completion, not just a model-list query,
+     * so the result carries three outcomes rather than two. A provider whose
+     * model list answers while its chat 404s used to report as healthy — the
+     * operator saw green and not one message ever reached it.
+     *
      * @param {string} name
-     * @returns {Promise<Object>} { success, latency_ms, model, error }
+     * @returns {Promise<Object>} { success, reachable, chat_ok, latency_ms, chat_ms, chat_model, error }
      */
     async test(name) {
         const resp = await fetch(`/api/settings/providers/${encodeURIComponent(name)}/test`, {
             method: 'POST',
         });
         return await resp.json();
+    },
+
+    /**
+     * Which of the three states a test result represents.
+     * @param {Object} result
+     * @returns {'working'|'chat_failing'|'unreachable'}
+     */
+    stateOf(result) {
+        if (!result) return 'unreachable';
+        if (result.success) return 'working';
+        // Reached the provider, but it cannot actually answer a message.
+        if (result.reachable && result.chat_ok === false) return 'chat_failing';
+        return 'unreachable';
+    },
+
+    /**
+     * One line an operator can act on, per state.
+     * @param {Object} result
+     * @returns {{label: string, tone: string, detail: string}}
+     */
+    describe(result) {
+        const state = this.stateOf(result);
+        if (state === 'working') {
+            const ms = result.chat_ms != null ? `${result.chat_ms} ms` : '';
+            const model = result.chat_model ? ` · ${result.chat_model}` : '';
+            return { label: 'Working', tone: 'success', detail: `replied in ${ms}${model}` };
+        }
+        if (state === 'chat_failing') {
+            return {
+                label: 'Chat failing',
+                tone: 'warning',
+                detail: result.error || 'the model list answers, a real message does not',
+            };
+        }
+        return { label: 'Unreachable', tone: 'danger', detail: result.error || 'no response' };
     },
 
     /**
@@ -122,7 +163,8 @@ var ProvidersManager = window.ProvidersManager = {
      */
     statusIcon(status) {
         // Use colored SVG circles instead of emoji for a crisp, premium look.
-        var colors = { healthy: 'var(--success)', degraded: 'var(--warning)', down: 'var(--danger)', unknown: 'var(--text-muted)' };
+        // degraded == reachable but chat failing: the state that had no colour before.
+        var colors = { healthy: 'var(--success)', degraded: 'var(--warning)', chat_failing: 'var(--warning)', down: 'var(--danger)', unknown: 'var(--text-muted)' };
         var color = colors[status] || colors.unknown;
         return '<svg width="10" height="10" viewBox="0 0 10 10"><circle cx="5" cy="5" r="4" fill="' + color + '"/></svg>';
     },
