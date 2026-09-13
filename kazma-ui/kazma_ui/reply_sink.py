@@ -85,6 +85,64 @@ _lock = threading.RLock()
 # Marker key on the assistant row while its turn is still in flight.
 _OPEN = "open"
 
+# Durable lifecycle field. `open`/`pending` are kept in sync beside it for
+# readers that predate this.
+_LIFECYCLE = "lifecycle"
+
+#: A turn's lifecycle is a JOIN-SEMILATTICE, not a field: it only ever moves
+#: forward, and `closed` absorbs.
+#:
+#:     pending  ->  open  ->  closed
+#:
+#: This is the rule the module was missing. Identity fixed *which row* a
+#: writer may touch, `allow_shrink` and `merge_parts` made content and parts
+#: monotone — but lifecycle stayed a plain assignment any of the fifteen
+#: write sites could flip in either direction. So a straggling in-flight
+#: flush from one transport, landing after another transport had finalised,
+#: reopened a finished turn and hung it forever (live, 2026-09-13: the final
+#: close at 22:24:41 was undone by a 50-char flush at 22:24:42).
+#:
+#: With a join, arrival order stops mattering for lifecycle exactly as it
+#: already did for content. Proven by exhaustive permutation in
+#: `tests/test_turn_state_confluence.py`, which fails on the old assignment
+#: for 18 of 24 orderings.
+#: Two INDEPENDENT monotone fields, not one chain. An early version folded
+#: `pending` into the chain and broke a real contract: a pending bubble may be
+#: written with `open_turn=False` (a placeholder with no text yet), which the
+#: chain read as "closed" and erased. Pending answers "is there text yet"; the
+#: lifecycle answers "is this turn still running". Both only move one way.
+_LIVE, _CLOSED = "open", "closed"
+_LIFECYCLE_RANK = {_LIVE: 0, _CLOSED: 1}
+
+
+def _lifecycle_of(row: dict[str, Any] | None) -> str | None:
+    """The row's current lifecycle, tolerating rows written before this field."""
+    if not isinstance(row, dict):
+        return None
+    stored = row.get(_LIFECYCLE)
+    if stored in _LIFECYCLE_RANK:
+        return str(stored)
+    if _LIFECYCLE in row or _OPEN in row or "pending" in row:
+        # A legacy row: absence of the open marker meant finished.
+        return _LIVE if row.get(_OPEN) else _CLOSED
+    return None
+
+
+def _join_lifecycle(current: str | None, incoming: str) -> str:
+    """Least upper bound. Never moves backwards, so `closed` is terminal."""
+    if current is None:
+        return incoming
+    return max(current, incoming, key=lambda s: _LIFECYCLE_RANK.get(s, 0))
+
+
+def _write_lifecycle(row: dict[str, Any], state: str) -> None:
+    """Store the lifecycle plus the legacy `open` flag derived from it."""
+    row[_LIFECYCLE] = state
+    if state == _CLOSED:
+        row.pop(_OPEN, None)
+    else:
+        row[_OPEN] = True
+
 
 def _store() -> Any:
     from kazma_ui.session_manager import get_session_manager
@@ -157,7 +215,7 @@ def close_reply_turn(thread_id: str, session_id: str = "", turn_id: str = "") ->
         with _store().transact(session_id) as sess:
             for m in reversed(sess.messages or []):
                 if isinstance(m, dict) and m.get("turn_id") == tid:
-                    m.pop(_OPEN, None)
+                    _write_lifecycle(m, _CLOSED)
                     m.pop("pending", None)
                     break
     except Exception:
@@ -324,6 +382,7 @@ def upsert_reply(
                     row = m
                     break
 
+            existing_state = _lifecycle_of(row)
             if row is None:
                 if not text.strip() and not pending:
                     # Nothing to say and no bubble requested — do not create
@@ -366,15 +425,20 @@ def upsert_reply(
                 if derived_act:
                     row["activity"] = derived_act
 
-            if pending:
-                row["pending"] = True
-            elif str(row.get("content") or "").strip():
+            # `pending` is monotone: it means "no text yet", so the first
+            # text retires it permanently. Re-adding it after text exists
+            # would show a processing spinner on an answered turn.
+            if str(row.get("content") or "").strip():
                 row.pop("pending", None)
+            elif pending:
+                row["pending"] = True
 
-            if open_turn:
-                row[_OPEN] = True
-            else:
-                row.pop(_OPEN, None)
+            # Lifecycle JOINS; it never assigns. A write that says "still in
+            # flight", arriving after one that said "finished", is a straggler
+            # — and a straggler must not resurrect the turn.
+            _write_lifecycle(
+                row, _join_lifecycle(existing_state, _LIVE if open_turn else _CLOSED)
+            )
 
             if activity and not row.get("activity"):
                 row["activity"] = list(activity)
