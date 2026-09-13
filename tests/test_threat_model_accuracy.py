@@ -221,3 +221,51 @@ def test_unknown_mcp_tools_still_default_to_danger():
     assert classify_mcp_tool("mcp__evil__exfiltrate") == "unknown"
     assert classify_mcp_tool("mcp__evil__do_thing") == "unknown"
     assert classify_mcp_tool("mcp__evil__write_file") == "danger"
+
+
+# ── the user-facing guide must reach the honest pages ───────────────────────
+
+_GUIDE = _ROOT / "docs" / "docs" / "guide" / "security-and-safety.md"
+
+
+@pytest.fixture(scope="module")
+def guide() -> str:
+    assert _GUIDE.exists(), "the user-facing security guide is gone"
+    return _GUIDE.read_text(encoding="utf-8")
+
+
+def test_the_guide_routes_to_the_pages_that_qualify_its_claims(guide):
+    """The guide described the fence in one table row and linked none of
+    THREAT_MODEL, INJECTION or KNOWN_GAPS.
+
+    That is the same defect the audit found in README: the documents a reader
+    reaches first asserted the protections, and the documents saying what those
+    protections do NOT do were unreachable from them.
+    """
+    for page in ("THREAT_MODEL.md", "INJECTION.md", "KNOWN_GAPS.md"):
+        assert page in guide, f"the security guide does not link {page}"
+
+
+def test_the_guide_quotes_the_benchmark_result_including_the_tie(guide):
+    """A guide that published 10.4% without 11.6% beside it would be quoting
+    the fence's number while hiding what it is being compared against."""
+    assert "10.4%" in guide, "the guide does not give the fence's measured ASR"
+    assert "11.6%" in guide, "the guide gives the fence's number without spotlighting's"
+    low = guide.lower()
+    assert "cannot be told apart" in low
+
+
+def test_the_guide_documents_trust_from_caller_not_content(guide):
+    """`is_error` is the whole lesson of the bypass. If the guide stops
+    explaining why the flag exists, the next person to touch that function will
+    reintroduce the sniff."""
+    assert "is_error" in guide
+    low = guide.lower()
+    assert "never from the content" in low or "trust comes from the caller" in low
+
+
+def test_the_guide_warns_about_mcp_name_classification(guide):
+    """It affects the DEFAULT posture, so it belongs in the hardening list a
+    reader actually follows, not only in KNOWN_GAPS."""
+    assert "KAZMA_MCP_SAFE_ALLOWLIST" in guide
+    assert "read_env" in guide
