@@ -124,3 +124,59 @@ def test_inference_still_helps_a_url_a_human_typed(typed, expected):
     someone pastes into Settings still gets the `/v1` it almost certainly needs,
     and an already-versioned path is still left alone."""
     assert normalize_provider_url(typed) == expected
+
+
+# ── capabilities are declared, and unknowns stay honest ─────────────────────
+
+
+@pytest.mark.parametrize("name", sorted(PROVIDER_PRESETS))
+def test_every_provider_resolves_a_complete_capability_shape(name):
+    """Callers must never branch on a missing key. `capabilities()` always
+    returns the full shape, so a provider nobody has configured behaves like
+    one that was, minus the facts."""
+    from kazma_core.providers import capabilities
+
+    caps = capabilities(name)
+    assert caps["api_style"] in {"openai", "anthropic", "bedrock", "google", "azure"}
+    assert isinstance(caps["system_role"], str) and caps["system_role"]
+    assert set(caps["supports"]) == {"tools", "streaming", "json_mode", "vision"}
+
+
+@pytest.mark.parametrize("name", sorted(PROVIDER_PRESETS))
+def test_an_unverified_capability_is_none_not_false(name):
+    """`None` means nobody has checked; `False` means someone checked and it
+    does not work. Collapsing the two would trade a silent assumption for the
+    same assumption wearing a schema — and the UI could no longer tell a
+    reader which it is looking at."""
+    from kazma_core.providers import capabilities
+
+    for capability, value in capabilities(name)["supports"].items():
+        assert value is None or isinstance(value, bool), (
+            f"{name}.{capability} is {value!r}; use None for unverified"
+        )
+
+
+def test_a_measured_capability_names_where_it_came_from():
+    """An override is either structural (which adapter serves it) or measured.
+    If someone adds a bare `True`, the comment block above CAPABILITY_OVERRIDES
+    is the thing that stops it being an assumption, so it has to stay."""
+    import inspect
+
+    from kazma_core import providers
+
+    src = inspect.getsource(providers)
+    assert "NOT VERIFIED" in src
+    assert "provider_conformance" in src, (
+        "the overrides no longer point at the script that turns None into a bool"
+    )
+
+
+def test_zai_is_a_preset_not_a_hand_typed_custom_entry():
+    """It is in production use. A provider configured by hand in the UI carries
+    no capabilities and no declared base URL, which is how its /v4 path got a
+    /v1 appended to it in the first place."""
+    from kazma_core.providers import capabilities
+
+    entry = PROVIDER_PRESETS["zai"]
+    assert entry["base_url"] == "https://api.z.ai/api/paas/v4"
+    assert capabilities("zai")["supports"]["tools"] is True
