@@ -419,10 +419,27 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         # empty while the runtime resolves the key from the
                         # environment, and the chat probe has to send what a
                         # real message would send.
+                        # The row's `model` field is only one of the places a
+                        # model can live, and it is empty for a provider set up
+                        # by discovering and ticking models. Reading only it
+                        # made the probe send nothing and then blame the
+                        # provider for "chat failing".
+                        probe_model = registry.probe_model_for(name)
+                        if not probe_model:
+                            return {
+                                "success": False,
+                                "latency_ms": latency,
+                                "reachable": True,
+                                "chat_ok": False,
+                                "error": (
+                                    "Reachable, but no model is selected for this "
+                                    "provider, so there is nothing to send. Press "
+                                    "Discover, tick at least one model, then Test "
+                                    "again."
+                                ),
+                            }
                         chat = await _probe_chat_completion(
-                            base_url,
-                            typed_key or api_key,
-                            str(provider.get("model") or ""),
+                            base_url, typed_key or api_key, probe_model,
                         )
                         if not chat["ok"]:
                             # Its own health value, not "degraded". "Degraded"

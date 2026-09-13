@@ -987,6 +987,35 @@ class ModelRegistry:
 
         return merged
 
+    def probe_model_for(self, name: str) -> str:
+        """A model to send when checking that *name* works, or "".
+
+        The provider row's ``model`` field is only one of the places a model
+        can live, and for a provider configured by discovering and ticking
+        models it is empty. Reading only that field made the health probe send
+        no model at all and then report the provider as "chat failing" -- a
+        verdict about the provider, caused entirely by the check.
+
+        Order: the row's pinned model, then what the operator ticked, then
+        what is visible in the dropdowns, then anything discovered or listed
+        manually.
+        """
+        entry = self.get_provider(name) or {}
+        pinned = str(entry.get("model") or "").strip()
+        if pinned:
+            return pinned
+        for candidates in (
+            self.get_selected_models(name),
+            self.get_visible_models(name),
+            self.get_discovered_models(name),
+            entry.get("models") or [],
+        ):
+            for candidate in candidates or []:
+                text = str(candidate).strip()
+                if text:
+                    return text
+        return ""
+
     def stored_key_is_undecryptable(self, name: str) -> bool:
         """True when a key IS saved for *name* but the vault cannot open it.
 
