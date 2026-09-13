@@ -16,6 +16,35 @@ _OLLAMA_PORTS = {11434}
 _LITELLM_PORTS = {4000}
 
 
+def _declared_preset_urls() -> frozenset[str]:
+    """Base URLs Kazma ships, lowercased and without a trailing slash.
+
+    `providers.py` is a pure data module with no imports of its own, so this
+    cannot introduce a cycle. Imported lazily anyway, so that a broken preset
+    table can never stop URL handling working.
+    """
+    global _PRESET_URLS
+    if _PRESET_URLS is None:
+        try:
+            from kazma_core.providers import PROVIDER_PRESETS
+
+            _PRESET_URLS = frozenset(
+                str(entry.get("base_url", "")).strip().rstrip("/").lower()
+                for entry in PROVIDER_PRESETS.values()
+                if str(entry.get("base_url", "")).strip()
+            )
+        except Exception:  # pragma: no cover - defensive
+            _PRESET_URLS = frozenset()
+    return _PRESET_URLS
+
+
+_PRESET_URLS: frozenset[str] | None = None
+
+
+def _is_declared_preset_url(url: str) -> bool:
+    return url.strip().rstrip("/").lower() in _declared_preset_urls()
+
+
 def normalize_provider_url(
     base_url: str,
     *,
@@ -54,6 +83,21 @@ def normalize_provider_url(
         return ""
 
     url = base_url.strip()
+
+    # A URL we shipped ourselves is not a guess to be improved.
+    #
+    # This function exists to rescue a URL a *human typed* — "localhost:1234"
+    # should become "http://localhost:1234/v1". Applying that guesswork to a
+    # preset is not a rescue, it is an override, and the preset is the most
+    # authoritative statement we have about where a provider's API lives.
+    #
+    # Three providers have been broken by the override: Google's
+    # /v1beta/openai, Z.AI's /api/paas/v4 (84 of 84 calls 404'd), and
+    # Perplexity, whose OpenAI-compatible path carries no version segment at
+    # all. Each 404'd on every request while the models endpoint kept answering,
+    # so the UI reported the provider as healthy.
+    if _is_declared_preset_url(url):
+        return url.rstrip("/")
 
     # Step 1: Add scheme if missing
     if not re.match(r"^https?://", url):
