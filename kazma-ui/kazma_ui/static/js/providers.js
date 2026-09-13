@@ -1,6 +1,12 @@
 /**
- * Providers Manager — Handles provider CRUD, health monitoring, and connection testing.
- * Used by the Services/Providers tab in Settings.
+ * Providers Manager — the provider page's data layer.
+ *
+ * Pure logic only: how to read a test result, what state to paint a card in,
+ * which capability badges to show. Every HTTP call the page makes lives in
+ * settings_hub.js against /api/providers; this file deliberately owns no
+ * endpoint of its own, because owning a second one is what let the two halves
+ * of this feature drift far enough that a whole phase shipped into a route
+ * nobody called.
  */
 
 // Assign to window so soft-nav can re-inject this file without
@@ -20,79 +26,12 @@ var ProvidersManager = window.ProvidersManager = {
         custom: { name: 'Custom Endpoint', base_url: '', docs: '' },
     },
 
-    /**
-     * Load all providers from backend.
-     * @returns {Promise<Array>} Provider list
-     */
-    async loadAll() {
-        try {
-            const resp = await fetch('/api/settings/providers');
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            return await resp.json();
-        } catch (e) {
-            console.error('[Providers] Failed to load:', e);
-            return [];
-        }
-    },
-
-    /**
-     * Add a new provider.
-     * @param {Object} data - { name, display_name, base_url, api_key, models, enabled }
-     * @returns {Promise<Object>} Result
-     */
-    async add(data) {
-        const resp = await fetch('/api/settings/providers', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data),
-        });
-        return await resp.json();
-    },
-
-    /**
-     * Delete a provider by name.
-     * @param {string} name
-     * @returns {Promise<Object>}
-     */
-    async remove(name) {
-        const resp = await fetch(`/api/settings/providers/${encodeURIComponent(name)}`, {
-            method: 'DELETE',
-        });
-        return await resp.json();
-    },
-
-    /**
-     * Toggle provider enabled/disabled.
-     * @param {string} name
-     * @param {boolean} enabled
-     * @returns {Promise<Object>}
-     */
-    async toggle(name, enabled) {
-        const resp = await fetch(`/api/settings/providers/${encodeURIComponent(name)}/toggle`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ enabled }),
-        });
-        return await resp.json();
-    },
-
-    /**
-     * Test a provider connection.
-     *
-     * The backend now sends a real completion, not just a model-list query,
-     * so the result carries three outcomes rather than two. A provider whose
-     * model list answers while its chat 404s used to report as healthy — the
-     * operator saw green and not one message ever reached it.
-     *
-     * @param {string} name
-     * @returns {Promise<Object>} { success, reachable, chat_ok, latency_ms, chat_ms, chat_model, error }
-     */
-    async test(name) {
-        const resp = await fetch(`/api/settings/providers/${encodeURIComponent(name)}/test`, {
-            method: 'POST',
-        });
-        return await resp.json();
-    },
+    // NOTE: loadAll / add / remove / toggle / test used to sit here, wrapping
+    // /api/settings/providers. Nothing called them: the Settings page is built
+    // on the hub* functions in settings_hub.js, which use /api/providers. They
+    // were an SDK for a page that had stopped existing, and keeping a second
+    // client in step with the first is precisely the cost this refactor already
+    // paid once. What remains below is pure logic with no endpoint of its own.
 
     /**
      * Which of the three states a test result represents.
@@ -211,16 +150,6 @@ var ProvidersManager = window.ProvidersManager = {
             facts.push({ label: 'Context', value: String(caps.max_context) });
         }
         return facts;
-    },
-
-    /**
-     * Get health status for a provider.
-     * @param {string} name
-     * @returns {Promise<Object>}
-     */
-    async getHealth(name) {
-        const resp = await fetch(`/api/settings/providers/${encodeURIComponent(name)}/health`);
-        return await resp.json();
     },
 
     /**

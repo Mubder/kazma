@@ -183,7 +183,8 @@ build a workflow on it.
 | 2 — capability schema | `c9a41fa9` | `api_style`, `system_role`, `supports{}`, `max_context`. `None` means *not verified* and is a first-class value; a `None` becomes a `bool` only by running the live probes. Z.AI promoted from a hand-typed custom entry to a preset. |
 | 3 — the UI | `d59b9458` | Test sends a real completion and reports three states. The frontend can finally express *reachable but chat failing*. |
 | 4 — consolidation | `a02e3fa1` | One shared probe. **Phase 3's fix had landed in the endpoint the UI does not call** — the duplication cost exactly what this plan predicted, during the refactor meant to fix it. |
-| 5 — rendering | this commit | The page now paints the three states, capability badges, and the declared wire facts. Found that **none of Phase 3's data had ever reached the browser**: FastAPI serialises the Test route through `ProviderTestResponse`, which did not declare `reachable` or `chat_ok`, so the response model silently deleted both. Every test checked the function's return value; nothing checked the response body. |
+| 5 — rendering | `528c369f` | The page now paints the three states, capability badges, and the declared wire facts. Found that **none of Phase 3's data had ever reached the browser**: FastAPI serialises the Test route through `ProviderTestResponse`, which did not declare `reachable` or `chat_ok`, so the response model silently deleted both. Every test checked the function's return value; nothing checked the response body. |
+| 6 — adapter table | this commit | The four-way vendor ladder deciding which client class to build existed in three methods of `ModelRegistry`. Replaced by one `api_style` lookup, which is what the capability schema was for. A new wire format is one line; a new provider speaking an existing one is zero. |
 
 ### What the plan got right
 
@@ -207,18 +208,32 @@ because the user asked exactly that question and the answer was "nothing".
 
 ### Still open
 
-- **The ~40 vendor branches in `llm_provider.py` are not deleted yet.** The
-  schema that replaces them exists and the URL inference is gone; the
-  remaining branches are behavioural and want the live probes run against
-  each provider first, so the replacements are measured rather than assumed.
+- **Behavioural vendor branches outside adapter selection.** The adapter
+  ladder is gone — `api_style` now chooses the client class from one table in
+  `provider_adapters.py`, and a test asserts every preset's declared style has
+  an adapter. What remains is genuinely per-API rather than per-vendor
+  (`discover_models` special-cases Vertex AI, which has no `/models`
+  endpoint, and Ollama's `:latest` suffix) plus the OTel system-name mapping,
+  which is a naming convention rather than behaviour. Anything further wants
+  the live probes run per provider so replacements are measured, not assumed.
 - **Most capabilities are still `None`.** That is the honest state: they
   become booleans by running `scripts/provider_conformance.py --live`
   per provider, which costs pennies and a key. Measured so far: `zai`
-  (glm-4.5 — chat, system turn, tools) and `ollama` (mistral:7b — same four).
-  OpenRouter was probed and deliberately **not** recorded: the run auto-picked
-  `inference-net/schematron-v2-turbo`, which ignores the system turn and has
-  no tool endpoint upstream. That is a fact about one model, and writing it
-  into the provider table would be the guessing this table exists to replace.
-- **`this.providers` / `testProvider()` in `settings_hub.js` are dead.** They
-  call `/api/settings/providers` and no template renders them; the page runs
-  entirely on the `hub*` set. One of the two should go.
+  (glm-4.5), `ollama` (mistral:7b) and `openrouter` (openai/gpt-4o-mini) —
+  chat, system turn and tool calling pass on all three.
+
+  OpenRouter took two runs and the first one is the lesson. Unpinned, the
+  harness auto-picked `inference-net/schematron-v2-turbo`, which ignores the
+  system turn and whose upstream serves no tool endpoint; OpenRouter answered
+  correctly with `No endpoints found that support tool use`, and recording
+  that would have written one model's limits into the provider's row. The
+  report now marks an auto-picked model with `*` and says so in a legend,
+  because the run that produces a misleading result must be the one that warns
+  about it.
+- **`/api/settings/providers/*` now has no UI caller.** The duplicate
+  frontend half is gone — a complete second provider CRUD path
+  (`loadProviders`, `saveProvider`, `testProvider`, …) plus its
+  `ProvidersManager` HTTP wrappers, none of it bound to any template. The
+  routes still serve and are still tested, but nothing in the product calls
+  them; either delete them or make them the documented public API. Leaving
+  them as an unused twin is how this started.

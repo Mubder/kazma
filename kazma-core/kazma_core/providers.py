@@ -232,13 +232,21 @@ CAPABILITY_OVERRIDES: dict[str, dict[str, object]] = {
         "system_role": "system",
         "supports": {"tools": True, "streaming": None, "json_mode": None, "vision": None},
     },
-    # Deliberately NOT recorded: openrouter. The conformance run on
-    # 2026-09-13 failed system_turn and tool_call, but it had auto-picked
-    # `inference-net/schematron-v2-turbo` — a niche model that ignores the
-    # system turn and whose upstream serves no tool endpoint. That is a fact
-    # about one model, not about OpenRouter, and writing it here would be the
-    # same guessing this table exists to replace. Re-run pinned to a
-    # mainstream model to fill it in.
+    # Measured 2026-09-13 pinned to `openai/gpt-4o-mini`: model list, chat,
+    # system turn and tool calling all pass.
+    #
+    # The first run failed system_turn and tool_call and was NOT recorded. It
+    # had auto-picked `inference-net/schematron-v2-turbo`, a niche model that
+    # ignores the system turn and whose upstream serves no tool endpoint —
+    # OpenRouter itself answered correctly, with
+    # `No endpoints found that support tool use`. OpenRouter routes to hundreds
+    # of models and tool support is per-model, so what this records is that the
+    # *endpoint* speaks tools when the chosen model does, which is the question
+    # the transport asks.
+    "openrouter": {
+        "system_role": "system",
+        "supports": {"tools": True, "streaming": None, "json_mode": None, "vision": None},
+    },
 }
 
 

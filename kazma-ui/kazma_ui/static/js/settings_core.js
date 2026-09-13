@@ -9,12 +9,13 @@
         saving: false,
 
         // ── Providers Tab ──
-        providers: [],
+        // The providers UI lives entirely in the `hub*` state below. An older
+        // parallel set (`providers`, `newProvider`, `showProviderModal`,
+        // `testingProvider`, `providerTestResult`) reached
+        // /api/settings/providers and was rendered by no template — a whole
+        // second provider page that had stopped existing. It is gone; only
+        // `providerPresets`, which the Add dialog reads, survives.
         providerPresets: [],
-        newProvider: { name: '', display_name: '', base_url: '', api_key: '', models: '', enabled: true },
-        showProviderModal: false,
-        testingProvider: null,
-        providerTestResult: null,
 
         // ── Models Tab ──
         modelRegistry: [],
@@ -693,7 +694,6 @@
                 /* ignore URL sync errors */
             }
             switch (newTab) {
-                case 'providers': await this.loadProviders(); break;
                 case 'providers_connectors':
                     await Promise.all([
                         this.loadHubProviders(),

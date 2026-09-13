@@ -455,3 +455,138 @@ class TestTheSettingsPageRendersTheStates:
             ".cap-badge.cap-unknown",
         ):
             assert cls in css, f"{cls} has no styling, so it renders as the default"
+
+
+# ── one adapter table, not three ladders ───────────────────────────────────
+
+
+class TestTheAdapterIsChosenByDeclaredStyle:
+    """`get_client`, `get_model` and `get_client_by_provider` each carried the
+    same four-way branch on the vendor's name. Adding a provider with its own
+    wire format meant finding all three and hoping there were only three.
+
+    `api_style` already says which format to speak, and several providers share
+    one, so this is a lookup rather than a branch on who the vendor is."""
+
+    @staticmethod
+    def _config():
+        from kazma_core.llm_provider import LLMConfig
+
+        return LLMConfig.from_dict(
+            {"base_url": "https://example.invalid/v1", "api_key": "k", "model": "m"}
+        )
+
+    def test_openai_style_providers_all_get_the_openai_client(self):
+        from kazma_core.llm_provider import LLMProvider
+        from kazma_core.provider_adapters import build_client
+
+        for name in ("openai", "groq", "zai", "ollama", "openrouter", "deepseek"):
+            client = build_client(name, self._config(), {})
+            assert type(client) is LLMProvider, f"{name} got {type(client).__name__}"
+
+    def test_anthropic_gets_its_own_client(self):
+        from kazma_core.anthropic_llm import AnthropicProvider
+        from kazma_core.provider_adapters import build_client
+
+        assert isinstance(build_client("anthropic", self._config(), {}), AnthropicProvider)
+
+    def test_every_declared_style_has_an_adapter(self):
+        """A capability table entry naming a style Kazma cannot speak is a typo
+        that would otherwise surface as an unexplained 400."""
+        from kazma_core.provider_adapters import ADAPTER_STYLES
+        from kazma_core.providers import PROVIDER_PRESETS, capabilities
+
+        for name in PROVIDER_PRESETS:
+            style = capabilities(name)["api_style"]
+            assert style in ADAPTER_STYLES, f"{name} declares unknown api_style {style!r}"
+
+    def test_an_unknown_style_falls_back_loudly(self, caplog):
+        import logging
+
+        from kazma_core.llm_provider import LLMProvider
+        from kazma_core.provider_adapters import build_client
+        from kazma_core.providers import CAPABILITY_OVERRIDES
+
+        CAPABILITY_OVERRIDES["_conformance_fake"] = {"api_style": "smoke-signals"}
+        try:
+            with caplog.at_level(logging.WARNING):
+                client = build_client("_conformance_fake", self._config(), {})
+        finally:
+            CAPABILITY_OVERRIDES.pop("_conformance_fake", None)
+
+        assert type(client) is LLMProvider
+        assert "no adapter" in caplog.text
+
+    def test_vertex_keeps_its_default_region(self):
+        """An empty stored location must not become an empty location string —
+        Vertex rejects that."""
+        from kazma_core.provider_adapters import _google_kwargs
+
+        assert _google_kwargs({})["location"] == "us-central1"
+        assert _google_kwargs({"location": ""})["location"] == "us-central1"
+        assert _google_kwargs({"location": "europe-west4"})["location"] == "europe-west4"
+
+    def test_the_client_builders_no_longer_branch_on_vendor_names(self):
+        """Parsed, not grepped. Scoped to the three client builders on purpose:
+        elsewhere in this module a vendor name is a legitimate test —
+        ``discover_models`` special-cases Google because Vertex AI genuinely
+        has no ``/models`` endpoint, and Ollama because its ids carry a
+        ``:latest`` suffix. Those are facts about the API, not about which
+        class to construct."""
+        import ast
+        import inspect
+
+        from kazma_core.model_registry import ModelRegistry
+
+        vendors = {"anthropic", "azure", "bedrock", "google"}
+        offenders = []
+        for method in ("get_client", "get_model", "get_client_by_provider"):
+            tree = ast.parse(inspect.getsource(getattr(ModelRegistry, method)).lstrip())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Compare) or not isinstance(node.ops[0], ast.Eq):
+                    continue
+                for side in [node.left, *node.comparators]:
+                    if isinstance(side, ast.Constant) and side.value in vendors:
+                        offenders.append(f"{method}: {ast.unparse(node)}")
+        assert not offenders, (
+            "adapter selection is branching on vendor names again: " + "; ".join(offenders)
+        )
+
+    def test_all_three_entry_points_use_the_factory(self):
+        import inspect
+
+        from kazma_core.model_registry import ModelRegistry
+
+        for method in ("get_client", "get_model", "get_client_by_provider"):
+            src = inspect.getsource(getattr(ModelRegistry, method))
+            assert "build_client(" in src, f"{method} builds its client by hand"
+
+
+class TestThereIsOneFrontendProviderPath:
+    """A complete second provider CRUD path lived in the settings mixins,
+    wired to /api/settings/providers and rendered by no template. It is the
+    same duplication that, on the backend, cost this refactor a phase shipped
+    into a route the UI does not call."""
+
+    @staticmethod
+    def _read(*parts: str) -> str:
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parent.parent.joinpath(*parts)
+        ).read_text(encoding="utf-8")
+
+    def test_the_data_layer_owns_no_endpoint(self):
+        """Every HTTP call the page makes goes through settings_hub.js. A
+        `fetch` reappearing here means a second client is back."""
+        js = self._read("kazma-ui", "kazma_ui", "static", "js", "providers.js")
+        code = "\n".join(
+            line for line in js.splitlines()
+            if not line.lstrip().startswith(("*", "//", "/*"))
+        )
+        assert "fetch(" not in code, "providers.js is making HTTP calls again"
+
+    def test_no_second_crud_path_in_the_mixins(self):
+        js = self._read("kazma-ui", "kazma_ui", "static", "js", "settings_hub.js")
+        for dead in ("async loadProviders(", "async saveProvider(", "async testProvider("):
+            assert dead not in js, f"the duplicate provider path is back: {dead}"
