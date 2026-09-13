@@ -1797,6 +1797,19 @@ class KazmaAppBuilder:
             except Exception as exc:
                 logger.warning("[HITL] Failed to start approval-timeout watchdog: %s", exc)
 
+            # ── Turn-liveness invariant ────────────────────────────
+            # A turn open with nothing working on it is impossible. Every
+            # failure in this area so far reached the operator as a symptom
+            # (a page stuck on "Action required") while the server logged a
+            # line nobody read. This does not care WHY a turn hangs, so it
+            # covers the next cause too.
+            try:
+                from kazma_ui.turn_liveness import start_turn_liveness_watchdog
+
+                start_turn_liveness_watchdog()
+            except Exception as exc:
+                logger.warning("[turn-liveness] failed to start watchdog: %s", exc)
+
             # ── Time Travel: mount replay API + page route ──────────
             # ALWAYS mounted — even when the recorder failed to initialize.
             # The router then serves a structured 503 (time_travel_unavailable)
@@ -2087,6 +2100,14 @@ class KazmaAppBuilder:
             await stop_hitl_timeout_watchdog()
         except Exception as e:
             logger.debug("[app] HITL watchdog stop: %s", e)
+
+        # Stop the turn-liveness watchdog
+        try:
+            from kazma_ui.turn_liveness import stop_turn_liveness_watchdog
+
+            await stop_turn_liveness_watchdog()
+        except Exception as e:
+            logger.debug("[app] turn-liveness watchdog stop: %s", e)
 
         # Stop document ingestion workers (drain in-flight stages) before
         # cron/agent teardown. Jobs are durable — pending rows resume on the

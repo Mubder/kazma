@@ -59,6 +59,7 @@ from kazma_core.chaos import InjectionTarget, chaos_injection
 
 __all__ = [
     "close_reply_turn",
+    "open_turns_snapshot",
     "current_reply_turn",
     "open_reply_turn",
     "record_instant_turn",
@@ -187,6 +188,16 @@ def open_reply_turn(thread_id: str, turn_id: str = "") -> str:
             while len(_open_turns) > _MAX_OPEN_TURNS:
                 _open_turns.popitem(last=False)
     return turn_id
+
+
+def open_turns_snapshot() -> dict[str, str]:
+    """A read-only copy of ``thread_id -> turn_id`` for turns still in flight.
+
+    For the liveness watchdog. It is a snapshot on purpose: the watchdog must
+    never hold this module's lock while it walks sessions or sends an alert.
+    """
+    with _lock:
+        return dict(_open_turns)
 
 
 def current_reply_turn(thread_id: str) -> str:
