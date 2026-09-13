@@ -401,7 +401,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: String(inputs || ''),
+          detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
           state: 'running',
         });
       },
@@ -411,7 +411,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: String(data.result || ''),
+          detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
           state: 'done',
         });
       },
@@ -1876,6 +1876,24 @@
     return '“' + truncateStr(s, 48) + '”';
   }
 
+  /**
+   * Tool-step detail formatting lives in static/js/turn_detail.js: pure
+   * functions with no DOM, so a test can execute them instead of only reading
+   * them. chat.js is 7,700 lines inside an IIFE around a browser — logic that
+   * can only be verified by reading it is logic that drifts.
+   *
+   * The wrappers degrade to the raw value if that file fails to load: a
+   * missing gist is a cosmetic loss, and a step row that throws is not.
+   */
+  function _tcResultSummary(result) {
+    var M = window.KazmaTurnDetail;
+    return M ? M.resultSummary(result) : '';
+  }
+  function _tcDetailWithGist(gist, raw) {
+    var M = window.KazmaTurnDetail;
+    return M ? M.withGist(gist, raw) : String(raw == null ? '' : raw);
+  }
+
   /** Alpine store liveness flag. Split out of _setStatusStrip so a turn can
    *  mark itself thinking WITHOUT stamping a text override on the card. */
   function _setStoreThinking(on, msg) {
@@ -3080,7 +3098,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: String(inputs || ''),
+          detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
           state: 'running',
         });
       },
@@ -3094,7 +3112,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: String(data.result || ''),
+          detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
           state: isSwarm ? 'running' : 'done',
         });
         if (isSwarm) {
