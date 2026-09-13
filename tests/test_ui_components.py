@@ -201,14 +201,16 @@ class TestSidebarComponent:
     def test_has_dashboard_link(self, sidebar_html):
         assert 'href="/dashboard"' in sidebar_html
 
-    def test_dashboard_lives_in_more(self, sidebar_html):
-        """Hands 0.11: Dashboard is an inspector under More, not Work."""
-        more = sidebar_html.find('class="nav-more-body"')
-        dash = sidebar_html.find('href="/dashboard"')
-        settings = sidebar_html.find('href="/settings"')
+    def test_dashboard_is_an_inspector_not_a_work_surface(self, sidebar_html):
+        """Dashboard used to live under a "More" disclosure to keep it out of
+        Work. The disclosure is gone — every destination is visible now — so
+        the grouping carries that distinction instead: Dashboard sits under
+        Activity, after the Work section."""
         work = sidebar_html.find("nav.primary")
-        assert more != -1 and dash != -1 and settings != -1 and work != -1
-        assert work < settings < more < dash
+        activity = sidebar_html.find("nav.activity")
+        dash = sidebar_html.find('href="/dashboard"')
+        assert -1 not in (work, activity, dash)
+        assert work < activity < dash
         assert sidebar_html.count('href="/dashboard"') == 1
 
     def test_has_skills_link(self, sidebar_html):
@@ -222,9 +224,8 @@ class TestSidebarComponent:
 
     def test_has_x_studio_link(self, sidebar_html):
         assert 'href="/x"' in sidebar_html
-        more = sidebar_html.find('class="nav-more-body"')
-        x_link = sidebar_html.find('href="/x"')
-        assert more != -1 and more < x_link
+        # It is a capability, not a work surface — after the Work section.
+        assert sidebar_html.find("nav.primary") < sidebar_html.find('href="/x"')
 
     def test_has_settings_link(self, sidebar_html):
         assert 'href="/settings"' in sidebar_html
