@@ -127,12 +127,24 @@ PROVIDERS: dict[str, dict[str, str]] = {
 
 
 def load_fence():
-    """Import `format_untrusted_block` from the real source file.
+    """Import the **production tool-output path** from the real source file.
 
-    By path rather than by package, because `kazma_core.safety.__init__` pulls
-    in `aiosqlite` and a benchmark venv has no business installing a database
-    driver to test a string function. The point is that this is the *shipped*
-    fence and not a copy that can quietly drift.
+    That is `fence_untrusted`, not `format_untrusted_block`. This used to
+    return the latter, and the difference mattered: `fence_untrusted` is the
+    wrapper every real caller goes through (`read_url`, `web_search`,
+    `mcp/manager`), and it carried a passthrough that
+    `format_untrusted_block` does not have. Content beginning with ``Error:``
+    was shipped to the model **unfenced** -- a complete bypass that this
+    benchmark could not see, because it was measuring the function underneath
+    the hole. An adversarial review of this harness found it on 2026-09-13 by
+    noticing exactly that mismatch.
+
+    Benchmark what ships. If the two ever diverge again, the number on the page
+    should move with production, not with the function production does not call.
+
+    Loaded by path rather than by package because `kazma_core.safety.__init__`
+    pulls in `aiosqlite`, and a benchmark venv has no business installing a
+    database driver to test a string function.
     """
     if not _FENCE_SRC.exists():
         raise SystemExit(f"fence source not found: {_FENCE_SRC}")
@@ -141,7 +153,7 @@ def load_fence():
         raise SystemExit(f"could not load {_FENCE_SRC}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.format_untrusted_block
+    return mod.fence_untrusted
 
 
 # ── environment ─────────────────────────────────────────────────────────────
