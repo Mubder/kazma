@@ -100,22 +100,12 @@ it as a failure. Accepted deliberately — a bypassable fence is worse — but t
 right repair is for `spec_tools` to signal failure out of band instead of by
 string prefix.
 
-**The fixture's statistics are not produced by committed code.** The per-suite
-and per-task blocks in `tests/fixtures/agentdojo_qwen25_7b.json` re-derive
-exactly from `--analyze`, but `pooled`, `significance_p_values`, `noise_floor`
-and `social_framing_ablation` were assembled by scratch scripts that are not in
-the repo, and the ablation arms ran from uncommitted local edits. A reader can
-check the raw counts and cannot reproduce the statistics.
-
-**The `poolside/laguna-s-2.1` A/B is unfinished — blocked on quota, not on
-code.** A single hardened-fence run measured 83% unfenced against 17% fenced
-(delta 67, zero errors), with both payloads the 2026-09-12b hardening targets
-defended. That number is **not published**, because there is no matching
-pre-hardening run to attribute it to: the model may simply be resistant. The
-baseline run returned 84 consecutive `Rate limit exceeded: free` errors and the
-harness refused to report anything, which is the NO RESULT guard behaving
-correctly — a run of errors is not a run of defended attacks. Re-run both
-conditions when the free-tier quota resets.
+**~~The fixture's statistics are not produced by committed code.~~** Closed
+2026-09-13. `--analyze` derives the raw counts, `--report` the pooled figures
+and every p-value, and `--ablate-social` re-runs the wording ablation. All of
+it reads the run logs and calls nothing, so a reader who does not trust us can
+re-derive each number on the page. Guards assert the fixture's counts equal
+what `--report` produces and that `build_report` never touches a provider.
 
 **The `groq/compound-mini` row predates the current fence.**
 42% → 8% was measured before the 2026-09-12b hardening and has not been
