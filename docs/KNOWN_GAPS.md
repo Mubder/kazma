@@ -122,12 +122,16 @@ in the table rather than quietly reused, but it is stale.
 `live_direct_override` still succeeds against `mistral:7b` in both conditions.
 It is printed in every run rather than summarised away.
 
-**Two of AgentDojo's four suites are unrun.** `slack` (105 runs/condition) and
-`banking` (144) are measured; `workspace` (560) and `travel` (140) are not, and
-`workspace` is the largest by a wide margin. The pooled fence-over-spotlighting
-lean sits at p = 0.063 on obedience — the kind of number more data resolves in
-one direction or the other, and leaving it unresolved is a choice about compute,
-not a finding.
+**Only two of AgentDojo's four suites can measure anything on this model.**
+`slack` and `banking` have undefended attack success of 25.5% and 12.7% — enough
+headroom to detect a defense. `travel` sits at **2.9%** and `workspace` at
+**0.3%**, so neither measures anything in either direction; `travel` was run to
+completion (560 runs per condition) and `workspace` stopped after 297 runs on
+the evidence rather than after 26 hours for completeness. `travel` also produced
+the only sub-0.05 fence-beats-spotlighting figure in the data (p = 0.032) on a
+suite where spotlighting underperformed no defense at all; it is shown and
+refused rather than quoted. A frontier model would likely have headroom on all
+four, and that run has not been done.
 
 **The live corpus is 14 cases.** Enough to show a delta, not enough to claim
 coverage. The offline corpus is 56. AgentDojo adds 249 runs per condition on

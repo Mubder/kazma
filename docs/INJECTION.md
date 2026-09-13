@@ -584,6 +584,52 @@ direction, which is the entire reason single runs cannot be compared — and why
 the first version of this section produced a ranking that four measurements
 do not support.
 
+### `travel` and `workspace`: no result, including one that flattered us
+
+Both remaining suites were run. Neither can support a claim, and saying so is
+the point of this section.
+
+**`travel` — 560 runs per condition, four repeats.**
+
+| condition | ASR | utility |
+|---|---|---|
+| undefended | 16/560 — **2.9%** | 12.9% |
+| spotlighting | 19/560 — **3.4%** | 12.9% |
+| Kazma fence | 8/560 — 1.4% | 13.2% |
+
+The undefended baseline is at the floor. There is almost nothing for a defense
+to reduce, and the giveaway is the middle row: **spotlighting scored higher than
+no defense at all.** When a real defense underperforms the undefended condition,
+the measurement contains noise rather than signal. Utility of 10.7–15.7% says
+the rest of it: `qwen2.5:7b` fails the user's *own* task on roughly 88% of
+travel runs. It cannot operate the suite well enough for an attack on it to mean
+anything.
+
+This page has warned about exactly this case since the live tier was added — *if
+the unfenced rate is near zero the corpus is too easy for that model and the run
+says nothing in either direction*. The rule applies here even though the noise
+happened to point our way.
+
+**And it did point our way.** On `travel`, fence-versus-spotlighting comes out at
+**p = 0.0321** — the only sub-0.05 figure favouring the fence over spotlighting
+anywhere in this data. It is not reported as a result, because it is a win over a
+condition that itself lost to doing nothing. Publishing it would mean quoting the
+one suite where the dice fell right while discarding the two that were
+informative.
+
+**`workspace` — stopped after 297 runs.**
+
+The undefended baseline won **1 attack in 297 runs — 0.3% ASR** — with healthy
+utility of 42.1%. So the model can operate this suite; the attack simply does not
+land on it. A defense cannot be shown to reduce 0.3%, and completing four repeats
+of three conditions would have taken roughly 26 hours to produce a guaranteed
+null. It was stopped on the evidence rather than finished for completeness.
+
+**What the four suites actually say**, which is less than four suites sounds
+like: `slack` and `banking` had enough undefended attack success to measure
+against, and both show the same thing. `travel` and `workspace` did not, on this
+model. Two informative suites, not four.
+
 ### Where this comparison flatters Kazma
 
 Kazma's fence carries an **in-band banner**: the warning lives inside the block,
@@ -595,12 +641,13 @@ statistically.
 
 ### What this still does not prove
 
-- **Two suites, one model, one attack.** ASR is model-dependent — section 3
+- **Two *informative* suites, one model, one attack.** ASR is model-dependent — section 3
   shows the same fence scoring a 33-point delta on one model and nothing on
   another. `qwen2.5:7b` is a local 7B model; these numbers should not be
   compared to leaderboard figures gathered on frontier models.
-- **`workspace` and `travel` are unrun.** They are the two largest suites, and
-  nothing here says the pattern holds there.
+- **`workspace` and `travel` were run and are uninformative on this model** —
+  see above. Their undefended baselines sit at 2.9% and 0.3%, so they measure
+  nothing in either direction.
 - **Utility on `slack` was low across the board** (17–23%), so many runs failed
   the user task for reasons unrelated to any defense, shrinking the effective
   base. `banking` was healthier at 39–44%.

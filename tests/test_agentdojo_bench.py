@@ -757,3 +757,64 @@ def test_the_cap_asymmetry_stays_on_the_page(recorded, injection_doc):
         f"{round(excl['fence_vs_spotlighting_obedience_p'], n)}" in injection_doc
         for n in (2, 3, 4)
     ), "the page does not quote the cap-corrected obedience p-value"
+
+
+# -- the null results, including the one that favoured us --------------------
+
+
+def test_the_travel_result_is_refused_not_quoted(recorded, injection_doc):
+    """`travel` produced the only sub-0.05 fence-beats-spotlighting figure in
+    the whole dataset (p=0.0321), on a suite whose undefended baseline sits at
+    2.9% and where spotlighting scored HIGHER than no defense at all.
+
+    Quoting it would mean keeping the one suite where noise pointed our way and
+    discarding the two that were informative. This test fails if it ever gets
+    quoted as a result.
+    """
+    import re
+
+    _, data = recorded
+    t = data["travel_null_result"]
+    assert t["verdict"].startswith("NO RESULT")
+    # spotlighting above undefended is the tell that there is no signal
+    assert t["asr"]["spotlighting"] > t["asr"]["none"]
+    low = re.sub(r"\s+", " ", injection_doc.lower())
+    assert "no result" in low or "not reported as a result" in low
+    for overclaim in (
+        "the fence beats spotlighting on travel",
+        "significant on travel",
+        "travel confirms",
+    ):
+        assert overclaim not in low, f"the page quotes travel as support: {overclaim!r}"
+
+
+def test_the_refused_p_value_is_still_shown(recorded, injection_doc):
+    """Refusing a result means showing it and explaining why, not hiding it.
+    A page that quietly dropped the inconvenient-because-favourable number
+    would be no better than one that quoted it."""
+    _, data = recorded
+    p = data["travel_null_result"]["p_values"]["fence_vs_spotlighting"]
+    assert any(f"{round(p, n)}" in injection_doc for n in (3, 4)), (
+        f"the page does not show the refused p-value {p}"
+    )
+
+
+def test_workspace_was_stopped_on_evidence(recorded, injection_doc):
+    """0.3% undefended ASR means no headroom. Stopping was a measurement
+    decision; the page has to say so rather than leaving a suite silently
+    missing."""
+    _, data = recorded
+    w = data["workspace_stopped"]
+    done = next(iter(w["completed"].values()))
+    assert done["asr"] < 1.0, "workspace had headroom after all -- rewrite the section"
+    assert "0.3%" in injection_doc
+    assert "297" in injection_doc
+
+
+def test_the_page_does_not_claim_four_suites(injection_doc):
+    """Two informative suites is the honest count. 'Four AgentDojo suites'
+    would be true and misleading."""
+    import re
+
+    low = re.sub(r"\s+", " ", injection_doc.lower())
+    assert "two informative suites" in low or "two informative* suites" in low or "informative suites" in low
