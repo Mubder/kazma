@@ -185,7 +185,9 @@ build a workflow on it.
 | 4 — consolidation | `a02e3fa1` | One shared probe. **Phase 3's fix had landed in the endpoint the UI does not call** — the duplication cost exactly what this plan predicted, during the refactor meant to fix it. |
 | 5 — rendering | `528c369f` | The page now paints the three states, capability badges, and the declared wire facts. Found that **none of Phase 3's data had ever reached the browser**: FastAPI serialises the Test route through `ProviderTestResponse`, which did not declare `reachable` or `chat_ok`, so the response model silently deleted both. Every test checked the function's return value; nothing checked the response body. |
 | 6 — adapter table | `4e813d8c` | The four-way vendor ladder deciding which client class to build existed in three methods of `ModelRegistry`. Replaced by one `api_style` lookup, which is what the capability schema was for. A new wire format is one line; a new provider speaking an existing one is zero. |
-| 7 — one API surface | this commit | `/api/settings/providers/*` deleted along with the service layer behind it. And the bug that arrived while deleting it: **Test told a working provider it had no API key** — the runtime resolves a key from the provider row, the legacy `llm.*` settings *or* `<PROVIDER>_API_KEY`, and Test read only the row. The same defect that opened this plan, in a different variable. |
+| 7 — one API surface | `abd16573` | `/api/settings/providers/*` deleted along with the service layer behind it. And the bug that arrived while deleting it: **Test told a working provider it had no API key** — the runtime resolves a key from the provider row, the legacy `llm.*` settings *or* `<PROVIDER>_API_KEY`, and Test read only the row. The same defect that opened this plan, in a different variable. |
+| 8 — the control plane | `61a2991e` | The page became master-detail, as the mockup showed. The commit before it had added pills and badges to the old stacked cards and called the UI done; the operator's reply was that it was their old page with a little improvement, and they were right. |
+| 9 — four bugs in the check itself | `cb2424f4` · `ef8f99b7` · `b931a37a` · `79c2b05d` | Found by an operator using it, not by any test here. **Pressing Test destroyed every saved API key.** Then three more, all the same mistake in different variables. See below. |
 
 ### What the plan got right
 
@@ -206,6 +208,39 @@ dictionary; the response model in front of it dropped two of the fields, and
 the gap survived a whole phase because the operator's question — *what does
 the page show?* — was never the question any test asked. Phase 5 exists
 because the user asked exactly that question and the answer was "nothing".
+
+### The thing the plan never considered: the check as a hazard
+
+This plan opens by observing that the health check tested a path the product
+does not use. It treated that as *one bug*. It was a pattern, and the plan had
+no phase for finding the rest of it.
+
+The probe has three inputs — URL, key, model — and every one of them was
+resolved differently from how a real message resolves it:
+
+| what the check did | what the product does |
+|---|---|
+| queried `GET /models` | sends `POST /chat/completions` |
+| read the key off the provider row | resolves it through `ModelRegistry` |
+| spelled the env var `Z.AI_API_KEY` | reads `Z_AI_API_KEY` |
+| read a `model` field | that field does not exist on a provider |
+
+Each was found by an operator hitting it, fixed in isolation, and called done —
+three separate times — before anyone asked what *else* the probe does
+differently. A fourth failure is what made the pattern impossible to miss.
+
+Worse than any of them: the check was not merely uninformative, it was
+**destructive**. `set_provider_health` is a read-modify-write over the whole
+provider list through the vault-resolved view, so a Test pressed from a process
+that could not decrypt replaced every stored `vault://` pointer with an empty
+string. Pressing Test deleted every saved API key, permanently, and then
+truthfully reported that no key was stored.
+
+The lesson this plan should have carried from the start: **a diagnostic must
+resolve its inputs through the same code the product does, and must not be able
+to write.** The first half is now enforced by
+`resolve_provider_credentials()` and `probe_model_for()`; the second by the
+guard in `save_providers()`.
 
 ### Still open
 
@@ -231,6 +266,14 @@ because the user asked exactly that question and the answer was "nothing".
   report now marks an auto-picked model with `*` and says so in a legend,
   because the run that produces a misleading result must be the one that warns
   about it.
+- **Other read-modify-write paths over resolved secrets are not audited.**
+  `save_providers` is guarded. The same shape — read a vault-resolved blob,
+  change one field, write the whole thing back — exists wherever a nested
+  secret lives inside a JSON config value (`connectors.*` is the obvious
+  neighbour). Nothing has checked those, and the failure is silent.
+- **No test asserts that a diagnostic cannot write.** The `save_providers`
+  guard stops the damage; nothing stops a future health check from reaching
+  for a mutating call. A lint or an architectural test would.
 - *(closed)* **The duplicate API is gone.** `/api/settings/providers/*`, the
   `providers_router` that carried it, the `SettingsManager` delegation
   methods, `kazma_core/settings_providers.py` and `ProviderAddRequest` are
@@ -239,3 +282,6 @@ because the user asked exactly that question and the answer was "nothing".
   through to the generic `DELETE /api/settings/{key}` and answers 200 for a
   key it invents, so the regression test checks the routing table, not a
   status code.
+- *(closed)* **The UI.** Master-detail control plane, built from the mockup,
+  with three documented departures where the mockup showed figures nothing
+  measures.

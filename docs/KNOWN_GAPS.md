@@ -284,6 +284,28 @@ ConfigStore now logs one warning at boot naming the file and saying it is not
 read. The file itself is left alone: deleting an operator's data on their
 behalf to fix a diagnostic problem is the wrong trade.
 
+**A diagnostic that writes can destroy what it is checking.** Pressing **Test**
+on a provider deleted every saved API key. `set_provider_health` is a
+read-modify-write over the whole provider list through the vault-*resolved*
+view, and an undecryptable `vault://` pointer resolves to `None` → `""`, so one
+write from a process that could not decrypt blanked every pointer on disk.
+Permanently, with one `WARNING` line as the only symptom, after which the UI
+truthfully reported that no key was stored. Reproduced end to end; fixed by a
+guard in `save_providers` that refuses to blank a stored key.
+→ `tests/test_provider_key_is_not_destroyed.py`, `CHANGELOG.md`.
+
+**Keys destroyed before that fix are not recoverable and must be re-entered.**
+The vault may still hold the secret; the pointer to it is gone.
+
+**The same read-modify-write shape is unaudited elsewhere.** Any config value
+that is a JSON blob containing a nested secret has the same hazard —
+`connectors.*` is the obvious neighbour. Only `providers.list` is guarded.
+Nothing has checked the rest, and the failure mode is silent.
+
+**Nothing stops a future health check from writing.** The guard blocks the
+specific damage; no test or lint asserts that a diagnostic path may not call a
+mutating one. Until one exists, this class is prevented by convention.
+
 **The injection A/B on OpenRouter's free tier cannot fit in a day.** The limit
 is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two
 conditions) needs 56. Either split it across two days and label each side an
