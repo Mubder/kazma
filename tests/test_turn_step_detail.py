@@ -134,3 +134,51 @@ class TestChatJsUsesIt:
             / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
         ).read_text(encoding="utf-8")
         assert html.index("turn_detail.js") < html.index("js/chat.js")
+
+
+class TestAStepRowStaysOneLine:
+    """Leading with the gist made every tool row taller — gist plus raw, up to
+    the three-line clamp. The transcript grew, and the final reply landed below
+    the fold: the operator had to scroll to read an answer that used to arrive
+    in view. Collapsed rows show the gist alone.
+    """
+
+    @staticmethod
+    def _read(*parts: str) -> str:
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parent.parent.joinpath(*parts)
+        ).read_text(encoding="utf-8")
+
+    def test_a_gist_led_detail_is_marked_for_the_one_line_clamp(self):
+        chat = self._read("kazma-ui", "kazma_ui", "static", "js", "chat.js")
+        assert "has-gist" in chat
+        assert "var brk = t.indexOf(" in chat
+
+    def test_the_one_line_clamp_exists_and_is_tighter_than_the_default(self):
+        import re
+
+        css = self._read("kazma-ui", "kazma_ui", "static", "css", "kazma.css")
+
+        def max_height(selector: str) -> float:
+            start = css.index(selector + " {")
+            block = css[start : css.index("}", start)]
+            found = re.search(r"max-height:\s*([\d.]+)em", block)
+            assert found, f"no em max-height on {selector}"
+            return float(found.group(1))
+
+        gist = max_height(".agent-progress-step .step-detail.is-clamped.has-gist")
+        default = max_height(".agent-progress-step .step-detail")
+        assert gist < default, (
+            f"the gist clamp ({gist}em) is not tighter than the default "
+            f"({default}em), so rows are still multi-line"
+        )
+        assert gist <= 2.0, "a collapsed row should be one line"
+
+    def test_the_raw_value_is_still_reachable(self):
+        """One line collapsed, everything on expand. The toggle only swaps
+        classes, so the full text has to stay in the DOM."""
+        chat = self._read("kazma-ui", "kazma_ui", "static", "js", "chat.js")
+        assert "step-show-more" in chat
+        assert "det.classList.toggle('is-clamped', open);" in chat

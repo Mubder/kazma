@@ -4232,10 +4232,21 @@
   function _detailHtml(detail, forceExpanded) {
     if (!detail) return '';
     var t = truncateStr(String(detail), TOOL_DETAIL_MAX);
-    if (forceExpanded || t.length <= STEP_DETAIL_CLAMP_AT) {
+    // A detail written by turn_detail.js leads with a one-line gist and keeps
+    // the raw payload below it. Collapsed, show ONLY that line \u2014 the raw value
+    // is for the moment you go looking, not for every row you scroll past.
+    //
+    // This also keeps a step row ONE line tall. Leading with the gist made
+    // rows taller (gist + raw, up to the 3-line clamp), the transcript grew,
+    // and the final reply landed below the fold \u2014 the operator had to scroll
+    // to read an answer that used to arrive in view.
+    var brk = t.indexOf('\n');
+    var hasGist = brk > 0 && brk <= 120;
+    if (forceExpanded || (!hasGist && t.length <= STEP_DETAIL_CLAMP_AT)) {
       return '<div class="step-detail is-expanded">' + escapeHtml(t) + '</div>';
     }
-    return '<div class="step-detail is-clamped">' + escapeHtml(t) + '</div>' +
+    return '<div class="step-detail is-clamped' + (hasGist ? ' has-gist' : '') +
+      '">' + escapeHtml(t) + '</div>' +
       '<button type="button" class="step-show-more" data-open="0">' +
       escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>';
   }
