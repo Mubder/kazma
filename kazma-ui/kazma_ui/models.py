@@ -29,7 +29,6 @@ __all__ = [
     "ModelProfileUpdateRequest",
     "ModelTestRequest",
     "PasswordChange",
-    "ProviderAddRequest",
     "ProviderTestResponse",
     "ProviderToggleRequest",
     "ProviderUpdateRequest",
@@ -170,15 +169,9 @@ class DashboardMetrics(BaseModel):
 # ── Provider Models ───────────────────────────────────────────────────
 
 
-class ProviderAddRequest(BaseModel):
-    """Request to add a new LLM provider."""
-
-    name: str
-    display_name: str = ""
-    base_url: str
-    api_key: str = ""
-    models: list[str] = Field(default_factory=list)
-    enabled: bool = True
+# NOTE: ProviderAddRequest lived here, for POST /api/settings/providers. That
+# route was a duplicate of POST /api/providers, which takes
+# ProviderUpdateRequest below. Both are gone with it.
 
 
 class ProviderToggleRequest(BaseModel):

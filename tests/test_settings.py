@@ -31,6 +31,20 @@ def sm(config_store):
     return SettingsManager(config_store)
 
 
+@pytest.fixture
+def registry(config_store):
+    """Providers live in ModelRegistry, not SettingsManager.
+
+    SettingsManager used to expose add_provider / delete_provider / … as a
+    pass-through to a ProviderSettingsService that passed through again to
+    this registry. The only callers were the duplicate
+    /api/settings/providers routes, and both layers are gone; these tests now
+    exercise the behaviour where it actually lives.
+    """
+    from kazma_core.model_registry import ModelRegistry
+    return ModelRegistry(config_store)
+
+
 # ══════════════════════════════════════════════════════════════════════
 # TestSettingsManager — Unit tests
 # ══════════════════════════════════════════════════════════════════════
@@ -43,16 +57,15 @@ class TestSettingsManager:
         """SettingsManager initializes without error."""
         assert sm is not None
 
-    # ── Providers ──
+    # ── Providers (ModelRegistry) ──
 
-    def test_get_providers_empty(self, sm):
+    def test_get_providers_empty(self, registry):
         """Returns a list (possibly with default presets)."""
-        providers = sm.get_all_providers()
-        assert isinstance(providers, list)
+        assert isinstance(registry.list_providers(), list)
 
-    def test_add_provider(self, sm):
+    def test_add_provider(self, registry):
         """Adding a provider persists it."""
-        result = sm.add_provider({
+        result = registry.upsert_provider({
             "name": "test-provider",
             "display_name": "Test",
             "base_url": "https://test.example.com/v1",
@@ -62,41 +75,36 @@ class TestSettingsManager:
         })
         assert result["name"] == "test-provider"
         assert result["base_url"] == "https://test.example.com/v1"
-        # Verify persistence
-        providers = sm.get_all_providers()
-        found = [p for p in providers if p["name"] == "test-provider"]
+        found = [p for p in registry.list_providers() if p["name"] == "test-provider"]
         assert len(found) == 1
 
-    def test_add_provider_update_existing(self, sm):
+    def test_add_provider_update_existing(self, registry):
         """Adding a provider with the same name updates it."""
-        sm.add_provider({"name": "dup", "base_url": "https://old.com/v1"})
-        sm.add_provider({"name": "dup", "base_url": "https://new.com/v1"})
-        providers = sm.get_all_providers()
-        found = [p for p in providers if p["name"] == "dup"]
+        registry.upsert_provider({"name": "dup", "base_url": "https://old.com/v1"})
+        registry.upsert_provider({"name": "dup", "base_url": "https://new.com/v1"})
+        found = [p for p in registry.list_providers() if p["name"] == "dup"]
         assert len(found) == 1
         assert found[0]["base_url"] == "https://new.com/v1"
 
-    def test_delete_provider(self, sm):
+    def test_delete_provider(self, registry):
         """Deleting a provider removes it."""
-        sm.add_provider({"name": "to-delete", "base_url": "https://x.com/v1"})
-        sm.delete_provider("to-delete")
-        providers = sm.get_all_providers()
-        found = [p for p in providers if p["name"] == "to-delete"]
+        registry.upsert_provider({"name": "to-delete", "base_url": "https://x.com/v1"})
+        registry.delete_provider("to-delete")
+        found = [p for p in registry.list_providers() if p["name"] == "to-delete"]
         assert len(found) == 0
 
-    def test_toggle_provider(self, sm):
+    def test_toggle_provider(self, registry):
         """Toggling a provider updates its enabled state."""
-        sm.add_provider({"name": "toggle-me", "base_url": "https://x.com/v1", "enabled": True})
-        sm.toggle_provider("toggle-me", False)
-        providers = sm.get_all_providers()
-        found = [p for p in providers if p["name"] == "toggle-me"]
+        registry.upsert_provider(
+            {"name": "toggle-me", "base_url": "https://x.com/v1", "enabled": True}
+        )
+        registry.toggle_provider("toggle-me", False)
+        found = [p for p in registry.list_providers() if p["name"] == "toggle-me"]
         assert found[0]["enabled"] is False
 
-    def test_provider_presets(self, sm):
+    def test_provider_presets(self, registry):
         """Default providers include presets from kazma_core.providers."""
-        providers = sm.get_all_providers()
-        # Should have at least openai, anthropic, etc.
-        names = [p["name"] for p in providers]
+        names = [p["name"] for p in registry.list_providers()]
         assert "openai" in names
         assert "anthropic" in names
 
@@ -107,9 +115,9 @@ class TestSettingsManager:
         registry = sm.get_model_registry()
         assert isinstance(registry, list)
 
-    def test_unified_model_options(self, sm):
+    def test_unified_model_options(self, sm, registry):
         """Unified options merge providers, profiles, and llm defaults."""
-        sm.add_provider({
+        registry.upsert_provider({
             "name": "merged-provider",
             "models": ["provider-model"],
             "base_url": "https://provider.example/v1",
@@ -435,7 +443,12 @@ class TestSettingsAPI:
         app.include_router(router)
 
         from fastapi.testclient import TestClient
-        return TestClient(app)
+        test_client = TestClient(app)
+        # Providers are created through ModelRegistry, not through a settings
+        # route, so a test needs the store this app was wired to.
+        test_client.kazma_config_store = cs
+        test_client.kazma_app = app
+        return test_client
 
     def test_get_settings(self, client):
         """GET /api/settings returns a dict."""
@@ -450,39 +463,19 @@ class TestSettingsAPI:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    def test_provider_list(self, client):
-        """GET /api/settings/providers returns a list."""
-        resp = client.get("/api/settings/providers")
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+    def test_the_duplicate_provider_routes_are_gone(self, client):
+        """/api/settings/providers/* duplicated /api/providers/* — same
+        operations, different path, and once the dead frontend half was
+        removed, no caller. The documented surface is /api/providers.
 
-    def test_provider_add(self, client):
-        """POST /api/settings/providers adds a provider."""
-        resp = client.post("/api/settings/providers", json={
-            "name": "test-api",
-            "base_url": "https://test.example.com/v1",
-            "api_key": "test-key",
-        })
-        assert resp.status_code == 200
-        assert resp.json()["name"] == "test-api"
-
-    def test_provider_delete(self, client):
-        """DELETE /api/settings/providers/{name} removes a provider."""
-        client.post("/api/settings/providers", json={
-            "name": "to-delete",
-            "base_url": "https://x.com/v1",
-        })
-        resp = client.delete("/api/settings/providers/to-delete")
-        assert resp.status_code == 200
-
-    def test_provider_toggle(self, client):
-        """PUT /api/settings/providers/{name}/toggle toggles a provider."""
-        client.post("/api/settings/providers", json={
-            "name": "toggle-test",
-            "base_url": "https://x.com/v1",
-        })
-        resp = client.put("/api/settings/providers/toggle-test/toggle", json={"enabled": False})
-        assert resp.status_code == 200
+        Checked against the route table rather than by status code: these
+        paths sit under the generic `/api/settings/{key}` routes, so a request
+        to one answers 405 or even 200 (for a config key it just invented)
+        without any provider route existing. A status code cannot answer this
+        question; the routing table can."""
+        paths = {getattr(r, "path", "") for r in client.kazma_app.routes}
+        offenders = {p for p in paths if p.startswith("/api/settings/providers")}
+        assert not offenders, f"the duplicate provider routes are back: {offenders}"
 
     def test_model_defaults_endpoint(self, client):
         """GET /api/settings/models/defaults returns defaults."""
@@ -493,7 +486,9 @@ class TestSettingsAPI:
 
     def test_model_options_endpoint(self, client):
         """GET /api/settings/models/options returns unified options."""
-        client.post("/api/settings/providers", json={
+        from kazma_core.model_registry import ModelRegistry
+
+        ModelRegistry(client.kazma_config_store).upsert_provider({
             "name": "settings-provider",
             "models": ["settings-model"],
             "base_url": "https://provider.example/v1",

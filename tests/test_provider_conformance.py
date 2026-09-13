@@ -294,13 +294,29 @@ class TestThereIsOnlyOneProbe:
             "the UI route has its own copy of the probe again"
         )
 
-    def test_the_settings_route_probes_chat_too(self):
-        """This is the route providers.js actually calls."""
+    def test_there_is_only_one_test_route_left(self):
+        """The duplicate was not fixed, it was deleted.
+
+        `/api/settings/providers/{name}/test` ran the same check from a second
+        service layer, and the fact that it existed is what let a whole phase
+        ship into the route the UI does not call. It is gone; the routing
+        table, not a status code, is the thing that can say so."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "settings.py"
+        ).read_text(encoding="utf-8")
+        assert "/api/settings/providers" not in src.replace(
+            "# NOTE: there is no providers_router. /api/settings/providers/*", ""
+        ), "the duplicate provider routes are back in settings.py"
+
+    def test_the_surviving_route_reports_the_chat_failure_plainly(self):
         import inspect
 
-        from kazma_core import settings_providers
+        from kazma_ui import providers as ui_providers
 
-        src = inspect.getsource(settings_providers)
+        src = inspect.getsource(ui_providers)
         assert "probe_chat_completion" in src
         assert "Reachable, but chat is failing" in src
 
@@ -362,14 +378,12 @@ class TestTheThreeStatesReachTheBrowser:
         exactly when an operator needs it."""
         import inspect
 
-        from kazma_core import settings_providers
         from kazma_ui import providers as ui_providers
 
-        for module in (settings_providers, ui_providers):
-            src = inspect.getsource(module)
-            assert '"chat_failing"' in src, (
-                f"{module.__name__} still collapses chat failure into 'degraded'"
-            )
+        src = inspect.getsource(ui_providers)
+        assert '"chat_failing"' in src, (
+            "the test route still collapses chat failure into 'degraded'"
+        )
 
 
 class TestTheProviderListCarriesCapabilities:

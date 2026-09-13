@@ -1,5 +1,53 @@
 # CHANGELOG
 
+## Test told a working provider it had no API key (2026-09-13)
+
+Reported from a live install: a provider that answers every message returned
+
+> **Unreachable** — No API key stored for this provider. Paste the full key
+> into the field…
+
+The key was in `.env`. Chat resolves a provider's key from three places —
+the stored provider row, the legacy `llm.*` settings, or
+`<PROVIDER>_API_KEY` in the environment — and `ModelRegistry` has done so all
+along. The Test route read only the provider row, so a provider configured
+entirely through a `.env` file worked for every real request and was told by
+the check that it did not exist.
+
+This is the same defect that opened `docs/plans/PROVIDER_LAYER_PLAN.md`, in a
+different variable. That one tested `/models` while the product called
+`/chat/completions`; this one resolved the key by hand while the product
+resolved it through the registry. **A check that does not exercise the path the
+product uses is not a check.**
+
+`ModelRegistry.resolve_provider_credentials(name)` now answers "what would the
+runtime actually send", and both halves of Test — the model-list call and the
+chat probe — use it. When nothing is found anywhere, the error names all three
+places that were searched, including the exact environment variable.
+
+## The duplicate provider API is deleted, not merely kept in step
+
+`/api/settings/providers/*` offered the same six operations as
+`/api/providers/*` on a different path, through a `ProviderSettingsService`
+that delegated to `ModelRegistry` — which `/api/providers/*` already calls
+directly. Only one of the two is documented in the API guide, and after the
+dead frontend half was removed, nothing called the other: the last reference
+was a fetch on settings-page load whose result was assigned to a property that
+no template read.
+
+Gone: the six routes, the `providers_router` that carried them, the
+`SettingsManager` delegation methods, `kazma_core/settings_providers.py`, and
+`ProviderAddRequest`. `/api/providers/*` is the one surface.
+
+This pair is what cost this refactor a phase shipped into the route the UI does
+not call. Keeping both in step was never going to be cheaper than having one.
+
+One sharp edge worth knowing: a `DELETE /api/settings/providers/anything` now
+falls through to the generic `DELETE /api/settings/{key}` route and answers
+`200` for a config key it just invented. That is why the regression test checks
+the routing table rather than a status code — a status code cannot answer this
+question.
+
 ## Three copies of the same vendor ladder, replaced by one lookup (2026-09-13)
 
 `ModelRegistry.get_client`, `.get_model` and `.get_client_by_provider` each

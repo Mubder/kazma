@@ -71,7 +71,6 @@ DEFAULT_MODEL_DEFAULTS: dict[str, str] = {
 _START_TIME = time.monotonic()
 
 
-from kazma_core.settings_providers import ProviderSettingsService  # re-export
 from kazma_core.settings_mcp import MCPSettingsService  # re-export
 
 __all__ = ["DEFAULT_APPEARANCE", "DEFAULT_MODEL_DEFAULTS", "DEFAULT_SHORTCUTS", "SettingsManager"]
@@ -90,48 +89,25 @@ class SettingsManager:
         self._registry = ModelRegistry(config_store)
 
         # Instantiate modular services
-        self.providers_service = ProviderSettingsService(config_store, self._registry)
         self.mcp_service = MCPSettingsService(config_store)
 
         # Register services on global Dependency Injection container
         from kazma_core.service_container import get_container
         try:
-            get_container().register(ProviderSettingsService, self.providers_service)
             get_container().register(MCPSettingsService, self.mcp_service)
         except Exception as exc:
             logger.debug("[SettingsManager] Container registration skipped: %s", exc)
 
     # ══════════════════════════════════════════════════════════════════
-    # PROVIDERS (Delegated to ProviderSettingsService)
+    # PROVIDERS -- not here any more
     # ══════════════════════════════════════════════════════════════════
-
-    def get_all_providers(self) -> list[dict[str, Any]]:
-        """List all configured providers."""
-        return self.providers_service.get_all_providers()
-
-    def add_provider(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Add a new provider."""
-        return self.providers_service.add_provider(data)
-
-    def delete_provider(self, name: str) -> None:
-        """Delete a provider by name."""
-        self.providers_service.delete_provider(name)
-
-    def toggle_provider(self, name: str, enabled: bool) -> None:
-        """Enable/disable a provider."""
-        self.providers_service.toggle_provider(name, enabled)
-
-    async def test_provider(self, name: str) -> dict[str, Any]:
-        """Test a provider connection with a real HTTP call."""
-        return await self.providers_service.test_provider(name)
-
-    def get_provider_health(self, name: str) -> dict[str, Any]:
-        """Get health status for a provider."""
-        return self.providers_service.get_provider_health(name)
-
-    def _update_provider_health(self, name: str, status: str) -> None:
-        """Update provider health status in store."""
-        self.providers_service._update_provider_health(name, status)
+    #
+    # get_all_providers / add_provider / delete_provider / toggle_provider /
+    # test_provider / get_provider_health used to delegate to a
+    # ProviderSettingsService, which delegated to ModelRegistry. Their only
+    # callers were the /api/settings/providers/* routes, a duplicate of
+    # /api/providers/* that nothing in the product used. Talk to
+    # ModelRegistry directly.
 
     # ══════════════════════════════════════════════════════════════════
     # MODELS

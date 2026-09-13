@@ -32,8 +32,6 @@ from kazma_ui.models import (
     ModelDefaultUpdate,
     ModelTestRequest,
     PasswordChange,
-    ProviderAddRequest,
-    ProviderToggleRequest,
     SettingsUpdate,
     ShortcutUpdate,
     VoiceSettingsUpdate,
@@ -200,7 +198,12 @@ class SettingsRouterBuilder:
         self.templates = templates
 
         self.router = APIRouter(tags=["settings"])
-        self.providers_router = APIRouter()
+        # NOTE: there is no providers_router. /api/settings/providers/* was a
+        # duplicate of /api/providers/* -- same operations, different path,
+        # no caller once the dead frontend half was removed, and not the one
+        # documented in docs/docs/guide/api-and-extension-points.md. Two
+        # surfaces for one concept is how they drift, and this pair drifted
+        # far enough that a fix shipped into the route nobody called.
         self.models_router = APIRouter()
         self.mcp_router = APIRouter()
         self.general_router = APIRouter()
@@ -1502,42 +1505,6 @@ class SettingsRouterBuilder:
             config_store.invalidate_yaml_cache()
             return {"status": "ok", "reset": str(count)}
 
-    def _build_providers_routes(self) -> None:
-        router = self.providers_router
-        _get_sm = self._get_sm
-
-        @router.get("/api/settings/providers")
-        async def api_get_providers() -> list[dict[str, Any]]:
-            """List all configured providers."""
-            return _get_sm().get_all_providers()
-
-        @router.post("/api/settings/providers")
-        async def api_add_provider(req: ProviderAddRequest) -> dict[str, Any]:
-            """Add a new provider."""
-            return _get_sm().add_provider(req.model_dump())
-
-        @router.delete("/api/settings/providers/{name}")
-        async def api_delete_provider(name: str) -> dict[str, str]:
-            """Delete a provider."""
-            _get_sm().delete_provider(name)
-            return {"status": "ok"}
-
-        @router.put("/api/settings/providers/{name}/toggle")
-        async def api_toggle_provider(name: str, req: ProviderToggleRequest) -> dict[str, str]:
-            """Toggle provider enabled/disabled."""
-            _get_sm().toggle_provider(name, req.enabled)
-            return {"status": "ok"}
-
-        @router.post("/api/settings/providers/{name}/test")
-        async def api_test_provider(name: str) -> dict[str, Any]:
-            """Test a provider connection."""
-            return await _get_sm().test_provider(name)
-
-        @router.get("/api/settings/providers/{name}/health")
-        async def api_provider_health(name: str) -> dict[str, Any]:
-            """Get provider health status."""
-            return _get_sm().get_provider_health(name)
-
     def _build_models_routes(self) -> None:
         router = self.models_router
         _get_sm = self._get_sm
@@ -1721,13 +1688,11 @@ class SettingsRouterBuilder:
 
     def build(self) -> APIRouter:
         self._build_general_routes()
-        self._build_providers_routes()
         self._build_models_routes()
         self._build_mcp_routes()
 
         # Mount the decoupled sub-routers on the parent router
         self.router.include_router(self.general_router)
-        self.router.include_router(self.providers_router)
         self.router.include_router(self.models_router)
         self.router.include_router(self.mcp_router)
         return self.router

@@ -167,7 +167,7 @@ kazma/
 | `retry.py` | Generic retry utilities |
 | `router.py` / `routing_engine.py` | Routing helpers / unified worker routing |
 | `service_container.py` | DI container |
-| `settings_manager.py` / `settings_mcp.py` / `settings_providers.py` | Settings facades |
+| `settings_manager.py` / `settings_mcp.py` | Settings facades |
 | `shutdown.py` | Global graceful-shutdown flag |
 | `state.py` | Agent state types |
 | `streaming.py` | Streaming helpers |
