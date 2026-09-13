@@ -674,6 +674,26 @@ python scripts/injection_report.py --sync   # re-record measured fields
 python -m pytest tests/test_injection_containment.py -q
 ```
 
+The AgentDojo figures in section 4 have their own entry points. The first two
+read the committed run logs, call nothing, and need no API key — they exist so
+a reader who does not trust us can re-derive every number on that page:
+
+```bash
+# raw counts, obedience, iteration-cap saturation, per injection task
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py --analyze --suite banking
+
+# pooled figures and every p-value quoted on the page
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py --report slack,banking
+
+# re-run the wording ablation (needs a model)
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py \
+    --live --suite banking --ablate-social --provider ollama --model qwen2.5:7b
+```
+
+`--analyze` warns rather than stays silent when something is off: a pipeline
+directory it cannot classify, two separate runs being pooled into one row, or
+an attacker marker that appears in legitimate task content.
+
 ### Reproducing the live numbers — free, offline, no API key
 
 The structural numbers above are reproducible by anyone, because no model is

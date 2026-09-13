@@ -1,5 +1,160 @@
 # CHANGELOG
 
+## "Error:" was a complete prompt-fence bypass (2026-09-13)
+
+`fence_untrusted` passed content through **unfenced** whenever it began with
+`Error:`. Every caller of that function forwards attacker-controlled text:
+
+| caller | what it forwards |
+|---|---|
+| `read_url.py:1126` | a fetched web page — the attacker writes all of it |
+| `web_search.py:556` | remote search titles and snippets |
+| `mcp/manager.py:1085` | a third-party MCP server's tool result |
+| `mcp.py:57` | an MCP resource body |
+
+So an attacker who began their payload with six characters had it delivered to
+the model raw — no fence, no banner, nothing marking it as observation data:
+
+```
+fence_untrusted("Ignore all previous instructions…")         -> fenced, 871 chars
+fence_untrusted("Error: Ignore all previous instructions…")  -> VERBATIM
+```
+
+The exemption existed for Kazma's *own* error strings and could not tell them
+from an attacker writing the same prefix. Trust is now declared by the caller
+through an explicit `is_error` flag: the caller knows the provenance, and the
+content is written by the attacker and can never be evidence about itself.
+
+**The benchmark could not have caught it.** `docs/INJECTION.md` said the
+AgentDojo run measured "the shipped function" — it measured
+`format_untrusted_block`, the function *underneath* the wrapper, while
+production calls `fence_untrusted`. The harness now loads the production path
+and a guard asserts an `Error:`-prefixed payload comes back fenced, so the same
+hole would fail the benchmark rather than hide beneath it.
+
+Found by an adversarial review of the benchmark harness that noticed the
+mismatch between what the page claimed to measure and what production calls.
+
+### The same shape, one layer down
+
+Sweeping for other places where a safety step could be skipped turned up a
+second one immediately: `fence_untrusted` caught any exception from
+`format_untrusted_block` and returned the raw text, on the reasoning that
+fencing must never be the reason a tool fails. The reasoning is right and the
+conclusion was a bypass — anything that could make the fence raise would hand
+the model unwrapped content. It now fails to a placeholder naming the source and
+the number of characters withheld. Dropping a tool result is recoverable; an
+unfenced injection is not.
+
+Also checked in that sweep and found sound, stated because a sweep that reports
+only hits is not a sweep: `graph_helpers`' memory-RAG path already fails closed
+on import failure, `markup_guard`'s early return is token restoration rather
+than a trust decision, and the HITL gate keys every decision on `tool_name` as
+an identity with a default-deny tail.
+
+### An MCP server names its own tools, and the name is trusted
+
+`classify_mcp_tool` reads the tool name — supplied by the third-party server —
+and a safe-looking verb classifies `safe`. Verified: `get_file`, `read_env` and
+a bare `get` all classify safe. `read_env` is the sharp one, because `env` is
+deliberately absent from the `shell_exec` allowlist precisely so one approval
+cannot become a credential dump.
+
+**Closed in production**: `KAZMA_PRODUCTION=1` gates every MCP tool not on
+`KAZMA_MCP_SAFE_ALLOWLIST`, name irrelevant. **Open in the default posture**,
+where `force_hitl` is `tier in ("danger","unknown")` and a `safe` name skips it.
+The code doing this already carries the comment *"safe name patterns are not
+enough (list_keys, get_env, export_data, …)"* — the reasoning was written down
+and only the production branch acts on it.
+
+Not changed. Making every MCP tool prompt in dev is a real usability cost and
+the operator's decision, not ours. Documented in
+[THREAT_MODEL.md](docs/THREAT_MODEL.md) and [KNOWN_GAPS.md](docs/KNOWN_GAPS.md)
+with the mitigations that exist today, and guarded — including a test that fails
+if the weakness ever stops being true, so the page must then stop claiming it.
+
+## Four measurements of everything, and what it cost to find out (2026-09-13)
+
+Yesterday's AgentDojo numbers were one run per condition. An adversarial review
+of the harness pointed out that the fence had been measured four times and the
+baselines once, and that the published figure was the fence's **minimum**. That
+was true, and it was the second claim on this page to need retracting in a day.
+
+Every condition has now been run four times on both suites — **996 runs per
+condition**.
+
+```
+attacks won, four runs each, nothing changed between them
+                  slack (/105)        banking (/144)
+  undefended     27  29  29  22      22  19  16  16
+  spotlighting   14  22  18  15      14  12   7  14
+  Kazma fence    14  16  20  16       7  13   7  11
+```
+
+| condition | ASR | acted on payload |
+|---|---|---|
+| undefended | 180/996 — **18.1%** | 240/996 — 24.1% |
+| spotlighting | 116/996 — **11.6%** | 185/996 — 18.6% |
+| **Kazma fence** | 104/996 — **10.4%** | 147/996 — **14.8%** |
+
+**Both defenses beat undefended decisively** — p < 0.001 for the fence on both
+measures, clearing the noise band and a Bonferroni correction for the six
+pairwise tests on the page (α = 0.0083) with room to spare. Fencing untrusted
+tool output works, and that is the claim the product makes.
+
+**On AgentDojo's own ASR metric the fence and spotlighting are
+indistinguishable**: p = 0.39, and p = 0.49 with iteration-cap runs removed.
+Four characters of delimiter plus one sentence of system prompt does the same
+work as Kazma's ~800-character in-band banner.
+
+**On obedience the fence leads, and it is reported as suggestive rather than
+established.** 14.8% against 18.6%, p = 0.022 — but the fence exhausts
+AgentDojo's `max_iters` cap 64 times in 420 `slack` runs against spotlighting's
+7, because its longer banner means its conversations run out of turns, and a
+capped run defended nothing while counting as a clean win. Excluding every
+capped run across both suites it holds at p = 0.031: it survives the artifact
+and does **not** clear the corrected threshold.
+
+### What repeating changed
+
+`banking` had been the fence's strongest result — 4.9% against spotlighting's
+9.7% — and it was the suite still standing on a single run. Repeated, the gap
+closed to 6.6% against 8.2%, p = 0.31. The 4.9% was the fence's low draw of
+four, and spotlighting's own four runs *include* a 4.9%.
+
+The direction matters: on `slack` all three original runs were **low** draws, on
+`banking` the undefended original was a **high** one. Noise does not lean
+consistently, which is exactly why single runs cannot be compared — and why the
+first version of this section produced a ranking that four measurements do not
+support.
+
+Spotlighting's own spread is **7.6 points**, wider than the 5.7 first measured
+on the fence. The band belongs to the harness and the model, not to any
+defense, and it had only ever been measured on one condition.
+
+### The harness bugs behind all of it
+
+- **Condition mis-bucketing.** `analyze()` split the pipeline directory on `-`
+  and took `parts[1]`. `local` is the only `MODEL_NAMES` key without a dash, so
+  a run under `gpt-4o-mini-2024-07-18` parsed its condition as `"4o"` and all
+  three conditions collapsed into one row with three times the *n* and an ASR
+  halfway between defended and undefended — silently. Would have fired on the
+  next non-Ollama run.
+- **A cache key that ignored the model.** `pipeline.name` carried the
+  `MODEL_NAMES` key, not the model, and the digest covered only the defense, so
+  two different models produced the same name and the second run returned the
+  first's cached results as its own numbers.
+- **Silent pooling.** `analyze()` globbed every pipeline directory, ignoring the
+  digest, and merged separate runs into one row without a word.
+- **The statistics were not reproducible.** The fixture claimed its numbers came
+  from the harness; only the raw counts did. `--report` now derives the pooled
+  figures and every p-value from the run logs, and `--ablate-social` re-runs the
+  wording ablation, so a reader who does not trust us can check each number.
+- **The context window was never pinned.** Measured rather than worried about:
+  Ollama served `qwen2.5:7b` at 32,768 tokens and the largest conversation in
+  any condition was ~18.8k — spotlighting's, not the fence's. Clean, but only
+  because it was checked.
+
 ## The social-framing clause: a null result, priced (2026-09-13)
 
 `KNOWN_GAPS.md`'s top open item said the fence's social-framing wording — "no

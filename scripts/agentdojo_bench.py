@@ -23,7 +23,7 @@ model:
 |---|---|
 | `none` | passed through raw — the undefended baseline |
 | `spotlighting` | wrapped in `<<`/`>>` with a warning in the system prompt (Hines et al., arXiv:2403.14720) — AgentDojo's own built-in defense |
-| `kazma_fence` | wrapped by `format_untrusted_block`, the shipped function, loaded from the real source file |
+| `kazma_fence` | wrapped by `fence_untrusted` — the production tool-output path, loaded from the real source file |
 
 `spotlighting` is in here because a number with nothing beside it is not a
 result. It is the same *kind* of defense as ours — delimit untrusted content,
@@ -41,11 +41,18 @@ Two numbers come out of each condition, and both are needed:
 
 ## The fence is not modified for this
 
-`format_untrusted_block` is loaded from
+`fence_untrusted` is loaded from
 `kazma-core/kazma_core/safety/prompt_fence.py` **by file path**, bypassing the
 package `__init__` (which drags in a database driver AgentDojo has no reason to
-install). There is no vendored copy to drift, and no benchmark-only tuning: if
+install). There is no vendored copy to drift and no benchmark-only tuning: if
 the fence changes, this run changes with it.
+
+It is `fence_untrusted` and not `format_untrusted_block` for a reason. The
+latter is the inner function; production calls the wrapper, and the wrapper
+carried a passthrough the inner one does not have — content beginning
+``Error:`` shipped unfenced. Measuring the inner function made this harness
+structurally incapable of seeing a complete bypass in the code it claimed to
+cover. Benchmark what ships.
 
 ## Running it
 
@@ -61,6 +68,14 @@ A smoke run that calls nothing:
 
 ```bash
 .venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py --dry-run
+```
+
+Re-derive the published numbers from existing run logs — calls nothing, needs
+no key:
+
+```bash
+scripts/agentdojo_bench.py --analyze --suite banking       # raw counts + obedience
+scripts/agentdojo_bench.py --report slack,banking          # pooled figures + p-values
 ```
 
 The real thing (costs money — see `--estimate` first):
