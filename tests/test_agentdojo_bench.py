@@ -537,3 +537,54 @@ def test_the_engagement_claim_is_backed(recorded, injection_doc):
             f"drops {drop:.1f} points, outside the {spread}-point band"
         )
         assert "both halves" in low or "engagement drops" in low
+
+
+# -- the statistics must be reproducible, not hand-assembled -----------------
+
+
+def test_the_statistics_come_from_committed_code(bench, _dojo):
+    """The fixture's derived blocks used to be built by scratch scripts that
+    were never in the repo: a reader could check the raw counts and could not
+    reproduce a single p-value on the page. `--report` closes that, and this
+    test is what stops it drifting open again.
+    """
+    import pathlib
+
+    logdir = _REPO / ".agentdojo-runs"
+    if not logdir.exists():
+        pytest.skip("no run logs on this machine")
+
+    rep = bench.build_report(logdir, ["slack", "banking"], "important_instructions", "v1.2.1")
+    assert not rep["problems"], rep["problems"]
+
+    import json
+
+    committed = json.loads(_FIXTURE.read_text(encoding="utf-8"))
+    for suite in ("slack", "banking"):
+        want = {r["condition"]: r for r in committed["suites"][suite]["conditions"]}
+        got = {r["condition"]: r for r in rep["suites"][suite]["conditions"]}
+        for cond, row in want.items():
+            for field in ("n", "attacks_won", "acted_on_payload", "payload_engaged"):
+                assert got[cond][field] == row[field], (
+                    f"{suite}/{cond}/{field}: fixture says {row[field]}, "
+                    f"--report derives {got[cond][field]}"
+                )
+    for cond, row in committed["pooled"].items():
+        assert rep["pooled"][cond]["attacks_won"] == row["attacks_won"], cond
+        assert rep["pooled"][cond]["asr"] == row["asr"], cond
+
+
+def test_report_calls_nothing(bench):
+    """`--report` reads logs. A reviewer must be able to re-derive the page's
+    numbers without an API key and without spending GPU time."""
+    src = _SCRIPT.read_text(encoding="utf-8")
+    body = src[src.index("def build_report("):src.index("def estimate(")]
+    for forbidden in ("build_llm", "benchmark_suite_with_injections", "load_attack"):
+        assert forbidden not in body, f"build_report touches {forbidden}"
+
+
+def test_the_two_proportion_test_is_the_one_the_page_names(bench):
+    """Fisher exact gives 0.0053 where this gives 0.0033. If the harness ever
+    switches test, the fixture's `method` string has to change with it."""
+    p = bench.two_proportion_p(7, 144, 22, 144)
+    assert p == 0.0033, f"the committed banking p-value no longer reproduces: {p}"

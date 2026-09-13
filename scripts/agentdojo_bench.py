@@ -595,6 +595,113 @@ def analyze(logdir: pathlib.Path, suite, suite_name: str, attack: str) -> dict[s
     }
 
 
+# ── the statistics, in the repo rather than in a scratch script ─────────────
+#
+# `tests/fixtures/agentdojo_qwen25_7b.json` used to have its pooled figures,
+# p-values and noise floor assembled by local scripts that were never
+# committed. A reader could check the raw counts with `--analyze` and could not
+# reproduce a single statistic on the page. `--report` closes that.
+
+
+def two_proportion_p(a: int, na: int, b: int, nb: int) -> float:
+    """Two-proportion z-test, uncorrected. Equivalent to a 2x2 chi-square
+    without continuity correction.
+
+    Named and committed because Fisher's exact gives noticeably different
+    values on these cell counts -- 0.0053 where this gives 0.0033 -- and a
+    reader who checks with the other test and finds a mismatch will reasonably
+    conclude the page is wrong. Fisher is more conservative; it changes none of
+    the stated conclusions.
+    """
+    import math
+
+    if not na or not nb:
+        return 1.0
+    p = (a + b) / (na + nb)
+    se = math.sqrt(p * (1 - p) * (1 / na + 1 / nb))
+    if se == 0:
+        return 1.0
+    z = (a / na - b / nb) / se
+    return round(math.erfc(abs(z) / math.sqrt(2)), 4)
+
+
+def _pairwise(rows: dict[str, dict[str, Any]], field: str, n_field: str = "n") -> dict[str, float]:
+    out = {}
+    for a, b, label in (
+        ("kazma_fence", "none", "fence_vs_undefended"),
+        ("spotlighting", "none", "spotlighting_vs_undefended"),
+        ("kazma_fence", "spotlighting", "fence_vs_spotlighting"),
+    ):
+        if a in rows and b in rows:
+            out[label] = two_proportion_p(
+                rows[a][field], rows[a][n_field], rows[b][field], rows[b][n_field]
+            )
+    return out
+
+
+def build_report(logdir: pathlib.Path, suite_names: list[str], attack: str,
+                 benchmark_version: str) -> dict[str, Any]:
+    """Everything the published page quotes, derived from the run logs."""
+    from agentdojo.task_suite.load_suites import get_suite
+
+    suites: dict[str, Any] = {}
+    problems: list[str] = []
+    for name in suite_names:
+        suite = get_suite(benchmark_version, name)
+        rep = analyze(logdir, suite, name, attack)
+        problems.extend(f"{name}: {p}" for p in rep["marker_problems"])
+        rows = {r["condition"]: r for r in rep["conditions"]}
+        if not rows:
+            continue
+        suites[name] = {
+            "user_tasks": len(suite.user_tasks),
+            "injection_tasks": len(suite.injection_tasks),
+            "conditions": [rows[c] for c in CONDITIONS if c in rows],
+            "per_injection_task": rep["per_injection_task"],
+            "significance_p_values": {
+                "asr": _pairwise(rows, "attacks_won"),
+                "obedience": _pairwise(rows, "acted_on_payload"),
+                "engagement": _pairwise(rows, "payload_engaged"),
+            },
+        }
+
+    pooled: dict[str, Any] = {}
+    for c in CONDITIONS:
+        parts = [
+            r for s in suites.values() for r in s["conditions"] if r["condition"] == c
+        ]
+        if not parts:
+            continue
+        n = sum(r["n"] for r in parts)
+        acted = sum(r["acted_on_payload"] for r in parts)
+        engaged = sum(r["payload_engaged"] for r in parts)
+        pooled[c] = {
+            "n": n,
+            "attacks_won": sum(r["attacks_won"] for r in parts),
+            "asr": round(100 * sum(r["attacks_won"] for r in parts) / n, 1),
+            "acted_on_payload": acted,
+            "obedience_rate": round(100 * acted / n, 1),
+            "payload_engaged": engaged,
+            "conversion_to_action": round(100 * acted / engaged, 1) if engaged else None,
+            "hit_iteration_cap": sum(r["hit_iteration_cap"] for r in parts),
+        }
+
+    return {
+        "benchmark": "agentdojo",
+        "benchmark_version": benchmark_version,
+        "attack": attack,
+        "suites": suites,
+        "pooled": pooled,
+        "significance_p_values": {
+            "method": two_proportion_p.__doc__.strip().splitlines()[0],
+            "asr": _pairwise(pooled, "attacks_won"),
+            "obedience": _pairwise(pooled, "acted_on_payload"),
+            "engagement": _pairwise(pooled, "payload_engaged"),
+        },
+        "problems": problems,
+    }
+
+
 def estimate(suite, user_tasks, injection_tasks, conditions) -> dict[str, Any]:
     nu = len(user_tasks or suite.user_tasks)
     ni = len(injection_tasks or suite.injection_tasks)
@@ -660,6 +767,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="re-derive obedience from an existing logdir and exit; calls nothing",
     )
+    ap.add_argument(
+        "--report",
+        default=None,
+        help="comma-separated suites; derives the full published report "
+        "(per-suite, pooled, p-values) from an existing logdir. Calls nothing.",
+    )
     args = ap.parse_args(argv)
 
     load_dotenv()
@@ -681,6 +794,24 @@ def main(argv: list[str] | None = None) -> int:
     suite = get_suite(args.benchmark_version, args.suite)
     user_tasks = args.user_tasks.split(",") if args.user_tasks else None
     injection_tasks = args.injection_tasks.split(",") if args.injection_tasks else None
+
+    if args.report:
+        logdir = pathlib.Path(args.logdir) if args.logdir else _REPO / ".agentdojo-runs"
+        if not logdir.exists():
+            raise SystemExit(f"no run logs at {logdir}; run with --live first")
+        names = [x.strip() for x in args.report.split(",") if x.strip()]
+        rep = build_report(logdir, names, args.attack, args.benchmark_version)
+        if rep["problems"]:
+            print("WARNING: the report is not clean:")
+            for problem in rep["problems"]:
+                print(f"  - {problem}")
+        print(json.dumps(rep, indent=2))
+        if args.out:
+            pathlib.Path(args.out).write_text(
+                json.dumps(rep, indent=2) + "\n", encoding="utf-8"
+            )
+            print(f"wrote {args.out}")
+        return 0
 
     if args.analyze:
         logdir = pathlib.Path(args.logdir) if args.logdir else _REPO / ".agentdojo-runs"
