@@ -1,5 +1,9 @@
 # Provider layer — one plan, front and back
 
+> **All four phases landed 2026-09-13.** What the work actually found is at
+> the bottom, under *What shipped*; the plan below is kept as written so the
+> predictions can be read against the outcome.
+
 **Goal.** Adding a provider should be filling in a form, not filling in a form
 and then discovering over the following weeks which code paths it breaks.
 
@@ -167,3 +171,40 @@ This does not make every provider work. It makes every provider's
 suite, and shown in the UI as what they are. A provider that genuinely cannot
 do tool calls will still not do tool calls; it will simply say so before you
 build a workflow on it.
+
+---
+
+## What shipped
+
+| phase | commit | outcome |
+|---|---|---|
+| 1 — static conformance | `8f6a86fa` | Its first assertion found **Perplexity** broken the same way Google and Z.AI had been: a declared base URL silently extended to `/v1`. Fixed the rule instead of adding a third vendor exemption — a URL Kazma ships is now used verbatim. |
+| 1b — live probes | `30aca560` | Four probes per provider. Found **three bugs in the harness itself**, including a 16-token budget that reported a working provider as broken because `glm-5.3` spends reasoning tokens before emitting content. |
+| 2 — capability schema | `c9a41fa9` | `api_style`, `system_role`, `supports{}`, `max_context`. `None` means *not verified* and is a first-class value; a `None` becomes a `bool` only by running the live probes. Z.AI promoted from a hand-typed custom entry to a preset. |
+| 3 — the UI | `d59b9458` | Test sends a real completion and reports three states. The frontend can finally express *reachable but chat failing*. |
+| 4 — consolidation | `a02e3fa1` | One shared probe. **Phase 3's fix had landed in the endpoint the UI does not call** — the duplication cost exactly what this plan predicted, during the refactor meant to fix it. |
+
+### What the plan got right
+
+Ordering conformance first. Phase 1 paid for itself on its first assertion,
+before any refactor existed to justify, and every later phase had a failing
+test to satisfy rather than a hope.
+
+### What it missed
+
+That the duplicate route would bite *during* the work rather than after it.
+The plan listed consolidation last as drift prevention; it was actually a
+correctness bug already in flight, and Phase 3 shipped into the wrong endpoint
+because of it. Checking which route the frontend calls belonged in Phase 0.
+
+### Still open
+
+- **The ~40 vendor branches in `llm_provider.py` are not deleted yet.** The
+  schema that replaces them exists and the URL inference is gone; the
+  remaining branches are behavioural and want the live probes run against
+  each provider first, so the replacements are measured rather than assumed.
+- **Most capabilities are still `None`.** That is the honest state: they
+  become booleans by running `scripts/provider_conformance.py --live`
+  per provider, which costs pennies and a key. Only `zai` has measured values.
+- **The UI does not yet render capability badges.** The data is there;
+  the mockup shows the target.
