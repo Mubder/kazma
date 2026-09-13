@@ -135,6 +135,14 @@ PROVIDERS: dict[str, dict[str, str]] = {
         "key_env": "",
         "default_model": "qwen2.5:7b",
     },
+    # Z.AI serves its OpenAI-compatible API at /v4, not /v1. Written out in
+    # full here rather than relying on normalisation, because appending /v1 to
+    # it 404s every call -- the bug fixed in url_utils on 2026-09-13.
+    "zai": {
+        "base_url": "https://api.z.ai/api/paas/v4",
+        "key_env": "Z_AI_API_KEY",
+        "default_model": "glm-5.3-flash",
+    },
 }
 
 
@@ -204,7 +212,37 @@ def build_llm(provider: str, model: str | None, temperature: float):
             "this script reads .env but never writes it."
         )
     client = OpenAI(base_url=spec["base_url"], api_key=api_key or "unused")
+    _accept_only_standard_roles(client)
     return OpenAILLM(client, model or spec["default_model"], temperature=temperature)
+
+
+def _accept_only_standard_roles(client) -> None:
+    """Rewrite the ``developer`` role to ``system`` on the way out.
+
+    AgentDojo emits OpenAI's newer ``developer`` role for the system turn.
+    Z.AI (GLM) rejects it outright with ``400 Incorrect role information``,
+    which surfaces as every single run failing for a reason that looks like a
+    key or URL problem and is neither.
+
+    Rewriting the role is a transport detail, not a change to the experiment:
+    the text of the system turn, and its position, are untouched. Doing it here
+    rather than patching AgentDojo keeps the benchmark's own code the version
+    upstream ships.
+    """
+    original = client.chat.completions.create
+
+    def create(**kwargs):
+        messages = kwargs.get("messages")
+        if messages:
+            patched = []
+            for msg in messages:
+                if isinstance(msg, dict) and msg.get("role") == "developer":
+                    msg = {**msg, "role": "system"}
+                patched.append(msg)
+            kwargs["messages"] = patched
+        return original(**kwargs)
+
+    client.chat.completions.create = create
 
 
 # ── the three pipelines ─────────────────────────────────────────────────────
@@ -229,6 +267,7 @@ _KAZMA_SYSTEM_SUFFIX = (
 _MODEL_NAME_KEY: dict[str, str | None] = {
     "ollama": "local",
     "deepseek": None,
+    "zai": None,
     "groq": None,
     "openrouter": None,
     "openai": None,  # resolved from the actual model id below
