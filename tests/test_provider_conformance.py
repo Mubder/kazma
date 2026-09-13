@@ -318,3 +318,140 @@ class TestThereIsOnlyOneProbe:
         assert not raises, f"the probe can raise ({len(raises)} raise statements)"
         handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]
         assert handlers, "the probe has no exception handling at all"
+
+
+# ── the page has to actually show it ───────────────────────────────────────
+
+
+class TestTheThreeStatesReachTheBrowser:
+    """The probe returned `reachable`/`chat_ok` for a while and the page still
+    showed two states, because FastAPI serialises the Test route through
+    `ProviderTestResponse` and **drops every field the model does not
+    declare**. The data was correct, the contract silently deleted it, and no
+    test noticed because every test checked the function's return value rather
+    than the response body."""
+
+    def test_the_response_model_keeps_the_chat_fields(self):
+        from kazma_ui.models import ProviderTestResponse
+
+        dumped = ProviderTestResponse(
+            success=False,
+            latency_ms=12,
+            reachable=True,
+            chat_ok=False,
+            error="Reachable, but chat is failing.",
+        ).model_dump()
+
+        assert dumped["reachable"] is True
+        assert dumped["chat_ok"] is False
+
+    def test_a_working_result_keeps_what_answered(self):
+        from kazma_ui.models import ProviderTestResponse
+
+        dumped = ProviderTestResponse(
+            success=True, latency_ms=40, reachable=True, chat_ok=True,
+            chat_ms=310, chat_model="glm-4.5",
+        ).model_dump()
+
+        assert dumped["chat_ms"] == 310
+        assert dumped["chat_model"] == "glm-4.5"
+
+    def test_chat_failure_gets_its_own_health_value(self):
+        """`degraded` is also what a failing model list writes. Storing both
+        under one label loses the distinction on the next page load, which is
+        exactly when an operator needs it."""
+        import inspect
+
+        from kazma_core import settings_providers
+        from kazma_ui import providers as ui_providers
+
+        for module in (settings_providers, ui_providers):
+            src = inspect.getsource(module)
+            assert '"chat_failing"' in src, (
+                f"{module.__name__} still collapses chat failure into 'degraded'"
+            )
+
+
+class TestTheProviderListCarriesCapabilities:
+    """Badges cannot render from data the API never sends."""
+
+    def test_the_list_route_attaches_declared_capabilities(self):
+        import inspect
+
+        from kazma_ui import providers as ui_providers
+
+        src = inspect.getsource(ui_providers)
+        assert 'entry["capabilities"]' in src, (
+            "/api/providers does not send capabilities, so the UI has nothing to render"
+        )
+
+    def test_capabilities_keep_unknowns_as_null(self):
+        """`None` must survive to JSON as `null`. A `False` here would be an
+        assumption wearing a schema."""
+        from kazma_core.providers import capabilities
+
+        caps = capabilities("openrouter")
+        assert caps["supports"]["streaming"] is None
+        assert caps["supports"]["streaming"] is not False
+
+
+class TestTheSettingsPageRendersTheStates:
+    """The template is the surface the operator sees. Everything above this is
+    plumbing that, until now, ended in a pipe with no tap on it."""
+
+    @staticmethod
+    def _html() -> str:
+        from pathlib import Path
+
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "templates" / "settings.html"
+        )
+        assert path.exists(), "settings.html is gone"
+        return path.read_text(encoding="utf-8")
+
+    def test_the_card_paints_a_state_pill(self):
+        html = self._html()
+        assert "providerState(p)" in html
+        assert "state-pill" in html
+
+    def test_the_card_renders_capability_badges(self):
+        html = self._html()
+        assert "providerCapabilities(p)" in html
+        assert "cap-badge" in html
+
+    def test_chat_failing_comes_with_something_to_do_about_it(self):
+        """An amber pill that does not say what to change is a nicer way of
+        saying nothing."""
+        html = self._html()
+        assert "note-fix" in html
+        assert "providerState(p) === 'chat_failing'" in html
+
+    def test_the_result_lands_on_the_card_that_was_tested(self):
+        from pathlib import Path
+
+        js = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "static" / "js" / "settings_hub.js"
+        ).read_text(encoding="utf-8")
+        assert "card._test = outcome" in js, (
+            "one shared result line cannot say which of six providers failed"
+        )
+
+    def test_the_styles_exist_for_every_state(self):
+        from pathlib import Path
+
+        css = (
+            Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
+        ).read_text(encoding="utf-8")
+        for cls in (
+            ".state-pill.state-working",
+            ".state-pill.state-chat_failing",
+            ".state-pill.state-unreachable",
+            ".state-pill.state-untested",
+            ".cap-badge.cap-yes",
+            ".cap-badge.cap-no",
+            ".cap-badge.cap-unknown",
+        ):
+            assert cls in css, f"{cls} has no styling, so it renders as the default"

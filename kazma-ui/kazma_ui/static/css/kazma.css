@@ -3424,6 +3424,153 @@ details.kazma-working > summary {
   flex-wrap: wrap;
   flex-shrink: 0;
 }
+/* State pill — three outcomes plus "nobody has checked".
+   Semantic colour only; the accent hue stays reserved for actions. */
+.state-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--tint-strong);
+  white-space: nowrap;
+}
+.state-pill .state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.state-pill.state-working {
+  color: var(--success);
+  background: var(--success-subtle);
+  border-color: var(--success-subtle);
+}
+.state-pill.state-chat_failing {
+  color: var(--warning);
+  background: var(--warning-subtle);
+  border-color: var(--warning-subtle);
+}
+.state-pill.state-unreachable {
+  color: var(--danger);
+  background: var(--danger-subtle);
+  border-color: var(--danger-subtle);
+}
+/* "Not tested" is deliberately quiet — it is an absence of evidence, not a
+   problem, and painting it amber would teach operators to ignore amber. */
+.state-pill.state-untested {
+  color: var(--text-muted);
+}
+
+/* Declared wire facts: how Kazma talks to this provider. */
+.provider-wire-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 2px;
+}
+.wire-fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 0.7rem;
+}
+.wire-fact-label {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.62rem;
+}
+.wire-fact-value {
+  font-family: var(--font-mono);
+  color: var(--text-secondary, var(--text-muted));
+}
+
+/* Capability badges. Three states, and "unknown" must not look like "no" —
+   an unmeasured capability rendered as a cross is the assumption this schema
+   exists to stop. */
+.provider-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+.cap-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 0.66rem;
+  border: 1px solid var(--border);
+  background: var(--tint);
+  color: var(--text-muted);
+  cursor: help;
+}
+.cap-badge .cap-mark {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+.cap-badge.cap-yes {
+  color: var(--success);
+  border-color: var(--success-subtle);
+  background: var(--success-subtle);
+}
+.cap-badge.cap-no {
+  color: var(--danger);
+  border-color: var(--danger-subtle);
+  background: var(--danger-subtle);
+}
+.cap-badge.cap-unknown {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+
+/* Per-card test result. */
+.provider-test-note {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  background: var(--tint);
+  font-size: 0.75rem;
+}
+.provider-test-note .note-headline {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.provider-test-note .note-detail {
+  color: var(--text-muted);
+  word-break: break-word;
+}
+.provider-test-note .note-fix {
+  margin-top: 6px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.provider-test-note.note-working {
+  border-left-color: var(--success);
+}
+.provider-test-note.note-working .note-headline { color: var(--success); }
+.provider-test-note.note-chat_failing {
+  border-left-color: var(--warning);
+  background: var(--warning-subtle);
+}
+.provider-test-note.note-chat_failing .note-headline { color: var(--warning); }
+.provider-test-note.note-unreachable {
+  border-left-color: var(--danger);
+  background: var(--danger-subtle);
+}
+.provider-test-note.note-unreachable .note-headline { color: var(--danger); }
+
 .provider-card .discovered-models-panel {
   width: 100%;
   min-width: 0;

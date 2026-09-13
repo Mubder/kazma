@@ -305,6 +305,39 @@ def _short(exc: Exception, n: int = 90) -> str:
 PROBES = (probe_models, probe_chat, probe_system_turn, probe_tools)
 
 
+async def _first_served_model(client) -> str:
+    """Ask the provider which models it serves, and take one.
+
+    Without this the probe inherits whatever model the registry happens to
+    hold globally -- `deepseek-flash` on this install -- and sends it to every
+    provider. All three then fail with "unknown model", which says nothing
+    about the provider and everything about the probe. An operator should not
+    have to know a provider's model IDs to ask whether it works.
+    """
+    import httpx
+
+    cfg = client.config
+    base = (cfg.base_url or "").rstrip("/")
+    key = cfg.api_key or ""
+    try:
+        async with httpx.AsyncClient(timeout=20) as http:
+            resp = await http.get(
+                f"{base}/models",
+                headers={"Authorization": f"Bearer {key}"} if key else {},
+            )
+        if resp.status_code != 200:
+            return ""
+        payload = resp.json()
+        rows = payload.get("data", payload) or []
+        for row in rows:
+            mid = row.get("id") if isinstance(row, dict) else str(row)
+            if mid:
+                return str(mid)
+    except Exception:
+        return ""
+    return ""
+
+
 async def run_provider(provider: str, model: str | None) -> ProviderReport:
     client = _client_for(provider, model)
     report = ProviderReport(provider=provider)
@@ -313,7 +346,16 @@ async def run_provider(provider: str, model: str | None) -> ProviderReport:
             "resolve_client", FAIL,
             f"no usable key (set {env_key_for(provider)})"))
         return report
-    report.model = str(getattr(getattr(client, "config", None), "model", "") or "?")
+
+    cfg = getattr(client, "config", None)
+    if not model:
+        # Only when the caller did not pin one: an explicit --model is a
+        # question about that model and must not be silently replaced.
+        discovered = await _first_served_model(client)
+        if discovered and cfg is not None:
+            cfg.model = discovered
+    report.model = str(getattr(cfg, "model", "") or "?")
+
     for probe in PROBES:
         report.probes.append(await probe(client))
     return report

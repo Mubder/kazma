@@ -223,6 +223,22 @@ CAPABILITY_OVERRIDES: dict[str, dict[str, object]] = {
         "system_role": "system",
         "supports": {"tools": True, "streaming": None, "json_mode": None, "vision": None},
     },
+    # Measured 2026-09-13 against a local ollama serving mistral:7b — model
+    # list, chat, system turn and tool calling all pass. Tool support here is
+    # per-model in practice (a model without a tool template will refuse), so
+    # this records what the *endpoint* accepts, which is the question the
+    # transport asks.
+    "ollama": {
+        "system_role": "system",
+        "supports": {"tools": True, "streaming": None, "json_mode": None, "vision": None},
+    },
+    # Deliberately NOT recorded: openrouter. The conformance run on
+    # 2026-09-13 failed system_turn and tool_call, but it had auto-picked
+    # `inference-net/schematron-v2-turbo` — a niche model that ignores the
+    # system turn and whose upstream serves no tool endpoint. That is a fact
+    # about one model, not about OpenRouter, and writing it here would be the
+    # same guessing this table exists to replace. Re-run pinned to a
+    # mainstream model to fill it in.
 }
 
 

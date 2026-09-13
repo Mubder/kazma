@@ -90,10 +90,11 @@ def _is_secret_key(key: str) -> bool:
 
 
 # The probe lives in kazma_core.provider_probe so that this route and
-# /api/settings/providers/{name}/test -- which is the one the Settings page
-# actually calls -- cannot drift apart again. Fixing only this copy changed
-# nothing an operator would ever see.
+# /api/settings/providers/{name}/test cannot drift apart again. Two routes
+# both offer "Test"; the Settings page reaches this one, and a fix applied to
+# only one of them changes nothing an operator would ever see.
 from kazma_core.provider_probe import probe_chat_completion as _probe_chat_completion
+from kazma_core.providers import capabilities as _provider_capabilities
 
 
 def _activate_tested_provider(registry: Any, name: str) -> None:
@@ -199,6 +200,11 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                 entry["all_models"] = entry.get("models", [])
             entry["selected_models"] = selected
             entry["visible_models"] = registry.get_visible_models(name)
+            # What the provider layer *declares* about this provider, so the
+            # page can show it instead of the operator finding out from a 400.
+            # `None` inside `supports` means NOT VERIFIED and the UI renders it
+            # as such — it is not a quiet "no".
+            entry["capabilities"] = _provider_capabilities(name)
             providers.append(entry)
         return providers
 
@@ -378,7 +384,11 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                             str(provider.get("model") or ""),
                         )
                         if not chat["ok"]:
-                            registry.set_provider_health(name, "degraded")
+                            # Its own health value, not "degraded". "Degraded"
+                            # is also what a failing model list writes, and
+                            # collapsing the two loses the distinction the
+                            # moment the page reloads.
+                            registry.set_provider_health(name, "chat_failing")
                             return {
                                 "success": False,
                                 "latency_ms": latency,

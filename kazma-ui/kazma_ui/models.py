@@ -211,11 +211,30 @@ class ConnectorUpdateRequest(BaseModel):
 
 
 class ProviderTestResponse(BaseModel):
-    """Response from a non-destructive LLM provider health check."""
+    """Response from a non-destructive LLM provider health check.
+
+    ``reachable`` and ``chat_ok`` are the two halves of the check and they are
+    not the same question. A provider whose model list answers while a real
+    completion 404s is reachable and not working, and the page has to be able
+    to say so.
+
+    These fields are declared here for a blunt reason: FastAPI serialises
+    through this model and *drops* anything undeclared. The probe had been
+    returning ``reachable``/``chat_ok`` for a while and none of it reached the
+    browser, so the three-state UI could never have rendered.
+    """
 
     success: bool
     latency_ms: int | None = None
     error: str | None = None
+    #: The model list answered. Not a claim that the provider works.
+    reachable: bool | None = None
+    #: A real completion came back on the path the product uses.
+    chat_ok: bool | None = None
+    #: Round-trip of that completion, in ms.
+    chat_ms: int | None = None
+    #: The model the provider says it served, which need not be the one asked for.
+    chat_model: str | None = None
 
 
 class ConnectorTestResponse(BaseModel):

@@ -115,7 +115,10 @@ class ProviderSettingsService:
                 base_url, api_key, str(provider.get("model") or "")
             )
             if not chat["ok"]:
-                self._update_provider_health(name, "degraded")
+                # Distinct from "degraded", which a failing model list also
+                # writes. Two causes under one label is a distinction lost on
+                # the next page load.
+                self._update_provider_health(name, "chat_failing")
                 return {
                     "success": False,
                     "latency_ms": latency,

@@ -183,6 +183,7 @@ build a workflow on it.
 | 2 — capability schema | `c9a41fa9` | `api_style`, `system_role`, `supports{}`, `max_context`. `None` means *not verified* and is a first-class value; a `None` becomes a `bool` only by running the live probes. Z.AI promoted from a hand-typed custom entry to a preset. |
 | 3 — the UI | `d59b9458` | Test sends a real completion and reports three states. The frontend can finally express *reachable but chat failing*. |
 | 4 — consolidation | `a02e3fa1` | One shared probe. **Phase 3's fix had landed in the endpoint the UI does not call** — the duplication cost exactly what this plan predicted, during the refactor meant to fix it. |
+| 5 — rendering | this commit | The page now paints the three states, capability badges, and the declared wire facts. Found that **none of Phase 3's data had ever reached the browser**: FastAPI serialises the Test route through `ProviderTestResponse`, which did not declare `reachable` or `chat_ok`, so the response model silently deleted both. Every test checked the function's return value; nothing checked the response body. |
 
 ### What the plan got right
 
@@ -197,6 +198,13 @@ The plan listed consolidation last as drift prevention; it was actually a
 correctness bug already in flight, and Phase 3 shipped into the wrong endpoint
 because of it. Checking which route the frontend calls belonged in Phase 0.
 
+And that "the backend returns it" is not the same claim as "the browser
+receives it". Phase 3 was marked done on a function that returned the right
+dictionary; the response model in front of it dropped two of the fields, and
+the gap survived a whole phase because the operator's question — *what does
+the page show?* — was never the question any test asked. Phase 5 exists
+because the user asked exactly that question and the answer was "nothing".
+
 ### Still open
 
 - **The ~40 vendor branches in `llm_provider.py` are not deleted yet.** The
@@ -205,6 +213,12 @@ because of it. Checking which route the frontend calls belonged in Phase 0.
   each provider first, so the replacements are measured rather than assumed.
 - **Most capabilities are still `None`.** That is the honest state: they
   become booleans by running `scripts/provider_conformance.py --live`
-  per provider, which costs pennies and a key. Only `zai` has measured values.
-- **The UI does not yet render capability badges.** The data is there;
-  the mockup shows the target.
+  per provider, which costs pennies and a key. Measured so far: `zai`
+  (glm-4.5 — chat, system turn, tools) and `ollama` (mistral:7b — same four).
+  OpenRouter was probed and deliberately **not** recorded: the run auto-picked
+  `inference-net/schematron-v2-turbo`, which ignores the system turn and has
+  no tool endpoint upstream. That is a fact about one model, and writing it
+  into the provider table would be the guessing this table exists to replace.
+- **`this.providers` / `testProvider()` in `settings_hub.js` are dead.** They
+  call `/api/settings/providers` and no template renders them; the page runs
+  entirely on the `hub*` set. One of the two should go.

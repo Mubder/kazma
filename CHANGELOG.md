@@ -1,5 +1,50 @@
 # CHANGELOG
 
+## The provider page showed two states while the backend measured three (2026-09-13)
+
+Kazma's Test button had been sending a real completion for several commits,
+and could tell *reachable* (the model list answers) from *working* (a message
+comes back). The Settings page showed none of it. The operator asked why the
+UI hadn't changed, and the answer was worse than "not done yet":
+
+```python
+class ProviderTestResponse(BaseModel):
+    success: bool
+    latency_ms: int | None = None
+    error: str | None = None
+```
+
+FastAPI serialises the Test route through that model and **drops every field
+it does not declare**. `reachable`, `chat_ok`, `chat_ms` and `chat_model` were
+computed, returned, and deleted on the way out. Every test checked what the
+route function returned; none checked the response body, so the deletion was
+invisible for a whole phase.
+
+What the page shows now, per provider card:
+
+- **A state pill with four values** — Working / Chat failing / Unreachable /
+  Not tested. "Not tested" is its own state: nobody has looked, and painting
+  that as a failure invents one.
+- **Capability badges** — tools, streaming, JSON mode, vision, each in three
+  states. An unverified capability renders as `?` with a dashed border, never
+  as a cross. `null` and `false` are different claims and the badge says which.
+- **The declared wire facts** — API style and the role name used for the
+  system turn. Both were guessed inside the transport until providers started
+  rejecting the guess with a 400.
+- **The test result on the card that was tested**, with a fix line for the
+  chat-failing case: the model list answering means the key and host are fine,
+  so the base URL's version segment and the selected model are what to check.
+
+Chat failure also stopped being stored as `degraded`, which is what a failing
+*model list* writes too. Two causes under one label is a distinction lost on
+the next page load — exactly when an operator needs it.
+
+Capabilities measured and recorded this round: `zai` (glm-4.5) and `ollama`
+(mistral:7b) — chat, system turn and tool calling pass on both. OpenRouter was
+probed and deliberately not recorded; the run auto-picked a niche model whose
+upstream serves no tool endpoint, which is a fact about that model rather than
+about OpenRouter.
+
 ## "Error:" was a complete prompt-fence bypass (2026-09-13)
 
 `fence_untrusted` passed content through **unfenced** whenever it began with

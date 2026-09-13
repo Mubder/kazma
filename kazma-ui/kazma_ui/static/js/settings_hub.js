@@ -300,8 +300,16 @@
             try {
                 const raw = await this._fetch('/api/providers');
                 if (!raw) throw new Error('providers unavailable');
+                // Carry test results across the reload that Toggle/Discover
+                // trigger — otherwise pressing any other button on the card
+                // erases the answer the operator just asked for.
+                const previous = {};
+                (this.hubProviders || []).forEach(function (p) {
+                    if (p && p._test) previous[p.name] = p._test;
+                });
                 // Normalize so Alpine x-for always gets string arrays
                 this.hubProviders = (Array.isArray(raw) ? raw : []).map(function (p) {
+                    if (previous[p.name]) p._test = previous[p.name];
                     var disc = p.discovered_models;
                     if (!Array.isArray(disc)) disc = [];
                     p.discovered_models = disc.map(function (m) {
@@ -786,6 +794,7 @@
         async testHubProvider(name) {
             this.hubTestingProvider = name;
             this.hubTestResult = { type: 'provider' };
+            let outcome;
             try {
                 const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/test`, { method: 'POST' });
                 const result = await resp.json();
@@ -794,11 +803,40 @@
                 if (typeof errorMsg === 'object') {
                     errorMsg = JSON.stringify(errorMsg);
                 }
-                this.hubTestResult = { type: 'provider', success, error: errorMsg, ...result };
+                outcome = { type: 'provider', source: 'card', success, error: errorMsg, ...result };
             } catch (e) {
-                this.hubTestResult = { type: 'provider', success: false, error: e.message };
+                outcome = { type: 'provider', source: 'card', success: false, error: e.message };
             }
+            this.hubTestResult = outcome;
+            // Also pin it to the card it belongs to. One shared result line at
+            // the bottom of the list cannot say *which* of six providers just
+            // failed, and the answer is the whole point of pressing Test.
+            const card = this.hubProviders.find(x => x.name === name);
+            if (card) card._test = outcome;
             this.hubTestingProvider = null;
+        },
+
+        /** @returns {'working'|'chat_failing'|'unreachable'|'untested'} */
+        providerState(p) {
+            return ProvidersManager.cardState(p, p && p._test);
+        },
+
+        providerStateLabel(p) {
+            return ProvidersManager.STATE_LABELS[this.providerState(p)] || 'Not tested';
+        },
+
+        /** The one line under the pill: what the last test actually found. */
+        providerStateDetail(p) {
+            if (!p || !p._test) return '';
+            return ProvidersManager.describe(p._test).detail || '';
+        },
+
+        providerCapabilities(p) {
+            return ProvidersManager.capabilityBadges(p);
+        },
+
+        providerWireFacts(p) {
+            return ProvidersManager.wireFacts(p);
         },
 
         async testHubProviderFromModal() {
@@ -844,7 +882,7 @@
                 if (typeof errorMsg === 'object') {
                     errorMsg = JSON.stringify(errorMsg);
                 }
-                this.hubTestResult = { type: 'provider', success, error: errorMsg, ...result };
+                this.hubTestResult = { type: 'provider', source: 'modal', success, error: errorMsg, ...result };
                 this.hubProviderTested = true; // attempt completed: enable save
                 if (success) {
                     showToast('Connection test succeeded', 'success');
@@ -852,7 +890,7 @@
                     showToast(`Test failed: ${errorMsg}`, 'error');
                 }
             } catch (e) {
-                this.hubTestResult = { type: 'provider', success: false, error: e.message };
+                this.hubTestResult = { type: 'provider', source: 'modal', success: false, error: e.message };
                 this.hubProviderTested = true; // attempt completed on exception: enable save
                 showToast('Test failed: ' + e.message, 'error');
             }
