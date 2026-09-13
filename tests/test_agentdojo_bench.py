@@ -548,7 +548,6 @@ def test_the_statistics_come_from_committed_code(bench, _dojo):
     reproduce a single p-value on the page. `--report` closes that, and this
     test is what stops it drifting open again.
     """
-    import pathlib
 
     logdir = _REPO / ".agentdojo-runs"
     if not logdir.exists():
