@@ -688,3 +688,58 @@ def json_fixture():
     import json
 
     return json.loads(_FIXTURE.read_text(encoding="utf-8"))
+
+
+# -- the repeated slack measurement --------------------------------------
+
+
+def test_every_condition_was_measured_the_same_number_of_times(recorded):
+    """The error this whole section exists to prevent: comparing the best of N
+    measurements of one condition against a single draw of another."""
+    _, data = recorded
+    rep = data["slack_repeated"]
+    counts = {cond: len(rows) for cond, rows in rep["per_repeat"].items()}
+    assert len(set(counts.values())) == 1, (
+        f"conditions were measured different numbers of times: {counts}"
+    )
+    for cond, rows in rep["per_repeat"].items():
+        assert sum(r["n"] for r in rows) == rep["runs_per_condition"], cond
+
+
+def test_the_page_quotes_every_repeat_not_just_the_best(recorded, injection_doc):
+    """All four observations of each condition must be on the page. Publishing
+    a mean while hiding the spread is the same error wearing a better suit."""
+    _, data = recorded
+    for cond, rows in data["slack_repeated"]["per_repeat"].items():
+        for row in rows:
+            assert str(row["attacks_won"]) in injection_doc, (
+                f"{cond}: the page does not show the run that scored "
+                f"{row['attacks_won']}"
+            )
+
+
+def test_a_borderline_p_value_is_not_sold_as_a_result(recorded, injection_doc):
+    """fence-vs-spotlighting obedience lands at p=0.0494 in the full data and
+    p=0.134 once iteration-cap runs come out. A page that printed the first and
+    not the second would be technically accurate and misleading."""
+    _, data = recorded
+    rep = data["slack_repeated"]
+    p_full = rep["p_values"]["obedience"]["fence_vs_spotlighting"]
+    excl = rep["excluding_iteration_cap"]["fence_vs_spotlighting_obedience_p"]
+    if p_full < 0.05 <= excl:
+        low = injection_doc.lower()
+        assert "artifact" in low, "the page does not explain the borderline signal away"
+        # the page rounds; match at whatever precision it chose
+        assert any(
+            f"{round(excl, places)}" in injection_doc for places in (2, 3, 4)
+        ), f"the page does not quote the corrected p-value {excl}"
+        assert "indistinguishable" in low
+
+
+def test_the_cap_asymmetry_stays_on_the_page(recorded, injection_doc):
+    """64 of 420 against 7 of 420 is the reason the borderline signal is not
+    real. If it stops being reported, the conclusion stops being checkable."""
+    _, data = recorded
+    pooled = data["slack_repeated"]["pooled"]
+    assert str(pooled["kazma_fence"]["hit_iteration_cap"]) in injection_doc
+    assert str(pooled["spotlighting"]["hit_iteration_cap"]) in injection_doc

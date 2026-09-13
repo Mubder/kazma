@@ -57,26 +57,31 @@ points, and the study that would settle it has a known price.
 → `docs/INJECTION.md`, section 4, "Does the social-framing wording earn its
 place?"
 
-**The published fence figures are the best of four measurements; the baselines
-were measured once.** `slack` has four runs of the byte-identical shipped fence
-(14, 16, 20, 16 attacks won of 105) and exactly one run each of `none` and
-`spotlighting`. The page published 14 — the minimum. On the fence's four-run
-mean of 15.7% it is **behind** spotlighting's 13.3% on that cell, not tied, and
-the conversion "mechanism" (58.1% against 68.4%) pools to 68.0% against 68.4%
-and disappears. Repeats of both baselines are running; until they land, every
-fence-versus-spotlighting comparison on that page is provisional and is marked
-as such. The noise floor was measured and then not applied to our own headline,
-which is the same error as not measuring it.
+**~~The published fence figures are the best of four measurements.~~** Closed
+2026-09-13 by repeating every condition four times on `slack`. All three
+single runs had been low draws — undefended 27 against a 25.5% mean,
+spotlighting 14 against 16.4%, the fence 14 against 15.7%. With 420 runs per
+condition both defenses beat undefended robustly (ASR p = 0.0005 and
+p = 0.0013) and the fence and spotlighting are **indistinguishable** on every
+cut. Spotlighting's own spread is 7.6 points, wider than the 5.7 measured on
+the fence: the band belongs to the harness, not the defense, and had only
+been measured on one condition.
+
+**`banking` is still a single run per condition.** It is the suite that
+favours the fence (4.9% against spotlighting's 9.7%), which is exactly the
+reason not to lean on it until it has been repeated the way `slack` now has.
 
 **The fence hits AgentDojo's iteration cap far more often than the baselines,
-and those runs score as defensive wins.** On `slack`: 17/105 fenced runs
-exhausted `max_iters=15` against 2/105 undefended and 0/105 spotlighting — the
-fence adds ~800 characters per tool result, so fenced conversations are ~2.8x
-longer and run out of turns. A capped run defended nothing; it ran out of
-budget. Excluding them the fence's `slack` ASR is 15.9% rather than 13.3%.
-`--analyze` now reports `hit_iteration_cap` and `asr_excluding_capped` per
-condition; neither figure is excluded from the headline, because dropping runs
-would be its own thumb on the scale.
+and those runs score as defensive wins.** Over 420 `slack` runs the fence
+exhausted `max_iters=15` **64 times** against spotlighting's 7 and
+undefended's 5 — it adds ~800 characters per tool result, so its
+conversations run out of turns. A capped run defended nothing and sits in
+the denominator as a clean win. This is not cosmetic: the single sub-0.05
+signal in the repeated data (fence-vs-spotlighting obedience, p = 0.0494)
+falls to **p = 0.134** once capped runs are excluded, and the fence lands
+fractionally behind on ASR. `--analyze` reports `hit_iteration_cap` and
+`asr_excluding_capped`; neither is dropped from the headline, because
+excluding runs would be its own thumb on the scale.
 
 **~~Ollama's context window is not pinned in the benchmark.~~** Closed
 2026-09-13: measured rather than assumed. Ollama reported serving

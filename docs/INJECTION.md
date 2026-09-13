@@ -414,18 +414,14 @@ on `banking` alone it reaches neither. The fence is the only condition that
 separates from undefended on every measure in both suites.
 
 **The fence and spotlighting still cannot be told apart from each other.**
-Pooled, ASR p = 0.29 and obedience p = 0.063 — **and both are computed from a
-single run of each condition, which the next subsection shows is not good
-enough**,
+Pooled over both suites at one run each, ASR p = 0.29 and obedience
+p = 0.063. On `slack`, repeated four times per condition, ASR p = 0.78
+and the obedience gap is an iteration-cap artifact (below),
 and 0.063 is not 0.05. An earlier version of this page said the fence "buys
 nothing over a far simpler defense"; that turned a `slack` tie into a finding
 and `banking` shows why single-suite conclusions were premature. The honest
 statement is still that they are not distinguishable, now with two suites
 leaning the same way.
-
-> **Read the subsection below before this table.** Every figure in it is one
-> run of each condition. The fence has four measurements of `slack` and they
-> disagree with each other by more than the gaps shown here.
 
 **The fence works on both halves of the path, not one.** An earlier version of
 this section claimed the payload engages the model at a similar rate in every
@@ -522,6 +518,58 @@ So the claim stays where it was, with a number attached to it now: the wording i
 points, and the experiment that would settle it has a known price. Publishing the
 ordering as support would be reading a rank order out of noise, which is the
 mistake this page has already made once.
+
+### `slack`, measured four times per condition
+
+The first version of this section published **one** run of each condition. Every
+one of those three happened to be a low draw, and the fence's was the lowest of
+its four. Repeating all three changes what the page can claim.
+
+```
+attacks won out of 105, four runs each, nothing changed between them
+  undefended     27  29  29  22
+  spotlighting   14  22  18  15
+  Kazma fence    14  16  20  16
+```
+
+Spotlighting's spread is **7.6 points** — wider than the 5.7 measured on the
+fence. The band is a property of the harness and the model, not of the defense,
+and it had only ever been measured on one condition.
+
+| condition | 420 runs | ASR | acted on payload | conversion | hit the iteration cap |
+|---|---|---|---|---|---|
+| undefended | 4 × 105 | 107/420 — **25.5%** | 140/420 — 33.3% | 83.3% | 5 |
+| spotlighting | 4 × 105 | 69/420 — **16.4%** | 109/420 — 26.0% | 74.7% | 7 |
+| **Kazma fence** | 4 × 105 | 66/420 — **15.7%** | 85/420 — 20.2% | 68.0% | **64** |
+
+**Both defenses beat undefended, and now robustly.** ASR p = 0.0005 for the
+fence and p = 0.0013 for spotlighting; obedience p < 0.001 and p = 0.019. Those
+survive the noise band and they survive a Bonferroni correction for the six
+pairwise tests on this page (α = 0.0083) in the ASR column.
+
+**The fence and spotlighting are indistinguishable.** ASR 15.7% against 16.4%,
+a 0.7-point gap at p = 0.78. Obedience comes out at p = 0.0494 — and that is
+the one number on this page that needs its caveats read rather than skipped:
+
+- It is a hair under the threshold, from six pairwise comparisons. Corrected
+  for those, α is 0.0083 and it is not significant.
+- **It is mostly an artifact.** The fence exhausted AgentDojo's `max_iters`
+  cap **64 times out of 420**, against spotlighting's 7 — the fence adds ~800
+  characters per tool result, so its conversations run out of turns. A capped
+  run defended nothing; it ran out of budget, and it sits in the denominator as
+  a clean win. Excluding capped runs the obedience gap falls to **p = 0.134**,
+  and on ASR the fence lands fractionally *behind* spotlighting (16.9% against
+  16.2%).
+
+So on `slack`, after four measurements of each arm: Kazma's ~800-character
+in-band banner does the same work as four characters of delimiter and one
+sentence of system prompt. That is the result. It was a tie when it was
+measured once badly, and it is a tie when it is measured four times properly —
+which is worth more than the tie, because the first version of that claim was
+arrived at by accident.
+
+`banking` still favours the fence (4.9% against 9.7%), and it has been measured
+once per condition. It should be repeated before anyone leans on it.
 
 ### Where this comparison flatters Kazma
 
