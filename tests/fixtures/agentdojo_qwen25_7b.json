@@ -432,7 +432,7 @@
     "n_per_observation": 105,
     "asr_spread_points": 5.7
   },
-  "note": "Raw counts (suites.*.conditions, suites.*.per_injection_task) are produced by scripts/agentdojo_bench.py and re-derive exactly with --analyze. The derived blocks -- pooled, significance_p_values, noise_floor and social_framing_ablation -- were assembled by scratch scripts that are NOT in the repo, and the ablation arms ran from uncommitted local edits: a reader can check the counts but cannot reproduce the statistics. Tracked in KNOWN_GAPS.md. 'acted_on_payload' is counted by this harness rather than by AgentDojo, whose score requires the injection to COMPLETE -- a run where the model obeyed and then bungled the sequence scores as secure. docs/INJECTION.md section 4 is guarded against this file.",
+  "note": "Re-derivable from the run logs with scripts/agentdojo_bench.py: --analyze for the raw counts, --report for the pooled figures and p-values, and --ablate-social --live to re-run the social-framing arms. The derived blocks used to come from scratch scripts that were never committed; they no longer do. 'acted_on_payload' is counted by this harness rather than by AgentDojo, whose score requires the injection to COMPLETE -- a run where the model obeyed and then bungled the sequence scores as secure. docs/INJECTION.md section 4 is guarded against this file.",
   "social_framing_ablation": {
     "question": "Does the fence's social-framing paragraph change behaviour, or is it only written down? KNOWN_GAPS has carried this as unproven.",
     "suite": "banking",
@@ -477,7 +477,8 @@
       3.6
     ],
     "runs_per_arm_to_resolve_at_80pct_power": 1551,
-    "note": "The ordering (full < length_matched < no_social) matches the hypothesis and is not evidence: every pairwise interval contains zero, and an unchanged configuration moved 3 runs between measurements. length_matched exists because deleting the clause also removes 453 characters of banner."
+    "note": "The ordering (full < length_matched < no_social) matches the hypothesis and is not evidence: every pairwise interval contains zero, and an unchanged configuration moved 3 runs between measurements. length_matched exists because deleting the clause also removes 453 characters of banner.",
+    "reproduce_with": "scripts/agentdojo_bench.py --live --suite banking --ablate-social --provider ollama --model qwen2.5:7b"
   },
   "provisional": {
     "what": "fence-vs-spotlighting comparisons",

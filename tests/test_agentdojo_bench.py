@@ -588,8 +588,12 @@ def test_the_statistics_come_from_committed_code(bench, _dojo):
 def test_report_calls_nothing(bench):
     """`--report` reads logs. A reviewer must be able to re-derive the page's
     numbers without an API key and without spending GPU time."""
-    src = _SCRIPT.read_text(encoding="utf-8")
-    body = src[src.index("def build_report("):src.index("def estimate(")]
+    import inspect
+
+    # inspect.getsource, not a slice between two def lines -- an earlier version
+    # sliced from build_report to estimate and swept up run_ablation, which
+    # legitimately does call the runner.
+    body = inspect.getsource(bench.build_report)
     for forbidden in ("build_llm", "benchmark_suite_with_injections", "load_attack"):
         assert forbidden not in body, f"build_report touches {forbidden}"
 
@@ -629,3 +633,58 @@ def test_no_condition_approaches_the_serving_context_window(bench, _dojo):
                 f"against a {served_tokens}-token window -- close enough that silent "
                 "truncation may be affecting the result"
             )
+
+
+def test_the_ablation_arms_are_committed_and_reproduce(bench, _dojo):
+    """The social-framing ablation published in docs/INJECTION.md originally ran
+    from uncommitted local edits -- the one experiment testing whether the
+    fence's own wording earns its place could not be re-run by anyone.
+
+    These are now built by the harness, and the banner sizes must still match
+    what was published.
+    """
+    from agentdojo.agent_pipeline.tool_execution import tool_result_to_str
+
+    committed = {
+        a["arm"]: a
+        for a in json_fixture()["social_framing_ablation"]["arms"]
+    }
+    for arm in bench.ABLATION_ARMS:
+        rendered = bench.build_ablation_formatter(arm, tool_result_to_str)("probe")
+        assert len(rendered) == committed[arm]["banner_chars"], (
+            f"{arm}: harness renders {len(rendered)} chars, the published "
+            f"ablation used {committed[arm]['banner_chars']}"
+        )
+
+
+def test_only_the_full_arm_carries_the_social_sentence(bench, _dojo):
+    from agentdojo.agent_pipeline.tool_execution import tool_result_to_str
+
+    carrying = [
+        arm for arm in bench.ABLATION_ARMS
+        if bench._SOCIAL_SENTENCE
+        in bench.build_ablation_formatter(arm, tool_result_to_str)("probe")
+    ]
+    assert carrying == ["full"], f"the social sentence leaked into {carrying}"
+
+
+def test_the_filler_arm_stays_length_matched(bench):
+    """Deleting the clause removes 453 characters. If the filler drifts, the
+    ablation can no longer separate the wording from the banner's bulk and the
+    published conclusion becomes unearned."""
+    delta = abs(len(bench._SOCIAL_SENTENCE) - len(bench._NEUTRAL_FILLER))
+    assert delta <= 5, f"filler is {delta} chars off the sentence it replaces"
+
+
+def test_the_filler_says_nothing_about_authority(bench):
+    """It is a control. If it starts arguing with the attacker it is a second
+    treatment, not a control."""
+    low = bench._NEUTRAL_FILLER.lower()
+    for word in ("authority", "obey", "instruction", "ignore", "polite", "claims to be"):
+        assert word not in low, f"the neutral filler mentions {word!r}"
+
+
+def json_fixture():
+    import json
+
+    return json.loads(_FIXTURE.read_text(encoding="utf-8"))
