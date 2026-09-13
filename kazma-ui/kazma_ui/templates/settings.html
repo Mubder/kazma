@@ -59,15 +59,36 @@
                                 <div class="provider-title-row">
                                     <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
                                     <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? t('common.enabled') : t('common.disabled')"></span>
-                                    <span class="badge" :class="{
-                                        'badge-stdio': p.health === 'healthy',
-                                        'badge-standard': p.health === 'degraded',
-                                        'badge-premium': p.health === 'down'
-                                    }" x-text="p.health || t('settings.unknown')" x-show="p.health" x-cloak></span>
+                                    <!-- Three outcomes, not two. "Reachable" and
+                                         "working" are different claims and the
+                                         pill says which one was measured. -->
+                                    <span class="state-pill" :class="'state-' + providerState(p)">
+                                        <span class="state-dot" aria-hidden="true"></span>
+                                        <span x-text="providerStateLabel(p)"></span>
+                                    </span>
                                 </div>
                                 <div style="font-size:0.8rem;color:var(--text-muted);word-break:break-all" x-text="p.base_url"></div>
                                 <div style="font-size:0.75rem;color:var(--text-muted)">
                                     {{ t('settings.api_key') }}: <span x-text="p.api_key || '—'" style="font-family:var(--font-mono)"></span>
+                                </div>
+                                <!-- Declared, not inferred. Both of these were
+                                     guessed inside the transport until providers
+                                     started rejecting the guess. -->
+                                <div class="provider-wire-facts">
+                                    <template x-for="f in providerWireFacts(p)" :key="f.label">
+                                        <span class="wire-fact">
+                                            <span class="wire-fact-label" x-text="f.label"></span>
+                                            <span class="wire-fact-value" x-text="f.value"></span>
+                                        </span>
+                                    </template>
+                                </div>
+                                <div class="provider-caps" x-show="providerCapabilities(p).length" x-cloak>
+                                    <template x-for="c in providerCapabilities(p)" :key="c.key">
+                                        <span class="cap-badge" :class="'cap-' + c.state" :title="c.title">
+                                            <span x-text="c.label"></span>
+                                            <span class="cap-mark" x-text="c.state === 'yes' ? '✓' : (c.state === 'no' ? '✕' : '?')"></span>
+                                        </span>
+                                    </template>
                                 </div>
                             </div>
                             <div class="provider-actions">
@@ -79,6 +100,20 @@
                                 <button class="btn btn-secondary btn-sm" @click="discoverHubProvider(p.name)" :disabled="hubDiscoveringProvider === p.name" x-text="hubDiscoveringProvider === p.name ? '...' : '{{ t('settings.discover') }}'"></button>
                                 <button class="btn btn-secondary btn-sm" @click="editHubProvider(p.name)">{{ t('common.edit') }}</button>
                                 <button class="btn btn-danger btn-sm" @click="deleteHubProvider(p.name)">×</button>
+                            </div>
+                        </div>
+
+                        <!-- The result of this card's own Test. A single shared
+                             line at the bottom of the list could not say which
+                             provider it referred to. -->
+                        <div class="provider-test-note" :class="'note-' + providerState(p)"
+                             x-show="p._test" x-cloak>
+                            <div class="note-headline" x-text="providerStateLabel(p)"></div>
+                            <div class="note-detail" x-text="providerStateDetail(p)"></div>
+                            <div class="note-fix" x-show="providerState(p) === 'chat_failing'" x-cloak>
+                                The model list answered, so the key and the host are fine. Check the
+                                base URL's API version segment and the selected model — that pair is
+                                what <span style="font-family:var(--font-mono)">/chat/completions</span> rejects.
                             </div>
                         </div>
 
@@ -138,7 +173,10 @@
                     {{ t('settings.no_providers') }}
                 </div>
 
-                <div x-show="hubTestResult && hubTestResult.type === 'provider'" class="validation-result" style="margin-top:12px" x-cloak>
+                <!-- Results from the Add/Edit modal only: a card's own Test now
+                     renders on that card, and showing it twice was worse than
+                     showing it once in the wrong place. -->
+                <div x-show="hubTestResult && hubTestResult.type === 'provider' && hubTestResult.source !== 'card'" class="validation-result" style="margin-top:12px" x-cloak>
                     <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>
                     </template>
