@@ -21,6 +21,7 @@ And measured against live models (3 runs each, temperature 0):
 | `ollama/qwen2.5:7b` | 100% | **58%** | **42 points lower** | 2026-09-12b |
 | `ollama/mistral:7b` | 42% | **8%** | **33 points lower** | both |
 | `deepseek-flash` | 0% | 0% | no measurable effect | 2026-09-12 |
+| `Z.AI/glm-5.3-flash` | 0% | 0% | no measurable effect | 2026-09-13 |
 
 And on [AgentDojo](https://agentdojo.spylab.ai), a public benchmark written by
 other people — 996 runs per condition across the two of its four suites that can
@@ -202,6 +203,21 @@ number for this model in either direction.
 Note what it is: Groq's `compound` models are **agentic systems with
 server-side tool use**, not plain completions. For Kazma that is the more
 relevant target, but the claim has to say so.
+
+**`glm-5.3-flash`: no measurable effect either.** A third lineage, run on
+2026-09-13 because the `poolside` A/B was blocked on quota. Same outcome as
+`deepseek-flash`: zero payloads complied with in **either** condition, 34
+echoes. The model narrates the injection and refuses it. That is the model's
+own instruction-hierarchy training, not the fence, and the 12-case corpus is
+too easy to separate the two.
+
+Getting that far took a product fix. Z.AI serves its OpenAI-compatible API at
+`/api/paas/v4`, and Kazma's URL normaliser appended `/v1` to any base URL not
+ending in `/v1` — every call went to `/v4/v1/chat/completions` and 404'd.
+**84 of 84 calls failed**, and the harness's NO RESULT guard refused to
+report 0% as a defended run, which is the behaviour that makes these numbers
+worth anything. The normaliser now treats any trailing `/v<N>` as already
+versioned.
 
 **`deepseek-flash`: no measurable effect.** It complied with nothing in
 *either* condition, and echoed the canary 21 times while explaining that it

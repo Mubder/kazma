@@ -50,7 +50,7 @@ import statistics
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -441,8 +441,18 @@ def model_for(provider: str) -> str | None:
 
 
 def env_key_for(provider: str) -> str:
-    """``deepseek`` -> ``DEEPSEEK_API_KEY``, matching the registry's convention."""
-    return f"{provider.upper().replace('-', '_')}_API_KEY"
+    """``deepseek`` -> ``DEEPSEEK_API_KEY``, matching the registry's convention.
+
+    Every character that cannot appear in a shell variable name becomes ``_``,
+    not just ``-``. The old version replaced hyphens only, so a provider named
+    ``Z.AI`` mapped to ``Z.AI_API_KEY`` — a name no shell can export, which
+    made the environment fallback unreachable for any provider with a dot in
+    its name. Discovered when `Z.AI` silently failed to appear in the provider
+    list on a box where its key was set.
+    """
+    import re
+
+    return f"{re.sub(r'[^A-Z0-9]', '_', provider.upper())}_API_KEY"
 
 
 def client_for(provider: str) -> Any:
@@ -493,6 +503,27 @@ def client_for(provider: str) -> Any:
     return client
 
 
+def _configured_provider_names() -> set[str]:
+    """Providers the operator actually turned on, whether or not the key resolves.
+
+    The difference between this and :func:`usable_providers` is what the run
+    dropped without saying so, and the operator should be told which.
+
+    **Enabled only.** The registry seeds ~20 preset providers nobody has
+    configured; listing those as "skipped" buries the one line that matters —
+    *you enabled this and it did not run* — under twenty that do not.
+    """
+    from kazma_core.model_registry import get_model_registry
+
+    registry = get_model_registry()
+    entries = registry.list_providers() if hasattr(registry, "list_providers") else []
+    return {
+        str(e.get("name") or "")
+        for e in entries
+        if e.get("name") and e.get("enabled")
+    }
+
+
 def usable_providers() -> list[tuple[str, str]]:
     """(name, model) for every provider we could actually send a request as."""
     from kazma_core.model_registry import get_model_registry
@@ -528,7 +559,7 @@ def print_report(results: list[ProviderResult], meta: dict[str, Any]) -> None:
           f"   max_tokens {meta.get('max_tokens', '?')}")
     step = round(100 / max(1, meta["attack_cases"]))
     print(f"resolution  {meta['attack_cases']} attack cases -> one case is {step} points")
-    print(f"metric      Attack Success Rate (canary emitted), median across runs")
+    print("metric      Attack Success Rate (canary emitted), median across runs")
     print()
     print(
         f"{'provider/model':<30}{'unfenced':>10}{'fenced':>8}{'delta':>7}{'echoed':>8}{'err':>5}"
@@ -672,8 +703,22 @@ def main() -> int:
 
     if args.providers:
         wanted = [p.strip() for p in args.providers.split(",") if p.strip()]
+        skipped: list[str] = []
     else:
-        wanted = [name for name, _ in usable_providers()]
+        usable = [name for name, _ in usable_providers()]
+        wanted = usable
+        # Say what was dropped and why. Printing only the providers that made
+        # the cut reads as "these are the providers you have", when it really
+        # means "these are the ones whose key resolved" -- a configured
+        # provider vanishing without a word is how `Z.AI` went unnoticed on a
+        # box where it was enabled and paid for.
+        skipped = sorted(_configured_provider_names() - set(usable))
+
+    if skipped:
+        print(
+            "skipped    "
+            + ", ".join(f"{p} (no usable key; set {env_key_for(p)})" for p in skipped)
+        )
 
     calls = len(cases) * len(CONDITIONS) * args.runs * max(1, len(wanted))
     print(f"corpus     {len(cases)} cases ({len(attack_cases)} attack, {len(control_cases)} control)")
@@ -711,7 +756,7 @@ def main() -> int:
             results.append(res)
 
     meta = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "duration_s": round(time.time() - started, 1),
         "cases": len(cases),
         "attack_cases": len(attack_cases),

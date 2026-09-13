@@ -149,3 +149,60 @@ class TestGetDummyApiKey:
     def test_whitespace_key_treated_as_empty(self):
         result = get_dummy_api_key("http://localhost:1234/v1", "   ")
         assert result == "sk-lm-studio-dummy-key"
+
+
+class TestAlreadyVersionedPathsAreLeftAlone:
+    """`/v1` is not the only version a provider can serve.
+
+    Z.AI's OpenAI-compatible API lives at `/api/paas/v4`. The normaliser
+    appended `/v1` to anything not ending in `/v1`, producing
+    `/api/paas/v4/v1/chat/completions` — a 404 on every single call. The
+    provider was configured, enabled and paid for, and every request failed.
+
+    The same bug had already been patched once for Google (`/v1beta/openai`),
+    by adding a hostname exemption rather than fixing the rule. Two vendors is
+    enough: any trailing `/v<N>` segment now counts as already versioned.
+    """
+
+    def test_a_v4_api_is_not_given_a_v1_suffix(self):
+        from kazma_core.url_utils import normalize_provider_url
+
+        assert (
+            normalize_provider_url("https://api.z.ai/api/paas/v4/")
+            == "https://api.z.ai/api/paas/v4"
+        )
+
+    def test_other_versions_too(self):
+        from kazma_core.url_utils import normalize_provider_url
+
+        for path in ("v2", "v3", "v4", "v10"):
+            url = f"https://api.example.com/{path}"
+            assert normalize_provider_url(url) == url, path
+
+    def test_v1beta_style_versions_survive(self):
+        """Google's is `/v1beta/openai`; the hostname exemption covered that
+        one, but the rule should not depend on recognising the vendor."""
+        from kazma_core.url_utils import normalize_provider_url
+
+        assert (
+            normalize_provider_url("https://api.example.com/v1beta")
+            == "https://api.example.com/v1beta"
+        )
+
+    def test_an_unversioned_gateway_still_gets_v1(self):
+        """The fix must not stop the normaliser doing its job."""
+        from kazma_core.url_utils import normalize_provider_url
+
+        assert (
+            normalize_provider_url("https://gw.example.com/api")
+            == "https://gw.example.com/api/v1"
+        )
+        assert normalize_provider_url("localhost:1234") == "http://localhost:1234/v1"
+
+    def test_the_v1_dedupe_still_works(self):
+        from kazma_core.url_utils import normalize_provider_url
+
+        assert (
+            normalize_provider_url("https://api.openai.com/v1/v1")
+            == "https://api.openai.com/v1"
+        )
