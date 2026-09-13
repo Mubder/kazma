@@ -783,6 +783,46 @@
             return ProvidersManager.wireFacts(p);
         },
 
+        // ── control-plane view ──────────────────────────────────────────
+        // The page is master-detail: a list of providers with their state,
+        // and one open at a time. Selection is by name rather than index so
+        // it survives the reload that Toggle and Discover trigger.
+
+        selectHubProvider(name) {
+            this.hubSelectedProvider = name;
+        },
+
+        /** The open provider, defaulting to the first one in the list. */
+        selectedHubProvider() {
+            const list = this.hubProviders || [];
+            if (!list.length) return null;
+            const found = list.find(p => p.name === this.hubSelectedProvider);
+            return found || list[0];
+        },
+
+        providerStateCounts() {
+            return ProvidersManager.stateCounts(this.hubProviders || []);
+        },
+
+        providerApiVersion(p) {
+            return ProvidersManager.apiVersionOf(p);
+        },
+
+        providerChecks(p) {
+            return ProvidersManager.checksFor(p && p._test);
+        },
+
+        /** One short line for the list row: what the last check measured. */
+        providerRowMeta(p) {
+            const state = this.providerState(p);
+            if (state === 'untested') return '—';
+            const result = p && p._test;
+            if (!result) return '';
+            if (result.success && result.chat_ms != null) return result.chat_ms + ' ms';
+            if (result.reachable && result.chat_ok === false) return 'models ok · chat failing';
+            return result.latency_ms != null ? result.latency_ms + ' ms' : '';
+        },
+
         async testHubProviderFromModal() {
             const name = this.hubEditingProvider.name;
             if (!name || (!this.hubEditingProvider.base_url && name !== 'google')) {

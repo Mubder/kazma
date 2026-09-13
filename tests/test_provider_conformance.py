@@ -429,17 +429,61 @@ class TestTheSettingsPageRendersTheStates:
         assert "providerState(p)" in html
         assert "state-pill" in html
 
-    def test_the_card_renders_capability_badges(self):
+    def test_the_detail_pane_renders_capability_badges(self):
         html = self._html()
-        assert "providerCapabilities(p)" in html
+        assert "providerCapabilities(selectedHubProvider())" in html
         assert "cap-badge" in html
 
     def test_chat_failing_comes_with_something_to_do_about_it(self):
         """An amber pill that does not say what to change is a nicer way of
         saying nothing."""
         html = self._html()
-        assert "note-fix" in html
-        assert "providerState(p) === 'chat_failing'" in html
+        assert "providerState(selectedHubProvider()) === 'chat_failing'" in html
+        assert "API version segment" in html
+
+    def test_the_page_is_master_detail(self):
+        """A column of rows answers "which provider needs me" at a glance. The
+        old layout stacked full cards, so comparing two states meant scrolling
+        past everything between them."""
+        html = self._html()
+        assert "pc-grid" in html
+        assert "selectHubProvider(p.name)" in html
+        assert "providerStateCounts()" in html
+
+    def test_it_only_shows_checks_it_actually_ran(self):
+        """Two, not a fuller conformance table. The probes that measure the
+        system turn and a tool round-trip live in the live script and cost
+        money; rendering rows for them here would mean inventing results."""
+        html = self._html()
+        assert "providerChecks(selectedHubProvider())" in html
+        # The renderer has exactly two branches, so it cannot display a check
+        # nothing ran.
+        assert "settings.check_model_list" in html
+        assert "settings.check_completion" in html
+
+        import json
+        import subprocess
+        from pathlib import Path as _Path
+
+        js = (
+            _Path(__file__).resolve().parent.parent
+            / "kazma-ui" / "kazma_ui" / "static" / "js" / "providers.js"
+        )
+        harness = (
+            "globalThis.window = globalThis;"
+            f"eval(require('fs').readFileSync({json.dumps(str(js))}, 'utf8'));"
+            "console.log(JSON.stringify("
+            "globalThis.ProvidersManager.checksFor({success:true,reachable:true,"
+            "chat_ok:true,latency_ms:1,chat_ms:2}).map(c => c.key)));"
+        )
+        import shutil
+
+        if shutil.which("node"):
+            out = subprocess.run(
+                ["node", "-e", harness], capture_output=True, text=True, timeout=30
+            )
+            assert out.returncode == 0, out.stderr
+            assert json.loads(out.stdout.strip().splitlines()[-1]) == ["models", "chat"]
 
     def test_the_result_lands_on_the_card_that_was_tested(self):
         from pathlib import Path
