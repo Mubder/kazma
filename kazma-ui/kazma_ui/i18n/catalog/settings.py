@@ -2532,4 +2532,56 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "فشل الأرشفة: {error}",
         "en": "Archive failed: {error}",
     },
+    # ── Providers control plane ─────────────────────────────────────────
+    "settings.providers_lede": {
+        "ar": "المزود «قابل للوصول» عندما تستجيب قائمة نماذجه، و«يعمل» فقط عندما تعود استجابة حقيقية. هذان سؤالان مختلفان، وهذه الصفحة تسأل كليهما.",
+        "en": "A provider is reachable when its model list answers, and working only when a real completion comes back. Those are different questions, so this page asks both.",
+    },
+    "settings.state_working": {"ar": "يعمل", "en": "Working"},
+    "settings.state_chat_failing": {"ar": "المحادثة تفشل", "en": "Chat failing"},
+    "settings.state_unreachable": {"ar": "لا يمكن الوصول", "en": "Unreachable"},
+    "settings.state_untested": {"ar": "لم يُختبر", "en": "Not tested"},
+    "settings.configured": {"ar": "مُهيّأ", "en": "Configured"},
+    "settings.select_a_provider": {
+        "ar": "اختر مزودًا من القائمة لعرض تفاصيله.",
+        "en": "Select a provider from the list to see its details.",
+    },
+    "settings.api_style": {"ar": "نمط الواجهة", "en": "API style"},
+    "settings.api_version": {"ar": "إصدار الواجهة", "en": "API version"},
+    "settings.system_turn": {"ar": "دور النظام", "en": "System turn"},
+    "settings.declared_not_inferred": {
+        "ar": "معلن، غير مستنتج",
+        "en": "declared, not inferred",
+    },
+    "settings.capabilities": {"ar": "القدرات", "en": "Capabilities"},
+    "settings.cap_tools": {"ar": "استدعاء الأدوات", "en": "Tool calling"},
+    "settings.cap_streaming": {"ar": "البث", "en": "Streaming"},
+    "settings.cap_json_mode": {"ar": "وضع JSON", "en": "JSON mode"},
+    "settings.cap_vision": {"ar": "الرؤية", "en": "Vision"},
+    "settings.not_verified": {"ar": "غير مُتحقق منه", "en": "Not verified"},
+    "settings.not_verified_hint": {
+        "ar": "لم يقس أحد هذه القدرة بعد. شغّل scripts/provider_conformance.py --live لتحويلها إلى قيمة مقيسة.",
+        "en": "Nobody has measured this yet. Run scripts/provider_conformance.py --live to turn it into a measured value.",
+    },
+    "settings.checks": {"ar": "الفحوصات", "en": "Checks"},
+    "settings.check_model_list": {"ar": "قائمة النماذج", "en": "Model list"},
+    "settings.check_completion": {"ar": "استجابة حقيقية", "en": "Real completion"},
+    "settings.not_run_yet": {"ar": "لم يُشغّل بعد", "en": "not run yet"},
+    "settings.run_checks": {"ar": "شغّل الفحوصات", "en": "Run checks"},
+    "settings.why_two_checks": {
+        "ar": "لماذا فحصان",
+        "en": "Why two checks",
+    },
+    "settings.why_two_checks_body": {
+        "ar": "كان زر الاختبار يستعلم قائمة النماذج فقط. على مزود مدفوع حقيقي أعاد ذلك 200 بينما أعادت كل رسالة فعلية 404 — فظهر المزود أخضر ولم تصله رسالة واحدة. الفحص الذي لا يسلك المسار الذي يستخدمه المنتج ليس فحصًا.",
+        "en": "The old Test button queried the model list only. On a real paid provider that returned 200 while every real message returned 404 — so the provider showed green and never answered a single chat. A check that does not exercise the path the product uses is not a check.",
+    },
+    "settings.selected_models_count": {
+        "ar": "النماذج المختارة",
+        "en": "Models selected",
+    },
+    "settings.key_not_decryptable": {
+        "ar": "مخزّن، لكن تعذّر فك تشفيره",
+        "en": "stored, but cannot be decrypted",
+    },
 }

@@ -16,6 +16,10 @@
         // second provider page that had stopped existing. It is gone; only
         // `providerPresets`, which the Add dialog reads, survives.
         providerPresets: [],
+        // Master-detail: which provider the right-hand pane is showing.
+        // Held by name, so the selection survives the list reload that
+        // Toggle and Discover trigger.
+        hubSelectedProvider: '',
 
         // ── Models Tab ──
         modelRegistry: [],

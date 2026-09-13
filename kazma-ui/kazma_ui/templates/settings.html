@@ -47,135 +47,211 @@
              ═══════════════════════════════════════════════════════════ -->
         <div :class="{ hidden: hubSubtab !== 'providers' }" x-cloak>
             <div class="settings-group">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                    <h3>{{ t('settings.llm_providers') }}</h3>
-                    <button class="btn btn-primary btn-sm" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
-                </div>
-
-                <template x-for="p in hubProviders" :key="p.name">
-                    <div class="provider-card">
-                        <div class="provider-header">
-                            <div class="provider-info">
-                                <div class="provider-title-row">
-                                    <strong x-text="p.display_name || p.name" style="font-size:0.95rem"></strong>
-                                    <span class="badge" :class="p.enabled ? 'badge-stdio' : 'badge-sse'" x-text="p.enabled ? t('common.enabled') : t('common.disabled')"></span>
-                                    <!-- Three outcomes, not two. "Reachable" and
-                                         "working" are different claims and the
-                                         pill says which one was measured. -->
-                                    <span class="state-pill" :class="'state-' + providerState(p)">
-                                        <span class="state-dot" aria-hidden="true"></span>
-                                        <span x-text="providerStateLabel(p)"></span>
-                                    </span>
-                                </div>
-                                <div style="font-size:0.8rem;color:var(--text-muted);word-break:break-all" x-text="p.base_url"></div>
-                                <div style="font-size:0.75rem;color:var(--text-muted)">
-                                    {{ t('settings.api_key') }}: <span x-text="p.api_key || '—'" style="font-family:var(--font-mono)"></span>
-                                </div>
-                                <!-- Declared, not inferred. Both of these were
-                                     guessed inside the transport until providers
-                                     started rejecting the guess. -->
-                                <div class="provider-wire-facts">
-                                    <template x-for="f in providerWireFacts(p)" :key="f.label">
-                                        <span class="wire-fact">
-                                            <span class="wire-fact-label" x-text="f.label"></span>
-                                            <span class="wire-fact-value" x-text="f.value"></span>
-                                        </span>
-                                    </template>
-                                </div>
-                                <div class="provider-caps" x-show="providerCapabilities(p).length" x-cloak>
-                                    <template x-for="c in providerCapabilities(p)" :key="c.key">
-                                        <span class="cap-badge" :class="'cap-' + c.state" :title="c.title">
-                                            <span x-text="c.label"></span>
-                                            <span class="cap-mark" x-text="c.state === 'yes' ? '✓' : (c.state === 'no' ? '✕' : '?')"></span>
-                                        </span>
-                                    </template>
-                                </div>
-                            </div>
-                            <div class="provider-actions">
-                                <label class="toggle" :title="p.enabled ? t('common.disable') : t('common.enable')">
-                                    <input type="checkbox" :checked="p.enabled" @change="toggleHubProvider(p.name, $event.target.checked)">
-                                    <span class="toggle-slider"></span>
-                                </label>
-                                <button class="btn btn-secondary btn-sm" @click="testHubProvider(p.name)" :disabled="hubTestingProvider === p.name" x-text="hubTestingProvider === p.name ? '...' : '{{ t('settings.test') }}'"></button>
-                                <button class="btn btn-secondary btn-sm" @click="discoverHubProvider(p.name)" :disabled="hubDiscoveringProvider === p.name" x-text="hubDiscoveringProvider === p.name ? '...' : '{{ t('settings.discover') }}'"></button>
-                                <button class="btn btn-secondary btn-sm" @click="editHubProvider(p.name)">{{ t('common.edit') }}</button>
-                                <button class="btn btn-danger btn-sm" @click="deleteHubProvider(p.name)">×</button>
-                            </div>
-                        </div>
-
-                        <!-- The result of this card's own Test. A single shared
-                             line at the bottom of the list could not say which
-                             provider it referred to. -->
-                        <div class="provider-test-note" :class="'note-' + providerState(p)"
-                             x-show="p._test" x-cloak>
-                            <div class="note-headline" x-text="providerStateLabel(p)"></div>
-                            <div class="note-detail" x-text="providerStateDetail(p)"></div>
-                            <div class="note-fix" x-show="providerState(p) === 'chat_failing'" x-cloak>
-                                The model list answered, so the key and the host are fine. Check the
-                                base URL's API version segment and the selected model — that pair is
-                                what <span style="font-family:var(--font-mono)">/chat/completions</span> rejects.
-                            </div>
-                        </div>
-
-                        <div x-show="Array.isArray(p.discovered_models) && p.discovered_models.length > 0"
-                             x-cloak
-                             class="discovered-models-panel">
-                            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap">
-                                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                                    <span class="badge" style="background:var(--accent,#6366f1);color:#fff;font-size:0.65rem;padding:2px 8px;border-radius:999px;font-weight:600"
-                                          x-text="'Discovered (' + p.discovered_models.length + ')'"></span>
-                                    <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
-                                          x-show="(p.selected_models || []).length"
-                                          x-text="'(' + (p.selected_models || []).length + ' selected)'" x-cloak></span>
-                                </div>
-                                <div style="display:flex;align-items:center;gap:4px">
-                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(p.name)" x-text="t('settings.all_none')"></button>
-                                    <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="clearHubDiscovered(p.name)" :title="t('settings.clear_discovered')" x-text="t('settings.clear_discovered')"></button>
-                                </div>
-                            </div>
-                            <div class="input-with-icon" style="margin-bottom:6px">
-                                <input type="search"
-                                       class="form-input"
-                                       style="font-size:0.75rem;padding:6px 10px;width:100%;box-sizing:border-box"
-                                       :placeholder="'Search ' + p.discovered_models.length + ' models…'"
-                                       :value="p._modelQuery || ''"
-                                       @input="p._modelQuery = $event.target.value"
-                                       @click.stop>
-                            </div>
-                            <div class="discovered-models-list">
-                                <template x-for="m in filteredDiscoveredModels(p)" :key="String(m)">
-                                    <div class="model-item-row"
-                                         :class="{ selected: (p.selected_models || []).includes(m) }">
-                                        <label class="model-check-label">
-                                            <input type="checkbox"
-                                                :checked="(p.selected_models || []).includes(m)"
-                                                @change="toggleModelSelection(p.name, m, $event.target.checked)">
-                                            <span x-text="m"></span>
-                                        </label>
-                                        <button type="button" class="btn btn-danger btn-xs"
-                                                :title="t('settings.remove_model')"
-                                                @click.stop.prevent="deleteProviderDiscoveredModel(p.name, m)">×</button>
-                                    </div>
-                                </template>
-                                <div x-show="filteredDiscoveredModels(p).length === 0"
-                                     style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)" x-cloak>
-                                    No models match your search
-                                </div>
-                            </div>
-                            <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:4px">
-                                {{ t('settings.checked_models_hint') }}
-                            </div>
-                        </div>
+                <header class="pc-top">
+                    <div class="pc-lede">
+                        <h3>{{ t('settings.llm_providers') }}</h3>
+                        <p>{{ t('settings.providers_lede') }}</p>
                     </div>
-                </template>
+                    <div class="pc-states">
+                        <span class="pc-stat"><span class="state-dot dot-working"></span>{{ t('settings.state_working') }} <b x-text="providerStateCounts().working"></b></span>
+                        <span class="pc-stat"><span class="state-dot dot-chat_failing"></span>{{ t('settings.state_chat_failing') }} <b x-text="providerStateCounts().chat_failing"></b></span>
+                        <span class="pc-stat"><span class="state-dot dot-unreachable"></span>{{ t('settings.state_unreachable') }} <b x-text="providerStateCounts().unreachable"></b></span>
+                        <span class="pc-stat"><span class="state-dot dot-untested"></span>{{ t('settings.state_untested') }} <b x-text="providerStateCounts().untested"></b></span>
+                    </div>
+                </header>
 
-                <div x-show="hubProviders.length === 0 && !loading" class="empty-state" x-cloak>
-                    {{ t('settings.no_providers') }}
+                <div class="pc-grid">
+
+                    <!-- ── master: every configured provider, one row each ── -->
+                    <section class="pc-panel" aria-label="{{ t('settings.llm_providers') }}">
+                        <div class="pc-phead">
+                            <span class="pc-ptitle" x-text="'{{ t('settings.configured') }} · ' + hubProviders.length"></span>
+                            <button class="btn btn-primary btn-sm" @click="openHubProviderModal()">+ {{ t('settings.add_provider') }}</button>
+                        </div>
+
+                        <div x-show="hubProviders.length === 0 && !loading" class="empty-state" x-cloak>
+                            {{ t('settings.no_providers') }}
+                        </div>
+
+                        <template x-for="p in hubProviders" :key="p.name">
+                            <button type="button" class="pc-row"
+                                    :class="providerState(p)"
+                                    :aria-selected="selectedHubProvider() && selectedHubProvider().name === p.name"
+                                    @click="selectHubProvider(p.name)">
+                                <span class="pc-stripe" aria-hidden="true"></span>
+                                <span class="pc-rmain">
+                                    <span class="pc-rname">
+                                        <span x-text="p.display_name || p.name"></span>
+                                        <span class="pc-off" x-show="!p.enabled" x-cloak x-text="'{{ t('common.disabled') }}'"></span>
+                                    </span>
+                                    <span class="pc-rurl" x-text="p.base_url || '—'"></span>
+                                </span>
+                                <span class="pc-rside">
+                                    <span class="state-pill" :class="'state-' + providerState(p)" x-text="providerStateLabel(p)"></span>
+                                    <span class="pc-rlat" x-text="providerRowMeta(p)"></span>
+                                </span>
+                            </button>
+                        </template>
+                    </section>
+
+                    <!-- ── detail: the open provider ── -->
+                    <section class="pc-panel" aria-live="polite">
+                        <div x-show="!selectedHubProvider()" class="empty-state" x-cloak>
+                            {{ t('settings.select_a_provider') }}
+                        </div>
+
+                        <template x-if="selectedHubProvider()">
+                            <div>
+                                <div class="pc-phead">
+                                    <span class="pc-ptitle" x-text="selectedHubProvider().display_name || selectedHubProvider().name"></span>
+                                    <div class="pc-actions">
+                                        <label class="toggle" :title="selectedHubProvider().enabled ? '{{ t('common.disable') }}' : '{{ t('common.enable') }}'">
+                                            <input type="checkbox" :checked="selectedHubProvider().enabled"
+                                                   @change="toggleHubProvider(selectedHubProvider().name, $event.target.checked)">
+                                            <span class="toggle-slider"></span>
+                                        </label>
+                                        <button class="btn btn-secondary btn-sm" @click="discoverHubProvider(selectedHubProvider().name)"
+                                                :disabled="hubDiscoveringProvider === selectedHubProvider().name"
+                                                x-text="hubDiscoveringProvider === selectedHubProvider().name ? '…' : '{{ t('settings.discover') }}'"></button>
+                                        <button class="btn btn-secondary btn-sm" @click="editHubProvider(selectedHubProvider().name)">{{ t('common.edit') }}</button>
+                                        <button class="btn btn-danger btn-sm" @click="deleteHubProvider(selectedHubProvider().name)">×</button>
+                                        <button class="btn btn-primary btn-sm" @click="testHubProvider(selectedHubProvider().name)"
+                                                :disabled="hubTestingProvider === selectedHubProvider().name"
+                                                x-text="hubTestingProvider === selectedHubProvider().name ? '…' : '{{ t('settings.run_checks') }}'"></button>
+                                    </div>
+                                </div>
+
+                                <div class="pc-body">
+
+                                    <!-- What the last check found, and what to do about it. -->
+                                    <div class="pc-alert" :class="'alert-' + providerState(selectedHubProvider())"
+                                         x-show="selectedHubProvider()._test" x-cloak>
+                                        <span class="pc-at" x-text="providerStateLabel(selectedHubProvider())"></span>
+                                        <span class="pc-ab" x-text="providerStateDetail(selectedHubProvider())"></span>
+                                        <span class="pc-ab" x-show="providerState(selectedHubProvider()) === 'chat_failing'" x-cloak>
+                                            The model list answered, so the key and the host are fine. Check the base URL's
+                                            API version segment and the selected model — that pair is what
+                                            <code>/chat/completions</code> rejects.
+                                        </span>
+                                    </div>
+
+                                    <dl class="pc-dt">
+                                        <dt>{{ t('settings.api_style') }}</dt>
+                                        <dd x-text="(selectedHubProvider().capabilities || {}).api_style || 'openai'"></dd>
+
+                                        <dt>{{ t('settings.base_url') }}</dt>
+                                        <dd x-text="selectedHubProvider().base_url || '—'"></dd>
+
+                                        <dt>{{ t('settings.api_version') }}</dt>
+                                        <dd>
+                                            <span x-text="providerApiVersion(selectedHubProvider()) || '—'"></span>
+                                            <span class="pc-muted" x-show="providerApiVersion(selectedHubProvider())" x-cloak>({{ t('settings.declared_not_inferred') }})</span>
+                                        </dd>
+
+                                        <dt>{{ t('settings.system_turn') }}</dt>
+                                        <dd x-text="(selectedHubProvider().capabilities || {}).system_role || 'system'"></dd>
+
+                                        <dt>{{ t('settings.api_key') }}</dt>
+                                        <dd x-text="selectedHubProvider().api_key || '—'"></dd>
+
+                                        <dt>{{ t('settings.selected_models_count') }}</dt>
+                                        <dd x-text="(selectedHubProvider().selected_models || []).length + ' / ' + (selectedHubProvider().all_models || []).length"></dd>
+                                    </dl>
+
+                                    <div>
+                                        <div class="pc-ptitle pc-section">{{ t('settings.capabilities') }}</div>
+                                        <div class="provider-caps">
+                                            <template x-for="c in providerCapabilities(selectedHubProvider())" :key="c.key">
+                                                <span class="cap-badge" :class="'cap-' + c.state" :title="c.title">
+                                                    <span x-text="c.label"></span>
+                                                    <span class="cap-mark" x-text="c.state === 'yes' ? '✓' : (c.state === 'no' ? '✕' : '?')"></span>
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <!-- Only the checks this page actually runs. A longer
+                                         conformance table would mean inventing rows nothing
+                                         measured; the live probes live in
+                                         scripts/provider_conformance.py and cost money. -->
+                                    <div class="pc-probe">
+                                        <div class="pc-ph">
+                                            <span class="pc-ptitle">{{ t('settings.checks') }}</span>
+                                        </div>
+                                        <div class="pc-plist">
+                                            <template x-for="chk in providerChecks(selectedHubProvider())" :key="chk.key">
+                                                <div class="pc-pitem">
+                                                    <span class="pc-mark" :class="'mark-' + chk.state"
+                                                          x-text="chk.state === 'ok' ? '✓' : (chk.state === 'fail' ? '✕' : '–')"></span>
+                                                    <span class="pc-pname">
+                                                        <span x-text="chk.key === 'models' ? '{{ t('settings.check_model_list') }}' : '{{ t('settings.check_completion') }}'"></span>
+                                                        <code x-text="chk.key === 'models' ? 'GET /models' : 'POST /chat/completions'"></code>
+                                                    </span>
+                                                    <span class="pc-pmeta" x-text="chk.detail || '{{ t('settings.not_run_yet') }}'"></span>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <!-- Discovered models: unchanged behaviour, moved into the detail pane. -->
+                                    <div x-show="Array.isArray(selectedHubProvider().discovered_models) && selectedHubProvider().discovered_models.length > 0"
+                                         x-cloak class="discovered-models-panel">
+                                        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+                                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                                                <span class="badge" style="background:var(--accent,#6366f1);color:#fff;font-size:0.65rem;padding:2px 8px;border-radius:999px;font-weight:600"
+                                                      x-text="'Discovered (' + selectedHubProvider().discovered_models.length + ')'"></span>
+                                                <span class="badge" style="background:rgba(255,255,255,0.08);color:var(--text-muted);font-size:0.65rem;padding:2px 8px;border-radius:999px"
+                                                      x-show="(selectedHubProvider().selected_models || []).length"
+                                                      x-text="'(' + (selectedHubProvider().selected_models || []).length + ' selected)'" x-cloak></span>
+                                            </div>
+                                            <div style="display:flex;align-items:center;gap:4px">
+                                                <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="toggleAllModels(selectedHubProvider().name)" x-text="t('settings.all_none')"></button>
+                                                <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.65rem;padding:2px 8px" @click="clearHubDiscovered(selectedHubProvider().name)" :title="t('settings.clear_discovered')" x-text="t('settings.clear_discovered')"></button>
+                                            </div>
+                                        </div>
+                                        <div class="input-with-icon" style="margin-bottom:6px">
+                                            <input type="search" class="form-input"
+                                                   style="font-size:0.75rem;padding:6px 10px;width:100%;box-sizing:border-box"
+                                                   :placeholder="'Search ' + selectedHubProvider().discovered_models.length + ' models…'"
+                                                   :value="selectedHubProvider()._modelQuery || ''"
+                                                   @input="selectedHubProvider()._modelQuery = $event.target.value"
+                                                   @click.stop>
+                                        </div>
+                                        <div class="discovered-models-list">
+                                            <template x-for="m in filteredDiscoveredModels(selectedHubProvider())" :key="String(m)">
+                                                <div class="model-item-row" :class="{ selected: (selectedHubProvider().selected_models || []).includes(m) }">
+                                                    <label class="model-check-label">
+                                                        <input type="checkbox"
+                                                               :checked="(selectedHubProvider().selected_models || []).includes(m)"
+                                                               @change="toggleModelSelection(selectedHubProvider().name, m, $event.target.checked)">
+                                                        <span x-text="m"></span>
+                                                    </label>
+                                                    <button type="button" class="btn btn-danger btn-xs"
+                                                            :title="t('settings.remove_model')"
+                                                            @click.stop.prevent="deleteProviderDiscoveredModel(selectedHubProvider().name, m)">×</button>
+                                                </div>
+                                            </template>
+                                            <div x-show="filteredDiscoveredModels(selectedHubProvider()).length === 0"
+                                                 style="padding:12px;text-align:center;font-size:0.72rem;color:var(--text-muted)" x-cloak>
+                                                No models match your search
+                                            </div>
+                                        </div>
+                                        <div style="font-size:0.65rem;color:var(--text-tertiary);margin-top:4px">
+                                            {{ t('settings.checked_models_hint') }}
+                                        </div>
+                                    </div>
+
+                                    <p class="pc-note">
+                                        <b>{{ t('settings.why_two_checks') }}.</b> {{ t('settings.why_two_checks_body') }}
+                                    </p>
+                                </div>
+                            </div>
+                        </template>
+                    </section>
                 </div>
 
-                <!-- Results from the Add/Edit modal only: a card's own Test now
-                     renders on that card, and showing it twice was worse than
-                     showing it once in the wrong place. -->
+                <!-- Results from the Add/Edit modal only: a provider's own checks
+                     render in the detail pane above. -->
                 <div x-show="hubTestResult && hubTestResult.type === 'provider' && hubTestResult.source !== 'card'" class="validation-result" style="margin-top:12px" x-cloak>
                     <template x-if="hubTestResult?.success">
                         <span class="text-success">{{ t('settings.connected_latency') }} <span x-text="hubTestResult.latency_ms"></span>ms</span>

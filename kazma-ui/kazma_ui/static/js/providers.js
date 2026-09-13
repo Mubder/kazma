@@ -170,6 +170,100 @@ var ProvidersManager = window.ProvidersManager = {
     },
 
     /**
+     * The API version segment the provider's base URL declares, e.g. "v4".
+     *
+     * Shown because guessing it is what broke Google, Z.AI and Perplexity:
+     * a URL ending in something other than /v1 had /v1 appended, every call
+     * 404'd, and the page still reported the provider healthy. What the
+     * preset declares is now what gets called, and the operator can see it.
+     *
+     * @param {Object} provider
+     * @returns {string} the segment, or '' when the URL carries none
+     */
+    apiVersionOf(provider) {
+        var url = String((provider && provider.base_url) || '').replace(/\/+$/, '');
+        var match = url.match(/\/(v[0-9][A-Za-z0-9._-]*)$/);
+        return match ? match[1] : '';
+    },
+
+    /**
+     * How many providers sit in each state — the counters above the list.
+     * @param {Array} providers
+     * @returns {{working: number, chat_failing: number, unreachable: number, untested: number}}
+     */
+    stateCounts(providers) {
+        var counts = { working: 0, chat_failing: 0, unreachable: 0, untested: 0 };
+        (providers || []).forEach(function (p) {
+            var state = ProvidersManager.cardState(p, p && p._test);
+            if (counts[state] !== undefined) counts[state] += 1;
+        });
+        return counts;
+    },
+
+    /**
+     * The last clause of a probe error, for the narrow meta column.
+     *
+     * The backend error is written to be read as a sentence in the alert —
+     * "Reachable, but chat is failing. The model list answered in 358 ms; a
+     * real completion returned: HTTP 404". In a right-aligned column that
+     * ellipsises before reaching the only part that varies, which is the part
+     * the operator needs.
+     *
+     * @param {string} error
+     * @returns {string}
+     */
+    shortReason(error) {
+        var text = String(error || '').trim();
+        if (!text) return '';
+        var marker = text.lastIndexOf('returned: ');
+        if (marker !== -1) text = text.slice(marker + 'returned: '.length);
+        text = text.trim();
+        return text.length > 48 ? text.slice(0, 47) + '…' : text;
+    },
+
+    /**
+     * The checks that were actually run, with their real numbers.
+     *
+     * Two, not a longer list: Kazma asks the model list and then sends one
+     * real completion. Rendering a fuller conformance table here would mean
+     * inventing rows nothing measured — the live probes that produce more
+     * (system turn, tool round-trip) live in scripts/provider_conformance.py
+     * and cost money, so they are not run from this page.
+     *
+     * @param {Object} result  a test result, or null before Test is pressed
+     * @returns {Array<{key: string, label: string, state: 'ok'|'fail'|'idle', detail: string}>}
+     */
+    checksFor(result) {
+        var idle = { state: 'idle', detail: '' };
+        if (!result) {
+            return [
+                { key: 'models', label: 'model_list', state: 'idle', detail: '' },
+                { key: 'chat', label: 'completion', state: 'idle', detail: '' },
+            ];
+        }
+        var reachable = result.success || result.reachable === true;
+        var models = reachable
+            ? { state: 'ok', detail: result.latency_ms != null ? result.latency_ms + ' ms' : '' }
+            : { state: 'fail', detail: result.error || '' };
+        var chat = idle;
+        if (result.success) {
+            chat = {
+                state: 'ok',
+                detail: [
+                    result.chat_ms != null ? result.chat_ms + ' ms' : '',
+                    result.chat_model || '',
+                ].filter(Boolean).join(' · '),
+            };
+        } else if (reachable) {
+            chat = { state: 'fail', detail: this.shortReason(result.error) };
+        }
+        return [
+            { key: 'models', label: 'model_list', state: models.state, detail: models.detail },
+            { key: 'chat', label: 'completion', state: chat.state, detail: chat.detail },
+        ];
+    },
+
+    /**
      * Get status icon for a provider health state.
      * @param {string} status - 'healthy' | 'degraded' | 'down' | 'unknown'
      * @returns {string} SVG status dot
