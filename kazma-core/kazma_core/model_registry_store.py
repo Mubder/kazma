@@ -73,9 +73,75 @@ def load_providers(config_store: Any) -> list[dict[str, Any]]:
     return parse_providers_raw(raw)
 
 
+def load_providers_unresolved(config_store: Any) -> list[dict[str, Any]]:
+    """The stored provider list WITHOUT resolving vault pointers.
+
+    ``load_providers`` goes through ``config_store.get()``, which decrypts
+    every ``vault://`` pointer -- and returns ``None`` for any it cannot
+    decrypt. That is the right read for "give me a usable key" and the wrong
+    one for "give me what is on disk so I can write it back".
+    """
+    import json
+
+    try:
+        for values in config_store.get_all().values():
+            if "providers.list" in values:
+                stored = values["providers.list"]
+                if isinstance(stored, str):
+                    stored = json.loads(stored)
+                return stored if isinstance(stored, list) else []
+    except Exception:
+        logger.debug("[providers] unresolved read failed", exc_info=True)
+    return []
+
+
 def save_providers(config_store: Any, providers: list[dict[str, Any]]) -> None:
-    """Persist providers list (ConfigStore serializes; do not pre-json.dumps)."""
-    config_store.set("providers.list", providers, category="providers")
+    """Persist providers list, refusing to blank an api_key that is on disk.
+
+    **Why this guard exists.** Every provider mutation -- ``toggle_provider``,
+    ``set_provider_health``, ``upsert_provider`` -- is a read-modify-write over
+    the WHOLE list: read the resolved view, change one field, write all of it
+    back. When the reading process cannot decrypt the vault, every key in that
+    resolved view is ``None`` -> ``""``, and writing it back replaces each
+    ``vault://`` pointer with an empty string.
+
+    Reproduced: one ``set_provider_health("groq", "healthy")`` call -- which is
+    what pressing **Test** does -- turned
+    ``vault://cfg:providers.list.groq.api_key`` into ``""``. Permanently. The
+    only symptom was a one-line warning, and afterwards the provider reported
+    "no API key" while the operator knew they had saved one.
+
+    So: an empty incoming key never overwrites a non-empty stored one. This is
+    the single chokepoint every writer already goes through, which is why the
+    guard lives here rather than in each caller. The cost is that clearing a
+    key cannot be done by writing ``""`` -- delete the provider, or store a new
+    key over it.
+    """
+    stored_keys: dict[str, Any] = {}
+    for entry in load_providers_unresolved(config_store):
+        if isinstance(entry, dict):
+            name = str(entry.get("name", ""))
+            if name and entry.get("api_key"):
+                stored_keys[name] = entry["api_key"]
+
+    protected: list[dict[str, Any]] = []
+    for entry in providers:
+        if not isinstance(entry, dict):
+            protected.append(entry)
+            continue
+        name = str(entry.get("name", ""))
+        if name in stored_keys and not str(entry.get("api_key") or "").strip():
+            entry = dict(entry)
+            entry["api_key"] = stored_keys[name]
+            logger.warning(
+                "[providers] refused to blank the stored api_key for %r -- the "
+                "incoming value was empty, which is what an undecryptable "
+                "vault read looks like. Keeping what is on disk.",
+                name,
+            )
+        protected.append(entry)
+
+    config_store.set("providers.list", protected, category="providers")
 
 
 def detect_gcp_project_id() -> str:
