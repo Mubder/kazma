@@ -131,16 +131,11 @@ def _load_env_keys() -> None:
             os.environ[key] = value
 
 
-def env_key_for(provider: str) -> str:
-    """``Z.AI`` -> ``Z_AI_API_KEY``. Every non-alphanumeric becomes ``_``.
-
-    Replacing only hyphens left a dot in the name, producing ``Z.AI_API_KEY``,
-    which no shell can export -- so the environment fallback was unreachable for
-    any provider with a dot in its name.
-    """
-    import re
-
-    return f"{re.sub(r'[^A-Z0-9]', '_', provider.upper())}_API_KEY"
+# This script found the `Z.AI_API_KEY` spelling bug and fixed it here first,
+# while the runtime kept the broken version for both chat and the Test button.
+# A fix that lives only in the harness is not a fix, so the definition now
+# lives in kazma_core.providers and everyone imports it.
+from kazma_core.providers import env_key_for  # noqa: E402
 
 
 def _client_for(provider: str, model: str | None):

@@ -91,3 +91,57 @@ class TestTheTestRouteUsesIt:
         src = inspect.getsource(ui_providers)
         assert 'typed_key or str(provider.get("api_key")' not in src
         assert "typed_key or api_key" in src
+
+
+class TestTheEnvVarNameIsUsable:
+    """`Z.AI` produced `Z.AI_API_KEY` — a name no shell can export — so the
+    environment fallback was unreachable for that provider in chat *and* in
+    Test. The live-probe script had already hit this and fixed it in its own
+    local helper; the runtime kept the broken spelling, which is the whole
+    failure mode: a fix that lives only in the harness is not a fix."""
+
+    def test_a_dot_becomes_an_underscore(self):
+        from kazma_core.providers import env_key_for
+
+        assert env_key_for("Z.AI") == "Z_AI_API_KEY"
+
+    def test_a_hyphen_still_becomes_an_underscore(self):
+        from kazma_core.providers import env_key_for
+
+        assert env_key_for("lm-studio") == "LM_STUDIO_API_KEY"
+
+    def test_plain_names_are_unchanged(self):
+        from kazma_core.providers import env_key_for
+
+        assert env_key_for("groq") == "GROQ_API_KEY"
+        assert env_key_for("openrouter") == "OPENROUTER_API_KEY"
+
+    def test_every_preset_produces_a_shell_exportable_name(self):
+        import re
+
+        from kazma_core.providers import PROVIDER_PRESETS, env_key_for
+
+        for name in PROVIDER_PRESETS:
+            var = env_key_for(name)
+            assert re.fullmatch(r"[A-Z0-9_]+", var), f"{name} -> {var} is not exportable"
+
+    def test_the_runtime_resolver_uses_it(self, registry, monkeypatch):
+        """The end that matters. Not a spelling test — this asserts a key set
+        under the documented name is actually found."""
+        registry.upsert_provider(
+            {"name": "Z.AI", "base_url": "https://api.z.ai/api/paas/v4", "api_key": ""}
+        )
+        monkeypatch.setenv("Z_AI_API_KEY", "zai-env-value")
+        _, key = registry.resolve_provider_credentials("Z.AI")
+        assert key == "zai-env-value"
+
+    def test_one_definition_only(self):
+        """The script that found this bug must not carry its own copy again."""
+        from pathlib import Path
+
+        src = (
+            Path(__file__).resolve().parent.parent / "scripts" / "provider_conformance.py"
+        ).read_text(encoding="utf-8")
+        assert "def env_key_for" not in src, (
+            "the harness has its own env-var spelling again"
+        )

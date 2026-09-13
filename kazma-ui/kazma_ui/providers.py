@@ -335,7 +335,12 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
         local_names = {"ollama", "lm-studio", "lmstudio", "local"}
         if not api_key and name.lower() not in local_names:
-            env_name = f"{name.upper().replace('-', '_')}_API_KEY"
+            # The same helper the resolver uses, so the message names the
+            # variable Kazma actually reads. Spelling it locally is how
+            # `Z.AI_API_KEY` got told to an operator as something to set.
+            from kazma_core.providers import env_key_for
+
+            env_name = env_key_for(name)
             return {
                 "success": False,
                 "error": (
