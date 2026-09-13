@@ -15,21 +15,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "kazma-core"))
 
-from kazma_core.stores.knowledge import (
-    KnowledgeStore,
-    get_knowledge_store,
-    reset_knowledge_store,
-)
-from kazma_core.stores.knowledge_chunker import chunk_to_dict
-from kazma_core.stores.knowledge_index import KnowledgeIndex, reset_knowledge_index
-
-
 # The auto-inject getter reaches into the store singleton, so the temp DB
 # must be wired into BOTH the local store and the singleton.  We do that by
 # importing the singleton module globals and pointing them at our temp store.
 import kazma_core.stores.knowledge as _kb_module
-
 import pytest  # noqa: E402
+from kazma_core.stores.knowledge import (
+    KnowledgeStore,
+    reset_knowledge_store,
+)
+from kazma_core.stores.knowledge_chunker import chunk_to_dict
+from kazma_core.stores.knowledge_index import KnowledgeIndex, reset_knowledge_index
 
 
 @pytest.fixture(autouse=True)
