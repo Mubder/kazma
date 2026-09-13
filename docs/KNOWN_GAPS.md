@@ -67,9 +67,15 @@ cut. Spotlighting's own spread is 7.6 points, wider than the 5.7 measured on
 the fence: the band belongs to the harness, not the defense, and had only
 been measured on one condition.
 
-**`banking` is still a single run per condition.** It is the suite that
-favours the fence (4.9% against spotlighting's 9.7%), which is exactly the
-reason not to lean on it until it has been repeated the way `slack` now has.
+**~~`banking` is still a single run per condition.~~** Closed 2026-09-13.
+Repeated four times per condition (576 runs each). The gap that made it look
+like the fence's strongest suite closed: 4.9% against 9.7% became **6.6%
+against 8.2%, p = 0.31**. The published 4.9% was the fence's low draw of
+four, and spotlighting's own four runs include a 4.9%. Across both suites
+(996 runs per condition) the fence and spotlighting are indistinguishable on
+ASR (p = 0.39); on obedience the fence leads at p = 0.031 after removing the
+cap artifact, which does not clear the corrected threshold for six pairwise
+tests and is reported as suggestive.
 
 **The fence hits AgentDojo's iteration cap far more often than the baselines,
 and those runs score as defensive wins.** Over 420 `slack` runs the fence

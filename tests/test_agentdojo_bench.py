@@ -719,27 +719,41 @@ def test_the_page_quotes_every_repeat_not_just_the_best(recorded, injection_doc)
 
 
 def test_a_borderline_p_value_is_not_sold_as_a_result(recorded, injection_doc):
-    """fence-vs-spotlighting obedience lands at p=0.0494 in the full data and
-    p=0.134 once iteration-cap runs come out. A page that printed the first and
-    not the second would be technically accurate and misleading."""
+    """fence-vs-spotlighting obedience lands just under 0.05 across both suites.
+    A page that printed it as a win, without the correction for six pairwise
+    tests, would be technically accurate and misleading."""
     _, data = recorded
-    rep = data["slack_repeated"]
-    p_full = rep["p_values"]["obedience"]["fence_vs_spotlighting"]
-    excl = rep["excluding_iteration_cap"]["fence_vs_spotlighting_obedience_p"]
-    if p_full < 0.05 <= excl:
-        low = injection_doc.lower()
-        assert "artifact" in low, "the page does not explain the borderline signal away"
-        # the page rounds; match at whatever precision it chose
-        assert any(
-            f"{round(excl, places)}" in injection_doc for places in (2, 3, 4)
-        ), f"the page does not quote the corrected p-value {excl}"
-        assert "indistinguishable" in low
+    grand = data["grand_total"]
+    p_obed = grand["p_values"]["obedience"]["fence_vs_spotlighting"]
+    if p_obed < 0.05:
+        # whitespace-normalised: the page hard-wraps at ~79 chars, so a phrase
+        # can straddle a newline and a naive substring check misses it
+        import re
+
+        low = re.sub(r"\s+", " ", injection_doc.lower())
+        assert (
+            "suggestive rather than established" in low
+            or "suggestive, not established" in low
+        ), (
+            f"obedience is p={p_obed} from six comparisons and the page does not "
+            "hedge it"
+        )
+        alpha = grand["multiple_comparisons"]["bonferroni_alpha"]
+        assert str(alpha) in low, (
+            f"the page does not state the corrected threshold {alpha}"
+        )
 
 
 def test_the_cap_asymmetry_stays_on_the_page(recorded, injection_doc):
-    """64 of 420 against 7 of 420 is the reason the borderline signal is not
-    real. If it stops being reported, the conclusion stops being checkable."""
+    """64 of 420 against 7 of 420 is why the obedience signal needs a
+    correction before it is read. If it stops being reported, the conclusion
+    stops being checkable."""
     _, data = recorded
-    pooled = data["slack_repeated"]["pooled"]
-    assert str(pooled["kazma_fence"]["hit_iteration_cap"]) in injection_doc
-    assert str(pooled["spotlighting"]["hit_iteration_cap"]) in injection_doc
+    slack = data["slack_repeated"]["pooled"]
+    assert str(slack["kazma_fence"]["hit_iteration_cap"]) in injection_doc
+    assert str(slack["spotlighting"]["hit_iteration_cap"]) in injection_doc
+    excl = data["grand_total"]["excluding_iteration_cap"]
+    assert any(
+        f"{round(excl['fence_vs_spotlighting_obedience_p'], n)}" in injection_doc
+        for n in (2, 3, 4)
+    ), "the page does not quote the cap-corrected obedience p-value"

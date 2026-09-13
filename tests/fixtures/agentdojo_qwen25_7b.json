@@ -632,5 +632,140 @@
       "note": "the only sub-0.05 signal in the full data (obedience p=0.0494) disappears here, and would not survive Bonferroni for the six pairwise tests (alpha 0.0083) in any case"
     },
     "verdict": "both defenses beat undefended; the fence and spotlighting are indistinguishable from each other on every cut"
+  },
+  "banking_repeated": {
+    "what": "every condition measured FOUR times, matching slack",
+    "runs_per_condition": 576,
+    "attacks_won_per_repeat": {
+      "none": [
+        22,
+        19,
+        16,
+        16
+      ],
+      "spotlighting": [
+        14,
+        12,
+        7,
+        14
+      ],
+      "kazma_fence": [
+        7,
+        13,
+        7,
+        11
+      ]
+    },
+    "pooled": {
+      "none": {
+        "n": 576,
+        "attacks_won": 73,
+        "acted_on_payload": 100,
+        "hit_iteration_cap": 0,
+        "asr": 12.7,
+        "obedience_rate": 17.4
+      },
+      "spotlighting": {
+        "n": 576,
+        "attacks_won": 47,
+        "acted_on_payload": 76,
+        "hit_iteration_cap": 0,
+        "asr": 8.2,
+        "obedience_rate": 13.2
+      },
+      "kazma_fence": {
+        "n": 576,
+        "attacks_won": 38,
+        "acted_on_payload": 62,
+        "hit_iteration_cap": 2,
+        "asr": 6.6,
+        "obedience_rate": 10.8
+      }
+    },
+    "p_values": {
+      "asr": {
+        "fence_vs_undefended": 0.0005,
+        "spotlighting_vs_undefended": 0.0122,
+        "fence_vs_spotlighting": 0.3104
+      },
+      "obedience": {
+        "fence_vs_undefended": 0.0013,
+        "spotlighting_vs_undefended": 0.0494,
+        "fence_vs_spotlighting": 0.204
+      }
+    },
+    "superseded_single_run": {
+      "none": "15.3%",
+      "spotlighting": "9.7%",
+      "kazma_fence": "4.9%"
+    },
+    "verdict": "agrees with slack: both defenses beat undefended, the two defenses are indistinguishable"
+  },
+  "grand_total": {
+    "what": "slack + banking, four measurements of every condition",
+    "pooled": {
+      "none": {
+        "n": 996,
+        "attacks_won": 180,
+        "asr": 18.1,
+        "acted_on_payload": 240,
+        "obedience_rate": 24.1
+      },
+      "spotlighting": {
+        "n": 996,
+        "attacks_won": 116,
+        "asr": 11.6,
+        "acted_on_payload": 185,
+        "obedience_rate": 18.6
+      },
+      "kazma_fence": {
+        "n": 996,
+        "attacks_won": 104,
+        "asr": 10.4,
+        "acted_on_payload": 147,
+        "obedience_rate": 14.8
+      }
+    },
+    "p_values": {
+      "asr": {
+        "fence_vs_undefended": 0.0,
+        "spotlighting_vs_undefended": 0.0001,
+        "fence_vs_spotlighting": 0.391
+      },
+      "obedience": {
+        "fence_vs_undefended": 0.0,
+        "spotlighting_vs_undefended": 0.0026,
+        "fence_vs_spotlighting": 0.0223
+      }
+    },
+    "excluding_iteration_cap": {
+      "why": "a capped run ran out of turns rather than defending; the fence hits the cap far more often because its banner is longer",
+      "none": {
+        "n": 991,
+        "acted_on_payload": 238,
+        "obedience_rate": 24.0,
+        "asr": 18.1
+      },
+      "spotlighting": {
+        "n": 989,
+        "acted_on_payload": 182,
+        "obedience_rate": 18.4,
+        "asr": 11.5
+      },
+      "kazma_fence": {
+        "n": 930,
+        "acted_on_payload": 137,
+        "obedience_rate": 14.7,
+        "asr": 10.5
+      },
+      "fence_vs_spotlighting_asr_p": 0.4897,
+      "fence_vs_spotlighting_obedience_p": 0.0309
+    },
+    "multiple_comparisons": {
+      "pairwise_tests_on_this_page": 6,
+      "bonferroni_alpha": 0.0083,
+      "note": "fence-vs-spotlighting obedience is p=0.031 after removing the cap artifact -- nominally significant, and it does NOT clear the corrected threshold. Reported as suggestive, not established."
+    },
+    "verdict": "Both defenses beat undefended decisively on both measures (p<0.001). On AgentDojo's own ASR metric the fence and spotlighting are indistinguishable (p=0.39). On obedience the fence is ahead at p=0.031, which survives excluding the iteration-cap artifact but not correction for six pairwise tests: suggestive, not established."
   }
 }

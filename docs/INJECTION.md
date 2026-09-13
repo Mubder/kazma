@@ -519,57 +519,70 @@ points, and the experiment that would settle it has a known price. Publishing th
 ordering as support would be reading a rank order out of noise, which is the
 mistake this page has already made once.
 
-### `slack`, measured four times per condition
+### The result, after four measurements of everything
 
-The first version of this section published **one** run of each condition. Every
-one of those three happened to be a low draw, and the fence's was the lowest of
-its four. Repeating all three changes what the page can claim.
+Both suites, every condition run four times, **996 runs per condition**.
 
 ```
-attacks won out of 105, four runs each, nothing changed between them
-  undefended     27  29  29  22
-  spotlighting   14  22  18  15
-  Kazma fence    14  16  20  16
+attacks won, four runs each, nothing changed between them
+                  slack (/105)        banking (/144)
+  undefended     27  29  29  22      22  19  16  16
+  spotlighting   14  22  18  15      14  12   7  14
+  Kazma fence    14  16  20  16       7  13   7  11
 ```
 
-Spotlighting's spread is **7.6 points** — wider than the 5.7 measured on the
-fence. The band is a property of the harness and the model, not of the defense,
-and it had only ever been measured on one condition.
+| condition | 996 runs | ASR | acted on payload |
+|---|---|---|---|
+| undefended | 4 × (105+144) | 180/996 — **18.1%** | 240/996 — 24.1% |
+| spotlighting | 4 × (105+144) | 116/996 — **11.6%** | 185/996 — 18.6% |
+| **Kazma fence** | 4 × (105+144) | 104/996 — **10.4%** | 147/996 — **14.8%** |
 
-| condition | 420 runs | ASR | acted on payload | conversion | hit the iteration cap |
-|---|---|---|---|---|---|
-| undefended | 4 × 105 | 107/420 — **25.5%** | 140/420 — 33.3% | 83.3% | 5 |
-| spotlighting | 4 × 105 | 69/420 — **16.4%** | 109/420 — 26.0% | 74.7% | 7 |
-| **Kazma fence** | 4 × 105 | 66/420 — **15.7%** | 85/420 — 20.2% | 68.0% | **64** |
+**Both defenses beat undefended decisively.** p < 0.001 on both measures for the
+fence, p = 0.0001 and p = 0.0026 for spotlighting. These clear the noise band
+and a Bonferroni correction for the six pairwise tests on this page
+(α = 0.0083) with room to spare. Fencing untrusted tool output works, and that
+is the claim the product actually makes.
 
-**Both defenses beat undefended, and now robustly.** ASR p = 0.0005 for the
-fence and p = 0.0013 for spotlighting; obedience p < 0.001 and p = 0.019. Those
-survive the noise band and they survive a Bonferroni correction for the six
-pairwise tests on this page (α = 0.0083) in the ASR column.
+**On AgentDojo's own metric the fence and spotlighting are indistinguishable.**
+ASR 10.4% against 11.6%, p = 0.39 — and p = 0.49 with iteration-cap runs
+removed. Four characters of delimiter plus one sentence of system prompt does
+the same work on ASR as Kazma's ~800-character in-band banner.
 
-**The fence and spotlighting are indistinguishable.** ASR 15.7% against 16.4%,
-a 0.7-point gap at p = 0.78. Obedience comes out at p = 0.0494 — and that is
-the one number on this page that needs its caveats read rather than skipped:
+**On obedience the fence is ahead, and that result is suggestive rather than
+established.** 14.8% against 18.6%, p = 0.022.
 
-- It is a hair under the threshold, from six pairwise comparisons. Corrected
-  for those, α is 0.0083 and it is not significant.
-- **It is mostly an artifact.** The fence exhausted AgentDojo's `max_iters`
-  cap **64 times out of 420**, against spotlighting's 7 — the fence adds ~800
-  characters per tool result, so its conversations run out of turns. A capped
-  run defended nothing; it ran out of budget, and it sits in the denominator as
-  a clean win. Excluding capped runs the obedience gap falls to **p = 0.134**,
-  and on ASR the fence lands fractionally *behind* spotlighting (16.9% against
-  16.2%).
+That number needs one correction applied before it is read. The fence
+exhausts AgentDojo's `max_iters` cap far more often than the baselines —
+**64 of 420 `slack` runs against spotlighting's 7 and undefended's 5**,
+because ~800 extra characters per tool result means its conversations run
+out of turns. A capped run defended nothing; it ran out of budget, and it
+sits in the denominator as a clean win. (`banking` is barely affected: 2
+capped runs in 576, because those tasks are shorter.) Excluding every
+capped run across both suites, the obedience figures are 14.7% against
+18.4%, p = 0.031. So it survives the artifact that killed the
+`slack`-only version of this signal — but it does not clear the corrected
+threshold for six comparisons, and it is one model on one attack. The honest
+reading is that the fence *may* stop the model acting on a payload more often
+than bare delimiters do, and that this study cannot settle it.
 
-So on `slack`, after four measurements of each arm: Kazma's ~800-character
-in-band banner does the same work as four characters of delimiter and one
-sentence of system prompt. That is the result. It was a tie when it was
-measured once badly, and it is a tie when it is measured four times properly —
-which is worth more than the tie, because the first version of that claim was
-arrived at by accident.
+Obedience and ASR disagree because they measure different things:
+AgentDojo's score requires the injection to *complete*, so a run where the
+model obeyed and then bungled the sequence counts as secure. Obedience counts
+whether it touched the payload at all. The gap between the two columns is
+runs where the model did the attacker's work badly.
 
-`banking` still favours the fence (4.9% against 9.7%), and it has been measured
-once per condition. It should be repeated before anyone leans on it.
+### What changed when everything was repeated
+
+The single-run version of this page reported `banking` as the fence's strongest
+result — 4.9% against spotlighting's 9.7%. That gap is now 6.6% against 8.2%,
+p = 0.31. The 4.9% was the fence's low draw of four; spotlighting's own four
+runs *include* a 4.9%.
+
+On `slack` every one of the three original runs was a low draw. On `banking`
+the undefended run was a **high** draw. Noise does not lean in a consistent
+direction, which is the entire reason single runs cannot be compared — and why
+the first version of this section produced a ranking that four measurements
+do not support.
 
 ### Where this comparison flatters Kazma
 
