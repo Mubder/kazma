@@ -432,11 +432,37 @@ def _rmtree_force(path: Path) -> None:
     shutil.rmtree(path, onerror=_on_error)
 
 
+#: How long to wait for a writer to release the database before giving up.
+#: The default is 5s, which is nothing against a store being written
+#: continuously.
+_DB_BUSY_TIMEOUT_S = 60.0
+
+
 def _backup_one_db(src: Path, dest: Path) -> bool:
-    """WAL-safe copy of a single SQLite database via the Online Backup API."""
+    """WAL-safe copy of a single SQLite database via the Online Backup API.
+
+    Copied in ONE step (``pages=-1``), not in batches, and that is the whole
+    point. SQLite **restarts a backup from the beginning whenever the source
+    is written mid-copy**; with ``pages=100`` there is a restart window every
+    batch, so a database under continuous write can never finish. It does not
+    fail fast either — it grinds, then errors.
+
+    Measured on a live install 2026-09-13: ``snapshots.db`` (864 MB, written
+    every few seconds by the time-travel store) failed with
+    ``database is locked``, and the night's backup went from 26 databases /
+    1304 MB to 25 / 440 MB. Two thirds of the data by volume, missing, behind
+    an alert that said "1 database(s) failed".
+
+    One step takes a single read transaction with no restart window. In WAL
+    mode — which these stores use — readers do not block writers, so the cost
+    is a longer-held read lock, not a stalled application.
+    """
     try:
-        with sqlite3.connect(str(src)) as s, sqlite3.connect(str(dest)) as d:
-            s.backup(d, pages=100, sleep=0.01)
+        with (
+            sqlite3.connect(str(src), timeout=_DB_BUSY_TIMEOUT_S) as s,
+            sqlite3.connect(str(dest), timeout=_DB_BUSY_TIMEOUT_S) as d,
+        ):
+            s.backup(d)  # pages=-1: the whole DB, one transaction, no restart
         return True
     except Exception as exc:
         logger.warning("[universal-backup] DB copy failed %s: %s", src.name, exc)
@@ -654,7 +680,29 @@ def _snapshot_to_restic(dest: Path) -> dict[str, Any] | None:
         return {"ok": False, "error": "restic snapshot raised"}
 
 
-def _alert_on_backup_gaps(offsite: dict[str, Any], db_fail: int) -> None:
+def _failed_db_headline(db_fail: int, failed_dbs: list[dict[str, Any]]) -> str:
+    """Name the databases and the volume, not just the count.
+
+    "1 database(s) failed to back up" is true and useless: it reads as 96% of
+    26 covered. The one that failed on the live install held two thirds of the
+    backup by size. An operator cannot judge the blast radius from a count.
+    """
+    names = [str(d.get("path") or "?") for d in failed_dbs][:3]
+    listed = ", ".join(names) or "unknown"
+    if len(failed_dbs) > 3:
+        listed += f" (+{len(failed_dbs) - 3} more)"
+    missing = sum(int(d.get("missing_bytes") or 0) for d in failed_dbs)
+    if missing:
+        return (
+            f"{db_fail} database(s) failed to back up: {listed} — "
+            f"{missing / (1024 * 1024):.0f} MB not saved."
+        )
+    return f"{db_fail} database(s) failed to back up: {listed}."
+
+
+def _alert_on_backup_gaps(
+    offsite: dict[str, Any], db_fail: int, failed_dbs: list[dict[str, Any]] | None = None
+) -> None:
     """Tell the operator when a backup silently stopped protecting them.
 
     Live, 2026-08-28: 29 of 29 universal backups had
@@ -670,14 +718,19 @@ def _alert_on_backup_gaps(offsite: dict[str, Any], db_fail: int) -> None:
     Fail-open, like everything else here: an alerting problem must never
     turn a completed backup into a failed one.
     """
+    failed_dbs = failed_dbs or []
     try:
         from kazma_core.observability.ops_alerts import alert
 
         if db_fail:
             alert(
                 "backup.databases_failed",
-                f"{db_fail} database(s) failed to back up.",
-                "The local backup is incomplete. Check disk space and file locks.",
+                _failed_db_headline(db_fail, failed_dbs),
+                (
+                    "The local backup is incomplete. A database written "
+                    "continuously can starve the copy — check for a long-held "
+                    "write lock on the named store, then disk space."
+                ),
                 severity="critical",
             )
         if offsite.get("skipped"):
@@ -797,7 +850,18 @@ def perform_universal_backup(
             db_results.append({"path": str(rel), "size": db_dest.stat().st_size})
         else:
             db_fail += 1
-            db_results.append({"path": str(rel), "error": "backup failed"})
+            # Record the size that did NOT make it. "1 of 26 failed" reads as
+            # 96% covered; on the live install that one database was 864 MB of
+            # 1304 MB. A count is the wrong unit for "how much is missing".
+            try:
+                missing_bytes = db.stat().st_size
+            except OSError:
+                missing_bytes = 0
+            db_results.append({
+                "path": str(rel),
+                "error": "backup failed",
+                "missing_bytes": missing_bytes,
+            })
     _set_progress("databases", detail=f"Databases done ({db_ok} ok, {db_fail} failed)",
                    total=len(db_files), done=len(db_files))
 
@@ -865,7 +929,9 @@ def perform_universal_backup(
     if restic_result:
         manifest["restic"] = restic_result
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    _alert_on_backup_gaps(offsite, db_fail)
+    _alert_on_backup_gaps(
+        offsite, db_fail, [r for r in db_results if r.get("error")]
+    )
 
     # 6. Prune old backups (live-configured retention, env override, >= 1).
     keep = max(1, retention if retention is not None else _read_retention())
