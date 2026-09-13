@@ -22,6 +22,27 @@ And measured against live models (3 runs each, temperature 0):
 | `ollama/mistral:7b` | 42% | **8%** | **33 points lower** | both |
 | `deepseek-flash` | 0% | 0% | no measurable effect | 2026-09-12 |
 
+And on [AgentDojo](https://agentdojo.spylab.ai), a public benchmark written by
+other people — 996 runs per condition across the two of its four suites that can
+measure anything on this model:
+
+| condition | attack success | acted on the payload |
+|---|---|---|
+| undefended | **18.1%** | 24.1% |
+| spotlighting — 4 characters of delimiter, from the literature | **11.6%** | 18.6% |
+| **Kazma's fence** — ~800 characters of in-band banner | **10.4%** | 14.8% |
+
+**Read those two blocks together.** The corpus above is ours and shows 33–42
+point deltas. The benchmark below is not ours, and there the fence beats
+undefended decisively (p < 0.001) and **cannot be told apart from a four-character
+defense** (p = 0.39). Both are true. The second is the one a reviewer should weigh,
+because we did not choose its tasks, its attacks, or its scoring — and because
+every condition in it was measured four times after a first attempt published the
+fence's best run against baselines measured once.
+
+Details, including the two suites that measure nothing and the one result we
+refused because it favoured us, are in [section 4](#4-agentdojo--a-benchmark-we-did-not-write).
+
 Two numbers up top, because there are two structural defenses. Both are
 measured with **no model in the loop** — every offline result on this page is a
 property of the code, reproducible on a laptop with no API key.
