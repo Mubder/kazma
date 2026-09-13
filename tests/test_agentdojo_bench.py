@@ -688,3 +688,133 @@ def json_fixture():
     import json
 
     return json.loads(_FIXTURE.read_text(encoding="utf-8"))
+
+
+# -- the repeated slack measurement --------------------------------------
+
+
+def test_every_condition_was_measured_the_same_number_of_times(recorded):
+    """The error this whole section exists to prevent: comparing the best of N
+    measurements of one condition against a single draw of another."""
+    _, data = recorded
+    rep = data["slack_repeated"]
+    counts = {cond: len(rows) for cond, rows in rep["per_repeat"].items()}
+    assert len(set(counts.values())) == 1, (
+        f"conditions were measured different numbers of times: {counts}"
+    )
+    for cond, rows in rep["per_repeat"].items():
+        assert sum(r["n"] for r in rows) == rep["runs_per_condition"], cond
+
+
+def test_the_page_quotes_every_repeat_not_just_the_best(recorded, injection_doc):
+    """All four observations of each condition must be on the page. Publishing
+    a mean while hiding the spread is the same error wearing a better suit."""
+    _, data = recorded
+    for cond, rows in data["slack_repeated"]["per_repeat"].items():
+        for row in rows:
+            assert str(row["attacks_won"]) in injection_doc, (
+                f"{cond}: the page does not show the run that scored "
+                f"{row['attacks_won']}"
+            )
+
+
+def test_a_borderline_p_value_is_not_sold_as_a_result(recorded, injection_doc):
+    """fence-vs-spotlighting obedience lands just under 0.05 across both suites.
+    A page that printed it as a win, without the correction for six pairwise
+    tests, would be technically accurate and misleading."""
+    _, data = recorded
+    grand = data["grand_total"]
+    p_obed = grand["p_values"]["obedience"]["fence_vs_spotlighting"]
+    if p_obed < 0.05:
+        # whitespace-normalised: the page hard-wraps at ~79 chars, so a phrase
+        # can straddle a newline and a naive substring check misses it
+        import re
+
+        low = re.sub(r"\s+", " ", injection_doc.lower())
+        assert (
+            "suggestive rather than established" in low
+            or "suggestive, not established" in low
+        ), (
+            f"obedience is p={p_obed} from six comparisons and the page does not "
+            "hedge it"
+        )
+        alpha = grand["multiple_comparisons"]["bonferroni_alpha"]
+        assert str(alpha) in low, (
+            f"the page does not state the corrected threshold {alpha}"
+        )
+
+
+def test_the_cap_asymmetry_stays_on_the_page(recorded, injection_doc):
+    """64 of 420 against 7 of 420 is why the obedience signal needs a
+    correction before it is read. If it stops being reported, the conclusion
+    stops being checkable."""
+    _, data = recorded
+    slack = data["slack_repeated"]["pooled"]
+    assert str(slack["kazma_fence"]["hit_iteration_cap"]) in injection_doc
+    assert str(slack["spotlighting"]["hit_iteration_cap"]) in injection_doc
+    excl = data["grand_total"]["excluding_iteration_cap"]
+    assert any(
+        f"{round(excl['fence_vs_spotlighting_obedience_p'], n)}" in injection_doc
+        for n in (2, 3, 4)
+    ), "the page does not quote the cap-corrected obedience p-value"
+
+
+# -- the null results, including the one that favoured us --------------------
+
+
+def test_the_travel_result_is_refused_not_quoted(recorded, injection_doc):
+    """`travel` produced the only sub-0.05 fence-beats-spotlighting figure in
+    the whole dataset (p=0.0321), on a suite whose undefended baseline sits at
+    2.9% and where spotlighting scored HIGHER than no defense at all.
+
+    Quoting it would mean keeping the one suite where noise pointed our way and
+    discarding the two that were informative. This test fails if it ever gets
+    quoted as a result.
+    """
+    import re
+
+    _, data = recorded
+    t = data["travel_null_result"]
+    assert t["verdict"].startswith("NO RESULT")
+    # spotlighting above undefended is the tell that there is no signal
+    assert t["asr"]["spotlighting"] > t["asr"]["none"]
+    low = re.sub(r"\s+", " ", injection_doc.lower())
+    assert "no result" in low or "not reported as a result" in low
+    for overclaim in (
+        "the fence beats spotlighting on travel",
+        "significant on travel",
+        "travel confirms",
+    ):
+        assert overclaim not in low, f"the page quotes travel as support: {overclaim!r}"
+
+
+def test_the_refused_p_value_is_still_shown(recorded, injection_doc):
+    """Refusing a result means showing it and explaining why, not hiding it.
+    A page that quietly dropped the inconvenient-because-favourable number
+    would be no better than one that quoted it."""
+    _, data = recorded
+    p = data["travel_null_result"]["p_values"]["fence_vs_spotlighting"]
+    assert any(f"{round(p, n)}" in injection_doc for n in (3, 4)), (
+        f"the page does not show the refused p-value {p}"
+    )
+
+
+def test_workspace_was_stopped_on_evidence(recorded, injection_doc):
+    """0.3% undefended ASR means no headroom. Stopping was a measurement
+    decision; the page has to say so rather than leaving a suite silently
+    missing."""
+    _, data = recorded
+    w = data["workspace_stopped"]
+    done = next(iter(w["completed"].values()))
+    assert done["asr"] < 1.0, "workspace had headroom after all -- rewrite the section"
+    assert "0.3%" in injection_doc
+    assert "297" in injection_doc
+
+
+def test_the_page_does_not_claim_four_suites(injection_doc):
+    """Two informative suites is the honest count. 'Four AgentDojo suites'
+    would be true and misleading."""
+    import re
+
+    low = re.sub(r"\s+", " ", injection_doc.lower())
+    assert "two informative suites" in low or "two informative* suites" in low or "informative suites" in low

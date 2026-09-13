@@ -57,26 +57,37 @@ points, and the study that would settle it has a known price.
 → `docs/INJECTION.md`, section 4, "Does the social-framing wording earn its
 place?"
 
-**The published fence figures are the best of four measurements; the baselines
-were measured once.** `slack` has four runs of the byte-identical shipped fence
-(14, 16, 20, 16 attacks won of 105) and exactly one run each of `none` and
-`spotlighting`. The page published 14 — the minimum. On the fence's four-run
-mean of 15.7% it is **behind** spotlighting's 13.3% on that cell, not tied, and
-the conversion "mechanism" (58.1% against 68.4%) pools to 68.0% against 68.4%
-and disappears. Repeats of both baselines are running; until they land, every
-fence-versus-spotlighting comparison on that page is provisional and is marked
-as such. The noise floor was measured and then not applied to our own headline,
-which is the same error as not measuring it.
+**~~The published fence figures are the best of four measurements.~~** Closed
+2026-09-13 by repeating every condition four times on `slack`. All three
+single runs had been low draws — undefended 27 against a 25.5% mean,
+spotlighting 14 against 16.4%, the fence 14 against 15.7%. With 420 runs per
+condition both defenses beat undefended robustly (ASR p = 0.0005 and
+p = 0.0013) and the fence and spotlighting are **indistinguishable** on every
+cut. Spotlighting's own spread is 7.6 points, wider than the 5.7 measured on
+the fence: the band belongs to the harness, not the defense, and had only
+been measured on one condition.
+
+**~~`banking` is still a single run per condition.~~** Closed 2026-09-13.
+Repeated four times per condition (576 runs each). The gap that made it look
+like the fence's strongest suite closed: 4.9% against 9.7% became **6.6%
+against 8.2%, p = 0.31**. The published 4.9% was the fence's low draw of
+four, and spotlighting's own four runs include a 4.9%. Across both suites
+(996 runs per condition) the fence and spotlighting are indistinguishable on
+ASR (p = 0.39); on obedience the fence leads at p = 0.031 after removing the
+cap artifact, which does not clear the corrected threshold for six pairwise
+tests and is reported as suggestive.
 
 **The fence hits AgentDojo's iteration cap far more often than the baselines,
-and those runs score as defensive wins.** On `slack`: 17/105 fenced runs
-exhausted `max_iters=15` against 2/105 undefended and 0/105 spotlighting — the
-fence adds ~800 characters per tool result, so fenced conversations are ~2.8x
-longer and run out of turns. A capped run defended nothing; it ran out of
-budget. Excluding them the fence's `slack` ASR is 15.9% rather than 13.3%.
-`--analyze` now reports `hit_iteration_cap` and `asr_excluding_capped` per
-condition; neither figure is excluded from the headline, because dropping runs
-would be its own thumb on the scale.
+and those runs score as defensive wins.** Over 420 `slack` runs the fence
+exhausted `max_iters=15` **64 times** against spotlighting's 7 and
+undefended's 5 — it adds ~800 characters per tool result, so its
+conversations run out of turns. A capped run defended nothing and sits in
+the denominator as a clean win. This is not cosmetic: the single sub-0.05
+signal in the repeated data (fence-vs-spotlighting obedience, p = 0.0494)
+falls to **p = 0.134** once capped runs are excluded, and the fence lands
+fractionally behind on ASR. `--analyze` reports `hit_iteration_cap` and
+`asr_excluding_capped`; neither is dropped from the headline, because
+excluding runs would be its own thumb on the scale.
 
 **~~Ollama's context window is not pinned in the benchmark.~~** Closed
 2026-09-13: measured rather than assumed. Ollama reported serving
@@ -95,22 +106,12 @@ it as a failure. Accepted deliberately — a bypassable fence is worse — but t
 right repair is for `spec_tools` to signal failure out of band instead of by
 string prefix.
 
-**The fixture's statistics are not produced by committed code.** The per-suite
-and per-task blocks in `tests/fixtures/agentdojo_qwen25_7b.json` re-derive
-exactly from `--analyze`, but `pooled`, `significance_p_values`, `noise_floor`
-and `social_framing_ablation` were assembled by scratch scripts that are not in
-the repo, and the ablation arms ran from uncommitted local edits. A reader can
-check the raw counts and cannot reproduce the statistics.
-
-**The `poolside/laguna-s-2.1` A/B is unfinished — blocked on quota, not on
-code.** A single hardened-fence run measured 83% unfenced against 17% fenced
-(delta 67, zero errors), with both payloads the 2026-09-12b hardening targets
-defended. That number is **not published**, because there is no matching
-pre-hardening run to attribute it to: the model may simply be resistant. The
-baseline run returned 84 consecutive `Rate limit exceeded: free` errors and the
-harness refused to report anything, which is the NO RESULT guard behaving
-correctly — a run of errors is not a run of defended attacks. Re-run both
-conditions when the free-tier quota resets.
+**~~The fixture's statistics are not produced by committed code.~~** Closed
+2026-09-13. `--analyze` derives the raw counts, `--report` the pooled figures
+and every p-value, and `--ablate-social` re-runs the wording ablation. All of
+it reads the run logs and calls nothing, so a reader who does not trust us can
+re-derive each number on the page. Guards assert the fixture's counts equal
+what `--report` produces and that `build_report` never touches a provider.
 
 **The `groq/compound-mini` row predates the current fence.**
 42% → 8% was measured before the 2026-09-12b hardening and has not been
@@ -121,12 +122,16 @@ in the table rather than quietly reused, but it is stale.
 `live_direct_override` still succeeds against `mistral:7b` in both conditions.
 It is printed in every run rather than summarised away.
 
-**Two of AgentDojo's four suites are unrun.** `slack` (105 runs/condition) and
-`banking` (144) are measured; `workspace` (560) and `travel` (140) are not, and
-`workspace` is the largest by a wide margin. The pooled fence-over-spotlighting
-lean sits at p = 0.063 on obedience — the kind of number more data resolves in
-one direction or the other, and leaving it unresolved is a choice about compute,
-not a finding.
+**Only two of AgentDojo's four suites can measure anything on this model.**
+`slack` and `banking` have undefended attack success of 25.5% and 12.7% — enough
+headroom to detect a defense. `travel` sits at **2.9%** and `workspace` at
+**0.3%**, so neither measures anything in either direction; `travel` was run to
+completion (560 runs per condition) and `workspace` stopped after 297 runs on
+the evidence rather than after 26 hours for completeness. `travel` also produced
+the only sub-0.05 fence-beats-spotlighting figure in the data (p = 0.032) on a
+suite where spotlighting underperformed no defense at all; it is shown and
+refused rather than quoted. A frontier model would likely have headroom on all
+four, and that run has not been done.
 
 **The live corpus is 14 cases.** Enough to show a delta, not enough to claim
 coverage. The offline corpus is 56. AgentDojo adds 249 runs per condition on
@@ -146,6 +151,35 @@ answer is a reduction rather than an elimination.
 ---
 
 ## The MCP bridge
+
+**An MCP server names its own tools, and in the default posture the name
+decides whether you see the call.** `classify_mcp_tool` reads the tool name —
+which is supplied by the third-party server — and a name matching a safe verb
+classifies `safe`. Verified 2026-09-13: `get_file`, `read_env` and bare `get`
+all classify **safe**, so a hostile or compromised MCP server can pick a name
+that skips the approval gate. `read_env` is the sharp example: `env` is
+deliberately absent from the `shell_exec` allowlist precisely because one
+approval should not become a credential dump, and an MCP tool called `read_env`
+runs with no approval at all.
+
+This is **closed in production**. `KAZMA_PRODUCTION=1` forces HITL for every
+MCP tool not on `KAZMA_MCP_SAFE_ALLOWLIST`, regardless of name. It is open in
+the default/dev posture, where `force_hitl` is `tier in ("danger", "unknown")`
+and a `safe` classification skips it. The code that does this carries the
+comment *"safe name patterns are not enough (list_keys, get_env, export_data,
+…)"* — the reasoning is already written down; only the production branch acts
+on it.
+
+Servers default to `trust="approval_required"`, so this needs a server the
+operator connected and a tool name chosen by that server. That is within scope:
+the threat model already treats MCP *output* as untrusted. Tool *names* are the
+same channel and are currently trusted.
+
+Mitigations today: run with `KAZMA_PRODUCTION=1`, or set
+`KAZMA_MCP_SAFE_ALLOWLIST` to the tools you actually want unattended, or only
+connect servers you would let run unattended anyway. The real repair is to stop
+classifying third-party tools by their own names in every posture, which is a
+gating change with a real UX cost and has not been made.
 
 **A bus-less approval has no session grant and no YOLO.** One decision, one
 tool call — those are properties of a chat thread, and a separate process has

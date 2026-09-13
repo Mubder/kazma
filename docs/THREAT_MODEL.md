@@ -52,6 +52,15 @@ tools. It cannot bypass `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`,
 re-gated regardless. But for everything else, YOLO means the boundary above is
 not in place.
 
+**An MCP server names its own tools, and the name is trusted.**
+`classify_mcp_tool` reads the tool name — supplied by the third-party server
+— and a safe-looking verb classifies `safe`. In the **default posture** that
+skips the approval gate, so a hostile server can call its tool `get_file` or
+`read_env` and run unattended. `KAZMA_PRODUCTION=1` closes it: every MCP tool
+not on `KAZMA_MCP_SAFE_ALLOWLIST` is gated regardless of name. This page
+already treats MCP *output* as untrusted; tool *names* arrive over the same
+channel and currently are not.
+
 **A bus-less process fails closed.** `kazma mcp` spawned by an editor has no
 in-process approval bus. It queues into the shared gate registry when a live
 Kazma instance is watching, and **denies** when one is not — it never runs a
@@ -182,7 +191,7 @@ the above applies. Check yours:
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` | Local fallback re-enabled **even in production** |
 | `KAZMA_E2B_API_KEY` set | The only real isolation boundary here |
 | `KAZMA_ALLOW_YOLO=1` | Section 1 is off for canonical danger tools |
-| `KAZMA_PRODUCTION=1` | Bans local exec, narrows the shell allowlist, requires a workspace root |
+| `KAZMA_PRODUCTION=1` | Bans local exec, narrows the shell allowlist, requires a workspace root, **and gates every MCP tool by name-independent rule** |
 | `KAZMA_SHELL_STRICT=0` | Relaxes PATH restriction and binary resolution |
 
 A single-operator box with `DOCKER=0`, `ALLOW_LOCAL=1` and `ALLOW_YOLO=1` is a

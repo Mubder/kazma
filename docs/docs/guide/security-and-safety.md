@@ -332,6 +332,7 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 10. **Set `KAZMA_HITL_CANONICAL_FLOOR=1`** on strict deployments so the danger-tool approval list cannot be narrowed below the canonical set.
 11. **Set `KAZMA_TRUSTED_PROXIES`** when behind nginx/Caddy/Docker. Peer `127.0.0.1` is not a credential.
 12. **Do not pin scraping through `proxy=`.** Direct hops use `PinHostAsyncTransport`; peer-private abort always.
+13. **If you connect MCP servers, set `KAZMA_MCP_SAFE_ALLOWLIST` or run with `KAZMA_PRODUCTION=1`.** In the default posture an MCP tool is classified by its *name*, and that name is supplied by the third-party server — `get_file`, `read_env` and a bare `get` all classify `safe` and skip the approval gate. `read_env` is the one to think about: `env` is deliberately absent from the `shell_exec` allowlist precisely so a single approval cannot become a credential dump. Production mode gates every MCP tool not on the allowlist, name irrelevant.
 
 ---
 
@@ -348,9 +349,66 @@ These sit **beside** HITL, not inside it.
 | `/health/details` is sensitive | L-1; `/health/live` and `/health/ready` stay public |
 | SSRF pin-IP | `validate_url` returns public IPs; `PinHostAsyncTransport` when no proxy; `assert_peer_public` after each hop |
 | Errors | API `safe_error` / `validation_error`; no internals in 4xx/5xx bodies |
-| Fenced tool output | Fetched pages / search / MCP resources go through `prompt_fence` |
+| Fenced tool output | Fetched pages / search / MCP resources go through `fence_untrusted` — see [section 10](#10-the-prompt-fence--what-it-stops-measured) |
 
 CI: `tests/test_audit_2026_08_29_regressions.py`, `tests/test_audit_wave8.py`, `test_every_registered_tool_has_a_tier`.
+
+---
+
+## 10. The prompt fence — what it stops, measured
+
+Untrusted text — fetched web pages, search snippets, MCP tool results and
+resource bodies — is wrapped before a model sees it. The production entry point
+is `fence_untrusted(content, *, source, is_error=False)` in
+`kazma_core/safety/prompt_fence.py`; `format_untrusted_block` is the inner
+function it calls.
+
+**Trust comes from the caller, never from the content.** `is_error=True` is how
+a caller says "this string is my own failure message, not third-party text", and
+it is the only way to skip the fence. This is not a style preference: the flag
+replaced a check that sniffed `content.startswith("Error:")`, and because every
+caller forwards attacker-controlled text, an attacker who began a payload with
+those six characters had it delivered to the model unfenced. A trust decision
+read out of the content is a trust decision the attacker writes.
+
+A fencing failure also fails **closed** — if the fence raises, the caller gets a
+placeholder naming the source and the number of characters withheld, not the raw
+text.
+
+### What it is measured to do
+
+| | attack success | acted on the payload |
+|---|---|---|
+| undefended | 18.1% | 24.1% |
+| spotlighting (4-character delimiter, from the literature) | 11.6% | 18.6% |
+| **Kazma's fence** | **10.4%** | **14.8%** |
+
+996 runs per condition on [AgentDojo](https://agentdojo.spylab.ai), a public
+benchmark Kazma did not write, every condition measured four times. The fence
+beats no-defense decisively (p < 0.001) and **cannot be told apart from a
+four-character delimiter** (p = 0.39).
+
+Both halves of that matter. Fencing untrusted tool output works. It is also not
+where Kazma's advantage lies, and the page below says so rather than leaving you
+to discover it.
+
+### Before you rely on it
+
+- [Prompt injection: the numbers](https://github.com/Mubder/kazma/blob/main/docs/INJECTION.md)
+  — the full measurement, the payloads that still land, and the reproduction you
+  can run for free with no API key.
+- [Threat model](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md)
+  — what each boundary stops and, stated plainly, what it does not. Approval is
+  consent, not containment.
+- [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md)
+  — open weaknesses, dated. Including one that affects **this** page's
+  defaults: in the default posture an MCP server's own tool name decides
+  whether you are asked to approve the call, so a server naming its tool
+  `read_env` runs unattended. `KAZMA_PRODUCTION=1` or `KAZMA_MCP_SAFE_ALLOWLIST`
+  closes that.
+
+The fence reduces attack success. It does not eliminate it, and no honest number
+here will ever be 0%.
 
 ---
 

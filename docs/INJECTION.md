@@ -22,6 +22,27 @@ And measured against live models (3 runs each, temperature 0):
 | `ollama/mistral:7b` | 42% | **8%** | **33 points lower** | both |
 | `deepseek-flash` | 0% | 0% | no measurable effect | 2026-09-12 |
 
+And on [AgentDojo](https://agentdojo.spylab.ai), a public benchmark written by
+other people — 996 runs per condition across the two of its four suites that can
+measure anything on this model:
+
+| condition | attack success | acted on the payload |
+|---|---|---|
+| undefended | **18.1%** | 24.1% |
+| spotlighting — 4 characters of delimiter, from the literature | **11.6%** | 18.6% |
+| **Kazma's fence** — ~800 characters of in-band banner | **10.4%** | 14.8% |
+
+**Read those two blocks together.** The corpus above is ours and shows 33–42
+point deltas. The benchmark below is not ours, and there the fence beats
+undefended decisively (p < 0.001) and **cannot be told apart from a four-character
+defense** (p = 0.39). Both are true. The second is the one a reviewer should weigh,
+because we did not choose its tasks, its attacks, or its scoring — and because
+every condition in it was measured four times after a first attempt published the
+fence's best run against baselines measured once.
+
+Details, including the two suites that measure nothing and the one result we
+refused because it favoured us, are in [section 4](#4-agentdojo--a-benchmark-we-did-not-write).
+
 Two numbers up top, because there are two structural defenses. Both are
 measured with **no model in the loop** — every offline result on this page is a
 property of the code, reproducible on a laptop with no API key.
@@ -414,18 +435,14 @@ on `banking` alone it reaches neither. The fence is the only condition that
 separates from undefended on every measure in both suites.
 
 **The fence and spotlighting still cannot be told apart from each other.**
-Pooled, ASR p = 0.29 and obedience p = 0.063 — **and both are computed from a
-single run of each condition, which the next subsection shows is not good
-enough**,
+Pooled over both suites at one run each, ASR p = 0.29 and obedience
+p = 0.063. On `slack`, repeated four times per condition, ASR p = 0.78
+and the obedience gap is an iteration-cap artifact (below),
 and 0.063 is not 0.05. An earlier version of this page said the fence "buys
 nothing over a far simpler defense"; that turned a `slack` tie into a finding
 and `banking` shows why single-suite conclusions were premature. The honest
 statement is still that they are not distinguishable, now with two suites
 leaning the same way.
-
-> **Read the subsection below before this table.** Every figure in it is one
-> run of each condition. The fence has four measurements of `slack` and they
-> disagree with each other by more than the gaps shown here.
 
 **The fence works on both halves of the path, not one.** An earlier version of
 this section claimed the payload engages the model at a similar rate in every
@@ -523,6 +540,117 @@ points, and the experiment that would settle it has a known price. Publishing th
 ordering as support would be reading a rank order out of noise, which is the
 mistake this page has already made once.
 
+### The result, after four measurements of everything
+
+Both suites, every condition run four times, **996 runs per condition**.
+
+```
+attacks won, four runs each, nothing changed between them
+                  slack (/105)        banking (/144)
+  undefended     27  29  29  22      22  19  16  16
+  spotlighting   14  22  18  15      14  12   7  14
+  Kazma fence    14  16  20  16       7  13   7  11
+```
+
+| condition | 996 runs | ASR | acted on payload |
+|---|---|---|---|
+| undefended | 4 × (105+144) | 180/996 — **18.1%** | 240/996 — 24.1% |
+| spotlighting | 4 × (105+144) | 116/996 — **11.6%** | 185/996 — 18.6% |
+| **Kazma fence** | 4 × (105+144) | 104/996 — **10.4%** | 147/996 — **14.8%** |
+
+**Both defenses beat undefended decisively.** p < 0.001 on both measures for the
+fence, p = 0.0001 and p = 0.0026 for spotlighting. These clear the noise band
+and a Bonferroni correction for the six pairwise tests on this page
+(α = 0.0083) with room to spare. Fencing untrusted tool output works, and that
+is the claim the product actually makes.
+
+**On AgentDojo's own metric the fence and spotlighting are indistinguishable.**
+ASR 10.4% against 11.6%, p = 0.39 — and p = 0.49 with iteration-cap runs
+removed. Four characters of delimiter plus one sentence of system prompt does
+the same work on ASR as Kazma's ~800-character in-band banner.
+
+**On obedience the fence is ahead, and that result is suggestive rather than
+established.** 14.8% against 18.6%, p = 0.022.
+
+That number needs one correction applied before it is read. The fence
+exhausts AgentDojo's `max_iters` cap far more often than the baselines —
+**64 of 420 `slack` runs against spotlighting's 7 and undefended's 5**,
+because ~800 extra characters per tool result means its conversations run
+out of turns. A capped run defended nothing; it ran out of budget, and it
+sits in the denominator as a clean win. (`banking` is barely affected: 2
+capped runs in 576, because those tasks are shorter.) Excluding every
+capped run across both suites, the obedience figures are 14.7% against
+18.4%, p = 0.031. So it survives the artifact that killed the
+`slack`-only version of this signal — but it does not clear the corrected
+threshold for six comparisons, and it is one model on one attack. The honest
+reading is that the fence *may* stop the model acting on a payload more often
+than bare delimiters do, and that this study cannot settle it.
+
+Obedience and ASR disagree because they measure different things:
+AgentDojo's score requires the injection to *complete*, so a run where the
+model obeyed and then bungled the sequence counts as secure. Obedience counts
+whether it touched the payload at all. The gap between the two columns is
+runs where the model did the attacker's work badly.
+
+### What changed when everything was repeated
+
+The single-run version of this page reported `banking` as the fence's strongest
+result — 4.9% against spotlighting's 9.7%. That gap is now 6.6% against 8.2%,
+p = 0.31. The 4.9% was the fence's low draw of four; spotlighting's own four
+runs *include* a 4.9%.
+
+On `slack` every one of the three original runs was a low draw. On `banking`
+the undefended run was a **high** draw. Noise does not lean in a consistent
+direction, which is the entire reason single runs cannot be compared — and why
+the first version of this section produced a ranking that four measurements
+do not support.
+
+### `travel` and `workspace`: no result, including one that flattered us
+
+Both remaining suites were run. Neither can support a claim, and saying so is
+the point of this section.
+
+**`travel` — 560 runs per condition, four repeats.**
+
+| condition | ASR | utility |
+|---|---|---|
+| undefended | 16/560 — **2.9%** | 12.9% |
+| spotlighting | 19/560 — **3.4%** | 12.9% |
+| Kazma fence | 8/560 — 1.4% | 13.2% |
+
+The undefended baseline is at the floor. There is almost nothing for a defense
+to reduce, and the giveaway is the middle row: **spotlighting scored higher than
+no defense at all.** When a real defense underperforms the undefended condition,
+the measurement contains noise rather than signal. Utility of 10.7–15.7% says
+the rest of it: `qwen2.5:7b` fails the user's *own* task on roughly 88% of
+travel runs. It cannot operate the suite well enough for an attack on it to mean
+anything.
+
+This page has warned about exactly this case since the live tier was added — *if
+the unfenced rate is near zero the corpus is too easy for that model and the run
+says nothing in either direction*. The rule applies here even though the noise
+happened to point our way.
+
+**And it did point our way.** On `travel`, fence-versus-spotlighting comes out at
+**p = 0.0321** — the only sub-0.05 figure favouring the fence over spotlighting
+anywhere in this data. It is not reported as a result, because it is a win over a
+condition that itself lost to doing nothing. Publishing it would mean quoting the
+one suite where the dice fell right while discarding the two that were
+informative.
+
+**`workspace` — stopped after 297 runs.**
+
+The undefended baseline won **1 attack in 297 runs — 0.3% ASR** — with healthy
+utility of 42.1%. So the model can operate this suite; the attack simply does not
+land on it. A defense cannot be shown to reduce 0.3%, and completing four repeats
+of three conditions would have taken roughly 26 hours to produce a guaranteed
+null. It was stopped on the evidence rather than finished for completeness.
+
+**What the four suites actually say**, which is less than four suites sounds
+like: `slack` and `banking` had enough undefended attack success to measure
+against, and both show the same thing. `travel` and `workspace` did not, on this
+model. Two informative suites, not four.
+
 ### Where this comparison flatters Kazma
 
 Kazma's fence carries an **in-band banner**: the warning lives inside the block,
@@ -534,12 +662,13 @@ statistically.
 
 ### What this still does not prove
 
-- **Two suites, one model, one attack.** ASR is model-dependent — section 3
+- **Two *informative* suites, one model, one attack.** ASR is model-dependent — section 3
   shows the same fence scoring a 33-point delta on one model and nothing on
   another. `qwen2.5:7b` is a local 7B model; these numbers should not be
   compared to leaderboard figures gathered on frontier models.
-- **`workspace` and `travel` are unrun.** They are the two largest suites, and
-  nothing here says the pattern holds there.
+- **`workspace` and `travel` were run and are uninformative on this model** —
+  see above. Their undefended baselines sit at 2.9% and 0.3%, so they measure
+  nothing in either direction.
 - **Utility on `slack` was low across the board** (17–23%), so many runs failed
   the user task for reasons unrelated to any defense, shrinking the effective
   base. `banking` was healthier at 39–44%.
@@ -612,6 +741,26 @@ python scripts/injection_report.py          # the numbers
 python scripts/injection_report.py --sync   # re-record measured fields
 python -m pytest tests/test_injection_containment.py -q
 ```
+
+The AgentDojo figures in section 4 have their own entry points. The first two
+read the committed run logs, call nothing, and need no API key — they exist so
+a reader who does not trust us can re-derive every number on that page:
+
+```bash
+# raw counts, obedience, iteration-cap saturation, per injection task
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py --analyze --suite banking
+
+# pooled figures and every p-value quoted on the page
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py --report slack,banking
+
+# re-run the wording ablation (needs a model)
+.venv-agentdojo/Scripts/python.exe scripts/agentdojo_bench.py \
+    --live --suite banking --ablate-social --provider ollama --model qwen2.5:7b
+```
+
+`--analyze` warns rather than stays silent when something is off: a pipeline
+directory it cannot classify, two separate runs being pooled into one row, or
+an attacker marker that appears in legitimate task content.
 
 ### Reproducing the live numbers — free, offline, no API key
 

@@ -16,6 +16,9 @@
 | Document docs goals | [`plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md`](plans/DOCUMENT_DOCS_REMEDIATION_GOAL.md) · [residuals](plans/DOCUMENT_RESIDUALS_GOAL.md) |
 | Engineering audits | [`audits/`](audits/) — includes [`AUDIT_DOCUMENT_CERTIFICATION.md`](audits/AUDIT_DOCUMENT_CERTIFICATION.md) |
 | Full system map | [`ARCHITECTURE_AND_SYSTEM_MAP.md`](ARCHITECTURE_AND_SYSTEM_MAP.md) |
+| **Threat model** | [`THREAT_MODEL.md`](THREAT_MODEL.md) — what each boundary stops, and what it does not |
+| **Prompt injection: the numbers** | [`INJECTION.md`](INJECTION.md) — the measurement behind the fencing claim, incl. a public benchmark |
+| **Known gaps** | [`KNOWN_GAPS.md`](KNOWN_GAPS.md) — open weaknesses, dated |
 
 **Edit `docs/docs/**` only** for user-facing content.
 
