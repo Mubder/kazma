@@ -222,21 +222,17 @@ class TestTheTestButtonExercisesChat:
         """glm-5.3 spent 16 reasoning tokens before its first content token. A
         tight budget returns an empty completion and blames the provider for
         the probe's own mistake."""
-        import inspect
+        from kazma_core.provider_probe import PROBE_MAX_TOKENS
 
-        from kazma_ui.providers import _probe_chat_completion
-
-        src = inspect.getsource(_probe_chat_completion)
-        assert "max_tokens" in src
-        assert "160" in src, "the probe's token budget is too tight to be safe"
+        assert PROBE_MAX_TOKENS >= 120, "the probe's token budget is too tight to be safe"
 
     def test_an_empty_completion_counts_as_a_failure(self):
         """A 200 with no content is not a working provider."""
         import inspect
 
-        from kazma_ui.providers import _probe_chat_completion
+        from kazma_core.provider_probe import probe_chat_completion
 
-        assert "empty completion" in inspect.getsource(_probe_chat_completion)
+        assert "empty completion" in inspect.getsource(probe_chat_completion)
 
 
 # ── the frontend can express the third state ────────────────────────────────
@@ -279,3 +275,46 @@ class TestTheUIHasThreeStates:
     def test_the_status_dot_has_a_colour_for_chat_failing(self):
         js = self._js()
         assert "chat_failing:" in js
+
+
+# ── one probe, every route that offers "Test" ───────────────────────────────
+
+
+class TestThereIsOnlyOneProbe:
+    """Two near-identical `test_provider` implementations existed, and the
+    Settings page called the one that was NOT fixed — so improving the other
+    changed nothing an operator would ever see. That is what two surfaces for
+    one concept costs, and it cost it during this very refactor."""
+
+    def test_both_routes_share_the_same_function_object(self):
+        from kazma_core.provider_probe import probe_chat_completion
+        from kazma_ui.providers import _probe_chat_completion
+
+        assert _probe_chat_completion is probe_chat_completion, (
+            "the UI route has its own copy of the probe again"
+        )
+
+    def test_the_settings_route_probes_chat_too(self):
+        """This is the route providers.js actually calls."""
+        import inspect
+
+        from kazma_core import settings_providers
+
+        src = inspect.getsource(settings_providers)
+        assert "probe_chat_completion" in src
+        assert "Reachable, but chat is failing" in src
+
+    def test_the_probe_never_raises(self):
+        """A health check that throws cannot report a health status."""
+        import ast
+        import inspect
+
+        from kazma_core.provider_probe import probe_chat_completion
+
+        # Parsed, not grepped: an earlier version of this test matched the word
+        # "raise" inside the comment explaining that it must not raise.
+        tree = ast.parse(inspect.getsource(probe_chat_completion).lstrip())
+        raises = [n for n in ast.walk(tree) if isinstance(n, ast.Raise)]
+        assert not raises, f"the probe can raise ({len(raises)} raise statements)"
+        handlers = [n for n in ast.walk(tree) if isinstance(n, ast.ExceptHandler)]
+        assert handlers, "the probe has no exception handling at all"

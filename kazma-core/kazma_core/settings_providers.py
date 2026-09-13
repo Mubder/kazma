@@ -100,13 +100,43 @@ class ProviderSettingsService:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 resp = await client.get(f"{base_url}/models", headers=headers)
                 latency = int((time.monotonic() - start) * 1000)
-                if resp.status_code == 200:
-                    # Update health
-                    self._update_provider_health(name, "healthy")
-                    return {"success": True, "latency_ms": latency, "status_code": resp.status_code}
-                else:
+                if resp.status_code != 200:
                     self._update_provider_health(name, "degraded")
                     return {"success": False, "error": f"HTTP {resp.status_code}", "latency_ms": latency}
+
+            # The model list answered. That is NOT the same as the provider
+            # working: on a provider whose base URL had a version segment
+            # wrongly appended, /models returned 200 while /chat/completions
+            # returned 404, so this page reported a paid provider as healthy
+            # and not one message ever reached it.
+            from kazma_core.provider_probe import probe_chat_completion
+
+            chat = await probe_chat_completion(
+                base_url, api_key, str(provider.get("model") or "")
+            )
+            if not chat["ok"]:
+                self._update_provider_health(name, "degraded")
+                return {
+                    "success": False,
+                    "latency_ms": latency,
+                    "reachable": True,
+                    "chat_ok": False,
+                    "error": (
+                        "Reachable, but chat is failing. The model list answered "
+                        f"in {latency} ms; a real completion returned: {chat['error']}"
+                    ),
+                }
+
+            self._update_provider_health(name, "healthy")
+            return {
+                "success": True,
+                "latency_ms": latency,
+                "status_code": 200,
+                "reachable": True,
+                "chat_ok": True,
+                "chat_ms": chat["ms"],
+                "chat_model": chat["model"],
+            }
         except httpx.ConnectError:
             self._update_provider_health(name, "down")
             return {"success": False, "error": f"Cannot connect to {base_url}"}

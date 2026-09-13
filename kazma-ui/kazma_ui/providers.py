@@ -89,58 +89,11 @@ def _is_secret_key(key: str) -> bool:
     return any(hint in lower for hint in _SECRET_KEY_HINTS)
 
 
-async def _probe_chat_completion(
-    base_url: str, api_key: str, model: str, timeout: float = 20.0
-) -> dict[str, Any]:
-    """Send one tiny completion on the path the product actually uses.
-
-    The model-list check this sits behind answers a different question. On a
-    real provider whose base URL had a version segment wrongly appended,
-    ``/models`` returned 200 while ``/chat/completions`` returned 404 — so the
-    page reported a paid provider as healthy and not one message ever reached
-    it. A check that does not exercise the path the product uses is not a
-    check.
-
-    ``max_tokens`` is generous because a reasoning model spends tokens thinking
-    before it emits content; a tight budget returns an empty completion and
-    blames the provider for the probe's own mistake.
-    """
-    import httpx
-
-    if not model:
-        return {"ok": False, "ms": None, "model": "", "error": "no model selected"}
-
-    url = f"{base_url.rstrip('/')}/chat/completions"
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    payload = {
-        "model": model,
-        "messages": [{"role": "user", "content": "Reply with the single word: ready"}],
-        "max_tokens": 160,
-    }
-    start = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as http:
-            resp = await http.post(url, headers=headers, json=payload)
-        ms = int((time.monotonic() - start) * 1000)
-        if resp.status_code != 200:
-            detail = resp.text[:160].replace("\n", " ")
-            return {"ok": False, "ms": ms, "model": model,
-                    "error": f"HTTP {resp.status_code} — {detail}"}
-        data = resp.json()
-        choices = data.get("choices") or []
-        content = (choices[0].get("message", {}).get("content") or "").strip() if choices else ""
-        if not content:
-            return {"ok": False, "ms": ms, "model": model,
-                    "error": "the provider returned an empty completion"}
-        return {"ok": True, "ms": ms, "model": data.get("model") or model, "error": ""}
-    except httpx.ConnectError as exc:
-        return {"ok": False, "ms": None, "model": model,
-                "error": f"cannot connect — {exc}"}
-    except Exception as exc:  # pragma: no cover - defensive
-        return {"ok": False, "ms": None, "model": model,
-                "error": f"{type(exc).__name__}: {str(exc)[:120]}"}
+# The probe lives in kazma_core.provider_probe so that this route and
+# /api/settings/providers/{name}/test -- which is the one the Settings page
+# actually calls -- cannot drift apart again. Fixing only this copy changed
+# nothing an operator would ever see.
+from kazma_core.provider_probe import probe_chat_completion as _probe_chat_completion
 
 
 def _activate_tested_provider(registry: Any, name: str) -> None:
