@@ -51,9 +51,33 @@ Plus direct routes in `routes_direct.py` and a conditional Telegram webhook at `
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/provider/active` | Active provider/model. (line 583) |
-| `GET` | `/api/providers` | List providers. (line 601) |
-| `POST` | `/api/provider/switch` | Switch active provider/model. (line 607) |
+| `GET` | `/api/provider/active` | Active provider/model. |
+| `POST` | `/api/provider/switch` | Switch active provider/model. |
+| `GET` | `/api/providers` | List providers, with masked keys, discovered models and declared `capabilities`. |
+| `POST` | `/api/providers` | Add or update a provider. A masked `****` key means "keep the stored one". |
+| `DELETE` | `/api/providers/{name}` | Remove a provider. |
+| `POST` | `/api/providers/{name}/toggle` | Enable or disable. |
+| `POST` | `/api/providers/{name}/test` | Health check — see below. |
+| `POST` | `/api/providers/{name}/discover` | Fetch the provider's model list. |
+
+`/api/providers/*` is the **only** provider surface. A parallel
+`/api/settings/providers/*` existed with the same six operations and was
+deleted: two routes for one concept is how they drift, and this pair drifted
+far enough that a fix shipped into the one nothing called.
+
+**What `…/test` returns.** Reachable and working are different claims, so the
+response carries both:
+
+| field | meaning |
+|---|---|
+| `reachable` | the model list answered. Not a claim that the provider works. |
+| `chat_ok` | a real completion came back on `POST /chat/completions`. |
+| `chat_ms`, `chat_model` | that completion's latency, and the model the provider says it served. |
+| `success` | both of the above. |
+
+The check resolves its key through `ModelRegistry.resolve_provider_credentials`
+and its model through `ModelRegistry.probe_model_for` — the same paths a real
+message uses. It resolves nothing by hand, and it does not write.
 
 ### 2.3 HITL approval
 

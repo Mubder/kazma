@@ -1,5 +1,148 @@
 # CHANGELOG
 
+## Pressing Test deleted every saved API key (2026-09-13)
+
+An operator reported that four configured providers all said they had no API
+key. The keys were not missing because nobody saved them. They were deleted by
+the act of checking them.
+
+Every provider mutation is a read-modify-write over the *whole* list:
+
+```python
+providers = self.list_providers()   # vault-RESOLVED
+providers[i]["health"] = status     # change one field
+self._save_providers(providers)     # write ALL of them back
+```
+
+`list_providers()` resolves each `vault://` pointer, and
+`ConfigStore._resolve_vault_value` returns `None` for any pointer it cannot
+decrypt — which becomes `""`. So one write from a process that cannot decrypt
+replaces every stored pointer with an empty string. Permanently.
+`set_provider_health` is what the Test button writes, so pressing Test was
+enough, and because the write covers the whole list, editing *one* provider
+took out all the others.
+
+Reproduced end to end: save a key, confirm
+`vault://cfg:providers.list.groq.api_key` on disk, call
+`set_provider_health("groq", "healthy")` with the vault unavailable, and the
+stored value is `""`. The only symptom was a single `WARNING` line, after which
+the UI truthfully reported that no key was stored — and the operator, who had
+saved one, was told to paste it again.
+
+`save_providers` is the one chokepoint every writer already goes through, so
+the guard lives there: an empty incoming `api_key` never overwrites a non-empty
+stored one, and the refusal logs loudly. The cost is that clearing a key can no
+longer be done by writing `""` — delete the provider, or store a new key over
+it.
+
+**Operator impact: keys destroyed before this fix cannot be recovered and must
+be re-entered once.** The vault may still hold the secret, but the pointer to
+it is gone.
+
+### "No key" and "a key you cannot read" are different problems
+
+Both arrive at the Test route as an empty string, and the message assumed the
+second was the first. An operator whose `KAZMA_VAULT_KEY` was missing or
+rotated got told to paste a key they had already saved — the one action that
+cannot help, since the stored value is intact and the vault key is what is
+wrong.
+
+`ModelRegistry.stored_key_is_undecryptable()` tells them apart: the raw stored
+entry is a `vault://` pointer while the resolved read is empty. That
+distinction only became detectable once `save_providers` stopped blanking the
+pointer.
+
+## Correction: the previous entry blamed `.env`, and that was wrong
+
+The entry below — *"Test told a working provider it had no API key"* — states
+that the key was in `.env` and concludes that on that install "every key comes
+from the process environment". Both claims were mine, and both were wrong.
+
+What actually happened: I read the live store from a dev clone, saw every
+provider's `api_key` come back empty, and read that as configuration. It was
+damage — the wipe described above had already run. The `ConfigStore` startup
+banner warns about exactly this misreading and I went past it. Kazma's key
+store is the vault, not `.env`; the environment fallback is a fallback.
+
+The fix in that entry is real and stands: Test resolved the key by hand while
+the product resolved it through the registry, and
+`resolve_provider_credentials()` corrects that. The *diagnosis* attached to it
+did not, so it is corrected here rather than quietly edited.
+
+## The health probe had no model to send, for any provider
+
+Test reached a provider — model list answered in 358 ms — and then reported
+*"Reachable, but chat is failing: no model selected"*. The provider was fine.
+
+The probe sent `provider.get("model")`. There is no such field:
+`normalize_provider_entry` defines the canonical provider shape and it has no
+`model` key, so a stored provider never has one. The probe sent an empty model
+for **every** provider, and `probe_chat_completion`'s own guard turned that into
+"chat failing" — a verdict about the provider caused entirely by the check.
+
+`ModelRegistry.probe_model_for(name)` resolves a model the way the product
+would: the row's pinned model if one is somehow present, then the models the
+operator ticked, then what is visible in the dropdowns, then anything
+discovered or listed manually. When there is genuinely nothing to send, that is
+a configuration gap rather than a provider failure, and the message names the
+button that fixes it.
+
+## `Z.AI` asked for an environment variable no shell can export
+
+The env fallback built its variable name with
+`provider_name.upper().replace('-', '_')`. For `Z.AI` that produces
+`Z.AI_API_KEY`, so the fallback was silently unreachable for that provider in
+chat *and* in Test — and the error message told the operator to set a variable
+they could not set.
+
+`scripts/provider_conformance.py` had already hit this and fixed it, in its own
+local `env_key_for`. The runtime that resolves keys never got the fix. A fix
+that lives only in the harness is not a fix, so the definition now lives in
+`kazma_core.providers` and the resolver, the Test route and the script all
+import it.
+
+## The same defect, four times
+
+Four bugs in the provider health check, all one mistake in different variables:
+**the check did not do what a real message does.**
+
+| what the check did | what the product does |
+|---|---|
+| queried `GET /models` | sends `POST /chat/completions` |
+| read the key off the provider row | resolves it through the registry |
+| spelled the env var `Z.AI_API_KEY` | reads `Z_AI_API_KEY` |
+| read a `model` field | that field does not exist |
+
+Each was found by an operator hitting it, fixed in isolation, and declared
+done — three times — before anyone asked what *else* the probe does
+differently. The probe has three inputs: URL, key, model. All three were wrong,
+and they were only checked against the real path once the third failure made
+the pattern impossible to miss.
+
+## The providers page is a control plane now
+
+The page was a stack of full-height cards: eight providers meant eight screens
+of scrolling to compare two states. It is now master-detail — a column of rows
+carrying each provider's state as an edge stripe, a pill and one measured
+number, with a detail pane for the open one holding the alert, the declared
+wire facts, capability badges, the checks, and the note on why there are two of
+them. Counters across the top say how many providers sit in each state.
+
+Three deliberate departures from the approved mockup, all the same reason:
+
+* **Two checks, not six.** The mockup listed system-turn, auth, tool
+  round-trip and JSON mode. This page runs `GET /models` and
+  `POST /chat/completions`. The rest live in `scripts/provider_conformance.py`,
+  cost money, and are not run from here — rendering rows for them would mean
+  inventing results.
+* **No context window, no "parallel tool calls" badge.** Nothing measures
+  either; `max_context` is `None` for every provider.
+* **API version is read off the base URL** rather than shown as its own
+  declared field, because that is where it lives.
+
+An earlier commit added state pills and capability badges to the old cards and
+called the UI done. It was not the mockup, and the operator said so.
+
 ## Test told a working provider it had no API key (2026-09-13)
 
 Reported from a live install: a provider that answers every message returned
