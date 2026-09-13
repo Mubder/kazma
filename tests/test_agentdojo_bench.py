@@ -468,3 +468,72 @@ def test_the_power_needed_is_stated(recorded, injection_doc):
     assert f"{n:,}" in injection_doc or str(n) in injection_doc, (
         f"the page does not say the question needs ~{n} runs per arm"
     )
+
+
+# -- every p-value on the page must trace to this fixture --------------------
+
+
+def test_every_p_value_on_the_page_is_committed(recorded, injection_doc):
+    """`p = 0.0033` sat on the page for a day with no backing in any fixture --
+    the harness computes no p-values at all. It happened to be right, but a
+    reader could not check it, which is the same defect as being wrong.
+
+    The page rounds (p = 0.034) where the fixture keeps four places (0.0343),
+    so each quoted value is matched against the committed ones rounded to the
+    precision it was quoted at.
+    """
+    import re
+
+    _, data = recorded
+
+    def walk(node):
+        if isinstance(node, dict):
+            for v in node.values():
+                yield from walk(v)
+        elif isinstance(node, (int, float)) and not isinstance(node, bool):
+            yield float(node)
+
+    # Walk the WHOLE fixture: the ablation keeps its p-value under its own
+    # block, and an earlier version of this test only looked at
+    # significance_p_values, so it failed on a number that was committed.
+    committed = list(walk(data))
+    missing = []
+    for quoted in set(re.findall(r"p\s*=\s*(\d*\.\d+)", injection_doc)):
+        places = len(quoted.split(".")[1])
+        if not any(round(c, places) == float(quoted) for c in committed):
+            missing.append(quoted)
+    assert not missing, (
+        f"the page quotes p-values with no committed backing: {sorted(missing)}; "
+        f"committed values are {sorted(set(committed))}"
+    )
+
+
+def test_the_statistical_method_is_named(recorded):
+    """Fisher exact gives 0.0053 where the uncorrected z-test gives 0.0033. A
+    reader who checks with the other test and finds a mismatch will conclude
+    the page is wrong, so the fixture says which one was used."""
+    _, data = recorded
+    method = data["significance_p_values"].get("method", "")
+    assert "z-test" in method or "chi-square" in method, "the test used is not recorded"
+    assert "fisher" in method.lower(), (
+        "the fixture does not warn that Fisher exact gives different values"
+    )
+
+
+def test_the_engagement_claim_is_backed(recorded, injection_doc):
+    """An earlier version of the page claimed engagement was similar across
+    conditions and only conversion differed. The fixture says engagement drops
+    by more than the noise band, so that claim was false; this pins the
+    corrected one."""
+    _, data = recorded
+    pooled = data["pooled"]
+    fence, none = pooled["kazma_fence"], pooled["none"]
+    drop = 100 * none["payload_engaged"] / none["n"] - 100 * fence["payload_engaged"] / fence["n"]
+    spread = data["noise_floor"]["asr_spread_points"]
+    if drop > spread:
+        low = injection_doc.lower()
+        assert "similar rate in every condition" not in low, (
+            "the page still claims engagement is similar when the data says it "
+            f"drops {drop:.1f} points, outside the {spread}-point band"
+        )
+        assert "both halves" in low or "engagement drops" in low

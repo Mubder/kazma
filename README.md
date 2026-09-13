@@ -10,7 +10,7 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
     <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-7%2C892-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
-    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-3%2C147%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
+    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-3%2C266%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
@@ -38,7 +38,7 @@ Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before dan
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
 |---|---|---|---|
-| **~409K LOC** (328K Python code + 36K JS) | **7,892 automated tests** (563 test files) | **3,147+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
+| **~409K LOC** (328K Python code + 36K JS) | **7,346 test functions** (585 test files) | **3,266+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Kazma Observability Dashboard & Control Plane" width="100%">
@@ -125,6 +125,12 @@ Kazma's architecture reflects those foundational principles:
 - **Model Failover Chains**: Transparent multi-provider failover with per-provider cooldown timers and durable SQLite call ledgers (`kazma-data/llm_calls.db`).
 
 ### 🔒 Triple-Wired HITL Safety Architecture
+
+> Fail-closed by default. `KAZMA_ALLOW_YOLO=1` turns the gate off for the 53
+> canonical danger tools that are not in `ALWAYS_HITL_TOOLS`, and approval is
+> **consent, not containment** — it does not sandbox what you approve. What each
+> boundary does and does not stop is written out in
+> [THREAT_MODEL.md](docs/THREAT_MODEL.md).
 - **Default-deny HITL (2026-08-29 audit):** unclassified tools are gated; a Settings `require_approval_for` list **adds** to the tier floor and can no longer un-gate `shell_exec` by omission. Behind a reverse proxy, set `KAZMA_TRUSTED_PROXIES` to the proxy's address (peer 127.0.0.1 is not a credential).
 - **Layer 1 (Graph Interrupt)**: Single-agent execution pauses at the LangGraph level before mutating actions (`file_write`, `shell_exec`, `vault_retrieve`). Resumable from Web, TUI, or chat channels.
 - **Layer 2 (Swarm Bus)**: Multi-agent and CLI swarm dispatches enforce fail-closed approval gates on platform adapters (`FanOutBusAdapter` across Telegram/Discord/Slack).
@@ -354,6 +360,9 @@ mypy kazma-core/
 | [Swarm Orchestration](docs/docs/guide/swarm-orchestration.md) | Dispatch patterns, reliability breakers, autoscaling, and worker lifecycle |
 | [Document Intelligence](docs/docs/guide/document-intelligence.md) | Secure ingestion pipelines, quarantined OCR, and redaction operations |
 | [Security & HITL](docs/docs/guide/security-and-safety.md) | Triple-wired approval architecture, prompt fencing, and vault encryption |
+| [Threat Model](docs/THREAT_MODEL.md) | What each boundary stops and — stated plainly — what it does not |
+| [Prompt Injection: the numbers](docs/INJECTION.md) | The measurements behind the fencing claim, including a public benchmark and the payloads that still land |
+| [Known Gaps](docs/KNOWN_GAPS.md) | Open weaknesses, dated, so they do not depend on someone remembering |
 | [Configuration Reference](docs/docs/guide/configuration.md) | Detailed `kazma.yaml`, environment variables, and provider settings |
 
 ---

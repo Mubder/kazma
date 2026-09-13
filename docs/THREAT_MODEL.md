@@ -21,7 +21,7 @@ sense that word is usually used.
 | HITL approval | A tool running **without you seeing it** | Anything you approve. It is consent, not containment |
 | Docker jail (`python_exec`) | Network access, filesystem writes, fork bombs, memory exhaustion, a snippet reading your home directory | A kernel exploit. Docker shares your kernel |
 | Shell allowlist (`shell_exec`) | Shell interpreters, `env`, unknown binaries, paths outside the workspace | What the allowlisted binaries can do — `git` and `uv` are powerful |
-| Prompt fence | Untrusted text forging the fence, and forged role tokens reaching the tokenizer | A model choosing to obey a polite request inside the fence |
+| Prompt fence | Untrusted text forging the fence; forged role tokens from five known chat templates | A model choosing to obey a polite request inside the fence |
 | Vault | Secrets at rest on disk | A process that can read the vault key from the environment |
 
 If you take one sentence: **approval is the boundary that matters, and it is a
@@ -90,7 +90,7 @@ workspace.
 
 **An import blocklist applies on top, in the container as well as locally.**
 `os`, `sys`, `socket`, `subprocess`, `ctypes`, `pathlib`, `pickle` and about
-twenty more are refused, and `exec`/`eval`/`compile` are disabled — an import
+thirty-three more are refused, and `exec`/`eval`/`compile` are disabled — an import
 blocklist is worthless while those stay reachable. This is belt-and-braces
 inside Docker, where escape is already the kernel's problem rather than
 Python's, and it is the *only* protection in the local tier below. It also
@@ -146,17 +146,22 @@ you have approved the call.
 ## 4. The prompt fence — a measured reduction, not a guarantee
 
 Untrusted text (web pages, tool results, MCP output, skill bodies) is wrapped in
-a labelled data fence before a model sees it. Two structural properties are
-tested exhaustively and hold absolutely:
+a labelled data fence before a model sees it. One structural property holds over
+the whole corpus; the second is a denylist and is weaker, which is worth saying
+on the same screen:
 
-- No corpus payload can forge the fence's delimiters (56/56).
-- Foreign chat-template tokens (`<|im_start|>`, `[INST]`, `<<SYS>>`, Gemma
-  turns) are redacted, so a document cannot forge a role turn at the
-  tokenizer.
+- No corpus payload can forge the fence's delimiters — 35 attack payloads,
+  plus 21 benign controls through the same path (56/56).
+- Foreign chat-template tokens are redacted, so a document cannot forge a role
+  turn at the tokenizer — but this is a **denylist of five patterns** covering
+  ChatML, Llama 2/3, Mistral and Gemma. Only the `<|…|>` form is generic; a
+  template family nobody enumerated is not redacted.
 
 Those are properties of the code. **Whether a model obeys the fence is a
-property of the model**, and it is measured rather than asserted: 42% → 8% on
-`groq/compound-mini`, 100% → 58% on `qwen2.5:7b`, 42% → 8% on `mistral:7b`. See
+property of the model**, and it is measured rather than asserted: 42% → 8% on `groq/compound-mini`,
+100% → 58% on `qwen2.5:7b`, 42% → 8% on `mistral:7b` — **the `compound-mini`
+row was measured before the 2026-09-12b hardening and has not been re-run**,
+and none of these deltas has a measured noise band. See
 [INJECTION.md](INJECTION.md), including the reproduction you can run yourself
 for free, and the payloads that still get through.
 

@@ -17,7 +17,7 @@ And measured against live models (3 runs each, temperature 0):
 
 | model | unfenced | fenced | delta | fence |
 |---|---|---|---|---|
-| `groq/compound-mini` | 42% | **8%** | **34 points lower** | 2026-09-12 |
+| `groq/compound-mini` | 42% | **8%** | **33 points lower** | 2026-09-12 |
 | `ollama/qwen2.5:7b` | 100% | **58%** | **42 points lower** | 2026-09-12b |
 | `ollama/mistral:7b` | 42% | **8%** | **33 points lower** | both |
 | `deepseek-flash` | 0% | 0% | no measurable effect | 2026-09-12 |
@@ -245,7 +245,12 @@ fence                  unfenced  fenced  delta   payloads still landing
 
 `ollama/qwen2.5:7b`, chosen because it is local, free, and a different lineage
 from the cloud rows above. Both conditions were stable across all three runs
-(67-67% and 58-58%), so the 9-point move is not noise.
+(67-67% and 58-58%) — but the corpus is 12 payloads, so a "9-point move" is
+**one payload landing instead of two**, at the 8.3-point resolution named below.
+Stability *within* a condition is the wrong test: the band that matters is how
+far an **unchanged** configuration drifts between repeats, and none was measured
+on this harness. Section 4 measured 5.7 points of that drift on a different
+suite. This is the expected direction; it is not a result.
 
 **A third lineage, and a null result.** The same A/B on `ollama/mistral:7b`,
 3 runs each: **42% -> 8%, delta 33, byte-identical before and after.** Both
@@ -409,17 +414,28 @@ on `banking` alone it reaches neither. The fence is the only condition that
 separates from undefended on every measure in both suites.
 
 **The fence and spotlighting still cannot be told apart from each other.**
-Pooled, ASR p = 0.29 and obedience p = 0.063. The fence is directionally ahead
-in every single cell of both suites — which is a consistent lean, not a result,
+Pooled, ASR p = 0.29 and obedience p = 0.063 — **and both are computed from a
+single run of each condition, which the next subsection shows is not good
+enough**,
 and 0.063 is not 0.05. An earlier version of this page said the fence "buys
 nothing over a far simpler defense"; that turned a `slack` tie into a finding
 and `banking` shows why single-suite conclusions were premature. The honest
 statement is still that they are not distinguishable, now with two suites
 leaning the same way.
 
-**The mechanism is consistent across suites.** The payload engages the model at
-a similar rate in every condition; what differs is how often deliberation
-becomes action:
+> **Read the subsection below before this table.** Every figure in it is one
+> run of each condition. The fence has four measurements of `slack` and they
+> disagree with each other by more than the gaps shown here.
+
+**The fence works on both halves of the path, not one.** An earlier version of
+this section claimed the payload engages the model at a similar rate in every
+condition and only *conversion* differed. That was wrong, and the fixture it
+cited says so: engagement drops **31.3% → 22.9%** pooled (78/249 against 57/249,
+p = 0.034), which clears the 5.7-point band, and it clears it in both suites
+separately (37.1% → 29.5% on `slack`, 27.1% → 18.1% on `banking`). Fewer payloads
+reach the model's reasoning at all.
+
+Of the ones that do, fewer still become actions:
 
 | condition | slack | banking |
 |---|---|---|
@@ -427,8 +443,10 @@ becomes action:
 | spotlighting | 68% | 61% |
 | Kazma fence | **58%** | **50%** |
 
-The fence does not stop the model *reading* an injection. It interrupts the step
-between considering it and doing it. One transcript has the model writing
+So the fence is doing two separable things: fewer injections engage the model,
+and fewer of those that engage it are acted on. It does not stop the model
+*reading* an injection — the second number is the interesting one, because it is
+the step between considering and doing. One transcript has the model writing
 "Following Emma's instruction" and then fetching only the legitimate URL —
 persuaded in prose, unmoved in behaviour. That is what a data fence buys, and it
 is a smaller claim than "the model ignores injections".
@@ -581,7 +599,7 @@ no page.
 - **Containment is one layer.** It says nothing about tool-level authorisation.
   That is the HITL gate's job, and it is measured separately: every one of the
   57 danger tools is swept in `tests/test_eval_pack.py`.
-- **A denylist is a denylist.** The nine known attack shapes are covered;
+- **A denylist is a denylist.** The thirteen known attack shapes are covered;
   there are certainly phrasings nobody has thought of. That is the nature of
   the technique and the reason it is the second layer rather than the first.
 

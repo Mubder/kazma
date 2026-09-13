@@ -14,7 +14,7 @@ found it forgets.
 
 ## Prompt injection
 
-**Every live number on the injection page carries a ±5.7-point band.**
+**Every live number on the injection page carries a measured 5.7-point spread.**
 Running the *unchanged* fence configuration four times on AgentDojo's `slack`
 suite gave 14, 16, 20 and 16 attacks won out of 105 — at temperature 0. Ollama
 is not deterministic across runs. This was measured only after several
@@ -56,6 +56,48 @@ not proven, its effect on this model and suite is bounded below about nine
 points, and the study that would settle it has a known price.
 → `docs/INJECTION.md`, section 4, "Does the social-framing wording earn its
 place?"
+
+**The published fence figures are the best of four measurements; the baselines
+were measured once.** `slack` has four runs of the byte-identical shipped fence
+(14, 16, 20, 16 attacks won of 105) and exactly one run each of `none` and
+`spotlighting`. The page published 14 — the minimum. On the fence's four-run
+mean of 15.7% it is **behind** spotlighting's 13.3% on that cell, not tied, and
+the conversion "mechanism" (58.1% against 68.4%) pools to 68.0% against 68.4%
+and disappears. Repeats of both baselines are running; until they land, every
+fence-versus-spotlighting comparison on that page is provisional and is marked
+as such. The noise floor was measured and then not applied to our own headline,
+which is the same error as not measuring it.
+
+**The fence hits AgentDojo's iteration cap far more often than the baselines,
+and those runs score as defensive wins.** On `slack`: 17/105 fenced runs
+exhausted `max_iters=15` against 2/105 undefended and 0/105 spotlighting — the
+fence adds ~800 characters per tool result, so fenced conversations are ~2.8x
+longer and run out of turns. A capped run defended nothing; it ran out of
+budget. Excluding them the fence's `slack` ASR is 15.9% rather than 13.3%.
+`--analyze` now reports `hit_iteration_cap` and `asr_excluding_capped` per
+condition; neither figure is excluded from the headline, because dropping runs
+would be its own thumb on the scale.
+
+**Ollama's context window is not pinned in the benchmark.** Fenced `slack`
+conversations reach ~10k characters, past a default `num_ctx` of 2048/4096
+tokens, and Ollama truncates silently rather than erroring. "Zero provider
+errors" therefore does not rule out the fence scoring well partly because the
+payload fell out of the window. Unmeasured.
+
+**A fenced MCP transport error is no longer flagged as an error.** Closing the
+`Error:` fence bypass (2026-09-13) means `spec_tools`' own failure strings now
+arrive fenced, so `LocalToolRegistry` no longer sets `is_error` on them. The
+message is still readable by the model; supervisor retry logic no longer sees
+it as a failure. Accepted deliberately — a bypassable fence is worse — but the
+right repair is for `spec_tools` to signal failure out of band instead of by
+string prefix.
+
+**The fixture's statistics are not produced by committed code.** The per-suite
+and per-task blocks in `tests/fixtures/agentdojo_qwen25_7b.json` re-derive
+exactly from `--analyze`, but `pooled`, `significance_p_values`, `noise_floor`
+and `social_framing_ablation` were assembled by scratch scripts that are not in
+the repo, and the ablation arms ran from uncommitted local edits. A reader can
+check the raw counts and cannot reproduce the statistics.
 
 **The `poolside/laguna-s-2.1` A/B is unfinished — blocked on quota, not on
 code.** A single hardened-fence run measured 83% unfenced against 17% fenced
@@ -155,7 +197,7 @@ them found by chasing a test that looked merely stale:
 
 | Bug | Consequence |
 |---|---|
-| `kazma mcp` resolved its data dir from the client's CWD | the MCP bridge silently withheld all 55 danger tools, and Kazma's entire data dir could anchor beside an unrelated project |
+| `kazma mcp` resolved its data dir from the client's CWD | the MCP bridge silently withheld all 57 danger tools, and Kazma's entire data dir could anchor beside an unrelated project |
 | `CircuitBreaker.from_dict` clamped a reloaded breaker's age at one cooldown | a tripped breaker could never reach half-open, so it never recovered |
 | the cron scheduler never installed the job's tenant | every scheduled turn ran context-less and could not read tenant-scoped secrets — two 09:00 reminders failed with "no usable API key" |
 | a Playwright fixture slept 1.5s instead of polling | one slow test left uvicorn unbound and broke two neighbours |
