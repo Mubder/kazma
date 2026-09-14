@@ -31,6 +31,7 @@ kazma
 ├── serve [port]           # launch Web UI (uvicorn)
 ├── ask [options] <prompt> # in-process agent (no uvicorn)
 ├── acp                    # ACP JSON-RPC on stdio (Zed / JetBrains)
+├── mcp                    # MCP server on stdio — the whole tool registry, behind the HITL gate
 ├── wizard                 # interactive skill-install wizard
 ├── hub ...                # skill hub (Click group)
 ├── docs <build|serve>     # build/serve the Docusaurus docs site
@@ -137,6 +138,33 @@ Zed — `~/.config/zed/settings.json` (Windows: `%APPDATA%\Zed\settings.json`):
 
 Open the Agent Panel, pick **Kazma**, start a thread. Danger tools prompt
 in the editor (Allow once / Allow for this session / Reject).
+
+### 2.8 `kazma mcp`
+
+MCP server on stdio exposing **the whole tool registry** (155 tools) to any
+MCP client — Claude Desktop, an editor, another agent. `tools/call` hands
+straight to `LocalToolRegistry.execute()`, the same chokepoint where
+commitment authorization, PreToolUse hooks, the permissions allowlist and
+the HITL approval bus already live. Danger tools stop for a human through
+the same gate the chat window uses — that is the difference from
+`kazma_gateway.mcp_server` ("kazma-ide"), the older narrow IDE server whose
+`check_sync()` can only block, never queue. See `docs/MCP_SERVER.md`.
+
+```json
+{
+  "mcpServers": {
+    "kazma": { "command": "kazma", "args": ["mcp"] }
+  }
+}
+```
+
+| Env var | Meaning |
+|---|---|
+| `KAZMA_MCP_TOOLS` | Comma-separated allowlist, enforced on `tools/call` as well as `tools/list`. |
+| `KAZMA_MCP_ALLOW_UNGATED` | Publish danger tools even with **no verified approval path**. Fail-closed is the default: ungated, danger tools are withheld entirely (155 tools become 100), not advertised and refused. |
+
+Tiers map onto MCP's own `destructiveHint` / `readOnlyHint`, so danger tools
+render as destructive in the client's approval UI without reading our docs.
 
 ---
 
