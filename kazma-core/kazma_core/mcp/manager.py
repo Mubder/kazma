@@ -2224,6 +2224,43 @@ class UnifiedToolExecutor:
                         force_hitl = tool_name.lower() not in allowlist
                     else:
                         force_hitl = tier in ("danger", "unknown")
+                    # The supervisor graph may already BE the HITL authority
+                    # for this turn. `LocalToolRegistry.execute` has skipped
+                    # this same bus gate on that signal for a while: a second
+                    # prompt asks the operator twice and can deadlock the turn,
+                    # because the bus waits for an approval they already gave
+                    # to the graph. This path never learned it, so MCP tools
+                    # prompted on Telegram and Discord while the operator was
+                    # in the Web UI answering the graph -- and on 2026-09-14
+                    # they watched two surfaces say REJECTED for a turn they
+                    # had approved.
+                    #
+                    # This does not widen what runs unasked. The graph is a
+                    # COMPLETE gate for these tools: `requires_approval` routes
+                    # `mcp__` names through `classify_mcp_tool` and treats
+                    # anything not 'safe' as needing approval -- the same tier
+                    # test used just above. When the graph holds the gate it
+                    # has already decided about this exact call.
+                    if force_hitl:
+                        try:
+                            from kazma_core.agent.tool_registry import (
+                                _graph_hitl_gate_ctx,
+                            )
+
+                            _graph_owns_gate = bool(_graph_hitl_gate_ctx.get())
+                        except Exception:
+                            logger.debug(
+                                "[MCP] graph-gate check unavailable", exc_info=True
+                            )
+                            _graph_owns_gate = False
+                        if _graph_owns_gate:
+                            logger.info(
+                                "[MCP] %s: the graph holds the HITL gate this "
+                                "turn - not posting a second bus approval",
+                                tool_name,
+                            )
+                            force_hitl = False
+
                     if force_hitl:
                         try:
                             import json as _json
