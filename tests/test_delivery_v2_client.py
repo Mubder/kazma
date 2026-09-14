@@ -742,7 +742,17 @@ class TestResyncFragmentationFixes:
             "return;\n      }", 1
         )[0]
         # The generating branch must early-return while a stream is live…
-        assert "if (activeStream) {" in generating
+        #
+        # Asserted the literal `if (activeStream) {` until 2026-09-14. That
+        # spelling was the bug: a handle stays non-null after the server
+        # closes the body, so this branch returned without reopening and the
+        # turn was never delivered. `_streamIsLive()` asks the stream, which
+        # knows. The contract here — do not abort a HEALTHY stream — is
+        # unchanged and is now actually about health.
+        assert "if (_streamIsLive()) {" in generating
+        assert "if (activeStream) {" not in generating, (
+            "liveness must be asked, not inferred from a variable"
+        )
         assert "NEVER abort it here" in generating
         # …and must NOT contain the old abort-then-skip-reopen pattern.
         assert "activeStream.abort(); } catch (e)" not in generating
@@ -752,7 +762,9 @@ class TestResyncFragmentationFixes:
         src = _CHAT_JS.read_text(encoding="utf-8")
         render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
         assert "meta.source === 'resync'" in render_fn
-        assert "&& !activeStream" in render_fn
+        # Was `&& !activeStream`; same correction as above — a closed handle
+        # must count as "no live stream", not as one.
+        assert "&& !_streamIsLive()" in render_fn
 
 
 class TestSingleBootPainter:
