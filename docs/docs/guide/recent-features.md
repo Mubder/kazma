@@ -12,6 +12,29 @@ research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find
 the deep docs when you need detail.
 
+**New in 2026-09-14:** The **providers page is a control plane** — master-detail
+with state pills, declared capabilities, and a Test that sends a **real
+completion** (`reachable` ≠ `chat_ok`); `/api/providers/*` is the one provider
+surface, the duplicate `/api/settings/providers/*` is deleted.
+**Prompt injection is measured, not claimed**: 996 runs × 4 conditions on
+AgentDojo — the fence scores 10.4% attack success vs 18.1% undefended, and
+statistically ties the literature's 4-character delimiter; a fencing failure
+now fails **closed**, and the `"Error:"` prefix bypass is gone
+([Security](./security-and-safety#10-the-prompt-fence--what-it-stops-measured),
+[the full numbers](https://github.com/Mubder/kazma/blob/main/docs/INJECTION.md)).
+**Backups prove themselves**: the restore drill runs **daily** (5 min after
+boot, every 24 h from last *completed* run) and a weekly deep tier reads the
+bytes back — Postgres data sections streamed through `pg_restore`, `restic
+check --read-data-subset`, and a HEAD read-back of the offsite object.
+**`kazma mcp`** hands the whole tool registry (155 tools) to any MCP client
+with the real HITL gate — ungated, danger tools are withheld, not refused
+([CLI](./cli-reference#28-kazma-mcp)). **Releases are verifiable**: Sigstore
+signatures, SLSA provenance, CycloneDX SBOM (`gh attestation verify`). **OTel
+GenAI spans** for every LLM call and tool execution
+([ops guide](../ops/opentelemetry)). Config safety: an empty write can no
+longer erase a stored secret anywhere, and an approval given in one surface is
+honoured in all of them.
+
 **New in 2026-09-10 (Hands 0.11):** Chat is home (`/` → `/chat`; first-run
 asks for one provider key + model). `file_apply_patch_set` is one HITL card
 (optional `verify=true` runs nearby pytest). Web `/ide` is CodeMirror 5
@@ -54,6 +77,13 @@ resolution + git-write blast radius), transcript recall fallback
 
 | Area | What you get | Where |
 |------|--------------|-------|
+| **Providers control plane (2026-09-13)** | `/settings` providers page is master-detail: state pills, declared capability badges, wire facts, and **two real checks** (`GET /models` + a real completion — `reachable` ≠ `chat_ok`, latency + served model). One `/api/providers/*` surface; the duplicate `/api/settings/providers/*` is deleted. Key resolution goes through `ModelRegistry.resolve_provider_credentials` — the same path a real message uses. | [Web UI](../products/web-ui); [API & extension points](./api-and-extension-points) |
+| **Prompt fence, measured (2026-09-11/13)** | AgentDojo, 996 runs × 4: fence 10.4% attack success vs 18.1% undefended (p < 0.001); ties the 4-character spotlighting delimiter (p = 0.39). `"Error:"` prefix bypass removed — trust comes from the caller's `is_error` flag, never the content; fencing failure returns a placeholder, fail-closed. MCP tools: in the default posture the *server's own tool name* classifies the call — set `KAZMA_MCP_SAFE_ALLOWLIST` or run `KAZMA_PRODUCTION=1`. | [Security §10](./security-and-safety); [INJECTION.md](https://github.com/Mubder/kazma/blob/main/docs/INJECTION.md); [THREAT_MODEL.md](https://github.com/Mubder/kazma/blob/main/docs/THREAT_MODEL.md) |
+| **Self-proving backups (2026-09-13/14)** | Restore drill **daily** (24 h from last completed run) + weekly deep tier: Postgres data streamed through `pg_restore --file=-`, `restic check --read-data-subset=5%`, offsite HEAD read-back (a short upload and a complete one look identical from the sender). Manifest marks `proven_in_production=False` until a live drill result exists. The busiest database no longer misses the backup; a backup that cannot write offsite refuses to report success. | [Disaster recovery](../ops/disaster-recovery); [KNOWN_GAPS.md](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md) |
+| **`kazma mcp` (2026-09-11)** | Whole tool registry as an MCP server for any client; `tools/call` rides `LocalToolRegistry.execute()` — commitment auth, PreToolUse hooks, HITL bus. No approval path → danger tools withheld (fail-closed). `KAZMA_MCP_TOOLS` narrows; tiers map to `destructiveHint`/`readOnlyHint`. | [CLI §2.8](./cli-reference#28-kazma-mcp); `docs/MCP_SERVER.md` |
+| **Verifiable releases (2026-09-11)** | Wheel + sdist with Sigstore keyless signatures, SLSA build provenance (`gh attestation verify`), CycloneDX 1.6 SBOM from `--frozen uv.lock`, signed `SHA256SUMS`. | [SUPPLY_CHAIN.md](https://github.com/Mubder/kazma/blob/main/docs/SUPPLY_CHAIN.md) |
+| **OTel GenAI spans (2026-09-12)** | Standard GenAI semantic-convention spans for every LLM call and tool execution — appears in an existing OTel collector with no Kazma exporter. Opt-in via `OTEL_EXPORTER_OTLP_ENDPOINT`; installs its exporter; never replaces a provider you configured. | [OpenTelemetry (ops)](../ops/opentelemetry) |
+| **Config integrity fixes (2026-09-14)** | An empty write can no longer erase a stored secret (the guard's veto is honoured at every layer, the sqlite branch rolls back first). `atomic_update` holds an `RLock` — a swarm approval can no longer deadlock the whole process. Config writes with a dead SQLite settings DB warn about the live Postgres shadow. Vault detects divergent duplicate keys. | CHANGELOG 2026-09-12/14 |
 | **Hands 0.11 (2026-09-10)** | Chat is home. `file_apply_patch_set` (one HITL card, `-/+` hunks, optional pytest verify). Supervisor re-hops on `TESTS FAILED` (cap 3). ACP diffs + `session/cancel`. Docker jail `force`. | [IDE](../products/ide); [CLI](./cli-reference); `examples/hands-demo/` |
 | **Web `/ide` CodeMirror (2026-09-10)** | File pane is CodeMirror 5 `fromTextArea` (nord, `--bg-deep`). Textarea-first so a blocked CDN still shows the file. Read-only git is a subprocess, not HITL. | `/ide`; [IDE](../products/ide) |
 | **Turn Delivery + HITL registry (2026-09)** | Chat journal is SoT; `close_turn` is the only closer; client projects. One HITL row in `hitl_gates.db` (`pending` = live buttons; second claim **409**). FanOut is tri-state. | [Security](./security-and-safety); [Diagnosis map](../ops/diagnosis-map); AGENTS.md §30–§31 |

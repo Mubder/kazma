@@ -181,12 +181,27 @@ MECHANISMS: tuple[Mechanism, ...] = (
         module="kazma_core.backup.restore_drill",
         symbol="verify_backup",
         proof="tests/test_restore_drill.py",
-        proven_in_production=True,
+        # WAS True. It had never run. An audit of three days of live logs on
+        # 2026-09-14 found 34 "restore drill scheduler started" and zero
+        # results: the interval was 168h and the loop slept a full interval
+        # BEFORE its first pass, so a host restarting every few hours reset
+        # the clock every time. This entry asserted a property that had never
+        # once been measured -- which is the exact failure this manifest
+        # exists to prevent, committed by the manifest itself.
+        #
+        # Back to True only when a drill RESULT appears in a live log.
+        proven_in_production=False,
         note=(
-            "Non-destructive: integrity-checks every SQLite file in scratch "
-            "and parses the Postgres TOC via pg_restore --list. Kazma has no "
-            "restore path for universal backups, so verification is the half "
-            "that can be rehearsed safely."
+            "Daily, counted from the last completed run so restarts cannot "
+            "reset it. Non-destructive, and now checks recoverability rather "
+            "than readability: the backup's own .env key must open the "
+            "backup's own vault, the copy is checked for completeness against "
+            "the manifest's own claims, and a zero-table database is a "
+            "failure rather than a pass. Weekly it reads the bytes -- the "
+            "Postgres dump streamed through pg_restore --file=-, restic check "
+            "--read-data-subset=5%, and a HEAD read-back of the offsite "
+            "object. Scheduling is pinned by "
+            "tests/test_restore_drill_actually_runs.py."
         ),
     ),
     Mechanism(
