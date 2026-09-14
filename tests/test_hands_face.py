@@ -17,14 +17,21 @@ def test_root_handler_redirects_to_chat() -> None:
     assert "dashboard.html" not in src.split("async def root")[1].split("async def ")[0]
 
 
-def test_nav_more_css_does_not_flex_the_details_node() -> None:
+def test_no_disclosure_css_survives_the_disclosure() -> None:
+    """The `.nav-more` rules are gone because the markup is.
+
+    This used to assert how the disclosure hid its body — `display: none` on
+    `.nav-more-body`, never on the `<details>` node itself (the 2026-08-26
+    revert). The nav no longer hides anything: all sixteen destinations are
+    visible under headings, so those selectors matched nothing.
+
+    A selector matching nothing is not harmless — it is what silently dropped
+    the provider model list's styling on 2026-09-14, because CSS has no
+    undefined-name error. Dead rules go.
+    """
     v5 = _V5.read_text(encoding="utf-8")
-    assert ".nav-more-body {" in v5
-    assert "display: none;" in v5
-    assert ".nav-more[open] > .nav-more-body" in v5
-    # Negative: display must not be set on details.nav-more itself.
-    chunk = v5.split(".nav-more {")[1].split(".nav-more-summary")[0]
-    assert "display:" not in chunk
+    assert ".nav-more-body" not in v5
+    assert ".nav-more[open]" not in v5
 
 
 def test_ide_review_panel_markers() -> None:
@@ -51,11 +58,22 @@ def test_ide_review_panel_markers() -> None:
     assert "rejectReview" in js
 
 
-def test_sidebar_work_links_outside_more() -> None:
+def test_sidebar_leads_with_the_work_surfaces() -> None:
+    """Chat leads; Dashboard is an inspector and comes later.
+
+    The ordering used to be enforced by hiding Dashboard behind "More". It is
+    visible now, so the grouping carries the distinction: Work first, the rest
+    under their own headings.
+
+    The inline-display check stays. That was the 2026-08-26 lesson — a
+    `display:` in this nav beat the UA's own hiding — and it is about how
+    fragile display toggling here is, not about the disclosure it was written
+    for.
+    """
     html = _SIDEBAR.read_text(encoding="utf-8")
-    work, _, more = html.partition('class="nav-more-body"')
-    assert 'href="/chat"' in work
-    assert 'href="/settings"' in work
-    assert 'href="/dashboard"' in more
     nav_chunk = html.split("<nav")[1].split("</nav>")[0]
     assert 'style="display:' not in nav_chunk
+    assert "<details" not in nav_chunk
+    for href in ("/chat", "/settings", "/dashboard"):
+        assert f'href="{href}"' in nav_chunk
+    assert nav_chunk.index('href="/chat"') < nav_chunk.index('href="/dashboard"')
