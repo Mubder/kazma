@@ -674,7 +674,21 @@ class ConfigStore:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._yaml_path = Path(yaml_path or "kazma.yaml")
         self._conn: sqlite3.Connection | None = None
-        self._lock = threading.Lock()
+        # REENTRANT, and it has to be. `atomic_update` holds this lock across
+        # the whole read-mutate-write, and the write half calls
+        # `_prepare_value_for_storage` -> `_stored_raw`, which reads the cache
+        # under the same lock. With a plain Lock that is a self-deadlock: the
+        # thread blocks on a lock it already owns, forever, and because it is
+        # never released EVERY later ConfigStore call in the process blocks
+        # too. The whole app freezes from one swarm approval.
+        #
+        # Shipped 2026-09-14 in 69578c77 -- the empty-write secret guard is
+        # what added the `_stored_raw` call -- and found the same day by a
+        # full test run that hung for five hours instead of failing in one.
+        #
+        # Safe because this lock only guards short critical sections over an
+        # in-process cache and a sqlite handle; nothing ever waits on it.
+        self._lock = threading.RLock()
         self._yaml_cache: dict[str, Any] | None = None
         self._cache: dict[str, Any] = {}
         # Cache write timestamps (audit M-P2): the read cache had no TTL, so
@@ -1078,6 +1092,31 @@ class ConfigStore:
             logger.debug("[ConfigStore] raw read failed for %s", key, exc_info=True)
             return None
 
+    def _refused_the_write(self, key: str, new_val: Any, to_store: Any) -> bool:
+        """True when `_prepare_value_for_storage` vetoed this write.
+
+        It signals a veto by returning None -- for a masked placeholder from
+        the UI, or for an empty value that would erase a stored secret.
+        `set()` has always honoured that. `atomic_update` did not: it fed the
+        None straight into `json.dumps`, wrote the string "null" over the
+        row, and left a WARNING in the log saying it had refused.
+
+        That is the same defect the guard was built to stop, one layer up --
+        a check that fires, logs, and is then ignored by its own caller.
+
+        The test is `to_store is None` AND `new_val is not None`, not just the
+        first: an updater returning None for a non-sensitive key means
+        "store null", and prepare passes that through unchanged. Only a
+        value that went in real and came back None was actually vetoed.
+        """
+        if to_store is not None or new_val is None:
+            return False
+        logger.warning(
+            "[ConfigStore] atomic_update on %s was vetoed by the write guard; the stored value is left as it was.",
+            key,
+        )
+        return True
+
     @staticmethod
     def _has_stored_secret(existing: Any) -> bool:
         """True when *existing* is a real stored secret worth protecting."""
@@ -1465,6 +1504,8 @@ class ConfigStore:
                                 curr = row[0]
                         new_val = updater(curr)
                         to_store = self._prepare_value_for_storage(key, new_val)
+                        if self._refused_the_write(key, new_val, to_store):
+                            return curr
                         # Serialize EXACTLY like set() (audit M-P3): a plain
                         # string used to be stored unquoted here while get()
                         # unconditionally json.loads — a string-valued key
@@ -1502,6 +1543,11 @@ class ConfigStore:
                             curr = row[0]
                     new_val = updater(curr)
                     to_store = self._prepare_value_for_storage(key, new_val)
+                    if self._refused_the_write(key, new_val, to_store):
+                        # BEGIN IMMEDIATE is open; returning without this
+                        # would strand the write lock on the database.
+                        conn.execute("ROLLBACK")
+                        return curr
                     val_str = json.dumps(to_store)
                     conn.execute(
                         """INSERT OR REPLACE INTO settings (key, value, category, updated_at)

@@ -187,7 +187,16 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-addopts = "-v --strict-markers --tb=short"
+# A hung test must FAIL, not stall. On 2026-09-14 a self-deadlock in
+# ConfigStore.atomic_update stopped the suite dead at test ~250 of 8,217;
+# three consecutive full runs sat at the same byte of output, the last for
+# five hours, and none of them ever reported. A deadlock does not raise, so
+# nothing failed -- the run simply never ended. The cap is deliberately far
+# above the slowest honest test (the whole suite averages ~0.3s each) so it
+# only ever catches something that is genuinely stuck. --timeout-method=thread
+# is the one that works on Windows, and it dumps the stack of every thread,
+# which is how the deadlock above was located in a single run.
+addopts = "-v --strict-markers --tb=short --timeout=300 --timeout-method=thread"
 markers = [
     "unit: Unit tests",
     "integration: Integration tests",
