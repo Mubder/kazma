@@ -36,6 +36,7 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -102,7 +103,157 @@ def _check_sqlite(path: Path, scratch: Path, res: DrillResult) -> None:
     if verdict.lower() != "ok":
         res.add(f"sqlite:{name}", False, f"integrity_check: {verdict[:120]}")
         return
+    if tables == 0:
+        # `integrity_check` passes on an empty file: structurally perfect and
+        # completely worthless. A backup that saved nothing must not read as a
+        # backup that saved everything.
+        res.add(f"sqlite:{name}", False, "opens, but contains no tables at all")
+        return
     res.add(f"sqlite:{name}", True, f"{tables} tables")
+
+
+def _check_vault_opens(backup: Path, res: DrillResult) -> None:
+    """Prove the backup's own ``.env`` key decrypts the backup's own vault.
+
+    The highest-consequence check here, and one of the cheapest. Every other
+    check can pass while this fails, and the result is a backup whose every
+    secret — provider keys, connector tokens, OAuth credentials — is
+    permanently unreadable. `.env` being *present* proved nothing: a stale or
+    rotated ``KAZMA_VAULT_KEY`` sits in a file of exactly the right size.
+
+    Reads only, in a subprocess-free way, and never touches the live vault:
+    the key is loaded from the backup's `.env` and applied to a COPY of the
+    backup's vault.db.
+    """
+    env_file = backup / ".env"
+    vault_db = backup / "dbs" / "vault.db"
+    if not env_file.is_file():
+        return  # already reported by env:present
+    if not vault_db.is_file():
+        # An install with the vault disabled has no vault.db, and calling that
+        # a broken backup is a false alarm. Only a vault that EXISTS and will
+        # not open is a finding.
+        return
+
+    key = ""
+    try:
+        for line in env_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip().lstrip("﻿")
+            if line.startswith("#") or "=" not in line:
+                continue
+            name, _, value = line.partition("=")
+            if name.strip().removeprefix("export ").strip() == "KAZMA_VAULT_KEY":
+                key = value.strip().strip("'\"")
+    except Exception as exc:  # noqa: BLE001
+        res.add("vault:key", False, f"could not read .env: {exc}")
+        return
+
+    if not key:
+        res.add(
+            "vault:key", False,
+            "no KAZMA_VAULT_KEY in the backup's .env -- every encrypted secret "
+            "in this backup is unrecoverable",
+        )
+        return
+
+    import os
+    import tempfile
+
+    scratch = Path(tempfile.mkdtemp(prefix="kazma-vault-drill-"))
+    previous = os.environ.get("KAZMA_VAULT_KEY")
+    try:
+        copy = scratch / "vault.db"
+        shutil.copy2(vault_db, copy)
+        # Bring the WAL sidecars along. A SQLite file copied without its -wal
+        # loses every write that has not been checkpointed — the copy opens
+        # cleanly and reports "no such table", which would read here as a
+        # broken vault. Backups written through the online backup API have no
+        # sidecar; one produced any other way might.
+        for suffix in ("-wal", "-shm"):
+            side = vault_db.with_name(vault_db.name + suffix)
+            if side.is_file():
+                shutil.copy2(side, copy.with_name(copy.name + suffix))
+        os.environ["KAZMA_VAULT_KEY"] = key
+        from kazma_core.security.vault import SecretVault
+
+        # How many secret ROWS exist, read straight from SQL. This is the
+        # question `list_secrets()` cannot answer: with the WRONG key it comes
+        # back empty, which is indistinguishable from a vault that holds
+        # nothing — so a stale key read as "no secrets stored" and PASSED.
+        # Caught by the test for exactly that case.
+        con = sqlite3.connect(f"file:{copy}?mode=ro", uri=True)
+        try:
+            rows = con.execute("SELECT count(*) FROM secrets").fetchone()[0]
+        finally:
+            con.close()
+
+        if rows == 0:
+            # Genuinely empty: an install with no secrets yet. Calling that a
+            # broken backup would be a false alarm.
+            res.add("vault:decrypt", True, "vault opens; no secrets stored")
+            return
+
+        vault = SecretVault(db_path=str(copy))
+        names = [
+            str(s.get("name") or "") for s in vault.list_secrets() if s.get("name")
+        ]
+        opened = sum(1 for n in names[:5] if vault.retrieve(n) is not None)
+        res.add(
+            "vault:decrypt", opened > 0,
+            f"{opened}/{min(5, len(names))} sampled secrets decrypt "
+            f"({rows} stored)" if opened
+            else f"the backup's key opens NOTHING -- {rows} stored secret(s) "
+                 "are unrecoverable from this backup",
+        )
+    except Exception as exc:  # noqa: BLE001
+        res.add("vault:decrypt", False, f"vault will not open: {exc}")
+    finally:
+        if previous is None:
+            os.environ.pop("KAZMA_VAULT_KEY", None)
+        else:
+            os.environ["KAZMA_VAULT_KEY"] = previous
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def _check_completeness(backup: Path, res: DrillResult) -> None:
+    """Is everything the backup CLAIMED to save actually on disk?
+
+    Checked against the backup's own manifest rather than the live data
+    directory. A first version compared the two and flagged 238 "missing"
+    databases — the 212 per-repo `code-index` stores among them — because the
+    drill can be pointed at any backup, including one from another install or
+    another day, and "what is on this machine right now" is simply not the
+    question a backup can be asked.
+
+    What the manifest CAN be held to is its own word: every database it says
+    it saved must be there, and readable. The complementary failure — a store
+    that was never attempted — is recorded by the backup itself and is already
+    read out of the manifest as `manifest:databases`.
+    """
+    manifest = backup / "manifest.json"
+    if not manifest.is_file():
+        return  # already reported by manifest:present
+    try:
+        m = json.loads(manifest.read_text(encoding="utf-8"))
+        items = ((m.get("databases") or {}).get("items")) or []
+    except Exception as exc:  # noqa: BLE001
+        res.add("complete:databases", False, f"manifest unreadable: {exc}")
+        return
+    if not items:
+        return
+
+    dbs_root = backup / "dbs"
+    missing = [
+        str(it.get("path") or "")
+        for it in items
+        if not it.get("error") and not (dbs_root / str(it.get("path") or "")).is_file()
+    ]
+    res.add(
+        "complete:databases", not missing,
+        f"all {len(items)} recorded databases are present" if not missing
+        else f"{len(missing)} database(s) the manifest claims are NOT on disk: "
+             + ", ".join(missing[:5]) + ("…" if len(missing) > 5 else ""),
+    )
 
 
 def _check_pg_dump(dump: Path, res: DrillResult) -> None:
@@ -208,6 +359,8 @@ def verify_backup(
         scratch.mkdir(parents=True, exist_ok=True)
         for db in dbs:
             _check_sqlite(db, scratch, res)
+        _check_vault_opens(d, res)
+        _check_completeness(d, res)
     finally:
         if owns_scratch:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -289,15 +442,58 @@ def run_drill(backup_dir: str | Path | None = None) -> DrillResult:
     return res
 
 
-#: Weekly. Bit rot, an expired credential and a truncated dump are all slow
-#: failures -- checking daily would add noise without finding them sooner,
-#: and monthly leaves too long a window in which a restore silently stops
-#: being possible.
-DRILL_INTERVAL_HOURS = 168.0
+#: Daily. The weekly cadence was not the problem -- never running was. A
+#: restore that has silently stopped being possible should be found in a day,
+#: and these checks are cheap enough to afford it.
+DRILL_INTERVAL_HOURS = 24.0
+
+#: Where the last completed run is remembered, so the cadence survives a
+#: restart.
+_LAST_RUN_KEY = "backup.restore_drill.last_run"
+
+#: A short settle after boot, then run if one is due. Not zero -- a drill
+#: firing during startup competes with the work an operator is waiting on.
+_DRILL_FIRST_DELAY_SECONDS = 300.0
+
+
+def _last_drill_run() -> float:
+    """Epoch seconds of the last completed drill, or 0.0."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        return float(get_config_store().get(_LAST_RUN_KEY, 0) or 0)
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _record_drill_run(when: float) -> None:
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(_LAST_RUN_KEY, float(when), category="backup")
+    except Exception:  # noqa: BLE001
+        logger.debug("[restore-drill] could not record run time", exc_info=True)
+
+
+def drill_is_due(now: float | None = None) -> bool:
+    """True when no drill has completed within the interval.
+
+    The cadence is measured from the LAST RUN, not from process start. It used
+    to sleep a full interval before its first run, so on a host restarting more
+    often than the interval it never fired at all -- 34 scheduler starts and
+    zero results across three days of live logs, while the module's own
+    docstring warned that a mechanism nobody runs asserts a property nobody has
+    measured.
+    """
+    stamp = time.time() if now is None else now
+    last = _last_drill_run()
+    if last <= 0:
+        return True
+    return (stamp - last) >= DRILL_INTERVAL_HOURS * 3600
 
 
 async def drill_scheduler() -> None:
-    """Run the drill once a week. Crash-isolated; sleeps first.
+    """Run the drill daily, counting from the last run rather than from boot.
 
     This module could verify a backup from the day it was written. Nothing
     called it: its only non-test reference was the resilience manifest, which
@@ -306,15 +502,24 @@ async def drill_scheduler() -> None:
     hardcoded ``{"ok": True}`` Postgres entry, and as the offsite remote that
     reported healthy while refusing every write.
 
-    Sleeps first because a drill on every boot fires hardest during an
-    incident, when the operator needs another message least.
+    Waits a few minutes after boot rather than a full interval: long enough
+    that a drill does not compete with the work an operator is waiting on,
+    short enough that a host restarting daily still gets one.
     """
     import asyncio
 
+    first = True
     while True:
         try:
-            await asyncio.sleep(DRILL_INTERVAL_HOURS * 3600)
+            if first:
+                await asyncio.sleep(_DRILL_FIRST_DELAY_SECONDS)
+                first = False
+            else:
+                await asyncio.sleep(DRILL_INTERVAL_HOURS * 3600)
+            if not drill_is_due():
+                continue
             res = await asyncio.to_thread(run_drill)
+            _record_drill_run(time.time())
             if res.ok:
                 # Logged on success on purpose: a mechanism that speaks only
                 # when it breaks cannot be told from one that never runs.
