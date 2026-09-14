@@ -17,6 +17,55 @@ var KazmaStream = (function() {
     // a different scope; a var declared there made the getter throw
     // "lastEventId is not defined" on any stream error).
     var lastEventId = null;
+    // Is this stream still able to deliver? Same scope rule as lastEventId
+    // above, and for the same reason -- the getter below closes over THIS,
+    // not over the fetch callback.
+    //
+    // chat.js used to answer "is the stream alive?" by testing whether its
+    // `activeStream` variable was non-null. That is a belief, not a fact: a
+    // handle stays non-null after the server closes the body unless some
+    // callback nulls it, and those callbacks are epoch-gated, so a
+    // superseded stream's terminal frame nulls nothing. On 2026-09-14 that
+    // belief cost an operator a finished 3,725-character reply -- the
+    // post-approval re-attach was skipped because a dead handle looked
+    // alive. Liveness is reported here, where it is known.
+    var closed = false;
+
+    // Guard: the SSE ``event: done`` frame already completes the turn.
+    // When the HTTP body closes, the reader also ends — without this flag
+    // chat.js would call onDone a *second* time with no payload and paint
+    // the false ``No response received…`` bubble after a good reply.
+    //
+    // THESE THREE LIVE AT ssePost SCOPE, not inside the fetch .then.
+    // They were declared in the .then callback while the .catch below --
+    // which is chained on the OUTER promise -- called both functions. They
+    // are not lexically visible there, so that handler threw
+    // `ReferenceError: isBenignStreamClose is not defined` EVERY time it
+    // ran, and `onError` was never reached. chat.js nulls `activeStream`
+    // and resyncs from onError, so a transport failure left a dead handle
+    // that looked alive and no recovery at all. Same scope trap the
+    // lastEventId comment above already warns about, in the same function.
+    // Found 2026-09-14 by a test that drove a failing fetch through it.
+    var streamFinished = false;
+
+    function finishStream(data) {
+      if (streamFinished) return;
+      streamFinished = true;
+      closed = true;
+      if (callbacks.onDone) callbacks.onDone(data);
+    }
+
+    function isBenignStreamClose(err) {
+      if (!err) return true;
+      if (err.name === 'AbortError') return true;
+      var msg = String((err && err.message) || err || '').toLowerCase();
+      return msg === 'network error'
+        || msg.indexOf('networkerror') >= 0
+        || msg.indexOf('failed to fetch') >= 0
+        || msg.indexOf('load failed') >= 0
+        || msg.indexOf('body stream') >= 0
+        || msg.indexOf('err_incomplete') >= 0;
+    }
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
@@ -24,36 +73,13 @@ var KazmaStream = (function() {
       signal: controller.signal,
     }).then(function(response) {
       if (!response.ok) {
+        closed = true;
         if (callbacks.onError) callbacks.onError('HTTP ' + response.status);
         return;
       }
       var reader = response.body.getReader();
       var decoder = new TextDecoder();
       var buffer = '';
-
-      // Guard: the SSE ``event: done`` frame already completes the turn.
-      // When the HTTP body closes, the reader also ends — without this flag
-      // chat.js would call onDone a *second* time with no payload and paint
-      // the false ``No response received…`` bubble after a good reply.
-      var streamFinished = false;
-
-      function finishStream(data) {
-        if (streamFinished) return;
-        streamFinished = true;
-        if (callbacks.onDone) callbacks.onDone(data);
-      }
-
-      function isBenignStreamClose(err) {
-        if (!err) return true;
-        if (err.name === 'AbortError') return true;
-        var msg = String((err && err.message) || err || '').toLowerCase();
-        return msg === 'network error'
-          || msg.indexOf('networkerror') >= 0
-          || msg.indexOf('failed to fetch') >= 0
-          || msg.indexOf('load failed') >= 0
-          || msg.indexOf('body stream') >= 0
-          || msg.indexOf('err_incomplete') >= 0;
-      }
 
       function pump() {
         reader.read().then(function(result) {
@@ -222,6 +248,7 @@ var KazmaStream = (function() {
 
       pump();
     }).catch(function(err) {
+      closed = true;
       if (err.name === 'AbortError') return;
       if (isBenignStreamClose(err)) {
         finishStream(undefined);
@@ -231,9 +258,15 @@ var KazmaStream = (function() {
     });
 
     return {
-      abort: function() { controller.abort(); },
+      abort: function() { closed = true; controller.abort(); },
       /** Last journaled seq seen on this stream (Turn Delivery V2). */
       lastEventId: function() { return lastEventId; },
+      /**
+       * True once this stream can no longer deliver anything: the body
+       * ended, it errored, or it was aborted. Ask this instead of
+       * guessing from whether a variable still holds the handle.
+       */
+      isClosed: function() { return closed; },
     };
   }
 

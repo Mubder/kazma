@@ -334,6 +334,7 @@
    * attach, unconditionally.
    */
   function _reattachAfterApproval(reason) {
+    _startReconciler('approval');
     if (activeStream) {
       try { activeStream.abort(); } catch (eAb) { /* already dead */ }
       activeStream = null;
@@ -613,6 +614,86 @@
     } catch (e) { /* ignore */ }
   }
 
+  /**
+   * Is the delivery stream actually able to deliver?
+   *
+   * `activeStream` being non-null is not an answer. The handle stays put
+   * after the server closes the body unless a terminal callback nulls it,
+   * and those callbacks are epoch-gated -- a superseded stream's `done`
+   * frame nulls nothing. KazmaStream now reports `isClosed()` from inside
+   * the stream, where it is a fact. Older handles without the getter fall
+   * back to the old truthiness test.
+   */
+  function _streamIsLive() {
+    if (!activeStream) return false;
+    if (typeof activeStream.isClosed !== 'function') return true;
+    return !activeStream.isClosed();
+  }
+
+  /* ── Delivery reconciler ────────────────────────────────────────────
+   *
+   * The one mechanism in this file that is not allowed to give up.
+   *
+   * Everything else that recovers a stuck turn asks a client-side question
+   * first -- is the stream alive, is the card terminal, are we awaiting an
+   * approval -- and skips the server when the answer is wrong. Each of
+   * those guards has failed at least once, and each failure looks identical
+   * to the operator: the answer exists on the server and the screen says
+   * the agent is still waiting.
+   *
+   * 2026-09-14 is the case this was written for. An approval was granted,
+   * the tool ran, a 3,725-character reply was persisted -- and the browser
+   * made zero requests between the approve and the reply, because one
+   * stale variable made every recovery path decline. Nothing was lost.
+   * Nothing was delivered either.
+   *
+   * So this loop has NO guard on whether to ask. While a turn might still
+   * be undelivered it asks the server, on a timer, and `_resyncDelivery`
+   * paints whatever server truth turns out to be. It stops on one thing
+   * only: the server saying the turn is over, twice in a row. Not on a
+   * belief about the transport, not on a card's phase, not on a budget.
+   *
+   * It is deliberately convergent rather than correct-first-time: it does
+   * not matter WHICH delivery path broke, because the next tick heals it.
+   * That is the property worth having -- a bug in the stream becomes a few
+   * seconds of delay instead of a lost answer.
+   */
+  var _RECONCILE_MS = 6000;
+  var _RECONCILE_HIDDEN_MS = 30000;   // backoff, NOT a stop
+  var _RECONCILE_IDLE_TICKS = 2;      // server must say idle twice
+  var _reconcileTimer = null;
+  var _reconcileIdleTicks = 0;
+
+  function _turnMayBeUndelivered() {
+    return !!(_isGenerating || _awaitingReply || _awaitingApproval
+      || _serverGenerating || _serverPaused);
+  }
+
+  /** Idempotent: safe to call from every path that starts or resumes a turn. */
+  function _startReconciler(reason) {
+    _reconcileIdleTicks = 0;
+    if (_reconcileTimer) return;
+    _scheduleReconcile();
+  }
+
+  function _scheduleReconcile() {
+    if (_reconcileTimer) return;
+    var wait = (typeof document !== 'undefined' && document.hidden)
+      ? _RECONCILE_HIDDEN_MS : _RECONCILE_MS;
+    _reconcileTimer = setTimeout(_reconcileTick, wait);
+  }
+
+  function _reconcileTick() {
+    _reconcileTimer = null;
+    if (!chatSessionId) return;   // no session: there is nothing to deliver
+    try { _resyncDelivery('reconcile'); } catch (eR) { /* never fatal */ }
+    // Counted from the PREVIOUS resync's answer, which is the conservative
+    // direction: it costs an extra tick, it cannot stop early.
+    if (_turnMayBeUndelivered()) _reconcileIdleTicks = 0;
+    else _reconcileIdleTicks += 1;
+    if (_reconcileIdleTicks < _RECONCILE_IDLE_TICKS) _scheduleReconcile();
+  }
+
   function _resyncDelivery(reason) {
     if (!chatSessionId) return;
     var sid = chatSessionId;
@@ -670,7 +751,7 @@
       // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
       // trigger churned connections for no gain.
       if (generating || liveHitl) {
-        if (activeStream) {
+        if (_streamIsLive()) {
           // A live stream owns this turn — NEVER abort it here. Aborting a
           // healthy stream forced a journal-cursor reopen whose replay
           // painted terminal segments, fragmenting one reply into multiple
@@ -1244,7 +1325,16 @@
     _clearTurnTimers();
     _turnWatchdogTimer = setTimeout(function() {
       _turnWatchdogTimer = null;
-      if (!_isGenerating || _awaitingApproval) return;
+      if (!_isGenerating) return;
+      if (_awaitingApproval) {
+        // Waiting on the operator is not idleness -- but this branch used
+        // to `return` WITHOUT re-arming, unlike every other branch here.
+        // One firing while an approval card was on screen disarmed the
+        // watchdog for the rest of the turn. Re-arm; the reconciler runs
+        // regardless, and this stays as a second net rather than a latch.
+        _armTurnWatchdog();
+        return;
+      }
       var idleFor = Date.now() - (_lastTurnActivityTs || 0);
       if (idleFor < TURN_IDLE_WATCHDOG_MS - 500) {
         // Activity arrived after schedule — re-arm.
@@ -2198,6 +2288,10 @@
     // HITL: turn is paused. Keep the composer usable for /steer, /abort,
     // /long, /yolo — locking it was why steers vanished (incident 2026-08-16).
     _clearTurnTimers();
+    // An approval can be granted from Telegram or Discord while this tab
+    // only watches. The reconciler is what makes the answer show up here
+    // anyway -- this tab never sees an approve response to react to.
+    _startReconciler('hitl');
     _isGenerating = false;
     _awaitingApproval = true;
     // This tab saw the interrupt. Do NOT treat this flag as "already approved"
@@ -2297,7 +2391,7 @@
         if (store.pendingApproval) return;
         // Reply already painted and the SSE fetch is gone — Stop was stuck
         // because WS still had isThinking from a leftover status frame.
-        var sseDead = !activeStream;
+        var sseDead = !_streamIsLive();
         var replyPainted = !!(tokenAccum && String(tokenAccum).trim());
         if (sseDead && replyPainted) {
           console.warn('[KazmaChat] Desync recovery: SSE ended with a painted reply — releasing Stop');
@@ -2898,7 +2992,7 @@
         }
         if (body && body.mode === 'hard') {
           _awaitingReply = true;
-          if (!activeStream) {
+          if (!_streamIsLive()) {
             try { _attachJournal('steer-json'); } catch (eRe) { /* ignore */ }
           }
         }
@@ -3060,6 +3154,7 @@
     } catch (e) { /* ignore */ }
 
     function _dispatchSse(extraBody) {
+      _startReconciler('dispatch');
       if (activeStream) {
         try { activeStream.abort(); } catch (e) { /* already dead */ }
       }
@@ -7578,7 +7673,7 @@
     if (!_historical && (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done')) {
       _awaitingReply = false;
     }
-    if ((meta.source === 'resync' || meta.source === 'hydrate') && !activeStream) {
+    if ((meta.source === 'resync' || meta.source === 'hydrate') && !_streamIsLive()) {
       currentMsgEl = null;
     }
     // Interior painters (_syncCotPanel/_paintHitlFromDoc) save/restore
