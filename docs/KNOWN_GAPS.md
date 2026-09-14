@@ -225,14 +225,39 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**1 failure** (2026-09-13, `pytest tests/`, 7892 passed in 51 min), and it is
-a full-suite-only flake: `tests/e2e/test_smoke.py::test_reload_restores_answer_and_cot`
-passes alone and passes with the whole `tests/e2e/` directory (8/8), failing
-only inside the 7,917-test run. Cross-suite contention under load, not a
-product bug — the day's only product change (`prompt_fence.py`) is never
-called from `kazma-ui/`, so it cannot reach that test. Do not chase it from a
-full-suite report alone; re-run the file first. Was 21 failures + 1
-collection error on the morning of 2026-09-12.
+**0 failures** (2026-09-14), across all six declared `testpaths`:
+
+| Path | Result |
+|---|---|
+| `tests/` (`--ignore=tests/e2e`) | 8203 passed, 22 skipped, 3 xfailed, 36m27s |
+| `kazma-core/kazma_core_tests`, `kazma-core/tests` | 398 passed |
+| `kazma-gateway/…`, `kazma-ui/…`, `kazma-tui/…` | 317 passed, 1 skipped |
+
+**`pytest tests/` is not the suite, and running only it hides failures for
+days.** `pyproject.toml` declares six testpaths; the habit here has been to
+run the first one and call the result green. On 2026-09-14 that habit was
+caught: `test_multi_platform.py::test_swarm_dispatch_timeout_handling` had
+been red since 2026-09-09, when the user-facing timeout message was reworded
+to name the budget that ran out. The test pinned the old literal phrase, the
+product was the better of the two, and five days of "green" runs never
+touched the file. Run bare `pytest` — which uses all six — before claiming a
+baseline.
+
+The run before it took five hours and reported nothing at all. Three
+consecutive full runs had stalled at the identical byte of output on the same
+test file, because a self-deadlock in `ConfigStore.atomic_update` stops a
+thread without raising: nothing fails, the run just never ends. The suite now
+carries `--timeout=300 --timeout-method=thread` in `pyproject.toml` addopts
+so a hang fails and dumps every thread's stack. **If that flag ever
+disappears, put it back** — without it the suite cannot distinguish a hang
+from patience. See CHANGELOG, 2026-09-14.
+
+Before that: 1 full-suite-only flake on 2026-09-13
+(`tests/e2e/test_smoke.py::test_reload_restores_answer_and_cot`, which passes
+alone and passes with the whole `tests/e2e/` directory — cross-suite
+contention under load, not a product bug; re-run the file before chasing it
+from a full-suite report). Was 21 failures + 1 collection error on the morning
+of 2026-09-12.
 
 Twenty-one were stale tests pinning code that had moved, each verified against
 the product before being touched. Four were real product bugs, every one of
@@ -297,14 +322,50 @@ guard in `save_providers` that refuses to blank a stored key.
 **Keys destroyed before that fix are not recoverable and must be re-entered.**
 The vault may still hold the secret; the pointer to it is gone.
 
-**The same read-modify-write shape is unaudited elsewhere.** Any config value
-that is a JSON blob containing a nested secret has the same hazard —
-`connectors.*` is the obvious neighbour. Only `providers.list` is guarded.
-Nothing has checked the rest, and the failure mode is silent.
+**~~The same read-modify-write shape is unaudited elsewhere.~~** Closed
+2026-09-14. The audit found two config values that are JSON blobs holding
+nested secrets — `providers.list` (guarded) and `swarm.output_target` (not).
+Connectors are flat keys, one row each, so the blob round-trip never reached
+them. The guard moved from `save_providers` down to
+`_prepare_value_for_storage`, the chokepoint every writer passes through, and
+it reads the **unresolved** stored value — a `get()` that cannot decrypt
+returns `None`, which is indistinguishable from "nothing here" and is exactly
+how the original damage was done.
+→ `tests/test_secrets_are_never_blanked.py`.
 
 **Nothing stops a future health check from writing.** The guard blocks the
 specific damage; no test or lint asserts that a diagnostic path may not call a
 mutating one. Until one exists, this class is prevented by convention.
+
+**A guard can fire, log, and be overruled by its own caller.** The
+empty-write guard above signals a refusal by returning `None`. `set()` had
+always honoured that; `atomic_update` fed it into `json.dumps` and wrote the
+string `"null"` over the row it had just refused to blank — while logging the
+refusal. Fixed on 2026-09-14, but the class is wider than the instance: a
+sentinel return value is only as good as the callers that check it, and
+nothing lints for the ones that do not.
+
+**Adding a read inside a lock-holding method can deadlock it.** The same fix
+gave `_prepare_value_for_storage` a call to `_stored_raw`, which takes the
+ConfigStore lock. `atomic_update` already held it. `threading.Lock` is not
+reentrant, so the thread blocked on its own lock forever and never released
+it, stranding every later ConfigStore call in the process — the whole
+application, from one swarm approval. The lock is an `RLock` now, which
+prevents recurrence in this class, but nothing asserts that a method called
+under the lock does not acquire something *else* that is still plain.
+→ `tests/test_atomic_update_does_not_deadlock.py`.
+
+**The backup verification has not yet run on the operator's machine.** The
+daily restore drill and the weekly deep tier landed on 2026-09-14 and are
+tested in CI, but the first live pass fires five minutes after the next
+restart. Until it does, recoverability is again a property asserted rather
+than measured — which is the precise failure this work was written to end.
+Do not describe backups as verified until a drill result exists in the log.
+
+**`snapshots.db` will prune but not shrink.** The retention fix commits its
+deletes now, so rows past retention do go. The 864 MB file only returns space
+when a `VACUUM` succeeds against a store that is written every few seconds,
+and that has not been demonstrated.
 
 **The injection A/B on OpenRouter's free tier cannot fit in a day.** The limit
 is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two

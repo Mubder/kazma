@@ -1,5 +1,263 @@
 # CHANGELOG
 
+## A lock taken twice froze everything behind it (2026-09-14)
+
+A full test run stopped for five hours and reported nothing. Three consecutive
+runs had stalled at the *identical byte* of output — 2,714 — on the same test
+file, and each time the stall was read as slowness and a fresh run launched on
+top of it, so two 2.2 GB pytest processes ended up contending over one tree.
+
+Nothing failed, because a deadlock does not raise. The run simply never ended.
+
+The cause was the previous fix, one entry down. The empty-write guard taught
+`_prepare_value_for_storage` to read what is actually on disk, so it could tell
+"no secret here" apart from "a vault pointer I cannot open". That read,
+`_stored_raw`, takes the ConfigStore lock. `atomic_update` **already holds it**
+— across the whole read-mutate-write, which is the entire point of the method.
+`threading.Lock` is not reentrant.
+
+So the thread blocked on a lock it owned itself, forever, and never released
+it. Every later ConfigStore call in the process then queued behind it. The
+blast radius is not one stuck call; it is the whole application, from one swarm
+approval — `shared_approvals.resolve()` passes a dict, which is exactly the
+branch that reads raw.
+
+It reached main looking harmless because `set()` and the lease writer call the
+guard *outside* the lock. Only `atomic_update` was exposed, and only for a
+dict, a list, or an empty sensitive value.
+
+The lock is an `RLock` now. Safe here: it guards short critical sections over
+an in-process cache and a sqlite handle, and nothing ever waits on it.
+
+### The guard fired, logged, and was overruled by its own caller
+
+Uncovered by fixing the deadlock. With the hang gone the guard worked —
+refused the blank, logged `refused to blank the stored secret` — and then
+`atomic_update` fed the `None` veto into `json.dumps` and wrote the string
+`"null"` over the row.
+
+A check that fires, logs, and is ignored by the code that called it is the same
+defect the guard exists to prevent, one layer up. Both branches honour the veto
+now and return the value that still stands. The SQLite branch rolls back first:
+returning out of an open `BEGIN IMMEDIATE` would have stranded the database
+write lock — a second freeze in the shape of the first.
+
+The test the fix turns on is `to_store is None` **and** `new_val is not None`.
+An updater returning `None` for a non-sensitive key means "store null", and
+prepare passes that through unchanged; only a value that went in real and came
+back `None` was actually vetoed.
+
+### A hung test must fail, and must say where
+
+The suite now runs with `--timeout=300 --timeout-method=thread`. The cap sits
+far above the slowest honest test — the suite averages about 0.3s each — so it
+only ever catches something genuinely stuck, and it dumps every thread's stack,
+which is how this was finally located in a single 100-second run.
+
+→ `tests/test_atomic_update_does_not_deadlock.py` — 10 tests, 6 of which fail
+against the unfixed code, verified by stashing the fix and watching them fail
+first. The reentrancy test uses a *timed* acquire rather than nested `with`
+blocks: the obvious spelling deadlocks pytest's own main thread, so the first
+draft hung the runner instead of failing it — the exact mistake it exists to
+catch.
+
+**Operator impact: none, if you pull before restarting.** The window was
+2026-09-14 03:47 to 09:57 on `main`.
+
+---
+
+## An empty write can no longer erase a secret anywhere (2026-09-14)
+
+Asked for after the provider-key fix below: *where else can this happen?*
+
+`save_providers` got a guard at its own writer. That fixed `providers.list` and
+nothing else, which is the wrong altitude for a defect that belongs to the
+storage rather than to one caller.
+
+Walking the live store for JSON blobs holding nested secrets turned up two:
+`providers.list` (guarded) and `swarm.output_target` (not). Connectors are flat
+keys, one row each, so the blob round-trip never reached them — and their
+writers already guard with `if token:` while removal goes through `delete()`,
+not `set("")`.
+
+But `_prepare_value_for_storage` carried the hazard for every sensitive key:
+
+```python
+if value is None or value == "":
+    return value        # writes straight through, over a vault ref
+```
+
+Masked placeholders were already skipped there. Empty was not. The guard now
+lives at that chokepoint, where `set`, `batch_set`, `atomic_update` and the
+nested walk underneath them all pass, and it distinguishes a stored secret from
+an absent one by reading the **unresolved** value — a `get()` that cannot
+decrypt returns `None`, which is indistinguishable from "nothing here" and is
+precisely how the original damage was done.
+
+Clearing a secret on purpose still works, through `delete(key)`, which is what
+the connector-removal path already used.
+
+→ `tests/test_secrets_are_never_blanked.py`
+
+---
+
+## Three durability mechanisms that ran, logged success, and did nothing (2026-09-14)
+
+A check of the backup system, prompted by one alert. Every finding below has
+the same shape: a mechanism that exists, is enabled, runs on schedule, reports
+success, and does not do its job.
+
+### The busiest database was the one that never got backed up
+
+The alert said `1 database(s) failed to back up`. What that sentence was
+covering, from the live install:
+
+```
+[universal-backup] DB copy failed snapshots.db: database is locked
+[universal-backup] complete: 25 DBs, 440.3 MB
+(the three runs before it: 26 DBs, 1304.0 MB)
+```
+
+`snapshots.db` is 905,596,928 bytes. The 864 MB gap between those totals is
+exactly it. "1 of 26 failed" reads as 96% covered; two thirds of the data by
+volume was missing.
+
+The copy already used the SQLite Online Backup API, which is the right method
+— but in batches: `s.backup(d, pages=100, sleep=0.01)`. SQLite **restarts** a
+backup from the beginning whenever the source is written during the copy, so
+every batch boundary is a restart window. The time-travel store is written
+every few seconds. An 864 MB database under continuous write cannot finish a
+batched copy, and it does not fail fast: it grinds, then errors.
+
+Copied in one step now (`pages=-1`) — a single read transaction, no restart
+window — plus a 60s busy timeout on both connections, against a 5s default that
+is nothing under continuous write. The alert now names the database and the
+megabytes lost instead of counting files.
+
+### The retention prune deleted the rows and rolled them back
+
+`snapshots.db` reached 864 MB with its oldest row 53 days past a 30-day
+retention, while a daily maintenance loop ran on schedule and logged success
+every time:
+
+```
+maintenance: deleted=3079 before=905596928 after=905867264
+maintenance: deleted=3083 before=905867264 after=906084352
+maintenance: deleted=3106 before=906084352 after=906158080
+```
+
+The same rows deleted each run, and the file *growing* after every successful
+prune. Python's `sqlite3` opens an implicit transaction for a DML statement,
+and `close()` without `commit()` rolls it back. The prune ran, counted its
+rows, reported them, and undid itself — for weeks.
+
+Nothing looked wrong because `rowcount` is what the DELETE *intended*. It
+reported 3,079 rows removed while the transaction was being rolled back
+underneath it. 3,122 rows / 537 MB — 63% of the store — were past retention on
+a system whose retention was enabled, scheduled, and apparently working.
+
+The commit is there now, and the run re-counts what remains on a fresh
+read-only connection rather than trusting its own `rowcount`. The file will not
+shrink until a `VACUUM` succeeds against a contended 864 MB store; the rows go
+regardless.
+
+→ `tests/test_snapshot_retention_actually_prunes.py`
+
+### The restore drill had never run once
+
+Across three days of live logs: 34 `restore drill scheduler started`, zero
+results. `DRILL_INTERVAL_HOURS` was 168 and the loop slept a full interval
+*before* its first run, so on a host restarting every few hours the clock reset
+every time. Backups were never verified — the property was assumed, never
+measured.
+
+The module's own docstring had already named this sin for its predecessor. The
+scheduler added to fix it reproduced it.
+
+Daily now, counted from the **last completed run** rather than from process
+start and stored in the config store, so restarts cannot reset it; first pass
+five minutes after boot rather than a full interval, so a daily-restarting host
+still gets one.
+
+### And it checked readability, not recoverability
+
+Every file opened and passed `PRAGMA integrity_check`. That proves the bytes
+are not corrupt. It does not prove you could get your data back. What it
+checks now, in order of consequence:
+
+- **The vault opens.** The backup's own `.env` key must open the backup's own
+  vault. `.env` being present proved nothing: a stale or rotated
+  `KAZMA_VAULT_KEY` sits in a file of exactly the right size, and every
+  encrypted secret behind it is lost. The count comes from SQL, not from
+  `list_secrets()` — which returns *empty* for a wrong key, so the first
+  version of this check passed a stale key.
+- **The copy is complete**, judged against the manifest's own claims rather
+  than the live data directory. Comparing against live produced 238 false
+  positives on the first run, 212 of them transient `code-index` stores.
+- **A database with zero tables is a failure**, not a pass. An empty file
+  passes `integrity_check`.
+
+Weekly, a deeper tier that reads the bytes rather than the headers: the
+Postgres dump streamed through `pg_restore --file=-` (a full restore rehearsal
+that needs no database), `restic check --read-data-subset=5%`, and a read-back
+of the offsite object — a `HEAD` against S3 comparing the stored size to what
+was uploaded, because an upload that returns 200 and a truncated object look
+identical from the sending side.
+
+→ `tests/test_restore_drill_actually_runs.py` (27 tests),
+`tests/test_backup_reports_the_real_loss.py`
+
+**None of this has run on the operator's machine yet.** The first daily drill
+fires five minutes after the next restart; the deep tier runs on the same pass,
+since it has never run.
+
+---
+
+## One turn, one story (2026-09-14)
+
+Four defects in how a turn reports itself, all reported from live use.
+
+**An approval given in one surface was rejected in another.** Approving in the
+web UI and then seeing `REJECTED` from Telegram or Discord. The surfaces
+resolved independently and the loser's answer won.
+→ `tests/test_approval_is_honoured_everywhere.py`
+
+**The turn lifecycle could be reopened by a straggling write.** A `closed` turn
+that received a late event went back to `open` and stayed there, which is what
+a dead chain-of-thought header over a finished task looks like. The lifecycle
+is a join-semilattice now — `_join_lifecycle` takes the least upper bound, so
+`closed` is absorbing and no interleaving can move it backwards. The
+confluence test failed on 18 of 24 orderings before the lattice landed.
+`pending` stays a separate monotone field; folding it in broke a real contract.
+→ `tests/test_turn_state_confluence.py`
+
+**A turn could sit open with nothing working on it and say nothing.** It pages
+the operator now instead of waiting to be noticed.
+→ `tests/test_turn_liveness_invariant.py`
+
+**A tool step led with its argument JSON.** The Live Task Card showed
+`file_search "auth middleware"` while the stored step showed
+`{"query":"auth middleware","path":"C:/x/y","max_results":50}` — one event, two
+renderings, and the ugly one was the one persisted, so every reloaded
+transcript showed blobs forever. The gist leads now and the raw value is still
+there under a three-line clamp. The formatting lives in
+`static/js/turn_detail.js` as pure functions, outside `chat.js`'s 7,700-line
+IIFE, because logic that can only be verified by reading it is logic that
+drifts — and the extraction immediately caught a bug in itself, a default that
+rendered `[object Object]`.
+→ `tests/test_turn_step_detail.py`, `tests/test_providers_js_behaviour.py`
+
+A collapsed tool row is one line again, so a finished reply stays in view
+instead of being pushed below the fold.
+
+**The sidebar shows all sixteen destinations in six groups** rather than four
+plus a disclosure. The distinction the old shape protected — Dashboard is an
+inspector, not a work surface — is carried by the grouping now instead of by
+hiding it.
+→ `tests/test_sidebar_shows_every_destination.py`
+
+---
+
 ## Pressing Test deleted every saved API key (2026-09-13)
 
 An operator reported that four configured providers all said they had no API

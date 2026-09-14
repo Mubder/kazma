@@ -176,10 +176,19 @@ class TestMultiPlatformSwarmDispatch:
                 pattern="dispatch",
             )
         
-        # Should send timeout message to user
+        # Should tell the user why nothing came back.
+        #
+        # This asserted the literal phrase "timed out" until 2026-09-14. The
+        # message was reworded on 2026-09-09 to name the budget that ran out
+        # and to say that partial work was discarded, which is strictly more
+        # useful -- so the test was stale, not the product. It asserts the
+        # CONTRACT now (the user is told the task ended and why) rather than
+        # one wording, which is what it was always trying to protect.
         mock_gateway_manager.send.assert_called()
         call_args = mock_gateway_manager.send.call_args[0][0]
-        assert "timed out" in call_args.text.lower()
+        text = call_args.text.lower()
+        assert any(w in text for w in ("timed out", "timeout", "cancelled", "canceled")), text
+        assert "swarm" in text, text
 
     async def test_telegram_mirror_receives_rich_html_report(
         self, mock_gateway_manager, mock_swarm_engine

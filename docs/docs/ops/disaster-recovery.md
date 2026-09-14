@@ -117,9 +117,39 @@ travelling with the data it protects.
 python -m kazma_core.backup.restore_drill
 ```
 
-Integrity-checks every SQLite file in a scratch copy and parses the Postgres
-archive with `pg_restore --list`. Non-zero exit on failure, so it can be
-scheduled.
+Non-zero exit on failure. It also runs on its own, **daily**, five minutes
+after boot and then once every 24 hours — counted from the last *completed*
+run, stored in the config store, so a host that restarts often cannot keep
+resetting the clock. (It used to be weekly, and the loop slept a full
+interval before its first pass, which on a frequently-restarting host meant
+it never ran at all. Three days of live logs: 34 scheduler starts, zero
+results.)
+
+**What the daily pass checks.** Integrity alone proves the bytes are not
+corrupt; it does not prove you could get your data back. So, in order of
+consequence:
+
+| Check | What it would catch |
+|---|---|
+| `vault:decrypt` — the backup's own `.env` key opens the backup's own vault | a stale or rotated `KAZMA_VAULT_KEY`. The file is present and exactly the right size either way, and every encrypted secret behind a wrong key is lost |
+| completeness against the manifest's own `databases.items` | a database the backup claimed to take and did not |
+| `PRAGMA integrity_check` on every SQLite file in a scratch copy | corruption in the copied pages |
+| zero tables is a **failure** | an empty file, which passes `integrity_check` happily |
+| `pg_restore --list` on the Postgres archive | a truncated or unreadable dump header |
+
+**What the weekly pass adds**, reading the bytes rather than the headers:
+
+| Check | What it would catch |
+|---|---|
+| the Postgres dump streamed through `pg_restore --file=-` | a dump whose *data* sections are damaged behind an intact TOC. A full restore rehearsal that needs no database |
+| `restic check --read-data-subset=5%` | bit rot inside the repository's packs |
+| a `HEAD` read-back of the offsite object, comparing stored size to uploaded size | a truncated upload. A short object and a complete one look identical from the sending side, which returns 200 for both |
+
+> **A drill that has never run proves nothing.** Do not describe backups as
+> verified until a drill *result* appears in the log — the presence of a
+> scheduler in the code is not evidence. The resilience manifest marks this
+> mechanism `proven_in_production=False` for exactly that reason, and it goes
+> back to `True` when a live result exists.
 
 ### The legacy scripts
 
