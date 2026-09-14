@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from typing import Any
 
 from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
@@ -426,11 +427,40 @@ class SafetyMiddleware:
         except Exception:
             logger.debug("[Safety] gate register skipped", exc_info=True)
 
+        # An approval card nobody can answer is worse than no card at all.
+        #
+        # `task_id` is read from the TOOL'S OWN ARGUMENTS by every caller
+        # (`arguments.get("task_id", "")`). A filesystem call carries
+        # {"path": ...}; a shell call carries {"command": ...}. None of them
+        # carry a task_id, so it is empty for essentially every real tool.
+        #
+        # Empty is not merely unhelpful, it is fatal. `wait_for_resolution`
+        # opens with `if not task_id: return False`, so the adapter posts the
+        # card, gets an instant False, and edits it to REJECTED -- while the
+        # card itself says "auto-reject in 300s". The buttons encode
+        # `swarm_approve_` with no id, so pressing them resolves nothing.
+        #
+        # Measured on the operator's install 2026-09-14 16:41 UTC: posted at
+        # :28.767, REJECTED at :30.825. Two seconds. Nobody could have
+        # approved it on any surface, and the log said `(task=)`.
+        #
+        # Mint an id when the caller has none. Unique per REQUEST, not per
+        # tool: two parallel calls to the same tool are two questions.
+        approval_id = task_id
+        if not approval_id:
+            approval_id = _gate_id or (
+                "swarm-" + uuid.uuid4().hex[:16]
+            )
+            logger.debug(
+                "[Safety] minted approval id %s for %s (caller passed none)",
+                approval_id, tool_name,
+            )
+
         approved = await bus.request_approval(
             worker_name=worker_name,
             task_description=f"Tool: {tool_name}" + (f" — {tool_args[:100]}" if tool_args else ""),
             proposed_output=f"Danger-tier tool '{tool_name}' requires approval before execution.",
-            task_id=task_id,
+            task_id=approval_id,
             timeout=self.approval_timeout,
         )
 
