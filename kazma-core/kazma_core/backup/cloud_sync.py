@@ -137,6 +137,14 @@ class CloudSyncProvider(Protocol):
         """Test connectivity. Returns {"ok": bool, "message" or "error": str}."""
         ...
 
+    async def stat_file(self, remote_name: str) -> dict[str, Any]:
+        """Read one uploaded object back: ``{ok, size, error}``.
+
+        Optional. A provider without it cannot have its offsite copy verified,
+        and the drill says so rather than assuming success.
+        """
+        ...
+
     def status(self) -> dict[str, Any]:
         """Return connection status for the UI."""
         ...
@@ -964,8 +972,40 @@ class S3Sync:
             resp = await client.put(url, content=payload, headers=signed)
         display = f"s3:{config['bucket']}/{key}"
         if resp.status_code in (200, 201):
-            return {"ok": True, "remote": display, "files": 1}
+            # The byte count is recorded so the restore drill can HEAD the
+            # object later and compare. "The upload returned 200" and "the
+            # object is there, whole" are different claims, and only the
+            # second one is a backup.
+            return {"ok": True, "remote": display, "files": 1, "size": len(payload)}
         return {"ok": False, "remote": display, "error": f"S3 error: HTTP {resp.status_code}"}
+
+    async def stat_file(self, remote_name: str) -> dict[str, Any]:
+        """HEAD one uploaded object. Returns ``{ok, size, error}``.
+
+        The offsite half of a backup was never read back: a manifest saying
+        ``offsite.ok: true`` records that a PUT returned 200, which a remote
+        that accepts writes and stores nothing also does.
+        """
+        config = self._get_config()
+        if not config["access_key"] or not config["bucket"]:
+            return {"ok": False, "error": "S3 not configured"}
+        key = f"{self._ROOT_FOLDER}/{remote_name}"
+        url = self._build_url(config, key)
+        try:
+            signed = self._sign_request("HEAD", url, {}, None, config)
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.head(url, headers=signed)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)[:200]}
+        if resp.status_code == 404:
+            return {"ok": False, "error": "the object is not there"}
+        if resp.status_code != 200:
+            return {"ok": False, "error": f"HTTP {resp.status_code}"}
+        try:
+            size = int(resp.headers.get("content-length") or 0)
+        except ValueError:
+            size = 0
+        return {"ok": True, "size": size}
 
     async def test_connection(self) -> dict[str, Any]:
         config = self._get_config()
