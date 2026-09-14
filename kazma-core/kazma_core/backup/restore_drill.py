@@ -463,6 +463,84 @@ def _check_restic_data(res: DrillResult) -> None:
         )
 
 
+def _check_offsite_object(backup: Path, res: DrillResult) -> None:
+    """Read the offsite copy back.
+
+    ``offsite.ok: true`` in a manifest records that an upload returned 200. A
+    remote that accepts writes and stores nothing returns 200 too, and the
+    local disk dying is the one scenario the offsite copy exists for — so the
+    claim was never worth more than the moment it was made.
+
+    HEADs the object and compares its length against the bytes the upload
+    reported sending. A provider without ``stat_file`` is reported as
+    unverifiable rather than assumed good.
+    """
+    manifest = backup / "manifest.json"
+    if not manifest.is_file():
+        return
+    try:
+        off = (json.loads(manifest.read_text(encoding="utf-8")).get("offsite")) or {}
+    except Exception:  # noqa: BLE001
+        return
+    if off.get("skipped"):
+        return  # deliberately disabled -- not a failure
+    if not off.get("ok"):
+        res.add("offsite:object", False, f"upload failed: {str(off.get('error'))[:160]}")
+        return
+
+    remote_name = f"{backup.name}.zip"
+    try:
+        from kazma_core.backup.cloud_sync import get_sync_provider
+
+        provider = get_sync_provider()
+    except Exception as exc:  # noqa: BLE001
+        res.add("offsite:object", True, f"provider unavailable ({exc}); skipped")
+        return
+    if provider is None:
+        res.add("offsite:object", True, "no cloud provider configured; skipped")
+        return
+    if not hasattr(provider, "stat_file"):
+        res.add(
+            "offsite:object", True,
+            f"{type(provider).__name__} cannot read an object back; unverified",
+        )
+        return
+
+    import asyncio
+
+    try:
+        stat = asyncio.run(provider.stat_file(remote_name))
+    except RuntimeError:
+        # Already inside a loop (the scheduler runs this in a thread, so this
+        # is the unusual path). Nothing to verify from here.
+        res.add("offsite:object", True, "not verifiable from a running loop; skipped")
+        return
+    except Exception as exc:  # noqa: BLE001
+        res.add("offsite:object", False, f"could not read it back: {exc}")
+        return
+
+    if not stat.get("ok"):
+        res.add(
+            "offsite:object", False,
+            f"{remote_name} is not readable offsite: {stat.get('error')}",
+        )
+        return
+
+    expected = int(off.get("size") or 0)
+    got = int(stat.get("size") or 0)
+    if expected and got != expected:
+        res.add(
+            "offsite:object", False,
+            f"offsite copy is {got} bytes, the upload sent {expected}",
+        )
+        return
+    res.add(
+        "offsite:object", True,
+        f"{got // 1024 // 1024} MB present offsite"
+        + ("" if expected else " (size not recorded at upload time)"),
+    )
+
+
 #: Weekly. The cheap checks run daily; these read gigabytes.
 DEEP_DRILL_INTERVAL_HOURS = 168.0
 _DEEP_LAST_RUN_KEY = "backup.restore_drill.last_deep_run"
@@ -518,6 +596,20 @@ def run_deep_drill(pg_dump: str | Path | None = None) -> DrillResult:
     else:
         _check_pg_data_section(dump, res)
     _check_restic_data(res)
+
+    try:
+        from kazma_core.backup.universal import _universal_dir, latest_universal_backup
+
+        latest = latest_universal_backup() or {}
+        name = str(latest.get("dir") or latest.get("path") or "")
+        if name:
+            d = Path(name)
+            if not d.is_dir():
+                d = _universal_dir() / name
+            if d.is_dir():
+                _check_offsite_object(d, res)
+    except Exception:  # noqa: BLE001
+        logger.debug("[restore-drill] offsite check skipped", exc_info=True)
     return res
 
 

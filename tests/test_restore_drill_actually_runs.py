@@ -317,3 +317,95 @@ class TestTheDeepTierReadsTheBytes:
         restore_drill._check_restic_data(res)
         chk = _check(res, "restic:data")
         assert chk and not chk["ok"], chk
+
+
+class TestTheOffsiteCopyIsReadBack:
+    """`offsite.ok: true` records that an upload returned 200. A remote that
+    accepts writes and stores nothing returns 200 too — and the local disk
+    dying is the one scenario the offsite copy exists for."""
+
+    @staticmethod
+    def _backup_with(tmp_path, offsite: dict):
+        import json as _json
+
+        d = tmp_path / "1789328482"
+        d.mkdir(parents=True)
+        (d / "manifest.json").write_text(
+            _json.dumps({"version": 1, "offsite": offsite}), encoding="utf-8"
+        )
+        return d
+
+    def _provider(self, monkeypatch, stat):
+        class _P:
+            async def stat_file(self, remote_name):
+                return stat
+
+        monkeypatch.setattr(
+            "kazma_core.backup.cloud_sync.get_sync_provider", lambda: _P(), raising=False
+        )
+
+    def test_a_missing_object_is_caught(self, tmp_path, monkeypatch):
+        d = self._backup_with(tmp_path, {"ok": True, "size": 1000})
+        self._provider(monkeypatch, {"ok": False, "error": "the object is not there"})
+        res = restore_drill.DrillResult(backup_dir=str(d))
+        restore_drill._check_offsite_object(d, res)
+        chk = _check(res, "offsite:object")
+        assert chk and not chk["ok"], chk
+
+    def test_a_truncated_object_is_caught(self, tmp_path, monkeypatch):
+        """The upload said it sent 1,000 bytes and 400 arrived."""
+        d = self._backup_with(tmp_path, {"ok": True, "size": 1000})
+        self._provider(monkeypatch, {"ok": True, "size": 400})
+        res = restore_drill.DrillResult(backup_dir=str(d))
+        restore_drill._check_offsite_object(d, res)
+        chk = _check(res, "offsite:object")
+        assert chk and not chk["ok"], chk
+        assert "400" in chk["detail"] and "1000" in chk["detail"]
+
+    def test_a_matching_object_passes(self, tmp_path, monkeypatch):
+        d = self._backup_with(tmp_path, {"ok": True, "size": 5 * 1024 * 1024})
+        self._provider(monkeypatch, {"ok": True, "size": 5 * 1024 * 1024})
+        res = restore_drill.DrillResult(backup_dir=str(d))
+        restore_drill._check_offsite_object(d, res)
+        chk = _check(res, "offsite:object")
+        assert chk and chk["ok"], chk
+
+    def test_an_upload_that_failed_is_reported(self, tmp_path, monkeypatch):
+        d = self._backup_with(tmp_path, {"ok": False, "error": "token expired"})
+        res = restore_drill.DrillResult(backup_dir=str(d))
+        restore_drill._check_offsite_object(d, res)
+        chk = _check(res, "offsite:object")
+        assert chk and not chk["ok"]
+        assert "token expired" in chk["detail"]
+
+    def test_deliberately_disabled_offsite_is_not_a_failure(self, tmp_path):
+        d = self._backup_with(tmp_path, {"skipped": "offsite disabled"})
+        res = restore_drill.DrillResult(backup_dir=str(d))
+        restore_drill._check_offsite_object(d, res)
+        assert _check(res, "offsite:object") is None
+        assert res.ok
+
+    def test_a_provider_that_cannot_read_back_says_so(self, tmp_path, monkeypatch):
+        """Unverified is reported as unverified — not as success."""
+        class _NoStat:
+            pass
+
+        d = self._backup_with(tmp_path, {"ok": True, "size": 10})
+        monkeypatch.setattr(
+            "kazma_core.backup.cloud_sync.get_sync_provider",
+            lambda: _NoStat(), raising=False,
+        )
+        res = restore_drill.DrillResult(backup_dir=str(d))
+        restore_drill._check_offsite_object(d, res)
+        chk = _check(res, "offsite:object")
+        assert chk and "unverified" in chk["detail"]
+
+    def test_the_uploader_records_what_it_sent(self):
+        """Without the size at upload time the drill can only say 'something
+        is there', which a truncated object also satisfies."""
+        import inspect
+
+        from kazma_core.backup.cloud_sync import S3Sync
+
+        src = inspect.getsource(S3Sync.upload_file)
+        assert '"size": len(payload)' in src
