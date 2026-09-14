@@ -123,7 +123,15 @@ def test_approve_json_clears_hitl_wait_so_reattach_can_run() -> None:
         "var onceBtn", 1
     )[0]
     assert "_awaitingApproval = false" in approve
-    assert "_reopenSseRef('approve-json')" in approve
+    # Asserted the literal `_reopenSseRef('approve-json')` until 2026-09-14.
+    # The re-attach moved behind `_reattachAfterApproval`, which drops the
+    # `if (!activeStream)` guard that had been swallowing the whole response
+    # -- so the contract this test protects is now MORE true, and only the
+    # spelling changed. Assert the contract.
+    assert "_reattachAfterApproval('approve-json')" in approve
+    assert "if (!activeStream)" not in approve, (
+        "the approve path must not decide for itself that a stream is alive"
+    )
     attach = chat.split("function _attachJournal(reason)", 1)[1].split(
         "function _defaultAttachCallbacks", 1
     )[0]

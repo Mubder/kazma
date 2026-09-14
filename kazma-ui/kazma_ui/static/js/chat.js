@@ -309,6 +309,39 @@
   // Set per-send (sendMessage closure owns _dispatchSse); module-level
   // recovery paths (_resyncDelivery) re-attach the live stream through it.
   var _reopenSseRef = null;
+
+  /**
+   * Re-attach to the journal after an approval. ALWAYS.
+   *
+   * Every call site used to read `if (!activeStream)` first, which asks a
+   * variable a question it cannot answer: the handle returned by KS.sse
+   * exposes `abort()` and `lastEventId()` and nothing about liveness. A
+   * stream the server closed on the HITL pause leaves that variable holding
+   * a dead handle unless a terminal callback nulls it -- and those callbacks
+   * are epoch-gated, so a superseded stream's `done` frame nulls nothing.
+   *
+   * Measured on the operator's install, 2026-09-14 15:44 UTC: approval
+   * granted and POST 200 at :28.8, the tool ran, and the turn closed at
+   * :43.3 with a 3,725-character reply -- with ZERO /api/chat/stream
+   * requests after the approve. The guard held, the answer was written to a
+   * journal nobody was reading, and the bubble kept the placeholder:
+   * "The agent paused to ask for permission to run a tool."
+   *
+   * The guard sat on the wrong side of the trade. A redundant attach costs
+   * one HTTP request and is idempotent -- it resumes from `last_event_id`,
+   * and bumping the epoch gates whatever it superseded. A MISSED attach
+   * costs the entire response. So: abort whatever we are holding, then
+   * attach, unconditionally.
+   */
+  function _reattachAfterApproval(reason) {
+    if (activeStream) {
+      try { activeStream.abort(); } catch (eAb) { /* already dead */ }
+      activeStream = null;
+    }
+    if (typeof _reopenSseRef === 'function') {
+      try { _reopenSseRef(reason); } catch (eRe) { /* ignore */ }
+    }
+  }
   // Bounded re-attaches per turn — a journal-gap attach closes without a
   // terminal, and an unbounded resync→reattach cycle with the same invalid
   // cursor loops forever (the "is it still running?" stuck state).
@@ -5758,9 +5791,7 @@
             if (res.status === 409) {
               _awaitingApproval = false;
               if (act) act.innerHTML = '<span class="hitl-status">Already resolved</span>';
-              if (!activeStream && typeof _reopenSseRef === 'function') {
-                try { _reopenSseRef('approve-409'); } catch (eRe) { /* ignore */ }
-              }
+              _reattachAfterApproval('approve-409');
               return;
             }
             if (res.status >= 400 || (res.body && res.body.ok === false)) {
@@ -5770,9 +5801,7 @@
             }
             _awaitingApproval = false;
             _awaitingReply = true;
-            if (!activeStream && typeof _reopenSseRef === 'function') {
-              try { _reopenSseRef('approve-json'); } catch (eRe) { /* ignore */ }
-            }
+            _reattachAfterApproval('approve-json');
           }).catch(function() {
             if (act) act.innerHTML = '<span class="hitl-status text-danger">Failed — retry</span>';
             _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = false; });
@@ -6008,9 +6037,7 @@
               tool: data.tool || '',
               interrupt_id: data.interrupt_id || '',
             });
-            if (!activeStream && typeof _reopenSseRef === 'function') {
-              try { _reopenSseRef('approve-409'); } catch (eRe) { /* ignore */ }
-            }
+            _reattachAfterApproval('approve-409');
             return;
           }
           applyTurnEvent({
@@ -6055,12 +6082,8 @@
         if (scope === 'tool' && KS.toast) {
           KS.toast('Allowed ' + (data.tool || 'tool') + ' for this session (~30m)', 'success', 3000);
         }
-        if (!activeStream) {
-          if (typeof _reopenSseRef === 'function') {
-            try { _reopenSseRef('approve-json'); } catch (eRe) { /* ignore */ }
-          }
-          _resyncDelivery('approve-json');
-        }
+        _reattachAfterApproval('approve-json');
+        _resyncDelivery('approve-json');
       }).catch(function(err) {
         applyTurnEvent({
           type: 'hitl', state: 'error', tool: data.tool || '',
