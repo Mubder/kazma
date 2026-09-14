@@ -700,6 +700,19 @@ def maintain_snapshots(
             if db.exists() and db.stat().st_size > 0:
                 cur = conn.execute("DELETE FROM snapshots WHERE timestamp < ?", (cutoff,))
                 deleted = cur.rowcount
+                # COMMIT. Python's sqlite3 opens an implicit transaction for a
+                # DML statement, and close() without commit ROLLS IT BACK — so
+                # this pruned 3,000+ rows, reported success, and undid it, on
+                # every run, for weeks. Live evidence (2026-09-13/14):
+                #
+                #   maintenance: deleted=3079 before=905596928 after=905867264
+                #   maintenance: deleted=3083 before=905867264 after=906084352
+                #   maintenance: deleted=3106 before=906084352 after=906158080
+                #
+                # The same rows deleted again each time, and the file GROWING
+                # after every "successful" prune. snapshots.db reached 864 MB
+                # with its oldest row 53 days past a 30-day retention.
+                conn.commit()
         finally:
             conn.close()
     except Exception as exc:  # noqa: BLE001 - never let maintenance take the server down
@@ -726,10 +739,36 @@ def maintain_snapshots(
         logger.warning("[TimeTravel] snapshot VACUUM failed: %s", exc)
         vacuum_status = f"failed: {exc}"
 
+    # Verify with the read that can fail the same way the write did. `rowcount`
+    # is what the DELETE *intended*; it reported 3,079 rows removed while the
+    # transaction was being rolled back underneath it. Count what is actually
+    # left, and say so loudly when the prune did not stick.
+    remaining_old = -1
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            remaining_old = conn.execute(
+                "SELECT count(*) FROM snapshots WHERE timestamp < ?", (cutoff,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+    except Exception:
+        logger.debug("[TimeTravel] prune verification skipped", exc_info=True)
+
     size_after = db.stat().st_size if db.exists() else 0
+    if remaining_old > 0:
+        logger.error(
+            "[TimeTravel] prune did NOT stick: %d rows older than %dd are still "
+            "there after deleting %d. Snapshots will grow without bound.",
+            remaining_old,
+            int(retention_days),
+            deleted,
+        )
     logger.info(
-        "[TimeTravel] maintenance: deleted=%d before=%d after=%d (retention=%dd)",
+        "[TimeTravel] maintenance: deleted=%d remaining_old=%d before=%d after=%d "
+        "(retention=%dd)",
         deleted,
+        remaining_old,
         size_before,
         size_after,
         int(retention_days),
@@ -740,7 +779,8 @@ def maintain_snapshots(
         "size_after": size_after,
         "reclaimed": max(0, size_before - size_after),
         "retention_days": int(retention_days),
-        "prune": "ok",
+        "prune": "ok" if remaining_old <= 0 else f"did not stick: {remaining_old} old rows remain",
+        "remaining_old": remaining_old,
         "vacuum": vacuum_status,
     }
 

@@ -937,7 +937,30 @@ class ConfigStore:
     _warned_plaintext_vault_off = False
     _warned_plaintext_vault_err = False
 
-    def _encrypt_nested_sensitive(self, value: Any, path: str) -> Any:
+    @staticmethod
+    def _existing_child(existing: Any, key: str, index: int, ident: str) -> Any:
+        """The node in the STORED structure matching this position.
+
+        Lists are matched by the item's own ``name``/``id`` when it has one --
+        the same identity `_encrypt_nested_sensitive` uses for its vault path
+        -- so reordering a list does not pair a secret with the wrong entry.
+        """
+        if isinstance(existing, dict):
+            return existing.get(key)
+        if isinstance(existing, list):
+            if ident:
+                for item in existing:
+                    if isinstance(item, dict) and str(
+                        item.get("name") or item.get("id") or ""
+                    ).strip() == ident:
+                        return item
+                return None
+            return existing[index] if 0 <= index < len(existing) else None
+        return None
+
+    def _encrypt_nested_sensitive(
+        self, value: Any, path: str, existing: Any = None
+    ) -> Any:
         """Vault-encrypt sensitive-named string values INSIDE dicts/lists.
 
         Audit M-P1: nested secrets (``providers.list[].api_key``,
@@ -950,7 +973,11 @@ class ConfigStore:
         """
         if isinstance(value, dict):
             return {
-                k: self._encrypt_nested_sensitive(v, f"{path}.{k}" if path else k)
+                k: self._encrypt_nested_sensitive(
+                    v,
+                    f"{path}.{k}" if path else k,
+                    self._existing_child(existing, k, -1, ""),
+                )
                 for k, v in value.items()
             }
         if isinstance(value, list):
@@ -965,9 +992,24 @@ class ConfigStore:
                 if isinstance(item, dict):
                     ident = str(item.get("name") or item.get("id") or "").strip()
                 item_path = f"{path}.{ident}" if ident else f"{path}.{i}"
-                out.append(self._encrypt_nested_sensitive(item, item_path))
+                out.append(self._encrypt_nested_sensitive(
+                    item, item_path, self._existing_child(existing, "", i, ident)
+                ))
             return out
         if not isinstance(value, str) or not value:
+            # An empty sensitive LEAF must not erase the pointer beside it --
+            # the providers.list wipe, one level down. Keep what is stored.
+            if (
+                path
+                and is_sensitive_config_key(path)
+                and self._has_stored_secret(existing)
+            ):
+                logger.warning(
+                    "[ConfigStore] refused to blank the stored secret at %s -- "
+                    "the incoming value was empty.",
+                    path,
+                )
+                return existing
             return value
         if is_vault_ref(value) or is_masked_secret_placeholder(value):
             return value
@@ -1004,6 +1046,47 @@ class ConfigStore:
                 key, exc,
             )
 
+    def _stored_raw(self, key: str) -> Any:
+        """The value on disk for *key*, WITHOUT resolving vault pointers.
+
+        `get()` decrypts, and returns ``None`` for a pointer it cannot open —
+        which is indistinguishable from "no secret here". The blanking guard
+        below has to tell those apart, so it reads what is actually stored.
+        """
+        try:
+            with self._lock:
+                if key in self._cache and self._cache_fresh(key):
+                    cached = self._cache[key]
+                    return None if cached is _MISSING else cached
+            if self._use_postgres():
+                pool = self._pg_pool()
+                if pool is None:
+                    return None
+                row = pool.execute_one(
+                    "SELECT value FROM kazma_settings WHERE key = %s", (key,)
+                )
+                if row is None:
+                    return None
+                value = row["value"]
+                return json.loads(value) if isinstance(value, str) else value
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            return json.loads(row["value"]) if row is not None else None
+        except Exception:
+            logger.debug("[ConfigStore] raw read failed for %s", key, exc_info=True)
+            return None
+
+    @staticmethod
+    def _has_stored_secret(existing: Any) -> bool:
+        """True when *existing* is a real stored secret worth protecting."""
+        if existing is None:
+            return False
+        if is_vault_ref(existing):
+            return True
+        return isinstance(existing, str) and bool(existing.strip())
+
     def _prepare_value_for_storage(self, key: str, value: Any) -> Any | None:
         """Return value to persist, or None to skip write (masked placeholder).
 
@@ -1016,10 +1099,35 @@ class ConfigStore:
 
         if not is_sensitive_config_key(key):
             if isinstance(value, (dict, list)):
-                return self._encrypt_nested_sensitive(value, key)
+                return self._encrypt_nested_sensitive(
+                    value, key, self._stored_raw(key)
+                )
             return value
 
         if value is None or value == "":
+            # An empty write must not erase a stored secret.
+            #
+            # This is the shape that destroyed every provider API key on a live
+            # install (2026-09-13): a vault pointer that cannot be decrypted
+            # resolves to None, becomes "", and is written straight back over
+            # the pointer. Permanently, with one warning line.
+            #
+            # `providers.list` got a guard at its own writer; this is the same
+            # guard where every writer already passes, so a JSON blob nobody
+            # has thought about yet is covered too.
+            #
+            # Clearing a secret on purpose goes through `delete(key)` -- which
+            # is what the connector-removal path already does -- so nothing
+            # legitimate needs an empty write.
+            existing = self._stored_raw(key)
+            if self._has_stored_secret(existing):
+                logger.warning(
+                    "[ConfigStore] refused to blank the stored secret %s -- the "
+                    "incoming value was empty, which is what an undecryptable "
+                    "vault read looks like. Use delete() to clear it.",
+                    key,
+                )
+                return None
             return value
 
         if is_vault_ref(value):
@@ -1028,7 +1136,7 @@ class ConfigStore:
         if isinstance(value, (dict, list)):
             # Sensitive container key (e.g. connectors.x.credentials) —
             # encrypt the sensitive-named leaves inside, store the structure.
-            return self._encrypt_nested_sensitive(value, key)
+            return self._encrypt_nested_sensitive(value, key, self._stored_raw(key))
 
         if not isinstance(value, str):
             # Non-string secrets still stored as JSON (rare)

@@ -21,11 +21,10 @@ def _sidebar_hrefs_by_section() -> dict[str, list[str]]:
     sections: dict[str, list[str]] = {}
     current = "_none"
     for line in html.splitlines():
-        if "nav.primary" in line:
-            current = "work"
-            sections.setdefault(current, [])
-        elif "nav-more-body" in line:
-            current = "more"
+        if "nav-section-title" in line:
+            # "{{ t('nav.section_automation') }}" -> "section_automation"
+            key = line.split("t('nav.", 1)[1].split("'", 1)[0]
+            current = key
             sections.setdefault(current, [])
         if 'href="/' in line and "nav-link" in line:
             start = line.index('href="') + 6
@@ -34,15 +33,21 @@ def _sidebar_hrefs_by_section() -> dict[str, list[str]]:
     return sections
 
 
-def test_sidebar_groups_match_hands_work_and_more() -> None:
+def test_every_destination_sits_in_the_right_group() -> None:
+    """Sixteen destinations, six groups, nothing behind a disclosure.
+
+    This asserted four links plus a "More" bucket until 2026-09-14. The
+    distinction it protected — Dashboard is an inspector, not a work surface —
+    is now carried by the grouping rather than by hiding it.
+    """
     groups = _sidebar_hrefs_by_section()
-    assert groups["work"] == ["/chat", "/workspace", "/ide", "/settings"]
-    assert "/dashboard" in groups["more"]
-    assert "/agents" in groups["more"]
-    assert "/replay" in groups["more"]
-    assert "/skills" in groups["more"]
-    assert "/mcp" in groups["more"]
-    assert "/dashboard" not in groups["work"]
+    assert groups["primary"] == ["/chat", "/workspace", "/ide"]
+    assert groups["activity"] == ["/dashboard", "/replay"]
+    assert groups["section_automation"] == ["/agents", "/swarm", "/scheduled"]
+    assert groups["capabilities"] == ["/skills", "/mcp", "/x"]
+    assert groups["configuration"] == ["/settings"]
+    assert "/dashboard" not in groups["primary"]
+    assert sum(len(v) for v in groups.values()) == 16
 
 
 def test_bottom_nav_uses_dashboard_not_memory() -> None:

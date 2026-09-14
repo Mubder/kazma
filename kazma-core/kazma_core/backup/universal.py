@@ -22,7 +22,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["perform_universal_backup", "list_universal_backups", "latest_universal_backup"]
+__all__ = ["perform_universal_backup", "list_universal_backups", "latest_universal_backup", "selectable_databases"]
 
 # Directories/patterns to EXCLUDE from the backup (never copy these).
 _EXCLUDE_DIRS = frozenset({"backups", "__pycache__", ".git", "node_modules", ".tmp", "cache", "lo-profile"})
@@ -438,6 +438,22 @@ def _rmtree_force(path: Path) -> None:
 _DB_BUSY_TIMEOUT_S = 60.0
 
 
+def selectable_databases(data_root: Path) -> list[Path]:
+    """The databases a universal backup will copy, under *data_root*.
+
+    Exported so the restore drill can ask the SAME question rather than
+    re-deriving it. Its first version compared the backup against every
+    ``*.db`` on disk and flagged hundreds of content-addressed cache files as
+    "missing" — a completeness check is only meaningful against the set the
+    backup actually intends to take.
+    """
+    return [
+        f
+        for f in sorted(data_root.rglob("*.db"))
+        if not any(p in _EXCLUDE_DIRS for p in f.parts)
+    ]
+
+
 def _backup_one_db(src: Path, dest: Path) -> bool:
     """WAL-safe copy of a single SQLite database via the Online Backup API.
 
@@ -835,9 +851,9 @@ def perform_universal_backup(
     # 1. All SQLite databases (WAL-safe).
     _set_progress("databases", detail="Copying databases…", total=0, done=0)
     db_results: list[dict[str, Any]] = []
-    db_files = sorted(data.rglob("*.db"))
+    db_files = sorted(selectable_databases(data))
     # Exclude any .db inside backups/ or excluded dirs.
-    db_files = [f for f in db_files if not any(p in _EXCLUDE_DIRS for p in f.parts)]
+
     db_ok = db_fail = 0
     for i, db in enumerate(db_files):
         rel = db.relative_to(data)
