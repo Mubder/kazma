@@ -662,13 +662,28 @@ def forget_prune(repo: str, password: str,
     return _run(["forget", "--prune", *policy], repo, password, action="forget")
 
 
-def check(repo: str, password: str, *, read_data: bool = False) -> ResticResult:
+def check(
+    repo: str,
+    password: str,
+    *,
+    read_data: bool = False,
+    read_data_subset: str = "",
+) -> ResticResult:
+    """Verify the repository. Metadata only unless asked for more.
+
+    ``read_data_subset`` ("5%", "1/10", …) re-reads and re-hashes a SLICE of
+    the packs. Bit rot is the failure a structural check cannot see, and
+    reading everything on a repo this size is too slow to run on a schedule —
+    a subset each week eventually covers the whole repo and costs minutes.
+    """
     args = ["check"]
     if read_data:
         # Reads and verifies every pack rather than just the metadata. Slow,
         # and the only thing that catches bit rot in the stored data.
         args.append("--read-data")
-    return _run(args, repo, password, action="check")
+    elif read_data_subset:
+        args.append(f"--read-data-subset={read_data_subset}")
+    return _run(args, repo, password, action="check", timeout=3600)
 
 
 def snapshots(repo: str, password: str) -> ResticResult:

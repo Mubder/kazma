@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import os
 import sqlite3
 import subprocess
 import tempfile
@@ -44,7 +45,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = ["DrillResult", "verify_backup", "run_drill", "drill_scheduler",
-           "DRILL_INTERVAL_HOURS"]
+           "DRILL_INTERVAL_HOURS", "run_deep_drill", "deep_drill_is_due",
+           "DEEP_DRILL_INTERVAL_HOURS"]
 
 # pg_restore --list on a multi-GB archive reads only the TOC, but a busy or
 # containerised host can still be slow. Generous on purpose: a false failure
@@ -370,6 +372,155 @@ def verify_backup(
     return res
 
 
+def _check_pg_data_section(dump: Path, res: DrillResult) -> None:
+    """Stream the WHOLE archive through pg_restore, not just its table of
+    contents.
+
+    ``pg_restore --list`` reads the TOC, which in a custom-format dump sits at
+    the front — so a file truncated mid-data lists perfectly and passes. This
+    restores to a plain-SQL stream and throws the output away, which forces
+    every data block to be read and decompressed. Corruption or truncation
+    anywhere in the 1.9 GB fails here.
+
+    No database is touched and none is needed: the risk of a restore rehearsal
+    without any of the risk of restoring.
+    """
+    try:
+        from kazma_core.migration.pg_bridge import resolve_pg_restore
+
+        prefix = list(resolve_pg_restore())
+    except Exception as exc:  # noqa: BLE001
+        res.add("postgres:data", True, f"pg_restore unavailable ({exc}); skipped")
+        return
+
+    started = time.time()
+    try:
+        with open(os.devnull, "wb") as sink:
+            proc = subprocess.run(
+                [*prefix, "--file=-", str(dump)],
+                stdout=sink,
+                stderr=subprocess.PIPE,
+                timeout=_DEEP_PG_TIMEOUT_S,
+            )
+    except subprocess.TimeoutExpired:
+        res.add(
+            "postgres:data", False,
+            f"pg_restore did not finish within {_DEEP_PG_TIMEOUT_S}s",
+        )
+        return
+    except Exception as exc:  # noqa: BLE001
+        res.add("postgres:data", False, f"could not run pg_restore: {exc}")
+        return
+
+    elapsed = time.time() - started
+    if proc.returncode != 0:
+        err = (proc.stderr or b"").decode("utf-8", "replace").strip()
+        res.add(
+            "postgres:data", False,
+            f"the archive does not read back: {err[:200]}",
+        )
+        return
+    mb = dump.stat().st_size // (1024 * 1024)
+    res.add("postgres:data", True, f"{mb} MB streamed in {elapsed:.0f}s")
+
+
+def _check_restic_data(res: DrillResult) -> None:
+    """Re-read and re-hash a slice of the restic packs.
+
+    ``restic check`` alone verifies structure — it cannot see bit rot in the
+    stored data, which is the failure that makes a repository look perfect and
+    restore garbage. A subset each week eventually covers the whole repo at a
+    cost measured in minutes.
+    """
+    try:
+        from kazma_core.backup import restic_repo
+    except Exception as exc:  # noqa: BLE001
+        res.add("restic:data", True, f"restic layer unavailable ({exc}); skipped")
+        return
+
+    if not restic_repo.restic_available():
+        res.add("restic:data", True, "restic is not installed; skipped")
+        return
+    password, _ = restic_repo.ensure_password()
+    if not password:
+        res.add(
+            "restic:data", False,
+            "no repository passphrase -- the snapshots cannot be verified OR "
+            "restored",
+        )
+        return
+
+    for scope, repo in restic_repo.repo_paths().items():
+        if not repo:
+            continue
+        out = restic_repo.check(
+            repo, password, read_data_subset=_DEEP_RESTIC_SUBSET
+        )
+        res.add(
+            f"restic:{scope}", bool(out.ok),
+            f"{_DEEP_RESTIC_SUBSET} of packs re-read" if out.ok
+            else (out.error or "check failed")[:200],
+        )
+
+
+#: Weekly. The cheap checks run daily; these read gigabytes.
+DEEP_DRILL_INTERVAL_HOURS = 168.0
+_DEEP_LAST_RUN_KEY = "backup.restore_drill.last_deep_run"
+_DEEP_PG_TIMEOUT_S = 3600
+#: Each pass verifies a slice; twenty weeks covers the repository.
+_DEEP_RESTIC_SUBSET = "5%"
+
+
+def deep_drill_is_due(now: float | None = None) -> bool:
+    """True when no DEEP drill has completed within its interval."""
+    stamp = time.time() if now is None else now
+    try:
+        from kazma_core.config_store import get_config_store
+
+        last = float(get_config_store().get(_DEEP_LAST_RUN_KEY, 0) or 0)
+    except Exception:  # noqa: BLE001
+        last = 0.0
+    if last <= 0:
+        return True
+    return (stamp - last) >= DEEP_DRILL_INTERVAL_HOURS * 3600
+
+
+def _record_deep_run(when: float) -> None:
+    try:
+        from kazma_core.config_store import get_config_store
+
+        get_config_store().set(_DEEP_LAST_RUN_KEY, float(when), category="backup")
+    except Exception:  # noqa: BLE001
+        logger.debug("[restore-drill] could not record deep run time", exc_info=True)
+
+
+def run_deep_drill(pg_dump: str | Path | None = None) -> DrillResult:
+    """The expensive half: prove the bytes read back, not just that they parse.
+
+    Everything the daily drill does is necessary and none of it is sufficient.
+    A dump whose TOC lists, a repository whose structure checks, and an S3
+    object whose upload returned 200 can all be true of a backup that restores
+    nothing. This reads the data.
+    """
+    res = DrillResult(backup_dir="(deep)")
+    dump = Path(pg_dump) if pg_dump else _latest_pg_dump()
+    if dump is None:
+        try:
+            from kazma_core.db.pg_backup import pg_backup_enabled
+
+            if pg_backup_enabled():
+                res.add(
+                    "postgres:data", False,
+                    "Postgres is the backend but no dump was found",
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("[restore-drill] pg_backup_enabled check failed", exc_info=True)
+    else:
+        _check_pg_data_section(dump, res)
+    _check_restic_data(res)
+    return res
+
+
 def _latest_pg_dump() -> Path | None:
     """The newest Postgres dump, or None if there genuinely is not one.
 
@@ -516,6 +667,17 @@ async def drill_scheduler() -> None:
                 first = False
             else:
                 await asyncio.sleep(DRILL_INTERVAL_HOURS * 3600)
+            # The weekly deep tier first: if it is due, the daily checks it
+            # supersedes run anyway below.
+            if deep_drill_is_due():
+                deep = await asyncio.to_thread(run_deep_drill)
+                _record_deep_run(time.time())
+                if deep.ok:
+                    logger.info("[restore-drill] deep: %s", deep.summary())
+                else:
+                    logger.error("[restore-drill] deep: %s", deep.summary())
+                    _alert_failure(deep)
+
             if not drill_is_due():
                 continue
             res = await asyncio.to_thread(run_drill)
