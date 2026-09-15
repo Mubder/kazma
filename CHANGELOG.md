@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## Live voice is a mouth on the real chat pipeline (2026-09-15)
+
+Web live voice used to be a parallel conversation: `/ws/voice` ran its own
+loop on the checkpointer-less streaming graph, forwarded **every** supervisor
+token to a second painter in `chat.js`, synthesized TTS from that token
+concatenation with a hardcoded `voice="default"`, and auto-denied danger
+tools because its graph could never resume. Voice turns vanished on refresh
+and nothing it said was the journal's truth.
+
+The voice socket now submits each utterance to the **same pump** as
+`/api/chat/stream` (`_drive_graph_to_journal` + journal attach, via the new
+`kazma_ui/voice_turn.py`): same checkpointed graph, same thread, same HITL
+gate registry. A danger tool pauses with the normal approval card and
+`hitl_paused` — approved turns are spoken if the socket is still open. The
+parallel paint hooks are gone; the chat UI projects the journaled turn.
+
+Honesty fixes that landed with it: VAD PCM is wrapped in a real RIFF/WAVE
+header before STT (it used to be raw PCM labelled `wav`); `EnergyVAD` no
+longer drops the partial frame of every browser chunk; the Silero VAD
+opt-in no longer `torch.hub`-downloads a model it then ignored — WebRTC VAD
+runs for real when installed, otherwise Energy VAD with a logged no-op;
+`kazma-data/stt_error.log` (which wrote API-key presence to disk) is
+deleted; the WS path honors ConfigStore `voice.tts_voice` and the
+sample-rate allowlist `{8,16,24,48} kHz`. TTS now speaks the **final reply
+only**, one complete sentence clip at a time (EdgeTTS streams natively;
+other providers synthesize per sentence), so first audio no longer waits
+for the whole buffer — and a failed turn (⚠️) is never spoken. Voice
+metrics: `kazma_voice_{stt,tts}_seconds`, `_utterances_total`,
+`_barge_in_total`, `_first_audio_seconds`.
+
 ## A lock taken twice froze everything behind it (2026-09-14)
 
 A full test run stopped for five hours and reported nothing. Three consecutive

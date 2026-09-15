@@ -24,12 +24,13 @@ Arabic, RTL (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English. 
 
 ### Is web live voice a phone-call (duplex)?
 
-On the Web UI Live button, **yes if LiveKit is configured** (`LIVEKIT_URL` +
-API key/secret): you can interrupt while it talks. The brain is still
-LangGraph (tools/HITL/memory). Telegram/Discord/Slack stay voice notes.
-See [Voice & media](voice-and-media). TTS is published into the LiveKit room
-when duplex is on. OpenAI Realtime / Gemini Live are **not** used as the
-brain (and are skipped as codecs).
+The Live button runs live voice on `/ws/voice`: same LangGraph brain, same
+chat thread/journal as typed messages, and you can interrupt while it talks.
+TTS speaks only the final reply, one sentence clip at a time. With LiveKit
+configured (`LIVEKIT_URL` + API key/secret) the browser also gets WebRTC
+echo cancellation and TTS is published into the room. Telegram/Discord/Slack
+stay voice notes. See [Voice & media](voice-and-media). OpenAI Realtime /
+Gemini Live are **not** used as the brain (and are skipped as codecs).
 
 ### Does `"barcode"` pick the coding model?
 

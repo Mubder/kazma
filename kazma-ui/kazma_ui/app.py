@@ -1353,18 +1353,17 @@ class KazmaAppBuilder:
                     return
 
                 def _voice_graph_getter() -> Any:
-                    # The streaming graph is checkpointer-less, so its HITL
-                    # config carries auto_deny (see get_streaming_graph):
-                    # a voice danger-tool pause could never be resumed via
-                    # /api/approve (audit F2) — it denies with a clear
-                    # message instead of interrupting.
-                    agent = self.agent
-                    if agent is not None:
-                        return agent.get_streaming_graph()
-                    return None
+                    # Live voice rides the SAME checkpointed graph as SSE
+                    # (one brain, one thread, real HITL). No fallback to the
+                    # checkpointer-less streaming graph: a voice HITL pause
+                    # must be resumable via /api/approve, and a fallback
+                    # here would reintroduce the split-brain mouth.
+                    return self._graph_holder.get("graph")
 
                 await handle_voice_websocket(
-                    websocket, graph_getter=_voice_graph_getter,
+                    websocket,
+                    graph_getter=_voice_graph_getter,
+                    agent_getter=lambda: self.agent,
                 )
 
             self.app.websocket("/ws/voice")(_ws_voice)

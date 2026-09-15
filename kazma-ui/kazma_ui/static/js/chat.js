@@ -3412,8 +3412,11 @@
           }
           updateContextBadgeSoon();
         }
-        // Play TTS for the assistant's response
-        if (tokenAccum && window.KazmaVoice && !interrupted) {
+        // Play TTS for the assistant's response. Skipped while live voice
+        // is streaming — that socket speaks the reply itself (sentence by
+        // sentence), and both mouths firing would double-speak the turn.
+        if (tokenAccum && window.KazmaVoice && !interrupted &&
+            !(window.KazmaVoice.isStreaming && window.KazmaVoice.isStreaming())) {
           window.KazmaVoice.playTTS(tokenAccum);
         }
         } finally {
@@ -7870,27 +7873,10 @@
       tokenAccum = '';
     },
 
-    // Voice streaming hooks — called by voice.js WebSocket client
-    onUserTranscription: function(text) {
-      appendMessage('user', text);
-      scrollToBottom();
-      beginTurn();
-    },
-    onStreamToken: function(content) {
-      _clearStatusStrip();
-      _pinLiveAssistantBubble();
-      tokenAccum += content;
-      tryIngestPlanFromText(tokenAccum);
-      var textEl = currentMsgEl.querySelector('.message-text');
-      // Funnels through the shared render + idempotent paint: these two
-      // sites skipped _scrubDsml, so scaffolding showed while streaming
-      // and vanished on the terminal paint - a guaranteed end-of-reply
-      // flash.
-      if (textEl) _paintHTML(textEl, _renderReplyHTML(tokenAccum));
-      scrollToBottom();
-    },
-    onStreamDone: function() {
-      endTurn();
-    },
+    // No live-voice paint hooks here. The voice WebSocket is a status +
+    // audio mouth only; the journaled turn (Turn Delivery V2) is projected
+    // by the same SSE/WS-chat path used for typed messages. Reintroducing
+    // onUserTranscription / onStreamToken / onStreamDone here would dual-
+    // paint the turn from a second author.
   };
 })();

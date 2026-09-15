@@ -14,14 +14,38 @@ the Web UI. This page covers how to enable and use voice and media.
 ## Voice (STT + TTS)
 
 Kazma voice is **turn-based by default** (STT → LangGraph → TTS) on every
-platform. On the **Web UI**, Live **duplex** (interrupt while it speaks) is
-opt-in via LiveKit WebRTC. The supervisor graph is still the brain — this is
-not OpenAI Realtime replacing LangGraph.
+platform. On the **Web UI**, the Live button opens `/ws/voice`: the same
+checkpointed supervisor graph and the **same chat thread/journal** as typed
+messages — live voice is a mouth, not a second brain. Speak; you can
+interrupt while it speaks.
 
-Energy VAD is the default; `KAZMA_SILERO_VAD=1` tries Silero when torch is
-installed.
+Energy VAD is the implementation. `KAZMA_SILERO_VAD=1` selects a better
+frame classifier when one is actually available: WebRTC VAD if
+`pip install webrtcvad` (8/16/32/48 kHz). Silero requires a vendored model
+Kazma does not ship yet — until it does, the flag does nothing beyond that
+and Energy VAD runs (logged once). No runtime model downloads.
 
-### LiveKit duplex (web only)
+### Live voice on the web (`/ws/voice`)
+
+- **One brain, one thread.** Your utterance is transcribed, submitted to
+  the same graph `/api/chat/stream` uses, and journaled in the same
+  conversation. The chat UI paints the turn from the journal — the voice
+  socket only carries status and audio.
+- **TTS speaks the final reply only**, sentence by sentence (each clip is a
+  complete MP3, so playback starts with the first sentence). Supervisor
+  planning, tool chatter, and failed turns (⚠️ notices) are never spoken.
+- **Danger tools pause for approval** like typed chat: you get the normal
+  approval card in the chat UI (`POST /api/approve/{thread_id}` resumes);
+  voice replies "Approval needed" and keeps listening. If the socket is
+  still open when the approved turn finishes, the reply is spoken.
+- **Barge-in**: speaking again stops playback and starts a new turn (a new
+  utterance is a new user message — it supersedes the in-flight one, same
+  rule as typed chat).
+- The socket authenticates like every other WS and resolves your chat
+  session server-side; an unknown session or a platform (`gw-*`) thread is
+  refused.
+
+### LiveKit duplex (web only, optional transport upgrade)
 
 You need a LiveKit server (self-host or [LiveKit Cloud](https://livekit.io)).
 Kazma does not start one.
@@ -37,7 +61,10 @@ Or ConfigStore `voice.livekit.url` / `api_key` / `api_secret`. Then the Live
 button on `/` joins a room (`POST /api/voice/livekit/token`) and barge-in
 cancels TTS when you speak. When duplex is on, the browser also **publishes
 TTS into the room** (`publishTrack`) so the media loop is honest (`tts_in_room`
-on `/api/voice/livekit/status`). Telegram / Discord / Slack are still voice notes.
+on `/api/voice/livekit/status`). LiveKit is WebRTC transport + browser echo
+cancellation — **not** a server media plane and not a second brain; the
+LangGraph `/ws/voice` loop still owns the conversation. Telegram / Discord /
+Slack are still voice notes.
 
 OpenAI Realtime and Gemini Live are **not** the conversation brain. Optional
 REST STT/TTS codec: `KAZMA_REALTIME_CODEC=1` (`kazma_core.voice.realtime_codec`).

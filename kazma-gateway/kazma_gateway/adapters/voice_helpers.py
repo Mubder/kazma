@@ -211,6 +211,11 @@ async def transcribe_audio(
             audio_format = "ogg"
 
     try:
+        import time
+
+        from kazma_core.metrics import record_voice_stt, record_voice_utterance
+
+        _t0 = time.monotonic()
         text = await transcribe(
             audio_bytes,
             provider=provider,
@@ -225,6 +230,8 @@ async def transcribe_audio(
                 language,
                 text,
             )
+            record_voice_stt(provider, "ok", time.monotonic() - _t0)
+            record_voice_utterance("gateway", "ok")
             return text.strip() or None
         # Fallback chain if primary returns empty
         text = await transcribe_with_fallback(
@@ -234,6 +241,9 @@ async def transcribe_audio(
             api_key=key,
             audio_format=audio_format,
         )
+        _status = "ok" if text else "empty"
+        record_voice_stt(provider, _status, time.monotonic() - _t0)
+        record_voice_utterance("gateway", _status)
         return (text or "").strip() or None
     except TypeError:
         # Older transcribe signature without audio_format

@@ -24,6 +24,11 @@ __all__ = [
     "record_hitl_gate",
     "record_hitl_gate_parity_mismatch",
     "record_hitl_gate_reconciled",
+    "record_voice_stt",
+    "record_voice_tts",
+    "record_voice_utterance",
+    "record_voice_barge_in",
+    "record_voice_first_audio",
 ]
 
 logger = logging.getLogger(__name__)
@@ -151,6 +156,34 @@ if _PROMETHEUS_AVAILABLE:
         "Gate reconciler convergence actions",
         ["action"],  # created_missing | orphaned | superseded
     )
+
+    # Voice (STT/TTS). first_audio is the WS live-voice honesty metric:
+    # segment-close → first tts_chunk. It deliberately measures the CURRENT
+    # pipeline shape — if TTS still waits for the full reply before the
+    # first chunk, this histogram exposes that.
+    VOICE_STT_SECONDS = Histogram(
+        "kazma_voice_stt_seconds",
+        "STT transcription latency",
+        ["provider", "status"],
+    )
+    VOICE_TTS_SECONDS = Histogram(
+        "kazma_voice_tts_seconds",
+        "TTS synthesis latency",
+        ["provider", "status"],
+    )
+    VOICE_UTTERANCES_TOTAL = Counter(
+        "kazma_voice_utterances_total",
+        "Voice utterances processed",
+        ["path", "status"],  # path: rest | ws | gateway
+    )
+    VOICE_BARGE_IN_TOTAL = Counter(
+        "kazma_voice_barge_in_total",
+        "Live-voice barge-in interruptions (new speech during a turn/TTS)",
+    )
+    VOICE_FIRST_AUDIO_SECONDS = Histogram(
+        "kazma_voice_first_audio_seconds",
+        "Live voice: VAD segment close → first TTS audio chunk (WS path)",
+    )
 else:
     # Stub objects for type checking
     LLM_CALLS_TOTAL = None
@@ -170,6 +203,11 @@ else:
     HITL_GATES_TOTAL = None
     HITL_GATE_PARITY_MISMATCH_TOTAL = None
     HITL_GATE_RECONCILED_TOTAL = None
+    VOICE_STT_SECONDS = None
+    VOICE_TTS_SECONDS = None
+    VOICE_UTTERANCES_TOTAL = None
+    VOICE_BARGE_IN_TOTAL = None
+    VOICE_FIRST_AUDIO_SECONDS = None
 
 
 # ── Metrics Endpoint ───────────────────────────────────────────────────
@@ -301,3 +339,44 @@ def record_delivery_replay(replayed: int = 0, gap: bool = False) -> None:
         DELIVERY_REPLAYED_TOTAL.inc(replayed)
     if gap:
         DELIVERY_SEQ_GAPS_TOTAL.inc()
+
+
+def record_voice_stt(provider: str, status: str, seconds: float = 0.0) -> None:
+    """Record one STT transcription attempt. No-op without prometheus."""
+    if not _PROMETHEUS_AVAILABLE or VOICE_STT_SECONDS is None:
+        return
+    VOICE_STT_SECONDS.labels(
+        provider=(provider or "unknown")[:32], status=(status or "unknown")[:32]
+    ).observe(max(0.0, float(seconds or 0.0)))
+
+
+def record_voice_tts(provider: str, status: str, seconds: float = 0.0) -> None:
+    """Record one TTS synthesis attempt. No-op without prometheus."""
+    if not _PROMETHEUS_AVAILABLE or VOICE_TTS_SECONDS is None:
+        return
+    VOICE_TTS_SECONDS.labels(
+        provider=(provider or "unknown")[:32], status=(status or "unknown")[:32]
+    ).observe(max(0.0, float(seconds or 0.0)))
+
+
+def record_voice_utterance(path: str, status: str) -> None:
+    """Record one voice utterance outcome (path: rest|ws|gateway)."""
+    if not _PROMETHEUS_AVAILABLE or VOICE_UTTERANCES_TOTAL is None:
+        return
+    VOICE_UTTERANCES_TOTAL.labels(
+        path=(path or "unknown")[:16], status=(status or "unknown")[:32]
+    ).inc()
+
+
+def record_voice_barge_in() -> None:
+    """Record a live-voice barge-in. No-op without prometheus."""
+    if not _PROMETHEUS_AVAILABLE or VOICE_BARGE_IN_TOTAL is None:
+        return
+    VOICE_BARGE_IN_TOTAL.inc()
+
+
+def record_voice_first_audio(seconds: float) -> None:
+    """Record live-voice segment-close → first TTS chunk latency (WS path)."""
+    if not _PROMETHEUS_AVAILABLE or VOICE_FIRST_AUDIO_SECONDS is None:
+        return
+    VOICE_FIRST_AUDIO_SECONDS.observe(max(0.0, float(seconds or 0.0)))

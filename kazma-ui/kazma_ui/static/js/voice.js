@@ -283,6 +283,10 @@
 
   // ──────────────────────────────────────────────────────
   // Streaming mode — WebSocket live conversation
+  //
+  // Turn Delivery V2: the journal is the source of truth and the chat UI
+  // is the projection. This socket carries STATUS + AUDIO only — it never
+  // paints chat bubbles (no token stream, no local user bubble).
   // ──────────────────────────────────────────────────────
 
   var ws = null;
@@ -291,7 +295,8 @@
   var audioProcessor = null;
   var micStream = null;
   var isStreaming = false;
-  var ttsAudioChunks = [];
+  var ttsQueue = [];      // pending sentence clips (each a complete MP3)
+  var ttsPlaying = false; // a clip is currently playing
   var ttsPlayer = null;
   var lkRoom = null;
   var bargeFrames = 0;
@@ -427,16 +432,9 @@
     else if (type === 'listening') showToast('Listening...', 'info', 1000);
     else if (type === 'transcribing') showToast('Transcribing...', 'info', 1000);
     else if (type === 'transcribed') {
+      // Status only — the journaled turn paints the chat; this socket
+      // never authors a parallel user bubble.
       showToast('You: "' + (msg.text || '').substring(0, 60) + '..."', 'info', 2000);
-      if (window.KazmaChat && window.KazmaChat.onUserTranscription) {
-        window.KazmaChat.onUserTranscription(msg.text);
-      }
-    }
-    else if (type === 'token') {
-      // Stream tokens into the chat (similar to SSE chat)
-      if (window.KazmaChat && window.KazmaChat.onStreamToken) {
-        window.KazmaChat.onStreamToken(msg.content);
-      }
     }
     else if (type === 'tool_call') {
       showToast('Tool: ' + msg.name, 'info', 2000);
@@ -444,22 +442,21 @@
     else if (type === 'tool_result') {
       /* tool completed */
     }
+    else if (type === 'hitl_paused') {
+      showToast('Approval needed — answer the card in chat to continue', 'info', 5000);
+    }
     else if (type === 'tts_chunk') {
-      // Accumulate TTS audio chunks
-      var bytes = _base64ToBytes(msg.data);
-      ttsAudioChunks.push(bytes);
+      // One COMPLETE sentence clip (valid MP3) — play as it arrives.
+      _enqueueTtsClip(_base64ToBytes(msg.data));
     }
     else if (type === 'tts_done') {
-      _playTtsChunks();
+      /* queue drains itself clip by clip */
     }
     else if (type === 'interrupted') {
-      if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} ttsPlayer = null; }
-      ttsAudioChunks = [];
+      _clearTts();
     }
     else if (type === 'done') {
-      if (window.KazmaChat && window.KazmaChat.onStreamDone) {
-        window.KazmaChat.onStreamDone();
-      }
+      /* turn finished server-side; the journal projection closes the bubble */
     }
     else if (type === 'error') {
       showToast('Voice error: ' + (msg.content || ''), 'error');
@@ -469,20 +466,37 @@
     }
   }
 
-  function _playTtsChunks() {
-    if (!ttsAudioChunks.length) return;
-    var blob = new Blob(ttsAudioChunks, { type: 'audio/mpeg' });
+  function _enqueueTtsClip(bytes) {
+    if (!bytes || !bytes.length) return;
+    ttsQueue.push(bytes);
+    _drainTtsQueue();
+  }
+
+  function _drainTtsQueue() {
+    if (ttsPlaying || !ttsQueue.length) return;
+    var bytes = ttsQueue.shift();
+    var blob = new Blob([bytes], { type: 'audio/mpeg' });
     var url = URL.createObjectURL(blob);
-    if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} }
     var audio = new Audio(url);
     ttsPlayer = audio;
+    ttsPlaying = true;
     audio.onended = function() {
       URL.revokeObjectURL(url);
+      ttsPlaying = false;
       if (ttsPlayer === audio) ttsPlayer = null;
+      _drainTtsQueue();
     };
-    audio.play();
+    audio.play().catch(function() {
+      ttsPlaying = false;
+      if (ttsPlayer === audio) ttsPlayer = null;
+    });
     _publishTtsToLiveKit(blob);
-    ttsAudioChunks = [];
+  }
+
+  function _clearTts() {
+    ttsQueue = [];
+    ttsPlaying = false;
+    if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} ttsPlayer = null; }
   }
 
   async function _publishTtsToLiveKit(blob) {
@@ -512,8 +526,7 @@
   }
 
   function _bargeIn() {
-    if (ttsPlayer) { try { ttsPlayer.pause(); } catch (e) {} ttsPlayer = null; }
-    ttsAudioChunks = [];
+    _clearTts();
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'interrupt' }));
     }
@@ -564,7 +577,8 @@
       try { lkRoom.disconnect(); } catch (e) {}
       lkRoom = null;
     }
-    ttsAudioChunks = [];
+    ttsQueue = [];
+    ttsPlaying = false;
     bargeFrames = 0;
   }
 
