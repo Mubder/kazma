@@ -21,12 +21,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+from contextvars import ContextVar
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
 
 __all__ = [
     "STTProvider",
+    "get_last_error",
     "get_stt_provider",
     "list_nvidia_stt_models",
     "list_stt_providers",
@@ -35,6 +37,17 @@ __all__ = [
     "transcribe",
     "transcribe_with_fallback",
 ]
+
+_last_error: ContextVar[str | None] = ContextVar("kazma_stt_last_error", default=None)
+
+
+def get_last_error() -> str | None:
+    """Most recent STT *provider* failure for this task (None = no-speech)."""
+    return _last_error.get()
+
+
+def _note_error(message: str) -> None:
+    _last_error.set(message)
 
 logger = logging.getLogger(__name__)
 
@@ -191,12 +204,18 @@ async def transcribe(
     """Transcribe audio using the named provider.
 
     Falls back to ``openai`` if the named provider is not registered.
+
+    Returns ``""`` (empty string) when the provider ran and heard no
+    speech. Returns ``None`` only on a provider failure (no key, HTTP
+    error); callers can inspect :func:`get_last_error`.
     """
+    _last_error.set(None)
     p = get_stt_provider(provider)
     if p is None:
         logger.warning("[STT] Unknown provider '%s' — falling back to openai", provider)
         p = get_stt_provider("openai")
     if p is None:
+        _note_error("No STT providers registered")
         logger.error("[STT] No providers registered")
         return None
     return await p(audio_bytes, language=language, api_key=api_key, audio_format=audio_format)
@@ -253,6 +272,7 @@ def _openai_stt() -> STTProvider:
     ) -> str | None:
         key = api_key or os.environ.get("OPENAI_API_KEY") or _get_provider_api_key_from_db("openai")
         if not key:
+            _note_error("OpenAI API key not configured")
             logger.error("[STT/openai] No API key")
             return None
         ext = audio_format or "ogg"
@@ -280,8 +300,9 @@ def _openai_stt() -> STTProvider:
                 text = resp.json().get("text", "").strip()
                 if text:
                     logger.info("[STT/openai] Transcribed: %.100s", text)
-                return text or None
-        except Exception:
+                return text
+        except Exception as exc:
+            _note_error(str(exc) or "OpenAI STT failed")
             logger.exception("[STT/openai] Failed")
             return None
 
@@ -300,6 +321,7 @@ def _groq_stt() -> STTProvider:
     ) -> str | None:
         key = api_key or os.environ.get("GROQ_API_KEY") or _get_provider_api_key_from_db("groq")
         if not key:
+            _note_error("Groq API key not configured")
             logger.error("[STT/groq] No API key")
             return None
         ext = audio_format or "ogg"
@@ -327,8 +349,9 @@ def _groq_stt() -> STTProvider:
                 text = resp.json().get("text", "").strip()
                 if text:
                     logger.info("[STT/groq] Transcribed: %.100s", text)
-                return text or None
-        except Exception:
+                return text
+        except Exception as exc:
+            _note_error(str(exc) or "Groq STT failed")
             logger.exception("[STT/groq] Failed")
             return None
 
@@ -351,6 +374,7 @@ def _cohere_stt() -> STTProvider:
     ) -> str | None:
         key = api_key or os.environ.get("COHERE_API_KEY") or _get_provider_api_key_from_db("cohere")
         if not key:
+            _note_error("Cohere API key not configured")
             logger.error("[STT/cohere] No API key")
             return None
         # Cohere supports: flac, mp3, mpeg, mpga, ogg, wav
@@ -383,8 +407,9 @@ def _cohere_stt() -> STTProvider:
                 text = resp.json().get("text", "").strip()
                 if text:
                     logger.info("[STT/cohere] Transcribed: %.100s", text)
-                return text or None
-        except Exception:
+                return text
+        except Exception as exc:
+            _note_error(str(exc) or "Cohere STT failed")
             logger.exception("[STT/cohere] Failed")
             return None
 
@@ -498,6 +523,7 @@ def _nvidia_stt() -> STTProvider:
             if llm_url and not _is_llm_only_nvidia_url(llm_url):
                 base_url = llm_url.rstrip("/")
             elif llm_url and _is_llm_only_nvidia_url(llm_url):
+                _note_error("NVIDIA LLM URL has no ASR — set voice.stt_base_url")
                 logger.error(
                     "[STT/nvidia] LLM base URL %s has no ASR. "
                     "Deploy a Speech NIM and set voice.stt_base_url "
@@ -508,6 +534,7 @@ def _nvidia_stt() -> STTProvider:
                 return None
 
         if not base_url:
+            _note_error("NVIDIA ASR endpoint not configured")
             logger.error(
                 "[STT/nvidia] No ASR endpoint configured. "
                 "Set voice.stt_base_url to your Speech NIM root "
@@ -548,6 +575,7 @@ def _nvidia_stt() -> STTProvider:
                     },
                 )
                 if resp.status_code == 404:
+                    _note_error("NVIDIA ASR endpoint returned 404")
                     logger.error(
                         "[STT/nvidia] 404 at %s — this is not a Speech NIM. "
                         "Model=%s. Configure voice.stt_base_url to a real ASR "
@@ -566,8 +594,9 @@ def _nvidia_stt() -> STTProvider:
                 text = (text or "").strip()
                 if text:
                     logger.info("[STT/nvidia] Transcribed via %s: %.100s", model, text)
-                return text or None
-        except Exception:
+                return text
+        except Exception as exc:
+            _note_error(str(exc) or "NVIDIA STT failed")
             logger.exception("[STT/nvidia] Failed url=%s model=%s", target_url, model)
             return None
 
@@ -591,6 +620,7 @@ def _faster_whisper_stt() -> STTProvider:
         try:
             from faster_whisper import WhisperModel  # type: ignore[import-untyped]
         except ImportError:
+            _note_error("faster-whisper is not installed")
             logger.error("[STT/faster-whisper] pip install faster-whisper required")
             return None
         import tempfile
@@ -615,10 +645,11 @@ def _faster_whisper_stt() -> STTProvider:
                         info.duration,
                         text,
                     )
-                return text or None
+                return text
             finally:
                 Path(tmp_path).unlink(missing_ok=True)
-        except Exception:
+        except Exception as exc:
+            _note_error(str(exc) or "faster-whisper STT failed")
             logger.exception("[STT/faster-whisper] Failed")
             return None
 

@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Live voice: empty Whisper is silence, not "Transcription failed" (2026-09-15)
+
+Every VAD clip includes ~1.5 s of trailing silence, so it always looked
+"long enough." Whisper returns `""` on that, providers collapsed it to
+`None`, and live toasted **Transcription failed** on every pause. Empty /
+no-speech now keeps listening; the error toast is only for a real provider
+failure (missing key, HTTP). Trailing endpoint silence is trimmed before
+STT.
+
 ## Voice: a mic click is not speech (2026-09-15)
 
 Clicking (not holding) the composer mic sent a tens-of-ms WebM clip;

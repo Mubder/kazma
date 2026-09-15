@@ -326,7 +326,7 @@ async def _process_utterance(
         pcm16le_duration_seconds,
         pcm16le_to_wav,
     )
-    from kazma_core.voice.stt import sanitize_transcript, transcribe
+    from kazma_core.voice.stt import get_last_error, sanitize_transcript, transcribe
 
     segment_at = time.monotonic()
     cfg = _voice_settings()
@@ -356,10 +356,16 @@ async def _process_utterance(
     if not text:
         record_voice_stt(stt_provider, "empty", time.monotonic() - _t0)
         record_voice_utterance("ws", "stt_empty")
-        # Real provider failure on a long-enough clip is worth an error;
-        # no-speech / hallucination just keeps listening.
-        if raw is None and duration >= 1.0:
+        # Empty Whisper / hallucination: keep listening. VAD segments always
+        # include ~1.5s of trailing silence, so they look "long enough" even
+        # when nobody spoke — that used to toast "Transcription failed" on
+        # every pause. Only surface a real provider failure (no key, HTTP).
+        err = get_last_error()
+        if err:
+            logger.warning("[ws-voice] STT provider failed: %s", err)
             await _ws_send(websocket, {"type": "error", "content": "Transcription failed"})
+        else:
+            logger.debug("[ws-voice] no speech in %.1fs segment", duration)
         return
     record_voice_stt(stt_provider, "ok", time.monotonic() - _t0)
     record_voice_utterance("ws", "stt_ok")
