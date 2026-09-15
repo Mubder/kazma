@@ -323,6 +323,10 @@ def test_hold_to_record_and_live_capture_guards() -> None:
     assert "Hold the mic to record" in voice
     assert "is-recording" in voice
     assert "micIcon.style.display" not in voice
+    v5 = (_REPO / "kazma-ui/kazma_ui/static/css/kazma.v5.css").read_text(encoding="utf-8")
+    # Idle: recording circle hidden. Recording: circle shown, mic glyph hidden.
+    assert ".composer-voice-btn .composer-mic-recording { display: none; }" in v5
+    assert ".composer-voice-btn.is-recording .composer-mic-recording { display: block; }" in v5
 
 
 # ── PR A: VAD carry (no dropped partial frames) ─────────────────────────
