@@ -42,6 +42,9 @@ and Energy VAD runs (logged once). No runtime model downloads.
 - **Barge-in**: speaking again stops playback and starts a new turn (a new
   utterance is a new user message — it supersedes the in-flight one, same
   rule as typed chat).
+- **Hold the mic** (the round button) to dictate into the composer; a
+  click is ignored. Live mode stays listening through silence — a
+  mic-open pop is not "Transcription failed".
 - The socket authenticates like every other WS and resolves your chat
   session server-side; an unknown session or a platform (`gw-*`) thread is
   refused.

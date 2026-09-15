@@ -188,7 +188,7 @@ async def transcribe_audio(
     """
     if not audio_bytes:
         return None
-    from kazma_core.voice.stt import transcribe, transcribe_with_fallback
+    from kazma_core.voice.stt import sanitize_transcript, transcribe, transcribe_with_fallback
 
     cfg = live_voice_settings()
     provider = str(cfg["stt_provider"])
@@ -232,7 +232,7 @@ async def transcribe_audio(
             )
             record_voice_stt(provider, "ok", time.monotonic() - _t0)
             record_voice_utterance("gateway", "ok")
-            return text.strip() or None
+            return sanitize_transcript(text.strip())
         # Fallback chain if primary returns empty
         text = await transcribe_with_fallback(
             audio_bytes,
@@ -244,7 +244,7 @@ async def transcribe_audio(
         _status = "ok" if text else "empty"
         record_voice_stt(provider, _status, time.monotonic() - _t0)
         record_voice_utterance("gateway", _status)
-        return (text or "").strip() or None
+        return sanitize_transcript((text or "").strip())
     except TypeError:
         # Older transcribe signature without audio_format
         try:
@@ -254,7 +254,7 @@ async def transcribe_audio(
                 language=language,
                 api_key=key,
             )
-            return (text or "").strip() or None
+            return sanitize_transcript((text or "").strip())
         except Exception:
             logger.exception("[voice] STT failed provider=%s", provider)
             return None

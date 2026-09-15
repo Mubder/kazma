@@ -178,7 +178,7 @@
         </button>
         {# No accept= filter — any file type (docx, pdf, images, …) is selectable without switching to "All Files" #}
         <input type="file" id="file-input" class="composer-file-input" multiple>
-        <button id="voice-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="Record voice (Hold to record)" aria-label="Record voice" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="KazmaVoice.startRecording()" ontouchend="KazmaVoice.stopRecording()">
+        <button id="voice-btn" class="btn-icon composer-icon-btn composer-voice-btn" title="Record voice (Hold to record)" aria-label="Record voice" type="button" onmousedown="KazmaVoice.startRecording()" onmouseup="KazmaVoice.stopRecording()" onmouseleave="KazmaVoice.stopRecording()" ontouchstart="event.preventDefault(); KazmaVoice.startRecording();" ontouchend="KazmaVoice.stopRecording()">
           <svg id="mic-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
             <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
             <path d="M19 10v2a7 7 0 01-14 0v-2"/>

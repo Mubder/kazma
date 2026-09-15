@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -30,6 +31,7 @@ __all__ = [
     "list_nvidia_stt_models",
     "list_stt_providers",
     "register_stt_provider",
+    "sanitize_transcript",
     "transcribe",
     "transcribe_with_fallback",
 ]
@@ -121,6 +123,61 @@ def list_stt_providers() -> list[str]:
 
 
 # ── High-level API ─────────────────────────────────────────────────────
+
+
+# Whisper (and clones) invent a word on silence / button clicks / mic-open
+# pops. These are the well-known no-speech strings — never treat them as
+# a user utterance. Real short replies (yes/no/ok) are NOT in this set.
+_NO_SPEECH_FOLD = frozenset({
+    "thank you",
+    "thanks",
+    "thanks for watching",
+    "thank you for watching",
+    "thanks for watching please subscribe",
+    "please subscribe",
+    "subscribe",
+    "bye",
+    "goodbye",
+    "you",
+    "the",
+    "uh",
+    "um",
+    "ah",
+    "mm",
+    "hmm",
+    "huh",
+    "you re welcome",
+    "youre welcome",
+    "peace",
+    "transcribed by",
+    "subtitles by",
+    "شكرا",
+    "شكرا لك",
+    "شكرا لكم",
+    "شكرا لكم",
+})
+_FOLD_RE = re.compile(r"[^\w\u0600-\u06FF]+", re.UNICODE)
+
+
+def sanitize_transcript(text: str | None) -> str | None:
+    """Return *text* if it looks like real speech, else None.
+
+    Drops empty / punctuation-only strings and Whisper's classic
+    no-speech hallucinations ("Thank you.", "you", "Subscribe", …).
+    Does **not** drop real one-word replies like "yes" / "no" / "ok".
+    """
+    if text is None:
+        return None
+    raw = str(text).strip()
+    if not raw:
+        return None
+    folded = _FOLD_RE.sub(" ", raw).strip().lower()
+    folded = re.sub(r"\s+", " ", folded)
+    if not folded or len(folded) < 2:
+        return None
+    if folded in _NO_SPEECH_FOLD:
+        return None
+    return raw
 
 
 async def transcribe(
@@ -215,6 +272,7 @@ def _openai_stt() -> STTProvider:
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
                         "model": _get_configured_stt_model("openai") or "whisper-1",
+                        "temperature": "0",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
@@ -261,6 +319,7 @@ def _groq_stt() -> STTProvider:
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
                         "model": _get_configured_stt_model("groq") or "whisper-large-v3",
+                        "temperature": "0",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
