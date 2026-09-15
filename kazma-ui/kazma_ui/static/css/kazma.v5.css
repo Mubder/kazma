@@ -557,9 +557,10 @@ html[data-theme="light"] { color-scheme: only light; }
 .composer-voice-btn svg {
   width: 20px;
   height: 20px;
-  display: block;
 }
-.composer-mic-recording { display: none; }
+/* Must beat `.composer-voice-btn svg { display }` — that rule made the
+   red recording circle visible at rest. */
+.composer-voice-btn .composer-mic-recording { display: none; }
 .composer-voice-btn.is-recording #mic-icon { display: none; }
 .composer-voice-btn.is-recording .composer-mic-recording { display: block; }
 .composer-voice-btn.is-recording {
