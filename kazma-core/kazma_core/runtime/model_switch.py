@@ -324,16 +324,9 @@ def switch_active_provider(
     return SwitchResult(ok=True, model=final_model, provider=final_prov)
 
 
-_FALLBACK_CHAT_MODEL = {
-    "deepseek": "deepseek-chat",
-    "openai": "gpt-4o-mini",
-    "anthropic": "claude-sonnet-4",
-    "google": "gemini-2.0-flash",
-    "groq": "llama-3.3-70b-versatile",
-    "xai": "grok-3",
-    "openrouter": "openai/gpt-4o-mini",
-    "mistral": "mistral-large-latest",
-}
+# Kept as a name because callers read it; the CONTENT now lives in
+# providers.py so the registry and this module cannot drift apart again.
+from kazma_core.providers import DEFAULT_MODEL_FOR as _FALLBACK_CHAT_MODEL
 
 
 def _first_model_for(reg: Any, provider: str) -> str:

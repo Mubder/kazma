@@ -291,3 +291,39 @@ def capabilities(provider: str) -> dict[str, object]:
 def system_role_for(provider: str) -> str:
     """The role name to use for the system turn. Read this instead of assuming."""
     return str(capabilities(provider)["system_role"])
+
+#: The model to use for a provider when NOTHING else has said which.
+#:
+#: This is data about a vendor -- "openai's small chat model is called
+#: gpt-4o-mini" -- and belongs in one place. It lived in two: an inline dict
+#: in `model_registry` (5 providers) and `_FALLBACK_CHAT_MODEL` in
+#: `runtime/model_switch` (8). They had already drifted; the registry copy
+#: was missing xai, openrouter and mistral, so the same question got
+#: different answers depending on which code path asked it.
+#:
+#: What does NOT belong anywhere is a bare `or "gpt-4o-mini"` as a universal
+#: last resort. That is not a default, it is a guess that an unconfigured
+#: install should dial OpenAI -- and on an install with no OpenAI key it
+#: produced a 401 that looked like a broken provider rather than an empty
+#: setting. Ask this map for the provider IN HAND; if the provider is not
+#: known, the answer is "" and the caller must say so out loud.
+DEFAULT_MODEL_FOR: dict[str, str] = {
+    "deepseek": "deepseek-chat",
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-sonnet-4",
+    "google": "gemini-2.0-flash",
+    "groq": "llama-3.3-70b-versatile",
+    "xai": "grok-3",
+    "openrouter": "openai/gpt-4o-mini",
+    "mistral": "mistral-large-latest",
+}
+
+
+def default_model_for(provider: str) -> str:
+    """The vendor default for *provider*, or "" when we do not know.
+
+    Empty is a real answer and callers must handle it. Substituting some
+    other vendor's model because this one is unknown is how an install ends
+    up reporting a model it is not running.
+    """
+    return DEFAULT_MODEL_FOR.get((provider or "").strip().lower(), "")

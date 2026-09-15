@@ -75,7 +75,9 @@ class AgentConfig:
     version: str = field(default_factory=lambda: _default_version())
     language: str = "ar"
     rtl: bool = True
-    default_model: str = "gpt-4o-mini"
+    # No vendor default. An unconfigured install must not silently mean
+    # OpenAI -- that is how a stale pin outlives the provider it named.
+    default_model: str = ""
     storage_path: str = "data/kazma.db"
     vector_dim: int = 384
     system_prompt: str = ""
@@ -139,7 +141,7 @@ def load_config(config_path: str | Path | None = None) -> AgentConfig:
         # reply when the user has not set agent.language explicitly.
         language=_language,
         rtl=agent_cfg.get("rtl", False),
-        default_model=models_cfg.get("default", "gpt-4o-mini"),
+        default_model=models_cfg.get("default", ""),
         storage_path=storage_cfg.get("path", "data/kazma.db"),
         vector_dim=storage_cfg.get("vector_dim", 384),
         system_prompt=_system_prompt,

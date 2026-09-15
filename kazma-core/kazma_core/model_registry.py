@@ -303,13 +303,11 @@ class ModelRegistry:
         models = vis or list(chosen.get("models") or [])
         model = str(models[0]) if models else ""
         if not model:
-            model = {
-                "deepseek": "deepseek-chat",
-                "openai": "gpt-4o-mini",
-                "anthropic": "claude-sonnet-4",
-                "google": "gemini-2.0-flash",
-                "groq": "llama-3.3-70b-versatile",
-            }.get(name.lower(), "")
+            # One map, in providers.py. This copy had drifted: it was missing
+            # xai, openrouter and mistral, which model_switch's copy had.
+            from kazma_core.providers import default_model_for
+
+            model = default_model_for(name)
         return name, base_url, api_key, model
 
     def get_active_profile(self) -> dict[str, str]:
@@ -546,9 +544,18 @@ class ModelRegistry:
                     provider_name, base_url, api_key = ready_name, ready_url, ready_key
                     effective_model = ready_model or effective_model
 
-            # Fallback model if still empty
+            # Fallback model if still empty.
+            #
+            # This used to end `or "gpt-4o-mini"`, which is the stale-pin
+            # defect one branch over: with nothing configured it invented an
+            # OpenAI model and dialled a provider that may hold no key. Ask
+            # the provider we actually resolved above.
             if not effective_model:
-                effective_model = str(self._config_store.get("llm.model", "") or "gpt-4o-mini")
+                effective_model = str(self._config_store.get("llm.model", "") or "")
+            if not effective_model:
+                from kazma_core.providers import default_model_for
+
+                effective_model = default_model_for(provider_name)
 
             config = LLMConfig.from_dict({
                 "base_url": base_url,
@@ -611,8 +618,12 @@ class ModelRegistry:
             return None
         effective_model = model or str(entry.get("model", "") or "")
         if not effective_model:
-            # Try the active model as a fallback
-            effective_model = self._active_model or "gpt-4o-mini"
+            # The active model, then THIS provider's own default -- never
+            # another vendor's. `get_client_for` is pinned to provider_name;
+            # answering with gpt-4o-mini for an Anthropic pin was simply wrong.
+            from kazma_core.providers import default_model_for
+
+            effective_model = self._active_model or default_model_for(provider_name)
         config = LLMConfig.from_dict({
             "base_url": str(entry.get("base_url", "")),
             "api_key": coerce_api_key(entry.get("api_key", "")),

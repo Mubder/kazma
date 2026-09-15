@@ -166,7 +166,13 @@ class LLMConfig:
 
     base_url: str = "https://api.openai.com/v1"
     api_key: str = ""
-    model: str = "gpt-4o-mini"
+    # No vendor default. `LLMConfig()` with nothing set used to mean
+    # "gpt-4o-mini on api.openai.com", so any path that forgot to pass a
+    # model silently became an OpenAI call -- and on an install with no
+    # OpenAI key that surfaced as a 401 blamed on the provider layer rather
+    # than as the missing setting it was. Empty is the honest value; the
+    # caller that cannot supply one should say so.
+    model: str = ""
     # 16384 default: 8192 truncates content-generation tasks (document
     # restructuring, research synthesis, long code) mid-stream, forcing
     # the wasteful auto-retry (doubles inference cost). 16384 is safe

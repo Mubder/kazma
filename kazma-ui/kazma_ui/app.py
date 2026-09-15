@@ -310,7 +310,9 @@ class KazmaAppBuilder:
                     ("llm.api_key", _env_key, "llm"),
                 ] + ([("llm.model", _env_model, "llm")] if _env_model else []))
                 self.registry._active_provider = _env_provider
-                self.registry._active_model = _env_model or "gpt-4o-mini"
+                # Empty when the env says nothing. Stamping an OpenAI model
+                # here is what put a pin on installs that never used OpenAI.
+                self.registry._active_model = _env_model or ""
                 self.registry._clients.clear()
                 logger.info(
                     "[App] Env-var override: provider=%s model=%s base_url=%s",
