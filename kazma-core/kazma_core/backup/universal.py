@@ -454,6 +454,28 @@ def selectable_databases(data_root: Path) -> list[Path]:
     ]
 
 
+def _table_count(db: Path) -> int | None:
+    """Tables in *db*, or None if it cannot be read.
+
+    None is deliberately distinct from 0: "I could not tell" must not be
+    recorded as "there was nothing there", or a future drill would excuse a
+    real loss on the strength of a failed read.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=5.0)
+        try:
+            return int(
+                conn.execute(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table'"
+                ).fetchone()[0]
+            )
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001
+        logger.debug("[universal-backup] table count failed for %s", db, exc_info=True)
+        return None
+
+
 def _backup_one_db(src: Path, dest: Path) -> bool:
     """WAL-safe copy of a single SQLite database via the Online Backup API.
 
@@ -863,7 +885,17 @@ def perform_universal_backup(
         db_dest.parent.mkdir(parents=True, exist_ok=True)
         if _backup_one_db(db, db_dest):
             db_ok += 1
-            db_results.append({"path": str(rel), "size": db_dest.stat().st_size})
+            db_results.append({
+                "path": str(rel),
+                "size": db_dest.stat().st_size,
+                # What the SOURCE held, so the drill can tell a backup that
+                # lost everything from a faithful copy of an empty file.
+                # `integrity_check` passes on both and they look identical
+                # from the backup side; only the source settles it, and only
+                # at the moment of copying (an offsite restore has no live
+                # data dir to consult later).
+                "source_tables": _table_count(db),
+            })
         else:
             db_fail += 1
             # Record the size that did NOT make it. "1 of 26 failed" reads as
