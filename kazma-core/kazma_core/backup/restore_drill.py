@@ -80,8 +80,51 @@ class DrillResult:
         )
 
 
-def _check_sqlite(path: Path, scratch: Path, res: DrillResult) -> None:
-    """Copy to scratch and integrity-check. Never opens the backup in place."""
+def _norm(rel: str) -> str:
+    """One spelling for a relative path, so Windows and POSIX agree."""
+    return str(rel).replace("\\", "/").strip("/").lower()
+
+
+def _source_table_counts(backup: Path) -> dict[str, int | None]:
+    """What each database held AT THE SOURCE, per the backup's own manifest.
+
+    Read from the manifest rather than the live data directory on purpose:
+    a restore drill may run against an offsite copy on a host that has no
+    live install at all, and the live file has moved on regardless. The
+    manifest is the only record of what was true when the copy was taken.
+
+    Missing key -> not recorded (older backup). Distinct from 0.
+    """
+    out: dict[str, int | None] = {}
+    try:
+        m = json.loads((backup / "manifest.json").read_text(encoding="utf-8"))
+        for item in (m.get("databases") or {}).get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            path = item.get("path")
+            if not path:
+                continue
+            if "source_tables" in item:
+                val = item.get("source_tables")
+                out[_norm(path)] = val if isinstance(val, int) else None
+    except Exception:  # noqa: BLE001
+        logger.debug("[drill] could not read source table counts", exc_info=True)
+    return out
+
+
+def _check_sqlite(
+    path: Path,
+    scratch: Path,
+    res: DrillResult,
+    source_tables: int | None = None,
+) -> None:
+    """Copy to scratch and integrity-check. Never opens the backup in place.
+
+    *source_tables* is what the manifest recorded for this database at the
+    moment it was copied. Without it, "no tables" is ambiguous: a truncated
+    backup of a real database and a faithful copy of an empty file are
+    byte-identical, and `integrity_check` passes on both.
+    """
     name = path.name
     target = scratch / name
     try:
@@ -109,7 +152,30 @@ def _check_sqlite(path: Path, scratch: Path, res: DrillResult) -> None:
         # `integrity_check` passes on an empty file: structurally perfect and
         # completely worthless. A backup that saved nothing must not read as a
         # backup that saved everything.
-        res.add(f"sqlite:{name}", False, "opens, but contains no tables at all")
+        #
+        # But an empty SOURCE is a different fact, and this check could not
+        # tell them apart. On the operator's install two 0-byte orphans
+        # (kazma.db, ops.db - created months ago, never written to) failed
+        # the drill every single night under the headline "a backup cannot be
+        # restored". Nothing was at risk; there was nothing in them. An alert
+        # that cries wolf daily trains you to ignore the night it is right.
+        if source_tables == 0:
+            res.add(
+                f"sqlite:{name}", True,
+                "empty at source - copied faithfully, nothing to lose",
+            )
+            return
+        if source_tables is None:
+            res.add(
+                f"sqlite:{name}", False,
+                "contains no tables, and the manifest does not record what "
+                "the source held (backup predates the check) - verify by hand",
+            )
+            return
+        res.add(
+            f"sqlite:{name}", False,
+            f"THE SOURCE HAD {source_tables} TABLES; the backup has none",
+        )
         return
     res.add(f"sqlite:{name}", True, f"{tables} tables")
 
@@ -359,8 +425,13 @@ def verify_backup(
     scratch = Path(scratch_dir or tempfile.mkdtemp(prefix="kazma-drill-"))
     try:
         scratch.mkdir(parents=True, exist_ok=True)
+        _src_tables = _source_table_counts(d)
         for db in dbs:
-            _check_sqlite(db, scratch, res)
+            try:
+                _key = _norm(str(db.relative_to(d / "dbs")))
+            except ValueError:
+                _key = _norm(db.name)
+            _check_sqlite(db, scratch, res, _src_tables.get(_key))
         _check_vault_opens(d, res)
         _check_completeness(d, res)
     finally:
