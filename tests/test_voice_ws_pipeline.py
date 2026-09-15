@@ -296,6 +296,36 @@ async def test_whisper_hallucination_is_not_a_user_turn(monkeypatch) -> None:
     assert spoken == []
 
 
+def test_public_stt_hint_does_not_call_nvidia_asr_a_missing_key() -> None:
+    from kazma_ui.routes_voice_ws import _public_stt_hint
+
+    nvidia = _public_stt_hint("NVIDIA ASR endpoint not configured")
+    assert "Whisper" in nvidia
+    assert "add a key" not in nvidia.lower()
+    key = _public_stt_hint("OpenAI API key not configured")
+    assert "add a key" in key.lower()
+
+
+@pytest.mark.asyncio
+async def test_transcribe_preferring_skips_nvidia_without_asr(monkeypatch) -> None:
+    from kazma_core.voice import stt as stt_mod
+
+    calls: list[str] = []
+
+    async def fake_transcribe(audio_bytes, *, provider="openai", **_k):
+        calls.append(provider)
+        if provider == "openai":
+            return "hello from openai"
+        return None
+
+    monkeypatch.setattr(stt_mod, "transcribe", fake_transcribe)
+    monkeypatch.setattr(stt_mod, "_nvidia_asr_base_url", lambda: None)
+    text = await stt_mod.transcribe_preferring(b"RIFF", provider="nvidia", audio_format="wav")
+    assert text == "hello from openai"
+    assert "nvidia" not in calls
+    assert calls == ["openai"]
+
+
 def test_sanitize_transcript_drops_no_speech_keeps_real_replies() -> None:
     from kazma_core.voice.stt import sanitize_transcript
 

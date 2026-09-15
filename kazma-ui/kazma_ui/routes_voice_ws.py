@@ -68,8 +68,15 @@ _ALLOWED_SAMPLE_RATES = frozenset({8000, 16000, 24000, 48000})
 def _public_stt_hint(err: str) -> str:
     """Operator-safe STT failure line. Never dump HTTP bodies."""
     low = (err or "").lower()
-    if "api key" in low or "not configured" in low or "not installed" in low:
+    if "asr" in low or "speech nim" in low or "stt_base_url" in low:
+        return (
+            "Live STT needs Whisper (OpenAI/Groq) — NVIDIA chat is not ASR. "
+            "Switch Settings → Voice → STT provider"
+        )
+    if "api key" in low:
         return "STT is not configured — add a key in Settings → Voice"
+    if "not installed" in low:
+        return "STT engine is not installed on this server"
     if "401" in low or "403" in low or "unauthorized" in low:
         return "STT authentication failed — check the API key in Settings → Voice"
     if "404" in low:
@@ -304,7 +311,13 @@ async def handle_voice_websocket(
 
 def _voice_settings() -> dict[str, str]:
     """ConfigStore voice overrides — ConfigStore wins over client choices."""
-    out: dict[str, str] = {"stt_provider": "", "stt_language": "", "tts_provider": "", "tts_voice": ""}
+    out: dict[str, str] = {
+        "stt_provider": "",
+        "stt_language": "",
+        "stt_api_key": "",
+        "tts_provider": "",
+        "tts_voice": "",
+    }
     try:
         from kazma_core.config_store import get_config_store
 
@@ -344,7 +357,11 @@ async def _process_utterance(
         pcm16le_duration_seconds,
         pcm16le_to_wav,
     )
-    from kazma_core.voice.stt import get_last_error, sanitize_transcript, transcribe
+    from kazma_core.voice.stt import (
+        get_last_error,
+        sanitize_transcript,
+        transcribe_preferring,
+    )
 
     segment_at = time.monotonic()
     cfg = _voice_settings()
@@ -364,10 +381,11 @@ async def _process_utterance(
     # Step 1: Transcribe — VAD yields raw PCM; STT providers get a real WAV.
     wav = pcm16le_to_wav(audio_bytes, sample_rate=sample_rate)
     _t0 = time.monotonic()
-    raw = await transcribe(
+    raw = await transcribe_preferring(
         wav,
         provider=stt_provider,
         language=language,
+        api_key=cfg.get("stt_api_key") or None,
         audio_format="wav",
     )
     text = sanitize_transcript(raw)

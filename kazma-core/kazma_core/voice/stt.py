@@ -35,6 +35,7 @@ __all__ = [
     "register_stt_provider",
     "sanitize_transcript",
     "transcribe",
+    "transcribe_preferring",
     "transcribe_with_fallback",
 ]
 
@@ -219,6 +220,53 @@ async def transcribe(
         logger.error("[STT] No providers registered")
         return None
     return await p(audio_bytes, language=language, api_key=api_key, audio_format=audio_format)
+
+
+async def transcribe_preferring(
+    audio_bytes: bytes,
+    *,
+    provider: str = "openai",
+    language: str = "auto",
+    api_key: str | None = None,
+    audio_format: str = "ogg",
+) -> str | None:
+    """Try *provider*, then OpenAI, then Groq.
+
+    NVIDIA without a Speech NIM URL is skipped (the LLM integrate URL is
+    not ASR — that used to toast "add a key" on live voice). An empty
+    successful transcript (no speech) is returned immediately so a later
+    provider cannot hallucinate a word onto silence.
+    """
+    primary = (provider or "openai").strip().lower() or "openai"
+    chain: list[str] = []
+    for name in (primary, "openai", "groq"):
+        if name and name not in chain and name != "none":
+            chain.append(name)
+
+    last: str | None = None
+    for name in chain:
+        if name == "nvidia":
+            try:
+                if not _nvidia_asr_base_url():
+                    logger.info(
+                        "[STT] skipping nvidia — no Speech NIM URL "
+                        "(set voice.stt_base_url or pick openai/groq)"
+                    )
+                    continue
+            except Exception:
+                continue
+        last = await transcribe(
+            audio_bytes,
+            provider=name,
+            language=language,
+            api_key=api_key if name == primary else None,
+            audio_format=audio_format,
+        )
+        if last:
+            return last
+        if last == "":
+            return ""
+    return last
 
 
 async def transcribe_with_fallback(
