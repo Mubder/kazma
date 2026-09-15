@@ -36,7 +36,7 @@ async def speech_to_text(
 
     from kazma_core.config_store import get_config_store
     from kazma_core.metrics import record_voice_stt, record_voice_utterance
-    from kazma_core.voice.stt import sanitize_transcript, transcribe
+    from kazma_core.voice.stt import sanitize_transcript, transcribe_preferring
 
     cs = get_config_store()
     db_provider = cs.get("voice.stt_provider")
@@ -60,10 +60,12 @@ async def speech_to_text(
 
     started = time.monotonic()
     try:
-        text = await transcribe(
+        stt_key = cs.get("voice.stt_api_key")
+        text = await transcribe_preferring(
             audio_bytes,
             provider=provider,
             language=language,
+            api_key=str(stt_key).strip() if stt_key else None,
             audio_format=ext,
         )
     except Exception as e:

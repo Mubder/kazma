@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Live STT no longer treats NVIDIA-without-ASR as "add a key" (2026-09-16)
+
+Settings → Voice STT set to NVIDIA (the LLM provider) has no Speech NIM
+URL. Live toasted **STT is not configured — add a key** because that
+hint matched any "not configured". Live (and REST) now skip NVIDIA
+without an ASR URL and fall back to OpenAI then Groq, same chain as
+Telegram voice notes.
+
 ## Swarm sits under Activity (2026-09-15)
 
 Moved Swarm from Agents & tools to Activity (with Dashboard), not
