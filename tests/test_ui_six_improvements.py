@@ -37,14 +37,14 @@ def test_every_destination_sits_in_the_right_group() -> None:
     """Sixteen destinations, grouped, nothing behind a disclosure.
 
     Work / Knowledge / Agents & tools / Activity / Settings.
-    Skills+MCP sit with Agents; Scheduled+X sit with Dashboard.
+    Skills+MCP sit with Agents; Swarm sits with Dashboard (live ops).
     Dashboard is an inspector, not a work surface.
     """
     groups = _sidebar_hrefs_by_section()
     assert groups["primary"] == ["/chat", "/workspace", "/ide"]
     assert groups["section_knowledge"] == ["/memory", "/knowledge", "/documents", "/research"]
-    assert groups["section_automation"] == ["/agents", "/swarm", "/skills", "/mcp"]
-    assert groups["activity"] == ["/dashboard", "/replay", "/scheduled", "/x"]
+    assert groups["section_automation"] == ["/agents", "/skills", "/mcp"]
+    assert groups["activity"] == ["/dashboard", "/swarm", "/replay", "/scheduled", "/x"]
     assert groups["configuration"] == ["/settings"]
     assert "capabilities" not in groups
     assert "/dashboard" not in groups["primary"]

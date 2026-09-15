@@ -121,18 +121,6 @@
             </span>
             <span class="nav-label">{{ t('nav.agents') }}</span>
         </a>
-        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}" @click="closeMobileNav()">
-            <span class="nav-icon">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                    <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
-                    <circle cx="12" cy="18" r="2"/>
-                    <line x1="6" y1="8" x2="12" y2="16"/>
-                    <line x1="18" y1="8" x2="12" y2="16"/>
-                    <line x1="8" y1="6" x2="16" y2="6"/>
-                </svg>
-            </span>
-            <span class="nav-label">{{ t('nav.swarm') }}</span>
-        </a>
         <a href="/skills" class="nav-link {{ 'active' if active_page == 'skills' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">
                 <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
@@ -160,6 +148,18 @@
                 </svg>
             </span>
             <span class="nav-label">{{ t('nav.dashboard') }}</span>
+        </a>
+        <a href="/swarm" class="nav-link {{ 'active' if active_page == 'swarm' else '' }}" @click="closeMobileNav()">
+            <span class="nav-icon">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                    <circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/>
+                    <circle cx="12" cy="18" r="2"/>
+                    <line x1="6" y1="8" x2="12" y2="16"/>
+                    <line x1="18" y1="8" x2="12" y2="16"/>
+                    <line x1="8" y1="6" x2="16" y2="6"/>
+                </svg>
+            </span>
+            <span class="nav-label">{{ t('nav.swarm') }}</span>
         </a>
         <a href="/replay" class="nav-link {{ 'active' if active_page == 'replay' else '' }}" @click="closeMobileNav()">
             <span class="nav-icon">

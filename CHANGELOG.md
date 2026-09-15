@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## Swarm sits under Activity (2026-09-15)
+
+Moved Swarm from Agents & tools to Activity (with Dashboard), not
+Knowledge — it is live ops, not memory.
+
 ## Voice mic no longer jumps; live STT names the real failure; nav regrouped (2026-09-15)
 
 Hold-to-talk toggled `display:block` on the mic SVGs, so the composer
