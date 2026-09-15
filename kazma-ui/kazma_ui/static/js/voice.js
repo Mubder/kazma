@@ -284,9 +284,10 @@
   // ──────────────────────────────────────────────────────
   // Streaming mode — WebSocket live conversation
   //
-  // Turn Delivery V2: the journal is the source of truth and the chat UI
-  // is the projection. This socket carries STATUS + AUDIO only — it never
-  // paints chat bubbles (no token stream, no local user bubble).
+  // Turn Delivery V2: the journal is the source of truth for the ASSISTANT
+  // turn and the chat UI is its projection. This socket authors the USER
+  // row on `transcribed` (like Send does for typed text) and otherwise
+  // carries status + audio only — it never paints assistant tokens.
   // ──────────────────────────────────────────────────────
 
   var ws = null;
@@ -432,9 +433,13 @@
     else if (type === 'listening') showToast('Listening...', 'info', 1000);
     else if (type === 'transcribing') showToast('Transcribing...', 'info', 1000);
     else if (type === 'transcribed') {
-      // Status only — the journaled turn paints the chat; this socket
-      // never authors a parallel user bubble.
-      showToast('You: "' + (msg.text || '').substring(0, 60) + '..."', 'info', 2000);
+      // This socket authors the USER row (like Send); the journal authors
+      // the assistant. Without the user row, the next turn's tokens latch
+      // onto the previous assistant bubble.
+      var said = String(msg.text || '').trim();
+      if (said && window.KazmaChat && typeof window.KazmaChat.beginVoiceTurn === 'function') {
+        window.KazmaChat.beginVoiceTurn(said);
+      }
     }
     else if (type === 'tool_call') {
       showToast('Tool: ' + msg.name, 'info', 2000);

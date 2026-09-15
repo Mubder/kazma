@@ -7728,6 +7728,29 @@
   }
   window.kazmaOnSoftNavLeave = destroyChatMouth;
 
+  /** Live-voice user-row contract. The voice socket is the originating
+   *  mouth for the USER line — exactly like the composer is for typed text
+   *  — while the journal/WS projector stays the only author of the
+   *  assistant. Without a fresh user row, _assistantBubbleForOpenTurn
+   *  latches onto the previous reply's bubble and the new turn's tokens
+   *  grow it (the 2026-09-02 crossed-bubble class). Mirrors the typed-chat
+   *  pre-graph sequence; never submits a second graph turn — the server
+   *  already ran the transcript. */
+  function beginVoiceTurn(text) {
+    var said = String(text || '').trim();
+    if (!said) return;
+    appendMessage('user', said);
+    scrollToBottomForce(); // a new turn starts; don't leave the reader scrolled up
+    currentMsgEl = null;
+    tokenAccum = '';
+    _turnPainted = false;
+    try {
+      disableInput(); // → beginTurn() — a new utterance is a new turn (barge-in included), never resume
+    } catch (eBegin) {
+      console.error('[KazmaChat] beginVoiceTurn beginTurn failed', eBegin);
+    }
+  }
+
   // Expose for inline handlers + agentStore turn lifecycle bridge
   window.KazmaChat = {
     sendMessage: sendMessage,
@@ -7742,6 +7765,7 @@
     hasInlineApprovalCard: hasInlineApprovalCard,
     hitlCardExistsFor: hitlCardExistsFor,
     beginTurn: beginTurn,
+    beginVoiceTurn: beginVoiceTurn,
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,
     pauseForApproval: pauseForApproval,
@@ -7873,10 +7897,11 @@
       tokenAccum = '';
     },
 
-    // No live-voice paint hooks here. The voice WebSocket is a status +
-    // audio mouth only; the journaled turn (Turn Delivery V2) is projected
-    // by the same SSE/WS-chat path used for typed messages. Reintroducing
-    // onUserTranscription / onStreamToken / onStreamDone here would dual-
-    // paint the turn from a second author.
+    // No live-voice ASSISTANT paint hooks here. The voice socket authors
+    // the user line via beginVoiceTurn (like Send authors typed text); the
+    // journaled turn (Turn Delivery V2) is projected by the same SSE/WS
+    // chat path used for typed messages. Reintroducing onUserTranscription
+    // / onStreamToken / onStreamDone here would dual-paint the turn from a
+    // second author.
   };
 })();

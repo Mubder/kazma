@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## Live voice minted no user row — journal tokens landed in the old bubble (2026-09-15)
+
+Follow-up to the live-voice rework below it. The voice socket journaled the
+user line server-side and let the journal paint the assistant, but nothing
+minted the **user row** client-side — and `_assistantBubbleForOpenTurn`
+latches the newest assistant after the last user row. So a live utterance
+after any existing reply streamed its tokens into the *previous* assistant
+bubble (the 2026-09-02 crossed-bubble class). A refresh looked fine; live
+paint was wrong.
+
+`KazmaChat.beginVoiceTurn(text)` now mirrors the typed-chat contract on
+`transcribed`: one user bubble, forced scroll, `currentMsgEl`/`tokenAccum`
+reset, `beginTurn()` — a new turn, never a resume (barge-in included). The
+voice socket authors the user line exactly like Send does; the journal
+remains the only author of the assistant. The "You: …" toast is gone (the
+bubble is the UI now), and the dual-paint guards still forbid
+`onUserTranscription`/`onStreamToken`/`onStreamDone`.
+
 ## Live voice is a mouth on the real chat pipeline (2026-09-15)
 
 Web live voice used to be a parallel conversation: `/ws/voice` ran its own

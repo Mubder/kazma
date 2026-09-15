@@ -554,6 +554,34 @@ def test_chat_js_has_no_live_voice_paint_hooks() -> None:
         assert f"KazmaChat.{hook}" not in voice, f"voice.js still dual-paints via {hook}"
 
 
+def test_live_voice_mints_the_user_row_not_the_assistant() -> None:
+    """The voice socket authors the USER line (like Send); the journal stays
+    the only author of the assistant. Without the user row the next turn's
+    tokens latch onto the previous assistant bubble."""
+    chat = (_REPO / "kazma-ui/kazma_ui/static/js/chat.js").read_text(encoding="utf-8")
+    voice = (_REPO / "kazma-ui/kazma_ui/static/js/voice.js").read_text(encoding="utf-8")
+
+    # chat.js exports beginVoiceTurn, defined with the user-row contract:
+    # user bubble → fresh assistant latch (currentMsgEl/tokenAccum reset)
+    # → beginTurn (a new turn, not resume).
+    assert "function beginVoiceTurn(text)" in chat
+    assert "beginVoiceTurn: beginVoiceTurn," in chat
+    fn = chat[chat.find("function beginVoiceTurn(text)"):chat.find("window.KazmaChat = {")]
+    assert "appendMessage('user'" in fn
+    assert "currentMsgEl = null" in fn and "tokenAccum = ''" in fn
+    assert "beginTurn" in fn
+    # It must not submit a second graph turn — the server already did.
+    assert "sendMessage" not in fn
+    assert "/api/chat/stream" not in fn
+
+    # voice.js invokes it from the transcribed branch (and still never
+    # paints assistant tokens itself).
+    transcribed = voice[voice.find("type === 'transcribed'"):voice.find("type === 'tool_call'")]
+    assert "beginVoiceTurn" in transcribed
+    assert "onStreamToken" not in voice
+    assert "tokenAccum" not in voice
+
+
 # ── PR C: sentence-splitting + streaming TTS ────────────────────────────
 
 

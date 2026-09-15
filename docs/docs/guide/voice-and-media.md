@@ -29,8 +29,9 @@ and Energy VAD runs (logged once). No runtime model downloads.
 
 - **One brain, one thread.** Your utterance is transcribed, submitted to
   the same graph `/api/chat/stream` uses, and journaled in the same
-  conversation. The chat UI paints the turn from the journal — the voice
-  socket only carries status and audio.
+  conversation. The voice socket authors the user line (like Send does for
+  typed text); the journal authors the assistant — the chat UI paints the
+  turn from it.
 - **TTS speaks the final reply only**, sentence by sentence (each clip is a
   complete MP3, so playback starts with the first sentence). Supervisor
   planning, tool chatter, and failed turns (⚠️ notices) are never spoken.
