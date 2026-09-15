@@ -185,6 +185,81 @@ async def test_short_segment_is_silent_not_transcription_failed(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_empty_whisper_on_long_segment_is_not_transcription_failed(
+    monkeypatch,
+) -> None:
+    """VAD clips always include ~1.5s of silence so duration >= 1s.
+    Empty Whisper used to toast 'Transcription failed' on every pause."""
+    from kazma_ui import routes_voice_ws as rws
+
+    async def fake_transcribe(*_a, **_k):
+        return ""  # successful no-speech, not a provider crash
+
+    monkeypatch.setattr("kazma_core.voice.stt.transcribe", fake_transcribe)
+    monkeypatch.setattr("kazma_core.voice.stt.get_last_error", lambda: None)
+    monkeypatch.setattr(rws, "_voice_settings", lambda: {
+        "stt_provider": "", "stt_language": "", "tts_provider": "", "tts_voice": "",
+    })
+    ws = FakeWebSocket()
+    pcm = b"\x00\x00" * 32000  # 2 s of silence, well above 1.0s
+    await rws._process_utterance(
+        ws, pcm,
+        stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
+        session=_make_session(), thread_id="vt-thread", session_id="vt-sess",
+        graph_getter=lambda: object(),
+    )
+    assert not ws.of("error"), ws.sent
+    assert not ws.of("transcribed")
+
+
+@pytest.mark.asyncio
+async def test_real_stt_provider_failure_still_errors(monkeypatch) -> None:
+    from kazma_ui import routes_voice_ws as rws
+
+    async def fake_transcribe(*_a, **_k):
+        return None
+
+    monkeypatch.setattr("kazma_core.voice.stt.transcribe", fake_transcribe)
+    monkeypatch.setattr(
+        "kazma_core.voice.stt.get_last_error",
+        lambda: "OpenAI API key not configured",
+    )
+    monkeypatch.setattr(rws, "_voice_settings", lambda: {
+        "stt_provider": "", "stt_language": "", "tts_provider": "", "tts_voice": "",
+    })
+    ws = FakeWebSocket()
+    pcm = b"\x00\x7f" * 16000
+    await rws._process_utterance(
+        ws, pcm,
+        stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
+        session=_make_session(), thread_id="vt-thread", session_id="vt-sess",
+        graph_getter=lambda: object(),
+    )
+    errs = ws.of("error")
+    assert errs and errs[0]["content"] == "Transcription failed"
+
+
+def test_vad_does_not_keep_full_silence_tail() -> None:
+    from kazma_core.voice.vad import EnergyVAD
+
+    vad = EnergyVAD(sample_rate=16000, silence_duration=1.5, min_speech_duration=0.3)
+    loud = b"\x00\x7f" * 1600  # 100 ms
+    silent = b"\x00\x00" * 1600
+    segment = None
+    for _ in range(8):
+        vad.feed(loud)
+    for _ in range(30):
+        r = vad.feed(silent)
+        if r is not None:
+            segment = r
+            break
+    assert segment is not None
+    # Untrimmed this would be speech + 1.5s of zeros (~48 KB of silence).
+    # After the endpoint trim it must stay under ~1.4 s (44800 bytes).
+    assert len(segment) < 45000, len(segment)
+
+
+@pytest.mark.asyncio
 async def test_whisper_hallucination_is_not_a_user_turn(monkeypatch) -> None:
     from kazma_ui import routes_voice_ws as rws
     from kazma_ui.sse_chat import _streaming

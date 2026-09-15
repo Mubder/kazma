@@ -99,6 +99,23 @@ class EnergyVAD:
         # that STT then received as a "wav".
         self._carry = bytearray()
 
+    def _trim_endpoint_silence(self, segment: bytes) -> bytes:
+        """Drop the silence used to close the segment, keep ~200 ms of tail.
+
+        EnergyVAD appends silent frames until ``silence_duration`` (1.5 s)
+        so every closed clip was speech + 1.5 s of zeros. Whisper then
+        returned empty / "Thank you" and live voice toasted a failure.
+        """
+        frame_bytes = self._frame_size * 2
+        if frame_bytes <= 0 or not segment:
+            return segment
+        keep_frames = max(1, int(round(0.2 / (self._frame_size / float(self._sample_rate or 16000)))))
+        drop_frames = max(0, int(self._silence_count) - keep_frames)
+        drop_bytes = drop_frames * frame_bytes
+        if drop_bytes <= 0 or drop_bytes >= len(segment):
+            return segment
+        return segment[:-drop_bytes]
+
     def _frame_is_speech(self, frame: bytes) -> bool:
         """Classify one complete frame. Overridden by smarter VADs."""
         return self._compute_rms(frame) > self._speech_threshold
@@ -159,7 +176,7 @@ class EnergyVAD:
                     # Silence long enough — segment complete
                     self._is_speaking = False
                     if self._speech_frame_count >= self._min_speech_frames:
-                        segment = bytes(self._speech_buffer)
+                        segment = self._trim_endpoint_silence(bytes(self._speech_buffer))
                         self._speech_buffer.clear()
                         self._speech_frame_count = 0
                         self._silence_count = 0
