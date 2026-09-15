@@ -145,7 +145,7 @@ async def test_utterance_sends_wav_shaped_bytes_to_stt(monkeypatch) -> None:
     })
 
     ws = FakeWebSocket()
-    pcm = b"\x00\x7f" * 480  # one 30 ms frame of loud PCM
+    pcm = b"\x00\x7f" * 16000  # 1 s of loud PCM (above MIN_SPEECH_SECONDS)
     await rws._process_utterance(
         ws, pcm,
         stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
@@ -154,6 +154,98 @@ async def test_utterance_sends_wav_shaped_bytes_to_stt(monkeypatch) -> None:
     assert captured["format"] == "wav"
     assert captured["bytes"][:4] == b"RIFF"
     assert len(captured["bytes"]) == 44 + len(pcm)
+
+
+@pytest.mark.asyncio
+async def test_short_segment_is_silent_not_transcription_failed(monkeypatch) -> None:
+    """Mic-open pops must not toast 'Transcription failed'."""
+    from kazma_ui import routes_voice_ws as rws
+
+    called = {"n": 0}
+
+    async def fake_transcribe(*_a, **_k):
+        called["n"] += 1
+        return None
+
+    monkeypatch.setattr("kazma_core.voice.stt.transcribe", fake_transcribe)
+    monkeypatch.setattr(rws, "_voice_settings", lambda: {
+        "stt_provider": "", "stt_language": "", "tts_provider": "", "tts_voice": "",
+    })
+    ws = FakeWebSocket()
+    pcm = b"\x00\x7f" * 480  # 30 ms
+    await rws._process_utterance(
+        ws, pcm,
+        stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
+        session=_make_session(), thread_id="vt-thread", session_id="vt-sess",
+        graph_getter=lambda: object(),
+    )
+    assert called["n"] == 0
+    assert not ws.of("error")
+    assert not ws.of("transcribed")
+
+
+@pytest.mark.asyncio
+async def test_whisper_hallucination_is_not_a_user_turn(monkeypatch) -> None:
+    from kazma_ui import routes_voice_ws as rws
+    from kazma_ui.sse_chat import _streaming
+
+    monkeypatch.setattr(
+        _streaming, "_drive_graph_to_journal",
+        _drive_script([("done", {"content": "should not run", "interrupted": False})]),
+    )
+
+    async def fake_transcribe(*_a, **_k):
+        return "Thank you."
+
+    spoken: list[str] = []
+
+    async def fake_stream(text, **_kw):
+        spoken.append(text)
+        yield b"audio"
+
+    monkeypatch.setattr("kazma_core.voice.stt.transcribe", fake_transcribe)
+    monkeypatch.setattr("kazma_core.voice.tts.synthesize_stream", fake_stream)
+    monkeypatch.setattr(rws, "_voice_settings", lambda: {
+        "stt_provider": "", "stt_language": "", "tts_provider": "", "tts_voice": "",
+    })
+    ws = FakeWebSocket()
+    pcm = b"\x00\x7f" * 16000
+    await rws._process_utterance(
+        ws, pcm,
+        stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
+        session=_make_session(), thread_id="vt-thread", session_id="vt-sess",
+        graph_getter=lambda: object(),
+    )
+    assert not ws.of("transcribed")
+    assert not ws.of("error")
+    assert spoken == []
+
+
+def test_sanitize_transcript_drops_no_speech_keeps_real_replies() -> None:
+    from kazma_core.voice.stt import sanitize_transcript
+
+    assert sanitize_transcript("Thank you.") is None
+    assert sanitize_transcript("you") is None
+    assert sanitize_transcript("...") is None
+    assert sanitize_transcript("شكرا") is None
+    assert sanitize_transcript("yes") == "yes"
+    assert sanitize_transcript("schedule the meeting") == "schedule the meeting"
+    assert sanitize_transcript(None) is None
+
+
+def test_pcm16le_duration_seconds() -> None:
+    from kazma_core.voice.pcm import pcm16le_duration_seconds
+
+    assert pcm16le_duration_seconds(b"\x00\x00" * 16000, 16000) == 1.0
+    assert pcm16le_duration_seconds(b"", 16000) == 0.0
+
+
+def test_hold_to_record_and_live_capture_guards() -> None:
+    voice = (_REPO / "kazma-ui/kazma_ui/static/js/voice.js").read_text(encoding="utf-8")
+    assert "_MIN_HOLD_MS" in voice
+    assert "_downsampleTo16k" in voice
+    assert "muteGain.gain.value = 0" in voice
+    assert "Hold the mic to record" in voice
 
 
 # ── PR A: VAD carry (no dropped partial frames) ─────────────────────────
@@ -428,7 +520,7 @@ async def test_voice_turn_hitl_pause_is_interrupted_not_synthesized(
     sess = _make_session(thread_id=f"vt-{uuid.uuid4().hex[:8]}")
     ws = FakeWebSocket()
     await rws._process_utterance(
-        ws, b"\x00\x7f" * 480,
+        ws, b"\x00\x7f" * 16000,
         stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
         session=sess, thread_id=sess.thread_id, session_id=sess.session_id,
         graph_getter=lambda: object(),
@@ -477,7 +569,7 @@ async def test_failed_turn_notice_is_never_spoken(monkeypatch) -> None:
     sess = _make_session(thread_id=f"vt-{uuid.uuid4().hex[:8]}")
     ws = FakeWebSocket()
     await rws._process_utterance(
-        ws, b"\x00\x7f" * 480,
+        ws, b"\x00\x7f" * 16000,
         stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
         session=sess, thread_id=sess.thread_id, session_id=sess.session_id,
         graph_getter=lambda: object(),
@@ -522,7 +614,7 @@ async def test_ws_tts_uses_configured_voice(monkeypatch) -> None:
     sess = _make_session(thread_id=f"vt-{uuid.uuid4().hex[:8]}")
     ws = FakeWebSocket()
     await rws._process_utterance(
-        ws, b"\x00\x7f" * 480,
+        ws, b"\x00\x7f" * 16000,
         stt_provider="openai", tts_provider="edgetts", sample_rate=16000,
         session=sess, thread_id=sess.thread_id, session_id=sess.session_id,
         graph_getter=lambda: object(),

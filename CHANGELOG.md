@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Voice: a mic click is not speech (2026-09-15)
+
+Clicking (not holding) the composer mic sent a tens-of-ms WebM clip;
+Whisper invented a word ("you", "Thank you") and dropped it in the input.
+Live `/ws/voice` labeled 48 kHz browser PCM as 16 kHz WAV, then toasted
+**Transcription failed** on every mic-open pop / empty Whisper result.
+
+Hold-to-record now requires ~700 ms and cancels getUserMedia if the button
+is released first. Live audio is resampled to 16 kHz, the mic is no longer
+played into the VAD, clips under 400 ms are dropped, and Whisper's
+no-speech hallucinations are sanitized instead of becoming a user turn.
+Empty STT keeps listening — it is not a connection error.
+
 ## Live voice minted no user row — journal tokens landed in the old bubble (2026-09-15)
 
 Follow-up to the live-voice rework below it. The voice socket journaled the

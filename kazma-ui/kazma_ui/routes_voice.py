@@ -36,7 +36,7 @@ async def speech_to_text(
 
     from kazma_core.config_store import get_config_store
     from kazma_core.metrics import record_voice_stt, record_voice_utterance
-    from kazma_core.voice.stt import transcribe
+    from kazma_core.voice.stt import sanitize_transcript, transcribe
 
     cs = get_config_store()
     db_provider = cs.get("voice.stt_provider")
@@ -85,9 +85,15 @@ async def speech_to_text(
             provider, ext, len(audio_bytes),
         )
         raise HTTPException(status_code=502, detail=f"STT provider '{provider}' failed")
+
+    cleaned = sanitize_transcript(text)
+    if not cleaned:
+        record_voice_stt(provider, "empty", elapsed)
+        record_voice_utterance("rest", "no_speech")
+        return {"text": "", "provider": provider, "ignored": "no_speech"}
     record_voice_stt(provider, "ok", elapsed)
     record_voice_utterance("rest", "ok")
-    return {"text": text, "provider": provider}
+    return {"text": cleaned, "provider": provider}
 
 
 @router.post("/tts", dependencies=[Depends(rate_limit("voice", 30))])

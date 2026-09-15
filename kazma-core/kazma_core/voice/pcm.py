@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import struct
 
-__all__ = ["pcm16le_to_wav"]
+__all__ = ["MIN_SPEECH_SECONDS", "pcm16le_duration_seconds", "pcm16le_to_wav"]
+
+#: Below this, a VAD segment is a click / mic-open pop, not speech.
+MIN_SPEECH_SECONDS = 0.4
 
 
 def pcm16le_to_wav(pcm: bytes, sample_rate: int = 16000, channels: int = 1) -> bytes:
@@ -59,3 +62,20 @@ def pcm16le_to_wav(pcm: bytes, sample_rate: int = 16000, channels: int = 1) -> b
         data_size,
     )
     return header + pcm
+
+
+def pcm16le_duration_seconds(
+    pcm: bytes, sample_rate: int = 16000, channels: int = 1
+) -> float:
+    """Duration of raw 16-bit PCM in seconds (0.0 on bad inputs)."""
+    try:
+        rate = int(sample_rate)
+        ch = int(channels)
+    except (TypeError, ValueError):
+        return 0.0
+    if rate <= 0 or ch <= 0:
+        return 0.0
+    bytes_per_sec = rate * ch * 2
+    if bytes_per_sec <= 0:
+        return 0.0
+    return len(pcm) / float(bytes_per_sec)

@@ -16,6 +16,15 @@
   var audioChunks = [];
   var isRecording = false;
   var stream = null;
+  // Hold-to-record: a click (mousedown+mouseup in <700ms) used to send a
+  // tiny WebM clip; Whisper invents a word ("you", "Thank you"). Cancel
+  // in-flight getUserMedia if the button is released before recording
+  // actually starts, and drop clips shorter than the hold floor.
+  var _micGen = 0;
+  var _micWanted = false;
+  var _micStartedAt = 0;
+  var _MIN_HOLD_MS = 700;
+  var _MIN_BLOB_BYTES = 1500;
 
   // Config (persisted in localStorage)
   var STT_PROVIDER_KEY = 'kazma.sttProvider';
@@ -59,13 +68,20 @@
   // ── Recording ─────────────────────────────────────────
 
   async function startRecording() {
-    if (isRecording) return;
+    if (isRecording || _micWanted) return;
     if (isStreaming) {
       showToast('Please stop Live Voice Mode first', 'warning');
       return;
     }
+    _micWanted = true;
+    var gen = ++_micGen;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      var mic = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!_micWanted || gen !== _micGen) {
+        mic.getTracks().forEach(function(t) { t.stop(); });
+        return;
+      }
+      stream = mic;
       audioChunks = [];
 
       // Prefer webm/opus, fall back to whatever the browser supports
@@ -85,23 +101,39 @@
       };
 
       mediaRecorder.onstop = async function() {
+        var held = this._heldMs || 0;
         var blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-        await sendForTranscription(blob);
         cleanup();
+        if (held < _MIN_HOLD_MS || blob.size < _MIN_BLOB_BYTES) {
+          showToast('Hold the mic to record', 'info', 2000);
+          return;
+        }
+        await sendForTranscription(blob);
       };
 
+      if (!_micWanted || gen !== _micGen) {
+        cleanup();
+        return;
+      }
       mediaRecorder.start(100); // collect in 100ms chunks
+      _micStartedAt = Date.now();
       isRecording = true;
       updateUI(true);
     } catch (err) {
+      _micWanted = false;
       console.error('[Voice] Microphone access denied:', err);
       showToast('Microphone access denied. Please allow microphone access.', 'error');
     }
   }
 
   function stopRecording() {
-    if (!isRecording || !mediaRecorder) return;
-    mediaRecorder.stop();
+    _micWanted = false;
+    if (!isRecording || !mediaRecorder) {
+      _micGen += 1; // cancel an in-flight getUserMedia start
+      return;
+    }
+    mediaRecorder._heldMs = Date.now() - _micStartedAt;
+    try { mediaRecorder.stop(); } catch (e) {}
     isRecording = false;
     updateUI(false);
   }
@@ -148,17 +180,20 @@
         return;
       }
       var data = await resp.json();
-      if (data.text) {
-        // Insert transcribed text into the chat input
-        var inputEl = document.getElementById('chat-input');
-        if (inputEl) {
-          var current = inputEl.value.trim();
-          inputEl.value = current ? current + ' ' + data.text : data.text;
-          inputEl.dispatchEvent(new Event('input'));
-          inputEl.focus();
-        }
-        showToast('Transcribed: "' + data.text.substring(0, 60) + '..."', 'success', 3000);
+      var said = data && data.text ? String(data.text).trim() : '';
+      if (!said || data.ignored) {
+        showToast('No speech detected', 'info', 2000);
+        return;
       }
+      // Insert transcribed text into the chat input
+      var inputEl = document.getElementById('chat-input');
+      if (inputEl) {
+        var current = inputEl.value.trim();
+        inputEl.value = current ? current + ' ' + said : said;
+        inputEl.dispatchEvent(new Event('input'));
+        inputEl.focus();
+      }
+      showToast('Transcribed: "' + said.substring(0, 60) + '..."', 'success', 3000);
     } catch (err) {
       console.error('[Voice] STT request failed:', err);
       showToast('Transcription request failed', 'error');
@@ -294,6 +329,7 @@
   var audioContext = null;
   var mediaStreamSource = null;
   var audioProcessor = null;
+  var muteGain = null;
   var micStream = null;
   var isStreaming = false;
   var ttsQueue = [];      // pending sentence clips (each a complete MP3)
@@ -368,6 +404,25 @@
     updateStreamingUI(false);
   }
 
+  function _downsampleTo16k(float32, inRate) {
+    // Chrome/Windows often ignores {sampleRate: 16000} and gives 44100/48000.
+    // Sending that PCM labeled as 16 kHz made Whisper fail or hallucinate.
+    var outRate = 16000;
+    if (!inRate || Math.abs(inRate - outRate) < 50) return float32;
+    var ratio = inRate / outRate;
+    var outLen = Math.floor(float32.length / ratio);
+    if (outLen < 1) return new Float32Array(0);
+    var out = new Float32Array(outLen);
+    for (var i = 0; i < outLen; i++) {
+      var src = i * ratio;
+      var i0 = Math.floor(src);
+      var i1 = Math.min(i0 + 1, float32.length - 1);
+      var f = src - i0;
+      out[i] = float32[i0] * (1 - f) + float32[i1] * f;
+    }
+    return out;
+  }
+
   async function _captureAudioForStreaming() {
     try {
       micStream = await navigator.mediaDevices.getUserMedia({
@@ -376,11 +431,15 @@
           sampleRate: 16000,
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          // AGC pumps room tone into the VAD as "speech".
+          autoGainControl: false
         }
       });
 
       audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      if (audioContext.state === 'suspended') {
+        try { await audioContext.resume(); } catch (eR) { /* autoplay policy */ }
+      }
       mediaStreamSource = audioContext.createMediaStreamSource(micStream);
 
       // Use ScriptProcessorNode for simplicity (AudioWorklet is more modern
@@ -388,7 +447,8 @@
       audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
       audioProcessor.onaudioprocess = function(e) {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        var input = e.inputBuffer.getChannelData(0);
+        var native = e.inputBuffer.getChannelData(0);
+        var input = _downsampleTo16k(native, audioContext.sampleRate);
 
         if (ttsPlayer && !ttsPlayer.paused) {
           var sum = 0;
@@ -418,7 +478,12 @@
       };
 
       mediaStreamSource.connect(audioProcessor);
-      audioProcessor.connect(audioContext.destination); // needed for processing to run
+      // Must be in the graph to fire, but must NOT play the mic (that
+      // was feeding the VAD its own output as "speech").
+      muteGain = audioContext.createGain();
+      muteGain.gain.value = 0;
+      audioProcessor.connect(muteGain);
+      muteGain.connect(audioContext.destination);
 
     } catch (err) {
       console.error('[Voice] Audio capture error:', err);
@@ -574,6 +639,7 @@
 
   function _cleanupStreaming() {
     if (audioProcessor) { try { audioProcessor.disconnect(); } catch (e) {} audioProcessor = null; }
+    if (muteGain) { try { muteGain.disconnect(); } catch (e) {} muteGain = null; }
     if (mediaStreamSource) { try { mediaStreamSource.disconnect(); } catch (e) {} mediaStreamSource = null; }
     if (audioContext) { try { audioContext.close(); } catch (e) {} audioContext = null; }
     if (micStream) { micStream.getTracks().forEach(function(t) { t.stop(); }); micStream = null; }

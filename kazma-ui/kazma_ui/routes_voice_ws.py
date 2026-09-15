@@ -321,8 +321,12 @@ async def _process_utterance(
         record_voice_stt,
         record_voice_utterance,
     )
-    from kazma_core.voice.pcm import pcm16le_to_wav
-    from kazma_core.voice.stt import transcribe
+    from kazma_core.voice.pcm import (
+        MIN_SPEECH_SECONDS,
+        pcm16le_duration_seconds,
+        pcm16le_to_wav,
+    )
+    from kazma_core.voice.stt import sanitize_transcript, transcribe
 
     segment_at = time.monotonic()
     cfg = _voice_settings()
@@ -330,19 +334,32 @@ async def _process_utterance(
         stt_provider = cfg["stt_provider"]
     language = cfg["stt_language"] or "auto"
 
+    # Mic-open pops and button clicks are tens of ms. Sending them to
+    # Whisper yields either empty (we used to toast "Transcription failed")
+    # or a hallucinated "Thank you" / "you". Drop them before the API.
+    duration = pcm16le_duration_seconds(audio_bytes, sample_rate)
+    if duration < MIN_SPEECH_SECONDS:
+        record_voice_utterance("ws", "too_short")
+        logger.debug("[ws-voice] skipping %.0fms segment (min %.0fms)", duration * 1000, MIN_SPEECH_SECONDS * 1000)
+        return
+
     # Step 1: Transcribe — VAD yields raw PCM; STT providers get a real WAV.
     wav = pcm16le_to_wav(audio_bytes, sample_rate=sample_rate)
     _t0 = time.monotonic()
-    text = await transcribe(
+    raw = await transcribe(
         wav,
         provider=stt_provider,
         language=language,
         audio_format="wav",
     )
+    text = sanitize_transcript(raw)
     if not text:
         record_voice_stt(stt_provider, "empty", time.monotonic() - _t0)
         record_voice_utterance("ws", "stt_empty")
-        await _ws_send(websocket, {"type": "error", "content": "Transcription failed"})
+        # Real provider failure on a long-enough clip is worth an error;
+        # no-speech / hallucination just keeps listening.
+        if raw is None and duration >= 1.0:
+            await _ws_send(websocket, {"type": "error", "content": "Transcription failed"})
         return
     record_voice_stt(stt_provider, "ok", time.monotonic() - _t0)
     record_voice_utterance("ws", "stt_ok")
