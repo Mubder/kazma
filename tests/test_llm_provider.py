@@ -21,7 +21,13 @@ class TestLLMConfig:
 
     def test_default_values(self) -> None:
         config = LLMConfig()
-        assert config.model == "gpt-4o-mini"
+        # NO vendor default, since 2026-09-15. `LLMConfig()` used to mean
+        # "gpt-4o-mini", so any path that forgot to pass a model silently
+        # became an OpenAI call -- and a stored pin nobody set outlived the
+        # provider it named, misreporting the running model forever after.
+        assert config.model == "", "an unconfigured config must not name a vendor model"
+        # base_url still defaults; changing it touches every provider's
+        # no-config path and is a separate change.
         assert config.base_url == "https://api.openai.com/v1"
         assert config.max_tokens == 16384
         assert config.temperature == 0.7
@@ -42,7 +48,7 @@ class TestLLMConfig:
 
     def test_from_dict_defaults(self) -> None:
         config = LLMConfig.from_dict({})
-        assert config.model == "gpt-4o-mini"
+        assert config.model == ""
 
 
 class TestLLMResponse:

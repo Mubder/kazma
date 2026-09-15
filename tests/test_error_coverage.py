@@ -144,7 +144,7 @@ class TestLLMConfigErrors:
 
     def test_empty_config(self) -> None:
         config = LLMConfig.from_dict({})
-        assert config.model == "gpt-4o-mini"
+        assert config.model == "", "empty config must not invent a vendor model"
         assert config.base_url == "https://api.openai.com/v1"
         assert config.max_tokens == 16384
 

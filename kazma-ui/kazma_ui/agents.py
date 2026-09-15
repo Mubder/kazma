@@ -193,7 +193,7 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
             "version": getattr(config, "version", "0.1.0") if config else "0.1.0",
             "language": getattr(config, "language", "ar") if config else "ar",
             "rtl": getattr(config, "rtl", True) if config else True,
-            "default_model": getattr(config, "default_model", "gpt-4o-mini") if config else "gpt-4o-mini",
+            "default_model": (getattr(config, "default_model", "") if config else ""),
             "system_prompt": (getattr(config, "system_prompt", "") or "")[:200] if config else "",
         },
         "llm": {

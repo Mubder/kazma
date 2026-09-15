@@ -472,6 +472,19 @@ def register_workers_routes(
             "circuit_breaker": breaker.to_dict() if hasattr(breaker, "to_dict") else str(breaker),
         })
 
+#: The provider a worker gets when the payload names none. Unchanged; what
+#: changed is that the MODEL is now derived from it instead of being pinned
+#: separately, so the two can never disagree.
+_DEFAULT_WORKER_PROVIDER = "deepseek"
+
+
+def _default_model_for_provider(provider: str) -> str:
+    """That provider's own default model, or "" when we do not know it."""
+    from kazma_core.providers import default_model_for
+
+    return default_model_for(provider)
+
+
 def _build_worker_config(payload: dict[str, Any]) -> Any:
     """Create a WorkerConfig from a UI payload."""
     try:
@@ -494,11 +507,18 @@ def _build_worker_config(payload: dict[str, Any]) -> Any:
             logger.debug("WorkerCapabilities parse failed: %s", exc)
             capabilities = None
 
+    _provider = str(payload.get("provider") or _DEFAULT_WORKER_PROVIDER)
+
     return WorkerConfig(
         name=(payload.get("name") or "").strip(),
         type=worker_type,
-        model=payload.get("model", "deepseek-chat"),
-        provider=payload.get("provider", "deepseek"),
+        # The model FOLLOWS the provider rather than being pinned to one
+        # vendor's. `model="deepseek-chat"` as a flat default beside
+        # `provider="deepseek"` happened to agree, but nothing held them
+        # together: changing one default left a worker reporting a model its
+        # provider does not serve.
+        model=(payload.get("model") or _default_model_for_provider(_provider)),
+        provider=_provider,
         role=payload.get("role", ""),
         system_prompt=payload.get("system_prompt", ""),
         capabilities=capabilities,
