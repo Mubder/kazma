@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Voice mic no longer jumps; live STT names the real failure; nav regrouped (2026-09-15)
+
+Hold-to-talk toggled `display:block` on the mic SVGs, so the composer
+icons drifted. The button is a fixed 32×32 slot with a CSS recording
+state. Live STT toasts the actual cause once per connection (missing key /
+rejected audio) instead of a generic **Transcription failed** on every
+pause, and writes WAV via stdlib `wave`. Sidebar: Skills + MCP sit with
+Agents & Swarm; Scheduled + X Studio sit with Dashboard / Time Travel.
+
 ## Live voice: empty Whisper is silence, not "Transcription failed" (2026-09-15)
 
 Every VAD clip includes ~1.5 s of trailing silence, so it always looked

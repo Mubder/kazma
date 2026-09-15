@@ -236,7 +236,7 @@ async def test_real_stt_provider_failure_still_errors(monkeypatch) -> None:
         graph_getter=lambda: object(),
     )
     errs = ws.of("error")
-    assert errs and errs[0]["content"] == "Transcription failed"
+    assert errs and "STT is not configured" in errs[0]["content"]
 
 
 def test_vad_does_not_keep_full_silence_tail() -> None:
@@ -321,6 +321,8 @@ def test_hold_to_record_and_live_capture_guards() -> None:
     assert "_downsampleTo16k" in voice
     assert "muteGain.gain.value = 0" in voice
     assert "Hold the mic to record" in voice
+    assert "is-recording" in voice
+    assert "micIcon.style.display" not in voice
 
 
 # ── PR A: VAD carry (no dropped partial frames) ─────────────────────────

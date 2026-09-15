@@ -34,18 +34,19 @@ def _sidebar_hrefs_by_section() -> dict[str, list[str]]:
 
 
 def test_every_destination_sits_in_the_right_group() -> None:
-    """Sixteen destinations, six groups, nothing behind a disclosure.
+    """Sixteen destinations, grouped, nothing behind a disclosure.
 
-    This asserted four links plus a "More" bucket until 2026-09-14. The
-    distinction it protected — Dashboard is an inspector, not a work surface —
-    is now carried by the grouping rather than by hiding it.
+    Work / Knowledge / Agents & tools / Activity / Settings.
+    Skills+MCP sit with Agents; Scheduled+X sit with Dashboard.
+    Dashboard is an inspector, not a work surface.
     """
     groups = _sidebar_hrefs_by_section()
     assert groups["primary"] == ["/chat", "/workspace", "/ide"]
-    assert groups["activity"] == ["/dashboard", "/replay"]
-    assert groups["section_automation"] == ["/agents", "/swarm", "/scheduled"]
-    assert groups["capabilities"] == ["/skills", "/mcp", "/x"]
+    assert groups["section_knowledge"] == ["/memory", "/knowledge", "/documents", "/research"]
+    assert groups["section_automation"] == ["/agents", "/swarm", "/skills", "/mcp"]
+    assert groups["activity"] == ["/dashboard", "/replay", "/scheduled", "/x"]
     assert groups["configuration"] == ["/settings"]
+    assert "capabilities" not in groups
     assert "/dashboard" not in groups["primary"]
     assert sum(len(v) for v in groups.values()) == 16
 

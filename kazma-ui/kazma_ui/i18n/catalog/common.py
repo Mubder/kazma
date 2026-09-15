@@ -425,8 +425,8 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Knowledge & memory",
     },
     "nav.section_automation": {
-        "ar": "الأتمتة",
-        "en": "Automation",
+        "ar": "الوكلاء والأدوات",
+        "en": "Agents & tools",
     },
     "nav.primary": {
         "ar": "العمل",

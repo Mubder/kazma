@@ -147,15 +147,8 @@
   }
 
   function updateUI(recording) {
-    var micIcon = document.getElementById('mic-icon');
-    var recIcon = document.getElementById('mic-recording-icon');
     var voiceBtn = document.getElementById('voice-btn');
-    if (micIcon) micIcon.style.display = recording ? 'none' : 'block';
-    if (recIcon) recIcon.style.display = recording ? 'block' : 'none';
-    if (voiceBtn) {
-      voiceBtn.style.background = recording ? 'rgba(239,68,68,0.2)' : '';
-      voiceBtn.style.borderColor = recording ? '#ef4444' : '';
-    }
+    if (voiceBtn) voiceBtn.classList.toggle('is-recording', !!recording);
   }
 
   // ── STT ───────────────────────────────────────────────
@@ -656,28 +649,10 @@
   function updateStreamingUI(streaming) {
     var voiceBtn = document.getElementById('voice-btn');
     var liveBtn = document.getElementById('voice-live-btn');
-    var micIcon = document.getElementById('mic-icon');
-    if (streaming) {
-      if (voiceBtn) {
-        voiceBtn.style.opacity = '0.5';
-        voiceBtn.style.pointerEvents = 'none';
-      }
-      if (liveBtn) {
-        liveBtn.style.background = 'rgba(34,197,94,0.2)';
-        liveBtn.style.color = '#22c55e';
-        liveBtn.title = 'Stop Live Voice Stream';
-      }
-    } else {
-      if (voiceBtn) {
-        voiceBtn.style.opacity = '';
-        voiceBtn.style.pointerEvents = '';
-        voiceBtn.style.background = isRecording ? 'rgba(239,68,68,0.2)' : '';
-      }
-      if (liveBtn) {
-        liveBtn.style.background = '';
-        liveBtn.style.color = '';
-        liveBtn.title = 'Start Live Voice Stream';
-      }
+    if (voiceBtn) voiceBtn.classList.toggle('is-live-disabled', !!streaming);
+    if (liveBtn) {
+      liveBtn.classList.toggle('is-live', !!streaming);
+      liveBtn.title = streaming ? 'Stop Live Voice Stream' : 'Start Live Voice Stream';
     }
   }
 
