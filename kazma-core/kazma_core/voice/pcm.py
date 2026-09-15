@@ -9,7 +9,8 @@ without wrapping it here first.
 
 from __future__ import annotations
 
-import struct
+import io
+import wave
 
 __all__ = ["MIN_SPEECH_SECONDS", "pcm16le_duration_seconds", "pcm16le_to_wav"]
 
@@ -41,27 +42,17 @@ def pcm16le_to_wav(pcm: bytes, sample_rate: int = 16000, channels: int = 1) -> b
     if ch <= 0:
         ch = 1
 
-    bits_per_sample = 16
-    block_align = ch * bits_per_sample // 8
-    byte_rate = rate * block_align
-    data_size = len(pcm)
-    header = struct.pack(
-        "<4sI4s4sIHHIIHH4sI",
-        b"RIFF",
-        36 + data_size,
-        b"WAVE",
-        b"fmt ",
-        16,  # fmt chunk size (PCM)
-        1,  # audio_format: PCM
-        ch,
-        rate,
-        byte_rate,
-        block_align,
-        bits_per_sample,
-        b"data",
-        data_size,
-    )
-    return header + pcm
+    # stdlib `wave` writes the canonical PCM header providers sniff.
+    # A hand-rolled RIFF that disagreed with the payload (odd sizes, a
+    # 48 kHz stream labelled 16 kHz) is what made live STT 400 while
+    # hold-to-record WebM succeeded.
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(ch)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(pcm)
+    return buf.getvalue()
 
 
 def pcm16le_duration_seconds(

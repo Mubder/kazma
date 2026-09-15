@@ -65,6 +65,20 @@ __all__ = ["handle_voice_websocket"]
 _ALLOWED_SAMPLE_RATES = frozenset({8000, 16000, 24000, 48000})
 
 
+def _public_stt_hint(err: str) -> str:
+    """Operator-safe STT failure line. Never dump HTTP bodies."""
+    low = (err or "").lower()
+    if "api key" in low or "not configured" in low or "not installed" in low:
+        return "STT is not configured — add a key in Settings → Voice"
+    if "401" in low or "403" in low or "unauthorized" in low:
+        return "STT authentication failed — check the API key in Settings → Voice"
+    if "404" in low:
+        return "STT endpoint not found — check the provider in Settings → Voice"
+    if "400" in low or "unsupported" in low or "invalid" in low or "could not" in low:
+        return "STT rejected the live audio — try hold-to-record, or switch STT provider"
+    return "Transcription failed"
+
+
 async def handle_voice_websocket(
     websocket: WebSocket,
     graph_getter: Any | None = None,
@@ -103,6 +117,7 @@ async def handle_voice_websocket(
     # barge-in / stop / close can cancel it (a superseding turn must not be
     # spoken twice).
     resume_slot: dict[str, asyncio.Task[Any] | None] = {"task": None}
+    stt_alerted = {"told": False}
 
     async def _cancel_utterance() -> None:
         nonlocal processing, utterance_task
@@ -225,6 +240,7 @@ async def handle_voice_websocket(
                         tid: str = thread_id,
                         sid: str = session_id,
                         rslot: dict[str, asyncio.Task[Any] | None] = resume_slot,
+                        stt_flag: dict[str, bool] = stt_alerted,
                     ) -> None:
                         nonlocal processing
                         try:
@@ -241,6 +257,7 @@ async def handle_voice_websocket(
                                 agent_getter=agent_getter,
                                 cancel=tts_cancel,
                                 resume_slot=rslot,
+                                stt_alerted=stt_flag,
                             )
                         except asyncio.CancelledError:
                             raise
@@ -315,6 +332,7 @@ async def _process_utterance(
     agent_getter: Any | None = None,
     cancel: asyncio.Event | None = None,
     resume_slot: dict[str, asyncio.Task[Any] | None] | None = None,
+    stt_alerted: dict[str, bool] | None = None,
 ) -> None:
     """Transcribe → submit to the journal pump → speak the final reply."""
     from kazma_core.metrics import (
@@ -363,7 +381,14 @@ async def _process_utterance(
         err = get_last_error()
         if err:
             logger.warning("[ws-voice] STT provider failed: %s", err)
-            await _ws_send(websocket, {"type": "error", "content": "Transcription failed"})
+            # One toast per socket — a 400 on every pause is unusable.
+            if stt_alerted is None or not stt_alerted.get("told"):
+                if stt_alerted is not None:
+                    stt_alerted["told"] = True
+                await _ws_send(websocket, {
+                    "type": "error",
+                    "content": _public_stt_hint(err),
+                })
         else:
             logger.debug("[ws-voice] no speech in %.1fs segment", duration)
         return

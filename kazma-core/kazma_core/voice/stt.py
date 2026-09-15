@@ -341,7 +341,6 @@ def _groq_stt() -> STTProvider:
                     files={"file": (f"audio.{ext}", audio_bytes, mime)},
                     data={
                         "model": _get_configured_stt_model("groq") or "whisper-large-v3",
-                        "temperature": "0",
                         **({} if language == "auto" else {"language": language}),
                     },
                 )
