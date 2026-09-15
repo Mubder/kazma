@@ -15,12 +15,21 @@ Supported providers:
 - ``nvidia``    — NVIDIA NIM TTS (cloud API)
 - ``kokoro``    — Kokoro neural TTS (local)
 - ``coqui``     — Coqui TTS (local)
+
+Streaming: :func:`synthesize_stream` yields audio bytes as the provider
+produces them (EdgeTTS only — every other provider synthesizes a complete
+clip and yields it as one chunk). Callers wanting low first-audio latency
+without a streaming provider should chunk the TEXT into sentences via
+:func:`split_sentences` and synthesize per sentence — each sentence clip
+is a complete, independently decodable audio file.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
+from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -32,7 +41,9 @@ __all__ = [
     "get_last_error",
     "list_tts_providers",
     "register_tts_provider",
+    "split_sentences",
     "synthesize",
+    "synthesize_stream",
 ]
 
 logger = logging.getLogger(__name__)
@@ -170,6 +181,70 @@ async def synthesize(
         _last_error.set(wrapped)
         logger.exception("[TTS/%s] Failed", provider)
         return None
+
+
+async def synthesize_stream(
+    text: str,
+    *,
+    provider: str = "edgetts",
+    voice: str = "default",
+    api_key: str | None = None,
+    output_format: str = "mp3",
+) -> AsyncIterator[bytes]:
+    """Yield synthesized audio as the provider produces it.
+
+    Only EdgeTTS has a native streaming transport — its chunks are yielded
+    incrementally. Every other provider synthesizes the full clip and yields
+    it as a single chunk; callers wanting earlier audio with those providers
+    must chunk the TEXT (see :func:`split_sentences`) instead of pretending
+    a completed buffer is a stream.
+
+    Raises :class:`TTSError` on config failures (missing dependency/key).
+    """
+    name = provider if get_tts_provider(provider) is not None else "edgetts"
+    if name == "edgetts":
+        try:
+            import edge_tts  # type: ignore[import-untyped]
+        except ImportError:
+            raise TTSError(
+                "edge-tts is not installed",
+                hint="pip install edge-tts",
+                is_config=True,
+            )
+        resolved = "en-US-AriaNeural" if voice == "default" else voice
+        communicate = edge_tts.Communicate(text, resolved)
+        got_any = False
+        async for chunk in communicate.stream():
+            if chunk.get("type") == "audio" and chunk.get("data"):
+                got_any = True
+                yield chunk["data"]
+        if not got_any:
+            logger.warning("[TTS/edgetts] stream produced no audio (voice=%s)", resolved)
+        return
+    audio = await synthesize(
+        text, provider=name, voice=voice, api_key=api_key, output_format=output_format
+    )
+    if audio:
+        yield audio
+
+
+# Sentence terminators for :func:`split_sentences`: EN punctuation, the
+# fullwidth variants, and the Arabic question mark.
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.?!？！؟])\s+|\n+")
+
+
+def split_sentences(text: str) -> list[str]:
+    """Split text into speakable sentence units.
+
+    Splits after ``. ? !`` (plus fullwidth ``！`` and Arabic ``؟``) on
+    following whitespace, and on any newline (markdown lists / headings
+    speak as separate clips). Terminators stay with their sentence so TTS
+    prosody is preserved. Never splits mid-sentence.
+    """
+    if not text or not text.strip():
+        return []
+    parts = _SENTENCE_SPLIT_RE.split(text.strip())
+    return [p.strip() for p in parts if p and p.strip()]
 
 
 # ── Built-in providers ─────────────────────────────────────────────────

@@ -3412,8 +3412,11 @@
           }
           updateContextBadgeSoon();
         }
-        // Play TTS for the assistant's response
-        if (tokenAccum && window.KazmaVoice && !interrupted) {
+        // Play TTS for the assistant's response. Skipped while live voice
+        // is streaming — that socket speaks the reply itself (sentence by
+        // sentence), and both mouths firing would double-speak the turn.
+        if (tokenAccum && window.KazmaVoice && !interrupted &&
+            !(window.KazmaVoice.isStreaming && window.KazmaVoice.isStreaming())) {
           window.KazmaVoice.playTTS(tokenAccum);
         }
         } finally {
@@ -7725,6 +7728,29 @@
   }
   window.kazmaOnSoftNavLeave = destroyChatMouth;
 
+  /** Live-voice user-row contract. The voice socket is the originating
+   *  mouth for the USER line — exactly like the composer is for typed text
+   *  — while the journal/WS projector stays the only author of the
+   *  assistant. Without a fresh user row, _assistantBubbleForOpenTurn
+   *  latches onto the previous reply's bubble and the new turn's tokens
+   *  grow it (the 2026-09-02 crossed-bubble class). Mirrors the typed-chat
+   *  pre-graph sequence; never submits a second graph turn — the server
+   *  already ran the transcript. */
+  function beginVoiceTurn(text) {
+    var said = String(text || '').trim();
+    if (!said) return;
+    appendMessage('user', said);
+    scrollToBottomForce(); // a new turn starts; don't leave the reader scrolled up
+    currentMsgEl = null;
+    tokenAccum = '';
+    _turnPainted = false;
+    try {
+      disableInput(); // → beginTurn() — a new utterance is a new turn (barge-in included), never resume
+    } catch (eBegin) {
+      console.error('[KazmaChat] beginVoiceTurn beginTurn failed', eBegin);
+    }
+  }
+
   // Expose for inline handlers + agentStore turn lifecycle bridge
   window.KazmaChat = {
     sendMessage: sendMessage,
@@ -7739,6 +7765,7 @@
     hasInlineApprovalCard: hasInlineApprovalCard,
     hitlCardExistsFor: hitlCardExistsFor,
     beginTurn: beginTurn,
+    beginVoiceTurn: beginVoiceTurn,
     endTurn: endTurn,
     forceEndTurn: forceEndTurn,
     pauseForApproval: pauseForApproval,
@@ -7870,27 +7897,11 @@
       tokenAccum = '';
     },
 
-    // Voice streaming hooks — called by voice.js WebSocket client
-    onUserTranscription: function(text) {
-      appendMessage('user', text);
-      scrollToBottom();
-      beginTurn();
-    },
-    onStreamToken: function(content) {
-      _clearStatusStrip();
-      _pinLiveAssistantBubble();
-      tokenAccum += content;
-      tryIngestPlanFromText(tokenAccum);
-      var textEl = currentMsgEl.querySelector('.message-text');
-      // Funnels through the shared render + idempotent paint: these two
-      // sites skipped _scrubDsml, so scaffolding showed while streaming
-      // and vanished on the terminal paint - a guaranteed end-of-reply
-      // flash.
-      if (textEl) _paintHTML(textEl, _renderReplyHTML(tokenAccum));
-      scrollToBottom();
-    },
-    onStreamDone: function() {
-      endTurn();
-    },
+    // No live-voice ASSISTANT paint hooks here. The voice socket authors
+    // the user line via beginVoiceTurn (like Send authors typed text); the
+    // journaled turn (Turn Delivery V2) is projected by the same SSE/WS
+    // chat path used for typed messages. Reintroducing onUserTranscription
+    // / onStreamToken / onStreamDone here would dual-paint the turn from a
+    // second author.
   };
 })();

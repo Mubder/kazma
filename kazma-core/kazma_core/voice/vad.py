@@ -92,6 +92,16 @@ class EnergyVAD:
         self._is_speaking = False
         self._silence_count = 0
         self._speech_frame_count = 0
+        # Partial-frame carry between feed() calls. Browser chunks (e.g.
+        # ScriptProcessor 4096 samples) are not a multiple of the 30 ms
+        # frame; without a carry the trailing partial frame of every chunk
+        # was dropped, punching periodic sample gaps into the segment PCM
+        # that STT then received as a "wav".
+        self._carry = bytearray()
+
+    def _frame_is_speech(self, frame: bytes) -> bool:
+        """Classify one complete frame. Overridden by smarter VADs."""
+        return self._compute_rms(frame) > self._speech_threshold
 
     @staticmethod
     def _compute_rms(samples: bytes) -> float:
@@ -119,14 +129,17 @@ class EnergyVAD:
         Returns:
             Complete speech segment bytes when silence detected, otherwise None.
         """
+        frame_bytes = self._frame_size * 2
+        buf = bytes(self._carry) + audio_chunk
+        carry_len = len(buf) % frame_bytes
+        self._carry = bytearray(buf[len(buf) - carry_len:]) if carry_len else bytearray()
+
         offset = 0
-        while offset + self._frame_size * 2 <= len(audio_chunk):
-            frame = audio_chunk[offset:offset + self._frame_size * 2]
-            offset += self._frame_size * 2
+        while offset + frame_bytes <= len(buf):
+            frame = buf[offset:offset + frame_bytes]
+            offset += frame_bytes
 
-            rms = self._compute_rms(frame)
-
-            if rms > self._speech_threshold:
+            if self._frame_is_speech(frame):
                 if not self._is_speaking:
                     # Speech started — flush pre-buffer into speech buffer
                     self._is_speaking = True
@@ -173,3 +186,4 @@ class EnergyVAD:
         self._is_speaking = False
         self._silence_count = 0
         self._speech_frame_count = 0
+        self._carry.clear()

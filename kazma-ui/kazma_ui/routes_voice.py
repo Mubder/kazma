@@ -32,11 +32,11 @@ async def speech_to_text(
     Accepts any audio format (ogg, mp3, wav, flac, webm, m4a).
     Returns ``{"text": "..."}`` on success.
     """
+    import time
+
     from kazma_core.config_store import get_config_store
+    from kazma_core.metrics import record_voice_stt, record_voice_utterance
     from kazma_core.voice.stt import transcribe
-    import traceback
-    import os
-    from pathlib import Path
 
     cs = get_config_store()
     db_provider = cs.get("voice.stt_provider")
@@ -58,6 +58,7 @@ async def speech_to_text(
     elif file.content_type:
         ext = file.content_type.split("/")[-1].split(";")[0]
 
+    started = time.monotonic()
     try:
         text = await transcribe(
             audio_bytes,
@@ -65,39 +66,28 @@ async def speech_to_text(
             language=language,
             audio_format=ext,
         )
-        if text is None:
-            log_dir = Path("kazma-data")
-            log_dir.mkdir(exist_ok=True)
-            with open(log_dir / "stt_error.log", "a", encoding="utf-8") as f:
-                f.write(f"\n--- STT FAILURE IN ENDPOINT: provider={provider}, format={ext}, bytes={len(audio_bytes)}, filename={file.filename}, content_type={file.content_type} ---\n")
-                f.write(f"OPENAI_API_KEY set in env: {bool(os.environ.get('OPENAI_API_KEY'))}\n")
-                f.write(f"GROQ_API_KEY set in env: {bool(os.environ.get('GROQ_API_KEY'))}\n")
-                f.write(f"NVIDIA_API_KEY set in env: {bool(os.environ.get('NVIDIA_API_KEY'))}\n")
-                from kazma_core.config_store import get_config_store
-                cs = get_config_store()
-                f.write(f"voice.stt_provider in DB: {cs.get('voice.stt_provider')}\n")
-                f.write(f"voice.stt_model in DB: {cs.get('voice.stt_model')}\n")
-                f.write("transcribe returned None (check API keys or logs above)\n")
-            raise HTTPException(status_code=502, detail=f"STT provider '{provider}' failed")
-        return {"text": text, "provider": provider}
     except Exception as e:
-        if not isinstance(e, HTTPException):
-            log_dir = Path("kazma-data")
-            log_dir.mkdir(exist_ok=True)
-            with open(log_dir / "stt_error.log", "a", encoding="utf-8") as f:
-                f.write(f"\n--- STT EXCEPTION IN ENDPOINT: provider={provider}, format={ext}, bytes={len(audio_bytes)}, filename={file.filename}, content_type={file.content_type} ---\n")
-                f.write(f"OPENAI_API_KEY set in env: {bool(os.environ.get('OPENAI_API_KEY'))}\n")
-                f.write(f"GROQ_API_KEY set in env: {bool(os.environ.get('GROQ_API_KEY'))}\n")
-                f.write(f"NVIDIA_API_KEY set in env: {bool(os.environ.get('NVIDIA_API_KEY'))}\n")
-                from kazma_core.config_store import get_config_store
-                cs = get_config_store()
-                f.write(f"voice.stt_provider in DB: {cs.get('voice.stt_provider')}\n")
-                f.write(f"voice.stt_model in DB: {cs.get('voice.stt_model')}\n")
-                f.write(traceback.format_exc())
-            from kazma_core.errors import safe_error
+        # Never write diagnostics (API-key presence, filenames) to disk —
+        # the log carries the sanitized failure under the provider name.
+        from kazma_core.errors import safe_error
 
-            raise HTTPException(status_code=500, detail=str(safe_error(e)))
-        raise e
+        record_voice_stt(provider, "error", time.monotonic() - started)
+        record_voice_utterance("rest", "error")
+        logger.exception("[STT] endpoint failure (provider=%s format=%s bytes=%d)", provider, ext, len(audio_bytes))
+        raise HTTPException(status_code=500, detail=str(safe_error(e))) from e
+
+    elapsed = time.monotonic() - started
+    if text is None:
+        record_voice_stt(provider, "error", elapsed)
+        record_voice_utterance("rest", "error")
+        logger.error(
+            "[STT] provider '%s' returned no text (format=%s bytes=%d)",
+            provider, ext, len(audio_bytes),
+        )
+        raise HTTPException(status_code=502, detail=f"STT provider '{provider}' failed")
+    record_voice_stt(provider, "ok", elapsed)
+    record_voice_utterance("rest", "ok")
+    return {"text": text, "provider": provider}
 
 
 @router.post("/tts", dependencies=[Depends(rate_limit("voice", 30))])
@@ -111,7 +101,10 @@ async def text_to_speech(
 
     Returns raw audio bytes with the appropriate content type.
     """
+    import time
+
     from kazma_core.config_store import get_config_store
+    from kazma_core.metrics import record_voice_tts, record_voice_utterance
     from kazma_core.voice.tts import get_last_error, synthesize
 
     cs = get_config_store()
@@ -130,13 +123,17 @@ async def text_to_speech(
     if not text.strip():
         raise HTTPException(status_code=400, detail="Empty text")
 
+    started = time.monotonic()
     audio = await synthesize(
         text,
         provider=provider,
         voice=voice,
         output_format=output_format,
     )
+    elapsed = time.monotonic() - started
     if audio is None:
+        record_voice_tts(provider, "error", elapsed)
+        record_voice_utterance("rest", "tts_error")
         # Distinguish a misconfiguration (missing dep / API key) from a
         # transient runtime failure. Config issues are 503 (fixable by the
         # operator) with an install/config hint; runtime failures stay 502.
@@ -150,6 +147,8 @@ async def text_to_speech(
         if err is not None:
             raise HTTPException(status_code=502, detail=f"TTS provider '{provider}' failed: {err}")
         raise HTTPException(status_code=502, detail=f"TTS provider '{provider}' failed")
+
+    record_voice_tts(provider, "ok", elapsed)
 
     content_type = {
         "mp3": "audio/mpeg",
