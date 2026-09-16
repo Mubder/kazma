@@ -258,9 +258,12 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install bandit
       - name: Bandit report (artifact only)
-        # The JSON dump is for humans; it must not decide the build.
+        # The JSON dump is for humans; it must not decide the build. It covers
+        # MORE than the gate on purpose — visibility is free, a red gate is not.
         run: |
           bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
+            kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \
+            tests scripts \
             -f json -o bandit-report.json || true
       - name: Bandit (high severity + high confidence — GATE)
         # This used to end in `|| true`, which meant the job named "Security
@@ -270,9 +273,35 @@ jobs:
         # (bandit's flags are cumulative thresholds, not exact levels), so the
         # gate stays actionable rather than a wall of low-confidence noise.
         # The nine findings this surfaced were fixed, not suppressed.
+        #
+        # 2026-09-17: kazma-cli / kazma-skills / kazma-tui were never scanned
+        # at all. They are clean at this threshold, so they join the gate.
         run: |
           bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
+            kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \
             -lll -ii
+      - name: Bandit B613 trojansource (GATE — every directory)
+        # Narrow gate, widest scope, and the only check applied to tests and
+        # scripts. A source file holding live bidi controls renders differently
+        # from how it compiles (CVE-2021-42574); a test file does that just as
+        # well as product code, and `tests/` is not in the gate above.
+        #
+        # Not hypothetical: this fired twice on 2026-09-17 — once in the HITL
+        # card's own invisible-character table, and once in
+        # test_arabic_text.py, which had been carrying literal LRM/RLM in a
+        # directory nothing scanned.
+        #
+        # The rest of tests/ and scripts/ stays out of the gate deliberately:
+        # the findings there are a test importing ftplib to test FTP backup, a
+        # jinja2 fixture with autoescape off, and npm shelling on Windows.
+        # Gating those makes a job that is red on day one, which is a job
+        # everybody learns to ignore — exactly how the `|| true` gap opened.
+        # They are in the artifact above. See docs/KNOWN_GAPS.md.
+        run: |
+          bandit -r kazma-core/kazma_core kazma-gateway/kazma_gateway kazma-ui/kazma_ui \
+            kazma-cli/kazma_cli kazma-skills/kazma_skills kazma-tui/kazma_tui \
+            tests scripts \
+            -t B613 -ii
       - name: Upload Bandit report
         if: always()
         uses: actions/upload-artifact@v4

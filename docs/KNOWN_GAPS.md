@@ -69,6 +69,19 @@ tree. Assume the same class exists elsewhere.
   importers, and the audit proved the point — `ruff --fix` removing "unused"
   imports silently broke every native skill via a re-export contract no linter
   could see (caught by `tests/test_imports.py`).
+- **Three bandit findings are reported but not gated.** The gate now covers
+  all six product packages (`kazma-cli`, `kazma-skills` and `kazma-tui` were
+  never scanned at all until 2026-09-17), plus a B613-only gate over `tests`
+  and `scripts` — trojansource is the one check where a test file is exactly
+  as dangerous as product code, and it fired twice the day it was added.
+  Everything else in `tests/` and `scripts/` is in the JSON artifact only:
+  `test_cloud_sync.py` imports `ftplib` to test the FTP backup backend,
+  `test_chat_steer_composer.py` builds a jinja2 fixture with autoescape off,
+  and `scripts/vendor_codemirror.py` passes `shell=(sys.platform == "win32")`
+  because `npm`/`npx` are `.cmd` shims. That last one is a real `shell=True`
+  with developer-controlled constants, not user input; it is recorded here
+  rather than suppressed with `# nosec`, and the clean fix is to resolve the
+  executable with `shutil.which` instead.
 - **Nothing asserts that an entry point installs a tenant context.** Vault
   secrets are tenant-scoped and everything saved through Settings is written
   under the web request's tenant (`"default"` on a single-user install).
@@ -92,13 +105,16 @@ tree. Assume the same class exists elsewhere.
   was already correct. Two days were spent on a provider fault that did not
   exist.
 
-  The vault's fallback direction is right and should not be widened. What is
-  missing is a gate: no test enumerates the entry points (HTTP middleware, cron,
-  CLI, agent nodes, swarm workers, the MCP bridge, webhook handlers) and asserts
-  each installs one. Until it does, the fourth instance will look exactly like
-  the first three. `SecretVault.describe_secret` exists so a diagnostic can at
-  least tell *absent* from *present, one scope over* without widening the
-  lookup — use it rather than inferring.
+  The vault's fallback direction is right and should not be widened.
+
+  **Partly closed 2026-09-17.** A static test listing the entry points would be
+  the same gate that let all seven audit defects through — it passes while the
+  entry point nobody listed is wrong. So the guard is at the miss instead:
+  `retrieve` now logs one warning per secret name per process when it returns
+  `None` for a name that *does* exist under some tenant, naming the scope and
+  saying the caller is missing `set_current_tenant_id()`. That fires at any
+  call site, including ones not written yet. Still open: nothing *fails* on it,
+  so a new entry point ships and is caught by someone reading a log.
   → `tests/test_cron_tenant_context.py`, `tests/test_vault_tenant_scope_read.py`.
 - **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
   function named `read_url`, so `import kazma_core.tools.read_url as ru` binds
