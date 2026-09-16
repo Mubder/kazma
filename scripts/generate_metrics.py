@@ -705,6 +705,13 @@ def sync_readme(m: dict, text: str) -> str:
 #: commit, so exact equality is unachievable — see check_readme.
 README_COMMIT_SLACK = 250
 
+#: Drift tolerated before README's headline counts count as misleading.
+#: Sized to catch the real incident (README said 7,346 tests / ~409K LOC
+#: against 7,659 / 430K) while surviving the ordinary case of a commit that
+#: adds a few tests before the sync-metrics bot regenerates.
+README_TEST_SLACK = 75
+README_LOC_K_SLACK = 5
+
 
 def check_readme(m: dict, text: str) -> list[str]:
     """Problems with README's headline metrics, or [] if it is honest.
@@ -726,26 +733,49 @@ def check_readme(m: dict, text: str) -> list[str]:
     v = readme_values(m)
     problems: list[str] = []
 
-    expected_exact = {
-        f"**~{v['loc_k']} LOC** ({v['code_k']} Python code + {v['js_k']} JS)":
-            r"\*\*~[\d.]+K LOC\*\* \([\d.]+K Python code \+ [\d.]+K JS\)",
-        f"**{v['test_functions']} test functions** ({v['test_files']} test files)":
-            r"\*\*[\d,]+ test functions\*\* \([\d,]+ test files\)",
-    }
-    for expected, pattern in expected_exact.items():
-        found = re.search(pattern, text)
-        if not found:
-            problems.append(f"could not find the line matching {pattern!r}")
-        elif found.group(0) != expected:
-            problems.append(f"{found.group(0)!r} should be {expected!r}")
+    # Counts drift by a handful on any commit that adds a test, and the
+    # sync-metrics bot only regenerates README AFTER the push — so an exact
+    # match here fails every such commit until the bot lands, i.e. the gate
+    # fights the bot. A gate that cannot be satisfied is a gate someone
+    # disables (this is the second time this check has had that flaw).
+    #
+    # The thing worth catching is README being stale enough to MISLEAD: it
+    # advertised 7,346 tests against a real 7,659, and ~409K LOC against 430K.
+    # A five-test lag is not that. So: bounded drift, and always fail when
+    # README contradicts ITSELF, which no amount of lag can excuse.
+    tests_now = m["tests"]["test_functions_total"]
+    stated_tests = re.search(r"\*\*([\d,]+) test functions\*\*", text)
+    if not stated_tests:
+        problems.append("could not find the '**N test functions**' claim")
+    else:
+        claimed = int(stated_tests.group(1).replace(",", ""))
+        if abs(claimed - tests_now) > README_TEST_SLACK:
+            problems.append(
+                f"claims {claimed:,} test functions, repository has "
+                f"{tests_now:,} ({abs(claimed - tests_now):,} out, slack is "
+                f"{README_TEST_SLACK}) — regenerate"
+            )
 
-    # Badges restate the test count; same fact, must not disagree with itself.
-    badge = re.search(r"Tests-([\d%A-Za-z,\.]+?)-10B981", text)
-    if badge and badge.group(1).replace("%2C", ",") != v["test_functions"]:
+    loc_k_now = round(m["python"]["total"] / 1000)
+    stated_loc = re.search(r"\*\*~([\d.]+)K LOC\*\*", text)
+    if not stated_loc:
+        problems.append("could not find the '**~NK LOC**' claim")
+    elif abs(float(stated_loc.group(1)) - loc_k_now) > README_LOC_K_SLACK:
         problems.append(
-            f"the Tests badge says {badge.group(1).replace('%2C', ',')!r} but the "
-            f"table says {v['test_functions']!r}"
+            f"claims ~{stated_loc.group(1)}K LOC, repository has ~{loc_k_now}K "
+            f"(slack is {README_LOC_K_SLACK}K) — regenerate"
         )
+
+    # Self-consistency is free and no lag excuses it: the badge and the table
+    # state the SAME fact, so they must agree with each other exactly.
+    badge = re.search(r"Tests-([\d%A-Za-z,\.]+?)-10B981", text)
+    if badge and stated_tests:
+        badge_n = badge.group(1).replace("%2C", ",")
+        if badge_n != stated_tests.group(1):
+            problems.append(
+                f"the Tests badge says {badge_n!r} but the table says "
+                f"{stated_tests.group(1)!r} — README contradicts itself"
+            )
 
     # Commits: a lower bound, so lagging is fine and overstating is not.
     #

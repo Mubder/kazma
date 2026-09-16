@@ -10,10 +10,10 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | Metric | Count |
 |---|---:|
 | Total `.py` files | **1,453** |
-| Total lines | **432,705** |
-| Pure code lines | 344,868 (79%) |
-| Blank lines | 66,412 (15%) |
-| Comment/doc lines | 21,425 (4%) |
+| Total lines | **432,735** |
+| Pure code lines | 344,881 (79%) |
+| Blank lines | 66,414 (15%) |
+| Comment/doc lines | 21,440 (4%) |
 
 ## By area
 
@@ -23,7 +23,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | tests/ + loadtests/ | 611 | 143,407 |
 | examples/ | 32 | 7,597 |
 | archive/ | 0 | 0 |
-| scripts/ | 35 | 10,761 |
+| scripts/ | 35 | 10,791 |
 | root *.py | 2 | 507 |
 
 ## LOC per package
@@ -43,7 +43,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | Metric | Count |
 |---|---:|
 | Test files | **611** |
-| Collected at runtime | n/a |
+| Collected at runtime | **9,087** |
 | `def test_*` functions | 6,022 |
 | `async def test_*` functions | 1,677 |
 | `Test*` classes | 1223 |
@@ -85,7 +85,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 |---|---:|
 | Commits | **3,434** |
 | Contributors | 9 |
-| Branches | 1 |
+| Branches | 2 |
 | Tags | 17 |
 
 ## Largest Python files (top 15)
