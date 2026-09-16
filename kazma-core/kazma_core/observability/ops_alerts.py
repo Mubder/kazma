@@ -81,6 +81,11 @@ class _KeyState:
 _state: dict[str, _KeyState] = {}
 _lock = threading.RLock()
 
+#: In-flight alert-delivery threads, so they can be awaited (drain_alerts)
+#: rather than left to write into whatever the process tears down next.
+_dispatch_threads: set[threading.Thread] = set()
+_threads_lock = threading.RLock()
+
 
 def ops_alerts_enabled() -> bool:
     """Separate switch from lifecycle notifications."""
@@ -323,8 +328,55 @@ async def _deliver(text: str) -> bool:
     )
 
 
+def _has_any_sink() -> bool:
+    """True if anything could actually receive an alert right now.
+
+    Conservative on purpose: any doubt returns True, because failing to
+    deliver an alert is worse than spawning a thread that discovers there was
+    nowhere to send it. What this removes is the case where we KNOW nothing
+    can receive -- no bus adapter and no Telegram credentials -- and would
+    otherwise start a thread, spin up an event loop, attempt a network call,
+    fail, and log a warning from inside that thread.
+
+    That is not just waste. The thread is what segfaults CPython when it
+    writes to a descriptor whose owner is tearing down (audit 2026-09-16);
+    not starting it at all is the only way to close the window rather than
+    narrow it.
+    """
+    try:
+        from kazma_core.swarm.bus import NullBusAdapter, get_message_bus
+
+        if not isinstance(get_message_bus().adapter, NullBusAdapter):
+            return True
+    except Exception:  # noqa: BLE001 — probe must never decide by raising
+        return True
+
+    try:
+        from kazma_core.config_store import get_config_store
+
+        cs = get_config_store()
+        token = str(cs.get("connectors.telegram.token", "") or "").strip()
+        chat = (
+            str(cs.get("guard.telegram.chat_id", "") or "").strip()
+            or str(cs.get("connectors.telegram.swarm_chat_id", "") or "").strip()
+            or str(cs.get("swarm.group_chat_id", "") or "").strip()
+        )
+        return bool(token and chat)
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def _dispatch(text: str) -> None:
     """Deliver without blocking or raising, from sync OR async callers."""
+    if not _has_any_sink():
+        # The WARNING in alert() is already the durable record; this only says
+        # the interrupt had nowhere to go.
+        logger.debug(
+            "[ops_alerts] no bus adapter and no Telegram credentials — "
+            "alert exists only in the log; not starting a delivery thread"
+        )
+        return
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -351,8 +403,45 @@ def _dispatch(text: str) -> None:
                 logger.warning("[ops_alerts] alert was NOT delivered anywhere")
         except Exception as exc:  # noqa: BLE001
             logger.warning("[ops_alerts] delivery raised: %s", exc)
+        finally:
+            with _threads_lock:
+                _dispatch_threads.discard(threading.current_thread())
 
-    threading.Thread(target=_run, name="ops-alert", daemon=True).start()
+    # Retained, not fire-and-forget (audit 2026-09-16). This used to be a
+    # bare `threading.Thread(...).start()` with no handle kept anywhere: the
+    # thread ran asyncio.run(_deliver(...)) -- real network I/O -- and logged
+    # warnings from inside it, with nothing able to wait for it or stop it.
+    #
+    # That is the raw-thread twin of audit F-07 (fire-and-forget asyncio
+    # tasks), and it segfaulted CPython: a daemon thread writing to stderr
+    # while pytest tore down its fd capture in pytest_runtest_teardown.
+    # Reproduced on Linux 2026-09-16 -- tests/test_reply_sink.py crashed with
+    # SIGSEGV on the one test that reaches an alert, and passed 17/17 with
+    # KAZMA_OPS_ALERTS=0. Anything that can write to a descriptor after its
+    # owner has gone needs a handle; see drain_alerts().
+    thread = threading.Thread(target=_run, name="ops-alert", daemon=True)
+    with _threads_lock:
+        _dispatch_threads.add(thread)
+    thread.start()
+
+
+def drain_alerts(timeout: float = 5.0) -> int:
+    """Wait for in-flight alert deliveries. Returns how many were still running.
+
+    Alerting is deliberately fire-and-forget on the hot path -- it is called
+    from exception handlers guarding the very failures it reports -- but
+    "nobody waits for it" must not mean "nobody CAN wait for it". Call this
+    before tearing down anything the delivery thread might write to (a log
+    handler, a captured stderr, the interpreter itself).
+    """
+    with _threads_lock:
+        pending = [t for t in _dispatch_threads if t.is_alive()]
+    for t in pending:
+        t.join(timeout=timeout)
+    still = sum(1 for t in pending if t.is_alive())
+    if still:
+        logger.debug("[ops_alerts] %d delivery thread(s) still running", still)
+    return still
 
 
 def alert(

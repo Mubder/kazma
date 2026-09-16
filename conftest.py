@@ -54,6 +54,25 @@ _ALLOW_REAL_DB = (os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") or "").strip().lowe
     "on",
 )
 
+# Ops alerts OFF for the suite (audit 2026-09-16).
+#
+# ops_alerts.alert() defaults to ENABLED, and any test that trips a
+# production error path reaches it indirectly -- then _dispatch starts a
+# daemon thread that runs asyncio.run(_deliver(...)), tries to send the
+# operator a real Telegram message, fails, and logs a warning FROM that
+# thread. Two things wrong with that under test: the suite should never
+# attempt outbound delivery to a human, and the thread writes to stderr
+# while pytest is tearing its fd capture down, which segfaults CPython.
+#
+# Measured on Linux: tests/test_reply_sink.py exits 139 (SIGSEGV) with
+# alerts on and passes 17/17 with them off -- the crash reproduces from the
+# single test that reaches an alert. tests/test_ops_alerts.py deletes this
+# variable in its own fixture, so it still covers the enabled default.
+#
+# setdefault, not a hard set: an operator debugging alert delivery can still
+# export KAZMA_OPS_ALERTS=1 for a run.
+os.environ.setdefault("KAZMA_OPS_ALERTS", "0")
+
 # Force the sqlite backend and strip every DSN variant BEFORE any kazma
 # module can read them.
 if not _ALLOW_REAL_DB:

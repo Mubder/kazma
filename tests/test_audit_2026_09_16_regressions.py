@@ -183,6 +183,71 @@ def test_email_list_fences_and_cannot_be_broken_out_of():
     )
 
 
+# ── F-9: the ops-alert thread that segfaulted CPython ────────────────────
+
+
+def test_dispatch_does_not_spawn_when_nothing_can_receive(monkeypatch):
+    """No bus adapter and no Telegram credentials ⇒ no delivery thread.
+
+    `_dispatch` used to start an UNRETAINED daemon thread unconditionally.
+    It ran asyncio.run(_deliver(...)) — real network I/O — and called
+    logger.warning() from inside itself. Under pytest that thread wrote to
+    stderr while the main thread tore down its fd capture in
+    pytest_runtest_teardown, and CPython segfaulted.
+
+    Reproduced on Linux 2026-09-16 in a container: tests/test_reply_sink.py
+    exited 139 (SIGSEGV) reproducibly, from the single test that reaches an
+    alert, and passed 17/17 with KAZMA_OPS_ALERTS=0. Retaining the thread
+    alone did NOT fix it — with alerts forced on it still crashed. Not
+    starting the thread when delivery is impossible is what closed it.
+    """
+    from kazma_core.observability import ops_alerts
+
+    monkeypatch.setattr(ops_alerts, "_has_any_sink", lambda: False)
+
+    started: list[object] = []
+    real_thread = ops_alerts.threading.Thread
+
+    def _spy(*a, **kw):
+        t = real_thread(*a, **kw)
+        started.append(t)
+        return t
+
+    monkeypatch.setattr(ops_alerts.threading, "Thread", _spy)
+    ops_alerts._dispatch("anything")
+    assert not started, (
+        "a delivery thread was started with nowhere to deliver — that thread "
+        "is the segfault vector (audit 2026-09-16 F-9)"
+    )
+
+
+def test_sink_probe_is_conservative(monkeypatch):
+    """Any doubt must spawn. Losing a real alert is worse than a spare thread."""
+    from kazma_core.observability import ops_alerts
+
+    def _boom():
+        raise RuntimeError("config store is down")
+
+    monkeypatch.setattr(ops_alerts, "get_config_store", _boom, raising=False)
+    monkeypatch.setattr(
+        "kazma_core.config_store.get_config_store", _boom, raising=False
+    )
+    # A probe that cannot answer must answer True, not False.
+    assert ops_alerts._has_any_sink() is True
+
+
+def test_ops_alert_threads_are_retained_and_drainable():
+    """The thread must be reachable: `drain_alerts` is the join nobody had."""
+    from kazma_core.observability import ops_alerts
+
+    assert hasattr(ops_alerts, "drain_alerts"), (
+        "an unjoinable background thread has no way to be waited on before "
+        "the thing it writes to is torn down (audit 2026-09-16 F-9)"
+    )
+    # Draining with nothing in flight is a no-op, never a hang.
+    assert ops_alerts.drain_alerts(timeout=0.1) == 0
+
+
 # ── F-3: run_unit_tests is arbitrary code execution ──────────────────────
 
 

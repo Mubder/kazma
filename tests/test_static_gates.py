@@ -212,6 +212,55 @@ def test_no_bare_create_task():
     )
 
 
+def test_no_unretained_thread_start():
+    """``threading.Thread(...).start()`` must keep a handle (audit 2026-09-16).
+
+    The raw-thread twin of F-07 above, and it is worse than a GC'd task: a
+    daemon thread nobody holds cannot be waited for, so it outlives whatever
+    spawned it and keeps writing. ops_alerts._dispatch did exactly this --
+    started an unretained daemon thread that ran asyncio.run(_deliver(...)),
+    did network I/O, and logged warnings from inside itself. On Linux it
+    SEGFAULTED CPython by writing to stderr while pytest tore down its fd
+    capture: tests/test_reply_sink.py exited 139, reproducibly, from the one
+    test that reaches an alert.
+
+    Chaining `.start()` straight onto the constructor is the tell -- the
+    Thread object is discarded on the same line. Assign it, keep it
+    somewhere, and give callers a way to join.
+    """
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+                continue
+            func = node.value.func
+            # Match `<something>(...).start()` where the receiver is a call to
+            # Thread / threading.Thread / Timer / threading.Timer.
+            if not (isinstance(func, ast.Attribute) and func.attr == "start"):
+                continue
+            recv = func.value
+            if not isinstance(recv, ast.Call):
+                continue
+            ctor = _dotted(recv.func)
+            if ctor in ("threading.Thread", "Thread", "threading.Timer", "Timer"):
+                offenders.append(f"{rel}:{node.lineno} {ctor}(...).start()")
+
+    assert not offenders, (
+        "Unretained background thread: the Thread object is discarded on the "
+        "same line it is started, so nothing can join or stop it. A daemon "
+        "thread that outlives its owner and still writes to a descriptor "
+        "segfaults CPython (audit 2026-09-16, ops_alerts).\n"
+        "Fix: assign the thread, keep it in a module-level registry, and "
+        "expose a drain/join -- see ops_alerts.drain_alerts().\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

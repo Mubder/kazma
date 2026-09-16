@@ -83,6 +83,11 @@ def _write_dump(lag_s: float, tag: str) -> Path | None:
         return None
 
 
+#: The stall-watchdog thread, kept so it is inspectable and not an anonymous
+#: daemon (audit 2026-09-16). It runs for the life of the process by design.
+_watchdog_thread: Any = None
+
+
 def start_stall_watchdog(
     *,
     threshold_s: float = DEFAULT_THRESHOLD_S,
@@ -148,9 +153,14 @@ def start_stall_watchdog(
                 lag, path or "(dump failed)",
             )
 
-    threading.Thread(
+    # Retained (audit 2026-09-16): a watchdog that logs CRITICAL from its own
+    # thread must be reachable afterwards -- to check it is alive, and so it
+    # is not an anonymous daemon still writing while the process tears down.
+    global _watchdog_thread
+    _watchdog_thread = threading.Thread(
         target=_watch, name="kazma-loop-stall-watchdog", daemon=True
-    ).start()
+    )
+    _watchdog_thread.start()
     task = asyncio.get_running_loop().create_task(_heartbeat())
     logger.info(
         "[loop-stall] watchdog started (dump after %.0fs unresponsive)", threshold_s

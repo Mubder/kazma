@@ -10,27 +10,27 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | Metric | Count |
 |---|---:|
 | Total `.py` files | **1,449** |
-| Total lines | **431,496** |
-| Pure code lines | 344,015 (79%) |
-| Blank lines | 66,211 (15%) |
-| Comment/doc lines | 21,270 (4%) |
+| Total lines | **431,741** |
+| Pure code lines | 344,173 (79%) |
+| Blank lines | 66,248 (15%) |
+| Comment/doc lines | 21,320 (4%) |
 
 ## By area
 
 | Area | Files | Total LOC |
 |---|---:|---:|
-| Source (7 packages) | 811 | 275,319 |
-| tests/ + loadtests/ | 608 | 142,920 |
+| Source (7 packages) | 811 | 275,431 |
+| tests/ + loadtests/ | 608 | 143,034 |
 | examples/ | 32 | 7,597 |
 | archive/ | 0 | 0 |
 | scripts/ | 35 | 10,631 |
-| root *.py | 2 | 488 |
+| root *.py | 2 | 507 |
 
 ## LOC per package
 
 | Package | Files | Total LOC | Code LOC |
 |---|---:|---:|---:|
-| `kazma-core` | 532 | 176,217 | 143,259 |
+| `kazma-core` | 532 | 176,329 | 143,329 |
 | `kazma-gateway` | 71 | 23,220 | 18,493 |
 | `kazma-ui` | 99 | 48,866 | 41,095 |
 | `kazma-tui` | 43 | 12,116 | 9,754 |
@@ -43,12 +43,12 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 | Metric | Count |
 |---|---:|
 | Test files | **608** |
-| Collected at runtime | n/a |
-| `def test_*` functions | 6,004 |
+| Collected at runtime | **9,068** |
+| `def test_*` functions | 6,008 |
 | `async def test_*` functions | 1,677 |
 | `Test*` classes | 1223 |
-| Total test functions | 7,681 |
-| Test LOC | 142,920 |
+| Total test functions | 7,685 |
+| Test LOC | 143,034 |
 | Test-to-source LOC ratio | ~0.52:1 |
 
 > **Collected at runtime** is the real test count pytest would run
@@ -60,7 +60,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 
 | Metric | Count |
 |---|---:|
-| `def` functions | 6,598 |
+| `def` functions | 6,600 |
 | `async def` functions | 2,133 |
 | Classes | 962 |
 
@@ -85,7 +85,7 @@ All figures are derived from **git-tracked** files, so they are stable and repro
 |---|---:|
 | Commits | **3,413** |
 | Contributors | 9 |
-| Branches | 1 |
+| Branches | 2 |
 | Tags | 17 |
 
 ## Largest Python files (top 15)
