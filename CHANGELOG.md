@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Chat vs voice: one key store, two modality pickers (2026-09-16)
+
+API keys stay on Settings → Providers. Whisper/TTS models are not chat
+models: they are hidden from chat pickers, skipped by Provider Test
+(`/chat/completions`), and refused as the active chat model. Settings →
+Voice is the only place to pick STT/TTS. Discover reports how many speech
+models were omitted.
+
 ## Live STT no longer treats NVIDIA-without-ASR as "add a key" (2026-09-16)
 
 Settings → Voice STT set to NVIDIA (the LLM provider) has no Speech NIM

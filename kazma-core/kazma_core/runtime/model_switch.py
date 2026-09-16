@@ -174,6 +174,18 @@ def switch_active_model(
             error="active_model is required",
             error_code="invalid_model",
         )
+    from kazma_core.models.modality import is_speech_model
+
+    if is_speech_model(clean):
+        return SwitchResult(
+            ok=False,
+            model=clean,
+            error=(
+                f"{clean} is a speech model (STT/TTS), not a chat model. "
+                "Configure it under Settings → Voice."
+            ),
+            error_code="invalid_model",
+        )
 
     try:
         from kazma_core.model_registry import get_model_registry

@@ -887,7 +887,12 @@
                 const resp = await fetch(`/api/providers/${encodeURIComponent(name)}/discover`, { method: 'POST' });
                 const data = await resp.json();
                 const count = data.count || 0;
-                showToast(`${count} models discovered`, count > 0 ? 'success' : 'warning');
+                const speech = data.speech_omitted || 0;
+                var msg = count + ' chat models discovered';
+                if (speech) {
+                    msg += ' (' + speech + ' speech models hidden — STT is Settings → Voice)';
+                }
+                showToast(msg, count > 0 ? 'success' : 'warning');
                 await this.loadHubProviders();
             } catch (e) {
                 showToast('Discover failed: ' + e.message, 'error');
