@@ -700,6 +700,74 @@ def sync_readme(m: dict, text: str) -> str:
     return text
 
 
+#: How far behind README's commit count may fall before it counts as rot.
+#: It is written with a "+" (a LOWER bound), and it increments on every
+#: commit, so exact equality is unachievable — see check_readme.
+README_COMMIT_SLACK = 250
+
+
+def check_readme(m: dict, text: str) -> list[str]:
+    """Problems with README's headline metrics, or [] if it is honest.
+
+    Not a plain equality check against :func:`sync_readme`. The first version
+    of this gate was, and it failed on essentially every push: the commit
+    count increments with each commit, so README goes stale the instant it is
+    committed and no amount of regenerating can win that race. A gate that
+    cannot be satisfied is a gate people disable — the exact failure this
+    audit was about, reintroduced by the fix for it (2026-09-16).
+
+    So each figure is checked against the relation README actually claims:
+
+    * LOC / test counts are stated as facts -> must match exactly (they move
+      only on real changes, and `--write` keeps them current);
+    * commits is stated as ``N+`` -> a LOWER BOUND. It may lag, but it may
+      never overstate, and it may not rot indefinitely.
+    """
+    v = readme_values(m)
+    problems: list[str] = []
+
+    expected_exact = {
+        f"**~{v['loc_k']} LOC** ({v['code_k']} Python code + {v['js_k']} JS)":
+            r"\*\*~[\d.]+K LOC\*\* \([\d.]+K Python code \+ [\d.]+K JS\)",
+        f"**{v['test_functions']} test functions** ({v['test_files']} test files)":
+            r"\*\*[\d,]+ test functions\*\* \([\d,]+ test files\)",
+    }
+    for expected, pattern in expected_exact.items():
+        found = re.search(pattern, text)
+        if not found:
+            problems.append(f"could not find the line matching {pattern!r}")
+        elif found.group(0) != expected:
+            problems.append(f"{found.group(0)!r} should be {expected!r}")
+
+    # Badges restate the test count; same fact, must not disagree with itself.
+    badge = re.search(r"Tests-([\d%A-Za-z,\.]+?)-10B981", text)
+    if badge and badge.group(1).replace("%2C", ",") != v["test_functions"]:
+        problems.append(
+            f"the Tests badge says {badge.group(1).replace('%2C', ',')!r} but the "
+            f"table says {v['test_functions']!r}"
+        )
+
+    # Commits: a lower bound, so lagging is fine and overstating is not.
+    actual_commits = m["git"]["commits"]
+    stated = re.search(r"\*\*([\d,]+)\+ commits\*\*", text)
+    if not stated:
+        problems.append("could not find the '**N+ commits**' claim")
+    else:
+        claimed = int(stated.group(1).replace(",", ""))
+        if claimed > actual_commits:
+            problems.append(
+                f"claims {claimed:,}+ commits but the repository has "
+                f"{actual_commits:,} — a lower bound must not overstate"
+            )
+        elif actual_commits - claimed > README_COMMIT_SLACK:
+            problems.append(
+                f"claims {claimed:,}+ commits and the repository has "
+                f"{actual_commits:,} ({actual_commits - claimed:,} behind, "
+                f"slack is {README_COMMIT_SLACK}) — regenerate"
+            )
+    return problems
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate Kazma repository metrics.")
     parser.add_argument(
@@ -736,13 +804,14 @@ def main() -> int:
         except OSError:
             print("error: README.md not found", file=sys.stderr)
             return 1
-        synced = sync_readme(metrics, existing)
-        if synced != existing:
+
+        problems = check_readme(metrics, existing)
+        if problems:
             print(
                 "README.md's headline metrics disagree with the repository.\n"
                 "It claims to be auto-verified from METRICS.md; make that true:\n"
                 "    python scripts/generate_metrics.py --write\n"
-                f"Expected: {readme_values(metrics)}",
+                + "\n".join(f"  - {p}" for p in problems),
                 file=sys.stderr,
             )
             return 1
