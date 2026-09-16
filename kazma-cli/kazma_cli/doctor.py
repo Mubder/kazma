@@ -123,14 +123,43 @@ def collect() -> list[tuple[str, str]]:
     else:
         out.append(_line(OK, "the registry resolves to the configured pair"))
 
-    # ── the key, as the registry judges it ──────────────────────────────
+    # ── the key, and WHY it is unusable ─────────────────────────────────
     key = coerce_api_key(prov.get("api_key"))
     if url_is_cloud(base) and not key_is_usable(key):
-        out.append(_line(
-            BAD, f"{pname!r} has NO USABLE API KEY",
+        # Distinguish "never set" from "set, but this machine cannot open the
+        # vault holding it". They need opposite fixes and look identical
+        # otherwise: ConfigStore returns the default when a vault:// pointer
+        # fails to decrypt, so the secret's absence is indistinguishable from
+        # its being unreadable.
+        #
+        # This is not hypothetical. A Postgres config store is SHARED across
+        # installs while the vault is per-install (its own KAZMA_VAULT_KEY),
+        # so a vault:// pointer written by one machine resolves there and
+        # silently yields nothing on the other — which is exactly how a
+        # working provider became a 1211 from a different vendor (2026-09-16).
+        detail = (
             "the registry will silently substitute a provider that has one. "
-            "Settings -> Providers, set a real key.",
-        ))
+            "Settings -> Providers, set a real key."
+        )
+        try:
+            from kazma_core.model_registry_store import load_providers_unresolved
+
+            raw = next(
+                (p for p in load_providers_unresolved(cs)
+                 if isinstance(p, dict) and str(p.get("name")) == pname),
+                {},
+            )
+            if str(raw.get("api_key") or "").startswith("vault://"):
+                detail = (
+                    "the stored key is a vault:// pointer THIS INSTALL CANNOT "
+                    "DECRYPT — the secret lives in another install's vault. A "
+                    "Postgres config store is shared between installs; the "
+                    "vault is not. Re-enter the key here (Settings -> "
+                    "Providers) so it is written into this machine's vault."
+                )
+        except Exception:  # noqa: BLE001 — diagnosis must not fail the report
+            pass
+        out.append(_line(BAD, f"{pname!r} has NO USABLE API KEY", detail))
     else:
         out.append(_line(OK, f"{pname!r} has a usable key on its provider row"))
 
@@ -149,13 +178,18 @@ def collect() -> list[tuple[str, str]]:
     catalog = list((disc or {}).get(_cat_owner, []) or [])
     if not catalog:
         out.append(_line(
-            WARN, f"no discovered models for {pname!r}",
+            WARN, f"no discovered models for {_cat_owner!r}",
             "Settings -> Models -> Discover. Without a catalog Kazma cannot "
             "tell a good model id from a bad one, and the spelling guard is a "
             "no-op.",
         ))
     elif model in catalog:
-        out.append(_line(OK, f"{pname!r} offers {model!r}", f"{len(catalog)} models known"))
+        # Name the provider that actually OWNS this endpoint, not the
+        # configured one — after a substitution they differ, and printing
+        # "'deepseek' offers 'glm-5.3-flash'" is nonsense that undermines the
+        # whole report.
+        out.append(_line(OK, f"{_cat_owner!r} offers {model!r}",
+                         f"{len(catalog)} models known"))
     else:
         bare = model.split("/", 1)[1] if "/" in model else None
         if bare and bare in catalog:
@@ -167,7 +201,7 @@ def collect() -> list[tuple[str, str]]:
         else:
             near = [m for m in catalog if model.split("/")[-1][:4] in m][:6]
             out.append(_line(
-                BAD, f"{pname!r} does not offer {model!r}",
+                BAD, f"{_cat_owner!r} does not offer {model!r}",
                 f"closest: {near or catalog[:6]}",
             ))
 
