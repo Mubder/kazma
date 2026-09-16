@@ -658,7 +658,7 @@ def record_chat_research(
         )
         return None
     now = time.time()
-    sid = session_id or f"rs_chat_{hashlib.md5((topic or '').encode()).hexdigest()[:12]}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}"
+    sid = session_id or f"rs_chat_{hashlib.md5((topic or '').encode(), usedforsecurity=False).hexdigest()[:12]}" if topic else f"rs_chat_{uuid.uuid4().hex[:12]}"
     c = _conn()
     try:
         cur = c.execute("SELECT * FROM research_sessions WHERE id = ?", (sid,))

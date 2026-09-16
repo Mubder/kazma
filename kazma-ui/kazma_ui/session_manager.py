@@ -1059,6 +1059,29 @@ def get_session_manager() -> SessionManager:
     return _session_manager
 
 
+#: Per-process test DBs already scheduled for removal at exit, so repeated
+#: reset_session_manager() calls register the path once rather than N times.
+_test_db_cleanups: set[str] = set()
+
+
+def _register_test_db_cleanup(path: str) -> None:
+    """Unlink this process's test DB on exit, so pid files do not accumulate."""
+    if path in _test_db_cleanups:
+        return
+    _test_db_cleanups.add(path)
+
+    import atexit
+
+    def _cleanup(p: str = path) -> None:
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.remove(p + suffix)
+            except OSError:
+                pass
+
+    atexit.register(_cleanup)
+
+
 def reset_session_manager() -> SessionManager:
     """Reset the singleton and return a fresh instance (for tests)."""
     global _session_manager
@@ -1074,12 +1097,35 @@ def reset_session_manager() -> SessionManager:
     except Exception:
         db_path = "kazma-data/chat_sessions.db"
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
-        db_path = "kazma-data/chat_sessions_test.db"
+        # Per-PROCESS, not one shared file (2026-09-16).
+        #
+        # scripts/fast_test.py runs four pytest processes in parallel from the
+        # same cwd. With a single hardcoded "kazma-data/chat_sessions_test.db"
+        # they all resolve the SAME file and each one removes and recreates
+        # it -- so one process unlinks it while another holds it open, and
+        # SQLite raises "disk I/O error". set_session_manager() below already
+        # documents this as a known flake family and exists to avoid it, but
+        # reset_session_manager() kept the shared path, so every test that
+        # calls it DIRECTLY (rather than going through set_session_manager)
+        # was still exposed. Seen in CI twice on the same file:
+        # tests/test_model_selection_pipeline.py, 29 errors at fixture setup,
+        # on a run whose suite was otherwise 8976 passed / 0 failed.
+        #
+        # The pid suffix makes concurrent chunks disjoint; honouring data_dir
+        # keeps KAZMA_DATA_DIR isolation working for callers that set it.
+        try:
+            from kazma_core.paths import data_dir
+
+            _test_dir = str(data_dir())
+        except Exception:
+            _test_dir = "kazma-data"
+        db_path = os.path.join(_test_dir, f"chat_sessions_test_{os.getpid()}.db")
         if os.path.exists(db_path):
             try:
                 os.remove(db_path)
             except Exception as exc:
                 logging.getLogger(__name__).debug("test session db remove: %s", exc)
+        _register_test_db_cleanup(db_path)
 
     _session_manager = SessionManager(db_path=db_path)
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):

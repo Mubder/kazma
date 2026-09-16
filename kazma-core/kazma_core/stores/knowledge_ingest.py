@@ -419,7 +419,7 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
         from kazma_core.proxy.client import get_scraping_client
         from kazma_core.security.ssrf import SSRFError, resolve_redirects, validate_url
 
-        validate_url(url)
+        validate_url(url, block_unresolved=True)
         # Sitemap/robots discovery uses the same Proxy Provider as page fetch.
         # Redirects are resolved with every hop SSRF-checked, then fetched with
         # redirects OFF (audit F-08). Validating only the *final* URL still let
@@ -440,9 +440,21 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
             except Exception:
                 target = url
             r = await client.get(target)
+            # Post-connect peer check (audit 2026-09-16 F-6): everything above
+            # resolves DNS before the socket exists, so a rebinding host passes
+            # it. read_url has asserted the real peer since F-08; KB ingest,
+            # which crawls whole sites, did not.
+            from kazma_core.proxy.client import get_active_proxy_url
+            from kazma_core.security.ssrf import assert_peer_public
+
+            try:
+                assert_peer_public(r, url=target, via_proxy=bool(get_active_proxy_url()))
+            except SSRFError as exc:
+                logger.warning("[kb_discover] peer blocked for %s: %s", url, exc)
+                return None, url
             final = str(r.url)
             try:
-                validate_url(final)
+                validate_url(final, block_unresolved=True)
             except SSRFError:
                 return None, url
             if r.status_code >= 400:
@@ -532,7 +544,7 @@ async def _firecrawl_map_site(
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
 
-        validate_url(seed_url)
+        validate_url(seed_url, block_unresolved=True)
         # ``search`` ranks URLs by relevance; omit it for section-root maps
         # so Firecrawl returns the full URL set rather than a seed-ranked
         # slice.  ``limit`` caps the result set; we scope/filter locally.
@@ -1342,7 +1354,7 @@ async def ingest_url(
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url)
+        validate_url(url, block_unresolved=True)
     except Exception as exc:
         result.errors.append(f"SSRF/invalid URL {url}: {exc}")
         result.failed_urls.append(url)
@@ -1415,7 +1427,7 @@ async def ingest_site(
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(seed_url)
+        validate_url(seed_url, block_unresolved=True)
     except Exception as exc:
         yield ProgressUpdate(phase="error", message=f"invalid seed: {exc}", started_at=started)
         return

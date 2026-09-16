@@ -9,6 +9,9 @@ import subprocess
 import httpx
 from kazma_core.tools.file_write import _get_workspace
 
+# Network-bound git push/pull used to run ON the event loop (audit F-4).
+from kazma_skills.native._subprocess import run_off_loop
+
 # Disable interactive terminal credential prompts across all Git sub-processes
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
 os.environ["GIT_ASKPASS"] = "echo"
@@ -20,7 +23,7 @@ async def git_status() -> str:
     """Get the current git repository status, branch, and staged/unstaged changes."""
     cwd = _get_workspace()
     try:
-        res = subprocess.run(
+        res = await run_off_loop(
             ["git", "status", "--porcelain"],
             cwd=cwd,
             capture_output=True,
@@ -31,7 +34,7 @@ async def git_status() -> str:
             return "Not a git repository or git command failed."
         
         # Get active branch name
-        branch_res = subprocess.run(
+        branch_res = await run_off_loop(
             ["git", "branch", "--show-current"],
             cwd=cwd,
             capture_output=True,
@@ -66,10 +69,10 @@ async def git_commit(message: str, files: list[str] | None = None) -> str:
 
         # Stage files
         add_args = ["git", "add", "."] if not files else ["git", "add"] + files
-        subprocess.run(add_args, cwd=cwd, check=True, env=commit_env)
+        await run_off_loop(add_args, cwd=cwd, check=True, env=commit_env)
 
         # Commit
-        res = subprocess.run(
+        res = await run_off_loop(
             ["git", "commit", "-m", message],
             cwd=cwd,
             capture_output=True,
@@ -131,7 +134,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         # Resolve active branch if not explicitly given
         if not target_branch:
             try:
-                b_res = subprocess.run(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True, timeout=5)
+                b_res = await run_off_loop(["git", "branch", "--show-current"], cwd=cwd, capture_output=True, text=True, timeout=5)
                 target_branch = b_res.stdout.strip()
             except Exception:
                 target_branch = ""
@@ -139,7 +142,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         # Check if upstream tracking branch exists
         has_upstream = False
         try:
-            u_res = subprocess.run(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, capture_output=True, text=True, timeout=5)
+            u_res = await run_off_loop(["git", "rev-parse", "--abbrev-ref", "@{u}"], cwd=cwd, capture_output=True, text=True, timeout=5)
             has_upstream = (u_res.returncode == 0 and bool(u_res.stdout.strip()))
         except Exception:
             has_upstream = False
@@ -147,7 +150,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     # Retrieve the remote URL (used to push the URL directly so the auth
     # http.extraheader applies to exactly this target — see auth note below).
     try:
-        remote_res = subprocess.run(["git", "config", "--get", f"remote.{remote}.url"], cwd=cwd, capture_output=True, text=True, timeout=5)
+        remote_res = await run_off_loop(["git", "config", "--get", f"remote.{remote}.url"], cwd=cwd, capture_output=True, text=True, timeout=5)
         remote_url = remote_res.stdout.strip()
     except Exception:
         remote_url = ""
@@ -319,10 +322,10 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
                     # Verify the retry actually landed.
                     if target_branch:
                         try:
-                            head_sha = subprocess.run(
+                            head_sha = (await run_off_loop(
                                 ["git", "rev-parse", "HEAD"], cwd=cwd,
                                 capture_output=True, text=True, timeout=5,
-                            ).stdout.strip()
+                            )).stdout.strip()
                             if head_sha and _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
                                 return retried
                         except Exception:
@@ -343,14 +346,14 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         if action == "push" and target_branch:
             looks_noop = ("up-to-date" in output.lower()) or ("already up to date" in output.lower())
             try:
-                head_sha = subprocess.run(
+                head_sha = (await run_off_loop(
                     ["git", "rev-parse", "HEAD"], cwd=cwd,
                     capture_output=True, text=True, timeout=5,
-                ).stdout.strip()
-                ahead = subprocess.run(
+                )).stdout.strip()
+                ahead = (await run_off_loop(
                     ["git", "rev-list", "--count", f"origin/{target_branch}..HEAD"],
                     cwd=cwd, capture_output=True, text=True, timeout=5,
-                ).stdout.strip()
+                )).stdout.strip()
             except Exception:
                 head_sha, ahead = "", ""
             ahead_n = 0
@@ -397,7 +400,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             pull_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
             pull_cmd.extend(["pull", "--rebase", remote, target_branch or "main"])
 
-            subprocess.run(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
+            await run_off_loop(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
 
             # Retry push
             rc2, out2 = _run()
@@ -464,7 +467,7 @@ async def git_checkout(branch: str, create: bool = False) -> str:
     cwd = _get_workspace()
     cmd = ["git", "checkout", "-b", branch] if create else ["git", "checkout", branch]
     try:
-        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
+        res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=10)
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:
         return f"Error running git checkout: {e}"
@@ -474,7 +477,7 @@ async def git_merge(source_branch: str) -> str:
     """Merge a branch into the currently active local branch."""
     cwd = _get_workspace()
     try:
-        res = subprocess.run(["git", "merge", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
+        res = await run_off_loop(["git", "merge", source_branch], cwd=cwd, capture_output=True, text=True, timeout=15)
         return res.stdout.strip() or res.stderr.strip()
     except Exception as e:
         return f"Error merging branch {source_branch}: {e}"

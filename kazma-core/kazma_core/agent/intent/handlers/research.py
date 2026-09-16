@@ -80,7 +80,7 @@ async def run_research_deep(decision: TurnDecision, state: dict[str, Any], **ctx
         f"Research session started: {sess.id}",
         f"Topic: {topic}",
         f"Status: {sess.status} (stage: {sess.stage})",
-        f"The pipeline is running in background. Track progress via the Research panel",
+        "The pipeline is running in background. Track progress via the Research panel",
         f"or GET /api/research/sessions/{sess.id}",
     ]
 

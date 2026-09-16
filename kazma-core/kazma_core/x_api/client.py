@@ -185,7 +185,7 @@ class XClient:
         if resp.status_code == 429:
             retry_after = resp.headers.get("retry-after") or resp.headers.get("x-rate-limit-reset") or ""
             raise XApiError(
-                f"X rate limit (HTTP 429). Wait before retrying"
+                "X rate limit (HTTP 429). Wait before retrying"
                 + (f" (Retry-After {retry_after})" if retry_after else "")
                 + ". Kazma did not auto-retry.",
                 status=429,

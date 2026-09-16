@@ -264,7 +264,10 @@ async def supervisor_node(
     # ContextAuthority may still run for observability / needs_compaction
     # flag, but we never replace messages with an LLM summary mid-loop.
     try:
-        state_for_check = {**state, "messages": messages}
+        # (A `state_for_check = {**state, "messages": messages}` dict was built
+        # here and never read — a leftover from when this block still passed a
+        # state to the authority. should_compact takes `messages` directly.
+        # Removed 2026-09-16; it copied the whole state on every turn.)
         if authority is not None and hasattr(authority, "counter"):
             if authority.counter.should_compact(messages) or state.get("needs_compaction"):
                 breaker_reset = {

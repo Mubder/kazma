@@ -54,18 +54,33 @@ async def email_list(
         )
         if not msgs:
             return f"{banner}\nNo messages found in `{folder}`."
-        lines = [
+        header = [
             f"{banner}",
             f"### Emails in `{folder}` ({len(msgs)})",
             "",
+        ]
+        # Sender, subject and snippet are all attacker-controlled: a mailbox
+        # is the one inbound channel anyone on the internet can write to. Its
+        # sibling `email_get` fenced the body AND the subject while this
+        # listing returned both raw, so a payload in a subject line or the
+        # first 80 chars of a body reached the model unfenced — the cheapest
+        # injection in the product (audit 2026-09-16 F-2).
+        table = [
             "| id | flags | from | subject | date | labels | snippet |",
             "|----|-------|------|---------|------|--------|---------|",
         ]
         for m in msgs:
-            lines.append(m.short_row())
-        lines.append("")
-        lines.append("Use `email_get(message_id=...)` for full body.")
-        return "\n".join(lines)
+            table.append(m.short_row())
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        fenced = fence_untrusted(
+            "\n".join(table), source=f"email_list:{folder}"
+        )
+        return (
+            "\n".join(header)
+            + fenced
+            + "\n\nUse `email_get(message_id=...)` for full body."
+        )
     except Exception as exc:
         logger.exception("email_list failed")
         msg = str(exc)

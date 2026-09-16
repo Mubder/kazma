@@ -914,7 +914,7 @@ def _resolve_exec_act(profile, tool_name, args, *, audit, thread_id, tenant_id, 
             c.status = "aborted"; c.policy_decision = "deny"
             cid = create_commitment(c, cfg=cfg)
             logger.warning("[commitment] DENY exec — catastrophic pattern matched: %s", command[:80])
-            return EffectDecision("deny", f"exec denylist: catastrophic pattern in command",
+            return EffectDecision("deny", "exec denylist: catastrophic pattern in command",
                                   profile, audit, commitment_id=cid)
     # 2. cwd pin: if a cwd is provided, verify it's within the workspace root.
     cwd = args.get("cwd")

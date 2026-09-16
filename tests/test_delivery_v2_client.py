@@ -593,9 +593,30 @@ class TestUIAuditPhase3Fixes:
     """docs/audits/AUDIT_UI_DEEP_2026-08-26.md — Phase 3 (P2) contracts."""
 
     def test_voice_buttons_restored(self):
+        """The composer voice button is laid out, not hidden.
+
+        This used to assert the literal one-liner
+        ``.composer-voice-btn { display: inline-flex; }``. Commit ff42bc98
+        ("hide the red mic circle except while recording") expanded that rule
+        into a multi-line block with the SAME ``display: inline-flex`` — so
+        the contract held and the test went red anyway, because it was
+        matching formatting rather than the property. Read the base rule's
+        body and assert on what it declares.
+        """
+        import re
+
         v5 = (_UI / "static" / "css" / "kazma.v5.css").read_text(encoding="utf-8")
-        assert ".composer-voice-btn { display: inline-flex; }" in v5
-        assert ".composer-voice-btn { display: none; }" not in v5
+        # The base rule only — not `.composer-voice-btn.is-recording`, not
+        # `.composer-voice-btn svg`.
+        match = re.search(r"\.composer-voice-btn\s*\{([^}]*)\}", v5)
+        assert match, ".composer-voice-btn rule is missing from kazma.v5.css"
+        body = match.group(1)
+        assert "display: inline-flex" in body, (
+            f"the composer voice button is not laid out inline-flex: {body!r}"
+        )
+        assert "display: none" not in body, (
+            f"the composer voice button is hidden outright: {body!r}"
+        )
 
     def test_dead_topbar_css_pruned(self):
         css = (_UI / "static" / "css" / "kazma.css").read_text(encoding="utf-8")

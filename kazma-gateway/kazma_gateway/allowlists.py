@@ -72,10 +72,30 @@ def is_gateway_admin(sender_id: str, platform: str = "") -> bool:
 
     env_raw = (os.environ.get(GATEWAY_ADMINS_ENV) or "").strip()
     if env_raw:
-        env_tokens: set[str] = set()
+        sender_plat = (
+            platform or (sender_id.split(":", 1)[0] if ":" in sender_id else "")
+        ).strip().lower()
         for part in split_ids(env_raw):
-            env_tokens |= _candidate_tokens(part)
-        return bool(candidates & env_tokens)
+            if ":" in part:
+                # A qualified entry (`telegram:12345`) grants admin on THAT
+                # platform only. Expanding it to its bare tail — which is what
+                # _candidate_tokens does — meant `telegram:12345` also matched
+                # a Discord user whose snowflake happened to be 12345. Both
+                # platforms use numeric ids, so the collision is possible and
+                # silently grants admin on a platform the operator never named
+                # (audit 2026-09-16 F-8).
+                entry_plat, entry_id = part.split(":", 1)
+                if (
+                    entry_plat.strip().lower() == sender_plat
+                    and entry_id.strip()
+                    and entry_id.strip() in candidates
+                ):
+                    return True
+            elif part in candidates:
+                # An UNqualified entry (`12345`) is the operator saying "this
+                # id, wherever it appears" — honour it as written.
+                return True
+        return False
 
     plat = (platform or "").strip().lower()
     if not plat and ":" in sender_id:

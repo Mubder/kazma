@@ -106,7 +106,7 @@ async def _load_robots_checker(seed_url: str) -> Any:
         robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(robots_url)
+        validate_url(robots_url, block_unresolved=True)
         if _central_fetch is not None:
             fr = await _central_fetch(robots_url, purpose="crawl")
             body = fr.text if fr.ok else ""
@@ -143,7 +143,7 @@ async def _fetch_html(url: str) -> tuple[str | None, str]:
         from kazma_core.security.ssrf import SSRFError, resolve_redirects, validate_url
         from kazma_core.proxy.client import get_scraping_client
 
-        validate_url(url)
+        validate_url(url, block_unresolved=True)
         # Route through the proxy provider (opt-in) + rotate UA. The multi-page
         # spider is the highest block-risk, so proxying it is the biggest win.
         # Every redirect hop is SSRF-checked before the body fetch (audit F-08).
@@ -165,10 +165,24 @@ async def _fetch_html(url: str) -> tuple[str | None, str]:
             except Exception:
                 target = url
             r = await client.get(target)
+            # Post-connect peer check (audit 2026-09-16 F-6). Every check
+            # above this line is a DNS lookup made BEFORE the socket opens;
+            # a host that answers the validating query with a public A record
+            # and the connecting query with 169.254.169.254 passes all of
+            # them. read_url has asserted the real peer since audit F-08 —
+            # crawl_site, the higher-volume spider, never did.
+            from kazma_core.security.ssrf import assert_peer_public
+            from kazma_core.proxy.client import get_active_proxy_url
+
+            try:
+                assert_peer_public(r, url=target, via_proxy=bool(get_active_proxy_url()))
+            except SSRFError as exc:
+                logger.warning("[crawl_site] peer blocked for %s: %s", url, exc)
+                return None, url
             # Re-validate final URL after redirects
             final = str(r.url)
             try:
-                validate_url(final)
+                validate_url(final, block_unresolved=True)
             except SSRFError:
                 return None, url
             if r.status_code >= 400:
@@ -247,7 +261,7 @@ async def crawl_site(
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(start)
+        validate_url(start, block_unresolved=True)
     except Exception as exc:
         return f"Error: {exc}"
 
@@ -280,7 +294,7 @@ async def crawl_site(
         try:
             from kazma_core.security.ssrf import validate_url
 
-            validate_url(url)
+            validate_url(url, block_unresolved=True)
         except Exception:
             results.append({"url": url, "status": "blocked_ssrf", "chars": 0, "path": ""})
             continue

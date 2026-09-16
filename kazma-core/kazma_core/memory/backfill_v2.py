@@ -400,7 +400,7 @@ def _backfill_memories_to_episodes(primary: sqlite3.Connection) -> dict[str, int
             logger.info("[backfill] no `memories` table — skipping")
             return stats
         rows = legacy.execute(
-            f"SELECT * FROM memories"
+            "SELECT * FROM memories"
         ).fetchall()
         now = time.time()
         for r in rows:

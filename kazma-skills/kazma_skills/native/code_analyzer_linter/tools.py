@@ -10,6 +10,11 @@ from pathlib import Path
 from kazma_core.agent.tool_registry import _workspace_scope_error
 from kazma_core.tools.file_write import _get_workspace
 
+# `subprocess` stays imported for TimeoutExpired / PIPE; every RUN goes
+# through run_off_loop so a 60s pytest does not freeze the whole server
+# (audit 2026-09-16 F-4).
+from kazma_skills.native._subprocess import run_off_loop
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,7 +49,7 @@ async def lint_code(path: str) -> str:
 
     cmd = [ruff_path, "check", str(p)]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        res = await run_off_loop(cmd, capture_output=True, text=True, timeout=30)
         # ruff check returns exit code 1 if errors found, which is normal behavior
         output = res.stdout.strip() or res.stderr.strip()
         if res.returncode == 0:
@@ -78,7 +83,7 @@ async def format_code(path: str) -> str:
 
     cmd = [ruff_path, "format", str(p)]
     try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        res = await run_off_loop(cmd, capture_output=True, text=True, timeout=30)
         output = res.stdout.strip() or res.stderr.strip()
         if res.returncode == 0:
             return f"Formatting successfully completed on: {path}\n{output}"
@@ -119,7 +124,7 @@ async def run_unit_tests(test_path: str) -> str:
 
     try:
         # Limit test suite execution to 60 seconds to prevent hanging
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        res = await run_off_loop(cmd, capture_output=True, text=True, timeout=60)
         output = res.stdout.strip()
         err = res.stderr.strip()
         combined = f"{output}\n{err}".strip()

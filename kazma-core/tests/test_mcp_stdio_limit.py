@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -55,6 +56,18 @@ async def test_connect_stdio_passes_raised_limit(monkeypatch) -> None:
     assert captured["kwargs"]["limit"] == 4 * 1024 * 1024
 
 
+@pytest.mark.skipif(
+    os.name != "nt",
+    reason=(
+        "Asserts nvm-windows shim handling, which needs Windows PATH *semantics*, "
+        "not just sys.platform. The production code takes os.path.dirname of "
+        r"'C:\nvm4w\nodejs\npx.cmd'; on POSIX that is '' (no forward slashes), so "
+        "the prepend is skipped and the assertion cannot hold however much we "
+        "monkeypatch sys.platform. Covered by the windows-selector-loop CI job. "
+        "Surfaced 2026-09-16 when the Tests job was repaired and ran on Linux "
+        "for the first time since 30398512."
+    ),
+)
 @pytest.mark.asyncio
 async def test_win32_which_hit_prepends_shim_dir_without_unbound_os(
     monkeypatch,

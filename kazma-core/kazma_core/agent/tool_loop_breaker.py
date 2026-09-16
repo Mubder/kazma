@@ -258,7 +258,7 @@ def tool_signature(name: str, arguments: Any) -> str:
         canon = _json.dumps(arguments or {}, sort_keys=True, default=str)
     except Exception:
         canon = repr(arguments)
-    digest = hashlib.sha1(f"{name}:{canon}".encode("utf-8", "replace")).hexdigest()
+    digest = hashlib.sha1(f"{name}:{canon}".encode("utf-8", "replace"), usedforsecurity=False).hexdigest()
     return digest[:16]
 
 

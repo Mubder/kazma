@@ -229,8 +229,14 @@ async def test_bus_dual_racing_and_pending_result():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_discord_interaction_component_removal():
+async def test_discord_interaction_component_removal(monkeypatch):
     from kazma_gateway.adapters.discord import DiscordAdapter
+
+    # Answering a swarm/HITL approval is admin-grade since audit 2026-09-16
+    # F-8 (it was previously less privileged than installing a package). This
+    # test drives an allow_all adapter, which is exactly the posture the gate
+    # is there to close, so it must name an admin to reach the ack path.
+    monkeypatch.setenv("KAZMA_GATEWAY_ADMINS", "discord:user_1")
 
     adapter = DiscordAdapter(token="fake", allow_all=True)
     ack_payloads = []

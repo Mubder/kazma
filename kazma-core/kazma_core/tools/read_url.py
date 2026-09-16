@@ -622,7 +622,7 @@ async def _try_jina_reader(url: str) -> str | None:
         import httpx
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url)
+        validate_url(url, block_unresolved=True)
         # Proxy is public; still SSRF-check the *target* URL above.
         jina_url = f"https://r.jina.ai/{url}"
         token = (os.environ.get("JINA_API_KEY") or os.environ.get("KAZMA_JINA_API_KEY") or "").strip()
@@ -665,7 +665,7 @@ async def _try_firecrawl(url: str) -> str | None:
         import httpx
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url)
+        validate_url(url, block_unresolved=True)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -827,7 +827,7 @@ async def _fetch_full_text(url: str) -> str:
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
 
-        validated_ips = validate_url(url) or ()
+        validated_ips = validate_url(url, block_unresolved=True) or ()
     except SSRFError as exc:
         return f"Error: {exc}"
     except ValueError as exc:
@@ -921,7 +921,7 @@ async def _fetch_full_text(url: str) -> str:
                 try:
                     from kazma_core.security.ssrf import SSRFError, validate_url
 
-                    validated_ips = validate_url(redirect_url) or ()
+                    validated_ips = validate_url(redirect_url, block_unresolved=True) or ()
                 except SSRFError as exc:
                     return f"Error: Redirect blocked (SSRF): {exc}"
                 except ValueError as exc:
@@ -1300,11 +1300,13 @@ async def list_research_chunks(
         return "Error: file is empty."
 
     n = max(1, (total + size - 1) // size)
-    lines = [
+    header = [
         f"# Research chunks for `{path}`",
         f"Total chars: {total} · chunk_size: {size} · chunks: {n}",
         "",
     ]
+    # 120-char previews of remote-authored text — fenced below (F-2).
+    lines: list[str] = []
     for i in range(n):
         start = i * size
         end = min(total, start + size)
@@ -1312,10 +1314,15 @@ async def list_research_chunks(
         lines.append(f"## chunk_index={i}  [{start}:{end}]")
         lines.append(f"  {preview}…")
         lines.append("")
-    lines.append(
-        f"Read one chunk: read_research_chunk(path='{path}', chunk_index=0, chunk_size={size})"
+    footer = (
+        f"\nRead one chunk: read_research_chunk(path='{path}', "
+        f"chunk_index=0, chunk_size={size})"
     )
-    return "\n".join(lines)
+    return (
+        "\n".join(header)
+        + fence_untrusted("\n".join(lines), source=f"research_index:{path}")
+        + footer
+    )
 
 
 async def read_research_chunk(
@@ -1379,11 +1386,13 @@ async def summarize_research_file(
 
     total = len(body)
     n = max(1, (total + size - 1) // size)
-    lines = [
+    header = [
         f"# Extractive summary of `{path}`",
         f"Total chars: {total} · chunks: {n} (showing up to {limit})",
         "",
     ]
+    # Remote-authored headings + 200-char previews — fenced below (F-2).
+    lines: list[str] = []
     for i in range(min(n, limit)):
         start = i * size
         end = min(total, start + size)
@@ -1403,10 +1412,15 @@ async def summarize_research_file(
         lines.append("")
     if n > limit:
         lines.append(f"… {n - limit} more chunks not shown.")
-    lines.append(
-        "Next: read_research_chunk for important indices, or digest_research_file for a full digest."
+    footer = (
+        "\nNext: read_research_chunk for important indices, "
+        "or digest_research_file for a full digest."
     )
-    return "\n".join(lines)
+    return (
+        "\n".join(header)
+        + fence_untrusted("\n".join(lines), source=f"research_summary:{path}")
+        + footer
+    )
 
 
 async def digest_research_file(
@@ -1443,17 +1457,21 @@ async def digest_research_file(
         return "Error: file is empty."
 
     n = max(1, (total + size - 1) // size)
-    parts: list[str] = [
+    header: list[str] = [
         f"# Research digest of `{path}`",
         f"Source chars: {total} · chunks processed: {n} · output cap: {out_cap}",
         "",
         "## Key points (extractive)",
         "",
     ]
+    # Everything appended to `parts` below is verbatim remote-authored text
+    # and is fenced before it is returned (audit 2026-09-16 F-2). Keep the
+    # trusted scaffolding in `header`/`footer`, never in here.
+    parts: list[str] = []
 
     # Budget per chunk for the digest body
     per = max(80, min(400, out_cap // max(n, 1)))
-    used = sum(len(p) for p in parts)
+    used = sum(len(p) for p in header)
 
     for i in range(n):
         if used >= out_cap - 200:
@@ -1493,12 +1511,15 @@ async def digest_research_file(
         parts.append(block)
         used += len(block) + 1
 
-    parts.append("")
-    parts.append(
-        "Digest is extractive only. For quotes/details: "
+    footer = (
+        "\nDigest is extractive only. For quotes/details: "
         f"read_research_chunk(path='{path}', chunk_index=N)."
     )
-    out = "\n".join(parts)
-    if len(out) > out_cap:
-        out = out[:out_cap] + "\n[digest hard-capped]"
-    return out
+    body = "\n".join(parts)
+    if len(body) > out_cap:
+        body = body[:out_cap] + "\n[digest hard-capped]"
+    # The digest is verbatim sentences lifted out of a fetched page. It used
+    # to be returned raw while its sibling read_research_chunk fenced — and
+    # the tool descriptions steer the model to THIS one for research, so the
+    # recommended path was the unfenced one (audit 2026-09-16 F-2).
+    return "\n".join(header) + fence_untrusted(body, source=f"research_digest:{path}") + footer

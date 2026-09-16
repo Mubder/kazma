@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import json
 import re
@@ -441,6 +442,46 @@ async def _query_mongodb(db_uri: str, query: str, params: list | None, limit: in
         return f"Mongo Error: query failed. Detail: {exc}"
 
 
+def _remote_host_error(db_uri: str, dialect: str) -> str | None:
+    """Gate + log outbound database connections (audit 2026-09-16 F-6).
+
+    The SQLite path is workspace-scoped and path-validated. The remote
+    dialects are not scoped to anything: the model supplies a whole URI, so a
+    prompt-injected agent can open a connection to any host on the internet
+    or the local network, at tool tier ``read`` with no HITL prompt.
+
+    The reads themselves are already constrained (SELECT/WITH only), so this
+    is not sized as a block-by-default — an operator legitimately points this
+    at localhost, a LAN warehouse, or a managed cloud instance, and defaulting
+    to deny would break all three. Instead:
+
+      * every remote connection is logged with its host, so it is *visible*;
+      * ``KAZMA_DB_CLIENT_ALLOWED_HOSTS`` (comma-separated hostnames) turns it
+        into a real allowlist for anyone who wants one.
+    """
+    from urllib.parse import urlparse
+
+    host = (urlparse(db_uri).hostname or "").strip().lower()
+    if not host:
+        return "Error: could not parse a host from the database URI."
+
+    allowed_raw = (os.environ.get("KAZMA_DB_CLIENT_ALLOWED_HOSTS") or "").strip()
+    if allowed_raw:
+        allowed = {h.strip().lower() for h in allowed_raw.split(",") if h.strip()}
+        if host not in allowed:
+            logger.warning(
+                "[database_client] refused %s connection to %r "
+                "(not in KAZMA_DB_CLIENT_ALLOWED_HOSTS)", dialect, host,
+            )
+            return (
+                f"Error: host {host!r} is not in KAZMA_DB_CLIENT_ALLOWED_HOSTS. "
+                "Add it there to allow this connection."
+            )
+
+    logger.info("[database_client] %s query -> host %r", dialect, host)
+    return None
+
+
 async def execute_db_query_any(
     db_uri: str,
     query: str,
@@ -453,6 +494,10 @@ async def execute_db_query_any(
     JSON filter document and ``params[0]`` (optional) names the collection.
     """
     dialect = _detect_dialect(db_uri)
+    if dialect != "sqlite":
+        host_err = _remote_host_error(db_uri, dialect)
+        if host_err:
+            return host_err
     if dialect == "mongodb":
         return await _query_mongodb(db_uri, query, params, limit)
 

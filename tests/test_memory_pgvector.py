@@ -43,7 +43,17 @@ def _cfg(**kwargs: Any) -> dict[str, Any]:
 
 
 def test_pgvector_not_forced_without_dsn(monkeypatch) -> None:
+    """Establish 'no DSN' here rather than relying on conftest to strip it.
+
+    This used to lean on the root conftest force-stripping KAZMA_DATABASE_URL
+    for every run. Since audit 2026-09-16 F-7 the CI Postgres job opts out of
+    that strip (KAZMA_TEST_ALLOW_REAL_DB=1) so it can talk to a real server —
+    at which point a test named "without_dsn" ran WITH one and failed, having
+    never stated the precondition its own name promises.
+    """
     monkeypatch.delenv("KAZMA_PGVECTOR", raising=False)
+    monkeypatch.delenv("KAZMA_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     out = _cfg()
     _apply_pgvector_scale_defaults(out)
     assert out["vector"]["provider"] == "sqlite_vec"
@@ -51,8 +61,11 @@ def test_pgvector_not_forced_without_dsn(monkeypatch) -> None:
 
 
 def test_pgvector_auto_selects_hybrid_when_postgres_dsn(monkeypatch) -> None:
-    """Pytest strips KAZMA_DATABASE_URL; the production helper still reads it.
-    Here the DSN comes from memory.backends.state.url (Settings / same DSN).
+    """The DSN comes from memory.backends.state.url (Settings / same DSN).
+
+    Note: pytest normally strips KAZMA_DATABASE_URL, but not under the CI
+    Postgres job's KAZMA_TEST_ALLOW_REAL_DB opt-in — so do not rely on that
+    strip for a precondition (audit 2026-09-16 F-7).
     """
     monkeypatch.delenv("KAZMA_PGVECTOR", raising=False)
     out = _cfg(

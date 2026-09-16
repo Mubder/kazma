@@ -85,11 +85,40 @@ def chunk_files(files: list[Path], chunks: int) -> list[list[Path]]:
     return [c for c in out if c]
 
 
+#: pytest's final tally, e.g. "==== 2526 passed, 12 skipped in 84.21s ====".
+#: Anchored on the trailing "in <n>s" so it cannot match a count mentioned in
+#: ordinary test output.
+_SUMMARY_LINE_RE = re.compile(
+    r"^.*?\b\d+ (?:passed|failed|error|errors|skipped|xfailed|xpassed)\b"
+    r".*?\bin \d[\d.]*s.*$",
+    re.M,
+)
+
+
 def _parse_summary(log: str) -> dict[str, int]:
+    """Counts from pytest's summary line, wherever it is in the output.
+
+    This used to read only ``log[-2500:]``. That is fine when the tally is the
+    last thing printed and silently wrong when it is not: a long warnings
+    block after it pushes the tally out of the window, nothing parses, and the
+    chunk records 0 passed / 0 failed. The caller then sees empty counts,
+    concludes the chunk "lost its output", and retries all ~155 of its files
+    one process at a time.
+
+    That is what chunk 00 did on every CI run up to 2026-09-16 -- reported
+    "OK 0p/0f (155 files)" and then "crashed/timed out (exit=1)" on a suite
+    that was entirely green, roughly doubling the job's wall clock and making
+    a healthy chunk look like a crash. The existing comment blamed "heavy
+    concurrency"; the cause was this 2500-character window.
+
+    Locate the tally instead of hoping it is near the end, and read the LAST
+    one (a chunk runs one pytest, but retries append).
+    """
+    matches = _SUMMARY_LINE_RE.findall(log)
+    window = matches[-1] if matches else log[-4000:]
     counts: dict[str, int] = {}
-    tail = log[-2500:]
     for kind in ("passed", "failed", "skipped", "error", "deselected", "xfailed", "xpassed"):
-        mm = re.search(rf"(\d+) {kind}", tail)
+        mm = re.search(rf"(\d+) {kind}", window)
         if mm:
             counts[kind] = int(mm.group(1))
     return counts
@@ -250,9 +279,34 @@ def main() -> int:
 
     # ── Retry crashed chunks file-by-file to isolate poison ────────────────
     poison: list[str] = []
+    # Full verbose rerun output per poison file, keyed by relative path.
+    #
+    # The diagnostic rerun below already captures this — including the
+    # faulthandler stack that Python prints on a fatal signal — and the code
+    # used to extract one line from it ("last test line") and discard the
+    # rest. For a segfault that discarded part IS the diagnosis, which made
+    # every native crash un-actionable from a CI log: on 2026-09-16
+    # tests/test_reply_sink.py was reported as `exit=-11` with nothing to act
+    # on. A tail of it is printed with the POISON list now.
+    poison_diag: dict[str, str] = {}
     for r in crashed_chunks:
         print(f"[fast-test] chunk {r['idx']:02d} crashed/timed out "
               f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
+        # Show WHY. The chunk's own log was captured and then dropped on the
+        # floor, so "crashed/timed out (exit=1)" arrived with no evidence
+        # whatsoever — and a chunk that genuinely died looked identical to one
+        # whose tally simply failed to parse. Chunks 00 and 03 have reported
+        # `0p/0f` on every run observed to date and nobody could say why,
+        # because this is the only place that ever held the answer
+        # (2026-09-16). Same lesson as the POISON diagnostics below: the
+        # runner already has the evidence; print it.
+        _tail = [ln for ln in (r["log"] or "").splitlines() if ln.strip()][-25:]
+        if _tail:
+            print(f"[fast-test] --- chunk {r['idx']:02d}: last 25 lines ---")
+            for _ln in _tail:
+                print(f"  | {_ln}")
+        else:
+            print(f"[fast-test] --- chunk {r['idx']:02d} produced NO output at all ---")
         for f in r["files"]:
             code, log = run_pytest(
                 [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
@@ -281,6 +335,7 @@ def main() -> int:
                     "unknown",
                 )
                 poison.append(f"{f.relative_to(REPO)} (hang; last test line: {last})")
+                poison_diag[str(f.relative_to(REPO))] = diag
             else:
                 # One extra chance for the crash class: the native-lib
                 # segfaults are INTERMITTENT — a file that crashed standalone
@@ -319,6 +374,7 @@ def main() -> int:
                         f"{f.relative_to(REPO)} (exit={code}, rerun exit={code2}; "
                         f"last test line: {last})"
                     )
+                    poison_diag[str(f.relative_to(REPO))] = diag
 
     wall = time.time() - t0
     print(f"\n[fast-test] TOTALS in {wall:.0f}s: " +
@@ -344,6 +400,17 @@ def main() -> int:
         print(f"\n[fast-test] POISON files (crash/hang even standalone):")
         for p in poison:
             print(f"  POISON {p}")
+        # Tail of each poison file's diagnostic rerun. For a segfault this is
+        # the faulthandler stack — the only thing that makes `exit=-11`
+        # actionable from a CI log (2026-09-16). Bounded so a chatty hang
+        # cannot flood the run log.
+        for rel, diag in poison_diag.items():
+            tail = [ln for ln in diag.splitlines() if ln.strip()][-40:]
+            if not tail:
+                continue
+            print(f"\n[fast-test] --- {rel}: last 40 lines of the diagnostic rerun ---")
+            for ln in tail:
+                print(f"  | {ln}")
     code = suite_exit_code(totals, failed=all_failed, poison=poison)
     passed = int(totals.get("passed", 0) or 0)
     if code == 2:

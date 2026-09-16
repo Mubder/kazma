@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import time
 from typing import Any
 
@@ -795,7 +794,6 @@ class TelegramAdapter(BaseAdapter):
             # Always require a webhook secret when this route is mounted (audit H2).
             # Polling mode never hits this path.
             import hmac
-            import secrets as _secrets
 
             if not self._webhook_secret:
                 # No secret configured → Telegram never sends the
@@ -1400,6 +1398,38 @@ class TelegramAdapter(BaseAdapter):
         data = decode_callback_data(data)
         action = parse_callback_data(data)
         text = action.text
+
+        # ── Admin gate for approval buttons (audit 2026-09-16 F-8) ──────
+        # Audit H-8 made package installation admin-grade but stopped there,
+        # which left the privilege model upside down: pressing **Approve** on
+        # a `shell_exec`, `vault_retrieve`, `email_send` or `git_push` card
+        # was LESS privileged than installing a package. Approving a danger
+        # tool is the single most powerful button in the product — it is the
+        # one that converts "the agent wants to" into "the agent did".
+        #
+        # In the shipped posture (allowed_users configured, no
+        # KAZMA_GATEWAY_ADMINS) is_gateway_admin returns True for exactly the
+        # users who could already approve, so this changes nothing. It bites
+        # only in allow_all, where it is supposed to: every member of a group
+        # chat could otherwise answer the operator's approvals.
+        if action.kind in ("hitl", "swarm"):
+            from kazma_gateway.allowlists import is_gateway_admin
+
+            _approver = f"telegram:{from_user.get('id', '')}"
+            if not is_gateway_admin(_approver, "telegram"):
+                logger.warning(
+                    "[telegram] Non-admin user %s tried to answer a %s approval.",
+                    from_user.get("id"),
+                    action.kind,
+                )
+                self._spawn(
+                    self._answer_callback_query(
+                        cb_id,
+                        "Not authorized: approving a danger tool requires admin. "
+                        "Set KAZMA_GATEWAY_ADMINS or the platform user allowlist.",
+                    )
+                )
+                return
 
         # Dismiss loading indicator with status text
         alert_text = None

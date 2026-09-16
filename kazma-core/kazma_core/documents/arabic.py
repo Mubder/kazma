@@ -73,7 +73,15 @@ Direction = str  # "ltr" | "rtl"
 
 # Explicit bidi formatting controls. They carry no content and corrupt both
 # search folding and the shaping pipeline's index alignment.
-_BIDI_CONTROLS = "‎‏؜‪‫‬‭‮⁦⁧⁨⁩"
+#
+# Written as escapes, not literals. As literal characters these twelve are
+# invisible in every editor, so the line could not be read as written and
+# bandit flagged the file under B613 (Trojan Source) -- the one rule you
+# never want to suppress, because suppressing it is how a real one hides.
+# Same twelve codepoints, now legible:
+#   U+200E/200F LRM/RLM, U+061C ALM, U+202A-202E embeddings+overrides,
+#   U+2066-2069 isolates.
+_BIDI_CONTROLS = "\u200e\u200f\u061c\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
 _BIDI_CONTROL_RE = re.compile(f"[{_BIDI_CONTROLS}]")
 
 # Arabic Presentation Forms-A/B — what a "visual glyph dump" extractor emits.

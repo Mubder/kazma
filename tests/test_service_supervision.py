@@ -483,11 +483,26 @@ def test_reaper_kills_a_live_orphan(monkeypatch, tmp_path):
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: alive["v"])
 
     def _run(cmd, **kw):
-        killed.append(cmd)
+        killed.append([str(c) for c in cmd])
         alive["v"] = False
         return type("R", (), {"returncode": 0})()
 
     monkeypatch.setattr(guard.subprocess, "run", _run)
+
+    # reap_orphan has TWO branches: `taskkill` on nt, `os.killpg` on POSIX.
+    # This test patched only the Windows one, so on Linux it hit the real
+    # os.killpg against a fabricated pid and died with ESRCH ("[Errno 3] No
+    # such process"). Patch the POSIX pair as well and assert on the pid
+    # rather than on which syscall got there — the contract is "the orphan
+    # is killed", not "taskkill was spawned".
+    monkeypatch.setattr(guard.os, "getpgid", lambda pid: pid, raising=False)
+
+    def _killpg(pgid, sig):
+        killed.append(["killpg", str(pgid), str(sig)])
+        alive["v"] = False
+
+    monkeypatch.setattr(guard.os, "killpg", _killpg, raising=False)
+
     guard.reap_orphan(guard.GuardLog(tmp_path / "g.log"))
     assert killed, "a live orphan must be killed before spawning a second server"
     assert "4321" in " ".join(killed[0])
@@ -795,6 +810,11 @@ def test_only_python_holders_are_killed(monkeypatch, tmp_path):
     killed: list[list[str]] = []
 
     def _run(cmd, **kw):
+        # `ps -p PID -o comm=` is the POSIX image-name lookup, not a kill —
+        # recording it as one made this negative control fail on Linux (see
+        # test_python_holder_is_killed for the same defect).
+        if cmd and cmd[0] in ("tasklist", "ps"):
+            return type("R", (), {"stdout": "sqlservr.exe", "returncode": 0})()
         killed.append(list(cmd))
         return type("R", (), {"stdout": "sqlservr.exe"})()
 
@@ -835,13 +855,32 @@ def test_python_holder_is_killed(monkeypatch, tmp_path):
     killed: list[list[str]] = []
 
     def _run(cmd, **kw):
+        # The image-name LOOKUP is a subprocess call too, and it is not a
+        # kill. This stub modelled only the Windows lookup (`tasklist`), so
+        # on POSIX the `ps -p PID -o comm=` probe fell through to the kill
+        # branch and returned an empty name — `_is_reapable_image("")` is
+        # False, so the holder was never reaped and the assert below failed.
+        # Invisible until CI's Tests job was repaired (2026-09-16), because
+        # the job had not run since 30398512.
         if cmd and cmd[0] == "tasklist":
             return type("R", (), {"stdout": "python.exe  4242", "returncode": 0})()
+        if cmd and cmd[0] == "ps":
+            # `ps -p PID -o comm=` prints the bare command name.
+            return type("R", (), {"stdout": "python3\n", "returncode": 0})()
         killed.append(cmd)
         return type("R", (), {"stdout": "", "returncode": 0})()
 
     monkeypatch.setattr(guard.subprocess, "run", _run)
     monkeypatch.setattr(guard, "_pid_alive", lambda pid: False)
+    # POSIX kills with os.kill(pid, SIGKILL), not taskkill. Unpatched, that
+    # runs for real against the fabricated pid 4242 and raises
+    # ProcessLookupError, which reap_port_holder catches and reports as a
+    # failed reap -> returns False. Record it like the Windows branch.
+    monkeypatch.setattr(
+        guard.os, "kill",
+        lambda pid, sig: killed.append(["kill", str(pid), str(sig)]),
+        raising=False,
+    )
     log = guard.GuardLog(tmp_path / "g.log")
     assert guard.reap_port_holder("http://127.0.0.1:9090/health/ready", log) is True
     assert killed, "a python squatter on our own port must be cleared"

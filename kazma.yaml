@@ -192,6 +192,7 @@ safety:
     - python_exec
     - request_path_access
     - run_tests
+    - run_unit_tests
     - schedule_task
     - send_file
     - send_message

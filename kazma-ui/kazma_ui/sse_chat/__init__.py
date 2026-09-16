@@ -2008,7 +2008,6 @@ def create_sse_chat_router(
         from kazma_ui.reply_sink import resolve_reply_turn as _resolve_steer_turn
         from kazma_ui.sse_chat._streaming import (
             _drive_graph_to_journal,
-            mark_thread_unpaused,
         )
 
         resume_input = build_resume_command(action="apply")

@@ -49,12 +49,10 @@ import logging
 import queue
 import threading
 import time
-import typing as _typing
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any
 
 __all__ = [
     "LocalTool",
@@ -62,6 +60,17 @@ __all__ = [
     "get_tool_registry",
     "reset_permission_manager_cache",
     "tool",
+    # ── Compatibility re-exports ────────────────────────────────────────
+    # These live in tool_schema / tool_scope but a dozen call sites (most of
+    # kazma_skills.native.*) import them from HERE, because this module was
+    # their original home. They are listed in __all__ deliberately: without
+    # it they look unused to a linter, and `ruff --select F401 --fix` deletes
+    # the import line and breaks every native skill at import time — which is
+    # exactly what happened during the 2026-09-16 audit cleanup, caught by
+    # tests/test_imports.py. If you want them gone, move the call sites first.
+    "_is_under_agent_skill_dir",
+    "_python_type_to_json_schema",
+    "_workspace_scope_error",
 ]
 
 logger = logging.getLogger(__name__)

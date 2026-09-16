@@ -157,7 +157,20 @@ async def close_shared_checkpoints() -> None:
                             pass
                         done.set()
 
-                    threading.Thread(target=_close, daemon=True).start()
+                    # Retain the handle and actually wait on `done` (audit
+                    # 2026-09-16). The Event above was created for exactly
+                    # this and then never waited on, so the close raced the
+                    # rest of teardown with nothing able to join it. An
+                    # unretained daemon thread still touching a SQLite
+                    # connection while the process tears down is the same
+                    # shape that segfaulted CPython in ops_alerts.
+                    closer = threading.Thread(target=_close, daemon=True)
+                    closer.start()
+                    if not done.wait(timeout=5.0):
+                        logger.debug(
+                            "[checkpoints_shared] close for %s did not finish "
+                            "in 5s; leaving it to the daemon thread", key,
+                        )
             except Exception:
                 logger.debug("[checkpoints_shared] close failed for %s", key, exc_info=True)
     _refcounts.clear()

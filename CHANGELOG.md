@@ -1,5 +1,128 @@
 # CHANGELOG
 
+## Deep audit 2026-09-16: seven defects that every gate we had said were fine
+
+A cold-read audit of the whole tree. Every finding below shipped, and every
+one of them was green in CI. The fixes are listed with the gate that should
+have caught them, because in six of seven cases one existed and was looking
+at the wrong thing.
+
+**F-1 — three background loops had never run in production.** The swarm
+maintenance watchdog (audit H-9), the checkpoint retention sweep (M-G1) and
+the liveness heartbeat (M-P6) were started from `_setup_swarm()`, a
+**synchronous** constructor method. `main()` calls `create_app()` before
+`uvicorn.run()`, so there is no running event loop; every one of them raised
+`RuntimeError: no running event loop`, was caught by a broad `except
+Exception`, logged at warning, and never retried. Consequences, worst first:
+`kazma migrate import`'s live-server interlock reads a fresh
+`system.heartbeat.epoch`, which was therefore **never written** — the guard
+against swapping databases out from under a running server could not fire.
+This install's store had no such key at all, and `checkpoints.db` had grown
+to 20 MB with its deleter inert. Moved to `_start_background_loops()` on the
+async lifespan. Also fixed: `_heartbeat_started` was latched to `True`
+*before* the attempt, so a failed start permanently suppressed every retry.
+
+**F-2 — the promoted research path bypassed the prompt fence.** Fencing
+untrusted tool output is the project's headline security claim.
+`read_research_chunk` fenced; `digest_research_file`,
+`summarize_research_file` and `list_research_chunks` returned remote-authored
+text verbatim — and the tool description tells the model "for research: prefer
+read_url_to_file then digest_research_file", so the *recommended* path was the
+unfenced one. `email_list` had the same shape: `email_get` fenced body and
+subject, the listing returned sender, subject and an 80-char body snippet raw,
+and only the snippet stripped newlines — so a newline in a **subject** broke
+out of the markdown row and forged free-form lines the model read as the tool
+speaking. All now fence, and table cells are flattened and pipe-escaped. The
+gate that passed throughout asserted `"fence_untrusted" in src`: one fenced
+sibling in a 1,500-line module satisfied it. It is now per-function and closed
+by default — an unclassified public tool coroutine fails the gate.
+
+**F-3 — `run_unit_tests` was arbitrary code execution at the `read` tier.**
+pytest imports `conftest.py` and every collected module. It was the only tool
+in the registry classified `EffectKind.EXEC` at the `SAFE` security tier, with
+no approval, because `TOOL_TIERS` and `kazma.yaml` still gated `run_tests` —
+the pre-rename name, which is not a registered tool and so gated nothing. Now
+`danger` and canonical. A new test asserts the general form, so the next
+rename cannot reopen it.
+
+**F-4 — twenty `subprocess.run` calls on the event loop.** In agent tools,
+with timeouts up to **90 seconds** (`install_python_packages`,
+`install_npm_packages`), 60s (`run_unit_tests`), 30s (git push/pull). Each one
+froze every SSE chat stream, `/health`, and the HITL approval endpoint for its
+whole duration — and since `main()` pins `ws_ping_interval=20.0`, the protocol
+pings that Turn Delivery V2 relies on could not fire either, so live sockets
+were culled mid-turn by a `pip install`. `shell_exec` in core had used
+`asyncio.to_thread` all along; the skills layer never adopted it. All twenty
+now go through `kazma_skills.native._subprocess.run_off_loop`. The gate that
+scans those exact files for blocking calls knew only `sqlite3.connect`; it now
+names subprocess, sync HTTP, `time.sleep` and the non-SQLite drivers too.
+
+**F-5 — a new danger tool never reaches an existing installation.**
+`ConfigStore.reconcile_from_yaml` seeds only keys that are *absent* ("existing
+DB keys are never overwritten"), so once an install has a
+`safety.require_approval_for` row, every tool added to
+`CANONICAL_DANGER_TOOLS` afterwards is invisible to it — forever, across
+upgrades, with no migration that could fix it. Found live: a store holding 56
+of 57 canonical tools, permanently missing `file_apply_patch_set`, warning
+about it at every boot. The canonical floor is now **on by default**
+(`KAZMA_HITL_CANONICAL_FLOOR=0` is an explicit, warned opt-out), so the
+effective list can never be narrower than canonical. Separately,
+`config_schema.SafetyConfig` held a **fourth** hand-maintained copy of the
+list, 25 entries behind and still naming three tools that no longer exist; it
+now derives from the source of truth.
+
+**F-6 — SSRF guards were strongest on the lowest-risk callers.**
+`validate_url` fails *open* when a host does not resolve unless passed
+`block_unresolved=True`. Model discovery, browser automation and gateway
+attachments passed it; every LLM-facing fetcher — `crawl_site`,
+`knowledge_ingest_url`/`_site`, `vision_analyze`, `read_url` — did not. Worse,
+only `read_url` asserted the peer it actually connected to, so the others were
+open to DNS rebinding between the check and the socket. All now block
+unresolved hosts and assert the connected peer.
+
+**F-7 — CI gates that could not fail.** The job named `Security Scan` ended
+both bandit invocations in `|| true`; it was green no matter what. Un-gated,
+and the nine real findings fixed rather than suppressed: five non-security
+MD5/SHA1 uses annotated `usedforsecurity=False`, the FTP backup path upgraded
+to **FTPS** with a loud warned fallback (a plaintext offsite backup put the
+operator's password and a full copy of the install on the wire), and
+`documents/arabic.py`'s twelve literal bidi control characters rewritten as
+escapes — B613 is the one rule you never suppress, because suppressing it is
+how a real Trojan Source hides. Also: README claimed `Metrics auto-verified
+from METRICS.md` above figures that disagreed with it on every number (7,346
+vs 7,659 tests, ~409K vs 430K LOC, 3,266 vs 3,404 commits) — the generator now
+syncs README and CI gates on a race-free README check. Added a **Postgres CI
+job** (the whole `*_pg.py` tier, ~2,400 LOC shipped as the supported
+multi-replica mode, ran in no job at all) and wired the three orphaned
+`tests/e2e` suites that `fast_test.py` excludes and `playwright-smoke` never
+ran.
+
+**F-8 — answering an approval was less privileged than installing a package.**
+Audit H-8 made installs admin-grade on all three chat platforms and stopped
+there, leaving **Approve** — the button that turns "the agent wants to" into
+"the agent did" — gated only by the chat allowlist. In the `allow_all` posture
+every member of the group could answer the operator's approvals. Now
+admin-gated on Telegram, Discord and Slack (a no-op when `allowed_users` is
+configured). Also: the sixteen `KAZMA_*` switches that weaken a security
+default are documented in `.env.example` for the first time and gated by a
+test; every WebSocket endpoint must now prove it authenticates; ClamAV in the
+Docker image gets its signature database (`clamav` ships the scanner and no
+DB, so `clamscan` errored, and the default treats an error as "skipped" — the
+image advertised malware scanning and did not do it); and the dead
+`start_document_workers`/`stop_document_workers` lifecycle API was removed.
+
+One thing that did **not** change, deliberately: `ruff --fix` on unused
+imports removed a re-export that a dozen native skills depend on and broke
+them all at import time. `tests/test_imports.py` caught it. The 107 unused
+imports stay until someone moves the call sites; only the bug-shaped rules
+(F811, F541, E713) were applied. `start_document_workers` was safe to delete
+because nothing — not the app, not the CLI, not one test — called it.
+
+Regressions: `tests/test_audit_2026_09_16_regressions.py`,
+`tests/test_audit_2026_09_16_approval_privilege.py`, and five new rules in
+`tests/test_static_gates.py`. Open items recorded in `docs/KNOWN_GAPS.md`.
+
+
 ## Voice docs + STT language matches the other Voice selects (2026-09-16)
 
 STT Language is a `form-select` (auto, ar, en, …, custom ISO) like provider
