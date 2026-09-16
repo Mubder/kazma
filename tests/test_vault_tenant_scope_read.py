@@ -29,6 +29,8 @@ tenant's credentials -- see `tests/test_cron_tenant_context.py`.
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from kazma_core.security.vault import SecretVault
 from kazma_core.tenant_context import reset_current_tenant_id, set_current_tenant_id
@@ -262,3 +264,107 @@ def test_a_second_name_still_gets_its_own_warning(vault, as_tenant, caplog):
         vault.retrieve(NAME)
         vault.retrieve("cfg:providers.list.groq.api_key")
     assert caplog.text.count("NOT FOUND") == 2
+
+
+def test_an_absent_secret_is_looked_up_once_not_once_per_call(vault, as_tenant):
+    """The tripwire must not cost a query per miss.
+
+    The first version recorded only names it actually warned about, so a
+    GENUINELY ABSENT secret re-ran the locked `SELECT DISTINCT tenant_id` on
+    every single miss. Config resolution reads absent keys constantly, and CI
+    wall time went 1,487s -> 1,937s with one file tipping over into a hang.
+    A diagnostic that costs a query per call is a performance bug in a
+    helpful hat.
+    """
+    as_tenant(None)
+    seen: list[str] = []
+
+    class CountingConn:
+        """sqlite3.Connection.execute is read-only, so wrap the connection."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        def execute(self, sql, *a, **kw):
+            seen.append(" ".join(str(sql).split()))
+            return self._inner.execute(sql, *a, **kw)
+
+        def __getattr__(self, item):
+            return getattr(self._inner, item)
+
+    real = vault._conn
+    vault._conn = CountingConn(real)
+    try:
+        for _ in range(20):
+            assert vault.retrieve("cfg:never.stored") is None
+    finally:
+        vault._conn = real
+
+    probes = [s for s in seen if "SELECT DISTINCT tenant_id" in s]
+    assert len(probes) == 1, (
+        f"{len(probes)} scope probes for 20 misses — it must be cached after "
+        "the first, whatever the verdict was"
+    )
+
+
+def test_a_miss_acquires_the_lock_exactly_once(vault, as_tenant):
+    """The tripwire must not add a second acquire/release cycle.
+
+    The first version released the lock, then took it again to run its probe.
+    That window let another thread in, and `test_documents_api_phase8.py`
+    hung in app SHUTDOWN on Linux — twice on the same commit — while passing
+    on Windows in identical wall-clock time. A hang that depends on thread
+    scheduling is what a lock-window bug looks like, and KNOWN_GAPS already
+    records the class: "adding a read inside a lock-holding method can
+    deadlock it".
+    """
+    as_tenant("default")
+    vault.store(NAME, SECRET)
+    as_tenant(None)
+
+    acquires = {"n": 0}
+    real = vault._lock
+
+    class CountingLock:
+        def __enter__(self):
+            acquires["n"] += 1
+            return real.__enter__()
+
+        def __exit__(self, *a):
+            return real.__exit__(*a)
+
+    vault._lock = CountingLock()
+    try:
+        assert vault.retrieve(NAME) is None
+    finally:
+        vault._lock = real
+
+    assert acquires["n"] == 1, (
+        f"a miss took the lock {acquires['n']}x; the probe belongs inside the "
+        "acquisition retrieve already makes"
+    )
+
+
+def test_the_warning_is_emitted_outside_the_lock(vault, as_tenant):
+    """A logging handler is arbitrary code, and this path runs at shutdown."""
+    as_tenant("default")
+    vault.store(NAME, SECRET)
+    as_tenant(None)
+
+    held: list[bool] = []
+
+    class Spy(logging.Handler):
+        def emit(self, record):
+            held.append(vault._lock.locked())
+
+    import kazma_core.security.vault as vault_mod
+
+    handler = Spy()
+    vault_mod.logger.addHandler(handler)
+    try:
+        vault.retrieve(NAME)
+    finally:
+        vault_mod.logger.removeHandler(handler)
+
+    assert held, "the warning did not fire"
+    assert not any(held), "the vault lock was held while calling a log handler"

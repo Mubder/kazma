@@ -98,10 +98,12 @@ class SecretVault:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()
-        #: Secret names already reported by `_warn_if_scoped_elsewhere`.
-        #: One line per name per process — a missing tenant context repeats
-        #: on every turn, and a warning that repeats is a warning nobody reads.
-        self._scope_warned: set[str] = set()
+        #: Secret names already examined by `_scope_owners_locked`,
+        #: recorded whatever the verdict was. Two jobs, one set: a missing
+        #: tenant context repeats on every turn, so the warning must not (a
+        #: warning that repeats is a warning nobody reads), and the lookup
+        #: behind it must not re-run per call for names that are simply absent.
+        self._scope_checked: set[str] = set()
         self._conn = sqlite3.connect(
             self._db_path, check_same_thread=False, isolation_level=None
         )
@@ -259,15 +261,52 @@ class SecretVault:
                 ).fetchone()
                 if row:
                     return self._decrypt(row["encrypted_value"], row["nonce"])
-        self._warn_if_scoped_elsewhere(name, tid)
+            # Probe for the missing-tenant-context case INSIDE this same
+            # acquisition. The first version took the lock a second time,
+            # right after releasing it — which opens a window for another
+            # thread to take it and never give it back. `docs/KNOWN_GAPS.md`
+            # already records that class ("adding a read inside a
+            # lock-holding method can deadlock it"), and this reproduced it:
+            # `test_documents_api_phase8.py` hung in app SHUTDOWN on Linux,
+            # twice, while passing on Windows in the same wall-clock time —
+            # a thread-scheduling difference, which is what a lock-window bug
+            # looks like. Net lock operations are now exactly what they were
+            # before the tripwire existed.
+            owners = self._scope_owners_locked(name, tid)
+        if owners:
+            # Logged OUTSIDE the lock: a handler is arbitrary code, and this
+            # fires on a path that runs during shutdown.
+            self._warn_scoped_elsewhere(name, owners)
         return None
 
-    def _warn_if_scoped_elsewhere(self, name: str, tid: str | None) -> None:
+    def _scope_owners_locked(self, name: str, tid: str | None) -> list[str]:
+        """Tenants holding `name`, or [] if there is nothing to report.
+
+        **Caller must hold ``self._lock``.** Returns [] without querying when
+        this name has already been examined, so a genuinely absent secret
+        costs one probe per process rather than one per miss — config
+        resolution reads absent keys constantly.
+        """
+        if tid is not None:
+            return []  # asked for a specific tenant and it was not there
+        if name in self._scope_checked:
+            return []
+        self._scope_checked.add(name)
+        return [
+            str(r["tenant_id"])
+            for r in self._conn.execute(
+                "SELECT DISTINCT tenant_id FROM secrets"
+                " WHERE name = ? AND tenant_id IS NOT NULL",
+                (name,),
+            ).fetchall()
+        ]
+
+    def _warn_scoped_elsewhere(self, name: str, owners: list[str]) -> None:
         """Say so when a miss is really a missing tenant context.
 
-        The lookup above is correct and must not widen. But its failure mode
-        is silent and indistinguishable from "not configured", which is how
-        the same defect shipped three times:
+        The lookup is correct and must not widen. But its failure mode is
+        silent and indistinguishable from "not configured", which is how the
+        same defect shipped three times:
 
         =========================  ==================================
         cron turn (2026-09-12)     two 09:00 reminders, HTTP 401
@@ -281,28 +320,12 @@ class SecretVault:
         Each was fixed by installing a tenant at that one call site. A static
         test listing the entry points would be the same kind of gate that let
         all seven of the 2026-09-16 audit defects through -- it passes while
-        the *next* entry point, the one nobody listed, is wrong.
+        the *next* entry point, the one nobody listed, is wrong. So the
+        tripwire lives here, where every caller passes.
 
-        So the tripwire is here, where every caller passes, and it fires on
-        the miss itself. One line per secret name per process: enough to find
-        it in a log, not enough to flood one.
+        Called with the lock RELEASED and with the probe already done: a
+        logging handler is arbitrary code and this path runs during shutdown.
         """
-        if tid is not None:
-            return  # asked for a specific tenant and it was not there
-        if name in self._scope_warned:
-            return
-        with self._lock:
-            owners = [
-                str(r["tenant_id"])
-                for r in self._conn.execute(
-                    "SELECT DISTINCT tenant_id FROM secrets"
-                    " WHERE name = ? AND tenant_id IS NOT NULL",
-                    (name,),
-                ).fetchall()
-            ]
-        if not owners:
-            return  # genuinely absent — nothing to report
-        self._scope_warned.add(name)
         logger.warning(
             "[Vault] '%s' was NOT FOUND, but it exists under tenant(s) %s. "
             "This caller has no tenant context, and the lookup does not fall "
