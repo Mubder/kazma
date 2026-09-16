@@ -777,8 +777,12 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "WAV (uncompressed)",
     },
     "voice.master_help": {
-        "ar": "المفتاح الرئيسي لـ STT/TTS على تيليجرام وديسكورد وسلاك والويب. أوقفه لإيقاف كل الرسائل الصوتية والنسخ.",
-        "en": "Master switch for STT/TTS on Telegram, Discord, Slack, and Web. Turn off to stop all voice notes and transcription.",
+        "ar": "المفتاح الرئيسي لـ STT/TTS. المفاتيح من الإعدادات ← المزودون (نفس بطاقة OpenAI/Groq). هنا تختار كيف يسمع كازما ويتكلم — لا تضع Whisper كنموذج محادثة.",
+        "en": "Master switch for STT/TTS. API keys come from Settings → Providers (the same OpenAI/Groq card). This tab only picks how Kazma hears and speaks — never set Whisper as the chat model.",
+    },
+    "voice.keys_help": {
+        "ar": "مفاتيح API مشتركة مع المزودين. نماذج الكلام (Whisper) ليست نماذج محادثة — اختبار المزود على /chat/completions سيرفضها عن قصد.",
+        "en": "Keys are shared with Providers. Speech models (Whisper) are not chat models — Provider Test talks to /chat/completions and will refuse them on purpose.",
     },
     "voice.stt": {
         "ar": "تحويل الكلام إلى نص (STT)",

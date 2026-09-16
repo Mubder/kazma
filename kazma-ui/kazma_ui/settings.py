@@ -1525,6 +1525,16 @@ class SettingsRouterBuilder:
             except ImportError:
                 return {"success": False, "error": "SSRF validation module not available"}
 
+            from kazma_core.models.modality import is_speech_model
+
+            if is_speech_model(req.model):
+                return {
+                    "success": False,
+                    "error": (
+                        f"{req.model} is a speech model. Test chat models here; "
+                        "STT/TTS live under Settings → Voice (same API key)."
+                    ),
+                }
             try:
                 headers = {
                     "Authorization": f"Bearer {req.api_key or 'not-needed'}",
@@ -1606,6 +1616,20 @@ class SettingsRouterBuilder:
                     "status": "error",
                     "ok": False,
                     "error_code": "invalid_model",
+                }
+            from kazma_core.models.modality import is_speech_model
+
+            if is_speech_model(model):
+                return {
+                    "error": (
+                        f"{model} is a speech model (STT/TTS), not a chat model. "
+                        "Configure it under Settings → Voice."
+                    ),
+                    "status": "error",
+                    "ok": False,
+                    "error_code": "invalid_model",
+                    "active_model": model,
+                    "model": model,
                 }
             try:
                 from kazma_core.runtime.model_switch import switch_active_model

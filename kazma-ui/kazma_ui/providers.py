@@ -189,17 +189,23 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         for p in registry.list_providers():
             entry = _mask_provider_entry(p)
             name = p.get("name", "")
+            from kazma_core.models.modality import chat_models, speech_models
+
             discovered = registry.get_discovered_models(name)
             selected = registry.get_selected_models(name)
+            chat_discovered = chat_models(discovered)
+            speech_hidden = speech_models(discovered)
             if discovered:
-                manual = set(entry.get("models", []))
-                entry["discovered_models"] = discovered
-                entry["all_models"] = sorted(manual | set(discovered))
+                manual = set(chat_models(entry.get("models", [])))
+                entry["discovered_models"] = chat_discovered
+                entry["all_models"] = sorted(manual | set(chat_discovered))
             else:
                 entry["discovered_models"] = []
-                entry["all_models"] = entry.get("models", [])
-            entry["selected_models"] = selected
+                entry["all_models"] = chat_models(entry.get("models", []))
+            entry["selected_models"] = chat_models(selected)
             entry["visible_models"] = registry.get_visible_models(name)
+            if speech_hidden:
+                entry["speech_models_omitted"] = len(speech_hidden)
             # What the provider layer *declares* about this provider, so the
             # page can show it instead of the operator finding out from a 400.
             # `None` inside `supports` means NOT VERIFIED and the UI renders it
@@ -426,6 +432,25 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
                         # provider for "chat failing".
                         probe_model = registry.probe_model_for(name)
                         if not probe_model:
+                            from kazma_core.models.modality import speech_models
+
+                            only_speech = speech_models(
+                                registry.get_discovered_models(name)
+                                or (provider.get("models") or [])
+                            )
+                            if only_speech:
+                                return {
+                                    "success": False,
+                                    "latency_ms": latency,
+                                    "reachable": True,
+                                    "chat_ok": False,
+                                    "error": (
+                                        "Reachable, but the listed models are speech "
+                                        "(Whisper/TTS), not chat. Pick a chat model "
+                                        "here; configure STT/TTS under Settings → Voice. "
+                                        "API keys are shared."
+                                    ),
+                                }
                             return {
                                 "success": False,
                                 "latency_ms": latency,
@@ -513,7 +538,16 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         registry = get_model_registry()
         models = await registry.discover_models(name)
         registry.serialize()  # persist discovered models to ConfigStore
-        return {"name": name, "models": models, "count": len(models)}
+        from kazma_core.models.modality import chat_models, speech_models
+
+        chat = chat_models(models)
+        omitted = speech_models(models)
+        return {
+            "name": name,
+            "models": chat,
+            "count": len(chat),
+            "speech_omitted": len(omitted),
+        }
 
     @router.delete("/api/providers/{name}/models/{model_id:path}")
     async def delete_provider_model(name: str, model_id: str) -> dict[str, Any]:

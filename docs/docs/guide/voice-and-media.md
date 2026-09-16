@@ -13,6 +13,12 @@ the Web UI. This page covers how to enable and use voice and media.
 
 ## Voice (STT + TTS)
 
+**Keys vs models.** API keys live on **Settings → Providers** (one OpenAI /
+Groq / Cohere card). **Settings → Voice** only picks how Kazma hears and
+speaks (STT provider name, Whisper model, language, TTS voice). Whisper is
+not a chat model: it is hidden from chat pickers and Provider Test
+(`/chat/completions`). Pick STT here, not as the active chat model.
+
 Kazma voice is **turn-based by default** (STT → LangGraph → TTS) on every
 platform. On the **Web UI**, the Live button opens `/ws/voice`: the same
 checkpointed supervisor graph and the **same chat thread/journal** as typed

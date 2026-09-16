@@ -412,6 +412,14 @@ class ModelRegistry:
             logger.info("[registry] model change to %r ignored — profile locked by KAZMA_MODEL/KAZMA_PROVIDER env", model)
             return
         clean_model = (model or "").strip()
+        from kazma_core.models.modality import is_speech_model
+
+        if is_speech_model(clean_model):
+            raise ValueError(
+                f"{clean_model} is a speech model (STT/TTS), not a chat model. "
+                "Pick STT/TTS under Settings → Voice; API keys stay on the "
+                "matching provider card."
+            )
         with self._lock:
             self._active_model = clean_model
             self._config_store.set("registry.active_model", self._active_model, category="registry")
@@ -1012,8 +1020,10 @@ class ModelRegistry:
         manually.
         """
         entry = self.get_provider(name) or {}
+        from kazma_core.models.modality import is_speech_model
+
         pinned = str(entry.get("model") or "").strip()
-        if pinned:
+        if pinned and not is_speech_model(pinned):
             return pinned
         for candidates in (
             self.get_selected_models(name),
@@ -1023,7 +1033,7 @@ class ModelRegistry:
         ):
             for candidate in candidates or []:
                 text = str(candidate).strip()
-                if text:
+                if text and not is_speech_model(text):
                     return text
         return ""
 
@@ -1235,18 +1245,23 @@ class ModelRegistry:
         clean = (provider_name or "").strip()
         if not clean:
             return
+        from kazma_core.models.modality import chat_models
+
         self._config_store.set(
             f"providers.{clean}.selected_models",
-            [str(m) for m in models],
+            chat_models(models),
             category="providers",
         )
 
     def get_visible_models(self, provider_name: str) -> list[str]:
         """Return models that should appear in dropdowns.
 
-        If the user has explicitly selected models, returns only those (even if empty).
-        Otherwise returns all discovered + manual models (backward-compatible).
+        If the user has explicitly selected models, returns only those
+        (chat models only). Speech/STT/TTS ids never appear as chat models.
+        Otherwise returns discovered + manual chat models.
         """
+        from kazma_core.models.modality import chat_models
+
         clean = (provider_name or "").strip()
         if clean:
             raw = self._config_store.get(f"providers.{clean}.selected_models", None)
@@ -1257,13 +1272,14 @@ class ModelRegistry:
                     except (json.JSONDecodeError, TypeError):
                         raw = []
                 if isinstance(raw, list):
-                    return [str(m) for m in raw]
-                return []
+                    selected = chat_models(str(m) for m in raw)
+                    if selected:
+                        return selected
 
         discovered = self.get_discovered_models(provider_name)
         provider = self.get_provider(provider_name)
         manual = self._normalize_models(provider.get("models", [])) if provider else []
-        return sorted(set(discovered) | set(manual))
+        return chat_models(sorted(set(discovered) | set(manual)))
 
     # ── Saved model profiles ───────────────────────────────────────
 
@@ -1345,12 +1361,14 @@ class ModelRegistry:
             if provider_name:
                 provider_names.add(provider_name)
 
+        from kazma_core.models.modality import chat_models, is_speech_model
+
         llm_model = str(self._config_store.get("llm.model", "") or "").strip()
-        if llm_model:
+        if llm_model and not is_speech_model(llm_model):
             models.add(llm_model)
 
         yaml_default_model = str(self._config_store.get("models.default", "") or "").strip()
-        if yaml_default_model:
+        if yaml_default_model and not is_speech_model(yaml_default_model):
             models.add(yaml_default_model)
 
         task_defaults = self._collect_task_defaults()
@@ -1359,6 +1377,7 @@ class ModelRegistry:
         for model_name in self._extract_registry_models(self._config_store.get("models.registry", [])):
             models.add(model_name)
 
+        models = set(chat_models(models))
         return {
             "models": sorted(m for m in models if m),
             "providers": sorted(p for p in provider_names if p),
