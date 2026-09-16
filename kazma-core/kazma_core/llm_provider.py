@@ -370,6 +370,32 @@ async def _shared_ssl_context() -> Any:
         return _SSL_CONTEXT
 
 
+#: Signals that a 4xx means "this account is out of credit", not "slow down".
+#:
+#: Matching provider wording is normally a losing game, and this file says so
+#: elsewhere. It is warranted here because the alternative is worse: an empty
+#: balance retried as a blip wastes ~90s and then tells the operator to send
+#: the message again, forever. These strings are drawn from the providers this
+#: project actually ships support for; anything unmatched keeps the existing
+#: retry behaviour, so a miss costs nothing beyond the status quo.
+_BALANCE_EXHAUSTED_SIGNALS = (
+    "insufficient balance",      # Z.AI (code 1113), DeepSeek
+    "no resource package",       # Z.AI
+    "please recharge",           # Z.AI / Qwen
+    "insufficient_quota",        # OpenAI
+    "exceeded your current quota",  # OpenAI
+    "credit balance is too low",    # Anthropic
+    "insufficient credits",      # OpenRouter
+    "arrearage",                 # Qwen / DashScope
+)
+
+
+def _is_balance_exhausted(detail: str) -> bool:
+    """True when a provider error body means 'no credit', not 'too fast'."""
+    body = (detail or "").lower()
+    return any(sig in body for sig in _BALANCE_EXHAUSTED_SIGNALS)
+
+
 class LLMProvider:
     """OpenAI-compatible LLM client using httpx.
 
@@ -857,6 +883,31 @@ class LLMProvider:
                 payload.get("model"),
                 len(tools) if tools else 0,
             )
+
+            # ── Exhausted balance masquerading as a rate limit ─────────────
+            #
+            # Several providers return 429 for "you have no credit left".
+            # Z.AI, live 2026-09-16:
+            #   429 {"error":{"code":"1113","message":"Insufficient balance or
+            #        no resource package. Please recharge."}}
+            #
+            # Retrying that is pointless and the advice it produces is wrong:
+            # the 429 path burned ~90s on three backoffs and then told the
+            # operator "transient network/rate-limit blips usually clear on
+            # the next turn — please send your message again", which will fail
+            # identically forever. A quota that is empty is a PERMANENT
+            # condition with a specific human fix (top up / change provider),
+            # and saying otherwise sends someone to retry instead of to the
+            # billing page.
+            if status_code == 429 and _is_balance_exhausted(detail):
+                raise LLMError(
+                    f"The {self._describe_endpoint()} account has no credit left "
+                    f"(model {payload.get('model') or '<unset>'!r}). This will not "
+                    f"clear by retrying — top up that provider, or switch to "
+                    f"another in Settings → Providers. Provider said: "
+                    f"{detail[:200]}",
+                    transient=False,
+                ) from e
 
             # ── Rate-limit handling (429 Too Many Requests) ────────────────
             if status_code == 429:
@@ -1613,6 +1664,20 @@ class LLMProvider:
                     yield StreamDelta(content=resp.content)
                 yield StreamDelta(response=resp)
                 return
+
+            # An empty balance is permanent, whatever status it arrives under
+            # (Z.AI sends 429). transient=True here is what made the turn
+            # retry and then tell the operator to send the message again —
+            # advice that cannot ever work (2026-09-16).
+            if _is_balance_exhausted(detail):
+                raise LLMError(
+                    f"The {self._describe_endpoint()} account has no credit left "
+                    f"(model {payload.get('model') or '<unset>'!r}). This will not "
+                    f"clear by retrying — top up that provider, or switch to "
+                    f"another in Settings → Providers. Provider said: "
+                    f"{detail[:200]}",
+                    transient=False,
+                ) from e
 
             kind = "rate_limit_exhausted" if status_code == 429 else ""
             raise LLMError(
