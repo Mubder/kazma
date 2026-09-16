@@ -292,13 +292,64 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**0 failures** (2026-09-14), across all six declared `testpaths`:
+**On CI (Linux), 2026-09-16: 8,955 passed, 0 failed, 67 skipped, 3 xfailed.**
+One file still crashes and keeps the job red — see *The reply_sink segfault*
+below. Local Windows runs give 8,9xx passed with three extra failures in
+`tests/test_docx_rtl_visual.py`, which need a working LibreOffice; CI installs
+one, so they pass there and fail on a typical dev box.
+
+**Read this number with a caveat: until 2026-09-16 the CI `Tests` job had not
+executed since `30398512`.** The step that installs the Arabic rendering deps
+named `fonts-noto-naskh-arabic`, which is not a package on Debian or Ubuntu;
+`apt` exits 100 on an unknown name, so the step failed and took the whole job
+with it, on every run. Six consecutive red runs on main and nobody was looking,
+because the job had been red long enough to stop meaning anything. The step was
+added to stop the Arabic visual tests *skipping* silently — and replaced silent
+skipping with silent non-execution, which is strictly worse, since a skip is at
+least reported. Repairing it immediately surfaced five Linux-only failures
+(Windows-assuming tests that had never run on Linux) and two crash/hang files.
+Treat any baseline older than that date as unverified.
 
 | Path | Result |
 |---|---|
-| `tests/` (`--ignore=tests/e2e`) | 8203 passed, 22 skipped, 3 xfailed, 36m27s |
-| `kazma-core/kazma_core_tests`, `kazma-core/tests` | 398 passed |
-| `kazma-gateway/…`, `kazma-ui/…`, `kazma-tui/…` | 317 passed, 1 skipped |
+| CI `fast_test.py`, all testpaths (Linux) | 8,955 passed, 67 skipped, 3 xfailed |
+| `tests/` (`--ignore=tests/e2e`) | 8203 passed, 22 skipped, 3 xfailed, 36m27s (2026-09-14) |
+| `kazma-core/kazma_core_tests`, `kazma-core/tests` | 398 passed (2026-09-14) |
+| `kazma-gateway/…`, `kazma-ui/…`, `kazma-tui/…` | 317 passed, 1 skipped (2026-09-14) |
+
+### The reply_sink segfault (open)
+
+`tests/test_reply_sink.py` segfaults on Linux — `exit=-11`, reproducibly, both
+in a chunk and standalone. It does **not** reproduce on Windows. It is the only
+thing keeping CI red as of 2026-09-16, and it is not a regression: it has been
+there for as long as the `Tests` job has been broken, which is why nobody saw
+it.
+
+What the stack says (captured only after `scripts/fast_test.py` was changed to
+print the diagnostic rerun's tail — it had been discarding the faulthandler
+output and keeping one line, which is what made `exit=-11` un-actionable):
+
+- the main thread faults inside **`_pytest/capture.py:592 snap`**, during
+  `pytest_runtest_teardown` — pytest's own fd-capture machinery, not product
+  code;
+- a background thread is parked in `threading.py:1399` (`Timer.run` →
+  `finished.wait(interval)`);
+- loaded extension modules include `zstandard`, `ormsgpack`, `xxhash`
+  (langsmith's), `psutil._psutil_linux`, `PIL._imaging`, `yaml._yaml`.
+
+That shape — a live daemon/timer thread touching a descriptor while pytest
+snaps and closes its capture temp file at teardown — is the usual cause. The
+crash lands right after `test_store_failure_is_reported_not_swallowed`, which
+is the one test in the file that deliberately raises inside `upsert_reply`
+while `caplog` is capturing.
+
+**Deliberately not "fixed" blind.** It needs a Linux repro to confirm which
+thread owns the descriptor; any patch written without one would most likely
+relocate the crash rather than remove it, and a quarantine would hide a real
+native fault behind a green tick — the exact failure mode the rest of this
+page is about. Next step for whoever picks it up: reproduce on Linux, then
+bisect with `-p no:langsmith` and `--capture=no` to separate the plugin's
+threads from pytest's capture.
 
 **`pytest tests/` is not the suite, and running only it hides failures for
 days.** `pyproject.toml` declares six testpaths; the habit here has been to
