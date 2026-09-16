@@ -199,3 +199,66 @@ def test_describe_secret_flags_a_row_written_under_a_different_vault_key(
     monkeypatch.setenv("KAZMA_VAULT_KEY", "b" * 64)
     rows = SecretVault(db_path=db).describe_secret(NAME)
     assert rows and rows[0]["decrypts"] is False
+
+
+# ── the tripwire: any FUTURE entry point that forgets ──────────────────────
+#
+# The three fixes above are call-site fixes, and a test that lists call sites
+# is the gate that let all seven 2026-09-16 audit defects through: it passes
+# while the entry point nobody listed is wrong. So the durable guard is at
+# the miss itself, in the vault, where every caller passes.
+
+
+def test_a_context_less_miss_says_the_caller_is_at_fault(vault, as_tenant, caplog):
+    as_tenant("default")
+    vault.store(NAME, SECRET)
+    as_tenant(None)
+
+    with caplog.at_level("WARNING"):
+        assert vault.retrieve(NAME) is None
+
+    assert "NOT FOUND" in caplog.text
+    assert "default" in caplog.text, "name the scope that does have it"
+    assert "set_current_tenant_id" in caplog.text, "name the actual fix"
+    assert SECRET not in caplog.text, "a warning must never print the secret"
+
+
+def test_a_genuinely_absent_secret_is_quiet(vault, caplog):
+    """Absent is not a bug; warning about it would train people to ignore it."""
+    with caplog.at_level("WARNING"):
+        assert vault.retrieve("cfg:never.stored") is None
+    assert "NOT FOUND" not in caplog.text
+
+
+def test_an_explicit_tenant_miss_is_quiet(vault, as_tenant, caplog):
+    """Asking for bob and getting nothing is an answer, not a mistake."""
+    as_tenant("alice")
+    vault.store(NAME, "alice-key")
+
+    with caplog.at_level("WARNING"):
+        assert vault.retrieve(NAME, tenant_id="bob") is None
+    assert "NOT FOUND" not in caplog.text
+
+
+def test_the_warning_fires_once_per_name_not_once_per_turn(vault, as_tenant, caplog):
+    """A missing tenant repeats every turn; a log that repeats is ignored."""
+    as_tenant("default")
+    vault.store(NAME, SECRET)
+    as_tenant(None)
+
+    with caplog.at_level("WARNING"):
+        for _ in range(5):
+            vault.retrieve(NAME)
+    assert caplog.text.count("NOT FOUND") == 1
+
+
+def test_a_second_name_still_gets_its_own_warning(vault, as_tenant, caplog):
+    as_tenant("default")
+    vault.store(NAME, SECRET)
+    vault.store("cfg:providers.list.groq.api_key", SECRET)
+    as_tenant(None)
+
+    with caplog.at_level("WARNING"):
+        vault.retrieve(NAME)
+        vault.retrieve("cfg:providers.list.groq.api_key")
+    assert caplog.text.count("NOT FOUND") == 2

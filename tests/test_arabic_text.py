@@ -147,7 +147,11 @@ class TestLogicalRepair:
         assert arabic.to_logical(PLAIN) is PLAIN
 
     def test_bidi_controls_are_stripped(self):
-        assert arabic.strip_bidi_controls("a‎b‏c") == "abc"
+        # Built from code points: a literal LRM/RLM here would make this
+        # file itself a Trojan Source hazard (bandit B613), and a reader
+        # could not see what is being stripped.
+        text = "a" + chr(0x200E) + "b" + chr(0x200F) + "c"
+        assert arabic.strip_bidi_controls(text) == "abc"
 
     def test_parser_repairs_before_quality_assessment(self):
         """The IRBuilder must repair the layer, or the page escalates to OCR."""

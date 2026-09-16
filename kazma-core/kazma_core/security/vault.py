@@ -98,6 +98,10 @@ class SecretVault:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
 
         self._lock = threading.Lock()
+        #: Secret names already reported by `_warn_if_scoped_elsewhere`.
+        #: One line per name per process — a missing tenant context repeats
+        #: on every turn, and a warning that repeats is a warning nobody reads.
+        self._scope_warned: set[str] = set()
         self._conn = sqlite3.connect(
             self._db_path, check_same_thread=False, isolation_level=None
         )
@@ -255,7 +259,61 @@ class SecretVault:
                 ).fetchone()
                 if row:
                     return self._decrypt(row["encrypted_value"], row["nonce"])
+        self._warn_if_scoped_elsewhere(name, tid)
         return None
+
+    def _warn_if_scoped_elsewhere(self, name: str, tid: str | None) -> None:
+        """Say so when a miss is really a missing tenant context.
+
+        The lookup above is correct and must not widen. But its failure mode
+        is silent and indistinguishable from "not configured", which is how
+        the same defect shipped three times:
+
+        =========================  ==================================
+        cron turn (2026-09-12)     two 09:00 reminders, HTTP 401
+        agent turn (2026-09-17)    registry substituted another vendor,
+                                   Telegram got a 1211 for a model the
+                                   substituted provider does not serve
+        ``kazma doctor`` (same)    told the operator to re-enter a key
+                                   that was already correct
+        =========================  ==================================
+
+        Each was fixed by installing a tenant at that one call site. A static
+        test listing the entry points would be the same kind of gate that let
+        all seven of the 2026-09-16 audit defects through -- it passes while
+        the *next* entry point, the one nobody listed, is wrong.
+
+        So the tripwire is here, where every caller passes, and it fires on
+        the miss itself. One line per secret name per process: enough to find
+        it in a log, not enough to flood one.
+        """
+        if tid is not None:
+            return  # asked for a specific tenant and it was not there
+        if name in self._scope_warned:
+            return
+        with self._lock:
+            owners = [
+                str(r["tenant_id"])
+                for r in self._conn.execute(
+                    "SELECT DISTINCT tenant_id FROM secrets"
+                    " WHERE name = ? AND tenant_id IS NOT NULL",
+                    (name,),
+                ).fetchall()
+            ]
+        if not owners:
+            return  # genuinely absent — nothing to report
+        self._scope_warned.add(name)
+        logger.warning(
+            "[Vault] '%s' was NOT FOUND, but it exists under tenant(s) %s. "
+            "This caller has no tenant context, and the lookup does not fall "
+            "back global -> tenant (that would leak one tenant's credentials "
+            "to another). The secret is fine; the CALLER is missing "
+            "set_current_tenant_id(). This has caused a 401 storm, a "
+            "wrong-vendor LLM call and a lying diagnostic — see "
+            "docs/KNOWN_GAPS.md.",
+            name,
+            ", ".join(sorted(owners)),
+        )
 
     def describe_secret(self, name: str) -> list[dict[str, Any]]:
         """Per-scope facts about `name` WITHOUT returning the secret.
