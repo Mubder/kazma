@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import warnings
+
 warnings.filterwarnings("ignore", category=FutureWarning, module="typing_extensions")
 
 import os
+
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
 
 import logging
+
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 import sys
@@ -23,6 +26,26 @@ __all__ = ["main"]
 
 def main() -> None:
     """CLI entry point — supports wizard, hub, and docs commands."""
+    # Run as a tenant, the way an HTTP request does.
+    #
+    # Vault secrets are tenant-scoped, and everything saved through Settings
+    # is written under the web request's tenant ("default" on a single-user
+    # install). `retrieve` falls back tenant -> global and deliberately not
+    # the reverse, so a CLI with no tenant reads None for every key the UI
+    # holds. `kazma doctor` consequently reported the operator's DeepSeek key
+    # as unreadable while it sat in this very vault, decrypting fine
+    # (2026-09-16). A diagnostic that cannot see what the app sees is worse
+    # than no diagnostic.
+    #
+    # KAZMA_TENANT_ID overrides for the multi-tenant case; the ContextVar is
+    # set for the whole process and never reset, which is what we want for a
+    # one-shot command.
+    import os as _os
+
+    from kazma_core.tenant_context import set_current_tenant_id
+
+    set_current_tenant_id(_os.environ.get("KAZMA_TENANT_ID") or "default")
+
     # Parse --no-banner early (consume it if present)
     show_banner_flag = True
     args = sys.argv[1:]
@@ -144,8 +167,9 @@ def _run_serve(port: int) -> None:
     # ``KAZMA_DATABASE_URL=''``) don't shadow the real value from .env — that
     # shadow was the root cause of the "Postgres pool unavailable" boot crash.
     try:
-        from dotenv import load_dotenv
         from pathlib import Path
+
+        from dotenv import load_dotenv
 
         cwd_env = Path.cwd() / ".env"
         if cwd_env.exists():
@@ -218,7 +242,7 @@ def _run_serve(port: int) -> None:
         try:
             lan_ip = _socket.gethostbyname(_socket.gethostname())
             if lan_ip and not lan_ip.startswith("127."):
-                print(f"\n  Kazma WebUI running:")
+                print("\n  Kazma WebUI running:")
                 print(f"    → Local:   {browse_url}")
                 print(f"    → Network: http://{lan_ip}:{port}\n")
             else:

@@ -21,7 +21,6 @@ Read-only: it opens no sockets and writes no settings.
 from __future__ import annotations
 
 import json
-from typing import Any
 
 OK = "ok"
 WARN = "warn"
@@ -41,6 +40,45 @@ def _host(url: str) -> str:
 
 def _line(status: str, label: str, detail: str = "") -> tuple[str, str]:
     return status, f"{_MARK[status]} {label}" + (f"\n         {detail}" if detail else "")
+
+
+def _diagnose_vault_pointer(ptr: str) -> str:
+    """Say why a ``vault://`` pointer resolved to nothing, by asking the vault.
+
+    Three different failures look identical from ConfigStore, which returns
+    the default for all of them: the vault is off, the row is missing, or the
+    row exists but this caller cannot see its scope.
+    """
+    name = ptr[len("vault://"):]
+    from kazma_core.security.vault import get_vault
+
+    vault = get_vault()
+    if vault is None:
+        return (
+            f"the key is stored as {ptr} but the vault is DISABLED here "
+            "(KAZMA_VAULT_KEY is not set), so the pointer resolves to nothing. "
+            "Set KAZMA_VAULT_KEY in this install's .env and restart."
+        )
+    rows = vault.describe_secret(name)
+    if not rows:
+        return (
+            f"the key is stored as {ptr} but this install's vault has NO row "
+            "under that name — the secret was written into a different "
+            "install's vault. Re-enter the key here (Settings -> Providers)."
+        )
+    scopes = ", ".join(sorted(str(r.get("tenant_id") or "global") for r in rows))
+    if any(r.get("decrypts") is False for r in rows):
+        return (
+            f"the key is stored as {ptr} and the row EXISTS (scope: {scopes}) "
+            "but will not decrypt with this install's KAZMA_VAULT_KEY — the "
+            "vault key changed since it was written. Re-enter the key here "
+            "(Settings -> Providers)."
+        )
+    return (
+        f"the key is stored as {ptr}; the row exists and decrypts (scope: "
+        f"{scopes}) yet the registry still read nothing. That is a Kazma bug, "
+        "not a misconfiguration — please report it with this output."
+    )
 
 
 def collect() -> list[tuple[str, str]]:
@@ -132,11 +170,13 @@ def collect() -> list[tuple[str, str]]:
         # fails to decrypt, so the secret's absence is indistinguishable from
         # its being unreadable.
         #
-        # This is not hypothetical. A Postgres config store is SHARED across
-        # installs while the vault is per-install (its own KAZMA_VAULT_KEY),
-        # so a vault:// pointer written by one machine resolves there and
-        # silently yields nothing on the other — which is exactly how a
-        # working provider became a 1211 from a different vendor (2026-09-16).
+        # "Unreadable" has more than one cause and they need opposite fixes,
+        # so ask the vault which one it is instead of asserting. The first
+        # draft asserted: it told the operator the secret lived in another
+        # install's vault. It was in THIS vault, under tenant "default",
+        # decrypting perfectly — invisible only because the caller had no
+        # tenant context (2026-09-16, the 1211 incident). Confident wrong
+        # advice cost more than a vague right answer would have.
         detail = (
             "the registry will silently substitute a provider that has one. "
             "Settings -> Providers, set a real key."
@@ -149,14 +189,9 @@ def collect() -> list[tuple[str, str]]:
                  if isinstance(p, dict) and str(p.get("name")) == pname),
                 {},
             )
-            if str(raw.get("api_key") or "").startswith("vault://"):
-                detail = (
-                    "the stored key is a vault:// pointer THIS INSTALL CANNOT "
-                    "DECRYPT — the secret lives in another install's vault. A "
-                    "Postgres config store is shared between installs; the "
-                    "vault is not. Re-enter the key here (Settings -> "
-                    "Providers) so it is written into this machine's vault."
-                )
+            ptr = str(raw.get("api_key") or "")
+            if ptr.startswith("vault://"):
+                detail = _diagnose_vault_pointer(ptr)
         except Exception:  # noqa: BLE001 — diagnosis must not fail the report
             pass
         out.append(_line(BAD, f"{pname!r} has NO USABLE API KEY", detail))
