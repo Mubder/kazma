@@ -45,6 +45,11 @@ def main() -> None:
     if cmd == "status":
         _run_status()
 
+    elif cmd == "doctor":
+        from kazma_cli.doctor import run as _run_doctor
+
+        sys.exit(_run_doctor(sys.argv[2:]))
+
     elif cmd == "serve":
         port = int(sys.argv[2]) if len(sys.argv) > 2 else 9090
         _run_serve(port)
@@ -90,6 +95,7 @@ def main() -> None:
         print(f"Kazma CLI v{_get_version()}")
         print("Commands:")
         print("  status     Show Kazma status")
+        print("  doctor     Check provider/model resolution (which model, where, will it work)")
         print("  serve      Start the WebUI server (default port 9090)")
         print("  wizard     Start interactive skill installation wizard")
         print("  hub        Kazma Hub commands (search, install, list, etc.)")
