@@ -145,12 +145,12 @@ AR = "الصدق المدمج: إن مات النموذج تقول ذلك صرا
     ("label", "old", "new", "expect"),
     [
         ("identical", AR, AR, "changes NOTHING"),
-        ("bidi mark", AR, "‏" + AR, "invisible characters"),
-        ("zero width", "ab", "a​b", "invisible characters"),
-        ("nbsp for space", "a b", "a b", "invisible characters"),
-        ("thin space", "a b", "a b", "invisible characters"),
+        ("bidi mark", AR, chr(0x200F) + AR, "invisible characters"),
+        ("zero width", "ab", "a" + chr(0x200B) + "b", "invisible characters"),
+        ("nbsp for space", "a b", "a" + chr(0x00A0) + "b", "invisible characters"),
+        ("thin space", "a b", "a" + chr(0x2009) + "b", "invisible characters"),
         ("crlf", "a\r\nb", "a\nb", "line endings"),
-        ("nfd", "é", "é", "normalisation"),
+        ("nfd", "é", "e" + chr(0x0301), "normalisation"),
         ("trailing ws", "x  ", "x", "whitespace"),
     ],
 )
@@ -163,7 +163,7 @@ def test_an_invisible_difference_is_named(label, old, new, expect):
     ("old", "new"),
     [
         (AR, AR + " plus"),
-        ("a b", "ab"),          # deleting a real space is a real change
+        ("a b", "ab"),  # deleting a real space is a real change
         ("hello", "goodbye"),
         ("", "new file body"),
     ],
