@@ -6,6 +6,7 @@ import logging
 from typing import Any
 
 from kazma_gateway.gateway import IncomingMessage, OutboundMessage, SessionStore
+
 from .store import _build_target_id
 
 logger = logging.getLogger(__name__)
@@ -56,8 +57,9 @@ async def _stale_approval_message(
         )
         if not next_nodes and has_assistant and approved:
             try:
-                from kazma_core.config_store import get_config_store
                 import time as _t
+
+                from kazma_core.config_store import get_config_store
 
                 cs = get_config_store()
                 notice_key = f"hitl.last_stale_notice.{thread_id}"
@@ -259,6 +261,54 @@ _ARGS_BUDGET = 3200
 _MULTI_BUDGET = 600
 _PATCH_TOOLS = frozenset({"file_apply_patch", "file_apply_patch_set"})
 
+#: Tools whose payload arg is a DOCUMENT, not a decision.
+#:
+#: ``EXEC_TOOLS`` must be shown whole because the dangerous half of a chained
+#: command is at the end. That rule was written for ``shell_exec`` and then
+#: applied to every tool, which is how a Telegram card came to be a 3,200-
+#: character Arabic markdown file rendered as a single JSON line of literal
+#: ``\n`` escapes, ending in "open the web UI to see the remaining 638
+#: characters before approving" (2026-09-17).
+#:
+#: Nobody authorises a file write by reading the prose. The decision is
+#: *this many bytes, to this path* -- so lead with that and show enough of the
+#: body, with real line breaks, to recognise it.
+_CONTENT_TOOLS: dict[str, tuple[str, ...]] = {
+    "file_write": ("content",),
+    "file_append": ("content",),
+}
+
+#: Rendered body lines to show for a content tool, and the cap per line.
+_CONTENT_PREVIEW_LINES = 15
+_CONTENT_LINE_CHARS = 110
+
+#: Characters that can make two strings differ while looking identical.
+#: Arabic and Hebrew text collects bidi controls; editors and copy-paste add
+#: zero-width joiners, NBSP and BOMs.
+#:
+#: Zero-width and bidi marks are DELETED, but the space-like ones are folded
+#: to an ordinary space rather than dropped: a NBSP swapped for a space is the
+#: commonest invisible edit there is, and deleting both sides would also call
+#: ``a b`` and ``ab`` identical.
+_INVISIBLE: dict[int, str | None] = {
+    **dict.fromkeys(
+        (
+            ord(c)
+            for c in (
+                "​‌‍‎‏"  # ZWSP, ZWNJ, ZWJ, LRM, RLM
+                "‪‫‬‭‮"  # LRE, RLE, PDF, LRO, RLO
+                "⁦⁧⁨⁩"        # LRI, RLI, FSI, PDI
+                "﻿"                          # BOM / ZWNBSP
+            )
+        ),
+        None,
+    ),
+    **dict.fromkeys(
+        (ord(c) for c in "     "),  # NBSP + thin/figure
+        " ",
+    ),
+}
+
 
 def _hunk_lines(old: str, new: str, *, limit: int = 40) -> list[str]:
     lines: list[str] = []
@@ -267,6 +317,36 @@ def _hunk_lines(old: str, new: str, *, limit: int = 40) -> list[str]:
     for ln in str(new or "").splitlines()[:limit]:
         lines.append(f"+ {ln}")
     return lines
+
+
+def _describe_noop(old: str, new: str) -> str | None:
+    """Explain a hunk whose two sides look identical on screen, else None.
+
+    A card showed ``- الصدق المدمج: …`` above ``+ الصدق المدمج: …``,
+    character-for-character identical to the eye (2026-09-17). Something
+    invisible differed -- bidi marks, a zero-width joiner, NBSP, CRLF, or
+    NFC/NFD normalisation -- and the operator was asked to approve a change
+    they had no way to see. Name the difference, or say there is none.
+    """
+    o, n = str(old or ""), str(new or "")
+    if o != n:
+        import unicodedata
+
+        if unicodedata.normalize("NFC", o) == unicodedata.normalize("NFC", n):
+            return "the two sides differ only in Unicode normalisation (NFC/NFD)"
+        if o.replace("\r\n", "\n") == n.replace("\r\n", "\n"):
+            return "the two sides differ only in line endings (CRLF vs LF)"
+        # Invisible formatting characters: bidi controls, zero-width marks,
+        # and the non-breaking spaces that Arabic and French text collect.
+        if o.translate(_INVISIBLE) == n.translate(_INVISIBLE):
+            return (
+                "the two sides differ only in invisible characters "
+                "(bidi marks / zero-width / non-breaking spaces)"
+            )
+        if o.strip() == n.strip():
+            return "the two sides differ only in leading/trailing whitespace"
+        return None
+    return "this patch changes NOTHING — the two sides are identical"
 
 
 def _format_patch_preview(tool: str, args: Any) -> str | None:
@@ -288,13 +368,59 @@ def _format_patch_preview(tool: str, args: Any) -> str | None:
         if patch:
             out.extend(patch.splitlines()[:80])
         else:
-            out.extend(
-                _hunk_lines(
-                    str(item.get("old_string") or ""),
-                    str(item.get("new_string") or ""),
-                )
-            )
+            old = str(item.get("old_string") or "")
+            new = str(item.get("new_string") or "")
+            note = _describe_noop(old, new)
+            if note:
+                # Say it BEFORE the hunk. Printed after, it reads as a caption
+                # on a diff the operator has already tried and failed to read.
+                out.append(f"  ⚠️ {note}")
+            out.extend(_hunk_lines(old, new))
     return "\n".join(out)
+
+
+def _format_content_preview(tool: str, args: Any) -> str | None:
+    """Lead with the decision, then a readable excerpt. None → fall back.
+
+    The decision for a write is *how much, to where*. The body is evidence you
+    skim to recognise the document, so it is shown with real line breaks
+    rather than JSON-escaped onto one line.
+    """
+    fields = _CONTENT_TOOLS.get(tool)
+    if not fields or not isinstance(args, dict):
+        return None
+    field = next((f for f in fields if isinstance(args.get(f), str)), None)
+    if field is None:
+        return None
+
+    body = args[field]
+    lines: list[str] = []
+    path = args.get("path")
+    if path:
+        lines.append(f"path: {path}")
+    all_lines = body.splitlines()
+    lines.append(
+        f"{field}: {len(body):,} characters, {len(all_lines):,} lines"
+    )
+
+    # Any other arg is small and decision-relevant (encoding, mode) — keep it.
+    for k, v in args.items():
+        if k in fields or k == "path":
+            continue
+        lines.append(f"{k}: {v!r}")
+
+    shown = all_lines[:_CONTENT_PREVIEW_LINES]
+    lines.append("")
+    lines.append(f"--- first {len(shown)} of {len(all_lines):,} lines ---")
+    for ln in shown:
+        lines.append(
+            ln if len(ln) <= _CONTENT_LINE_CHARS
+            else ln[:_CONTENT_LINE_CHARS] + " …"
+        )
+    remaining = len(all_lines) - len(shown)
+    if remaining > 0:
+        lines.append(f"--- {remaining:,} more lines not shown ---")
+    return "\n".join(lines)
 
 
 def _format_args_for_approval(
@@ -318,6 +444,8 @@ def _format_args_for_approval(
     import json
 
     preview = _format_patch_preview(tool, args)
+    if preview is None:
+        preview = _format_content_preview(tool, args)
     if preview is not None:
         text = preview
     else:
@@ -700,7 +828,6 @@ async def _handle_hitl_resume(
     try:
         import contextlib
 
-        from langgraph.types import Command
 
         lock = await lock_getter(target_thread) if lock_getter is not None else None
         async with (lock if lock is not None else contextlib.AsyncExitStack()):
@@ -756,8 +883,9 @@ async def _handle_hitl_resume(
                 logger.debug("[HITL] gate claim skipped", exc_info=True)
             # Mark successful resume so a late second callback stays quiet.
             try:
-                from kazma_core.config_store import get_config_store
                 import time as _time
+
+                from kazma_core.config_store import get_config_store
 
                 get_config_store().set(
                     f"hitl.last_resume.{target_thread}",
