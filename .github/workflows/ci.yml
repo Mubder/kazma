@@ -68,7 +68,12 @@ jobs:
         # seed weights and the memory-graph tests fail on the degraded path).
         # Playwright smoke is a *separate* job (boot-wait polls /health/live).
         # torch-bearing extras (rag) are too heavy for CI.
-        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy
+        # prometheus-client added 2026-09-16: tests/test_context_integrity.py
+        # imports it unguarded to assert the trim counters actually move, so
+        # without it that test ERRORED rather than skipped. It is a tiny pure
+        # wheel and installing it exercises the metrics path instead of
+        # hiding it — the same reasoning as the extras above.
+        run: pip install -e ".[test]" pillow pymupdf sqlite-vec pypdfium2 numpy prometheus-client
       - name: Install Arabic rendering system deps
         # The visual RTL tests (tests/test_docx_rtl_visual.py) render DOCX
         # through LibreOffice and measure where glyphs land on the page. They
