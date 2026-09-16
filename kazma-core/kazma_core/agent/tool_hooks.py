@@ -248,7 +248,7 @@ def _run_command_sync(
     shell metacharacters.
     """
     if isinstance(command, str):
-        return subprocess.run(
+        return subprocess.run(  # nosec B602 - operator-authored hook, see docstring
             command,
             input=stdin,
             capture_output=True,

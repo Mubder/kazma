@@ -327,7 +327,6 @@ def _summarize_args_for_hitl(args: Any, *, max_len: int = 240) -> str:
         s = str(args)
         return s if len(s) <= max_len else s[: max_len - 1] + "…"
 
-    hints: list[str] = []
     rest: list[str] = []
     for k, v in args.items():
         # Normalise values to a compact string form.
@@ -346,7 +345,7 @@ def _summarize_args_for_hitl(args: Any, *, max_len: int = 240) -> str:
     promoted = [k for k in _HITL_HINT_KEYS if k in args]
     promoted_set = set(promoted)
     ordered = [f"{k}={_compact_value(k, args[k])}" for k in promoted]
-    ordered += [item for item in rest if not item.split("=", 1)[0] in promoted_set]
+    ordered += [item for item in rest if item.split("=", 1)[0] not in promoted_set]
     summary = ", ".join(ordered)
     return summary if len(summary) <= max_len else summary[: max_len - 1] + "…"
 

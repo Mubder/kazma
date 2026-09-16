@@ -654,17 +654,72 @@ def pct(part: int, whole: int) -> str:
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
+README_FILE = REPO_ROOT / "README.md"
+
+
+def readme_values(m: dict) -> dict[str, str]:
+    """The handful of numbers README.md restates from METRICS.md."""
+    py, t, a, g = m["python"], m["tests"], m["assets"], m["git"]
+    return {
+        "loc_k": f"{round(py['total'] / 1000)}K",
+        "code_k": f"{round(py['pure_code'] / 1000)}K",
+        "js_k": f"{round(a['js_loc'] / 1000)}K",
+        "test_functions": f"{t['test_functions_total']:,}",
+        "test_files": f"{t['files']:,}",
+        "commits": f"{g['commits']:,}",
+    }
+
+
+def sync_readme(m: dict, text: str) -> str:
+    """Rewrite README's headline numbers from *m*.
+
+    README carries `<!-- Metrics auto-verified from METRICS.md -->` above a
+    table that nothing actually verified: on 2026-09-16 it advertised 7,346
+    tests / 585 files / ~409K LOC / 3,266 commits while METRICS.md said
+    7,658 / 606 / 430K / 3,403. For a project whose pitch is "measured, not
+    asserted", the badge being the one unmeasured number is the worst
+    possible place for drift (audit 2026-09-16 F-7).
+    """
+    v = readme_values(m)
+    subs = [
+        # Shields badges
+        (r"(Tests-)[\d%A-Za-z,\.]+?(-10B981)",
+         lambda mm: mm.group(1) + v["test_functions"].replace(",", "%2C") + mm.group(2)),
+        (r"(Commits-)[\d%A-Za-z,\.]+?(-6366F1)",
+         lambda mm: mm.group(1) + v["commits"].replace(",", "%2C") + "%2B" + mm.group(2)),
+        # Headline table row
+        (r"\*\*~[\d.]+K LOC\*\* \([\d.]+K Python code \+ [\d.]+K JS\)",
+         lambda mm: f"**~{v['loc_k']} LOC** ({v['code_k']} Python code + {v['js_k']} JS)"),
+        (r"\*\*[\d,]+ test functions\*\* \([\d,]+ test files\)",
+         lambda mm: f"**{v['test_functions']} test functions** ({v['test_files']} test files)"),
+        (r"\*\*[\d,]+\+ commits\*\* across",
+         lambda mm: f"**{v['commits']}+ commits** across"),
+    ]
+    for pattern, repl in subs:
+        text = re.sub(pattern, repl, text)
+    return text
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate Kazma repository metrics.")
     parser.add_argument(
         "--write",
         action="store_true",
-        help="write the output to METRICS.md (default: print to stdout)",
+        help="write the output to METRICS.md and sync README.md (default: stdout)",
     )
     parser.add_argument(
         "--check",
         action="store_true",
         help="compare against METRICS.md and exit 1 if stale (for CI)",
+    )
+    parser.add_argument(
+        "--check-readme",
+        action="store_true",
+        help=(
+            "exit 1 if README.md's headline numbers disagree with the repo. "
+            "Unlike --check this is race-free (it does not depend on the "
+            "metrics bot having committed yet), so CI can GATE on it."
+        ),
     )
     args = parser.parse_args()
 
@@ -672,7 +727,27 @@ def main() -> int:
         print("error: not a git repository (or not run from repo root)", file=sys.stderr)
         return 2
 
-    rendered = render(collect())
+    metrics = collect()
+    rendered = render(metrics)
+
+    if args.check_readme:
+        try:
+            existing = README_FILE.read_text(encoding="utf-8")
+        except OSError:
+            print("error: README.md not found", file=sys.stderr)
+            return 1
+        synced = sync_readme(metrics, existing)
+        if synced != existing:
+            print(
+                "README.md's headline metrics disagree with the repository.\n"
+                "It claims to be auto-verified from METRICS.md; make that true:\n"
+                "    python scripts/generate_metrics.py --write\n"
+                f"Expected: {readme_values(metrics)}",
+                file=sys.stderr,
+            )
+            return 1
+        print("README.md metrics agree with the repository.")
+        return 0
 
     if args.check:
         try:
@@ -689,6 +764,14 @@ def main() -> int:
     if args.write:
         METRICS_FILE.write_text(rendered, encoding="utf-8")
         print(f"updated {METRICS_FILE.relative_to(REPO_ROOT)}")
+        try:
+            existing = README_FILE.read_text(encoding="utf-8")
+            synced = sync_readme(metrics, existing)
+            if synced != existing:
+                README_FILE.write_text(synced, encoding="utf-8")
+                print(f"updated {README_FILE.relative_to(REPO_ROOT)} (headline metrics)")
+        except OSError:
+            print("warning: README.md not found; skipped metric sync", file=sys.stderr)
         return 0
 
     print(rendered)

@@ -39,9 +39,25 @@ os.environ.setdefault(
     str(Path(_tempfile.mkdtemp(prefix="kazma-test-log-")) / "kazma.log"),
 )
 
+# Deliberate, explicit opt-out for a real-Postgres run (audit 2026-09-16 F-7).
+#
+# Everything below force-pins sqlite and strips every DSN so a developer's
+# `.env` can never point the suite at a live database. That default is right
+# and stays. But it is UNCONDITIONAL, which meant a CI job that sets
+# KAZMA_DB_BACKEND=postgres + KAZMA_DATABASE_URL would silently run on sqlite
+# anyway — a Postgres job that proves nothing, which is the same shape of
+# defect this audit was about. One env var, set by nothing except that job:
+_ALLOW_REAL_DB = (os.environ.get("KAZMA_TEST_ALLOW_REAL_DB") or "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
 # Force the sqlite backend and strip every DSN variant BEFORE any kazma
 # module can read them.
-os.environ["KAZMA_DB_BACKEND"] = "sqlite"
+if not _ALLOW_REAL_DB:
+    os.environ["KAZMA_DB_BACKEND"] = "sqlite"
 for _dsn_key in (
     "KAZMA_DATABASE_URL",
     "DATABASE_URL",
@@ -51,6 +67,10 @@ for _dsn_key in (
     "KAZMA_TEMPORAL_HOST",
     "TEMPORAL_ADDRESS",
 ):
+    # The DSN keys are the point of the opt-in; the others (E2B, Temporal) are
+    # third-party credentials and stay stripped either way.
+    if _ALLOW_REAL_DB and _dsn_key in ("KAZMA_DATABASE_URL", "DATABASE_URL"):
+        continue
     os.environ.pop(_dsn_key, None)
 
 import dotenv  # noqa: E402
@@ -66,7 +86,7 @@ _real_setitem = os.environ.__class__.__setitem__
 
 def _shielded_setitem(self, key, value):
     _real_setitem(self, key, value)
-    if key in ("KAZMA_DATABASE_URL", "DATABASE_URL"):
+    if key in ("KAZMA_DATABASE_URL", "DATABASE_URL") and not _ALLOW_REAL_DB:
         import warnings
 
         warnings.warn(

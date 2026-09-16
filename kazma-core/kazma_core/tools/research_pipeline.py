@@ -439,7 +439,7 @@ async def run_research_pipeline(
     if not candidates:
         return (
             "Error: deep research found no URLs. Check SearXNG / network "
-            f"(`KAZMA_SEARXNG_URL`).\n\n" + "\n".join(log)
+            "(`KAZMA_SEARXNG_URL`).\n\n" + "\n".join(log)
         )
 
     # ── Stage 2b: rank sources (industry R1) ──────────────────────────
@@ -763,7 +763,7 @@ async def run_research_pipeline(
     if claims_md:
         report += f"---\n\n{claims_md}\n"
     report += (
-        f"---\n\n## Pipeline log\n\n"
+        "---\n\n## Pipeline log\n\n"
         + "\n".join(f"- {line}" for line in log)
         + "\n"
     )

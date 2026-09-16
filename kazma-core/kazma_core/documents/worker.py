@@ -32,8 +32,6 @@ __all__ = [
     "StageResult",
     "TransientDocumentError",
     "ValidationPolicyError",
-    "start_document_workers",
-    "stop_document_workers",
 ]
 
 _PROCESSING_STATES = frozenset(
@@ -449,29 +447,10 @@ class DocumentWorkerManager:
         await self.worker.stop()
 
 
-_default_manager: DocumentWorkerManager | None = None
+# NOTE: `start_document_workers` / `stop_document_workers` and their
+# `_default_manager` singleton used to live here — a complete second
+# lifecycle API for document workers, exported in __all__, called by
+# nothing: not the app, not the CLI, not a single test. The real path is
+# `ingestion.py`, which builds its own DocumentWorkerManager. Removed in
+# the 2026-09-16 audit (F-8). Use DocumentWorkerManager directly.
 
-
-async def start_document_workers(
-    repository: DocumentJobRepository,
-    handlers: Mapping[DocumentJobState, StageHandler],
-    **kwargs: object,
-) -> DocumentWorkerManager:
-    """Explicitly construct and start the process-local document worker manager."""
-    global _default_manager
-    if _default_manager is not None and _default_manager.worker.running:
-        raise RuntimeError("document workers are already running")
-    worker = DocumentWorker(repository, handlers, **kwargs)
-    manager = DocumentWorkerManager(worker)
-    await manager.start()
-    _default_manager = manager
-    return manager
-
-
-async def stop_document_workers() -> None:
-    """Stop the explicitly started process-local document worker manager."""
-    global _default_manager
-    manager = _default_manager
-    _default_manager = None
-    if manager is not None:
-        await manager.stop()

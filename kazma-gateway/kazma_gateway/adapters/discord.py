@@ -433,6 +433,36 @@ class DiscordAdapter(BaseAdapter):
             await _ack({"type": 6})
             return
 
+        # Admin gate for approval buttons (audit 2026-09-16 F-8). Audit H-8
+        # made installs admin-grade and stopped there, leaving the privilege
+        # model upside down: pressing Approve on a shell_exec / vault_retrieve
+        # card was less privileged than installing a package. No-op in the
+        # shipped posture (allowed_users ⇒ admin); it bites only in allow_all,
+        # where any guild member could otherwise answer the operator.
+        if action.kind in ("hitl", "swarm"):
+            from kazma_gateway.allowlists import is_gateway_admin
+
+            if not is_gateway_admin(f"discord:{_ia_user_id}", "discord"):
+                logger.info(
+                    "[discord] Ignoring %s approval (admin required) user=%s",
+                    action.kind, _ia_user_id,
+                )
+                await _ack(
+                    {
+                        "type": 7,
+                        "data": {
+                            "content": (
+                                "⛔ Admin privilege required to approve a danger "
+                                "tool. Set KAZMA_GATEWAY_ADMINS or the platform "
+                                "user allowlist."
+                            ),
+                            "embeds": [],
+                            "components": [],
+                        },
+                    }
+                )
+                return
+
         if is_install_action(custom_id):
             # Admin gate (audit H-8): package installs are admin-grade; the
             # allowlist check above only bounds who may chat/click at all.

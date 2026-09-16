@@ -25,7 +25,6 @@ import hashlib
 import hmac
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
@@ -710,18 +709,60 @@ class FTPSync:
         }
 
     def _connect(self, cfg: dict[str, Any]) -> Any:
-        import ftplib
+        """Connect, preferring FTPS (explicit TLS) over plaintext FTP.
 
-        ftp = ftplib.FTP()
-        ftp.connect(cfg["host"], cfg["port"], timeout=15)
-        ftp.login(cfg["username"] or "anonymous", cfg["password"] or "kazma@")
+        This used to be an unconditional ``ftplib.FTP()``. An offsite backup
+        run over plaintext FTP puts the operator's **password** and the whole
+        archive on the wire in the clear, on the one channel that carries a
+        complete copy of the install (audit 2026-09-16 F-7). We now try
+        ``FTP_TLS`` first and fall back only when the server refuses AUTH TLS,
+        and that fallback is a loud warning, not a silent downgrade.
+
+        Set ``backups.offsite.ftp.require_tls`` to refuse the fallback.
+        """
+        import ftplib  # nosec B402 - FTPS preferred in _connect; plaintext is a warned fallback
+
+        host, port = cfg["host"], cfg["port"]
+        user = cfg["username"] or "anonymous"
+        password = cfg["password"] or "kazma@"
+
+        try:
+            ftps = ftplib.FTP_TLS()
+            ftps.connect(host, port, timeout=15)
+            ftps.login(user, password)
+            ftps.prot_p()  # encrypt the DATA channel too, not just the control one
+            ftps.set_pasv(True)
+            logger.info("[backup.ftp] Connected to %s over FTPS (TLS)", host)
+            return ftps
+        except Exception as exc:
+            require_tls = str(
+                _read_config("backups.offsite.ftp.require_tls", "") or ""
+            ).strip().lower() in ("1", "true", "yes", "on")
+            if require_tls:
+                raise RuntimeError(
+                    f"FTPS required but unavailable for {host}: {exc}. "
+                    "Unset backups.offsite.ftp.require_tls to allow plaintext."
+                ) from exc
+            logger.warning(
+                "[backup.ftp] FTPS unavailable for %s (%s) — falling back to "
+                "PLAINTEXT FTP. Your password and the entire backup archive "
+                "cross the network unencrypted. Prefer an SFTP/S3/rclone "
+                "target, or set backups.offsite.ftp.require_tls to refuse "
+                "this fallback.",
+                host,
+                exc,
+            )
+
+        ftp = ftplib.FTP()  # nosec B321 - explicit, warned-about fallback above
+        ftp.connect(host, port, timeout=15)
+        ftp.login(user, password)
         ftp.set_pasv(True)
         return ftp
 
     @staticmethod
     def _ensure_dir(ftp: Any, path: str) -> None:
         """cwd into ``path`` (relative to the login dir), creating missing dirs."""
-        import ftplib
+        import ftplib  # nosec B402 - FTPS preferred in _connect; plaintext is a warned fallback
 
         parts = [p for p in path.split("/") if p]
         if not parts:

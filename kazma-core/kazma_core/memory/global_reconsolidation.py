@@ -32,7 +32,7 @@ def subject_partition_index(subject: str, partition_count: int) -> int:
     """Stable 0..N-1 bucket for a subject slug (MD5, cross-platform)."""
     n = max(1, int(partition_count or 1))
     raw = (subject or "").strip().lower().encode("utf-8")
-    h = int(hashlib.md5(raw).hexdigest(), 16)
+    h = int(hashlib.md5(raw, usedforsecurity=False).hexdigest(), 16)
     return h % n
 
 

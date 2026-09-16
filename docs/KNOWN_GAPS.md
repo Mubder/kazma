@@ -8,7 +8,74 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word — and so the gap stops being invisible when the person who
 found it forgets.
 
-**Reviewed 2026-09-13.** An entry with no date has not been re-checked since.
+**Reviewed 2026-09-16.** An entry with no date has not been re-checked since.
+
+---
+
+## What the 2026-09-16 audit found, and what it says about our gates
+
+Seven defects, all shipped, all green in CI. They are fixed (see `CHANGELOG.md`)
+and the regressions are pinned in `tests/test_audit_2026_09_16_regressions.py`.
+They are recorded here rather than only in the changelog because the *pattern*
+is the finding, and the pattern is still a risk:
+
+**Every one of them sat next to a gate that was supposed to catch it.**
+
+| What shipped | The gate that was watching |
+|---|---|
+| Swarm reaping, checkpoint retention and the migrate-import liveness interlock had **never once run** — started from a sync constructor with no event loop, `RuntimeError` swallowed, logged at warning | nothing; the log line was the only evidence, for months |
+| `digest_research_file` / `summarize_research_file` / `list_research_chunks` returned fetched web text **unfenced** — and the tool descriptions steer the model to the digest, so the *recommended* research path was the unfenced one | `test_no_unfenced_web_tool_output` greps the **file** for `fence_untrusted`; one fenced sibling in a 1,500-line module made it pass |
+| `run_unit_tests` (pytest → arbitrary code execution) sat at the **read** tier, no approval | `TOOL_TIERS` still gated `run_tests`, the pre-rename name, which is not a registered tool |
+| 20 `subprocess.run` calls on the event loop in agent tools, up to **90s** each — freezing every SSE stream, WS ping and the approval endpoint | `test_no_blocking_db_driver_in_async` scans those exact files, for `sqlite3.connect` only |
+| `email_list` returned sender/subject/snippet unfenced while `email_get` fenced both; only the snippet stripped newlines, so a subject could break out of the table row | none |
+| New danger tools **never reach an existing install**: `reconcile_from_yaml` seeds only absent keys, so a live store held 56 of 57 canonical tools forever | the drift warning fired at every boot and was informational |
+| The `Security Scan` CI job could not fail (`bandit … \|\| true`), and README's "auto-verified" metrics were wrong on every figure | the metrics check also ended in `\|\| true` |
+
+The generalisation, which is the part worth keeping: **a gate that checks the
+shape of the code — a string in a file, one driver name, one tool's tier — will
+pass while the sibling function, the renamed tool, or the second copy of the
+list is wrong.** Where it was practical the gates are now per-function and
+closed by default (an unclassified public tool coroutine *fails*), but that
+discipline has been applied to the modules the audit touched, not to the whole
+tree. Assume the same class exists elsewhere.
+
+**Still open from that audit:**
+
+- **Postgres has one CI job, not coverage.** The new job runs seven named
+  `*_pg*` / `*postgres*` / `pgvector` files against a real Postgres service.
+  That is a tripwire for those code paths, not parity with the SQLite suite —
+  everything else still runs on SQLite only. A broad `-k` sweep was tried and
+  rejected: it drags in SQLite-shaped tests that fail for reasons unrelated to
+  the backend, and a job that is red on day one is a job everyone ignores,
+  which is how the gap opened in the first place.
+- **The suite can only reach a real Postgres through one deliberate switch.**
+  `conftest.py` force-pins `KAZMA_DB_BACKEND=sqlite` and strips every DSN at
+  import, with a guard that removes the DSN again if anything re-adds it — so
+  a developer's `.env` can never point the suite at a live database. Only
+  `KAZMA_TEST_ALLOW_REAL_DB=1` (set by the CI Postgres job and nothing else)
+  opens it. The first version of that CI job did **not** set it and would have
+  run entirely on SQLite while looking like Postgres coverage; that is why
+  `test_conftest_db_guard_is_failsafe_by_default` exists.
+- **`KAZMA_DATA_DIR` does not isolate a Postgres-backed ConfigStore.**
+  `_use_postgres()` keys off `KAZMA_DB_BACKEND` / `KAZMA_DATABASE_URL` only, so
+  a test or script that sets only the data dir on a developer box with `.env`
+  loaded reads — and can write — the real settings store. Verified by accident
+  during the audit.
+- **~229 of 272 `KAZMA_*` variables remain undocumented.** The sixteen that
+  weaken a security default are now in `.env.example` and gated by
+  `test_security_env_vars_are_documented`; the rest are not.
+- **175 public symbols have no reference outside their own module.** Not
+  removed: mass-deleting unreferenced public API is how you break downstream
+  importers, and the audit proved the point — `ruff --fix` removing "unused"
+  imports silently broke every native skill via a re-export contract no linter
+  could see (caught by `tests/test_imports.py`).
+- **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
+  function named `read_url`, so `import kazma_core.tools.read_url as ru` binds
+  the *function*, not the module (Python resolves `import a.b as c` by
+  attribute since 3.7). Anything reaching for the module must use
+  `importlib.import_module`. Not renamed — the call sites are many and the
+  breakage is loud rather than silent — but it costs a contributor an hour
+  the first time.
 
 ---
 

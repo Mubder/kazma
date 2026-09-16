@@ -488,7 +488,7 @@ def _dump_postgres_shared_state(
             _log("  (no KAZMA_DATABASE_URL — skipping Postgres dump)")
             return
         dest = staging / "data" / "postgres.dump"
-        _log(f"  pg_dump → data/postgres.dump (this may take a minute for large DBs)…")
+        _log("  pg_dump → data/postgres.dump (this may take a minute for large DBs)…")
         written = dump_database(dsn, dest, progress=lambda p: _log(f"    {p}"))
         manifest.table_counts["_postgres_dump"] = {
             "bytes": written.stat().st_size,

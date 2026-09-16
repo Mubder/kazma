@@ -26,7 +26,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ara \
     tesseract-ocr-eng \
     clamav \
+    clamav-freshclam \
     && rm -rf /var/lib/apt/lists/*
+
+# Fetch ClamAV signatures at BUILD time.
+#
+# The `clamav` package ships the scanner and no virus database. Without one,
+# `clamscan` exits with an error — and `scan_if_configured` treats an error as
+# "skipped" under the default (`malware_scan=auto`, `fail_closed=false`), so
+# every upload passed a scan that never ran, behind an INFO log (audit
+# 2026-09-16 F-8). The image advertised malware scanning and did not do it.
+#
+# `|| true`: freshclam needs network, and a mirror hiccup must not fail the
+# build. The entrypoint refreshes signatures at runtime anyway, and
+# `/health/details` reports `malware.available` so the gap is visible rather
+# than silent.
+RUN freshclam --quiet || true
 
 # Copy monorepo
 COPY . .

@@ -157,7 +157,7 @@ def _is_safe_url(url: str) -> bool:
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url)
+        validate_url(url, block_unresolved=True)
     except Exception:
         return False
     return True
@@ -212,6 +212,11 @@ async def _download_image(url: str) -> tuple[bytes, str]:
             timeout=REQUEST_TIMEOUT,
             headers=headers,
         ) as resp:
+            # Post-connect peer check (audit 2026-09-16 F-6). The guard above
+            # is DNS-time only; this one sees the IP we actually reached.
+            from kazma_core.security.ssrf import assert_peer_public
+
+            assert_peer_public(resp, url=fetch_url)
             resp.raise_for_status()
 
             # Check Content-Length header first (may be absent)

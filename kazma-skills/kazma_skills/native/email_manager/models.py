@@ -9,6 +9,18 @@ ProviderName = Literal["auto", "sandbox", "gmail", "microsoft", "imap"]
 SendAction = Literal["send", "reply", "forward", "draft"]
 
 
+def _cell(value: str | None, limit: int) -> str:
+    """Flatten sender-controlled text into a single safe markdown table cell.
+
+    Collapses every newline/carriage-return/tab and escapes the pipe, so no
+    field can end a row, start a new one, or add a column.
+    """
+    text = (value or "")[:limit]
+    for ch in ("\r", "\n", "\t"):
+        text = text.replace(ch, " ")
+    return text.replace("|", "\\|").strip()
+
+
 @dataclass
 class EmailMessage:
     id: str
@@ -30,13 +42,23 @@ class EmailMessage:
         return asdict(self)
 
     def short_row(self) -> str:
+        """One markdown table row. Every field here is sender-controlled.
+
+        `snip` used to be the only field with its newlines stripped, so a
+        newline in a *subject* (or a display name in `from_addr`) broke out
+        of the row and forged free-form lines in the tool result — the model
+        read them as the tool speaking. Cells are now uniformly flattened
+        and `|` is escaped so a crafted header cannot restructure the table
+        (audit 2026-09-16 F-2). The whole block is fenced by `email_list`;
+        this keeps the fence's contents from being reshaped.
+        """
         flag = "●" if self.unread else "○"
         star = "★" if self.starred else "☆"
-        snip = (self.snippet or self.body or "")[:80].replace("\n", " ")
-        labs = ",".join(self.labels) if self.labels else "—"
+        snip = _cell(self.snippet or self.body, 80)
+        labs = _cell(",".join(self.labels), 40) if self.labels else "—"
         return (
-            f"| `{self.id}` | {flag}{star} | {self.from_addr[:40]} | "
-            f"{self.subject[:50]} | {self.date[:25]} | {labs} | {snip} |"
+            f"| `{_cell(self.id, 60)}` | {flag}{star} | {_cell(self.from_addr, 40)} | "
+            f"{_cell(self.subject, 50)} | {_cell(self.date, 25)} | {labs} | {snip} |"
         )
 
 

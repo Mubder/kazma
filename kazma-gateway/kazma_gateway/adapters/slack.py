@@ -655,6 +655,22 @@ class SlackAdapter(BaseAdapter):
                                             _ia_user_id, action.kind,
                                         )
                                         continue
+                                    if action.kind in ("hitl", "swarm"):
+                                        # Admin gate for approval buttons
+                                        # (audit 2026-09-16 F-8): audit H-8
+                                        # made installs admin-grade and left
+                                        # Approve — the button that turns
+                                        # "wants to" into "did" — open to
+                                        # anyone who may interact. No-op when
+                                        # allowed_users is configured.
+                                        from kazma_gateway.allowlists import is_gateway_admin
+
+                                        if not is_gateway_admin(f"slack:{_ia_user_id}", "slack"):
+                                            logger.info(
+                                                "[Slack] Ignoring %s approval (admin required) user=%s",
+                                                action.kind, _ia_user_id,
+                                            )
+                                            continue
                                     if action.kind in ("sys_install", "install_dep"):
                                         # Admin gate (audit H-8): the allowlist
                                         # check above bounds who may interact at

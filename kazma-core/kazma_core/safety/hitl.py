@@ -50,6 +50,10 @@ DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300
 _DRIFT_WARN_COOLDOWN_S = 900.0  # 15 minutes
 _DRIFT_WARN_LAST: list[float] = [0.0]
 
+#: One-shot latch for the canonical-floor opt-out warning. get_hitl_config is
+#: called per tool call, so an unconditional warning here would be log spam.
+_FLOOR_OFF_WARNED: list[bool] = [False]
+
 # Thread-safe context var for tracking active session/thread_id
 _current_thread_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("_current_thread_id", default=None)
 
@@ -122,6 +126,10 @@ TOOL_TIERS: dict[str, str] = {
     "vault_retrieve": "danger",
     "vault_delete": "danger",
     "config_save": "danger",
+    # pytest imports and runs conftest.py + every collected module: this is
+    # arbitrary code execution, not a read (audit 2026-09-16 F-3). The
+    # `run_tests` entry below is the pre-rename alias, kept inert.
+    "run_unit_tests": "danger",
     "run_tests": "danger",
     "git_commit": "danger",
     "git_push_pull": "danger",
@@ -231,7 +239,6 @@ TOOL_TIERS: dict[str, str] = {
     "find_free_slots": "read",
     "list_events": "read",
     "lint_code": "read",
-    "run_unit_tests": "read",
     "execute_db_query": "read",     # SELECT/WITH only, enforced in the tool
     "inspect_db_schema": "read",
     "context_info": "read",
@@ -299,7 +306,16 @@ CANONICAL_DANGER_TOOLS: tuple[str, ...] = (
     "vault_retrieve",
     "vault_delete",
     "config_save",
-    "run_tests",
+    # `run_unit_tests` shells out to pytest, which imports and executes
+    # conftest.py and every collected module — arbitrary code execution
+    # under a testing name. It was tiered "read" for months because the
+    # gate still carried the pre-rename name `run_tests` (which is not a
+    # registered tool and so gated nothing), making it the only tool in
+    # the registry classified EffectKind.EXEC at the SAFE security tier
+    # (audit 2026-09-16 F-3). The dead alias is kept below so an operator
+    # who pinned it in their own require_approval_for keeps a valid entry.
+    "run_unit_tests",
+    "run_tests",  # deprecated alias of run_unit_tests; not registered
     "git_commit",
     # `git_push_pull` is deprecated and deliberately absent from the skill
     # manifest, so it is not registered and gating it protected nothing. The
@@ -441,30 +457,38 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception as exc:
         logger.error("ConfigStore overrides read failed in get_hitl_config — using yaml defaults: %s", exc)
 
-    # Optional canonical floor (deep-audit 2026-08-19, finding #10): when
-    # KAZMA_HITL_CANONICAL_FLOOR is set, canonical danger tools can never be
-    # narrowed out of the effective list — Settings/YAML narrowing below
-    # CANONICAL is capped back up.
+    # Canonical floor (deep-audit 2026-08-19 finding #10; made unconditional
+    # by audit 2026-09-16 F-5). The effective list can never be NARROWER than
+    # CANONICAL_DANGER_TOOLS; operators may still widen it.
     #
-    # Largely superseded by audit F-04: `requires_approval` now default-denies
-    # on the TOOL_TIERS classification, so a canonical tool narrowed out of
-    # this list is still gated by its `danger` tier. The flag remains useful
-    # because it puts the tools in the *effective list* itself, which is what
-    # the graph interrupt and swarm bus read directly.
+    # Why this is no longer opt-in. ConfigStore.reconcile_from_yaml seeds only
+    # keys that are ABSENT ("existing DB keys are never overwritten"), so once
+    # an installation has a `safety.require_approval_for` row, every danger
+    # tool added to CANONICAL/kazma.yaml afterwards never reaches that install
+    # — forever, silently, across upgrades. Observed live: a store holding 56
+    # of 57 canonical tools, permanently missing `file_apply_patch_set`.
+    # Narrowing below CANONICAL was never *effective* anyway (requires_approval
+    # default-denies on the TOOL_TIERS `danger` tier since audit F-04), but the
+    # graph interrupt and swarm bus read this list DIRECTLY, so an honest
+    # effective list is what actually closes the gap.
+    #
+    # KAZMA_HITL_CANONICAL_FLOOR=0 remains as a deliberate operator opt-out;
+    # it is not, and must not become, the default.
     try:
         _floor_raw = os.environ.get("KAZMA_HITL_CANONICAL_FLOOR", "").strip().lower()
-        _floor_on = _floor_raw in ("1", "true", "yes", "on")
         _floor_off = _floor_raw in ("0", "false", "no", "off")
-        if not _floor_on and not _floor_off:
-            try:
-                from kazma_core.tenant_isolation import multi_user_or_production
-
-                _floor_on = bool(multi_user_or_production())
-            except Exception:
-                _floor_on = False
-        if _floor_on:
+        if not _floor_off:
             require_approval_for = set(require_approval_for or []) | set(
                 CANONICAL_DANGER_TOOLS
+            )
+        elif not _FLOOR_OFF_WARNED[0]:
+            _FLOOR_OFF_WARNED[0] = True
+            logger.warning(
+                "[Safety] KAZMA_HITL_CANONICAL_FLOOR=0 — the effective "
+                "require_approval_for list may be narrower than "
+                "CANONICAL_DANGER_TOOLS. Canonical tools remain gated by their "
+                "TOOL_TIERS tier, but the graph interrupt and swarm bus read "
+                "this list directly."
             )
     except Exception:
         logger.debug("[Safety] KAZMA_HITL_CANONICAL_FLOOR check failed", exc_info=True)
@@ -476,7 +500,8 @@ def get_hitl_config(raw_config: dict[str, Any] | None = None) -> dict[str, Any]:
     # drift visible so danger tools missing from it (which would silently
     # skip approval) are caught. Cooldown-based repeat, not one-shot
     # (deep-audit 2026-08-19, finding #10). Diagnostic; enforcement is the
-    # KAZMA_HITL_CANONICAL_FLOOR flag above.
+    # canonical floor above, which is now unconditional — so `_canonical_only`
+    # can only be non-empty when an operator set KAZMA_HITL_CANONICAL_FLOOR=0.
     try:
         _now = time.monotonic()
         if _now - _DRIFT_WARN_LAST[0] >= _DRIFT_WARN_COOLDOWN_S:

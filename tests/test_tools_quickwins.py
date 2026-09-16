@@ -437,9 +437,20 @@ class TestReadUrlEdgeCases:
         assert "Error" in result
         assert "No URL" in result
 
+    # These two assert the friendly TRANSPORT error messages, so they must get
+    # past the SSRF pre-flight to reach the transport at all. `down.example.com`
+    # / `slow.example.com` do not resolve, and since audit 2026-09-16 F-6 every
+    # LLM-facing fetcher passes `block_unresolved=True` — an unresolvable host
+    # is now refused before a socket is opened, which is the point of the
+    # change. Stub the guard rather than swap in a host that really resolves:
+    # a unit test must not depend on live DNS. The guard itself is covered by
+    # tests/test_audit_2026_09_16_regressions.py and the SSRF suite.
     @pytest.mark.asyncio
-    async def test_read_url_connection_error(self) -> None:
+    async def test_read_url_connection_error(self, monkeypatch) -> None:
         """read_url returns friendly message on ConnectionError."""
+        monkeypatch.setattr(
+            "kazma_core.security.ssrf.validate_url", lambda u, **_kw: ()
+        )
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=ConnectionError("refused"))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -454,8 +465,11 @@ class TestReadUrlEdgeCases:
         assert "Could not connect" in result
 
     @pytest.mark.asyncio
-    async def test_read_url_timeout(self) -> None:
+    async def test_read_url_timeout(self, monkeypatch) -> None:
         """read_url returns friendly message on TimeoutError."""
+        monkeypatch.setattr(
+            "kazma_core.security.ssrf.validate_url", lambda u, **_kw: ()
+        )
         mock_client = AsyncMock()
         mock_client.get = AsyncMock(side_effect=TimeoutError("timed out"))
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)

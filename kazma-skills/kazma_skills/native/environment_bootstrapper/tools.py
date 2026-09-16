@@ -10,6 +10,9 @@ import subprocess
 from pathlib import Path
 from kazma_core.tools.file_write import _get_workspace
 
+# 90s pip/npm installs used to run ON the event loop (audit 2026-09-16 F-4).
+from kazma_skills.native._subprocess import run_off_loop
+
 logger = logging.getLogger(__name__)
 
 
@@ -46,7 +49,7 @@ async def install_python_packages(packages: list[str]) -> str:
 
     try:
         logger.info("Executing Python package install: %s", " ".join(cmd))
-        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=90)
+        res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=90)
         output = res.stdout.strip() or res.stderr.strip()
         if res.returncode == 0:
             return f"Successfully installed packages: {', '.join(packages)}\n\nOutput:\n{output}"
@@ -80,7 +83,7 @@ async def install_npm_packages(packages: list[str]) -> str:
     cmd = [npm_path, "install"] + packages
     try:
         logger.info("Executing npm install: %s", " ".join(cmd))
-        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=90)
+        res = await run_off_loop(cmd, cwd=cwd, capture_output=True, text=True, timeout=90)
         output = res.stdout.strip() or res.stderr.strip()
         if res.returncode == 0:
             return f"Successfully installed npm packages: {', '.join(packages)}\n\nOutput:\n{output}"

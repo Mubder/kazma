@@ -138,7 +138,6 @@ class SwarmEngine:
         self._task_lock = threading.Lock()  # protects _task_history mutations
         self._max_history = 500  # LRU cap to prevent unbounded memory growth
         self._result_aggregator = result_aggregator or ResultAggregator()
-        from kazma_core.routing_engine import UnifiedRouter
         self._routing_engine = UnifiedRouter()
         # Reliability config delegated to ReliabilityRegistry (P2-1 refactor).
         self._reliability = ReliabilityRegistry(

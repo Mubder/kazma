@@ -229,7 +229,7 @@ class WorkspaceStore:
         with self._lock:
             conn = self._get_conn()
             cur = conn.execute(
-                f"""UPDATE workspaces
+                """UPDATE workspaces
                     SET repo_url = ?, owner = ?, repo = ?,
                         default_branch = ?, is_github = ?
                     WHERE root_path = ?""",

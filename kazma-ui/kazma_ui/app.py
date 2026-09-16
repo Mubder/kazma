@@ -778,36 +778,62 @@ class KazmaAppBuilder:
             except Exception as e:
                 logger.warning("[Swarm] Orphan task recovery failed: %s", e)
 
-            # Periodic maintenance watchdog (audit H-9): stale-task reaping
-            # and idle-worker reaping used to run ONLY inside dispatch() —
-            # with no traffic, a stuck task held its admission slot forever.
-            try:
-                self.swarm_manager.engine.start_maintenance_loop()
-            except Exception as e:
-                logger.warning("[Swarm] Maintenance loop start failed: %s", e)
-
-            # Checkpoint retention sweep (audit M-G1): checkpoints.db grows a
-            # full-state row per superstep with no deleter — bound it daily.
-            try:
-                from kazma_core.checkpoint_retention import (
-                    start_checkpoint_retention_loop,
-                )
-
-                start_checkpoint_retention_loop()
-            except Exception as e:
-                logger.warning("[app] Checkpoint retention loop failed to start: %s", e)
+            # NOTE: the swarm maintenance watchdog (audit H-9), the checkpoint
+            # retention sweep (audit M-G1) and the liveness heartbeat (audit
+            # M-P6) used to start HERE. They cannot: this method runs inside
+            # the synchronous constructor, `main()` calls create_app() BEFORE
+            # uvicorn.run(), so there is no running event loop and every one
+            # of them died on `RuntimeError: no running event loop`, caught,
+            # logged at warning, never retried. All three now start from
+            # `_start_background_loops()` on the async lifespan (audit
+            # 2026-09-16 F-1). Do not move them back.
 
         except Exception as e:
             logger.warning("[Swarm] SwarmManager not available: %s", e)
             self.swarm_manager = None
 
+        if self.swarm_manager is not None:
+            container = get_container()
+            container.register(SwarmManager, self.swarm_manager)
+
+    def _start_background_loops(self) -> None:
+        """Start the process-wide background loops. **Requires a running loop.**
+
+        Called from ``_on_startup`` (the async lifespan), never from the
+        constructor: ``asyncio.create_task`` — which every one of these
+        bottoms out in — raises outside a running loop, and the resulting
+        warning was the only trace that swarm reaping, checkpoint retention
+        and the migrate-import liveness interlock had all been dead since
+        the day they were written (audit 2026-09-16 F-1).
+
+        Each loop is independently guarded: one failure must never take the
+        other two down with it.
+        """
+        # Periodic maintenance watchdog (audit H-9): stale-task reaping and
+        # idle-worker reaping used to run ONLY inside dispatch() — with no
+        # traffic, a stuck task held its admission slot forever.
+        if self.swarm_manager is not None:
+            try:
+                self.swarm_manager.engine.start_maintenance_loop()
+                logger.info("[Swarm] Maintenance loop started")
+            except Exception as e:
+                logger.error("[Swarm] Maintenance loop start failed: %s", e, exc_info=True)
+
+        # Checkpoint retention sweep (audit M-G1): checkpoints.db grows a
+        # full-state row per superstep with no deleter — bound it daily.
+        try:
+            from kazma_core.checkpoint_retention import start_checkpoint_retention_loop
+
+            start_checkpoint_retention_loop()
+            logger.info("[app] Checkpoint retention loop started")
+        except Exception as e:
+            logger.error("[app] Checkpoint retention loop failed to start: %s", e, exc_info=True)
+
         # Liveness heartbeat (audit M-P6): `kazma migrate import` refuses to
-        # swap live DBs when this key is fresh. Deliberately OUTSIDE the swarm
-        # try-block above: a heartbeat failure must never take the SwarmManager
-        # down with it (live 2026-09-09: a missing spawn_background import
-        # here disabled the entire swarm subsystem at boot).
+        # swap live DBs when this key is fresh. Without it the interlock that
+        # stops an import from discarding a running server's WAL frames never
+        # trips at all.
         if not getattr(KazmaAppBuilder, "_heartbeat_started", False):
-            KazmaAppBuilder._heartbeat_started = True
             try:
                 from kazma_core.background import spawn_background
 
@@ -824,16 +850,56 @@ class KazmaAppBuilder:
                                 "system.heartbeat.epoch", lambda _v: _time.time()
                             )
                         except Exception:
-                            pass
+                            logger.debug("[app] heartbeat stamp failed", exc_info=True)
                         await asyncio.sleep(60)
 
-                spawn_background(_heartbeat_loop(), name="liveness-heartbeat")
+                KazmaAppBuilder._heartbeat_task = spawn_background(
+                    _heartbeat_loop(), name="liveness-heartbeat"
+                )
+                # Set only AFTER the spawn succeeds: setting it first meant a
+                # failed start latched the flag and permanently suppressed
+                # every retry for the life of the process.
+                KazmaAppBuilder._heartbeat_started = True
+                logger.info("[app] Liveness heartbeat started")
             except Exception as e:
-                logger.warning("[app] Liveness heartbeat failed to start: %s", e)
+                logger.error("[app] Liveness heartbeat failed to start: %s", e, exc_info=True)
 
-        if self.swarm_manager is not None:
-            container = get_container()
-            container.register(SwarmManager, self.swarm_manager)
+    def _stop_background_loops(self) -> None:
+        """Cancel the loops from :meth:`_start_background_loops`.
+
+        Must run BEFORE ``drain_background``. All three are ``while True``
+        loops that never complete on their own, so a drain that waits on them
+        burns its full 10s timeout every single shutdown — and under test,
+        where ``with TestClient(app)`` enters the lifespan once per test, that
+        is ten seconds multiplied by the number of tests. It read as a hang:
+        ``tests/test_workspace_tab.py`` went from seconds to past its cap and
+        was reported as a poison file.
+
+        Idempotent and never raises: shutdown must not fail here.
+        """
+        try:
+            if self.swarm_manager is not None:
+                self.swarm_manager.engine.stop_maintenance_loop()
+        except Exception:
+            logger.debug("[Swarm] maintenance loop stop failed", exc_info=True)
+
+        try:
+            from kazma_core.checkpoint_retention import stop_checkpoint_retention_loop
+
+            stop_checkpoint_retention_loop()
+        except Exception:
+            logger.debug("[app] checkpoint retention stop failed", exc_info=True)
+
+        task = getattr(KazmaAppBuilder, "_heartbeat_task", None)
+        if task is not None:
+            try:
+                task.cancel()
+            except Exception:
+                logger.debug("[app] heartbeat cancel failed", exc_info=True)
+            KazmaAppBuilder._heartbeat_task = None
+            # Clear the latch too, so a second app in the same process (every
+            # test that builds one) can start its own heartbeat.
+            KazmaAppBuilder._heartbeat_started = False
 
     def _setup_gateway_and_bus(self) -> None:
         """Initialize GatewayManager, register adapters, and wire the message bus."""
@@ -1604,6 +1670,13 @@ class KazmaAppBuilder:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[Swarm] deferred checkpoint arming failed: %s", exc)
 
+            # ── Start the process-wide background loops ────────────────
+            # Same reason as the arming above: the constructor has no event
+            # loop, so swarm maintenance / checkpoint retention / the
+            # liveness heartbeat can only be started from here (audit
+            # 2026-09-16 F-1).
+            self._start_background_loops()
+
             # ── Connect MCP servers ────────────────────────────────────
             # The CLI path (agent_runner.run_once/main) calls
             # connect_mcp_servers() explicitly, but the web path was
@@ -1702,8 +1775,8 @@ class KazmaAppBuilder:
                         elif _missing:
                             _backup = latest_pg_backup()
                             _hint = (
-                                f"Restore the latest backup with: "
-                                f"python scripts/pg_backup.py restore --latest"
+                                "Restore the latest backup with: "
+                                "python scripts/pg_backup.py restore --latest"
                                 if _backup
                                 else "No pg_backup dump exists yet — restore from your "
                                 "migration bundle, then run: python scripts/pg_backup.py backup"
@@ -2084,6 +2157,16 @@ class KazmaAppBuilder:
             logger.info("[app] signal_shutdown() fired")
         except Exception as e:
             logger.warning("[app] signal_shutdown failed: %s", e)
+
+        # Cancel our own never-ending loops BEFORE draining. They are
+        # `while True` and never complete, so draining them first spends the
+        # full 10s timeout on every shutdown (audit 2026-09-16 F-1 follow-up).
+        # The later teardown block still calls stop_maintenance_loop() /
+        # stop_checkpoint_retention_loop() — both are idempotent.
+        try:
+            self._stop_background_loops()
+        except Exception as e:  # noqa: BLE001 — teardown must not fail here
+            logger.debug("[app] background loop stop failed: %s", e)
 
         # Give retained background tasks (crawls, rebuilds, promotions) a
         # bounded chance to finish before the loop closes (audit F-07).

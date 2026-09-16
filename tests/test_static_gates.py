@@ -26,6 +26,7 @@ by a failing test.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -68,7 +69,37 @@ def _dotted(func: ast.expr) -> str | None:
 
 # ── 1. Blocking DB driver inside async def (F-06) ────────────────────────
 
-BLOCKING_CALLS = {"sqlite3.connect", "_sqlite3.connect"}
+#: Synchronous calls that pin the event loop for the duration of the work.
+#:
+#: This started as SQLite-only and that was the hole: the gate's own docstring
+#: says a blocking call "stalls the event loop shared by every SSE/WebSocket
+#: stream", but the rule only ever looked for ``sqlite3.connect``. Meanwhile
+#: twenty ``subprocess.run`` calls sat inside ``async def`` agent tools with
+#: timeouts up to ninety seconds — a far bigger stall than any SQLite query,
+#: scanned by this very gate, and waved straight through (audit 2026-09-16
+#: F-4). The rule is about *blocking the loop*, so it names every way we do it.
+BLOCKING_CALLS = {
+    "sqlite3.connect",
+    "_sqlite3.connect",
+    # Waits for a child process. Use kazma_skills.native._subprocess.run_off_loop
+    # (skills) or `await asyncio.to_thread(subprocess.run, ...)` (core).
+    "subprocess.run",
+    "subprocess.call",
+    "subprocess.check_call",
+    "subprocess.check_output",
+    # Sync HTTP clients — use httpx.AsyncClient.
+    "requests.get",
+    "requests.post",
+    "requests.put",
+    "requests.delete",
+    "requests.request",
+    # Sleeps the whole loop. Use `await asyncio.sleep`.
+    "time.sleep",
+    # Sync DB drivers beyond SQLite.
+    "psycopg.connect",
+    "psycopg2.connect",
+    "pymysql.connect",
+}
 #: Sync helpers whose body opens SQLite; calling them from async def is the
 #: same pin as an inline connect (audit M-14 memory_api ``_conn()``).
 BLOCKING_HELPERS = {"_conn"}
@@ -238,6 +269,171 @@ def test_no_unfenced_web_tool_output(rel):
         "text in the system (audit F-09).\n"
         "Fix: `from kazma_core.safety.prompt_fence import fence_untrusted` and "
         "return `fence_untrusted(text, source=...)`."
+    )
+
+
+# ── 4b. Per-FUNCTION fencing (audit 2026-09-16 F-2) ──────────────────────
+#
+# The module-level check above is necessary and not sufficient: it passes as
+# soon as the string `fence_untrusted` appears ANYWHERE in the file. read_url.py
+# is 1,500 lines with eleven public tools; one of them fenced, and that was
+# enough to make the gate green while `digest_research_file`,
+# `summarize_research_file` and `list_research_chunks` returned verbatim
+# remote-authored text — and the tool descriptions steer the model to the
+# digest, so the *recommended* research path was the unfenced one.
+#
+# This gate is per-function and closed by default: every public coroutine in a
+# listed module must be classified, so a new reader cannot be added without a
+# deliberate decision about its provenance.
+
+#: module → {function: must_fence}. False means "this function returns only
+#: our own text" and needs a reason in the comment beside it.
+FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
+    "kazma-core/kazma_core/tools/read_url.py": {
+        # Return remote-authored bytes in some form — all must fence.
+        "read_url": True,
+        "read_research_chunk": True,
+        "digest_research_file": True,
+        "summarize_research_file": True,
+        "list_research_chunks": True,
+        # Writes to disk and returns OUR path/byte-count receipt, not the body.
+        "read_url_to_file": False,
+    },
+    "kazma-skills/kazma_skills/native/email_manager/tools.py": {
+        # A mailbox is the one inbound channel anyone on the internet can
+        # write to. Anything echoing a sender's text must fence.
+        "email_list": True,
+        "email_get": True,
+        # Our own send/delete/categorise receipts.
+        "email_send": False,
+        "email_delete": False,
+        "email_categorize": False,
+        "email_analyze": False,
+    },
+}
+
+
+def _fences_somewhere(node: ast.AST) -> bool:
+    """True if this function body calls a fence helper anywhere."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            name = _dotted(sub.func)
+            if name in {"fence_untrusted", "format_untrusted_block", "fence_resource"}:
+                return True
+    return False
+
+
+@pytest.mark.parametrize("rel", sorted(FENCED_TOOL_FUNCTIONS))
+def test_untrusted_readers_fence_per_function(rel):
+    """Every classified reader fences; every public coroutine is classified."""
+    path = REPO_ROOT / rel
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    expected = FENCED_TOOL_FUNCTIONS[rel]
+
+    public_async = {
+        n.name: n
+        for n in tree.body
+        if isinstance(n, ast.AsyncFunctionDef) and not n.name.startswith("_")
+    }
+
+    unclassified = sorted(set(public_async) - set(expected))
+    assert not unclassified, (
+        f"{rel} defines public tool coroutine(s) with no entry in "
+        "FENCED_TOOL_FUNCTIONS. This gate is closed by default: decide whether "
+        "each one returns remote-authored text and add it as True/False with a "
+        "reason (audit 2026-09-16 F-2).\n  " + ", ".join(unclassified)
+    )
+
+    offenders = [
+        name
+        for name, must in expected.items()
+        if must and name in public_async and not _fences_somewhere(public_async[name])
+    ]
+    assert not offenders, (
+        f"{rel}: function(s) declared to return remote-authored text but "
+        "calling no fence helper. A module-level grep for `fence_untrusted` "
+        "does NOT cover this — one fenced sibling made the whole file pass "
+        "while the recommended research path shipped unfenced (F-2).\n"
+        "Fix: `from kazma_core.safety.prompt_fence import fence_untrusted` and "
+        "wrap the remote-authored portion, keeping your own scaffolding "
+        "outside the fence.\n  " + ", ".join(sorted(offenders))
+    )
+
+
+#: Name fragments that mark an env var as a security switch — something that
+#: weakens a default and therefore has to be discoverable.
+SECURITY_ENV_MARKERS = (
+    "AUTH_DISABLED", "BYPASS", "ALLOW_UNGATED", "ALLOW_LOCAL", "ALLOW_MUTATE",
+    "GATEWAY_ADMINS", "CANONICAL_FLOOR", "DEMO_MODE", "TRUSTED_IN_PROD",
+    "AUTOLOGIN_HOSTS", "STRICT_ALLOWLIST", "CHAOS_ENABLED",
+    "DISABLE_COST_BREAKER", "YOLO_TTL",
+)
+
+
+def test_security_env_vars_are_documented():
+    """Every security-weakening ``KAZMA_*`` switch appears in .env.example.
+
+    The 2026-09-16 audit found the code reading 272 ``KAZMA_*`` variables
+    while ``.env.example`` documented 43 — and none of the sixteen that turn a
+    safety default off. A switch nobody can discover is a switch nobody can
+    audit, including the operator who set it two years ago.
+    """
+    documented = (REPO_ROOT / ".env.example").read_text(encoding="utf-8", errors="replace")
+    found: set[str] = set()
+    for path in _product_files():
+        src = path.read_text(encoding="utf-8", errors="replace")
+        for name in re.findall(r"KAZMA_[A-Z0-9_]+", src):
+            if any(marker in name for marker in SECURITY_ENV_MARKERS):
+                found.add(name)
+
+    missing = sorted(n for n in found if n not in documented)
+    assert not missing, (
+        "Security-relevant env var read by the code but absent from "
+        ".env.example (audit 2026-09-16 F-8). Each of these weakens a "
+        "default; document it with what it turns off and why you would.\n  "
+        + "\n  ".join(missing)
+    )
+
+
+def test_every_websocket_endpoint_authenticates():
+    """Every ``@app.websocket`` handler must call ``websocket_is_authenticated``.
+
+    WebSocket handshakes do not pass through the HTTP auth middleware, so a WS
+    endpoint's authentication lives *inside its handler* and nothing structural
+    enforces that it is there. An external route sweep cannot tell a protected
+    WS endpoint from an open one — during the 2026-09-16 audit all three
+    (``/ws/chat``, ``/ws/dashboard``, ``/ws/voice``) looked ungated from
+    outside and all three were in fact fine. This makes that checkable, so the
+    next WS endpoint cannot ship without a decision.
+    """
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decorated_ws = any(
+                isinstance(d, ast.Call)
+                and isinstance(d.func, ast.Attribute)
+                and d.func.attr == "websocket"
+                for d in node.decorator_list
+            )
+            if not decorated_ws:
+                continue
+            body = ast.dump(node)
+            if "websocket_is_authenticated" not in body:
+                offenders.append(f"{_rel(path)}:{node.lineno} {node.name}")
+
+    assert not offenders, (
+        "WebSocket endpoint with no authentication check. WS handshakes bypass "
+        "the HTTP auth middleware entirely, so the check must be in the handler "
+        "(audit 2026-09-16 F-8).\n"
+        "Fix: `from kazma_ui.auth import websocket_is_authenticated`, then "
+        "`await websocket.accept()` and close 4003 when it returns False.\n  "
+        + "\n  ".join(offenders)
     )
 
 

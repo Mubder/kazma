@@ -296,17 +296,33 @@ def test_hitl_canonical_floor_caps_narrowing(monkeypatch):
         }
     }
 
-    # Without the flag, on a lab (non-prod) install: narrowing is honored.
+    # The floor is now ON BY DEFAULT, including on a lab install (audit
+    # 2026-09-16 F-5). It used to be opt-in, and the consequence was not
+    # hypothetical: ConfigStore.reconcile_from_yaml seeds only ABSENT keys,
+    # so once an install has a `safety.require_approval_for` row, no danger
+    # tool added to CANONICAL/kazma.yaml afterwards ever reaches it. A live
+    # store was found holding 56 of 57 canonical tools, permanently missing
+    # `file_apply_patch_set`, with no migration that could ever fix it.
     monkeypatch.delenv("KAZMA_HITL_CANONICAL_FLOOR", raising=False)
     monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
     monkeypatch.delenv("KAZMA_MULTI_USER", raising=False)
     effective = get_hitl_config(narrowed)["require_approval_for"]
-    assert set(effective) == {"file_write"}
+    assert set(CANONICAL_DANGER_TOOLS) <= set(effective), (
+        "narrowing below CANONICAL must be capped back up by default"
+    )
 
-    # With the flag: canonical danger tools are floored back in.
+    # Explicitly set to 1: same thing.
     monkeypatch.setenv("KAZMA_HITL_CANONICAL_FLOOR", "1")
     effective = get_hitl_config(narrowed)["require_approval_for"]
     assert set(CANONICAL_DANGER_TOOLS) <= set(effective)
+
+    # Explicit opt-out is still honoured — an operator may deliberately
+    # narrow, and gets a warning for it. The tools stay gated by their
+    # TOOL_TIERS tier; what changes is the *effective list*, which the graph
+    # interrupt and swarm bus read directly.
+    monkeypatch.setenv("KAZMA_HITL_CANONICAL_FLOOR", "0")
+    effective = get_hitl_config(narrowed)["require_approval_for"]
+    assert set(effective) == {"file_write"}
 
 
 # ── Patch 4 — finding #15a: typing keepalive is refcounted per target ───

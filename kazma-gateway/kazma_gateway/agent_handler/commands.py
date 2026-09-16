@@ -674,7 +674,7 @@ async def _try_ide_command(
             if "/" not in slug:
                 await _send_model_reply(
                     msg, store, manager, thread_id,
-                    f"⚠️ Usage: /ide repo clone <owner/repo>",
+                    "⚠️ Usage: /ide repo clone <owner/repo>",
                 )
                 return True
             import asyncio

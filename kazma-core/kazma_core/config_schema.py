@@ -62,47 +62,28 @@ class ConnectorsConfig(BaseModel):
     slack: SlackConnectorConfig | None = Field(default=None)
 
 
+def _default_danger_tools() -> list[str]:
+    """The canonical danger list, never a hand-maintained copy of it.
+
+    This used to be a literal of 32 names that drifted 25 entries behind
+    :data:`kazma_core.safety.hitl.CANONICAL_DANGER_TOOLS` — it still carried
+    three tools that no longer exist (`code_exec`, `run_tests`,
+    `git_push_pull`) and was missing every danger tool added since (audit
+    2026-09-16 F-5). A comment saying "keep aligned" is not a mechanism;
+    importing the source of truth is.
+    """
+    from kazma_core.safety.hitl import CANONICAL_DANGER_TOOLS
+
+    return list(CANONICAL_DANGER_TOOLS)
+
+
 class SafetyConfig(BaseModel):
     """Safety/HITL configuration."""
-    
+
     enabled: bool = Field(default=True)
     hitl: dict[str, Any] = Field(default_factory=lambda: {
         "enabled": True,
-        # Keep aligned with safety.hitl.CANONICAL_DANGER_TOOLS / kazma.yaml
-        "require_approval_for": [
-            "file_write",
-            "file_delete",
-            "shell_exec",
-            "code_exec",
-            "python_exec",
-            "schedule_task",
-            "cancel_scheduled",
-            "edit_scheduled",
-            "vault_retrieve",
-            "vault_delete",
-            "config_save",
-            "run_tests",
-            "git_commit",
-            "git_push_pull",
-            "git_checkout",
-            "git_merge",
-            "github_create_pr",
-            "github_merge_pr",
-            "github_create_issue",
-            "github_comment_issue",
-            "install_python_packages",
-            "install_npm_packages",
-            "install_agent_skill",
-            "uninstall_agent_skill",
-            "email_send",
-            "email_delete",
-            "email_categorize",
-            "browser_eval_js",
-            "x_post",
-            "x_delete_post",
-            "x_schedule_post",
-            "x_cancel_scheduled_post",
-        ],
+        "require_approval_for": _default_danger_tools(),
         "timeout_seconds": 300,
     })
     allow_headless_danger: bool = Field(

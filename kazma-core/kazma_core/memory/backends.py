@@ -352,7 +352,7 @@ class QdrantVectorBackend:
             # Qdrant point ids must be uuid or unsigned int — use hash string as uuid5-like hex
             import hashlib
 
-            point_id = hashlib.md5(item_id.encode("utf-8")).hexdigest()
+            point_id = hashlib.md5(item_id.encode("utf-8"), usedforsecurity=False).hexdigest()
             # Format as UUID
             point_uuid = (
                 f"{point_id[:8]}-{point_id[8:12]}-{point_id[12:16]}-"
@@ -388,7 +388,7 @@ class QdrantVectorBackend:
 
             import httpx
 
-            point_id = hashlib.md5(item_id.encode("utf-8")).hexdigest()
+            point_id = hashlib.md5(item_id.encode("utf-8"), usedforsecurity=False).hexdigest()
             point_uuid = (
                 f"{point_id[:8]}-{point_id[8:12]}-{point_id[12:16]}-"
                 f"{point_id[16:20]}-{point_id[20:32]}"

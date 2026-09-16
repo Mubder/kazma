@@ -32,7 +32,7 @@ human boundary, not a technical one.**
 ## 1. HITL approval — consent, not containment
 
 Every danger-tier tool routes through `LocalToolRegistry.execute()` →
-`SafetyMiddleware.check()`. 57 tools are in `CANONICAL_DANGER_TOOLS`. The gate
+`SafetyMiddleware.check()`. 58 tools are in `CANONICAL_DANGER_TOOLS`. The gate
 posts an approval request and waits for a human.
 
 **What it genuinely gives you.** Nothing dangerous happens while you are not

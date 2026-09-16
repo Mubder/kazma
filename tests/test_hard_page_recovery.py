@@ -116,10 +116,14 @@ async def test_fetch_full_text_uses_recovery_on_bot_wall(monkeypatch):
 
     import httpx
 
-    # Bypass SSRF for unit test (public-looking host)
+    # Bypass SSRF for unit test (public-looking host). The stub must accept
+    # the guard's keyword arguments and return the validated-IP tuple the
+    # caller expects: `block_unresolved=True` was added on every LLM-facing
+    # fetcher (audit 2026-09-16 F-6), and a positional-only `lambda u: u`
+    # raised TypeError inside the production call rather than failing here.
     monkeypatch.setattr(
         "kazma_core.security.ssrf.validate_url",
-        lambda u: u,
+        lambda u, **_kw: (),
     )
     # get_scraping_client builds the real client; patch it + httpx for safety
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
