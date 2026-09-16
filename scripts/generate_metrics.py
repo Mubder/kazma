@@ -748,6 +748,23 @@ def check_readme(m: dict, text: str) -> list[str]:
         )
 
     # Commits: a lower bound, so lagging is fine and overstating is not.
+    #
+    # Skipped entirely on a shallow clone. actions/checkout defaults to
+    # fetch-depth 1, where `git rev-list --count HEAD` returns 1 -- so this
+    # check called a correct README a liar ("claims 3,415+ commits but the
+    # repository has 1") and failed CI on a green suite. Everything else here
+    # reads `git ls-files`, which is the index and works shallow; only the
+    # commit count needs history. A gate must verify what its environment can
+    # actually answer and stay quiet about the rest, rather than fail loudly
+    # on a question it had no way to ask (2026-09-16).
+    if git("rev-parse", "--is-shallow-repository").strip() == "true":
+        print(
+            "note: shallow clone — skipping the commit-count check "
+            "(set fetch-depth: 0 to include it)",
+            file=sys.stderr,
+        )
+        return problems
+
     actual_commits = m["git"]["commits"]
     stated = re.search(r"\*\*([\d,]+)\+ commits\*\*", text)
     if not stated:
