@@ -8,7 +8,7 @@ say against it. Every entry names the evidence, so a reader can check it rather
 than take our word — and so the gap stops being invisible when the person who
 found it forgets.
 
-**Reviewed 2026-09-16.** An entry with no date has not been re-checked since.
+**Reviewed 2026-09-17.** An entry with no date has not been re-checked since.
 
 ---
 
@@ -69,6 +69,37 @@ tree. Assume the same class exists elsewhere.
   importers, and the audit proved the point — `ruff --fix` removing "unused"
   imports silently broke every native skill via a re-export contract no linter
   could see (caught by `tests/test_imports.py`).
+- **Nothing asserts that an entry point installs a tenant context.** Vault
+  secrets are tenant-scoped and everything saved through Settings is written
+  under the web request's tenant (`"default"` on a single-user install).
+  `Vault.retrieve` falls back tenant → global and deliberately **not** the
+  reverse, because a global → tenant fallback would let any context-less
+  background task read another tenant's credentials. The consequence is that
+  any code path which forgets to install a tenant reads `None` for every
+  secret the UI holds — and `None` is indistinguishable from "not configured",
+  so the failure is silent and the diagnosis is wrong.
+
+  **This has now shipped three times, each fixed at one call site:**
+
+  | Where | Symptom | Fixed |
+  |---|---|---|
+  | cron scheduler | two 09:00 reminders failed `HTTP 401: no usable API key`, paging the operator twice | 2026-09-12 |
+  | the agent turn (`resolve_live_client`) | the operator's DeepSeek key read as absent → registry substituted Z.AI → Telegram answered with Z.AI's `{"code":"1211","message":"Unknown Model"}` for a DeepSeek model id | 2026-09-17 |
+  | `kazma_cli.main` | `kazma doctor` reported the key unreadable and blamed another install's vault, while it sat in that same vault decrypting fine | 2026-09-17 |
+
+  The third is the one worth staring at: the **diagnostic** had the bug it was
+  built to diagnose, so it confidently sent the operator to re-enter a key that
+  was already correct. Two days were spent on a provider fault that did not
+  exist.
+
+  The vault's fallback direction is right and should not be widened. What is
+  missing is a gate: no test enumerates the entry points (HTTP middleware, cron,
+  CLI, agent nodes, swarm workers, the MCP bridge, webhook handlers) and asserts
+  each installs one. Until it does, the fourth instance will look exactly like
+  the first three. `SecretVault.describe_secret` exists so a diagnostic can at
+  least tell *absent* from *present, one scope over* without widening the
+  lookup — use it rather than inferring.
+  → `tests/test_cron_tenant_context.py`, `tests/test_vault_tenant_scope_read.py`.
 - **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
   function named `read_url`, so `import kazma_core.tools.read_url as ru` binds
   the *function*, not the module (Python resolves `import a.b as c` by
@@ -292,9 +323,9 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
-**On CI (Linux), 2026-09-16: 8,955 passed, 0 failed, 67 skipped, 3 xfailed.**
-One file still crashes and keeps the job red — see *The reply_sink segfault*
-below. Local Windows runs give 8,9xx passed with three extra failures in
+**On CI (Linux), 2026-09-17: 9,019 passed, 0 failed, 67 skipped, 3 xfailed —
+job green** (run `35152707624`, commit `a1cb6650`). Local Windows runs give
+9,0xx passed with three extra failures in
 `tests/test_docx_rtl_visual.py`, which need a working LibreOffice; CI installs
 one, so they pass there and fail on a typical dev box.
 
@@ -317,39 +348,42 @@ Treat any baseline older than that date as unverified.
 | `kazma-core/kazma_core_tests`, `kazma-core/tests` | 398 passed (2026-09-14) |
 | `kazma-gateway/…`, `kazma-ui/…`, `kazma-tui/…` | 317 passed, 1 skipped (2026-09-14) |
 
-### The reply_sink segfault (open)
+### ~~The reply_sink segfault~~ (closed 2026-09-16)
 
-`tests/test_reply_sink.py` segfaults on Linux — `exit=-11`, reproducibly, both
-in a chunk and standalone. It does **not** reproduce on Windows. It is the only
-thing keeping CI red as of 2026-09-16, and it is not a regression: it has been
-there for as long as the `Tests` job has been broken, which is why nobody saw
-it.
+`tests/test_reply_sink.py` segfaulted on Linux — `exit=-11`, reproducibly,
+both in a chunk and standalone, never on Windows. It was the last thing
+keeping the `Tests` job red, and it was not a regression: it had been there
+for as long as the job had been broken, which is why nobody saw it.
 
-What the stack says (captured only after `scripts/fast_test.py` was changed to
-print the diagnostic rerun's tail — it had been discarding the faulthandler
-output and keeping one line, which is what made `exit=-11` un-actionable):
+The faulthandler stack pointed at `_pytest/capture.py:592 snap` during
+teardown with a background `Timer` thread parked in `finished.wait(interval)`
+— a live daemon thread touching a descriptor while pytest closed its capture
+temp file. That reading was right about the shape and useless for a fix,
+because it named pytest's machinery rather than whose thread it was.
 
-- the main thread faults inside **`_pytest/capture.py:592 snap`**, during
-  `pytest_runtest_teardown` — pytest's own fd-capture machinery, not product
-  code;
-- a background thread is parked in `threading.py:1399` (`Timer.run` →
-  `finished.wait(interval)`);
-- loaded extension modules include `zstandard`, `ormsgpack`, `xxhash`
-  (langsmith's), `psutil._psutil_linux`, `PIL._imaging`, `yaml._yaml`.
+The owner was `ops_alerts`: `alert()` spawned a dispatch thread per call with
+nothing tracking it, so threads outlived the test that started them and were
+still writing when pytest snapped its capture fd. Fixed by registering them in
+`_dispatch_threads`, adding `drain_alerts()`, and adding `_has_any_sink()` so
+`alert()` does not spawn a thread at all when no sink is configured — which is
+the case in every test. `conftest.py` also sets `KAZMA_OPS_ALERTS=0` by
+default; ten ops_alerts-adjacent suites were swept afterwards because that
+env var silently changes what `alert()` does, and one test (`test_daily_digest`)
+depended on it running.
+→ green CI run `35152707624`, 9,019 passed, 0 failed.
 
-That shape — a live daemon/timer thread touching a descriptor while pytest
-snaps and closes its capture temp file at teardown — is the usual cause. The
-crash lands right after `test_store_failure_is_reported_not_swallowed`, which
-is the one test in the file that deliberately raises inside `upsert_reply`
-while `caplog` is capturing.
+**What it cost, and the lesson that outlives it:** the crash was
+un-actionable for as long as `scripts/fast_test.py` discarded the diagnostic
+rerun's output and kept one line. `exit=-11` is not a diagnosis. The runner
+now prints a 40-line tail for crashed chunks; without that this was
+unfixable by reading.
 
-**Deliberately not "fixed" blind.** It needs a Linux repro to confirm which
-thread owns the descriptor; any patch written without one would most likely
-relocate the crash rather than remove it, and a quarantine would hide a real
-native fault behind a green tick — the exact failure mode the rest of this
-page is about. Next step for whoever picks it up: reproduce on Linux, then
-bisect with `-p no:langsmith` and `--capture=no` to separate the plugin's
-threads from pytest's capture.
+**Still mislabelled:** `fast_test.py` reports a chunk exiting `1` (ordinary
+test failures) as "crashed/timed out", and chunks 00/03 still report `0p/0f`
+and trigger a per-file retry pass for reasons not yet understood — visible in
+the green run above as `chunk 00 crashed/timed out (exit=1) — retrying 156
+files individually`. The totals are correct; the label is not, and it costs
+whoever reads the log a wrong first hypothesis.
 
 **`pytest tests/` is not the suite, and running only it hides failures for
 days.** `pyproject.toml` declares six testpaths; the habit here has been to
