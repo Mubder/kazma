@@ -290,21 +290,34 @@ _CONTENT_LINE_CHARS = 110
 #: to an ordinary space rather than dropped: a NBSP swapped for a space is the
 #: commonest invisible edit there is, and deleting both sides would also call
 #: ``a b`` and ``ab`` identical.
+#: Written as CODE POINTS, never as literal characters. A source file that
+#: holds real bidi controls is the Trojan Source hazard (CVE-2021-42574):
+#: it renders differently from how it compiles, which is exactly the
+#: confusion this table exists to detect. Bandit B613 fails the build on it,
+#: correctly, and the first version of this table tripped it.
 _INVISIBLE: dict[int, str | None] = {
+    # Deleted outright -- these have no width, so removing them from both
+    # sides cannot merge two genuinely different strings.
     **dict.fromkeys(
         (
-            ord(c)
-            for c in (
-                "​‌‍‎‏"  # ZWSP, ZWNJ, ZWJ, LRM, RLM
-                "‪‫‬‭‮"  # LRE, RLE, PDF, LRO, RLO
-                "⁦⁧⁨⁩"        # LRI, RLI, FSI, PDI
-                "﻿"                          # BOM / ZWNBSP
-            )
+            0x200B, 0x200C, 0x200D, 0x200E, 0x200F,  # ZWSP ZWNJ ZWJ LRM RLM
+            0x202A, 0x202B, 0x202C, 0x202D, 0x202E,  # LRE RLE PDF LRO RLO
+            0x2066, 0x2067, 0x2068, 0x2069,          # LRI RLI FSI PDI
+            0xFEFF,                                  # BOM / ZWNBSP
         ),
         None,
     ),
+    # Folded to a space, NOT deleted: a NBSP swapped for a space is the
+    # commonest invisible edit there is, and deleting both sides would also
+    # call ``a b`` and ``ab`` identical.
     **dict.fromkeys(
-        (ord(c) for c in "     "),  # NBSP + thin/figure
+        (
+            0x00A0,  # NBSP
+            0x202F,  # narrow NBSP
+            0x2007,  # figure space
+            0x2009,  # thin space
+            0x200A,  # hair space
+        ),
         " ",
     ),
 }
