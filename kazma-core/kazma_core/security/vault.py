@@ -30,7 +30,7 @@ import os
 import secrets as _secrets
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -184,7 +184,7 @@ class SecretVault:
         """
         ct, nonce = self._encrypt(value)
         tid = self._tenant_filter(tenant_id)
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         sid = _secrets.token_hex(16)
         meta = json.dumps(metadata or {})
 
@@ -237,6 +237,15 @@ class SecretVault:
         with self._lock:
             # Try tenant-specific first, then global. Newest-first within a
             # scope so a rotated credential always wins over a stale copy.
+            #
+            # The reverse fallback (global -> tenant) is deliberately absent:
+            # it would let any context-less background task read another
+            # tenant's credentials. A caller that cannot see a secret it owns
+            # is missing its tenant context, and that is fixed at the call
+            # site -- see `resolve_live_client` and the CLI entrypoint, both
+            # of which install one. `describe_secret` exists so a diagnostic
+            # can tell "absent" from "present, one scope over" without
+            # widening this lookup.
             for query_tid in ([tid] if tid else []) + [None]:
                 row = self._conn.execute(
                     """SELECT encrypted_value, nonce FROM secrets
@@ -247,6 +256,34 @@ class SecretVault:
                 if row:
                     return self._decrypt(row["encrypted_value"], row["nonce"])
         return None
+
+    def describe_secret(self, name: str) -> list[dict[str, Any]]:
+        """Per-scope facts about `name` WITHOUT returning the secret.
+
+        For diagnostics (``kazma doctor``): which scopes hold this name, when
+        each was written, and whether it decrypts with this install's key.
+        A tool that reports on credentials must not print them, and a tool
+        that says "cannot decrypt" must have actually tried.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT tenant_id, updated_at, encrypted_value, nonce
+                   FROM secrets WHERE name = ? ORDER BY rowid DESC""",
+                (name,),
+            ).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                self._decrypt(r["encrypted_value"], r["nonce"])
+                decrypts = True
+            except Exception:  # noqa: BLE001 — a failure IS the answer here
+                decrypts = False
+            out.append({
+                "tenant_id": r["tenant_id"],
+                "updated_at": r["updated_at"],
+                "decrypts": decrypts,
+            })
+        return out
 
     def find_divergent_duplicates(self) -> list[dict[str, Any]]:
         """Names stored under more than one scope with DIFFERENT values.

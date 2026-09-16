@@ -17,6 +17,8 @@ Every supervisor / respond LLM call must go through :func:`resolve_live_client`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from kazma_core.runtime.turn_model import current_turn_model
@@ -157,6 +159,30 @@ def _provider_serves(base_url: str, model: str) -> bool:
     return model in catalog or model.split("/", 1)[-1] in catalog
 
 
+@contextmanager
+def _turn_tenant(state: dict[str, Any] | None) -> Iterator[None]:
+    """Install this turn's tenant, if the caller does not already have one.
+
+    An ambient tenant is never overridden: a request that already resolved
+    its tenant outranks whatever a checkpointed state blob carries.
+    """
+    from kazma_core.tenant_context import (
+        get_current_tenant_id,
+        reset_current_tenant_id,
+        set_current_tenant_id,
+    )
+
+    if get_current_tenant_id():
+        yield
+        return
+    tid = str((state or {}).get("tenant_id") or "default")
+    token = set_current_tenant_id(tid)
+    try:
+        yield
+    finally:
+        reset_current_tenant_id(token)
+
+
 def resolve_live_client(
     fallback: Any,
     *,
@@ -185,7 +211,24 @@ def resolve_live_client(
     try:
         from kazma_core.model_registry import get_model_registry
 
-        registry_client = get_model_registry().get_client(pinned)
+        # Build the client AS THE TURN'S TENANT. Provider API keys are vault
+        # secrets, and a key saved through Settings is written under the
+        # request's tenant ("default" for a single-user install). The vault
+        # falls back tenant -> global and deliberately not the reverse, so a
+        # context-less caller reads None for a key that is sitting right
+        # there. The registry then treats the provider as keyless and
+        # SUBSTITUTES another vendor.
+        #
+        # That is not a theory. Live, 2026-09-16: the operator's DeepSeek key
+        # was present and decrypting, this node ran with no tenant, the
+        # registry swapped in Z.AI, and Telegram answered with Z.AI's
+        # {"code":"1211","message":"Unknown Model"} for a DeepSeek model id.
+        # Cron had the identical hole in 2026-09-12 (401, twice, at 09:00) and
+        # was fixed the same way, at the call site -- see
+        # `tests/test_cron_tenant_context.py` for why the fix does not belong
+        # in the vault's fallback.
+        with _turn_tenant(state):
+            registry_client = get_model_registry().get_client(pinned)
     except Exception:
         logger.debug("resolve_live_client: registry get_client failed", exc_info=True)
 
