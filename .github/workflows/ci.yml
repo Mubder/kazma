@@ -75,11 +75,27 @@ jobs:
         # are the only Arabic tests that cannot lie — and they skipped on every
         # CI run, because soffice and the Arabic fonts were never installed. The
         # w:jc-inversion class of bug was free to come back green.
+        # `fonts-noto-naskh-arabic` is NOT a package on Ubuntu noble (or on
+        # Debian). apt exits 100 on an unknown name, which failed this step —
+        # and with it the ENTIRE Tests job — on every run since it was added
+        # in 30398512. Six consecutive red runs on main, and the gate that
+        # was supposed to be catching regressions had not executed once
+        # (audit 2026-09-16 follow-up). The Naskh faces ship inside
+        # `fonts-noto-core`; verify that rather than trust the name, so a
+        # future rename fails loudly here instead of silently re-skipping the
+        # Arabic visual tests.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libreoffice-writer fonts-noto-naskh-arabic fonts-noto-core \
+            libreoffice-writer fonts-noto-core fontconfig \
             tesseract-ocr tesseract-ocr-ara tesseract-ocr-eng
+          if ! fc-list | grep -qi "naskh"; then
+            echo "::error::Noto Naskh Arabic is missing — tests/test_docx_rtl_visual.py would skip silently."
+            fc-list | grep -i noto | head -20
+            exit 1
+          fi
+          echo "Noto Naskh Arabic present:"
+          fc-list | grep -i naskh | head -3
       - name: Run tests (GATE — failures fail CI)
         # Industry eval pack (tests/test_eval_pack.py, marker `eval`) is in
         # tests/ and is collected by fast_test.py — do not exclude it.

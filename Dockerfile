@@ -17,7 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     libpq5 \
-    fonts-noto-naskh-arabic \
+    # NOT `fonts-noto-naskh-arabic` — no such package on Debian/Ubuntu. apt
+    # exits 100 on an unknown name, so naming it here would fail the whole
+    # image build (it already killed CI's Tests job on every run since
+    # 30398512). The Naskh faces ship inside fonts-noto-core.
     fonts-noto-core \
     fonts-dejavu-core \
     libreoffice-writer \
