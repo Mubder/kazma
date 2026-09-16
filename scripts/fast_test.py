@@ -85,11 +85,40 @@ def chunk_files(files: list[Path], chunks: int) -> list[list[Path]]:
     return [c for c in out if c]
 
 
+#: pytest's final tally, e.g. "==== 2526 passed, 12 skipped in 84.21s ====".
+#: Anchored on the trailing "in <n>s" so it cannot match a count mentioned in
+#: ordinary test output.
+_SUMMARY_LINE_RE = re.compile(
+    r"^.*?\b\d+ (?:passed|failed|error|errors|skipped|xfailed|xpassed)\b"
+    r".*?\bin \d[\d.]*s.*$",
+    re.M,
+)
+
+
 def _parse_summary(log: str) -> dict[str, int]:
+    """Counts from pytest's summary line, wherever it is in the output.
+
+    This used to read only ``log[-2500:]``. That is fine when the tally is the
+    last thing printed and silently wrong when it is not: a long warnings
+    block after it pushes the tally out of the window, nothing parses, and the
+    chunk records 0 passed / 0 failed. The caller then sees empty counts,
+    concludes the chunk "lost its output", and retries all ~155 of its files
+    one process at a time.
+
+    That is what chunk 00 did on every CI run up to 2026-09-16 -- reported
+    "OK 0p/0f (155 files)" and then "crashed/timed out (exit=1)" on a suite
+    that was entirely green, roughly doubling the job's wall clock and making
+    a healthy chunk look like a crash. The existing comment blamed "heavy
+    concurrency"; the cause was this 2500-character window.
+
+    Locate the tally instead of hoping it is near the end, and read the LAST
+    one (a chunk runs one pytest, but retries append).
+    """
+    matches = _SUMMARY_LINE_RE.findall(log)
+    window = matches[-1] if matches else log[-4000:]
     counts: dict[str, int] = {}
-    tail = log[-2500:]
     for kind in ("passed", "failed", "skipped", "error", "deselected", "xfailed", "xpassed"):
-        mm = re.search(rf"(\d+) {kind}", tail)
+        mm = re.search(rf"(\d+) {kind}", window)
         if mm:
             counts[kind] = int(mm.group(1))
     return counts
