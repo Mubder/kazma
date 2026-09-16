@@ -15,6 +15,11 @@ Configure providers in **Web UI → Settings → Providers**, or in `kazma.yaml`
 or via environment variables. See [Configuration → Provider
 presets](../guide/configuration#52-built-in-provider-presets).
 
+**Voice is not chat.** The same OpenAI/Groq/Cohere **key** is used for
+Whisper STT, but Whisper models are hidden from chat pickers and Provider
+Test (`/chat/completions`). Pick STT/TTS under [Settings →
+Voice](../guide/voice-and-media).
+
 ---
 
 ## Two integration tiers

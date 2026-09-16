@@ -203,8 +203,10 @@ switch, run the rebuild so every row lives in the same vector space.
 | `gateway.rate_limits.discord` | int | `5` | Requests per window. |
 | `gateway.rate_limits.slack` | int | `1` | Requests per window. |
 | `gateway.suggestions.enabled` | bool | `true` | Suggested-followup UI. |
-| `gateway.voice.enabled` | bool | `false` | Voice (STT inbound + TTS outbound) across **all platforms** (Telegram, Discord, Slack) + Web. Also settable at runtime via the Settings UI. |
-| `gateway.voice.stt_provider` | string | `openai` | Speech-to-text provider: `openai`, `groq`, `cohere`, `nvidia`, or `faster-whisper` (local). |
+| `gateway.voice.enabled` | bool | `false` | Voice (STT inbound + TTS outbound) across **all platforms** (Telegram, Discord, Slack) + Web. Also settable at runtime via Settings → Voice. |
+| `gateway.voice.stt_provider` | string | `openai` | Speech-to-text **name**: `openai`, `groq`, `cohere`, `nvidia`, or `faster-whisper`. API keys come from Settings → Providers, not this block. Whisper is not a chat model. |
+| `gateway.voice.stt_language` | string | `auto` | STT language (`auto`, `ar`, `en`, …). Settings uses the same `form-select` as the other Voice fields. |
+| `gateway.voice.stt_model` | string | `default` | Whisper / transcribe model id for the chosen STT provider. |
 | `gateway.voice.tts_provider` | string | `edgetts` | Text-to-speech provider: `edgetts` (free, default), `openai`, `nvidia`, `kokoro` (local), `coqui` (local). |
 
 ### `safety.hitl` (lines 81-96)

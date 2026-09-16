@@ -25,8 +25,8 @@ Open `http://127.0.0.1:9090` (or your `KAZMA_HOST`/`KAZMA_PORT`).
 |------|------|---------|
 | Chat | `/` or chat route | SSE streaming agent chat (`sse_chat.py`, `streaming.js`) |
 | Dashboard | `/dashboard` | Observability + **Memory & Governance** (health board, L2 property graph explorer, backups) |
-| Settings | `/settings` | Models, providers, safety, account, **Email** (`?tab=email`), **Documents** (`?tab=documents`), **Proxy Provider** (System tab) |
-| Providers control plane | `/settings?tab=providers_connectors` | Master-detail over every provider: state pill + edge stripe per row, declared capability badges, wire facts (base URL, API version read off it), and **Test** — `GET /models` plus a real completion (`reachable` vs `chat_ok`, latency, the model the provider says it served). Key/model resolution rides the same registry paths a real message uses. |
+| Settings | `/settings` | Models, providers, safety, account, **Voice** (`?tab=voice` — STT/TTS pickers; keys stay on Providers), **Email** (`?tab=email`), **Documents** (`?tab=documents`), **Proxy Provider** (System tab) |
+| Providers control plane | `/settings?tab=providers_connectors` | Master-detail over every provider: state pill + edge stripe per row, declared capability badges, wire facts (base URL, API version read off it), and **Test** — `GET /models` plus a real **chat** completion (`reachable` vs `chat_ok`). Speech models (Whisper) are omitted; STT lives on the Voice tab. Key/model resolution rides the same registry paths a real message uses. |
 | Swarm / Command Center | `/swarm` | Workers, live tasks, dispatch UI |
 | Time Travel | `/replay` | Snapshot timeline browser, restore (rewind), fork (branch), compare diff, live SSE snapshot events |
 | Research | `/research` | **Start deep research** (live SSE sessions), results list, archive, compare, export |
