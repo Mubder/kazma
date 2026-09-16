@@ -485,6 +485,23 @@ class LLMProvider:
     # it causes a 404 "model not found".
     _ROUTING_PREFIXES = ("ollama/", "lm-studio/")
 
+    def _describe_endpoint(self) -> str:
+        """Host the request actually went to, for error messages.
+
+        The raw base_url can carry a path and (for some proxies) credentials,
+        so report the host plus a short shape rather than echoing the URL.
+        """
+        url = getattr(self.config, "base_url", "") or ""
+        if not url:
+            return "<no base_url configured>"
+        try:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(url)
+            return parsed.hostname or url
+        except Exception:  # noqa: BLE001 — never fail while building an error
+            return url
+
     @staticmethod
     def _strip_routing_prefix(model: str, base_url: str = "") -> str:
         """Strip kazma's internal provider routing prefix from a model name.
@@ -510,7 +527,94 @@ class LLMProvider:
                 return model[len(prefix):]
         if model.startswith("openai/") and LLMProvider._is_bare_local_server(base_url):
             return model[len("openai/"):]
+        return LLMProvider._reconcile_vendor_prefix(model, base_url)
+
+    @staticmethod
+    def _reconcile_vendor_prefix(model: str, base_url: str = "") -> str:
+        """Drop a vendor prefix the target provider does not actually use.
+
+        The same model is spelled differently depending on how you reach it:
+
+            OpenRouter    z-ai/glm-5.3-flash
+            Z.AI direct   glm-5.3-flash
+
+        Pick the aggregator spelling while pointed at the vendor's own API and
+        the request goes out verbatim, because any name containing "/" is
+        passed through untouched. Z.AI answers
+        ``{"code":"1211","message":"Unknown Model, please check the model
+        code."}`` and nothing in the product explains why (live report,
+        2026-09-16, Telegram).
+
+        Blanket prefix-stripping is NOT the fix and would cause the mirror-image
+        bug: ``groq/compound-mini`` is Groq's REAL upstream id, so stripping it
+        at api.groq.com breaks a working setup. The comment on
+        ``_strip_routing_prefix`` says exactly this.
+
+        So decide from the provider's OWN discovered model list rather than
+        from a hardcoded vendor table: strip only when the bare name is known
+        to this provider and the prefixed one is not. Groq keeps its prefix
+        (``groq/compound-mini`` IS in its list); Z.AI loses the foreign one
+        (``glm-5.3-flash`` is in its list, ``z-ai/glm-5.3-flash`` is not).
+        Unknown either way -> unchanged, because a guess here is what caused
+        the problem.
+        """
+        if "/" not in model or not base_url:
+            return model
+        bare = model.split("/", 1)[1]
+        if not bare:
+            return model
+        try:
+            known = LLMProvider._known_models_for(base_url)
+        except Exception:  # noqa: BLE001 — never fail a call over a lookup
+            return model
+        if not known:
+            return model
+        if model in known:
+            return model          # the prefixed id is the real one (Groq)
+        if bare in known:
+            logger.info(
+                "[llm] model %r is not offered by %s but %r is — sending the "
+                "bare id. The prefixed spelling belongs to an aggregator "
+                "(e.g. OpenRouter); the direct API uses the bare one.",
+                model, LLMProvider._host_of(base_url), bare,
+            )
+            return bare
         return model
+
+    @staticmethod
+    def _host_of(base_url: str) -> str:
+        try:
+            from urllib.parse import urlparse
+
+            return urlparse(base_url).hostname or base_url
+        except Exception:  # noqa: BLE001
+            return base_url
+
+    @staticmethod
+    def _known_models_for(base_url: str) -> set[str]:
+        """Models discovered for whichever configured provider owns *base_url*."""
+        import json as _json
+
+        from kazma_core.config_store import get_config_store
+        from kazma_core.model_registry_store import load_providers
+
+        cs = get_config_store()
+        host = LLMProvider._host_of(base_url)
+        names = [
+            str(p.get("name"))
+            for p in load_providers(cs)
+            if isinstance(p, dict)
+            and LLMProvider._host_of(str(p.get("base_url") or "")) == host
+        ]
+        if not names:
+            return set()
+        discovered = cs.get("registry.discovered_models")
+        if isinstance(discovered, str):
+            discovered = _json.loads(discovered or "{}")
+        out: set[str] = set()
+        for name in names:
+            out.update(str(m) for m in (discovered or {}).get(name, []) or [])
+        return out
 
     @staticmethod
     def _is_bare_local_server(base_url: str) -> bool:
@@ -1044,8 +1148,18 @@ class LLMProvider:
                         transient=_combo_transient,
                     ) from e
             else:
+                # Name the model AND the endpoint. The 401 branch above has
+                # always said "rejected by {model} / {base_url}"; this branch
+                # printed only the vendor's raw body, so a model/provider
+                # mismatch surfaced as e.g. Z.AI's
+                #   {"error":{"code":"1211","message":"Unknown Model, ..."}}
+                # with nothing saying WHICH model was sent WHERE — the single
+                # most useful fact, and the one the operator cannot get any
+                # other way (audit 2026-09-16).
                 raise LLMError(
-                    f"LLM call failed (HTTP {status_code}): {detail[:300]}",
+                    f"LLM call failed (HTTP {status_code}) for model "
+                    f"{payload.get('model') or '<unset>'!r} at "
+                    f"{self._describe_endpoint()}: {detail[:300]}",
                     transient=False,
                 ) from e
         except LLMError:

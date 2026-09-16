@@ -292,6 +292,21 @@ def main() -> int:
     for r in crashed_chunks:
         print(f"[fast-test] chunk {r['idx']:02d} crashed/timed out "
               f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
+        # Show WHY. The chunk's own log was captured and then dropped on the
+        # floor, so "crashed/timed out (exit=1)" arrived with no evidence
+        # whatsoever — and a chunk that genuinely died looked identical to one
+        # whose tally simply failed to parse. Chunks 00 and 03 have reported
+        # `0p/0f` on every run observed to date and nobody could say why,
+        # because this is the only place that ever held the answer
+        # (2026-09-16). Same lesson as the POISON diagnostics below: the
+        # runner already has the evidence; print it.
+        _tail = [ln for ln in (r["log"] or "").splitlines() if ln.strip()][-25:]
+        if _tail:
+            print(f"[fast-test] --- chunk {r['idx']:02d}: last 25 lines ---")
+            for _ln in _tail:
+                print(f"  | {_ln}")
+        else:
+            print(f"[fast-test] --- chunk {r['idx']:02d} produced NO output at all ---")
         for f in r["files"]:
             code, log = run_pytest(
                 [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
