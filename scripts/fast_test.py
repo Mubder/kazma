@@ -250,6 +250,16 @@ def main() -> int:
 
     # ── Retry crashed chunks file-by-file to isolate poison ────────────────
     poison: list[str] = []
+    # Full verbose rerun output per poison file, keyed by relative path.
+    #
+    # The diagnostic rerun below already captures this — including the
+    # faulthandler stack that Python prints on a fatal signal — and the code
+    # used to extract one line from it ("last test line") and discard the
+    # rest. For a segfault that discarded part IS the diagnosis, which made
+    # every native crash un-actionable from a CI log: on 2026-09-16
+    # tests/test_reply_sink.py was reported as `exit=-11` with nothing to act
+    # on. A tail of it is printed with the POISON list now.
+    poison_diag: dict[str, str] = {}
     for r in crashed_chunks:
         print(f"[fast-test] chunk {r['idx']:02d} crashed/timed out "
               f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
@@ -281,6 +291,7 @@ def main() -> int:
                     "unknown",
                 )
                 poison.append(f"{f.relative_to(REPO)} (hang; last test line: {last})")
+                poison_diag[str(f.relative_to(REPO))] = diag
             else:
                 # One extra chance for the crash class: the native-lib
                 # segfaults are INTERMITTENT — a file that crashed standalone
@@ -319,6 +330,7 @@ def main() -> int:
                         f"{f.relative_to(REPO)} (exit={code}, rerun exit={code2}; "
                         f"last test line: {last})"
                     )
+                    poison_diag[str(f.relative_to(REPO))] = diag
 
     wall = time.time() - t0
     print(f"\n[fast-test] TOTALS in {wall:.0f}s: " +
@@ -344,6 +356,17 @@ def main() -> int:
         print(f"\n[fast-test] POISON files (crash/hang even standalone):")
         for p in poison:
             print(f"  POISON {p}")
+        # Tail of each poison file's diagnostic rerun. For a segfault this is
+        # the faulthandler stack — the only thing that makes `exit=-11`
+        # actionable from a CI log (2026-09-16). Bounded so a chatty hang
+        # cannot flood the run log.
+        for rel, diag in poison_diag.items():
+            tail = [ln for ln in diag.splitlines() if ln.strip()][-40:]
+            if not tail:
+                continue
+            print(f"\n[fast-test] --- {rel}: last 40 lines of the diagnostic rerun ---")
+            for ln in tail:
+                print(f"  | {ln}")
     code = suite_exit_code(totals, failed=all_failed, poison=poison)
     passed = int(totals.get("passed", 0) or 0)
     if code == 2:

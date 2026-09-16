@@ -153,7 +153,8 @@ class TestWorkspaceCommandRouting:
 class TestWorkspaceRouteServesPage:
     """GET /workspace must serve the workspace page (not redirect)."""
 
-    @pytest.fixture
+    # Class-scoped: three read-only page GETs, one create_app().
+    @pytest.fixture(scope="class")
     def client(self) -> TestClient:
         from kazma_ui.app import create_app
 
@@ -176,10 +177,18 @@ class TestWorkspaceRouteServesPage:
 class TestWorkspaceFilesEndpoint:
     """GET /api/workspace/files must return a valid file listing."""
 
-    @pytest.fixture
-    def client(self, tmp_path: Path) -> TestClient:
+    # Class-scoped on purpose (2026-09-16). Function scope rebuilt the entire
+    # app per test -- measured at 15s setup + 17s teardown, so these eight
+    # read-only GETs cost ~185s and blew the chunked runner's per-chunk
+    # timeout. fast_test.py then labelled the whole file POISON (hang), which
+    # read like a product deadlock and was really just eight app boots. The
+    # tests only ever GET /api/workspace/files, so one app for the class is
+    # the same coverage at an eighth of the cost. Needs tmp_path_factory:
+    # tmp_path is function-scoped and cannot be used from a class fixture.
+    @pytest.fixture(scope="class")
+    def client(self, tmp_path_factory: pytest.TempPathFactory) -> TestClient:
         # Point workspace to a temp dir with known contents
-        ws = tmp_path / "workspace"
+        ws = tmp_path_factory.mktemp("workspace_tab") / "workspace"
         ws.mkdir()
         (ws / "file1.txt").write_text("hello")
         (ws / "file2.py").write_text("print('hi')")
@@ -258,9 +267,11 @@ class TestWorkspaceFilesEndpoint:
 class TestWorkspaceGitEndpoint:
     """GET /api/git/status must return git status."""
 
-    @pytest.fixture
-    def client(self, tmp_path: Path) -> TestClient:
-        ws = tmp_path / "workspace"
+    # Class-scoped: two read-only GETs do not need two whole apps (see
+    # TestWorkspaceFilesEndpoint for the measurement).
+    @pytest.fixture(scope="class")
+    def client(self, tmp_path_factory: pytest.TempPathFactory) -> TestClient:
+        ws = tmp_path_factory.mktemp("workspace_git") / "workspace"
         ws.mkdir()
         with patch.dict(os.environ, {"KAZMA_WORKSPACE": str(ws)}):
             from kazma_ui.app import create_app
@@ -288,9 +299,10 @@ class TestWorkspaceGitEndpoint:
 class TestWorkspaceRecentEndpoint:
     """GET /api/workspace/recent must return recently modified files."""
 
-    @pytest.fixture
-    def client(self, tmp_path: Path) -> TestClient:
-        ws = tmp_path / "workspace"
+    # Class-scoped: three read-only GETs, one app.
+    @pytest.fixture(scope="class")
+    def client(self, tmp_path_factory: pytest.TempPathFactory) -> TestClient:
+        ws = tmp_path_factory.mktemp("workspace_recent") / "workspace"
         ws.mkdir()
         (ws / "recent.txt").write_text("recent")
         (ws / "older.txt").write_text("older")
