@@ -94,6 +94,13 @@ def test_alert_totals_and_suppressions_are_reported(tmp_path, monkeypatch):
     operator learns a throttled condition kept happening all day."""
     monkeypatch.setenv("KAZMA_GUARD_LOG", str(_guard_log(tmp_path, [])))
     monkeypatch.setenv("KAZMA_LOG_FILE", str(_app_log(tmp_path, [])))
+    # This test needs alert() to actually run and record throttle state.
+    # conftest.py turns ops alerts OFF for the suite (audit 2026-09-16: an
+    # unretained delivery thread segfaulted CPython by writing into pytest's
+    # capture teardown), so opt back in here — the same way
+    # tests/test_ops_alerts.py does. Safe because `_dispatch` is stubbed
+    # below, so nothing is delivered and no thread is started.
+    monkeypatch.delenv("KAZMA_OPS_ALERTS", raising=False)
     monkeypatch.setattr(ops_alerts, "_dispatch", lambda _t: None)
     for _ in range(12):
         ops_alerts.alert("mcp.down", "MCP down", cooldown_s=3600)
