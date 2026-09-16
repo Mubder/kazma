@@ -359,6 +359,18 @@ def test_hold_to_record_and_live_capture_guards() -> None:
     assert ".composer-voice-btn.is-recording .composer-mic-recording { display: block; }" in v5
 
 
+def test_stt_language_is_a_form_select_like_the_other_voice_fields() -> None:
+    html = (_REPO / "kazma-ui/kazma_ui/templates/settings.html").read_text(encoding="utf-8")
+    js = (_REPO / "kazma-ui/kazma_ui/static/js/settings_integrations.js").read_text(
+        encoding="utf-8"
+    )
+    assert 'x-model="sttLanguageType"' in html
+    assert 'class="form-select" x-model="sttLanguageType"' in html
+    assert 'placeholder="auto or en, ar, fr..."' not in html
+    assert "onSttLanguageTypeChange" in js
+    assert "_syncSttLanguageType" in js
+
+
 # ── PR A: VAD carry (no dropped partial frames) ─────────────────────────
 
 

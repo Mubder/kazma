@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Voice docs + STT language matches the other Voice selects (2026-09-16)
+
+STT Language is a `form-select` (auto, ar, en, …, custom ISO) like provider
+and model, not a free-text box. Docs (Voice & media, Configuration, LLM
+providers, Web UI, FAQ) state keys live on Providers and Whisper is not
+chat.
+
 ## Chat vs voice: one key store, two modality pickers (2026-09-16)
 
 API keys stay on Settings → Providers. Whisper/TTS models are not chat

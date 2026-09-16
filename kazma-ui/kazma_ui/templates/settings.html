@@ -2930,8 +2930,33 @@
 
                         <div class="form-group">
                             <label>{{ t('voice.stt_language') }}</label>
-                            <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="auto or en, ar, fr..." @change="saveVoiceSettings()">
+                            <select class="form-select" x-model="sttLanguageType" @change="onSttLanguageTypeChange()">
+                                <option value="auto">{{ t('voice.lang_auto') }}</option>
+                                <option value="ar">العربية (ar)</option>
+                                <option value="en">English (en)</option>
+                                <option value="fr">Français (fr)</option>
+                                <option value="de">Deutsch (de)</option>
+                                <option value="es">Español (es)</option>
+                                <option value="it">Italiano (it)</option>
+                                <option value="pt">Português (pt)</option>
+                                <option value="ru">Русский (ru)</option>
+                                <option value="tr">Türkçe (tr)</option>
+                                <option value="zh">中文 (zh)</option>
+                                <option value="ja">日本語 (ja)</option>
+                                <option value="ko">한국어 (ko)</option>
+                                <option value="hi">हिन्दी (hi)</option>
+                                <option value="fa">فارسی (fa)</option>
+                                <option value="ur">اردو (ur)</option>
+                                <option value="nl">Nederlands (nl)</option>
+                                <option value="pl">Polski (pl)</option>
+                                <option value="sv">Svenska (sv)</option>
+                                <option value="custom">{{ t('voice.lang_custom') }}</option>
+                            </select>
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_language_help') }}</p>
+                        </div>
+                        <div class="form-group" x-show="sttLanguageType === 'custom'" style="margin-top:8px;" x-cloak>
+                            <label>{{ t('voice.stt_language_code') }}</label>
+                            <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="ISO-639-1, e.g. ar" @change="saveVoiceSettings()">
                         </div>
                     </div>
 

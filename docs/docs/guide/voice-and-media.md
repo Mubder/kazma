@@ -13,11 +13,15 @@ the Web UI. This page covers how to enable and use voice and media.
 
 ## Voice (STT + TTS)
 
-**Keys vs models.** API keys live on **Settings → Providers** (one OpenAI /
-Groq / Cohere card). **Settings → Voice** only picks how Kazma hears and
-speaks (STT provider name, Whisper model, language, TTS voice). Whisper is
-not a chat model: it is hidden from chat pickers and Provider Test
-(`/chat/completions`). Pick STT here, not as the active chat model.
+**One key store, two pickers.**
+
+| Surface | What it is |
+|---|---|
+| **Settings → Providers** | Who holds the API key (OpenAI, Groq, Cohere, …). Provider **Test** sends `/chat/completions` — it will refuse Whisper on purpose. |
+| **Settings → Voice** | How Kazma hears and speaks: STT provider *name*, Whisper model, language, TTS voice. Keys are read from the matching provider card. |
+
+Whisper is not a chat model. It is hidden from chat pickers and from Discover
+as a tickable chat model. Do not set it as the active chat model.
 
 Kazma voice is **turn-based by default** (STT → LangGraph → TTS) on every
 platform. On the **Web UI**, the Live button opens `/ws/voice`: the same
@@ -96,8 +100,8 @@ gateway:
   voice:
     enabled: true
     tts_reply: true           # platform auto voice-note replies (toggle in UI)
-    stt_provider: openai      # speech-to-text provider
-    stt_language: auto        # auto-detect; or "ar", "en", ...
+    stt_provider: openai      # speech-to-text provider (not the chat model)
+    stt_language: auto        # auto, ar, en, … (Settings is a dropdown)
     tts_provider: edgetts     # text-to-speech provider
     tts_voice: default
     tts_output_format: mp3
@@ -107,19 +111,25 @@ gateway:
 |---|---|
 | **Voice subsystem** (`enabled`) | Master on/off for STT + TTS everywhere |
 | **Auto voice-note replies** (`tts_reply`) | Telegram/Discord/Slack: speak the reply after a voice inbound. Off = text-only replies; STT still works |
+| **STT language** (`stt_language`) | `auto` lets the provider detect. `ar` selects Cohere's Arabic STT path when Cohere is the STT provider |
+| **STT / TTS provider** | Name only. The key is the same card as Settings → Providers |
 
 The same keys are read live by all adapters (`voice_helpers.py`), so changing
 a setting in the UI affects Telegram, Discord, Slack, and Web at once.
+
+NVIDIA **chat** (`integrate.api.nvidia.com`) is not ASR. If STT provider is
+`nvidia` without `voice.stt_base_url` pointing at a Speech NIM, Kazma skips
+it and falls back to OpenAI then Groq.
 
 ### STT (speech-to-text) providers
 
 | Provider | Key | Needs | Notes |
 |---|---|---|---|
-| OpenAI Whisper | `openai` | `OPENAI_API_KEY` | Default; robust across languages. |
-| Groq Whisper | `groq` | `GROQ_API_KEY` | Fastest; great for real-time. |
-| Cohere | `cohere` | `COHERE_API_KEY` | |
-| NVIDIA NIM / Riva | `nvidia` | `NVIDIA_API_KEY` | |
-| faster-whisper (local) | `faster-whisper` | `pip install faster-whisper` | Runs on-device; no API key. |
+| OpenAI Whisper | `openai` | Provider card / `OPENAI_API_KEY` | Default; robust across languages. |
+| Groq Whisper | `groq` | Provider card / `GROQ_API_KEY` | Fastest; great for real-time. |
+| Cohere | `cohere` | Provider card / `COHERE_API_KEY` | Arabic model when language is `ar`. |
+| NVIDIA Speech NIM | `nvidia` | `voice.stt_base_url` + key | Not the LLM integrate URL. |
+| faster-whisper (local) | `faster-whisper` | `pip install faster-whisper` | On-device; no API key. |
 
 ### TTS (text-to-speech) providers
 

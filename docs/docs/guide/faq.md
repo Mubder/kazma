@@ -31,6 +31,8 @@ configured (`LIVEKIT_URL` + API key/secret) the browser also gets WebRTC
 echo cancellation and TTS is published into the room. Telegram/Discord/Slack
 stay voice notes. See [Voice & media](voice-and-media). OpenAI Realtime /
 Gemini Live are **not** used as the brain (and are skipped as codecs).
+API keys stay on Settings → Providers; Whisper is picked on Settings → Voice,
+not as the active chat model.
 
 ### Does `"barcode"` pick the coding model?
 

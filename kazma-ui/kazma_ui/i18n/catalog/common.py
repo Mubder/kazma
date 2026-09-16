@@ -808,9 +808,21 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "لغة STT",
         "en": "STT Language",
     },
+    "voice.stt_language_code": {
+        "ar": "رمز اللغة (ISO-639-1)",
+        "en": "Language code (ISO-639-1)",
+    },
     "voice.stt_language_help": {
-        "ar": "استخدم \"auto\" أو صيغة ISO-639-1.",
-        "en": "Use \"auto\" or ISO-639-1 format.",
+        "ar": "تلقائي يترك الاكتشاف للمزوّد. العربية (ar) تفعّل مسار كوهير العربي.",
+        "en": "Auto lets the provider detect. Arabic (ar) selects Cohere's Arabic STT path.",
+    },
+    "voice.lang_auto": {
+        "ar": "تلقائي (كشف)",
+        "en": "Auto (detect)",
+    },
+    "voice.lang_custom": {
+        "ar": "رمز مخصص…",
+        "en": "Custom code…",
     },
     "voice.stt_model": {
         "ar": "نموذج STT",

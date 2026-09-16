@@ -250,6 +250,27 @@
             }
         },
 
+        _sttLanguageCodes() {
+            return [
+                'auto', 'ar', 'en', 'fr', 'de', 'es', 'it', 'pt', 'ru',
+                'tr', 'zh', 'ja', 'ko', 'hi', 'fa', 'ur', 'nl', 'pl', 'sv',
+            ];
+        },
+
+        _syncSttLanguageType() {
+            var code = String(this.voiceForm.stt_language || 'auto').trim().toLowerCase();
+            if (!code) code = 'auto';
+            this.voiceForm.stt_language = code;
+            this.sttLanguageType = this._sttLanguageCodes().indexOf(code) !== -1 ? code : 'custom';
+        },
+
+        onSttLanguageTypeChange() {
+            if (this.sttLanguageType !== 'custom') {
+                this.voiceForm.stt_language = this.sttLanguageType;
+                this.saveVoiceSettings();
+            }
+        },
+
         onTtsVoiceTypeChange() {
             if (this.ttsVoiceType !== 'custom') {
                 this.voiceForm.tts_voice = this.ttsVoiceType;

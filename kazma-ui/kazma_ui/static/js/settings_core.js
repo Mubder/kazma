@@ -367,6 +367,7 @@
         sttModelOptions: [],
         sttModelsLoading: false,
         sttModelType: 'default',
+        sttLanguageType: 'auto',
         ttsVoiceType: 'default',
 
         // ── Email tab (Connect Gmail / Microsoft — OAuth | IMAP | POP) ──
@@ -656,6 +657,9 @@
                 const voiceSettings = await this._fetch('/api/settings/voice');
                 if (voiceSettings) {
                     Object.assign(this.voiceForm, voiceSettings);
+                    if (typeof this._syncSttLanguageType === 'function') {
+                        this._syncSttLanguageType();
+                    }
                 }
                 const voiceProvs = await this._fetch('/api/voice/providers');
                 if (voiceProvs) {
