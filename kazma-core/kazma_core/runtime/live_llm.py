@@ -128,6 +128,35 @@ def _clean_model(value: Any) -> str | None:
     return s or None
 
 
+def _host_of(url: str) -> str:
+    try:
+        from urllib.parse import urlparse
+
+        return urlparse(url).hostname or url
+    except Exception:  # noqa: BLE001
+        return url
+
+
+def _provider_serves(base_url: str, model: str) -> bool:
+    """Whether *base_url*'s provider is known to offer *model*.
+
+    Conservative: unknown (no catalog, lookup failure, empty) returns True, so
+    this can only ever REJECT a pairing we can positively disprove. Used to
+    decide whether a pinned model may be carried onto a substituted provider.
+    """
+    if not base_url or not model:
+        return True
+    try:
+        from kazma_core.llm_provider import LLMProvider
+
+        catalog = LLMProvider._known_models_for(base_url)
+    except Exception:  # noqa: BLE001 — never fail a turn over a lookup
+        return True
+    if not catalog:
+        return True
+    return model in catalog or model.split("/", 1)[-1] in catalog
+
+
 def resolve_live_client(
     fallback: Any,
     *,
@@ -178,6 +207,33 @@ def resolve_live_client(
     # owns it — the captured graph llm may point at the right URL with
     # yesterday's key.
     if pinned:
+        # ...but the client and the model must travel TOGETHER.
+        #
+        # get_client(pinned) may hand back a DIFFERENT provider than the one
+        # that owns `pinned` — most commonly because the pinned model's
+        # provider has no usable API key, so the registry substitutes one
+        # that has. Returning (substituted_client, pinned) then sends one
+        # vendor's model id to another vendor's endpoint. Live, 2026-09-16:
+        #
+        #   registry: provider=deepseek model=deepseek-flash has no usable
+        #             API key; using Z.AI/glm-5.3-flash which has one
+        #   client  : base_url=https://api.z.ai/...  model=glm-5.3-flash
+        #   here    : returned (that Z.AI client, "deepseek-flash")
+        #   Z.AI    : {"code":"1211","message":"Unknown Model, ..."}
+        #
+        # Only override when we can SHOW the substituted provider does not
+        # serve the pinned model — an OpenAI-compatible provider takes the
+        # model per request, so a differing `config.model` is a default, not
+        # proof. No catalog => keep the pin (the pre-existing behaviour) and
+        # say so, because guessing is what produced the bad pairing.
+        if rg_model and rg_model != pinned and not _provider_serves(rg_url, pinned):
+            logger.warning(
+                "[live_llm] %s does not serve %r (its catalog has %r) — using "
+                "the substituted provider's own model. A pinned model cannot "
+                "be carried onto a provider that was swapped in for it.",
+                _host_of(rg_url), pinned, rg_model,
+            )
+            return registry_client, rg_model
         return registry_client, pinned
 
     if fb_url != rg_url or fb_key != rg_key:
