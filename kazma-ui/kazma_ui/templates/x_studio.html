@@ -160,15 +160,22 @@
       </template>
     </div>
     <div class="xs-card">
-      <h2>{{ t('x_studio.posted') }}</h2>
-      <div class="xs-empty" x-show="!audit.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
-      <template x-for="e in audit" :key="e.id || (e.ts + e.action)">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:.75rem;flex-wrap:wrap;">
+        <h2 style="margin:0 0 .75rem;">{{ t('x_studio.posted') }}</h2>
+        <label style="font-size:.72rem;color:var(--text-muted);display:flex;gap:.35rem;align-items:center;">
+          <input type="checkbox" x-model="auditWritesOnly">
+          writes only
+        </label>
+      </div>
+      <div class="xs-empty" x-show="!auditRows.length" x-cloak>{{ t('x_studio.empty_audit') }}</div>
+      <template x-for="e in auditRows" :key="e.id || (e.ts + e.action)">
         <div class="xs-row" x-effect="stampAr($el, displayBody(auditText(e)))">
           <div class="xs-body">
             <div class="kicker" x-show="displayKicker(auditText(e))" x-cloak
                  x-text="displayKicker(auditText(e))"></div>
             <div class="txt" x-text="displayBody(auditText(e))"></div>
-            <div class="when" x-text="(e.action || '') + (e.tweet_id ? ' · ' + e.tweet_id : '')"></div>
+            <div class="when" :style="auditFailed(e) ? 'color:var(--danger);' : ''"
+                 x-text="auditWhen(e)"></div>
           </div>
           <div class="acts">
             <button class="btn btn-secondary btn-sm" x-show="e.tweet_id" x-cloak

@@ -40,6 +40,11 @@ __all__ = [
 ]
 
 _loop_task: asyncio.Task | None = None
+#: (user_id, handle) for the connected account. It cannot change without
+#: new credentials, but the poller called verify_credentials on EVERY
+#: cycle -- a request per 10 minutes forever, and two identical rows in
+#: the audit log for every poll, burying the posts.
+_identity: tuple[str, str] | None = None
 _DEFAULT_POLL = 600.0
 #: Consecutive failures before the loop backs off hard. A 429 or a revoked
 #: token should not mean one doomed request every ten minutes forever.
@@ -63,7 +68,8 @@ async def start_mentions_loop(poll_interval: float | None = None) -> None:
 
 
 async def stop_mentions_loop() -> None:
-    global _loop_task
+    global _loop_task, _identity
+    _identity = None
     if _loop_task is not None:
         _loop_task.cancel()
         try:
@@ -158,14 +164,20 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
     client = XClient(xcfg.credentials)
     store = get_reply_store()
 
-    try:
-        me = await client.verify_credentials()
-        uid = str(me.get("id") or "")
-        my_handle = str(me.get("username") or "").lower()
-    except XApiError as exc:
-        logger.warning("[x-mentions] identity lookup failed: %s", exc)
-        return []
+    global _identity
+    if _identity is None:
+        try:
+            me = await client.verify_credentials()
+            _identity = (
+                str(me.get("id") or ""),
+                str(me.get("username") or "").lower(),
+            )
+        except XApiError as exc:
+            logger.warning("[x-mentions] identity lookup failed: %s", exc)
+            return []
+    uid, my_handle = _identity
     if not uid:
+        _identity = None
         return []
 
     since_id = await asyncio.to_thread(store.get_since_id)

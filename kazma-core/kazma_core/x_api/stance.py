@@ -50,6 +50,7 @@ __all__ = [
     "SUMMON_ANYONE",
     "mood_from_text",
     "ClassifierUnavailable",
+    "no_match_detail",
 ]
 
 
@@ -456,3 +457,24 @@ async def classify(
     else:
         logger.info("[x-reply] no declared subject matched — not replying")
     return hit
+
+
+def no_match_detail(text: str, subjects: tuple[Subject, ...]) -> str:
+    """Name the keywords that were checked and found absent.
+
+    "no declared subject matched" is true and unactionable — it does not say
+    what was looked for, so an operator cannot tell a narrow keyword list from
+    a broken classifier from a subject they forgot to save. The answer is
+    already in hand at the moment of the miss; it was simply not written down.
+    """
+    if not subjects:
+        return "no subjects are declared"
+    parts = []
+    for s in subjects[:4]:
+        kws = ", ".join(s.match[:8])
+        parts.append(f"{s.id} [{kws}]")
+    more = "" if len(subjects) <= 4 else f" (+{len(subjects) - 4} more)"
+    head = " ".join((text or "").split())[:90]
+    return (
+        f"checked {'; '.join(parts)}{more} — none present in: “{head}…”"
+    )

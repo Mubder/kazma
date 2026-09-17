@@ -1258,3 +1258,63 @@ async def test_a_keyword_hit_never_reaches_the_classifier(monkeypatch):
         cfg=_cfg(),
     )
     assert res.action == "awaiting_approval"
+
+
+# ── "no match" must say WHAT was checked ──────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_no_match_names_what_was_checked(monkeypatch):
+    """"no declared subject matched" is true and unactionable.
+
+    Live, 2026-09-17: the poller skipped a real summon with that sentence. The
+    operator could not tell a narrow keyword list from a broken classifier
+    from a subject they forgot to save, and the answer -- the keywords, and
+    the post they were absent from -- was in hand at the moment of the miss
+    and simply not written down.
+    """
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="nm1", parent_id="p1",
+        parent_text="Elon Musk is tuning his algorithm again",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+    )
+    assert res.action == "skipped"
+    assert "checked" in res.reason
+    assert "var" in res.reason, "the keywords that were tried must be named"
+    assert "Elon Musk" in res.reason, "the post they were absent from must be shown"
+
+
+def test_no_match_detail_lists_keywords_and_the_post():
+    from kazma_core.x_api.stance import no_match_detail
+
+    d = no_match_detail("a post about nothing relevant", (VAR, COFFEE))
+    assert "var" in d and "offside" in d and "espresso" in d
+    assert "a post about nothing relevant" in d
+
+
+def test_no_match_detail_handles_no_subjects():
+    from kazma_core.x_api.stance import no_match_detail
+
+    assert "no subjects are declared" in no_match_detail("x", ())
+
+
+def test_no_match_detail_is_bounded():
+    """A 4000-character quote chain must not become the whole reason string."""
+    from kazma_core.x_api.stance import no_match_detail
+
+    d = no_match_detail("x" * 4000, (VAR,))
+    assert len(d) < 400
+
+
+def test_no_match_detail_flattens_newlines():
+    from kazma_core.x_api.stance import no_match_detail
+
+    raw = "line one" + chr(10) + "line two" + chr(10) + chr(10) + "line three"
+    d = no_match_detail(raw, (VAR,))
+    assert chr(10) not in d
+    assert "line one line two line three" in d

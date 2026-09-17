@@ -23,6 +23,17 @@ function xStudioPage() {
     tab: 'studio',
     conversations: [],
     convLoading: false,
+    // The poller now makes two read calls every cycle, so reads drown the
+    // posts in a card titled "Posted". Default to the writes.
+    auditWritesOnly: true,
+
+    get auditRows() {
+      if (!this.auditWritesOnly) return this.audit;
+      const writes = ['post', 'reply', 'delete'];
+      return (this.audit || []).filter(function (e) {
+        return writes.indexOf((e && e.action) || '') !== -1;
+      });
+    },
 
     t(key) { return (window.t && window.t(key)) || key; },
 
@@ -233,7 +244,55 @@ function xStudioPage() {
 
     auditText(entry) {
       if (!entry) return '';
-      return entry.text || entry.error_detail || entry.action || '';
+      // Falling back to the ACTION NAME was why the list read
+      // "read_mentions / read_mentions / verify_credentials" with the same
+      // word repeated on the line below it. A row with no text is a call,
+      // not a post; say what it did instead of echoing its own label.
+      if (entry.text) return entry.text;
+      if (entry.error_detail) return entry.error_detail;
+      return this.auditLabel(entry);
+    },
+
+    auditLabel(entry) {
+      const a = (entry && entry.action) || '';
+      const map = {
+        read_mentions: 'checked mentions',
+        read_tweet: 'fetched a post',
+        verify_credentials: 'checked the connection',
+        tier_probe: 'probed the API tier',
+        post: 'posted',
+        reply: 'replied',
+        delete: 'deleted a post',
+      };
+      return map[a] || a.replace(/_/g, ' ');
+    },
+
+    // The line under each row said `action + tweet_id` and nothing else --
+    // no time, no status, on a field literally called "when". The audit
+    // store has had ts, status, http_status and duration_ms all along.
+    auditWhen(entry) {
+      if (!entry) return '';
+      const bits = [];
+      if (entry.ts) {
+        try {
+          bits.push(new Date(entry.ts).toLocaleString());
+        } catch (_e) { bits.push(String(entry.ts)); }
+      }
+      if (entry.status && entry.status !== 'success') {
+        bits.push(String(entry.status).toUpperCase());
+      }
+      if (entry.http_status && Number(entry.http_status) >= 400) {
+        bits.push('HTTP ' + entry.http_status);
+      }
+      if (entry.duration_ms) bits.push(Math.round(entry.duration_ms) + 'ms');
+      if (entry.tweet_id) bits.push(entry.tweet_id);
+      return bits.join(' · ');
+    },
+
+    auditFailed(entry) {
+      if (!entry) return false;
+      return (entry.status && entry.status !== 'success')
+        || (entry.http_status && Number(entry.http_status) >= 400);
     },
 
     useDraft(d) {

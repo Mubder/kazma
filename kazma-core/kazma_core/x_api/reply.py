@@ -41,6 +41,7 @@ from kazma_core.x_api.stance import (
     classify,
     get_reply_config,
     mood_from_text,
+    no_match_detail,
 )
 
 logger = logging.getLogger(__name__)
@@ -570,7 +571,8 @@ async def handle_summon(
     if subject is None:
         reason = (
             "no declared subject matched this post — Kazma does not have a "
-            "view on it, so it said nothing"
+            "view on it, so it said nothing. "
+            + no_match_detail(parent_text, cfg.subjects)
         )
         await asyncio.to_thread(store.mark_skipped, summon_id, reason)
         return SummonResult(False, "skipped", reason=reason,
@@ -708,7 +710,7 @@ async def preview_reply(
                 False, "skipped",
                 reason=(
                     "no declared subject matched this post — live, Kazma would "
-                    "say nothing"
+                    "say nothing. " + no_match_detail(parent_text, cfg.subjects)
                 ),
             )
 
