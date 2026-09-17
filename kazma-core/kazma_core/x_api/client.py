@@ -207,6 +207,14 @@ class XClient:
                 transient=True,
             )
         if resp.status_code in (401, 403):
+            low = detail.lower()
+            if "mentioned" in low or "are the author" in low:
+                raise XApiError(
+                    "X will only let this account reply to a post that mentions "
+                    "it or that it wrote. Replying to the original post (not the "
+                    f"mention) hits that wall. {detail}",
+                    status=resp.status_code,
+                )
             raise XApiError(
                 f"X auth/permission error HTTP {resp.status_code}. "
                 "Confirm the app is Read + Write and the four OAuth 1.0a user tokens "

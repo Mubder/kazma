@@ -1,5 +1,21 @@
 # CHANGELOG
 
+## Fix — X 403 on approve: reply to the mention, not the parent (2026-09-18)
+
+Approving a draft posted `in_reply_to_tweet_id=<the original post>`. X
+only allows replies to tweets that **mention this account** or that this
+account wrote. The mention (`@KazmaAI what do you think? 😂`) is the
+summon; the Elon tweet is not. Live audit: HTTP 403
+`not-authorized-for-resource` against a working Read+Write app, with the
+error copy sending the operator to re-check OAuth tokens.
+
+Auto-reply now replies to the **mention tweet**. `/x roast` (no real
+mention id) still targets the pasted URL and will 403 if that post does
+not mention us — that is X's rule. Approve also republishes a wire-failed
+row that still has its draft, so the 403'd Elon roast can be posted
+without spending another model call. The 403 copy names the mention rule
+instead of the tokens.
+
 ## X auto-reply: emoji is the dial, no subject required (2026-09-18)
 
 The live miss: three real `@KazmaAI` summons (including `@KazmaAI what do you

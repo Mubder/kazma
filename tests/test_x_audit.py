@@ -193,6 +193,19 @@ async def test_error_body_read_is_bounded(audit_db: Path, fake_http) -> None:
     assert "truncated" in body
 
 
+async def test_reply_403_names_the_mention_rule_not_the_tokens(audit_db: Path, fake_http) -> None:
+    """Live 2026-09-18: a valid Read+Write app 403'd because we replied to
+    the parent, not the mention. Leading with 'check your OAuth tokens'
+    sent the operator the wrong way."""
+    detail = "You can only reply to or quote posts where you are mentioned or are the author."
+    _FakeAsyncClient.resp = _FakeResp(403, {"detail": detail}, text='{"detail": "%s"}' % detail)
+    with pytest.raises(XApiError) as ei:
+        await _client().create_tweet("hi", reply_to_id="1")
+    msg = str(ei.value)
+    assert "mentioned" in msg.lower()
+    assert "Read + Write" not in msg
+
+
 async def test_http_error_audited(audit_db: Path, fake_http) -> None:
     _FakeAsyncClient.resp = _FakeResp(429, {"title": "Too Many Requests"}, text='{"title": "Too Many Requests"}')
     with pytest.raises(XApiError) as ei:
