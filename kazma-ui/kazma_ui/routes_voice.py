@@ -113,16 +113,29 @@ async def text_to_speech(
 
     from kazma_core.config_store import get_config_store
     from kazma_core.metrics import record_voice_tts, record_voice_utterance
-    from kazma_core.voice.tts import get_last_error, synthesize
+    from kazma_core.voice.tts import get_last_error, pick_voice_for_text, synthesize
 
     cs = get_config_store()
     db_provider = cs.get("voice.tts_provider")
     if db_provider and str(db_provider).strip() and str(db_provider).strip().lower() != "none":
         provider = str(db_provider)
 
+    # Match the voice to the TEXT, not to a global pin.
+    #
+    # This used to overwrite `voice` with `voice.tts_voice` unconditionally.
+    # The operator's install had that pinned to `ar-SA-HamedNeural`, so every
+    # English reply was spoken in Arabic — and because a technical answer is
+    # mostly commit SHAs, byte counts and table dashes, an Arabic voice read
+    # them out character by character for minutes (2026-09-17).
+    #
+    # A real voice name still wins: someone who typed one meant it. Only
+    # `auto` / `default` / `none` / empty defer to the text's script.
     db_voice = cs.get("voice.tts_voice")
-    if db_voice and str(db_voice).strip() and str(db_voice).strip().lower() != "none":
-        voice = str(db_voice)
+    voice = pick_voice_for_text(
+        text,
+        str(db_voice) if db_voice is not None else voice,
+        provider,
+    )
 
     db_output_format = cs.get("voice.tts_output_format")
     if db_output_format and str(db_output_format).strip() and str(db_output_format).strip().lower() != "none":

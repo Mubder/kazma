@@ -202,15 +202,95 @@
   var _ttsUnavailable = false;
   try { _ttsUnavailable = sessionStorage.getItem('kazma_tts_unavailable') === '1'; } catch (e) {}
 
+  // The currently playing reply, so it can be STOPPED.
+  //
+  // This used to be a bare `new Audio(url)` with no reference kept, so once
+  // a clip started nothing could interrupt it: not the stop button (there
+  // wasn't one), not disabling TTS in settings, not killing the server —
+  // the blob is already in the page. On 2026-09-17 that meant several
+  // minutes of unstoppable speech and the only remedy was closing the tab.
+  var _currentAudio = null;
+  var _currentUrl = null;
+
+  function stopTTS() {
+    if (_currentAudio) {
+      try { _currentAudio.pause(); _currentAudio.currentTime = 0; } catch (e) { /* already gone */ }
+      _currentAudio = null;
+    }
+    if (_currentUrl) {
+      try { URL.revokeObjectURL(_currentUrl); } catch (e) { /* already revoked */ }
+      _currentUrl = null;
+    }
+    updateSpeakUI();
+  }
+
+  function isSpeaking() {
+    return !!(_currentAudio && !_currentAudio.paused);
+  }
+
+  // Auto-speak is a CLIENT-side gate on top of the server's voice.tts_reply.
+  // Kept per-browser so muting on your phone does not silence the desktop.
+  function autoSpeakEnabled() {
+    try {
+      return localStorage.getItem('kazma_tts_autospeak') !== '0';
+    } catch (e) { return true; }
+  }
+
+  function setAutoSpeak(on) {
+    try { localStorage.setItem('kazma_tts_autospeak', on ? '1' : '0'); } catch (e) {}
+    if (!on) stopTTS();
+    updateSpeakUI();
+  }
+
+  function toggleAutoSpeak() {
+    var next = !autoSpeakEnabled();
+    setAutoSpeak(next);
+    try {
+      showToast(next ? 'Voice replies on' : 'Voice replies off — playback stopped', 'info', 2500);
+    } catch (e) { /* toast system absent */ }
+    return next;
+  }
+
+  function updateSpeakUI() {
+    var btn = document.getElementById('voice-speak-btn');
+    if (!btn) return;
+    var on = autoSpeakEnabled();
+    var speaking = isSpeaking();
+    btn.classList.toggle('is-muted', !on);
+    btn.classList.toggle('is-speaking', speaking);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = speaking
+      ? 'Stop speaking (click to stop this reply)'
+      : (on ? 'Voice replies ON — click to turn off' : 'Voice replies OFF — click to turn on');
+    var onIcon = document.getElementById('speak-on-icon');
+    var offIcon = document.getElementById('speak-off-icon');
+    if (onIcon) onIcon.style.display = on ? '' : 'none';
+    if (offIcon) offIcon.style.display = on ? 'none' : '';
+  }
+
+  // One click, two jobs: if something is playing, STOP it (that is what a
+  // person reaching for this button almost always wants). Otherwise toggle
+  // whether future replies speak.
+  function toggleSpeak() {
+    if (isSpeaking()) { stopTTS(); return false; }
+    return toggleAutoSpeak();
+  }
+
   async function playTTS(text, provider) {
     if (!isTtsEnabled() || _ttsUnavailable) return;
+    if (!autoSpeakEnabled()) return;
     provider = provider || getTtsProvider();
+    // One voice at a time — a new reply supersedes the previous clip.
+    stopTTS();
 
     try {
       var formData = new FormData();
       formData.append('text', text);
       formData.append('provider', provider);
-      formData.append('voice', 'default');
+      // 'auto' → the server picks a voice matching the text's script, so an
+      // English reply is not read in an Arabic voice. A voice pinned in
+      // Settings still overrides this.
+      formData.append('voice', 'auto');
       formData.append('output_format', 'mp3');
 
       var resp = await fetch('/api/voice/tts', { method: 'POST', body: formData });
@@ -231,10 +311,20 @@
       var audioBlob = await resp.blob();
       var url = URL.createObjectURL(audioBlob);
       var audio = new Audio(url);
-      audio.onended = function() { URL.revokeObjectURL(url); };
+      _currentAudio = audio;
+      _currentUrl = url;
+      audio.onended = function() {
+        if (_currentAudio === audio) { _currentAudio = null; }
+        if (_currentUrl === url) { _currentUrl = null; }
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        updateSpeakUI();
+      };
+      updateSpeakUI();
       await audio.play();
+      updateSpeakUI();
     } catch (err) {
       console.warn('[Voice] TTS playback failed:', err);
+      stopTTS();
     }
   }
 
@@ -299,6 +389,14 @@
       var liveBtn = document.getElementById('voice-live-btn');
       if (liveBtn) liveBtn.style.display = 'block';
     }
+    // The speak toggle needs no microphone — show it whenever TTS could
+    // play, which is any browser. Reflect the stored preference at load so
+    // a muted tab does not come back unmuted after a refresh.
+    updateSpeakUI();
+    // Escape stops speech, the way it cancels everything else on the page.
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && isSpeaking()) stopTTS();
+    });
   }
 
   // ── Init on DOM ready ─────────────────────────────────
@@ -685,6 +783,12 @@
     startRecording: startRecording,
     stopRecording: stopRecording,
     playTTS: playTTS,
+    stopTTS: stopTTS,
+    toggleSpeak: toggleSpeak,
+    toggleAutoSpeak: toggleAutoSpeak,
+    setAutoSpeak: setAutoSpeak,
+    autoSpeakEnabled: autoSpeakEnabled,
+    isSpeaking: isSpeaking,
     handleVoiceCommand: handleVoiceCommand,
     getSttProvider: getSttProvider,
     getTtsProvider: getTtsProvider,
