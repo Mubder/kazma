@@ -194,6 +194,12 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
         raise
 
     if not tweets:
+        # The commonest state, and it was invisible. "Polled, nothing new" and
+        # "never polled" are different problems with the same silence.
+        logger.info(
+            "[x-mentions] polled — no new mentions since %s",
+            since_id or "(start)",
+        )
         return []
 
     users = _index_users(includes)
@@ -213,6 +219,12 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
         summoner = str((author or {}).get("username") or "").lower()
 
         def _skip(reason: str) -> None:
+            # Logged, not just collected. Every gate below used to decide in
+            # silence, so a cycle that saw a mention and dropped it looked
+            # identical in the log to a cycle that saw nothing -- which is
+            # what made "I mentioned it and nothing happened" take four
+            # database queries to answer instead of one grep.
+            logger.info("[x-mentions] %s skipped: %s", tid, reason)
             results.append({"mention": tid, "action": "skipped", "reason": reason})
 
         if summoner and summoner == my_handle:
@@ -269,6 +281,13 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
 
     if newest and newest != since_id:
         await asyncio.to_thread(store.set_since_id, newest)
+
+    acted = [r for r in results if r.get("action") not in ("skipped", None)]
+    logger.info(
+        "[x-mentions] cycle done: %d mention(s), %d acted on, %d skipped, "
+        "cursor now %s",
+        len(tweets), len(acted), len(results) - len(acted), newest or since_id,
+    )
     return results
 
 
