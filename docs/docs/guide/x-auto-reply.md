@@ -162,6 +162,39 @@ Write a position, not a topic. Three things make one hold:
 actually wrote will pin the register harder than a paragraph describing it.
 This is the lever to reach for first when output feels off.
 
+### Answering everything (the emoji decides)
+
+If you want Kazma to reply to **whatever** you summon it under, with the emoji
+picking the tone, give a subject the single keyword `*`:
+
+```yaml
+subjects:
+  - id: general
+    match: ["*"]
+    mood: dry
+    view: |
+      React to what the post actually says, in my voice: short, dry, and
+      unimpressed by padding. Don't hedge and don't summarise back at them.
+```
+
+Then 😂 gets a roast, 🤬 gets an angry one, 🙄 a dry one — off the same subject,
+on any topic.
+
+Three things to know:
+
+- **Specific subjects are still tried first.** A catch-all is the floor, never
+  the ceiling, so adding one does not blunt the subjects you already wrote.
+- **It costs no model call to match.** A catch-all short-circuits before the
+  classifier, so "answer everything" is also the cheapest rule.
+- **The stance check is skipped for it.** That check asks "does this draft
+  argue the declared position?" — a catch-all's view is a *voice*, not a
+  claim, so every draft would come back `fence` and block itself. The content
+  screen and the hard lines still apply, and so does `draft` mode.
+
+This is still a declared subject: you wrote the view, it carries your hard
+lines, and nothing is improvised. What it drops is having to predict the topic
+in advance.
+
 ### Classification
 
 Keyword match runs first: deterministic, free, auditable, and it never calls

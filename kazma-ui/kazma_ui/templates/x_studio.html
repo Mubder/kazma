@@ -144,7 +144,11 @@
     </div>
   </div>
 
-  <div class="two-col-grid" style="margin-top:1rem;">
+  <!-- Drafts + Posted belong to the Studio tab too. The tab strip gated the
+       FIRST two-col-grid and missed this second one, so both cards rendered
+       under Conversations as well. -->
+  <div class="two-col-grid" style="margin-top:1rem;"
+       x-show="tab === 'studio'" x-cloak>
     <div class="xs-card">
       <h2>{{ t('x_studio.drafts') }}</h2>
       <div class="xs-empty" x-show="!drafts.length" x-cloak>{{ t('x_studio.empty_drafts') }}</div>

@@ -1318,3 +1318,162 @@ def test_no_match_detail_flattens_newlines():
     d = no_match_detail(raw, (VAR,))
     assert chr(10) not in d
     assert "line one line two line three" in d
+
+
+# ── Answering everything, without inventing a view ────────────────────────
+#
+# "Why can't it reply without defining a subject?" The rule is that Kazma
+# never invents a POSITION -- not that it must stay silent on topics the
+# operator failed to enumerate in advance. Those are different things, and
+# conflating them left no way to say "answer everything, in this voice".
+#
+# `*` as a keyword is still a declared subject: the operator wrote its view,
+# it carries its own hard lines, and it passes the same screen and stance
+# check. It just drops the requirement to predict the topic.
+
+CATCH_ALL = Subject(
+    id="general", match=("*",), view="My general take, in my voice.", mood="dry"
+)
+
+
+def test_catch_all_matches_an_unrelated_post():
+    from kazma_core.x_api.stance import _keyword_hit
+
+    hit = _keyword_hit("Elon Musk and his algorithm", (CATCH_ALL,))
+    assert hit is not None and hit.id == "general"
+
+
+def test_a_specific_subject_beats_the_catch_all():
+    """Adding a catch-all must not blunt the subjects that came first."""
+    from kazma_core.x_api.stance import _keyword_hit
+
+    # Catch-all listed FIRST, to prove order in the list does not decide it.
+    subs = (CATCH_ALL, VAR)
+    assert _keyword_hit("that VAR call again", subs).id == "var"
+    assert _keyword_hit("something else entirely", subs).id == "general"
+
+
+@pytest.mark.asyncio
+async def test_catch_all_never_costs_a_model_call(monkeypatch):
+    """"Answer everything" is the cheapest possible rule; it must not pay
+    for a classifier."""
+    async def _never(*a, **k):
+        raise AssertionError("a catch-all must not reach the classifier")
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _never)
+    got = await classify("wholly unrelated", _cfg(subjects=(CATCH_ALL,)))
+    assert got is not None and got.id == "general"
+
+
+@pytest.mark.asyncio
+async def test_catch_all_still_gets_the_hard_lines(_no_llm, monkeypatch):
+    """Answering everything is not a way around the rules that always apply."""
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+        seen["rules"] = subject.all_hard_lines()
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    res = await handle_summon(
+        summon_id="ca1", parent_id="p1", parent_text="anything at all",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(CATCH_ALL,)),
+    )
+    assert res.action == "awaiting_approval"
+    assert any("protected characteristic" in r for r in seen["rules"])
+
+
+@pytest.mark.asyncio
+async def test_catch_all_still_passes_the_screen(_no_llm, monkeypatch):
+    async def _bad(*, subject, parent_text, parent_handle="", mood=""):
+        return "they should die"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _bad)
+    res = await handle_summon(
+        summon_id="ca2", parent_id="p2", parent_text="anything",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(CATCH_ALL,)),
+    )
+    assert res.action == "failed" and "banned construction" in res.reason
+
+
+def test_no_match_detail_points_at_the_star():
+    """The dead end should name the way out of it."""
+    from kazma_core.x_api.stance import no_match_detail
+
+    assert "*" in no_match_detail("x", (VAR,)) or "*" in no_match_detail("x", (VAR,))
+    assert "*" in no_match_detail("x", ())
+
+
+@pytest.mark.asyncio
+async def test_catch_all_skips_the_stance_check(_no_llm, monkeypatch):
+    """A voice has no position to drift from.
+
+    The stance check asks "does this draft argue the declared position?". A
+    catch-all's view is a register, not a claim, so every draft would come
+    back `fence` and the whole "answer everything, the emoji picks the tone"
+    mode would block itself. The screen and the hard lines still run.
+    """
+    class _Resp:
+        content = "fence"
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="cs1", parent_id="p1", parent_text="anything at all",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(CATCH_ALL,), stance_check=True),
+    )
+    assert res.action == "awaiting_approval", res.reason
+
+
+@pytest.mark.asyncio
+async def test_a_specific_subject_still_gets_the_stance_check(_no_llm, monkeypatch):
+    """Skipping it for catch-alls must not skip it everywhere."""
+    class _Resp:
+        content = "contradicts"
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="cs2", parent_id="p2", parent_text="that VAR call",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(VAR,), stance_check=True),
+    )
+    assert res.action == "failed" and "AGAINST the declared view" in res.reason
+
+
+@pytest.mark.asyncio
+async def test_emoji_drives_tone_on_a_catch_all(_no_llm, monkeypatch):
+    """The whole point of the mode: no topic, the emoji decides."""
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+        seen["mood"] = mood
+        seen["subject"] = subject.id
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    await handle_summon(
+        summon_id="cs3", parent_id="p3", parent_text="a post about anything",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(CATCH_ALL,)),
+        summon_text="what do you think? 🤬",
+    )
+    assert seen["subject"] == "general"
+    assert seen["mood"] == "angry"

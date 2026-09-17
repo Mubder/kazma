@@ -3038,9 +3038,12 @@
                                 <input type="text" class="form-input"
                                        :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
                                        @input="s._matchText = $event.target.value"
-                                       placeholder="var, offside, تحكيم" autocomplete="off">
+                                       placeholder="var, offside, تحكيم   —  or just *" autocomplete="off">
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
                                     Matched as whole words, so "var" will not fire on "variable".
+                                    Use <code>*</code> on its own to answer <strong>every</strong> post —
+                                    the summon emoji then picks the tone. Specific subjects are still
+                                    tried first, so a catch-all never blunts them.
                                 </p>
                             </div>
                             <div class="form-group">

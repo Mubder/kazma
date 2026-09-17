@@ -599,7 +599,12 @@ async def handle_summon(
             parent_id=parent_id, summon_id=summon_id,
         )
     screen = screen_draft(draft, subject)
-    if not screen and cfg.stance_check:
+    # A catch-all's view is a VOICE, not a position -- "react to what the post
+    # says, in my register" has nothing to argue against, so the stance check
+    # would read every draft as `fence` and block the whole feature. The check
+    # guards drift from a declared position; a subject that declares none has
+    # no drift to detect. The content screen and the hard lines still apply.
+    if not screen and cfg.stance_check and not subject.is_catch_all():
         # The rule screen does not know what the operator's position IS. A
         # reply that quietly argues the other side passes it cleanly, which
         # for this feature is the failure that matters.
@@ -728,7 +733,7 @@ async def preview_reply(
             False, "failed", reason=str(exc), subject_id=subject.id
         )
     screen = screen_draft(draft, subject)
-    if not screen and cfg.stance_check:
+    if not screen and cfg.stance_check and not subject.is_catch_all():
         # Attended by definition — the operator is looking at it. A drifted
         # draft is shown WITH the verdict rather than hidden, because seeing
         # what the view produced when it misses is the point of the dry run.
