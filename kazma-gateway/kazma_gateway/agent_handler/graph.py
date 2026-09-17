@@ -974,18 +974,26 @@ def create_graph_handler(
                 _cap = apply_capacity_command(
                     thread_id, msg.text, actor=actor, require_slash=False,
                 )
-                ctx = await _store.get(thread_id) or msg.context_metadata
-                out_text, out_ctx = _prepare_tg_outbound(msg, _cap.reply, ctx)
-                await manager.send(OutboundMessage(
-                    target_id=_build_target_id(msg.platform, ctx),
-                    text=out_text,
-                    context_metadata=out_ctx,
-                ))
-                logger.info(
-                    "[agent-handler] /long action=%s thread=%s yolo=%s",
-                    _cap.action, thread_id, _cap.yolo_active,
-                )
-                return
+                if _cap.rewrite_user_text:
+                    msg.text = _cap.rewrite_user_text
+                    logger.info(
+                        "[agent-handler] /long action=%s thread=%s yolo=%s "
+                        "(body falls through to graph)",
+                        _cap.action, thread_id, _cap.yolo_active,
+                    )
+                else:
+                    ctx = await _store.get(thread_id) or msg.context_metadata
+                    out_text, out_ctx = _prepare_tg_outbound(msg, _cap.reply, ctx)
+                    await manager.send(OutboundMessage(
+                        target_id=_build_target_id(msg.platform, ctx),
+                        text=out_text,
+                        context_metadata=out_ctx,
+                    ))
+                    logger.info(
+                        "[agent-handler] /long action=%s thread=%s yolo=%s",
+                        _cap.action, thread_id, _cap.yolo_active,
+                    )
+                    return
 
         if msg.text:
             from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command

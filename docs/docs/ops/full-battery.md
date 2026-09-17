@@ -27,11 +27,15 @@ Base URL below is `http://127.0.0.1:9090`. Change it if yours is not. Do **not**
 
 ## Part A — chat probe (read-only)
 
-Paste as **one** message on Web chat **or** Telegram. First line raises the mission budget.
+**Two messages**, in order, on Web chat **or** Telegram.
+
+1. Send only: `/long mission`  
+   Wait for the `MISSION ON` ack. That slash is **not** sent to the model — if you paste the probe under it in the same bubble, the probe never runs.
+2. Then paste the block below (no slash on the first line).
+
+After a server reload that includes the 2026-09-17 `/long mission`+body fall-through, a single paste starting with `/long mission` plus the probe also works. Until then, use two messages.
 
 ```
-/long mission
-
 You are running Part A of the Kazma full-system battery. Read-only tools only. Do not write files, send email, post to X, mutate memory, dispatch a swarm task, or run shell_exec/python_exec/file_write. If a tool is missing, gated, or returns Error:/⚠️ — that row is FAIL, not a reason to invent a pass.
 
 Continue through EVERY section even if earlier ones fail. Do not synthesize a reassuring summary over a failed probe.
@@ -148,11 +152,11 @@ Do **not** `POST /api/backup/now` as part of the default battery (slow, writes).
 
 ## Part C — HITL write (chat, danger tools on purpose)
 
-Run **after** A and B. Paste as **one** message on the same mouth you actually use (Web SSE if that is daily; **Telegram if that is daily**). You will get an Approve card. Approve it. If no card appears, C has already failed.
+Run **after** A and B on the same mouth you actually use (Web SSE if that is daily; **Telegram if that is daily**). You will get an Approve card. Approve it. If no card appears, C has already failed.
+
+If mission is already on from Part A, paste the block below as-is. If not: send `/long on` **alone**, wait for the ack, **then** paste the block (a leading `/long` in the same bubble is not sent to the model).
 
 ```
-/long on
-
 You are running Part C of the Kazma full-system battery: one real HITL write.
 
 Create a unique probe file in the active workspace:

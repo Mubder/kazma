@@ -38,6 +38,10 @@ class CapacityCommandResult:
     yolo_active: bool = False
     yolo_blocked: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+    rewrite_user_text: str | None = None
+    """When the user pasted a real task AFTER `/long mission`, this is that
+    body — surfaces must fall through to the graph with it (audit 2026-09-17
+    battery paste: the slash fast-path ate the whole message)."""
 
 
 def is_capacity_command(text: str, *, require_slash: bool = True) -> bool:
@@ -52,6 +56,54 @@ def is_capacity_command(text: str, *, require_slash: bool = True) -> bool:
     return bare in ("long", "mission", "unrestricted")
 
 
+def _command_arity(parts: list[str]) -> int:
+    """How many leading tokens are the capacity command. 0 = do not split
+    (unknown sub → help on the whole string)."""
+    if not parts:
+        return 0
+    cmd = parts[0].lower().lstrip("/")
+    rest = [p.lower() for p in parts[1:]]
+    if cmd == "unrestricted":
+        if rest and rest[0] in _OFF | _STATUS | _ON:
+            return 2
+        return 1
+    if cmd == "mission":
+        if rest and rest[0] in _OFF | _STATUS | _ON | _MISSION_ALIASES:
+            return 2
+        return 1
+    if cmd != "long":
+        return 0
+    n = 1
+    if rest and rest[0] == "yolo":
+        n += 1
+        rest = rest[1:]
+    if not rest:
+        return n
+    if rest[0] in _STATUS | _OFF | _ON | _MISSION_ALIASES | _PRESETS or rest[0].isdigit():
+        return n + 1
+    return 0
+
+
+def _split_command_and_body(text: str) -> tuple[str, str]:
+    """Peel `/long mission` (etc.) off a pasted task body.
+
+    `/long mission` → (\"/long mission\", \"\")
+    `/long mission\\n\\nDo the battery` → (\"/long mission\", \"Do the battery\")
+    `/long bananas` → whole string, empty body (help path).
+    """
+    stripped = (text or "").strip()
+    parts = stripped.split()
+    n = _command_arity(parts)
+    if n <= 0:
+        return stripped, ""
+    rest = stripped
+    for _ in range(n):
+        rest = rest.lstrip()
+        sp = rest.split(None, 1)
+        rest = sp[1] if len(sp) > 1 else ""
+    return " ".join(parts[:n]), rest.strip()
+
+
 def apply_capacity_command(
     thread_id: str,
     text: str,
@@ -62,6 +114,14 @@ def apply_capacity_command(
     """Parse and apply a capacity command. Never raises to the caller."""
     if not thread_id or not is_capacity_command(text, require_slash=require_slash):
         return CapacityCommandResult(handled=False, reply="")
+
+    cmd, body = _split_command_and_body(text)
+    text = cmd
+
+    def _out(result: CapacityCommandResult) -> CapacityCommandResult:
+        if result.handled and body and result.action not in ("help", "error"):
+            result.rewrite_user_text = body
+        return result
 
     parsed = _parse(text)
     if parsed is None:
@@ -74,17 +134,17 @@ def apply_capacity_command(
     action = parsed["action"]
     try:
         if action == "status":
-            return CapacityCommandResult(
+            return _out(CapacityCommandResult(
                 handled=True,
                 action="status",
                 reply=format_capacity_status(thread_id),
                 **_flags(thread_id),
-            )
+            ))
         if action == "off_long":
             from kazma_core.agent.long_task import disable_long_task
 
             disable_long_task(thread_id, actor=actor)
-            return CapacityCommandResult(
+            return _out(CapacityCommandResult(
                 handled=True,
                 action="off_long",
                 reply=(
@@ -94,14 +154,14 @@ def apply_capacity_command(
                     "Re-enable: `/long on` · `/long mission` · `/long yolo`"
                 ),
                 **_flags(thread_id),
-            )
+            ))
         if action == "off_both":
             from kazma_core.agent.long_task import disable_long_task
             from kazma_core.safety.yolo import disable_yolo
 
             disable_long_task(thread_id, actor=actor)
             disable_yolo(thread_id, actor=actor)
-            return CapacityCommandResult(
+            return _out(CapacityCommandResult(
                 handled=True,
                 action="off_both",
                 reply=(
@@ -110,9 +170,9 @@ def apply_capacity_command(
                     "Power modes: `/long on` · `/long yolo` · `/unrestricted`"
                 ),
                 **_flags(thread_id),
-            )
+            ))
         if action == "on":
-            return _enable(
+            return _out(_enable(
                 thread_id,
                 actor=actor,
                 mode=str(parsed.get("mode") or "budget"),
@@ -121,7 +181,7 @@ def apply_capacity_command(
                 with_yolo=bool(parsed.get("yolo")),
                 remaining_turns=int(parsed.get("remaining_turns") or 1),
                 unified=bool(parsed.get("unified")),
-            )
+            ))
     except Exception:
         logger.exception("[capacity] apply failed thread=%s action=%s", thread_id[:12], action)
         return CapacityCommandResult(

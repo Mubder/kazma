@@ -54,6 +54,10 @@ def intercept_capacity_fast_path(
 
     if is_capacity_command(raw_msg, require_slash=True):
         _cap = apply_capacity_command(thread_id, raw_msg, actor=actor)
+        if _cap.rewrite_user_text:
+            # `/long mission` + a pasted task: budget is armed; the body
+            # falls through to the graph (battery paste used to die here).
+            return None, _cap.rewrite_user_text
         _persist_instant_turn(
             session, thread_id, raw_msg, _cap.reply, kind="capacity"
         )

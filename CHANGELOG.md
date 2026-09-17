@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## `/long mission` plus a pasted task now reaches the model (2026-09-17)
+
+A message that *started* with `/long mission` was handled as a slash
+command only — the rest of the bubble never hit the graph. That is why
+the full-system battery looked like it "only triggered the long
+command". Remainder after `/long mission` (and `/long on`, `/mission`,
+…) now falls through as the user turn. Bare `/long mission` is still
+the ack-only fast path.
+
 ## Full-system battery (2026-09-17)
 
 Ops pack that names the broken part: chat read-only probe, HTTP/ops

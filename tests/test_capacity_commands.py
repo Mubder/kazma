@@ -120,4 +120,25 @@ def test_unknown_sub_returns_help() -> None:
     r = apply_capacity_command(tid, "/long bananas", actor="t")
     assert r.handled is True
     assert "Usage" in r.reply
+    assert r.rewrite_user_text is None
+    disable_long_task(tid)
+
+
+def test_long_mission_with_pasted_body_falls_through() -> None:
+    """A battery paste starting `/long mission` must still reach the graph."""
+    tid = _tid("combo")
+    body = "You are running Part A of the Kazma full-system battery."
+    r = apply_capacity_command(tid, "/long mission\n\n" + body, actor="t")
+    assert r.handled is True
+    assert r.long_active is True
+    assert r.rewrite_user_text == body
+    disable_long_task(tid)
+
+
+def test_long_mission_alone_has_no_rewrite() -> None:
+    tid = _tid("long-only")
+    r = apply_capacity_command(tid, "/long mission", actor="t")
+    assert r.handled is True
+    assert r.long_active is True
+    assert r.rewrite_user_text is None
     disable_long_task(tid)

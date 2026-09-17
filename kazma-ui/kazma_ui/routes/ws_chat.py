@@ -1237,18 +1237,21 @@ def create_ws_chat_router(
                         _cap = apply_capacity_command(
                             thread_id, text, actor=f"ws:{session_id[:12]}",
                         )
-                        await _emit_journaled("capacity", {
-                            "long_active": _cap.long_active,
-                            "yolo_active": _cap.yolo_active,
-                            "action": _cap.action,
-                            "reply": _cap.reply,
-                        }, thread_id)
-                        await _emit_journaled("stream_end", {"capacity": True}, thread_id)
-                        record_instant_turn(
-                            session_id, thread_id, text, _cap.reply,
-                            kind="capacity",
-                        )
-                        continue
+                        if _cap.rewrite_user_text:
+                            text = _cap.rewrite_user_text
+                        else:
+                            await _emit_journaled("capacity", {
+                                "long_active": _cap.long_active,
+                                "yolo_active": _cap.yolo_active,
+                                "action": _cap.action,
+                                "reply": _cap.reply,
+                            }, thread_id)
+                            await _emit_journaled("stream_end", {"capacity": True}, thread_id)
+                            record_instant_turn(
+                                session_id, thread_id, text, _cap.reply,
+                                kind="capacity",
+                            )
+                            continue
 
                     from kazma_core.agent.plan_mode import apply_plan_command, is_plan_command
 
