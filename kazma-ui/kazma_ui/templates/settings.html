@@ -2836,10 +2836,24 @@
                     <button class="btn btn-sm btn-secondary" @click="loadXReply()" :disabled="xReplyLoading"
                             x-text="xReplyLoading ? '…' : 'Refresh'"></button>
                 </div>
-                <p style="margin:8px 0 16px;font-size:0.85rem;color:var(--text-secondary);">
+                <p style="margin:8px 0 12px;font-size:0.85rem;color:var(--text-secondary);">
                     Kazma replies to a post only when it matches a subject you declare below,
                     and argues the view you wrote. No matching subject means no reply — it
                     never improvises a position.
+                </p>
+
+                <!-- Live status. The dry run reads the card in the editor;
+                     everything else reads SAVED config, so an operator can have
+                     a working preview and a completely inert feature at the same
+                     time. That happened on the first live test and a real
+                     mention went nowhere with nothing to explain it. -->
+                <p x-show="xReply.live_reason" x-cloak
+                   :style="xReply.poller_running && xReply.can_draft
+                           ? 'background:var(--bg-secondary);border-inline-start:3px solid var(--accent);'
+                           : 'background:var(--bg-secondary);border-inline-start:3px solid var(--warning,#c80);'"
+                   style="margin:0 0 16px;padding:10px 12px;border-radius:6px;font-size:0.84rem;">
+                    <strong x-text="(xReply.poller_running && xReply.can_draft) ? 'Live' : 'Not live'"></strong>
+                    <span x-text="' — ' + xReply.live_reason"></span>
                 </p>
 
                 <template x-if="!xReply.connector_ready">
@@ -2850,7 +2864,8 @@
 
                 <label class="toggle-row">
                     <span class="toggle">
-                        <input type="checkbox" x-model="xReply.enabled">
+                        <input type="checkbox" x-model="xReply.enabled"
+                               @change="if (xReply.enabled && xReply.mode === 'off') xReply.mode = 'draft'">
                         <span class="toggle-slider"></span>
                     </span>
                     <span>Enable auto-reply</span>

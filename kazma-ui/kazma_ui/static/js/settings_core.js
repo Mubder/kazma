@@ -449,6 +449,7 @@
             stance_check: true, mood_emoji: {},
             moods: ['roast', 'angry', 'dry', 'deadpan', 'supportive'],
             connector_ready: false, can_draft: false, handle: '',
+            poller_running: false, live_reason: '',
         },
         xReplySummonersText: '',
         xReplyLoading: false,

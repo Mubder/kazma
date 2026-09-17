@@ -169,7 +169,39 @@ def _payload() -> dict[str, Any]:
         "connector_ready": xcfg.can_post(),
         "handle": xcfg.handle,
         "can_draft": cfg.can_draft(),
+        # Is the poller actually running right now? can_draft() says the SAVED
+        # config would allow it; this says whether the loop exists, which is a
+        # different question after a config change without a restart.
+        "poller_running": _poller_running(),
+        "live_reason": _live_reason(cfg, xcfg),
     }
+
+
+def _live_reason(cfg: Any, xcfg: Any) -> str:
+    """One sentence: is this thing actually going to do anything, and if not, why.
+
+    An operator can have a working dry run and a completely inert feature at
+    the same time -- the preview reads the card in the editor, everything else
+    reads saved config. That happened on the first live test: subject typed,
+    preview drafting happily, `enabled` never saved, and a real mention on X
+    went nowhere with nothing to explain it.
+    """
+    if not xcfg.can_post():
+        return "The X connector is not posting-ready — save and test the credentials above."
+    if not cfg.enabled:
+        return "Auto-reply is OFF. Nothing will happen on X until you enable it and press Save."
+    if cfg.mode == "off":
+        return "Mode is 'off'. Pick draft or auto, then press Save."
+    if not cfg.subjects:
+        return "No subjects are SAVED. A subject in the editor is not saved until you press Save."
+    if not cfg.summoners and cfg.summoner_policy != "anyone":
+        return "No trusted handles saved, so nobody can summon it."
+    if not _poller_running():
+        return (
+            f"Saved and live in {cfg.mode} mode, but the mentions poller is not "
+            "running — restart Kazma to start it. /x roast works meanwhile."
+        )
+    return f"Live in {cfg.mode} mode, poller running, {len(cfg.subjects)} subject(s)."
 
 
 @router.get("")
