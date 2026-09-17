@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## Full-battery Part D: restic, Postgres dump, migrate+vault (2026-09-17)
+
+Ops pack now includes the three drills that A/B/C cannot see: restore
+drill + restic snapshot list + restore rehearsal into TEMP (never onto
+live), `pg_backup.py list` / `PGDMP` magic, and `kazma migrate`
+export/verify/dry-import with vault-key pairing. `/api/backup/list`
+`"postgres": false` is "dump stale or skipped at copy time", not "this
+install is SQLite".
+
 ## Part C: post-approve tool success is not "no card" (2026-09-17)
 
 On Telegram the operator got `⚠️ Approval required` for `file_write` and
