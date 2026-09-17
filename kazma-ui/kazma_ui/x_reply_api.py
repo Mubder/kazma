@@ -450,6 +450,51 @@ def _summon_payload(result: Any) -> dict[str, Any]:
     return payload
 
 
+@protected_router.post("/poll", dependencies=[Depends(_csrf)])
+async def x_reply_poll() -> JSONResponse:
+    """Fetch mentions from X now. Conversations Refresh is this, not a DB reread.
+
+    Ignores the since_id cursor: a deleted mention as cursor made X report
+    zero results forever, which is why a new @KazmaAI mention did not appear
+    after hard-refresh.
+    """
+    from kazma_core.x_api.client import XApiError
+
+    try:
+        from kazma_core.tenant_context import tenant_scope
+        from kazma_core.x_api.mentions_fire import poll_once
+        from kazma_core.x_api.stance import get_reply_config
+
+        with tenant_scope("default"):
+            cfg = get_reply_config()
+            if not cfg.can_draft():
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": (
+                            "Auto-reply is not live — enable it in Settings → X "
+                            "and Save first."
+                        ),
+                    },
+                    status_code=400,
+                )
+            rows = await poll_once(cfg=cfg, ignore_cursor=True)
+        n = len(rows)
+        acted = sum(1 for r in rows if r.get("action") not in ("skipped", None))
+        if n == 0:
+            msg = (
+                "No mentions in X's latest window. If you just posted, wait a "
+                "few seconds and poll again."
+            )
+        else:
+            msg = f"Polled {n} mention(s): {acted} new, {n - acted} already handled or skipped."
+        return JSONResponse({"ok": True, "rows": rows, "count": n, "message": msg})
+    except XApiError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
 @protected_router.post("/approve", dependencies=[Depends(_csrf)])
 async def x_reply_approve(body: SummonIdBody) -> JSONResponse:
     sid = (body.summon_id or "").strip()

@@ -1685,3 +1685,91 @@ async def test_poll_once_direct_mention_drafts(_no_llm, monkeypatch):
     assert rows and rows[0]["action"] == "awaiting_approval"
     assert rows[0]["mention"] == "99"
     mf._identity = None
+
+
+@pytest.mark.asyncio
+async def test_poll_once_ignore_cursor_does_not_pass_since_id(_no_llm, monkeypatch):
+    import kazma_core.x_api.mentions_fire as mf
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    seen = {}
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id=""):
+            seen["since_id"] = since_id
+            return [], {}
+
+    get_reply_store().set_since_id("2100705922142073166")
+    mf._identity = None
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    rows = await mf.poll_once(cfg=_cfg(subjects=()), ignore_cursor=True)
+    assert rows == []
+    assert seen["since_id"] == ""
+    mf._identity = None
+
+
+@pytest.mark.asyncio
+async def test_empty_cursor_looks_back_when_since_id_is_a_handled_summon(
+    _no_llm, monkeypatch
+):
+    """Deleted mention as since_id: X returns 0, a new mention is sitting there."""
+    import kazma_core.x_api.mentions_fire as mf
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    calls = []
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id=""):
+            calls.append(since_id)
+            if since_id:
+                return [], {}
+            return (
+                [{
+                    "id": "2100999999999999999",
+                    "text": "@KazmaAI \U0001F602",
+                    "author_id": "2",
+                }],
+                {"users": [{"id": "2", "username": "balfaris"}]},
+            )
+
+        async def get_tweet(self, tid):
+            raise AssertionError("direct")
+
+    store = get_reply_store()
+    store.set_since_id("2100705922142073166")
+    store.claim(
+        summon_id="2100705922142073166", parent_id="p",
+        target_handle="t", summoner="s",
+    )
+    store.mark_failed("2100705922142073166", "deleted or not visible")
+    mf._identity = None
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    _stub_draft(monkeypatch)
+    rows = await mf.poll_once(cfg=_cfg(subjects=()))
+    assert calls == ["2100705922142073166", ""]
+    assert rows and rows[0]["mention"] == "2100999999999999999"
+    mf._identity = None

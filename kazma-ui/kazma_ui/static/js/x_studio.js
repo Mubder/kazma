@@ -38,16 +38,27 @@ function xStudioPage() {
 
     t(key) { return (window.t && window.t(key)) || key; },
 
-    async loadConversations() {
+    async loadConversations(opts) {
+      const poll = !!(opts && opts.poll);
       this.convLoading = true;
       try {
+        if (poll) {
+          const resp = await this._mutating('POST', '/api/x/reply/poll', {});
+          const pdata = await resp.json().catch(function () { return {}; });
+          if (!resp.ok || pdata.ok === false) {
+            window.showToast(pdata.error || 'Could not poll X', 'error');
+          } else if (pdata.message) {
+            window.showToast(pdata.message, 'success');
+          }
+        }
         const r = await fetch('/api/x/reply/conversations?limit=30', {
           credentials: 'same-origin',
         });
         const d = await r.json().catch(function () { return {}; });
         this.conversations = (d && d.rows) || [];
       } catch (e) {
-        this.conversations = [];
+        if (poll) window.showToast(String(e.message || e), 'error');
+        this.conversations = this.conversations || [];
       } finally {
         this.convLoading = false;
       }

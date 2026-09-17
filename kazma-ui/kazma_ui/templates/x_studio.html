@@ -202,10 +202,13 @@
   <div class="xs-card" x-show="tab === 'conversations'" x-cloak>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
       <h2 style="margin:0;">Conversations</h2>
-      <button class="btn btn-secondary btn-sm" @click="loadConversations()"
+      <button class="btn btn-secondary btn-sm" @click="loadConversations({poll: true})"
               :disabled="convLoading" x-text="convLoading ? '…' : t('x_studio.refresh')"></button>
     </div>
 
+    <p style="font-size:.76rem;color:var(--text-muted);margin:.4rem 0 0;">
+      Refresh fetches mentions from X. A page reload only rereads the local log.
+    </p>
     <p x-show="!convLoading && !conversations.length" x-cloak
        style="font-size:.84rem;color:var(--text-muted);margin-top:.75rem;">
       No summons yet. Mention the account with an emoji for tone

@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Fix — Conversations Refresh actually polls X (2026-09-18)
+
+Hard-refresh and the Conversations Refresh button only reread `x_replies.db`.
+They never called the mentions API. After the previous mention was deleted,
+its id stayed as `since_id`; every background poll then returned
+`result_count: 0` even when a new `@KazmaAI` mention was sitting on X.
+
+Refresh now POSTs `/api/x/reply/poll`, which fetches the latest mentions
+window (ignores the cursor) and skips ids already in the store. `/x poll`
+does the same. The background poller, if a cursor poll is empty and that
+`since_id` is a summon we already handled (deleted, 403, skipped), looks
+back at the latest window once instead of stalling forever.
+
 ## Fix — X 403 on approve: reply to the mention, not the parent (2026-09-18)
 
 Approving a draft posted `in_reply_to_tweet_id=<the original post>`. X

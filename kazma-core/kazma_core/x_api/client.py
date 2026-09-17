@@ -208,6 +208,13 @@ class XClient:
             )
         if resp.status_code in (401, 403):
             low = detail.lower()
+            if "deleted" in low or "not visible" in low:
+                raise XApiError(
+                    "That tweet is gone — deleted or not visible to this account. "
+                    "Write a new mention; Refresh on Conversations pulls it from X. "
+                    f"{detail}",
+                    status=resp.status_code,
+                )
             if "mentioned" in low or "are the author" in low:
                 raise XApiError(
                     "X will only let this account reply to a post that mentions "
