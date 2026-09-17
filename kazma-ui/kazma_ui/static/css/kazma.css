@@ -5168,10 +5168,33 @@ canvas { display: block; border-radius: 4px; }
   display: flex;
   gap: 2px;
   margin-top: 4px;
+}
+/* The ROW is always present; its buttons fade in on hover. It used to be the
+   row that was transparent, which cannot work here: opacity on the parent
+   composites the whole subtree, so a child cannot stay visible inside a
+   transparent parent. Read-aloud has to be reachable without hovering --
+   on a touch screen there is no hover at all, and someone trying to stop
+   audio should not have to hunt for the control. */
+.message-actions .msg-action {
   opacity: 0;
   transition: opacity 0.15s;
 }
-.message:hover .message-actions { opacity: 1; }
+.message:hover .message-actions .msg-action { opacity: 1; }
+.message-actions .speak-action { opacity: 1; }
+.message-actions .speak-action.is-speaking {
+  opacity: 1;
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.18);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .message-actions .speak-action.is-speaking { animation: kazma-speak-pulse 1.2s ease-in-out infinite; }
+}
+@keyframes kazma-speak-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+/* Keyboard users must still see what they focused. */
+.message-actions .msg-action:focus-visible { opacity: 1; }
 .msg-action {
   background: var(--tint);
   border: 1px solid var(--border-subtle);

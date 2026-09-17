@@ -4931,7 +4931,14 @@
       // Assistant message actions
       var aActions = document.createElement('div');
       aActions.className = 'message-actions';
+      // Speak sits FIRST and stays visible while the rest of the row waits
+      // for hover. It is the only action here that needs to be reachable
+      // while something is already happening: when a reply is being read
+      // aloud, the person wants to stop THIS one, and hunting for a hidden
+      // control (or a second speaker icon in the composer, which nobody
+      // could tell from the live-voice mic) is not a way to stop audio.
       aActions.innerHTML =
+        '<button class="msg-action speak-action" title="Read aloud" data-action="speak" aria-label="Read this message aloud">\uD83D\uDD0A</button>' +
         '<button class="msg-action reaction-btn" title="Helpful" data-reaction="up">\uD83D\uDC4D</button>' +
         '<button class="msg-action reaction-btn" title="Not helpful" data-reaction="down">\uD83D\uDC4E</button>' +
         '<button class="msg-action" title="Copy" data-action="copy">\u2398</button>';
@@ -4946,6 +4953,8 @@
           KS.toast(reaction === 'up' ? '\uD83D\uDC4D Thanks for the feedback!' : '\uD83D\uDC4E Got it. I\'ll try to improve.', 'info', 2000);
         } else if (btn && btn.dataset.action === 'copy') {
           copyAssistantMessage(wrapper);
+        } else if (btn && btn.dataset.action === 'speak') {
+          toggleSpeakMessage(wrapper);
         }
       });
     }
@@ -6226,6 +6235,46 @@
     navigator.clipboard.writeText(text).then(function() {
       KS.toast('Copied to clipboard', 'success', 2000);
     });
+  }
+
+  // ── Read aloud ────────────────────────────────────────
+  //
+  // One button per assistant message: speak it, or stop it if it is the one
+  // currently playing. A single global toggle could not express "stop THIS
+  // reply", and a second speaker icon in the composer was indistinguishable
+  // from the live-voice mic beside it.
+
+  var _speakSeq = 0;
+
+  function _speakId(msgEl) {
+    if (!msgEl.dataset.speakId) msgEl.dataset.speakId = 'msg-' + (++_speakSeq);
+    return msgEl.dataset.speakId;
+  }
+
+  function toggleSpeakMessage(msgEl) {
+    if (!window.KazmaVoice) return;
+    var id = _speakId(msgEl);
+    if (KazmaVoice.isSpeaking(id)) { KazmaVoice.stopTTS(); return; }
+    var text = (msgEl.querySelector('.message-text') || {}).textContent || '';
+    if (!text.trim()) { KS.toast('Nothing to read in this message', 'info', 2000); return; }
+    KazmaVoice.playTTS(text, null, id);
+  }
+
+  /** Repaint every speak button so exactly one can show the stop state. */
+  function refreshSpeakButtons(owner) {
+    var btns = document.querySelectorAll('.speak-action');
+    for (var i = 0; i < btns.length; i++) {
+      var btn = btns[i];
+      var wrap = btn.closest('.message');
+      var mine = wrap && wrap.dataset.speakId && wrap.dataset.speakId === owner;
+      btn.classList.toggle('is-speaking', !!mine);
+      btn.textContent = mine ? '⏹' : '🔊';
+      btn.title = mine ? 'Stop reading' : 'Read aloud';
+    }
+  }
+
+  if (window.KazmaVoice && KazmaVoice.onSpeakStateChange) {
+    KazmaVoice.onSpeakStateChange(refreshSpeakButtons);
   }
 
   function regenerateFrom(msgEl) {

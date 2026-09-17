@@ -127,3 +127,66 @@ def test_the_route_resolves_the_voice_from_the_text():
     assert "voice = str(db_voice)" not in src, (
         "this is the unconditional pin that spoke English replies in Arabic"
     )
+
+
+# ── where the control lives ────────────────────────────────────────────────
+#
+# The first attempt put a speak toggle in the composer, beside the live-voice
+# button. Both are speaker glyphs and nobody could tell which was which, so
+# the control moved onto each assistant message — next to copy and the
+# thumbs, where "read THIS" is unambiguous.
+
+
+def _read(rel: str) -> str:
+    from pathlib import Path
+
+    return (Path(__file__).resolve().parent.parent / rel).read_text(encoding="utf-8")
+
+
+def test_the_composer_has_only_one_speaker_icon():
+    html = _read("kazma-ui/kazma_ui/templates/chat.html")
+    assert "voice-speak-btn" not in html, (
+        "a second speaker button in the composer is indistinguishable from "
+        "the live-voice one beside it"
+    )
+    assert "voice-live-btn" in html, "live voice must stay in the composer"
+    assert "voice-btn" in html, "the mic must stay in the composer"
+
+
+def test_every_assistant_message_gets_a_speak_button():
+    js = _read("kazma-ui/kazma_ui/static/js/chat.js")
+    assert 'data-action="speak"' in js
+    assert "speak-action" in js
+    assert "toggleSpeakMessage(" in js
+
+
+def test_the_speak_button_is_visible_without_hover():
+    """The rest of the row may hide; this one may not.
+
+    On a touch screen there is no hover at all, and someone trying to STOP
+    audio should not have to discover the control first.
+    """
+    css = _read("kazma-ui/kazma_ui/static/css/kazma.css")
+    assert ".message-actions .speak-action { opacity: 1; }" in css
+    # The old rule faded the whole ROW, which makes an always-visible child
+    # impossible: opacity composites the entire subtree.
+    assert ".message:hover .message-actions { opacity: 1; }" not in css
+
+
+def test_playback_is_owned_so_one_message_can_stop_itself():
+    js = _read("kazma-ui/kazma_ui/static/js/voice.js")
+    assert "_currentOwner" in js
+    assert "function isSpeaking(owner)" in js
+    assert "onSpeakStateChange" in js, "the UI needs a start/stop signal"
+    # The clip must be reachable — a bare `new Audio()` with no handle is
+    # what made the 2026-09-17 playback unstoppable.
+    assert "_currentAudio = audio;" in js
+
+
+def test_no_second_hidden_autospeak_switch():
+    """Auto-speak is `voice.tts_reply` on the server, and only there."""
+    js = _read("kazma-ui/kazma_ui/static/js/voice.js")
+    assert "autoSpeakEnabled" not in js, (
+        "a localStorage auto-speak gate is a second source of truth that no "
+        "settings screen shows"
+    )
