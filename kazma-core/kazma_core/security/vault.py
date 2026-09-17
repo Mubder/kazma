@@ -30,6 +30,7 @@ import os
 import secrets as _secrets
 import sqlite3
 import threading
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -37,7 +38,14 @@ from typing import Any
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.tenant_context import get_current_tenant_id
 
-__all__ = ["SecretVault", "get_vault", "reset_vault", "retrieve_with_tenant_ladder"]
+__all__ = [
+    "SecretVault",
+    "get_vault",
+    "reset_posture_cache",
+    "reset_vault",
+    "retrieve_scoped",
+    "retrieve_with_tenant_ladder",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -413,33 +421,141 @@ class SecretVault:
                 self._conn = None
 
 
-def retrieve_with_tenant_ladder(name: str) -> str:
+#: Re-entrancy guard for the posture probe. ``multi_user_enabled()`` reads
+#: ``platform.users`` through ConfigStore, and this function is called FROM
+#: ConfigStore's own resolver — so without this a probe triggered by one
+#: config read could trigger another. Nested probes fail closed (no rung),
+#: which is the same answer an unknown posture gets.
+_probing = threading.local()
+
+#: Memoized posture. The probe reads ``platform.users`` through ConfigStore,
+#: so running it per read made every vaulted config read re-enter
+#: ``ConfigStore.get`` — measured at nesting depth 2 on the provider-key path,
+#: which is read constantly. That is the re-entrancy class that once
+#: deadlocked the whole application from one swarm approval.
+#:
+#: Caching a *posture* has one unsafe direction: a stale "single-tenant" after
+#: an install turns multi-user would leave the ``default`` rung on, which is a
+#: cross-tenant read. So the cache is asymmetric — multi-user STICKS for the
+#: process (its failure mode is a secret looking missing, exactly the
+#: pre-2026-09-17 behaviour, fail-closed), while single-tenant is re-probed
+#: every ``_POSTURE_TTL_S``. The env switches are checked live inside
+#: ``multi_user_or_production`` on every re-probe, so flipping
+#: ``KAZMA_PRODUCTION`` or ``KAZMA_MULTI_USER`` takes effect within one TTL.
+_POSTURE_TTL_S = 30.0
+_posture_lock = threading.Lock()
+_posture_cache: dict[str, float | bool] = {"allowed": False, "at": 0.0}
+
+
+def reset_posture_cache() -> None:
+    """Drop the memoized posture (tests, and an explicit operator reset)."""
+    with _posture_lock:
+        _posture_cache["allowed"] = False
+        _posture_cache["at"] = 0.0
+
+
+def _operator_default_rung_allowed() -> bool:
+    """True only where tenant ``default`` IS the operator.
+
+    The ladder below adds a ``default`` rung so a context-less background
+    reader can see Settings-saved secrets. On a single-operator install that
+    is correct — ``default`` is them. On a multi-tenant one it is a
+    cross-tenant read: tenant B asks for a key, misses, and gets whatever
+    tenant ``default`` has.
+
+    That is the same leak ``tests/test_cron_tenant_context.py`` refuses to
+    put in ``Vault.retrieve``'s fallback, moved one layer up, so it gets the
+    same answer. ``multi_user_or_production()`` fails CLOSED (True on a probe
+    error), which here means: when we cannot tell, do not add the rung.
+    """
+    if getattr(_probing, "active", False):
+        return False
+
+    now = time.time()
+    with _posture_lock:
+        allowed = bool(_posture_cache["allowed"])
+        at = float(_posture_cache["at"])
+        # Multi-user is sticky: once we have seen it, never re-probe back to
+        # the permissive answer within this process.
+        if at and not allowed:
+            return False
+        if at and (now - at) < _POSTURE_TTL_S:
+            return True
+
+    _probing.active = True
+    try:
+        from kazma_core.tenant_isolation import multi_user_or_production
+
+        allowed = not multi_user_or_production()
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "[Vault] posture probe failed — omitting the 'default' tenant rung"
+        )
+        allowed = False
+    finally:
+        _probing.active = False
+
+    with _posture_lock:
+        _posture_cache["allowed"] = allowed
+        _posture_cache["at"] = time.time()
+    return allowed
+
+
+def retrieve_scoped(name: str) -> str | None:
     """Decrypt *name* walking current tenant → ``default`` → global.
 
-    Settings-saved secrets live under the operator's tenant (``default`` on a
-    single-user install). ``retrieve()`` with no tenant sees ONLY global
-    rows, so a background loop that never installed a context reads every
-    Settings key as missing. This is the ladder ``x_api.config`` already
-    used; connector-health and offsite backup now share it.
+    Returns the RAW value (no strip) or ``None``, so callers that store
+    structured or whitespace-significant values are unaffected.
+
+    Settings-saved secrets live under the operator's tenant — measured on the
+    live install 2026-09-17, 34 of 67 vault rows are scoped to ``default``.
+    ``retrieve()`` with no tenant sees ONLY global rows, so a background loop,
+    cron job, CLI command or standalone script reads every one of them as
+    missing. That shipped three times (cron 09-12, the agent turn and
+    ``kazma doctor`` 09-16, connector-health/backup 09-17) before it was
+    fixed here rather than at the next call site.
+
+    The ``default`` rung is posture-gated — see
+    :func:`_operator_default_rung_allowed`. ``Vault.retrieve``'s own
+    tenant→global fallback is untouched.
     """
     vault = get_vault()
     if vault is None:
-        return ""
-    tenants: list[str | None] = []
-    current = get_current_tenant_id()
-    if current:
-        tenants.append(current)
-    for fallback in ("default", None):
-        if fallback not in tenants:
-            tenants.append(fallback)
-    for tid in tenants:
+        return None
+
+    def _try(tid: str | None) -> str | None:
         try:
             val = vault.retrieve(name, tid)
-        except Exception:
-            val = None
-        if val and str(val).strip():
-            return str(val).strip()
-    return ""
+        except Exception:  # noqa: BLE001
+            return None
+        return val if (val is not None and str(val) != "") else None
+
+    # First rung covers current-tenant AND global in one query, because
+    # Vault.retrieve already falls back tenant -> global. This is the hot
+    # path and it costs exactly what the old bare retrieve() cost.
+    current = get_current_tenant_id()
+    hit = _try(current or None)
+    if hit is not None:
+        return hit
+
+    # Only on a miss do we ask about posture. That probe reads
+    # `platform.users` through ConfigStore, and this function is called from
+    # ConfigStore's own resolver — running it eagerly made every vaulted read
+    # re-enter ConfigStore.get() (measured: nesting depth 2), which is the
+    # re-entrancy class that once deadlocked the whole application from a
+    # single swarm approval. On the miss path it runs at most once, and the
+    # thread-local guard above stops it recursing into itself.
+    if current == "default":
+        return None  # already tried, and it falls back to global
+    if not _operator_default_rung_allowed():
+        return None
+    return _try("default")
+
+
+def retrieve_with_tenant_ladder(name: str) -> str:
+    """:func:`retrieve_scoped`, stripped, with ``""`` for a miss."""
+    val = retrieve_scoped(name)
+    return str(val).strip() if val is not None else ""
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────

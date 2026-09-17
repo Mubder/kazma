@@ -893,8 +893,32 @@ class ConfigStore:
                 )
                 return None
             name = str(val)[len(_VAULT_REF_PREFIX):]
-            secret = vault.retrieve(name)
-            return secret if secret is not None else None
+            # Scoped resolve, not a bare retrieve. This used to be
+            # `vault.retrieve(name)` with no tenant, which sees ONLY global
+            # rows — so every context-less caller (cron, a background loop,
+            # the CLI, a script) read Settings-saved secrets as missing while
+            # they sat in the vault under tenant 'default'. Measured on the
+            # live install 2026-09-17: 4/4 X credentials resolved with a
+            # tenant installed, 0/4 without, against a vault that is 34/67
+            # tenant-scoped. Three separate incidents were patched at the
+            # call site before the shared resolver was the thing fixed.
+            #
+            # `retrieve_scoped` posture-gates the 'default' rung, so this is
+            # not the global→tenant fallback that
+            # tests/test_cron_tenant_context.py argues against: on a
+            # multi-tenant install the rung is omitted and behaviour is
+            # exactly what it was.
+            try:
+                from kazma_core.security.vault import retrieve_scoped
+
+                return retrieve_scoped(name)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "[ConfigStore] scoped resolve unavailable for %s — "
+                    "falling back to ambient retrieve", key, exc_info=True,
+                )
+                secret = vault.retrieve(name)
+                return secret if secret is not None else None
 
         # Lazy migrate: plaintext sensitive value + vault available → encrypt
         # Guard against re-migration loops: only migrate if the vault doesn't
