@@ -268,7 +268,8 @@ restart to turn it on. Modes, caps, subjects and views are also read live on
 every summon, so a view that is landing badly can be fixed and retried from
 X Studio → Conversations.
 
-`/x roast` and `/x poll` work without the poller running.
+`/x roast` and `/x poll` work without the poller running. X Studio →
+Conversations → Refresh is the same poll (it is not a page reload).
 
 ## Testing it safely
 

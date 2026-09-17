@@ -295,6 +295,18 @@ async def test_an_unsaved_subject_still_gets_the_universal_hard_lines(
     assert any("never a people" in r for r in seen["rules"])
 
 
+def test_conversations_refresh_polls_x():
+    """Hard-refresh used to reread the DB and never call X."""
+    import pathlib as _pl
+
+    js = _pl.Path("kazma-ui/kazma_ui/static/js/x_studio.js").read_text(encoding="utf-8")
+    html = _pl.Path(
+        "kazma-ui/kazma_ui/templates/x_studio.html"
+    ).read_text(encoding="utf-8")
+    assert "/api/x/reply/poll" in js
+    assert "loadConversations({poll: true})" in html
+
+
 def test_the_panel_sends_the_open_card():
     """Grep-proof: the JS must post the expanded subject, or this is dead."""
     import pathlib as _pl

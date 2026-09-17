@@ -164,11 +164,17 @@ def _followers(user: dict[str, Any] | None) -> int | None:
     return None
 
 
-async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
+async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dict[str, Any]]:
     """One poll cycle. Returns a summary row per mention considered.
 
-    Separated from the loop so tests and the ``/x poll`` command can drive a
-    single cycle without a running task.
+    Separated from the loop so tests, ``/x poll``, and the Conversations
+    Refresh button can drive a single cycle without a running task.
+
+    ``ignore_cursor`` (operator Refresh): do not pass ``since_id``. A
+    deleted mention as cursor makes X's mentions endpoint return
+    ``result_count: 0`` forever, which is what made a brand-new @KazmaAI
+    mention invisible after hard-refresh. Already-handled ids are still
+    skipped via the store.
     """
     from kazma_core.x_api.client import XApiError, XClient
     from kazma_core.x_api.config import get_x_config
@@ -201,9 +207,26 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
         _identity = None
         return []
 
-    since_id = await asyncio.to_thread(store.get_since_id)
+    stored_since = await asyncio.to_thread(store.get_since_id)
+    since_id = "" if ignore_cursor else stored_since
     try:
         tweets, includes = await client.get_mentions(uid, since_id=since_id)
+        if (
+            not tweets
+            and since_id
+            and not ignore_cursor
+            and await asyncio.to_thread(store.get, since_id) is not None
+        ):
+            # Live 2026-09-18: since_id was a deleted mention. Every cursor
+            # poll returned result_count=0 while a new @KazmaAI mention sat
+            # on X. Looking at the latest window recovers it; seen() drops
+            # the ones we already handled.
+            logger.warning(
+                "[x-mentions] since_id %s is a handled summon and X returned "
+                "nothing — looking at the latest window (deleted cursors stall)",
+                since_id,
+            )
+            tweets, includes = await client.get_mentions(uid, since_id="")
     except XApiError as exc:
         if exc.status in (401, 403):
             logger.error(
@@ -219,7 +242,7 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
         # "never polled" are different problems with the same silence.
         logger.info(
             "[x-mentions] polled — no new mentions since %s",
-            since_id or "(start)",
+            since_id or stored_since or "(start)",
         )
         return []
 

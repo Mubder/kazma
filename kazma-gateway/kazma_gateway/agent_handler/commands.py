@@ -2335,7 +2335,7 @@ async def _try_x_command(
             from kazma_core.x_api.mentions_fire import poll_once
 
             try:
-                rows = await poll_once(cfg=cfg)
+                rows = await poll_once(cfg=cfg, ignore_cursor=True)
             except Exception as exc:  # noqa: BLE001
                 await _send(
                     f"❌ Poll failed: {exc}\n\n"
@@ -2344,7 +2344,10 @@ async def _try_x_command(
                 )
                 return True
             if not rows:
-                await _send("No new mentions.")
+                await _send(
+                    "No mentions in X's latest window. If you just posted, "
+                    "wait a few seconds and `/x poll` again."
+                )
                 return True
             lines = [f"*Polled — {len(rows)} mention(s)*\n"]
             for r in rows:
