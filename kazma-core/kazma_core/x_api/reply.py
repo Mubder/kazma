@@ -612,6 +612,52 @@ async def handle_summon(
             parent_id=parent_id, summon_id=summon_id,
         )
 
+    try:
+        return await _handle_summon_claimed(
+            store=store, cfg=cfg, mode=mode,
+            summon_id=summon_id, parent_id=parent_id,
+            parent_text=parent_text, parent_handle=parent_handle,
+            summoner=summoner, target_followers=target_followers,
+            summon_text=summon_text, trusted=trusted,
+        )
+    except asyncio.CancelledError:
+        try:
+            await asyncio.to_thread(
+                store.mark_failed, summon_id, "draft interrupted — Retry"
+            )
+        except Exception:
+            logger.debug("[x-reply] mark_failed after cancel failed", exc_info=True)
+        raise
+    except Exception as exc:
+        # A killed/crashed draft left rows in `drafting` forever — no Retry
+        # button, no reason. Live 2026-09-18: "@KazmaAI what do you think
+        # buddy? 😂" sat in drafting after the model call never finished.
+        reason = _draft_error_text(exc)
+        logger.exception("[x-reply] summon %s crashed after claim", summon_id)
+        try:
+            await asyncio.to_thread(store.mark_failed, summon_id, reason)
+        except Exception:
+            logger.debug("[x-reply] mark_failed after crash failed", exc_info=True)
+        return SummonResult(
+            False, "failed", reason=reason,
+            parent_id=parent_id, summon_id=summon_id,
+        )
+
+
+async def _handle_summon_claimed(
+    *,
+    store: Any,
+    cfg: ReplyConfig,
+    mode: str,
+    summon_id: str,
+    parent_id: str,
+    parent_text: str,
+    parent_handle: str,
+    summoner: str,
+    target_followers: int | None,
+    summon_text: str,
+    trusted: bool,
+) -> SummonResult:
     rail = await _rail_error(
         cfg,
         parent_id=parent_id,

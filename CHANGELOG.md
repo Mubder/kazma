@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Fix — stuck `drafting` summons had no Retry (2026-09-18)
+
+The new `@KazmaAI what do you think buddy? 😂` mention was claimed, then
+the model call never finished, so the row sat in `drafting` with an empty
+reason. Conversations only showed Retry on skipped/failed/awaiting, so
+the latest card looked dead. Retry already worked on that id (`/x retry`);
+the button just was not there.
+
+Retry now shows on `drafting`. A crash or cancel after claim marks the
+row failed instead of leaving a ghost. Do not delete the tweet.
+
 ## Fix — Conversations Refresh actually polls X (2026-09-18)
 
 Hard-refresh and the Conversations Refresh button only reread `x_replies.db`.
