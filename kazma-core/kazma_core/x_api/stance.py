@@ -51,6 +51,8 @@ __all__ = [
     "mood_from_text",
     "ClassifierUnavailable",
     "no_match_detail",
+    "implicit_voice_subject",
+    "VOICE_SUBJECT_ID",
 ]
 
 
@@ -114,6 +116,31 @@ UNIVERSAL_HARD_LINES: tuple[str, ...] = (
     "never a people",
 )
 
+#: Implicit subject when the operator declared none (or none matched).
+#: The view is a VOICE, not a position — emoji picks the tone, the post
+#: picks the topic. Stance-check is skipped because there is nothing to
+#: contradict.
+VOICE_SUBJECT_ID = "voice"
+_VOICE_VIEW = (
+    "You have no declared political position on this post. React to what "
+    "it actually says, in the requested tone. Be specific to THIS post. "
+    "Do not invent a crusade, a cause, or a view the operator did not "
+    "write. Short, human, no hashtags, no preamble."
+)
+
+
+def implicit_voice_subject(*, mood: str = "dry") -> Subject:
+    """Catch-all used when no subject is declared, or none matched.
+
+    Still a Subject so every downstream rail (hard lines, screen, 280 cap)
+    keeps working. ``match=('*',)`` makes ``is_catch_all()`` true, which
+    is what skips the stance check — a voice has no position to drift from.
+    """
+    m = (mood or "dry").strip().lower()
+    if m not in MOODS:
+        m = "dry"
+    return Subject(id=VOICE_SUBJECT_ID, match=("*",), view=_VOICE_VIEW, mood=m)
+
 
 @dataclass(frozen=True)
 class Subject:
@@ -169,7 +196,10 @@ class ReplyConfig:
     stance_check: bool = True
 
     def can_draft(self) -> bool:
-        return self.enabled and self.mode in (MODE_DRAFT, MODE_AUTO) and bool(self.subjects)
+        # Subjects are optional. Zero subjects = voice-only: reply to
+        # whatever is summoned, emoji picks the tone. The original
+        # "no subject means no reply" rule fought the actual UX.
+        return self.enabled and self.mode in (MODE_DRAFT, MODE_AUTO)
 
     def is_trusted_summoner(self, handle: str) -> bool:
         """On the operator's explicit allowlist. Independent of policy."""
@@ -189,14 +219,16 @@ class ReplyConfig:
         return self.is_trusted_summoner(handle)
 
     def mood_override_allowed(self, handle: str) -> bool:
-        """Only a trusted summoner may dial the tone.
+        """The summon emoji is the tone dial.
 
-        Under ``anyone``, honouring a stranger's 🤬 would let someone pick
-        which register the operator answers in — a small but real manipulation
-        lever, and one with no upside. Strangers get the subject's declared
-        mood; the operator and their named cohosts get the emoji.
+        Anyone who is allowed to summon (see :meth:`is_summoner`) may set
+        it. Restricting this to the allowlist made the feature's actual UX
+        — mention + emoji — silently no-op for everyone when policy is
+        ``anyone``, which is the opposite of "the emoji decides".
         """
-        return self.allow_emoji_mood and self.is_trusted_summoner(handle)
+        if not self.allow_emoji_mood:
+            return False
+        return bool((handle or "").strip())
 
     def subject_by_id(self, sid: str) -> Subject | None:
         for s in self.subjects:
@@ -402,12 +434,26 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     ``none``; anything else it returns is discarded, so a hallucinated
     subject cannot become a reply.
     """
-    catalogue = "\n".join(f"- {s.id}: {', '.join(s.match[:6])}" for s in subjects)
+    specifics = [s for s in subjects if not s.is_catch_all()]
+    if not specifics:
+        return None
+    catalogue = "\n".join(
+        f"- {s.id}: keywords={', '.join(s.match[:6])}; view={s.view[:180]}"
+        for s in specifics
+    )
+    try:
+        from kazma_core.safety.prompt_fence import format_untrusted_block
+
+        fenced = format_untrusted_block(text[:1500], source="x_post")
+    except Exception:
+        fenced = text[:1500]
     prompt = (
         "Classify the post below into exactly ONE of these subject ids, or "
-        "'none' if it fits none of them.\n\n"
+        "'none' if it fits none of them. Use the view, not just the "
+        "keywords — a post can belong to a subject without repeating a "
+        "keyword.\n\n"
         f"Subjects:\n{catalogue}\n\n"
-        f"Post:\n{text[:1500]}\n\n"
+        f"Post:\n{fenced}\n\n"
         "Answer with the id alone. No explanation."
     )
     try:
@@ -457,32 +503,36 @@ async def classify(
 ) -> Subject | None:
     """Match *text* to a declared subject, or return ``None``.
 
-    ``None`` is a first-class answer meaning **do not reply**. Callers must
-    not fall back to a default subject; that would be the bot inventing a
-    view, which is the one thing this module exists to prevent.
+    Empty text returns ``None`` (nothing to react to). Everything else
+    returns a Subject: a keyword/LLM hit when one exists, otherwise the
+    implicit voice catch-all so a summon still gets a reply and the emoji
+    can set the tone. Silence is reserved for the rails (allowlist, caps,
+    screen), not for "we did not predict this topic".
     """
     cfg = cfg or get_reply_config()
-    if not cfg.subjects or not (text or "").strip():
+    if not (text or "").strip():
         return None
+    if not cfg.subjects:
+        logger.info("[x-reply] no subjects declared — voice-only reply")
+        return implicit_voice_subject()
     hit = _keyword_hit(text, cfg.subjects)
     if hit is not None:
         logger.info("[x-reply] subject %r matched on keyword", hit.id)
         return hit
-    if not allow_llm:
-        return None
-    if any(sub.is_catch_all() for sub in cfg.subjects):
-        # _keyword_hit already returns the catch-all, so reaching here means
-        # there is none. Guard anyway: a catch-all must never cost a model
-        # call, because "answer everything" is the cheapest possible rule.
-        return None
-    # Propagates ClassifierUnavailable — the caller must be able to tell
-    # "your keywords did not match" from "the classifier never ran".
-    hit = await _llm_pick(text, cfg.subjects)
-    if hit is not None:
-        logger.info("[x-reply] subject %r matched via classifier", hit.id)
-    else:
-        logger.info("[x-reply] no declared subject matched — not replying")
-    return hit
+    if allow_llm and not any(sub.is_catch_all() for sub in cfg.subjects):
+        try:
+            hit = await _llm_pick(text, cfg.subjects)
+        except ClassifierUnavailable as exc:
+            logger.warning(
+                "[x-reply] subject classifier could not run (%s) — "
+                "falling back to voice-only", exc,
+            )
+            return implicit_voice_subject()
+        if hit is not None:
+            logger.info("[x-reply] subject %r matched via classifier", hit.id)
+            return hit
+    logger.info("[x-reply] no declared subject matched — voice-only reply")
+    return implicit_voice_subject()
 
 
 def no_match_detail(text: str, subjects: tuple[Subject, ...]) -> str:
@@ -495,8 +545,9 @@ def no_match_detail(text: str, subjects: tuple[Subject, ...]) -> str:
     """
     if not subjects:
         return (
-            "no subjects are declared — add one, or give a subject the keyword "
-            "* to have it answer every post"
+            "no subjects are declared — replies still go out in voice-only "
+            "mode; emoji picks the tone. Add a subject to argue a view, or "
+            "* to write the voice yourself"
         )
     parts = []
     for s in subjects[:4]:

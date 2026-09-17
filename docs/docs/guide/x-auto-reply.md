@@ -1,12 +1,13 @@
 # X auto-reply
 
-Kazma can reply to a post it is summoned under — in a tone you pick, arguing
-a view **you wrote**. It is off by default and has no opinions of its own.
+Kazma can reply when someone mentions it — in a tone the **emoji** picks.
+It is off by default.
 
-The governing rule: **no declared subject means no reply.** If a post does not
-match a subject you configured, Kazma says nothing and tells you why. It never
-falls back to a generic take, because a bot that improvises a position
-under your handle is a different product from one that repeats yours.
+**Subjects are optional.** With none declared, every summon still gets a
+reply in voice-only mode: react to the post, don't invent a crusade, emoji
+sets roast / angry / dry / supportive. Add a subject when you want a
+*declared view* on a topic; those still win over the default voice. A
+hallucinated topic still cannot become a reply.
 
 ## Two ways to summon it
 
@@ -199,8 +200,9 @@ in advance.
 
 Keyword match runs first: deterministic, free, auditable, and it never calls
 a model. Only when nothing matches does an LLM pick — and it chooses from
-your declared subject **ids or nothing**. It cannot mint a subject, so a
-hallucinated topic can never become a reply.
+your declared subject **ids**, using the *view* not just the keywords. A
+hallucinated id is discarded. If nothing fits, the reply still goes out in
+**voice-only** mode (emoji sets the tone) rather than staying silent.
 
 ### Stance check
 
@@ -254,17 +256,17 @@ Set it to `0` to disable, knowingly.
 1. Save the four OAuth 1.0a credentials in Settings → Integrations → X and hit
    **Test** — auto-reply refuses to draft until the connector is posting-ready,
    and the panel says so rather than failing silently.
-2. Add at least one subject with a `view`. Until then every summon is declined.
-3. List your own handle under **Trusted handles**.
-4. Set the mode to `draft` and save.
+2. Subjects are optional. Skip them to reply to everything, emoji picking
+   the tone. Add one with a `view` only when you want a declared position.
+3. List your own handle under **Trusted handles** (or set who-can-summon to
+   anyone).
+4. Set the mode to `draft` and save — the poller starts on Save.
 5. Use **Try it** to draft against a pasted post until the voice is right.
 
-**A restart is needed for the mentions poller.** It is only *started* at boot,
-and only when auto-reply is enabled with at least one subject — so switching it
-on in a running server leaves the poller down until the next restart. The panel
-tells you when that applies. Nothing else needs a restart: modes, caps,
-subjects and views are read live on every summon, so a view that is landing
-badly can be fixed and retried immediately.
+**Saving auto-reply starts or stops the mentions poller.** You do not need a
+restart to turn it on. Modes, caps, subjects and views are also read live on
+every summon, so a view that is landing badly can be fixed and retried from
+X Studio → Conversations.
 
 `/x roast` and `/x poll` work without the poller running.
 
@@ -294,10 +296,12 @@ Your gateway login is the authorization here — you do **not** need to be in
 `summoners` for this, and adding your X handle would not help: the command
 passes a gateway identity (`telegram:12345`), not a handle on X.
 
-**3. A real mention (paid plan only).** From a *different* X account, reply to
-some post with a mention of your bot handle and your trigger phrase. Then
-`/x poll` to force a cycle rather than waiting for the interval. In `draft`
-mode you still approve before anything posts.
+**3. A real mention (paid plan only).** From a *different* X account, mention
+the bot (a reply under someone else's post, or a standalone `@handle 😂`).
+Then `/x poll` to force a cycle rather than waiting for the interval. In
+`draft` mode you still approve before anything posts — from Conversations
+or `/x approve`. Skipped rows have a **Retry** button that re-runs them
+against current config.
 
 `/x list` shows every summon with its outcome, including the skipped ones, so
 "nothing happened" is always explainable. Set `KAZMA_X_REPLY=0` to stop the
@@ -308,6 +312,8 @@ whole thing instantly.
 ```
 /x roast <url> | <text>    draft a reply
 /x approve <summon_id>     publish a held draft
+/x deny <summon_id>        discard a held draft
+/x retry <summon_id>       re-run a skipped/failed summon
 /x list                    recent summons and their state
 /x subjects                what Kazma has views on
 /x poll                    force one mentions poll (paid plan)
@@ -322,8 +328,9 @@ included), and what Kazma replied — or why it didn't.
 The posted list on the Studio tab cannot answer this. A reply read without its
 parent is a non-sequitur, and the most common question is the one about the
 replies that never happened. Skipped and failed summons are listed for exactly
-that reason: the incoming post shown against `no declared subject matched` is
-the answer.
+that reason. Approve, Deny and Retry sit on the row — Retry re-runs a skip
+against current config, which is how a config fix reaches a mention the
+cursor has already passed.
 
 Both sides are captured at claim time, not fetched later — the poller has them
 in hand, re-fetching costs read quota, and a deleted tweet is gone for good.

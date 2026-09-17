@@ -208,9 +208,9 @@
 
     <p x-show="!convLoading && !conversations.length" x-cloak
        style="font-size:.84rem;color:var(--text-muted);margin-top:.75rem;">
-      No summons yet. Kazma replies when someone mentions it under a post that
-      matches a subject you declared —
-      <a href="/settings?tab=x" style="color:var(--accent);">set that up in Settings</a>.
+      No summons yet. Mention the account with an emoji for tone
+      (😂 roast, 🤬 angry, 🙄 dry, ❤️ supportive) —
+      <a href="/settings?tab=x" style="color:var(--accent);">auto-reply settings</a>.
     </p>
 
     <template x-for="c in conversations" :key="c.summon_id">
@@ -238,6 +238,20 @@
           <span x-text="convWhen(c.at)"></span>
           <a x-show="c.url" x-cloak :href="c.url" target="_blank" rel="noopener"
              style="color:var(--accent);">open on X</a>
+          <span class="xs-row acts" style="margin-inline-start:auto;">
+            <button class="btn btn-primary btn-sm"
+                    x-show="c.status === 'awaiting_approval'" x-cloak
+                    :disabled="convBusy === c.summon_id"
+                    @click="convAction('approve', c)">Approve</button>
+            <button class="btn btn-danger btn-sm"
+                    x-show="c.status === 'awaiting_approval'" x-cloak
+                    :disabled="convBusy === c.summon_id"
+                    @click="convAction('deny', c)">Deny</button>
+            <button class="btn btn-secondary btn-sm"
+                    x-show="c.status === 'skipped' || c.status === 'failed' || c.status === 'awaiting_approval'" x-cloak
+                    :disabled="convBusy === c.summon_id"
+                    @click="convAction('retry', c)">Retry</button>
+          </span>
         </div>
       </div>
     </template>

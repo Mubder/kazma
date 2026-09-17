@@ -66,6 +66,10 @@ class ReplyConfigBody(BaseModel):
     subjects: list[SubjectBody] = Field(default_factory=list)
 
 
+class SummonIdBody(BaseModel):
+    summon_id: str = Field(default="")
+
+
 class PreviewBody(BaseModel):
     # The subject as the editor holds it right now, unsaved edits and all.
     # Without this the dry run could only test stored config, so tuning a
@@ -192,16 +196,20 @@ def _live_reason(cfg: Any, xcfg: Any) -> str:
         return "Auto-reply is OFF. Nothing will happen on X until you enable it and press Save."
     if cfg.mode == "off":
         return "Mode is 'off'. Pick draft or auto, then press Save."
-    if not cfg.subjects:
-        return "No subjects are SAVED. A subject in the editor is not saved until you press Save."
     if not cfg.summoners and cfg.summoner_policy != "anyone":
         return "No trusted handles saved, so nobody can summon it."
     if not _poller_running():
         return (
             f"Saved and live in {cfg.mode} mode, but the mentions poller is not "
-            "running — restart Kazma to start it. /x roast works meanwhile."
+            "running — Save again to start it, or restart Kazma. /x roast works meanwhile."
         )
-    return f"Live in {cfg.mode} mode, poller running, {len(cfg.subjects)} subject(s)."
+    n = len(cfg.subjects)
+    if n == 0:
+        return (
+            f"Live in {cfg.mode} mode, poller running, voice-only — "
+            "no subjects, emoji picks the tone."
+        )
+    return f"Live in {cfg.mode} mode, poller running, {n} subject(s)."
 
 
 @router.get("")
@@ -407,15 +415,19 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         ]
         get_config_store().batch_set(items)
 
+        # Start/stop the poller now so Save is the action, not a restart.
+        try:
+            from kazma_core.x_api.mentions_fire import ensure_mentions_loop
+
+            await ensure_mentions_loop()
+        except Exception:
+            logger.exception("[x_reply_api] ensure_mentions_loop failed")
+
         payload = _payload()
         payload["saved"] = True
         payload["warnings"] = warnings
-        # The poller reads config live, but it is only STARTED at boot when
-        # can_draft() was true. Turning auto-reply on in a running server
-        # therefore needs a restart -- say so rather than letting the operator
-        # wonder why nothing polls.
         payload["restart_required_for_poller"] = bool(
-            payload.get("can_draft") and not _poller_running()
+            payload.get("can_draft") and not payload.get("poller_running")
         )
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
@@ -430,6 +442,67 @@ def _poller_running() -> bool:
         return task is not None and not task.done()
     except Exception:  # noqa: BLE001
         return False
+
+
+def _summon_payload(result: Any) -> dict[str, Any]:
+    payload = result.to_dict() if hasattr(result, "to_dict") else dict(result)
+    payload["ok"] = bool(getattr(result, "ok", payload.get("ok")))
+    return payload
+
+
+@protected_router.post("/approve", dependencies=[Depends(_csrf)])
+async def x_reply_approve(body: SummonIdBody) -> JSONResponse:
+    sid = (body.summon_id or "").strip()
+    if not sid:
+        return JSONResponse({"ok": False, "error": "summon_id required"}, status_code=400)
+    try:
+        from kazma_core.tenant_context import tenant_scope
+        from kazma_core.x_api.reply import approve_summon
+
+        with tenant_scope("default"):
+            result = await approve_summon(sid)
+        status = 200 if result.ok or result.action == "skipped" else 400
+        return JSONResponse(_summon_payload(result), status_code=status)
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
+@protected_router.post("/deny", dependencies=[Depends(_csrf)])
+async def x_reply_deny(body: SummonIdBody) -> JSONResponse:
+    sid = (body.summon_id or "").strip()
+    if not sid:
+        return JSONResponse({"ok": False, "error": "summon_id required"}, status_code=400)
+    try:
+        from kazma_core.tenant_context import tenant_scope
+        from kazma_core.x_api.reply import deny_summon
+
+        with tenant_scope("default"):
+            result = await deny_summon(sid)
+        status = 200 if result.ok or result.action == "skipped" else 400
+        return JSONResponse(_summon_payload(result), status_code=status)
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
+@protected_router.post("/retry", dependencies=[Depends(_csrf)])
+async def x_reply_retry(body: SummonIdBody) -> JSONResponse:
+    """Re-run a skipped/failed/held summon against current config."""
+    sid = (body.summon_id or "").strip()
+    if not sid:
+        return JSONResponse({"ok": False, "error": "summon_id required"}, status_code=400)
+    try:
+        from kazma_core.tenant_context import tenant_scope
+        from kazma_core.x_api.reply import retry_summon
+
+        with tenant_scope("default"):
+            result = await retry_summon(sid)
+        status = 200 if result.ok or result.action in ("skipped", "awaiting_approval", "posted") else 400
+        # failed drafts still 200 — the operator needs the reason, not a 400
+        if result.action == "failed":
+            status = 200
+        return JSONResponse(_summon_payload(result), status_code=status)
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
 
 
 @protected_router.post("/preview", dependencies=[Depends(_csrf)])

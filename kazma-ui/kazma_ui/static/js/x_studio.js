@@ -23,6 +23,7 @@ function xStudioPage() {
     tab: 'studio',
     conversations: [],
     convLoading: false,
+    convBusy: '',
     // The poller now makes two read calls every cycle, so reads drown the
     // posts in a card titled "Posted". Default to the writes.
     auditWritesOnly: true,
@@ -49,6 +50,38 @@ function xStudioPage() {
         this.conversations = [];
       } finally {
         this.convLoading = false;
+      }
+    },
+
+    async convAction(kind, row) {
+      const id = row && row.summon_id;
+      if (!id || this.convBusy) return;
+      if (kind === 'approve' || kind === 'deny') {
+        const ok = await window.kazmaConfirm({
+          title: kind === 'approve' ? 'Post this reply?' : 'Discard this draft?',
+          message: (row.reply || row.reason || id),
+          confirmText: kind === 'approve' ? 'Approve' : 'Deny',
+          danger: kind === 'deny',
+        });
+        if (!ok) return;
+      }
+      this.convBusy = id;
+      try {
+        const resp = await this._mutating('POST', '/api/x/reply/' + kind, { summon_id: id });
+        const data = await resp.json().catch(function () { return {}; });
+        if (resp.ok && data.ok !== false) {
+          const msg = kind === 'approve' && data.url
+            ? ('Posted: ' + data.url)
+            : (kind === 'deny' ? 'Denied.' : (data.action === 'awaiting_approval' ? 'Redrafted — approve to post.' : (data.reason || 'Done.')));
+          window.showToast(msg, data.action === 'failed' ? 'error' : 'success');
+        } else {
+          window.showToast(data.error || data.reason || 'Request failed', 'error');
+        }
+        await this.loadConversations();
+      } catch (e) {
+        window.showToast(String(e.message || e), 'error');
+      } finally {
+        this.convBusy = '';
       }
     },
 

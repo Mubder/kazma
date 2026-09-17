@@ -2197,6 +2197,8 @@ async def _try_x_command(
 
         /x roast <url> | <post text>  — draft a reply to that post
         /x approve <summon_id>        — publish a held draft
+        /x deny <summon_id>           — discard a held draft
+        /x retry <summon_id>          — re-run a skipped/failed summon
         /x list                       — recent summons and their state
         /x poll                       — force one mentions poll (paid tiers)
         /x subjects                   — the declared subjects
@@ -2223,11 +2225,13 @@ async def _try_x_command(
             "𝕏 *Auto-reply*\n\n"
             "`/x roast <url> | <post text>` — draft a reply to that post\n"
             "`/x approve <summon_id>` — publish a held draft\n"
+            "`/x deny <summon_id>` — discard a held draft\n"
+            "`/x retry <summon_id>` — re-run a skipped/failed summon\n"
             "`/x list` — recent summons\n"
             "`/x subjects` — declared subjects and views\n"
             "`/x poll` — force one mentions poll (paid tier only)\n\n"
-            "Kazma only replies when the post matches a subject you declared "
-            "in Settings → X → Auto-reply. No matching subject → no reply."
+            "No subject is required — emoji picks the tone. Add a subject "
+            "only when you want a declared view on a topic."
         )
         return True
 
@@ -2243,9 +2247,10 @@ async def _try_x_command(
         if sub == "subjects":
             if not cfg.subjects:
                 await _send(
-                    "No subjects declared. Kazma has no view to argue from, so "
-                    "`/x roast` will always decline.\n\n"
-                    "Add them in Settings → Integrations → X → Auto-reply."
+                    "No subjects declared — voice-only. Mentions still get a "
+                    "reply; the emoji picks the tone.\n\n"
+                    "Add a subject in Settings → Integrations → X → Auto-reply "
+                    "when you want a declared view on a topic."
                 )
                 return True
             lines = [f"*{len(cfg.subjects)} subject(s)* (mode: `{cfg.mode}`)\n"]
@@ -2292,6 +2297,38 @@ async def _try_x_command(
                 await _send(f"✅ Posted.\n{res.url or res.tweet_id}")
             else:
                 await _send(f"❌ {res.reason}")
+            return True
+
+        if sub == "deny":
+            if not rest:
+                await _send("Usage: `/x deny <summon_id>` (see `/x list`).")
+                return True
+            from kazma_core.x_api.reply import deny_summon
+
+            res = await deny_summon(rest.split()[0])
+            if res.ok:
+                await _send("⏭️ Denied — nothing posted.")
+            else:
+                await _send(f"❌ {res.reason}")
+            return True
+
+        if sub == "retry":
+            if not rest:
+                await _send("Usage: `/x retry <summon_id>` (see `/x list`).")
+                return True
+            from kazma_core.x_api.reply import retry_summon
+
+            res = await retry_summon(rest.split()[0])
+            if res.action == "awaiting_approval":
+                await _send(
+                    f"📝 *Draft* (subject: `{res.subject_id}`)\n\n"
+                    f"{res.draft}\n\n"
+                    f"Post it: `/x approve {res.summon_id}`"
+                )
+            elif res.ok and res.action == "posted":
+                await _send(f"✅ Posted.\n{res.url or res.tweet_id}")
+            else:
+                await _send(f"⏭️ {res.reason or res.action}")
             return True
 
         if sub == "poll":

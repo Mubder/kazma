@@ -261,6 +261,24 @@ class XReplyStore:
     def mark_failed(self, summon_id: str, reason: str) -> None:
         self._update(summon_id, status=STATUS_FAILED, reason=reason[:500])
 
+    def release(self, summon_id: str) -> bool:
+        """Delete a non-posted row so ``claim`` can take it again.
+
+        Posted rows are left alone — retry is not a delete-and-repost.
+        Returns True if a row was removed.
+        """
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "DELETE FROM x_replies WHERE summon_id = ? AND status != ?",
+                    (str(summon_id), STATUS_POSTED),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
     def get(self, summon_id: str) -> ReplyRecord | None:
         with self._lock:
             conn = self._connect()

@@ -161,6 +161,26 @@ async def test_reply_and_delete_labels(audit_db: Path, fake_http) -> None:
     assert rows and rows[0]["tweet_id"] == "1770000000000000002"
 
 
+async def test_mentions_read_survives_a_page_bigger_than_8kb(audit_db: Path, fake_http) -> None:
+    """GET /mentions with expansions is not a tweet-sized payload.
+
+    Truncating at 8 KB turned a 200 into 'non-JSON success body' and the
+    poller backed off an hour. Reads use a 512 KB cap; writes stay tight.
+    """
+    tweets = [
+        {"id": str(10**18 + i), "text": "m" * 400, "author_id": "1"}
+        for i in range(40)
+    ]
+    payload = {
+        "data": tweets,
+        "includes": {"users": [{"id": "1", "username": "x"}]},
+    }
+    _FakeAsyncClient.resp = _FakeResp(200, payload)
+    got, includes = await _client().get_mentions("1")
+    assert len(got) == 40
+    assert includes["users"][0]["username"] == "x"
+
+
 async def test_error_body_read_is_bounded(audit_db: Path, fake_http) -> None:
     huge = "x" * 50_000
     _FakeAsyncClient.resp = _FakeResp(500, text=huge)

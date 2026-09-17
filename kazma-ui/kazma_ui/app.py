@@ -2125,22 +2125,22 @@ class KazmaAppBuilder:
             logger.warning("[X] Failed to start scheduled-post fire loop: %s", e)
 
         # ── X mentions poller (auto-reply) ────────────────────────────
-        # Only starts when connectors.x.reply.enabled is on AND subjects are
-        # declared — see ReplyConfig.can_draft(). The loop installs tenant
-        # "default" itself before reading any config, because connector and
-        # provider credentials are tenant-scoped vault rows and a loop with
-        # no ContextVar resolves 0 of them (measured live 2026-09-17).
+        # Starts when connectors.x.reply.enabled is on in draft/auto —
+        # subjects are optional (voice-only + emoji). Settings save also
+        # calls ensure_mentions_loop, so enabling without a restart works.
+        # The loop installs tenant "default" itself before reading any
+        # config (connector credentials are tenant-scoped vault rows).
         # Reading mentions needs a paid X tier; the loop logs and backs off
         # rather than hammering a 403. Best-effort: never blocks boot.
         try:
             from kazma_core.tenant_context import tenant_scope
-            from kazma_core.x_api.mentions_fire import start_mentions_loop
+            from kazma_core.x_api.mentions_fire import ensure_mentions_loop
             from kazma_core.x_api.stance import get_reply_config
 
+            running = await ensure_mentions_loop()
             with tenant_scope("default"):
                 _reply_cfg = get_reply_config()
-            if _reply_cfg.can_draft():
-                await start_mentions_loop()
+            if running:
                 logger.info(
                     "[X] Mentions poller started (mode=%s, %d subject(s), %ds)",
                     _reply_cfg.mode, len(_reply_cfg.subjects),
