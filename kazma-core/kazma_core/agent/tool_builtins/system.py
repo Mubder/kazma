@@ -844,8 +844,9 @@ def register_system_tools(registry: Any) -> None:
     # ── Context window indicator ──────────────────────────────
     @registry.register(
         description=(
-            "Show context window usage — token count, percentage, and summarization "
-            "threshold. Use '/context details' for per-role breakdown."
+            "Show context window usage (token count, percentage, summarization "
+            "threshold) plus the active workspace root, model, and provider. "
+            "Use details=true for a per-role token breakdown."
         ),
         category="diagnostics",
     )

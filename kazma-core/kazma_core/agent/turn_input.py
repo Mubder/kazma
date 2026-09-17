@@ -44,6 +44,7 @@ __all__ = [
     "WORKING_MEMORY_MARKER",
     "AUDIT_ONLY_CONSTRAINTS",
     "AUDIT_ONLY_ALLOWLIST",
+    "audit_only_allowlist",
     "WRITE_EXECUTE_TOOL_NAMES",
     "parse_hard_constraints",
     "extract_active_attachments",
@@ -639,6 +640,37 @@ AUDIT_ONLY_ALLOWLIST = frozenset(
     }
 )
 
+# Sensitive reads that stay blocked even under audit_only (internal DBs,
+# host logs). Everything else with HITL tier read/safe is allowed — a
+# "read-only diagnostic" must be able to call git_status / config_read /
+# email_list, not just file_read (Part A battery 2026-09-17).
+_AUDIT_ONLY_DENY = frozenset(
+    {
+        "execute_db_query",
+        "inspect_db_schema",
+        "sqlite_query",
+        "read_system_logs",
+        "list_active_processes",
+        "vault_list",
+    }
+)
+
+
+def audit_only_allowlist() -> frozenset[str]:
+    """Effective allowlist: base names ∪ HITL read/safe tools, minus deny."""
+    names: set[str] = set(AUDIT_ONLY_ALLOWLIST)
+    try:
+        from kazma_core.safety.hitl import TOOL_TIERS
+
+        names.update(
+            n
+            for n, t in TOOL_TIERS.items()
+            if t in ("read", "safe") and n not in _AUDIT_ONLY_DENY
+        )
+    except Exception:
+        pass
+    return frozenset(names)
+
 # Tools that mutate filesystem/code, execute shell, or deliver outbound files.
 # Matched by exact name or prefix (mcp__* write-ish names checked separately).
 WRITE_EXECUTE_TOOL_NAMES = frozenset(
@@ -1153,7 +1185,7 @@ def is_tool_allowed_under_constraints(
         return False
     # Strict allowlist when audit/read-only is active (YOLO cannot expand this).
     if cons.intersection({"audit_only", "read_only", "no_code_change", "no_writes"}):
-        if n in AUDIT_ONLY_ALLOWLIST:
+        if n in audit_only_allowlist():
             return True
         # MCP read-ish names only
         if n.startswith("mcp__") and not _MCP_WRITE_RE.search(n):

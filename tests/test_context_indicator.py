@@ -25,6 +25,9 @@ class TestContextIndicator:
         assert "Context Window" in result
         assert "Tokens:" in result
         assert "%" in result
+        assert "Workspace:" in result
+        assert "Model:" in result
+        assert "Provider:" in result
 
     @pytest.mark.asyncio
     async def test_context_details_breakdown(self) -> None:
@@ -63,3 +66,29 @@ class TestContextIndicator:
 
         assert "Context Window" in result
         assert "Summarization threshold" in result
+
+    @pytest.mark.asyncio
+    async def test_context_identity_from_live_profile(self) -> None:
+        """Identity lines come from workspace binding + the active profile."""
+        messages = [{"role": "user", "content": "who am i"}]
+        fake_reg = type("R", (), {})()
+        fake_reg.get_active_profile = lambda: {  # type: ignore[attr-defined]
+            "model": "gpt-4o-mini",
+            "provider": "openai",
+        }
+        with (
+            patch("kazma_core.config_store.ConfigStore", side_effect=Exception("no config")),
+            patch(
+                "kazma_core.workspace.binding.resolve_active_root",
+                return_value=r"C:\Users\balfa\kazma",
+            ),
+            patch(
+                "kazma_core.model_registry.get_model_registry",
+                return_value=fake_reg,
+            ),
+        ):
+            result = await context_cmd(messages)
+
+        assert "Workspace: C:\\Users\\balfa\\kazma" in result
+        assert "Model: gpt-4o-mini" in result
+        assert "Provider: openai" in result

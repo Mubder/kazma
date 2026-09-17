@@ -96,4 +96,28 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
 
     lines.append(f"Summarization threshold: {TOKEN_THRESHOLD:,} tokens ({threshold_utilization:.0f}% utilized)")
 
+    # Identity block — always emit these lines (even as "(unavailable)").
+    # context_info used to return only the token bar, so Part A could not
+    # verify workspace / active model in-process (2026-09-17).
+    workspace = "(unavailable)"
+    try:
+        from kazma_core.workspace.binding import resolve_active_root
+
+        workspace = str(resolve_active_root())
+    except Exception:
+        logger.debug("[context_cmd] workspace root unavailable", exc_info=True)
+    lines.append(f"Workspace: {workspace}")
+
+    model = "unknown"
+    provider = "unknown"
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        prof = get_model_registry().get_active_profile() or {}
+        model = str(prof.get("model") or "unknown")
+        provider = str(prof.get("provider") or "unknown")
+    except Exception:
+        logger.debug("[context_cmd] active model unavailable", exc_info=True)
+    lines.append(f"Model: {model}  Provider: {provider}")
+
     return "\n".join(lines)

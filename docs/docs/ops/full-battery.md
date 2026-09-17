@@ -35,6 +35,8 @@ Base URL below is `http://127.0.0.1:9090`. Change it if yours is not. Do **not**
 
 After a server reload that includes the 2026-09-17 `/long mission`+body fall-through, a single paste starting with `/long mission` plus the probe also works. Until then, use two messages.
 
+The probe text ("Read-only tools only" / "Do not write") **arms `audit_only`**. That is intended. Diagnostic reads (`config_read`, `git_status`, `email_list`, …) are on that allowlist; writes, `mcp_test_server`, vault/DB internals are not. A FAIL of `tool 'X' is not on the audit_only allowlist` on a read-tier probe after this change is a real gate bug, not "the subsystem is down".
+
 ```
 You are running Part A of the Kazma full-system battery. Read-only tools only. Do not write files, send email, post to X, mutate memory, dispatch a swarm task, or run shell_exec/python_exec/file_write. If a tool is missing, gated, or returns Error:/⚠️ — that row is FAIL, not a reason to invent a pass.
 
@@ -55,7 +57,7 @@ Result is PASS, FAIL, or SKIP (SKIP only if the feature is honestly not configur
 9. Research stack — research_readiness.
 10. Swarm — do NOT dispatch. Confirm check_swarm_task (or equivalent) is registered and answers. FAIL on import/"No swarm".
 11. HITL config — config_read safety.require_approval_for. Do not call a danger tool.
-12. MCP — mcp_test_server on the first configured server, else mcp_list_resources. SKIP if no servers.
+12. MCP — mcp_list_resources (not mcp_test_server; that is write-tier). SKIP if no servers.
 13. Documents — document_status or list. SKIP if documents.enabled is false.
 14. Email — email_list folder=INBOX limit=1. Do not send.
 15. Calendar — list_events. FAIL if the user has Google connected and the tool returns silent sandbox.
