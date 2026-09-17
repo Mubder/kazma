@@ -281,7 +281,7 @@ async def check_stance(
         if provider is not None:
             resp = await provider.chat(
                 [{"role": "user", "content": prompt}],
-                max_tokens=8,
+                max_tokens=_VERDICT_MAX_TOKENS,
                 temperature=0.0,
             )
             raw = str(getattr(resp, "content", "") or "").strip().lower()
@@ -364,6 +364,30 @@ def _build_prompt(
     ]
 
 
+#: Output ceilings. Sized for a reasoning model, which emits reasoning
+#: tokens before content — a ceiling tight enough for a tweet is one such a
+#: model never gets past. These cost nothing on a model that does not use them.
+_DRAFT_MAX_TOKENS = 1400
+_VERDICT_MAX_TOKENS = 600
+
+
+def _empty_content_reason(resp: Any, provider: Any) -> str:
+    """Why a SUCCESSFUL call produced no text. Names the fix, not the symptom."""
+    model = str(getattr(resp, "model", "") or getattr(
+        getattr(provider, "config", None), "model", "") or "the model")
+    if str(getattr(resp, "finish_reason", "") or "").lower() == "length":
+        return (
+            f"{model} hit its output limit before writing any reply. That is "
+            "the signature of a reasoning model spending its allowance on "
+            "reasoning tokens. Pick a non-reasoning model for drafting in "
+            "Settings → Models, or raise the ceiling."
+        )
+    return (
+        f"{model} returned an empty reply. If it is a reasoning model, choose "
+        "a non-reasoning one for drafting in Settings → Models."
+    )
+
+
 def _draft_error_text(exc: BaseException) -> str:
     """Operator-facing reason. Names the thing to go fix, not the traceback."""
     msg = str(exc).strip() or type(exc).__name__
@@ -415,10 +439,19 @@ async def draft_reply(
             )
         resp = await provider.chat(
             _build_prompt(subject, parent_text, parent_handle, mood),
-            max_tokens=200,
+            # A 280-character reply needs ~80 output tokens. The cap is not a
+            # budget to hit, it is a ceiling -- and a REASONING model spends
+            # its allowance on reasoning tokens before emitting any content at
+            # all. At 200 the operator's first live test produced "Response
+            # truncated at max_tokens=200 ... still truncated at 400" and an
+            # empty draft from a perfectly healthy deepseek-flash. Ceilings
+            # cost nothing unless a model uses them.
+            max_tokens=_DRAFT_MAX_TOKENS,
             temperature=0.9,
         )
         text = str(getattr(resp, "content", "") or "").strip()
+        if not text:
+            raise DraftFailed(_empty_content_reason(resp, provider))
     except Exception as exc:
         logger.exception("[x-reply] drafting failed")
         raise DraftFailed(_draft_error_text(exc)) from exc
