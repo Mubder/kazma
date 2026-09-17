@@ -354,10 +354,12 @@ async def test_auto_mode_publishes_and_records(_no_llm, monkeypatch):
 
     _stub_draft(monkeypatch)
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
+    # This test is about publish mechanics. The stance check is exercised in
+    # its own section; here it must not fail closed for want of a provider.
     res = await handle_summon(
         summon_id="m13", parent_id="p13", parent_text="Iran",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
-        cfg=_cfg(mode=MODE_AUTO),
+        cfg=_cfg(mode=MODE_AUTO, stance_check=False),
     )
     assert res.action == "posted" and res.tweet_id == "9001"
     assert get_reply_store().get("m13").status == STATUS_POSTED
@@ -661,3 +663,313 @@ def test_trusted_is_independent_of_policy():
     assert cfg.is_trusted_summoner("a_stranger") is False
     assert cfg.mood_override_allowed("balfaris") is True
     assert cfg.mood_override_allowed("a_stranger") is False
+
+
+# ── The conversation log keeps both sides ─────────────────────────────────
+#
+# The store originally kept handles, Kazma's draft and the outcome — but not
+# what the other person actually said. That log shows Kazma talking to itself:
+# a reply with no idea what provoked it, which is unreadable and makes "why
+# did it say that?" unanswerable without opening X and rebuilding the thread.
+#
+# Both texts are captured at CLAIM time, not later: the poller has them in
+# hand, re-fetching costs read quota, and once a tweet is deleted it is simply
+# gone.
+
+@pytest.mark.asyncio
+async def test_both_sides_are_recorded(_no_llm, monkeypatch):
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    _stub_draft(monkeypatch, text="Bold take from a fresh account.")
+    await handle_summon(
+        summon_id="c1", parent_id="p1",
+        parent_text="Iran is obviously the aggressor here",
+        parent_handle="someone", summoner="balfaris",
+        target_followers=9_000, cfg=_cfg(),
+        summon_text="what do you think Kazma? \U0001F602",
+    )
+    rec = get_reply_store().get("c1")
+    assert rec.parent_text == "Iran is obviously the aggressor here"
+    assert "\U0001F602" in rec.summon_text
+    assert rec.draft_text == "Bold take from a fresh account."
+    assert rec.summoner == "balfaris"
+    assert rec.target_handle == "someone"
+
+
+@pytest.mark.asyncio
+async def test_a_skipped_summon_still_records_what_was_said(monkeypatch):
+    """The unanswered question is 'why didn't it reply?' — so the incoming
+    post has to survive even when nothing was drafted."""
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="c2", parent_id="p2",
+        parent_text="best shawarma in Kuwait City",
+        parent_handle="someone", summoner="balfaris",
+        target_followers=9_000, cfg=_cfg(),
+        summon_text="Kazma?",
+    )
+    assert res.action == "skipped"
+    rec = get_reply_store().get("c2")
+    assert rec.parent_text == "best shawarma in Kuwait City"
+    assert rec.draft_text == ""
+    assert "no declared subject" in rec.reason
+
+
+def test_long_texts_are_bounded():
+    """A 20k-character quote-tweet chain must not become a 20k DB row."""
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    store = get_reply_store()
+    store.claim(
+        summon_id="c3", parent_id="p3", target_handle="t", summoner="s",
+        parent_text="x" * 9000, summon_text="y" * 9000,
+    )
+    rec = store.get("c3")
+    assert len(rec.parent_text) == 2000
+    assert len(rec.summon_text) == 500
+
+
+def test_older_stores_gain_the_columns(tmp_path):
+    """An install that predates the log must not silently keep the old shape.
+
+    CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so without the
+    additive migration an upgraded store would keep working and quietly never
+    record a conversation.
+    """
+    import sqlite3
+
+    from kazma_core.x_api.reply_store import XReplyStore
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """CREATE TABLE x_replies (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               summon_id TEXT NOT NULL UNIQUE,
+               parent_id TEXT NOT NULL DEFAULT '',
+               target_handle TEXT NOT NULL DEFAULT '',
+               summoner TEXT NOT NULL DEFAULT '',
+               subject_id TEXT NOT NULL DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'drafting',
+               draft_text TEXT NOT NULL DEFAULT '',
+               proposal_id TEXT NOT NULL DEFAULT '',
+               tweet_id TEXT NOT NULL DEFAULT '',
+               reason TEXT NOT NULL DEFAULT '',
+               tenant_id TEXT NOT NULL DEFAULT 'default',
+               created_at REAL NOT NULL,
+               updated_at REAL NOT NULL
+           );"""
+    )
+    conn.execute(
+        "INSERT INTO x_replies (summon_id, created_at, updated_at) "
+        "VALUES ('legacy', 1.0, 1.0)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = XReplyStore(db)
+    rec = store.get("legacy")
+    assert rec is not None, "the pre-existing row must survive the migration"
+    assert rec.parent_text == ""
+    assert store.claim(
+        summon_id="fresh", parent_id="p", target_handle="t", summoner="s",
+        parent_text="now recorded",
+    )
+    assert store.get("fresh").parent_text == "now recorded"
+
+
+# ── The stance check ──────────────────────────────────────────────────────
+#
+# screen_draft checks rules that are identical for every subject — violence,
+# length, emptiness. It has no idea what the operator's position IS, so a
+# reply that quietly argues the opposite side passes it cleanly. For a feature
+# whose whole premise is "argue the view I wrote", that is the failure that
+# matters: not a rude reply, but Kazma agreeing with the person it was
+# summoned to answer.
+
+def _verdict(monkeypatch, word):
+    """Stub the classifier to return one verdict."""
+    class _Resp:
+        content = word
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+
+
+def _no_provider(monkeypatch):
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: None)})(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_argues_passes(monkeypatch):
+    from kazma_core.x_api.reply import check_stance
+
+    _verdict(monkeypatch, "argues")
+    assert await check_stance("a sharp reply", IRAN, unattended=True) is None
+
+
+@pytest.mark.asyncio
+async def test_contradicting_draft_is_blocked(monkeypatch):
+    from kazma_core.x_api.reply import check_stance
+
+    _verdict(monkeypatch, "contradicts")
+    reason = await check_stance("actually they had a point", IRAN, unattended=False)
+    assert reason and "AGAINST the declared view" in reason
+
+
+@pytest.mark.asyncio
+async def test_fence_sitting_is_blocked(monkeypatch):
+    """Both-sides is a failure mode too, not a safe middle."""
+    from kazma_core.x_api.reply import check_stance
+
+    _verdict(monkeypatch, "fence")
+    reason = await check_stance("there are points on both sides", IRAN, unattended=False)
+    assert reason and "fence" in reason
+
+
+@pytest.mark.asyncio
+async def test_unknown_verdict_blocks_when_unattended(monkeypatch):
+    """A classifier that cannot answer must not become a silent approval."""
+    from kazma_core.x_api.reply import check_stance
+
+    _verdict(monkeypatch, "banana")
+    reason = await check_stance("something", IRAN, unattended=True)
+    assert reason and "could not run" in reason
+
+
+@pytest.mark.asyncio
+async def test_unknown_verdict_allows_when_attended(monkeypatch):
+    """In draft mode the operator IS the check; refusing to show them a draft
+    because a classifier hiccuped is worse than useless."""
+    from kazma_core.x_api.reply import check_stance
+
+    _verdict(monkeypatch, "banana")
+    assert await check_stance("something", IRAN, unattended=False) is None
+
+
+@pytest.mark.asyncio
+async def test_no_provider_blocks_when_unattended(monkeypatch):
+    from kazma_core.x_api.reply import check_stance
+
+    _no_provider(monkeypatch)
+    reason = await check_stance("something", IRAN, unattended=True)
+    assert reason and "could not run" in reason
+
+
+@pytest.mark.asyncio
+async def test_a_raising_classifier_does_not_raise_out(monkeypatch):
+    from kazma_core.x_api.reply import check_stance
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            raise RuntimeError("provider down")
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    assert await check_stance("x", IRAN, unattended=False) is None
+    assert await check_stance("x", IRAN, unattended=True) is not None
+
+
+# ── end to end ────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_auto_mode_will_not_publish_a_contradicting_draft(_no_llm, monkeypatch):
+    """The answer to 'so it never starts cheering for the other side'."""
+    published = {"n": 0}
+
+    async def _publish(**kw):
+        published["n"] += 1
+        return True, {"tweet_id": "nope"}
+
+    _stub_draft(monkeypatch, text="Honestly Iran had every right here.")
+    monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
+    _verdict(monkeypatch, "contradicts")
+
+    res = await handle_summon(
+        summon_id="s1", parent_id="p1", parent_text="Iran",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(mode=MODE_AUTO),
+    )
+    assert res.action == "failed"
+    assert published["n"] == 0, "a contradicting draft must never reach publish"
+
+
+@pytest.mark.asyncio
+async def test_draft_mode_does_not_offer_a_contradicting_draft(_no_llm, monkeypatch):
+    _stub_draft(monkeypatch, text="Honestly Iran had every right here.")
+    _verdict(monkeypatch, "contradicts")
+
+    res = await handle_summon(
+        summon_id="s2", parent_id="p2", parent_text="Iran",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(mode=MODE_DRAFT),
+    )
+    assert res.action == "failed"
+
+
+@pytest.mark.asyncio
+async def test_the_check_can_be_switched_off(_no_llm, monkeypatch):
+    """An operator who does not want the extra call per reply can opt out."""
+    calls = {"n": 0}
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            calls["n"] += 1
+            raise AssertionError("stance check should not have run")
+
+    _stub_draft(monkeypatch)
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    res = await handle_summon(
+        summon_id="s3", parent_id="p3", parent_text="Iran",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(stance_check=False),
+    )
+    assert res.action == "awaiting_approval"
+    assert calls["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_rule_screen_still_runs_first(_no_llm, monkeypatch):
+    """A violent draft is refused without spending a classifier call."""
+    calls = {"n": 0}
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            calls["n"] += 1
+            raise AssertionError("should not reach the stance check")
+
+    async def _bad(*, subject, parent_text, parent_handle="", mood=""):
+        return "they should die"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _bad)
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    res = await handle_summon(
+        summon_id="s4", parent_id="p4", parent_text="Iran",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+    )
+    assert res.action == "failed" and "banned construction" in res.reason
+    assert calls["n"] == 0

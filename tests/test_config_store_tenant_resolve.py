@@ -194,44 +194,62 @@ def _trace_depth(store_cls):
     return (lambda: setattr(store_cls, "get", real)), state
 
 
-def test_repeated_reads_do_not_re_enter_config_store(tmp_path, monkeypatch):
-    monkeypatch.setenv("KAZMA_VAULT_KEY", "k" * 64)
-    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("KAZMA_MULTI_USER", raising=False)
-    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+def test_the_posture_probe_is_not_run_per_read(_vault, monkeypatch):
+    """The probe must be amortised, not paid on every resolve.
 
-    from kazma_core.config_store import get_config_store, reset_config_store
+    The first cut called multi_user_or_production() eagerly on every resolve.
+    That probe reads `platform.users` THROUGH ConfigStore while this function
+    is called FROM ConfigStore's resolver, so every vaulted read re-entered
+    ConfigStore.get -- measured at nesting depth 2 on the provider-key path,
+    which is read constantly. The CHANGELOG has the precedent: a method called
+    under the ConfigStore lock that acquired something else deadlocked the
+    whole application from one swarm approval.
 
-    reset_config_store()
-    vault_mod.reset_vault()
-    vault_mod.reset_posture_cache()
-    cs = get_config_store()
+    Counting probe calls tests that invariant directly. An earlier version of
+    this test counted ConfigStore.get nesting instead, which made it a test of
+    singleton wiring under conftest's isolation fixture rather than of the
+    property, and it failed for reasons that had nothing to do with
+    re-entrancy.
+    """
+    probes = {"n": 0}
 
-    token = set_current_tenant_id("default")
+    def _probe():
+        probes["n"] += 1
+        return False  # single-tenant
+
+    monkeypatch.setattr(
+        "kazma_core.tenant_isolation.multi_user_or_production", _probe
+    )
+    _store_as(_vault, "default", "cfg:hot", "value")
+
+    for _ in range(25):
+        assert vault_mod.retrieve_scoped("cfg:hot") == "value"
+
+    assert probes["n"] == 1, (
+        f"the posture probe ran {probes['n']}x for 25 reads — it is back on "
+        "the hot path and every vaulted read re-enters ConfigStore"
+    )
+
+
+def test_a_hit_on_the_first_rung_never_probes(_vault, monkeypatch):
+    """A caller with its own tenant short-circuits before the probe."""
+    probes = {"n": 0}
+
+    def _probe():
+        probes["n"] += 1
+        return False
+
+    monkeypatch.setattr(
+        "kazma_core.tenant_isolation.multi_user_or_production", _probe
+    )
+    _store_as(_vault, "tenant-b", "cfg:own", "b-value")
+
+    token = set_current_tenant_id("tenant-b")
     try:
-        cs.set("connectors.x.access_token", "tok-real", category="connectors")
+        assert vault_mod.retrieve_scoped("cfg:own") == "b-value"
     finally:
         reset_current_tenant_id(token)
-    cs._clear_cache()
-
-    restore, state = _trace_depth(type(cs))
-    try:
-        assert cs.get("connectors.x.access_token") == "tok-real"
-        first = state["max"]
-        # Steady state is what matters: a probe amortised over a TTL is fine,
-        # a probe per read is the bug.
-        for _ in range(10):
-            state["max"] = 0
-            assert cs.get("connectors.x.access_token") == "tok-real"
-            assert state["max"] == 1, (
-                "every vaulted read re-entered ConfigStore.get -- the posture "
-                "probe is running per read again"
-            )
-        assert first <= 2
-    finally:
-        restore()
-        reset_config_store()
-        vault_mod.reset_vault()
+    assert probes["n"] == 0
 
 
 def test_nested_probe_fails_closed(_vault, monkeypatch):
@@ -290,3 +308,38 @@ def test_single_tenant_is_re_probed(_vault, monkeypatch):
     posture["multi"] = True
     monkeypatch.setattr(vault_mod, "_POSTURE_TTL_S", 0.0)
     assert vault_mod.retrieve_scoped("cfg:k") is None
+
+
+def test_tenant_scope_beats_a_stale_global_copy(_vault, monkeypatch):
+    """Order is not cosmetic: `default` must be tried BEFORE global.
+
+    A first cut of the ladder queried global first (Vault.retrieve already
+    falls back tenant -> global, so one call looked like it covered both).
+    When a name exists in BOTH scopes that returns the stale global copy of a
+    credential the operator has since re-saved through Settings — silently,
+    and looking exactly like a wrong key. Caught by
+    tests/test_x_publisher.py::test_vault_get_resolves_tenant_scoped_secrets,
+    which asserts the call order rather than just the result.
+    """
+    _single_tenant(monkeypatch)
+    _store_as(_vault, None, "cfg:dual_scoped", "GLOBAL-stale")
+    _store_as(_vault, "default", "cfg:dual_scoped", "DEFAULT-fresh")
+
+    assert vault_mod.retrieve_scoped("cfg:dual_scoped") == "DEFAULT-fresh"
+
+
+def test_a_scoped_caller_does_not_get_the_operator_rung(_vault, monkeypatch):
+    """`default` is the rung for context-LESS callers only.
+
+    A caller that already resolved its own tenant and missed must not fall
+    through to the operator's secrets, even on a single-operator box where
+    the posture gate would wave it through.
+    """
+    _single_tenant(monkeypatch)
+    _store_as(_vault, "default", "cfg:only_default", "operator-secret")
+
+    token = set_current_tenant_id("tenant-b")
+    try:
+        assert vault_mod.retrieve_scoped("cfg:only_default") is None
+    finally:
+        reset_current_tenant_id(token)

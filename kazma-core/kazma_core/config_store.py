@@ -911,7 +911,9 @@ class ConfigStore:
             try:
                 from kazma_core.security.vault import retrieve_scoped
 
-                return retrieve_scoped(name)
+                # Pass OUR handle: this function already resolved one and
+                # a second lookup could differ from it.
+                return retrieve_scoped(name, vault)
             except Exception:  # noqa: BLE001
                 logger.debug(
                     "[ConfigStore] scoped resolve unavailable for %s — "

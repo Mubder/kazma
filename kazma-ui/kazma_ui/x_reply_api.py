@@ -62,6 +62,7 @@ class ReplyConfigBody(BaseModel):
     poll_interval_s: int = Field(default=600)
     summoner_policy: str = Field(default="allowlist")
     allow_emoji_mood: bool = Field(default=True)
+    stance_check: bool = Field(default=True)
     subjects: list[SubjectBody] = Field(default_factory=list)
 
 
@@ -141,6 +142,7 @@ def _payload() -> dict[str, Any]:
         "poll_interval_s": cfg.poll_interval_s,
         "summoner_policy": cfg.summoner_policy,
         "allow_emoji_mood": cfg.allow_emoji_mood,
+        "stance_check": cfg.stance_check,
         "subjects": [
             {
                 "id": s.id,
@@ -185,6 +187,51 @@ async def x_reply_recent(limit: int = 20) -> JSONResponse:
 
         rows = get_reply_store().recent(limit=max(1, min(100, int(limit))))
         return JSONResponse({"ok": True, "rows": [r.to_dict() for r in rows]})
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
+@router.get("/conversations")
+async def x_reply_conversations(limit: int = 30) -> JSONResponse:
+    """Whole exchanges, newest first — who summoned, what was said, what Kazma said.
+
+    Distinct from ``/recent``, which is a state list for the settings panel.
+    This is the reading view: three turns per row, so "why did it say that?"
+    is answerable without opening X and reconstructing the thread by hand.
+
+    Skipped and failed summons are included on purpose. "It did not reply"
+    is the most common question, and an exchange showing the incoming post
+    with `no declared subject matched` against it is the answer.
+    """
+    try:
+        from kazma_core.x_api.reply_store import get_reply_store
+
+        rows = get_reply_store().recent(limit=max(1, min(100, int(limit))))
+        out = []
+        for r in rows:
+            out.append({
+                "summon_id": r.summon_id,
+                "parent_id": r.parent_id,
+                # Who wrote the post being replied to.
+                "target": r.target_handle,
+                "said": r.parent_text,
+                # Who called Kazma in, and how.
+                "summoner": r.summoner,
+                "summon": r.summon_text,
+                # What Kazma said, or why it did not.
+                "reply": r.draft_text,
+                "status": r.status,
+                "subject": r.subject_id,
+                "reason": r.reason,
+                "tweet_id": r.tweet_id,
+                "url": (
+                    f"https://x.com/i/web/status/{r.tweet_id}"
+                    if r.tweet_id else
+                    (f"https://x.com/i/web/status/{r.parent_id}" if r.parent_id else "")
+                ),
+                "at": r.created_at,
+            })
+        return JSONResponse({"ok": True, "rows": out})
     except Exception as exc:  # noqa: BLE001
         return _safe_error(exc)
 
@@ -242,6 +289,12 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         # replies. The other rails still hold: subject match, three caps, the
         # follower floor and the content screen.
         warnings: list[str] = []
+        if body.enabled and mode == MODE_AUTO and not body.stance_check:
+            warnings.append(
+                "Stance check is off and replies post unattended. Nothing "
+                "verifies a draft argues your view before it publishes — a "
+                "model that drifts will post the other side under your name."
+            )
         if body.enabled and policy == SUMMON_ANYONE and mode == MODE_AUTO:
             warnings.append(
                 "Anyone can summon and replies post unattended. A stranger's "
@@ -306,6 +359,11 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             (
                 "connectors.x.reply.allow_emoji_mood",
                 bool(body.allow_emoji_mood),
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.stance_check",
+                bool(body.stance_check),
                 _CATEGORY,
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),

@@ -16,7 +16,39 @@ function xStudioPage() {
     busy: false,
     _previewTimer: null,
 
+    // Two tabs: the studio (what Kazma posted) and conversations (what it
+    // was replying to). A reply read without its parent is a non-sequitur,
+    // which is why the posted list alone could never answer "why did it
+    // say that".
+    tab: 'studio',
+    conversations: [],
+    convLoading: false,
+
     t(key) { return (window.t && window.t(key)) || key; },
+
+    async loadConversations() {
+      this.convLoading = true;
+      try {
+        const r = await fetch('/api/x/reply/conversations?limit=30', {
+          credentials: 'same-origin',
+        });
+        const d = await r.json().catch(function () { return {}; });
+        this.conversations = (d && d.rows) || [];
+      } catch (e) {
+        this.conversations = [];
+      } finally {
+        this.convLoading = false;
+      }
+    },
+
+    convWhen(epoch) {
+      if (!epoch) return '';
+      try {
+        return new Date(Number(epoch) * 1000).toLocaleString();
+      } catch (e) {
+        return '';
+      }
+    },
 
     displayBody(raw) {
       const bidi = window.KazmaBidi;
