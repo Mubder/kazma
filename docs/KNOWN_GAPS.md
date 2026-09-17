@@ -69,6 +69,12 @@ tree. Assume the same class exists elsewhere.
   importers, and the audit proved the point — `ruff --fix` removing "unused"
   imports silently broke every native skill via a re-export contract no linter
   could see (caught by `tests/test_imports.py`).
+- **`KAZMA_DATA_DIR` does not isolate a Postgres-backed ConfigStore** — a
+  boot-time warning for this was written and reverted on 2026-09-17 in the
+  same rollback as the vault tripwire below, because the two shipped together
+  and only one of them could be cleared of causing the hang. The gap is
+  unchanged and is still recorded above; the warning can return once that
+  hang is understood.
 - **Three bandit findings are reported but not gated.** The gate now covers
   all six product packages (`kazma-cli`, `kazma-skills` and `kazma-tui` were
   never scanned at all until 2026-09-17), plus a B613-only gate over `tests`
@@ -107,14 +113,34 @@ tree. Assume the same class exists elsewhere.
 
   The vault's fallback direction is right and should not be widened.
 
-  **Partly closed 2026-09-17.** A static test listing the entry points would be
-  the same gate that let all seven audit defects through — it passes while the
-  entry point nobody listed is wrong. So the guard is at the miss instead:
-  `retrieve` now logs one warning per secret name per process when it returns
-  `None` for a name that *does* exist under some tenant, naming the scope and
-  saying the caller is missing `set_current_tenant_id()`. That fires at any
-  call site, including ones not written yet. Still open: nothing *fails* on it,
-  so a new entry point ships and is caught by someone reading a log.
+  **Attempted and REVERTED, 2026-09-17.** The fix tried was a runtime
+  tripwire: have `retrieve` log, once per name, when it returns `None` for a
+  name that does exist under some tenant. A static list of entry points would
+  be the same gate that let all seven audit defects through, so the guard
+  belonged at the miss, where every caller passes.
+
+  It turned CI red for four commits. `tests/test_documents_api_phase8.py`
+  began hanging in app SHUTDOWN (`TestClient.__exit__` -> `wait_shutdown` ->
+  `Future.result()`), reproducibly on Linux, never on Windows. Attribution is
+  not in doubt: ten prior runs clean, POISON on exactly the two commits that
+  carried the tripwire, and the counts line up (9048 - 17 poisoned + 10 added
+  = 9041).
+
+  The cause was never found. Three hypotheses were published and all three
+  were wrong — the probe's query cost (A/B: 415.4s vs 413.9s, no difference),
+  a slow runner (the failing rerun was *faster* than the last green run), and
+  a lock window from probing in a second acquisition (restructured; still
+  red). It does not reproduce in a Linux container even with CI's own system
+  packages: two arms, with and without the tripwire, 260.78s vs 260.35s,
+  neither hanging.
+
+  Reverted rather than iterated on, because main had been red for four
+  commits and "one more theory" had already been tried three times. **Anyone
+  picking this up starts by reproducing the hang, not by writing a fix.** The
+  useful artifacts are `scripts/`-free: a container with `libreoffice-writer`,
+  `tesseract-ocr` and `fonts-noto-core` gets the file running but not hanging,
+  so whatever the trigger is, it is not in that file alone.
+
   → `tests/test_cron_tenant_context.py`, `tests/test_vault_tenant_scope_read.py`.
 - **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
   function named `read_url`, so `import kazma_core.tools.read_url as ru` binds

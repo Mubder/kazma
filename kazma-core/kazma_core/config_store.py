@@ -260,7 +260,7 @@ def get_kazma_secret() -> str:
         return _EPHEMERAL_SECRET
 
 
-def get_or_create_disclosure_key(store: ConfigStore | None = None) -> str:
+def get_or_create_disclosure_key(store: "ConfigStore" | None = None) -> str:
     """Get or create the disclosure HMAC key.
     
     If KAZMA_DISCLOSURE_KEY is set in environment, use it.
@@ -745,7 +745,6 @@ class ConfigStore:
                 self._pg_pool()
                 logger.info("[ConfigStore] using Postgres backend")
                 self._warn_if_stale_sqlite_shadow()
-                self._warn_if_data_dir_implies_isolation()
             except Exception as exc:
                 logger.error(
                     "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
@@ -758,54 +757,6 @@ class ConfigStore:
             conn = self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
-
-    def _warn_if_data_dir_implies_isolation(self) -> None:
-        """Say so when a relocated data dir is reading a SHARED config store.
-
-        ``KAZMA_DATA_DIR`` moves an install's files. It does not move its
-        settings when the backend is Postgres -- `_use_postgres()` keys off
-        ``KAZMA_DB_BACKEND`` / ``KAZMA_DATABASE_URL`` and nothing else -- so a
-        script, a test harness or a second checkout that points the data dir
-        at a scratch path still reads *and writes* the production store while
-        looking thoroughly isolated.
-
-        That is not a hypothetical either. The dev clone in this repo shared
-        the operator's live Postgres for days: `kazma doctor` gave different
-        answers on the two boxes, a test run wrote junk into the real
-        `llm_calls.db`, and a vault:// pointer written by one machine resolved
-        to nothing on the other -- which is the 2026-09-16 outage.
-
-        Deliberately a warning and not a behaviour change. ``KAZMA_DATA_DIR``
-        is documented as a *relocatable production layout* feature, so making
-        it imply SQLite would silently detach a legitimately relocated
-        production install from its own database. Loud beats clever here.
-
-        One line at boot, best-effort, never fatal.
-        """
-        try:
-            import os as _os
-            from pathlib import Path as _Path
-
-            raw = (_os.environ.get("KAZMA_DATA_DIR") or "").strip()
-            if not raw:
-                return
-            from kazma_core.paths import get_project_root
-
-            relocated = _Path(raw).expanduser().resolve()
-            default = (get_project_root() / "kazma-data").resolve()
-            if relocated == default:
-                return  # pointed at its own dir; nothing surprising
-            logger.warning(
-                "[ConfigStore] KAZMA_DATA_DIR relocates files to %s, but "
-                "settings come from POSTGRES, which is SHARED with every other "
-                "install pointing at the same KAZMA_DATABASE_URL. This process "
-                "can read and WRITE that store. If you meant an isolated "
-                "install, also set KAZMA_DB_BACKEND=sqlite; if you meant a "
-                "relocated production layout, this is correct and expected.",
-                relocated,
-            )
-        except Exception:  # noqa: BLE001 — a diagnostic must never fail boot
-            logger.debug("[ConfigStore] data-dir isolation check failed", exc_info=True)
 
     def _warn_if_stale_sqlite_shadow(self) -> None:
         """Say so when a dead SQLite settings DB is shadowing the live one.
@@ -2089,7 +2040,7 @@ def set_config_store(store: ConfigStore) -> None:
     _config_store = store
 
 
-def peek_config_store() -> ConfigStore | None:
+def peek_config_store() -> "ConfigStore | None":
     """Return the live singleton WITHOUT creating one (None if not yet made).
 
     Test harnesses capture-and-restore via this + :func:`set_config_store`;
