@@ -395,7 +395,10 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
             return None
         resp = await provider.chat(
             [{"role": "user", "content": prompt}],
-            max_tokens=16,
+            # A reasoning model emits reasoning before content; 16 tokens
+            # is a ceiling it never gets past, and the classifier then
+            # returns empty and silently means 'no subject matched'.
+            max_tokens=600,
             temperature=0.0,
         )
         answer = str(getattr(resp, "content", "") or "").strip().lower()

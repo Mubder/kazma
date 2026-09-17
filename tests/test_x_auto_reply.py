@@ -1123,3 +1123,79 @@ def test_error_text_points_at_the_thing_to_fix(raw, expect):
     from kazma_core.x_api.reply import _draft_error_text
 
     assert expect in _draft_error_text(RuntimeError(raw))
+
+
+# ── A successful call that returns nothing ────────────────────────────────
+#
+# Live, 2026-09-17: the operator's first dry run logged
+#   "Response truncated at max_tokens=200 -- retrying once with max_tokens=400"
+#   "Still truncated at max_tokens=400 -- returning truncated response"
+# and produced "model returned an empty draft". The provider was healthy and
+# the key was fine: deepseek-flash is a REASONING model, and the ceiling was
+# set for the length of a tweet rather than for how such a model gets there.
+# The same mistake was in the stance check (8 tokens) and the subject
+# classifier (16) -- neither could ever have worked on that model.
+
+@pytest.mark.asyncio
+async def test_empty_content_names_the_reasoning_model(monkeypatch, _no_llm):
+    from kazma_core.x_api.reply import DraftFailed, draft_reply
+
+    class _Resp:
+        content = ""
+        finish_reason = "length"
+        model = "deepseek-flash"
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    with pytest.raises(DraftFailed) as err:
+        await draft_reply(subject=VAR, parent_text="VAR")
+    reason = str(err.value)
+    assert "deepseek-flash" in reason
+    assert "reasoning model" in reason
+    assert "empty draft" not in reason
+
+
+@pytest.mark.asyncio
+async def test_empty_without_truncation_still_explains(monkeypatch, _no_llm):
+    from kazma_core.x_api.reply import DraftFailed, draft_reply
+
+    class _Resp:
+        content = "   "
+        finish_reason = "stop"
+        model = "some-model"
+
+    class _Provider:
+        async def chat(self, *a, **k):
+            return _Resp()
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
+    )
+    with pytest.raises(DraftFailed) as err:
+        await draft_reply(subject=VAR, parent_text="VAR")
+    assert "empty reply" in str(err.value)
+
+
+def test_ceilings_leave_room_for_reasoning_tokens():
+    """Guard the numbers themselves.
+
+    A ceiling sized for the OUTPUT (a tweet is ~80 tokens) is one a reasoning
+    model never reaches. These are ceilings, not budgets: they cost nothing on
+    a model that does not use them, and they are the difference between the
+    feature working and returning nothing on an entire class of model.
+    """
+    from kazma_core.x_api import reply as r
+    from kazma_core.x_api import stance as st
+    import inspect
+
+    assert r._DRAFT_MAX_TOKENS >= 1000
+    assert r._VERDICT_MAX_TOKENS >= 400
+    src = inspect.getsource(st._llm_pick)
+    assert "max_tokens=600" in src, "the subject classifier ceiling regressed"
