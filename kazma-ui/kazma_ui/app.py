@@ -1538,6 +1538,21 @@ class KazmaAppBuilder:
             logger.warning("X API router failed to mount: %s", e)
             self._init_errors.append({"subsystem": "x_api", "error": str(e)})
 
+        # Auto-reply settings live on their own router: /api/x owns the
+        # connector (credentials, post, audit), this owns the subjects and
+        # views Kazma is allowed to argue from, plus the dry-run used to tune
+        # them without spending a real summon.
+        try:
+            from kazma_ui.x_reply_api import protected_router as xr_protected
+            from kazma_ui.x_reply_api import router as xr_router
+
+            self.app.include_router(xr_router)
+            self.app.include_router(xr_protected)
+            logger.info("X auto-reply router mounted at /api/x/reply/*")
+        except Exception as e:
+            logger.warning("X auto-reply router failed to mount: %s", e)
+            self._init_errors.append({"subsystem": "x_reply_api", "error": str(e)})
+
         # ── Scheduled Tasks (universal page: cron jobs + scheduled X posts) ──
         try:
             from kazma_ui.scheduled_api import create_scheduled_router
@@ -2108,6 +2123,33 @@ class KazmaAppBuilder:
             logger.info("[X] Scheduled-post fire loop started")
         except Exception as e:  # noqa: BLE001
             logger.warning("[X] Failed to start scheduled-post fire loop: %s", e)
+
+        # ── X mentions poller (auto-reply) ────────────────────────────
+        # Only starts when connectors.x.reply.enabled is on AND subjects are
+        # declared — see ReplyConfig.can_draft(). The loop installs tenant
+        # "default" itself before reading any config, because connector and
+        # provider credentials are tenant-scoped vault rows and a loop with
+        # no ContextVar resolves 0 of them (measured live 2026-09-17).
+        # Reading mentions needs a paid X tier; the loop logs and backs off
+        # rather than hammering a 403. Best-effort: never blocks boot.
+        try:
+            from kazma_core.tenant_context import tenant_scope
+            from kazma_core.x_api.mentions_fire import start_mentions_loop
+            from kazma_core.x_api.stance import get_reply_config
+
+            with tenant_scope("default"):
+                _reply_cfg = get_reply_config()
+            if _reply_cfg.can_draft():
+                await start_mentions_loop()
+                logger.info(
+                    "[X] Mentions poller started (mode=%s, %d subject(s), %ds)",
+                    _reply_cfg.mode, len(_reply_cfg.subjects),
+                    _reply_cfg.poll_interval_s,
+                )
+            else:
+                logger.info("[X] Mentions poller not started (auto-reply off)")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("[X] Failed to start mentions poller: %s", e)
 
         # ── Lifecycle status notification: "started" (or "restarted") ─
         # Emitted once all subsystems are up. The notifier upgrades this to

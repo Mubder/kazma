@@ -2176,3 +2176,217 @@ async def _build_slash_ctx(
     ctx["active_threads"] = 1
 
     return ctx
+
+
+
+async def _try_x_command(
+    msg: IncomingMessage,
+    store: SessionStore,
+    manager: Any,
+    thread_id: str,
+) -> bool:
+    """Handle ``/x`` — the paste-driven summon path for X auto-reply.
+
+    This is the trigger that works on every API tier. The operator sends a
+    tweet link (and, on a read-less tier, its text) instead of the poller
+    discovering the mention, so the whole drafting pipeline is exercisable
+    without spending read quota — and keeps working if the plan is ever
+    downgraded.
+
+    Subcommands::
+
+        /x roast <url> | <post text>  — draft a reply to that post
+        /x approve <summon_id>        — publish a held draft
+        /x list                       — recent summons and their state
+        /x poll                       — force one mentions poll (paid tiers)
+        /x subjects                   — the declared subjects
+
+    ``roast`` always runs in ``draft`` mode regardless of the configured
+    mode: an operator typing the command by hand is the approval step, and
+    silently auto-posting from a manual command would be a different feature
+    than the one they invoked.
+    """
+    text = (msg.text or "").strip()
+    low = text.lower()
+    if not (low == "/x" or low.startswith("/x ")):
+        return False
+
+    parts = text.split(maxsplit=2)
+    sub = parts[1].lower() if len(parts) > 1 else ""
+    rest = parts[2].strip() if len(parts) > 2 else ""
+
+    def _send(body: str):
+        return _send_model_reply(msg, store, manager, thread_id, body)
+
+    if not sub or sub in ("help", "?"):
+        await _send(
+            "𝕏 *Auto-reply*\n\n"
+            "`/x roast <url> | <post text>` — draft a reply to that post\n"
+            "`/x approve <summon_id>` — publish a held draft\n"
+            "`/x list` — recent summons\n"
+            "`/x subjects` — declared subjects and views\n"
+            "`/x poll` — force one mentions poll (paid tier only)\n\n"
+            "Kazma only replies when the post matches a subject you declared "
+            "in Settings → X → Auto-reply. No matching subject → no reply."
+        )
+        return True
+
+    from kazma_core.tenant_context import tenant_scope
+
+    # Gateway paths never install a tenant, and connector credentials plus
+    # provider keys are tenant-scoped vault rows (measured live: 0/4 without).
+    with tenant_scope("default"):
+        from kazma_core.x_api.stance import get_reply_config
+
+        cfg = get_reply_config()
+
+        if sub == "subjects":
+            if not cfg.subjects:
+                await _send(
+                    "No subjects declared. Kazma has no view to argue from, so "
+                    "`/x roast` will always decline.\n\n"
+                    "Add them in Settings → Integrations → X → Auto-reply."
+                )
+                return True
+            lines = [f"*{len(cfg.subjects)} subject(s)* (mode: `{cfg.mode}`)\n"]
+            for s in cfg.subjects:
+                view = s.view.strip().replace("\n", " ")
+                lines.append(
+                    f"• `{s.id}` — {s.mood}\n"
+                    f"  matches: {', '.join(s.match[:6])}\n"
+                    f"  view: {view[:160]}{'…' if len(view) > 160 else ''}"
+                )
+            await _send("\n".join(lines))
+            return True
+
+        if sub == "list":
+            from kazma_core.x_api.reply_store import get_reply_store
+
+            rows = get_reply_store().recent(limit=10)
+            if not rows:
+                await _send("No summons recorded yet.")
+                return True
+            lines = ["*Recent summons*\n"]
+            for r in rows:
+                mark = {
+                    "posted": "✅", "awaiting_approval": "⏳",
+                    "skipped": "⏭️", "failed": "❌",
+                }.get(r.status, "•")
+                lines.append(
+                    f"{mark} `{r.summon_id}` {r.status}"
+                    + (f" — {r.subject_id}" if r.subject_id else "")
+                    + (f"\n   {r.reason[:120]}" if r.reason else "")
+                    + (f"\n   {r.draft_text[:120]}" if r.draft_text else "")
+                )
+            await _send("\n".join(lines))
+            return True
+
+        if sub == "approve":
+            if not rest:
+                await _send("Usage: `/x approve <summon_id>` (see `/x list`).")
+                return True
+            from kazma_core.x_api.reply import approve_summon
+
+            res = await approve_summon(rest.split()[0])
+            if res.ok:
+                await _send(f"✅ Posted.\n{res.url or res.tweet_id}")
+            else:
+                await _send(f"❌ {res.reason}")
+            return True
+
+        if sub == "poll":
+            from kazma_core.x_api.mentions_fire import poll_once
+
+            try:
+                rows = await poll_once(cfg=cfg)
+            except Exception as exc:  # noqa: BLE001
+                await _send(
+                    f"❌ Poll failed: {exc}\n\n"
+                    "A 401/403 here usually means the X plan cannot read the "
+                    "mentions timeline (Free cannot)."
+                )
+                return True
+            if not rows:
+                await _send("No new mentions.")
+                return True
+            lines = [f"*Polled — {len(rows)} mention(s)*\n"]
+            for r in rows:
+                lines.append(
+                    f"• `{r.get('mention')}` {r.get('action')} — {r.get('reason', '')}"[:200]
+                )
+            await _send("\n".join(lines))
+            return True
+
+        if sub == "roast":
+            if not rest:
+                await _send(
+                    "Usage: `/x roast <url> | <post text>`\n\n"
+                    "The text after `|` is the post you are replying to. On a "
+                    "paid plan you can omit it and Kazma will fetch the post."
+                )
+                return True
+
+            from kazma_core.x_api.reply import handle_summon, parse_tweet_url
+
+            url_part, _, pasted = rest.partition("|")
+            parent_id, handle = parse_tweet_url(url_part.strip())
+            if not parent_id:
+                await _send(
+                    "Could not find a tweet id in that. Paste the full post URL."
+                )
+                return True
+
+            parent_text = pasted.strip()
+            followers = None
+            if not parent_text:
+                # No pasted text — try to fetch it. Fails cleanly on Free.
+                try:
+                    from kazma_core.x_api.client import XClient
+                    from kazma_core.x_api.config import get_x_config
+
+                    xcfg = get_x_config()
+                    tweet, includes = await XClient(xcfg.credentials).get_tweet(parent_id)
+                    parent_text = str(tweet.get("text") or "")
+                    users = includes.get("users") or []
+                    if users and isinstance(users[0], dict):
+                        handle = str(users[0].get("username") or handle).lower()
+                        metrics = users[0].get("public_metrics") or {}
+                        if "followers_count" in metrics:
+                            followers = int(metrics["followers_count"])
+                except Exception as exc:  # noqa: BLE001
+                    await _send(
+                        f"Could not fetch that post ({exc}).\n\n"
+                        "Paste its text instead:\n`/x roast <url> | <post text>`"
+                    )
+                    return True
+            if not parent_text:
+                await _send("That post has no text to react to.")
+                return True
+
+            res = await handle_summon(
+                summon_id=f"manual:{parent_id}",
+                parent_id=parent_id,
+                parent_text=parent_text,
+                parent_handle=handle,
+                summoner=str(getattr(msg, "sender_id", "") or "").split(":")[-1],
+                target_followers=followers,
+                cfg=cfg,
+                force_mode="draft",
+                # An emoji anywhere in the command dials the tone, the same
+                # way it would in a real summon on X.
+                summon_text=text,
+            )
+            if res.action == "awaiting_approval":
+                await _send(
+                    f"📝 *Draft* (subject: `{res.subject_id}`)\n\n"
+                    f"{res.draft}\n\n"
+                    f"Post it: `/x approve {res.summon_id}`"
+                )
+            elif res.action == "posted":
+                await _send(f"✅ Posted.\n{res.url}")
+            else:
+                await _send(f"⏭️ {res.reason}")
+            return True
+
+    await _send(f"Unknown subcommand `{sub}`. Try `/x help`.")
+    return True

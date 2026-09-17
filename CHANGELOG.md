@@ -1,5 +1,193 @@
 # CHANGELOG
 
+## X auto-reply: a settings panel, a tone dial, and an open-to-everyone switch (2026-09-17)
+
+**Settings → Integrations → X → Auto-reply.** Modes, caps, the allowlist, and
+a subject editor with a textarea for the `view` — plus a **dry run** that
+drafts against a pasted post and publishes nothing, records nothing, and burns
+no summon. That last part is the point: tuning a `view` is guesswork until you
+can see what it produces, and the alternative was spending a real, rate-capped,
+irreversible summon per iteration.
+
+Saving validates rather than accepting quietly. Subjects are the one config in
+the product where a malformed entry is silently *inert* — `_parse_subjects`
+skips anything missing `id`, `match` or `view` so one bad subject cannot
+disable the rest. Right for the server, hostile to the author: a fat-fingered
+key became a subject that never fired, with nothing to say why. The panel names
+the problem instead, and refuses `enabled` with mode `off`, or `enabled` with
+an empty allowlist.
+
+**The summon emoji now dials the tone.** "what do you think Kazma? 😂" gets a
+roast; the same sentence with 🤬 gets an angry one, off the same subject. The
+first cut threw this away entirely — `summon_text` was not even a parameter, so
+every reply arrived in whatever mood the subject happened to be saved with,
+which is not how anyone actually summons a bot.
+
+The invariant that makes it safe to honour text someone else wrote: the emoji
+reaches **tone only**. It cannot touch the subject's `view` or its
+`hard_lines`, and a test asserts every hard line survives a mood change,
+because that is the property a later refactor would break by accident.
+
+**`summoner_policy: anyone`** opens summoning to any account that mentions you.
+Every other rail holds unchanged: declared-subject match, the three caps, the
+follower floor, the content screen. What changes is only *who may ask*.
+
+Two deliberate asymmetries in that mode. A stranger may summon but may **not**
+set the mood — letting someone else choose whether you answer angry is a small
+manipulation lever with no upside, so strangers get the subject's declared mood
+and only listed handles keep the emoji. And `anyone` + `auto` — a stranger's
+tweet publishing under your name unread — warns on save rather than being
+refused, because it is the operator's account and their call, but it says so
+out loud instead of being discovered in the replies.
+
+`allowlist` remains the default and an empty list still means nobody: a config
+mistake must never open the account to the world.
+
+### Two defects fixed on the way
+
+`XClient._request` assumed `data` was a dict. It is a dict for `POST /2/tweets`
+and a **list** for every read endpoint, so the first mentions call raised
+`AttributeError` *after* a successful HTTP 200, inside the audit-log line. The
+call had worked; the client threw anyway. Found by the tier probe that
+established this account reads mentions at all.
+
+`restore_drill.py` sampled five secrets from a restored vault copy with
+`vault.retrieve(name)` — ambient tenant, and the drill runs context-less. Every
+tenant-scoped row returned None and was counted as "did not open". With 34 of
+67 rows scoped on this install, a sample of five could report **"the backup's
+key opens NOTHING"** about a backup whose key was fine. It now decrypts each
+sample as its own tenant, which `list_secrets()` already reports. A false alarm
+on recoverability is worse than no drill.
+
+## The tenant-scoped secret bug, fixed at the resolver this time (2026-09-17)
+
+Three incidents, three call-site patches, one unchanged cause.
+
+`ConfigStore._resolve_vault_value` resolved every `vault://` pointer with
+`vault.retrieve(name)` — no tenant. `Vault.retrieve` falls back tenant→global
+and deliberately not the reverse, so with no ContextVar it sees **global rows
+only**. Settings writes secrets under the operator's tenant. Therefore every
+context-less caller — cron, a background loop, the CLI, a standalone script —
+read them as missing and reported "not configured" about a credential sitting
+in the vault.
+
+That is the 2026-09-12 cron 401 (paged twice at 09:00), the 2026-09-16 Z.AI
+substitution (the operator's DeepSeek key was present and decrypting; the
+registry treated the provider as keyless and swapped vendors), and the
+2026-09-17 "X credentials are incomplete" report. Each was fixed where it
+surfaced. The resolver was never touched.
+
+**Measured, finally, rather than argued.** On the live install: the vault holds
+67 secrets — 33 global, **34 scoped to `default`**. Running the same probe in
+two processes, `ConfigStore.get()` resolved **4/4** X credentials with
+`tenant="default"` installed and **0/4** without. Half the vault was invisible
+to half the codebase.
+
+`retrieve_scoped()` now walks current tenant → `default` → global, and the
+resolver uses it. `Vault.retrieve`'s own contract is untouched —
+`tests/test_cron_tenant_context.py` still passes unmodified, including its
+assertion that a context-less caller must NOT see a tenant-scoped row directly.
+
+**The `default` rung is posture-gated**, which is the part that makes this
+different from the fallback that test argues against. On a single-operator
+install `default` IS the operator. On a multi-tenant one, falling back to it
+means tenant B asking for a key, missing, and receiving tenant `default`'s —
+the same cross-tenant read, moved one layer up, so it gets the same answer.
+`multi_user_or_production()` gates the rung and fails CLOSED, so "cannot tell"
+means "do not widen the read".
+
+### A false alarm this uncovered
+
+`restore_drill.py` sampled five secrets from a restored vault copy and called
+`vault.retrieve(name)` on each — ambient tenant, and the drill runs
+context-less. Every tenant-scoped row returned None and was counted as "did not
+open". With 34 of 67 rows scoped, a sample of five could report **"the backup's
+key opens NOTHING — N stored secrets are unrecoverable from this backup"** about
+a backup whose key was perfectly fine. It now decrypts each sample as its own
+tenant, which `list_secrets()` already reports. A false alarm on recoverability
+is worse than no drill: it sends the operator to rebuild a vault that was never
+broken. `KNOWN_GAPS` notes the drill has not yet run live — it would have been
+the first thing it said.
+
+Checked and left alone in the same sweep, because a sweep that reports only
+hits is not a sweep: `email_manager/credentials.py` forces global scope
+deliberately and consistently on both read and write; `secret_vault/tools.py`
+is the agent-facing tool where the caller's own tenant is the right scope; and
+ConfigStore's lazy-migrate comparison must stay ambient, because it compares
+against the scope the write will actually land in.
+
+`tests/test_config_store_tenant_resolve.py` — nine tests, including the
+multi-tenant leak, the fail-closed posture probe, and a source assertion that
+the bare `vault.retrieve` cannot come back.
+
+## X auto-reply: Kazma argues your view, or says nothing (2026-09-17)
+
+Kazma can now reply to a post it is summoned under, in a tone the operator
+picks, arguing a position the operator wrote. Off by default.
+
+**The governing rule is that it has no opinions.** `connectors.x.reply.subjects`
+is a list of operator-declared subjects, each with a `view`, a `mood`, and its
+own `hard_lines`. A post that matches none of them produces **no reply** and a
+logged reason — never a generic take. Classification is keyword-first
+(deterministic, free, never calls a model); the LLM fallback picks from the
+declared ids *or nothing*, so a hallucinated subject cannot become a reply.
+
+**Two triggers, one core.** `/x roast <url> | <text>` on any gateway works on
+every X plan — the operator supplies the post text, so no read quota is spent.
+The mentions poller does the same thing automatically and needs a paid plan.
+`reply.handle_summon` takes the parent text as a *parameter* rather than
+fetching it, which is what lets both triggers share everything below the
+trigger, and what keeps the feature alive if the API tier is ever downgraded.
+
+**`draft` is the default mode, not `auto`.** Every outbound X path in this
+repo rests on "a human approved this exact text" — `authorize.py` makes
+`x_post` refuse without a resolvable proposal id and rewrites the text from
+the stored proposal, because approval resolves an ID, not a memory.
+Auto-reply is the first feature that wants to break that, so it does not:
+`draft` holds the text, pushes it to the operator, and `/x approve <id>`
+publishes **the stored draft**, not anything the caller passes back in.
+`/x roast` forces `draft` whatever the configured mode, because an operator
+typing the command by hand is the approval step.
+
+Rails that `x_api.policy` cannot see, because it counts posts and not targets:
+per-day, per-target-per-day, per-thread cooldown, and a follower floor
+(mocking a large account is banter; the same text aimed at forty followers is
+pointing a bot at a stranger). Universal hard lines — no attacks on protected
+characteristics, no slurs, no threats, criticise institutions rather than
+peoples — are appended to every subject and cannot be switched off. A
+post-generation screen checks what the model *wrote*, not what it was asked
+for, because a model in `roast` mode drifts toward exactly the line the
+subject forbade.
+
+**Two defects found on the way in, both in code this feature builds on.**
+
+`XClient._request` assumed `data` was a dict. It is a dict for `POST /2/tweets`
+and a **list** for every read endpoint, so the first-ever mentions call raised
+`AttributeError` *after* a successful HTTP 200, inside the audit-log line. The
+call had worked; the client threw anyway. Found by the tier probe, which is
+also how the account's plan was established (mentions and tweet lookup both
+200 — Basic or above).
+
+The probe's first run reported "X credentials are incomplete" on an install
+where all four are present. They are vault rows under `tenant="default"`, and
+`ConfigStore._resolve_vault_value` calls `vault.retrieve(name)` with no tenant,
+which sees global rows only. Measured in separate processes: **4/4 resolved
+with a tenant installed, 0/4 without**, against a live vault that is 33 global
+/ 34 tenant-scoped. The 2026-09-17 audit fixed three *callers*; the shared
+resolver is unchanged, so every future background reader inherits it. The
+mentions poller therefore installs `tenant_scope("default")` before reading any
+config — as does the `/x` command, since gateway paths never set one either.
+
+New SQLite work is offloaded with `asyncio.to_thread`. The static gate does not
+require this — it cannot see a blocking call behind a method, which is why
+`scheduled_fire.py:91` still pins the loop on `store.list_due()` — but shipping
+a new instance of the class this repo just spent an audit on would be absurd.
+
+`tests/test_x_auto_reply.py` — 34 tests. The ones that matter: an unmatched
+post drafts nothing, a hallucinated subject id is discarded, a second summon
+with the same id spends no model call, a screened draft never reaches publish,
+and approve is not replayable.
+
 ## Full-battery Part D: restic, Postgres dump, migrate+vault (2026-09-17)
 
 Ops pack now includes the three drills that A/B/C cannot see: restore

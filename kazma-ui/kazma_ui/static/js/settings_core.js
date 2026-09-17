@@ -433,6 +433,30 @@
         // X audit log (append-only x_audit.db; loaded on demand)
         xShowKeys: false,
 
+        // ── X auto-reply (connectors.x.reply.*) ──────────────────────
+        // Subjects are the only config in the product where a malformed
+        // entry is silently harmless at runtime (stance._parse_subjects
+        // skips it), which is right for the server and wrong for the
+        // author. The panel validates on save and shows per-subject
+        // problems instead of letting a typo become a subject that never
+        // fires.
+        xReply: {
+            enabled: false, mode: 'off', summoners: [], trigger: '',
+            max_replies_per_day: 5, max_replies_per_target_per_day: 1,
+            cooldown_per_thread_s: 3600, min_target_followers: 500,
+            poll_interval_s: 600, subjects: [],
+            summoner_policy: 'allowlist', allow_emoji_mood: true, mood_emoji: {},
+            moods: ['roast', 'angry', 'dry', 'deadpan', 'supportive'],
+            connector_ready: false, can_draft: false, handle: '',
+        },
+        xReplySummonersText: '',
+        xReplyLoading: false,
+        xReplySaving: false,
+        xReplyProblems: [],
+        xReplyOpen: null,          // index of the expanded subject card
+        xReplyPreview: { text: '', handle: '', subject_id: '', mood: '', result: null, busy: false },
+        xReplyRecent: [],
+
         async init() {
             const self = this;
             self.loading = true;
