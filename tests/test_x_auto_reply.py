@@ -973,3 +973,80 @@ async def test_rule_screen_still_runs_first(_no_llm, monkeypatch):
     )
     assert res.action == "failed" and "banned construction" in res.reason
     assert calls["n"] == 0
+
+
+# ── Gateway identity is not an X handle ───────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_trusted_caller_skips_the_x_allowlist(_no_llm, monkeypatch):
+    """`/x roast` passes a GATEWAY identity, not a handle on X.
+
+    Telegram sends `telegram:12345`. Matching that against a list of X handles
+    is a category error: it can never match, so the command was refused for
+    everyone including the operator, and no allowlist entry could fix it —
+    putting your X handle in there does nothing for a Telegram id. The
+    gateway's own auth is the authorization for that path.
+    """
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="t1", parent_id="p1", parent_text="Iran",
+        parent_handle="someone", summoner="telegram:12345",
+        target_followers=9_000, cfg=_cfg(), force_mode="draft", trusted=True,
+    )
+    assert res.action == "awaiting_approval"
+
+
+@pytest.mark.asyncio
+async def test_untrusted_caller_is_still_gated(_no_llm, monkeypatch):
+    """The bypass is for authenticated gateway callers only."""
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="t2", parent_id="p2", parent_text="Iran",
+        parent_handle="someone", summoner="telegram:12345",
+        target_followers=9_000, cfg=_cfg(),
+    )
+    assert res.action == "skipped" and "summoners" in res.reason
+
+
+@pytest.mark.asyncio
+async def test_a_trusted_caller_can_set_the_tone(_no_llm, monkeypatch):
+    """They are the operator; the emoji is theirs to use."""
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+        seen["mood"] = mood
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    await handle_summon(
+        summon_id="t3", parent_id="p3", parent_text="Iran",
+        parent_handle="someone", summoner="telegram:12345",
+        target_followers=9_000, cfg=_cfg(), force_mode="draft", trusted=True,
+        summon_text="roast him 🤬",
+    )
+    assert seen["mood"] == "angry"
+
+
+@pytest.mark.asyncio
+async def test_trusted_does_not_lift_the_other_rails(_no_llm, monkeypatch):
+    """Only the allowlist is bypassed — caps and subjects still hold."""
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="t4", parent_id="p4", parent_text="Iran",
+        parent_handle="tiny", summoner="telegram:12345",
+        target_followers=40, cfg=_cfg(), force_mode="draft", trusted=True,
+    )
+    assert res.action == "skipped" and "followers" in res.reason
+
+
+def test_the_command_passes_trusted():
+    """Grep-proof: the /x path must keep sending trusted=True."""
+    import inspect
+
+    from kazma_gateway.agent_handler.commands import _try_x_command
+
+    src = inspect.getsource(_try_x_command)
+    assert "trusted=True" in src, (
+        "/x roast must mark itself a gateway caller, or the X allowlist "
+        "refuses the operator's own command"
+    )

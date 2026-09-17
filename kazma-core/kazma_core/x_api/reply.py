@@ -408,6 +408,7 @@ async def handle_summon(
     cfg: ReplyConfig | None = None,
     force_mode: str = "",
     summon_text: str = "",
+    trusted: bool = False,
 ) -> SummonResult:
     """Claim, gate, draft, screen, and publish-or-hold one summon.
 
@@ -435,10 +436,16 @@ async def handle_summon(
             reason="no subjects declared — nothing to argue from",
             parent_id=parent_id, summon_id=summon_id,
         )
-    # An empty allowlist means nobody. `force_mode` does not bypass this:
-    # the operator issuing /x is themselves checked, which is what makes the
-    # allowlist meaningful rather than decorative.
-    if summoner and not cfg.is_summoner(summoner):
+    # The allowlist holds X handles, and it gates who may summon ON X.
+    #
+    # `trusted` means the caller is an authenticated operator on a gateway
+    # (the `/x` command), not a handle on X. Checking them against it was a
+    # category error: Telegram passes `telegram:12345`, so the comparison was
+    # a numeric id against a list of X handles and could never match --
+    # `/x roast` was refused for everyone, including the operator, no matter
+    # what they put in the allowlist. The gateway's own auth is the
+    # authorization for that path; every other rail still applies.
+    if not trusted and summoner and not cfg.is_summoner(summoner):
         return SummonResult(
             False, "skipped",
             reason=f"@{summoner.lstrip('@')} is not in connectors.x.reply.summoners",
@@ -492,7 +499,7 @@ async def handle_summon(
     # produce the same reply. Only a TRUSTED summoner can dial it -- see
     # ReplyConfig.mood_override_allowed.
     mood = ""
-    if summon_text and cfg.mood_override_allowed(summoner):
+    if summon_text and (trusted or cfg.mood_override_allowed(summoner)):
         mood = mood_from_text(summon_text)
         if mood:
             logger.info("[x-reply] emoji set mood=%s for %s", mood, summon_id)

@@ -229,6 +229,41 @@ badly can be fixed and retried immediately.
 
 `/x roast` and `/x poll` work without the poller running.
 
+## Testing it safely
+
+Test in three layers. Do **not** start on X — the first two never touch your
+account.
+
+**1. Dry run (nothing leaves the machine).**
+Settings → Integrations → X → Auto-reply → **Try it**. Paste the text of a post,
+pick a tone, hit *Draft a reply*. Nothing is published, nothing is recorded, no
+summon is consumed, and no cap moves. Iterate on the `view` and `examples`
+here until the voice is right — this is what the panel exists for.
+
+**2. Manual summon from chat (posts only when you approve).**
+
+```
+/x roast https://x.com/someone/status/123 | the text of their post
+```
+
+Kazma classifies, drafts, screens, stance-checks, and **holds**. You get the
+draft back with `/x approve <id>`. Nothing posts until you run that. `/x roast`
+forces draft mode whatever your configured mode is, so this step cannot
+surprise you.
+
+Your gateway login is the authorization here — you do **not** need to be in
+`summoners` for this, and adding your X handle would not help: the command
+passes a gateway identity (`telegram:12345`), not a handle on X.
+
+**3. A real mention (paid plan only).** From a *different* X account, reply to
+some post with a mention of your bot handle and your trigger phrase. Then
+`/x poll` to force a cycle rather than waiting for the interval. In `draft`
+mode you still approve before anything posts.
+
+`/x list` shows every summon with its outcome, including the skipped ones, so
+"nothing happened" is always explainable. Set `KAZMA_X_REPLY=0` to stop the
+whole thing instantly.
+
 ## Operating it
 
 ```
