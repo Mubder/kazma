@@ -153,7 +153,7 @@ These modules implement or support tools (some registered at startup, some via s
 | `generate_markdown_doc` | document-generator | document | safe/read | Generate an atomic UTF-8 Markdown artifact with Unicode preservation.
  |
 | `document_import` | document-platform | document | safe/read | Ingest a workspace-safe local file into the durable document platform (quarantine, validate, parse out-of-process) and return its opaque document_id/job_id and final state. Only files inside the activ |
-| `document_status` | document-platform | document | safe/read | Report the durable processing state for a document_id or job_id, including stage, attempt count, and any safe error diagnostics.
+| `document_status` | document-platform | document | safe/read | No ids: tenant document-platform overview (enabled, workers, queue, catalog). With document_id or job_id: that job's stage, attempt count, and any safe error diagnostics.
  |
 | `document_read` | document-platform | document | safe/read | Read paged, fenced content of an already-processed document by its opaque document_id, with page/offset/max_chars selectors and deterministic continuation.
  |
