@@ -15,6 +15,8 @@ Use this before exposing Kazma beyond loopback. Aligns with
 
 **Feature smoke (research / KB / proxy / memory explain):** see [Smoke test matrix](./smoke-matrix) — run after related deploys.
 
+**Is the install actually alive?** [Full-system battery](./full-battery) — chat tools (A), HTTP/ops (B), one HITL write (C). A green Part A is not a green Kazma.
+
 ## P0 — Secrets & bind
 
 - [ ] `KAZMA_HOST` is intentional (`127.0.0.1` or proxy-only `0.0.0.0`)
