@@ -16,10 +16,12 @@ interval is operator config with a 60s floor, and ``since_id`` means a quiet
 account costs one near-empty response per poll rather than a re-read of the
 window.
 
-**A summon is a mention that passed the cheap gates.** Allowlist (or
-``anyone``), optional trigger phrase, not our own tweet. A standalone
-``@handle 😂`` is a summon — we reply to that tweet. A reply under someone
-else's post still reacts to the parent. Everything that survives goes to
+**A summon is an @mention, not a thread reply to Kazma.** Allowlist (or
+``anyone``), optional trigger phrase, not our own tweet, not a reply whose
+parent we authored (X pre-fills ``@handle`` on those, so they appear in
+the mentions timeline anyway). A standalone ``@handle 😂`` is a summon —
+we reply to that tweet. A mention under someone else's post reacts to the
+parent. Everything that survives goes to
 :func:`kazma_core.x_api.reply.handle_summon`, which claims it idempotently
 before spending a model call.
 """
@@ -315,9 +317,15 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             p_users = _index_users(p_includes)
             p_author = p_users.get(str(parent.get("author_id") or ""))
             parent_handle = str((p_author or {}).get("username") or summoner).lower()
-            # Replying under our own post is a conversation with the bot,
-            # not a loop: we never @-mention ourselves in drafts, and
-            # summoner == me is already skipped above.
+            # Operator rule: summons are @mentions, not thread replies to
+            # Kazma. A reply to our own post almost always includes @handle
+            # (X pre-fills it), so it shows up in the mentions timeline —
+            # and must still be ignored.
+            if parent_handle and parent_handle == my_handle:
+                await _skip(
+                    "reply to our own post — only @mentions summon, not thread replies"
+                )
+                continue
             target_followers = _followers(p_author)
         else:
             parent_id = tid

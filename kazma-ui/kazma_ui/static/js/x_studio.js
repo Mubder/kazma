@@ -67,12 +67,18 @@ function xStudioPage() {
     async convAction(kind, row) {
       const id = row && row.summon_id;
       if (!id || this.convBusy) return;
-      if (kind === 'approve' || kind === 'deny') {
+      if (kind === 'approve' || kind === 'deny' || kind === 'delete') {
+        const posted = kind === 'delete' && row.status === 'posted' && row.tweet_id;
         const ok = await window.kazmaConfirm({
-          title: kind === 'approve' ? 'Post this reply?' : 'Discard this draft?',
-          message: (row.reply || row.reason || id),
-          confirmText: kind === 'approve' ? 'Approve' : 'Deny',
-          danger: kind === 'deny',
+          title: kind === 'approve' ? 'Post this reply?'
+            : (kind === 'delete'
+              ? (posted ? 'Delete this reply on X?' : 'Remove from the log?')
+              : 'Discard this draft?'),
+          message: posted
+            ? ((row.reply || '') + '\n\nThis removes the tweet from X.')
+            : (row.reply || row.reason || id),
+          confirmText: kind === 'approve' ? 'Approve' : (kind === 'delete' ? 'Delete' : 'Deny'),
+          danger: kind !== 'approve',
         });
         if (!ok) return;
       }
@@ -83,7 +89,8 @@ function xStudioPage() {
         if (resp.ok && data.ok !== false) {
           const msg = kind === 'approve' && data.url
             ? ('Posted: ' + data.url)
-            : (kind === 'deny' ? 'Denied.' : (data.action === 'awaiting_approval' ? 'Redrafted — approve to post.' : (data.reason || 'Done.')));
+            : (kind === 'delete' ? (data.reason || 'Deleted.')
+              : (kind === 'deny' ? 'Denied.' : (data.action === 'awaiting_approval' ? 'Redrafted — approve to post.' : (data.reason || 'Done.'))));
           window.showToast(msg, data.action === 'failed' ? 'error' : 'success');
         } else {
           window.showToast(data.error || data.reason || 'Request failed', 'error');

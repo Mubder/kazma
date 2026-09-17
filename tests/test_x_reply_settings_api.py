@@ -305,6 +305,7 @@ def test_conversations_refresh_polls_x():
     ).read_text(encoding="utf-8")
     assert "/api/x/reply/poll" in js
     assert "loadConversations({poll: true})" in html
+    assert "convAction('delete'" in html
 
 
 def test_the_panel_sends_the_open_card():

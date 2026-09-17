@@ -49,6 +49,7 @@ __all__ = [
     "SummonResult",
     "approve_summon",
     "deny_summon",
+    "forget_summon",
     "retry_summon",
     "handle_summon",
     "preview_reply",
@@ -910,6 +911,47 @@ async def approve_summon(summon_id: str) -> SummonResult:
         True, "posted", draft=rec.draft_text, subject_id=rec.subject_id,
         tweet_id=tweet_id, url=str(payload.get("url") or ""), parent_id=rec.parent_id,
         summon_id=summon_id,
+    )
+
+
+async def forget_summon(summon_id: str) -> SummonResult:
+    """Delete the posted reply on X (if any) and drop the log row.
+
+    Operator click on Conversations is the approval, matching X Studio
+    delete. A tweet already gone on X still drops the row.
+    """
+    from kazma_core.x_api.booking import delete_x_post
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    store = get_reply_store()
+    rec = await asyncio.to_thread(store.get, summon_id)
+    if rec is None:
+        return SummonResult(False, "failed", reason="unknown summon id",
+                            summon_id=summon_id)
+    x_err = ""
+    if rec.tweet_id:
+        ok, payload = await delete_x_post(tweet_id=rec.tweet_id)
+        if not ok:
+            x_err = str(payload.get("error") or "delete failed")
+            low = x_err.lower()
+            gone = any(s in low for s in ("deleted", "not visible", "not found", "404"))
+            if not gone:
+                return SummonResult(
+                    False, "failed", reason=x_err, draft=rec.draft_text,
+                    subject_id=rec.subject_id, parent_id=rec.parent_id,
+                    summon_id=summon_id, tweet_id=rec.tweet_id,
+                )
+    await asyncio.to_thread(store.forget, summon_id)
+    if rec.tweet_id and not x_err:
+        reason = "deleted on X and removed from the log"
+    elif rec.tweet_id:
+        reason = f"removed from the log (already gone on X: {x_err})"
+    else:
+        reason = "removed from the log"
+    return SummonResult(
+        True, "deleted", reason=reason, draft=rec.draft_text,
+        subject_id=rec.subject_id, parent_id=rec.parent_id,
+        summon_id=summon_id, tweet_id=rec.tweet_id,
     )
 
 

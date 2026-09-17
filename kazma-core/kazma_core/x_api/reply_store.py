@@ -261,6 +261,20 @@ class XReplyStore:
     def mark_failed(self, summon_id: str, reason: str) -> None:
         self._update(summon_id, status=STATUS_FAILED, reason=reason[:500])
 
+    def forget(self, summon_id: str) -> bool:
+        """Remove a row from the log. Posted tweets must be deleted on X first."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                cur = conn.execute(
+                    "DELETE FROM x_replies WHERE summon_id = ?",
+                    (str(summon_id),),
+                )
+                conn.commit()
+                return cur.rowcount > 0
+            finally:
+                conn.close()
+
     def release(self, summon_id: str) -> bool:
         """Delete a non-posted row so ``claim`` can take it again.
 
@@ -335,16 +349,23 @@ class XReplyStore:
                 conn.close()
 
     def recent(self, limit: int = 20) -> list[ReplyRecord]:
+        """Newest mention on X first — not last time we touched the row.
+
+        ``ORDER BY created_at`` put a retried old summon above a newer one
+        because retry deletes and re-claims (new created_at). Tweet ids are
+        snowflakes: larger id is later on X. Manual ``/x roast`` rows have
+        no snowflake and sort after real mentions, by created_at.
+        """
+        cap = max(1, min(200, int(limit)))
         with self._lock:
             conn = self._connect()
             try:
-                rows = conn.execute(
-                    "SELECT * FROM x_replies ORDER BY created_at DESC LIMIT ?",
-                    (max(1, min(200, int(limit))),),
-                ).fetchall()
-                return [ReplyRecord(r) for r in rows]
+                rows = conn.execute("SELECT * FROM x_replies").fetchall()
             finally:
                 conn.close()
+        recs = [ReplyRecord(r) for r in rows]
+        recs.sort(key=lambda r: _mention_recency_key(r), reverse=True)
+        return recs[:cap]
 
     # ── Mentions cursor ───────────────────────────────────────────────
 
@@ -376,6 +397,14 @@ class XReplyStore:
                 conn.commit()
             finally:
                 conn.close()
+
+
+def _mention_recency_key(rec: ReplyRecord) -> tuple[int, int]:
+    """Sort key: larger is newer. Snowflake mentions beat manual roasts."""
+    sid = str(rec.summon_id or "").strip()
+    if sid.isdigit():
+        return (1, int(sid))
+    return (0, int((rec.created_at or 0.0) * 1000))
 
 
 _store: XReplyStore | None = None

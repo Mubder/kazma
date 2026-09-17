@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## X auto-reply: @mentions only; Conversations sorts by tweet time (2026-09-18)
+
+Summons are **@mentions**, not replies on Kazma's own thread. X pre-fills
+`@handle` when you reply to a post, so those replies show up in the mentions
+timeline — they are now skipped (`reply to our own post`). A standalone
+`@KazmaAI 😂` or a mention under someone else's post still drafts.
+
+Conversations was ordered by `created_at`, so Retry of an old summon jumped
+it to the top. The list is now newest-on-X first (snowflake tweet id).
+
+Each card has **Delete**: a posted reply is removed on X and from the log;
+anything else is dropped from the log only. `/x delete <id>` does the same.
+
 ## Fix — stuck `drafting` summons had no Retry (2026-09-18)
 
 The new `@KazmaAI what do you think buddy? 😂` mention was claimed, then

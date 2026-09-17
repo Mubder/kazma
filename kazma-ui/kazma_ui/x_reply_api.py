@@ -518,6 +518,24 @@ async def x_reply_approve(body: SummonIdBody) -> JSONResponse:
         return _safe_error(exc)
 
 
+@protected_router.post("/delete", dependencies=[Depends(_csrf)])
+async def x_reply_delete(body: SummonIdBody) -> JSONResponse:
+    """Delete the posted reply on X (if any) and drop the Conversations row."""
+    sid = (body.summon_id or "").strip()
+    if not sid:
+        return JSONResponse({"ok": False, "error": "summon_id required"}, status_code=400)
+    try:
+        from kazma_core.tenant_context import tenant_scope
+        from kazma_core.x_api.reply import forget_summon
+
+        with tenant_scope("default"):
+            result = await forget_summon(sid)
+        status = 200 if result.ok else 400
+        return JSONResponse(_summon_payload(result), status_code=status)
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
 @protected_router.post("/deny", dependencies=[Depends(_csrf)])
 async def x_reply_deny(body: SummonIdBody) -> JSONResponse:
     sid = (body.summon_id or "").strip()
