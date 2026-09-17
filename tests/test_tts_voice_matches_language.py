@@ -1,0 +1,129 @@
+"""An English reply must not be read aloud in an Arabic voice.
+
+Live, 2026-09-17. The operator opened the web UI and Kazma began speaking
+unprompted, in Arabic, reciting what sounded like hashes and dashes:
+
+    [TTS/edgetts] Synthesized 1424160 bytes (voice=ar-SA-HamedNeural)
+
+1.4 MB is several minutes of speech. Two defects produced it.
+
+`voice.tts_voice` was pinned to `ar-SA-HamedNeural`, and the route applied
+that pin to EVERY reply regardless of the text — so English answers went to
+an Arabic voice, which pronounces `ad03e222` and `|---|---|` character by
+character.
+
+The text that made it unbearable is also the text that breaks naive language
+detection: a technical reply is mostly git SHAs, byte counts and table
+pipes. Counting all characters would call that Arabic or Latin depending on
+how many dashes it had, so detection counts LETTERS only.
+"""
+
+from __future__ import annotations
+
+import pytest
+from kazma_core.voice.tts import AUTO_VOICE, detect_script, pick_voice_for_text
+
+AR = "مرحبا، كيف حالك اليوم؟"
+EN = "Hello, how are you today?"
+#: The live payload's shape: prose swamped by identifiers and punctuation.
+TECHNICAL = (
+    "Pushed as ad03e222. CI: 9,048 passed, 0 failed.\n"
+    "| metric | value |\n|---|---|\n| commits | 3,436+ |\n"
+    "See docs/KNOWN_GAPS.md — 415.37s vs 413.94s."
+)
+
+
+# ── detection ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("label", "text", "expect"),
+    [
+        ("plain arabic", AR, "arabic"),
+        ("plain english", EN, "latin"),
+        ("technical english", TECHNICAL, "latin"),
+        ("arabic with latin product name", "شكرا لك يا Kazma على المساعدة", "arabic"),
+        ("arabic with hashes", "تم الإصلاح في ad03e222 والاختبارات خضراء", "arabic"),
+        ("digits only", "12345 67890", "unknown"),
+        ("punctuation only", "|---|---| --- ... !!!", "unknown"),
+        ("empty", "", "unknown"),
+        ("whitespace", "   \n\t ", "unknown"),
+    ],
+)
+def test_script_detection(label, text, expect):
+    assert detect_script(text) == expect, label
+
+
+def test_digits_and_dashes_do_not_decide_the_language():
+    """The exact trap: the live text was mostly non-letters."""
+    assert detect_script(TECHNICAL) == "latin"
+    assert detect_script("ad03e222 | 9,048 | --- | 415.37s") == "latin"
+    # Arabic prose keeps winning even when identifiers outnumber the words.
+    assert detect_script("راجع ad03e222 و 20e1645b و 69d2d57e الآن") == "arabic"
+
+
+def test_arabic_does_not_need_a_majority_but_does_need_a_foothold():
+    """Where the line sits, and why it is not 50%.
+
+    The failure modes are asymmetric — Arabic read by an English voice is
+    unintelligible, whereas Latin words read by an Arabic voice are merely
+    accented — so Arabic wins well below half. But it is not *any* Arabic:
+    an English sentence ending in one Arabic word is an English sentence,
+    and speaking all of it in Arabic would be the same defect in reverse.
+
+    The threshold is 15% of letters.
+    """
+    # One Arabic word on an English sentence: still English. (4 of 30 letters)
+    assert detect_script("Please review the pull request. شكرا") == "latin"
+    # A clause, not a word: Arabic. (~16 of 44 letters)
+    assert detect_script("Please review the PR — شكرا جزيلا على المساعدة") == "arabic"
+    # An Arabic sentence with an English technical term stays Arabic.
+    assert detect_script("الرجاء مراجعة الـ pull request") == "arabic"
+
+
+# ── voice selection ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("configured", [AUTO_VOICE, "default", "none", "", None, "  "])
+def test_auto_follows_the_text(configured):
+    assert pick_voice_for_text(EN, configured, "edgetts") == "en-US-AriaNeural"
+    assert pick_voice_for_text(AR, configured, "edgetts") == "ar-SA-HamedNeural"
+
+
+def test_the_live_regression_english_no_longer_gets_an_arabic_voice():
+    assert pick_voice_for_text(TECHNICAL, AUTO_VOICE, "edgetts") == "en-US-AriaNeural"
+
+
+def test_an_explicitly_pinned_voice_still_wins():
+    """Someone who typed a voice name meant it; auto must not override."""
+    assert pick_voice_for_text(EN, "ar-SA-HamedNeural", "edgetts") == "ar-SA-HamedNeural"
+    assert pick_voice_for_text(AR, "en-GB-RyanNeural", "edgetts") == "en-GB-RyanNeural"
+
+
+def test_unknown_script_falls_back_to_latin_not_to_silence():
+    assert pick_voice_for_text("12345", AUTO_VOICE, "edgetts") == "en-US-AriaNeural"
+
+
+@pytest.mark.parametrize("provider", ["openai", "kokoro", "coqui", "nvidia", "unknown"])
+def test_providers_with_multilingual_voices_are_left_alone(provider):
+    """`alloy` is not an English voice — re-picking by script is meaningless."""
+    assert pick_voice_for_text(AR, AUTO_VOICE, provider) == "default"
+    assert pick_voice_for_text(EN, AUTO_VOICE, provider) == "default"
+    # ...but an explicit pin is still honoured.
+    assert pick_voice_for_text(AR, "nova", provider) == "nova"
+
+
+# ── the route must ask, not pin ────────────────────────────────────────────
+
+
+def test_the_route_resolves_the_voice_from_the_text():
+    """Wiring guard: the fix is void if the route reinstates the blunt pin."""
+    import inspect
+
+    from kazma_ui import routes_voice
+
+    src = inspect.getsource(routes_voice.text_to_speech)
+    assert "pick_voice_for_text(" in src, "the route must resolve per-text"
+    assert "voice = str(db_voice)" not in src, (
+        "this is the unconditional pin that spoke English replies in Arabic"
+    )

@@ -35,11 +35,14 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 
 __all__ = [
+    "AUTO_VOICE",
     "TTSError",
     "TTSProvider",
+    "detect_script",
     "get_tts_provider",
     "get_last_error",
     "list_tts_providers",
+    "pick_voice_for_text",
     "register_tts_provider",
     "split_sentences",
     "synthesize",
@@ -47,6 +50,82 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: Ask for a voice that matches the text instead of pinning one.
+AUTO_VOICE = "auto"
+
+#: Per-provider voice for each script we can detect. Only providers whose
+#: voice names are locale-specific appear here: OpenAI's ``alloy``/``nova``
+#: and Kokoro's voices are multilingual, so re-picking one by script would
+#: change the speaker for no benefit.
+_VOICE_BY_SCRIPT: dict[str, dict[str, str]] = {
+    "edgetts": {
+        "arabic": "ar-SA-HamedNeural",
+        "latin": "en-US-AriaNeural",
+    },
+}
+
+#: Arabic block, Arabic Supplement, Extended-A, and the Presentation Forms
+#: that Word and PDF extraction leave behind.
+_ARABIC_RANGES = (
+    (0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF),
+    (0xFB50, 0xFDFF), (0xFE70, 0xFEFF),
+)
+
+
+def detect_script(text: str) -> str:
+    """``"arabic"``, ``"latin"``, or ``"unknown"`` for *text*.
+
+    Counts letters only. Digits, punctuation and whitespace are ignored
+    because they are script-neutral and would otherwise decide the answer
+    for exactly the content that made this necessary: a reply that is mostly
+    commit hashes, byte counts and table dashes, with a few words of prose.
+
+    Arabic wins on presence rather than majority. A sentence of Arabic with
+    an English product name in it is Arabic text; read in an English voice
+    the Arabic is unintelligible, whereas Latin words in an Arabic voice are
+    merely accented. The failure modes are not symmetric, so the threshold
+    is not 50%.
+    """
+    if not text:
+        return "unknown"
+    arabic = latin = 0
+    for ch in text:
+        if not ch.isalpha():
+            continue
+        cp = ord(ch)
+        if any(lo <= cp <= hi for lo, hi in _ARABIC_RANGES):
+            arabic += 1
+        elif cp < 0x0250:  # Latin, Latin-1 Supplement, Extended-A/B
+            latin += 1
+    total = arabic + latin
+    if total == 0:
+        return "unknown"
+    if arabic and arabic * 100 >= total * 15:
+        return "arabic"
+    return "latin" if latin else "unknown"
+
+
+def pick_voice_for_text(text: str, configured: str | None, provider: str) -> str:
+    """Resolve the voice to synthesize *text* with.
+
+    An explicit voice always wins — an operator who typed a voice name meant
+    it. Only ``auto``, ``default``, empty and ``none`` delegate to the text.
+
+    Live, 2026-09-17: ``voice.tts_voice`` was pinned to ``ar-SA-HamedNeural``
+    and the route applied it to every reply, so English answers full of git
+    SHAs were read aloud in Arabic, letter by letter, for several minutes.
+    """
+    pinned = (configured or "").strip()
+    if pinned and pinned.lower() not in {AUTO_VOICE, "default", "none"}:
+        return pinned
+
+    table = _VOICE_BY_SCRIPT.get((provider or "").strip().lower())
+    if not table:
+        # Provider's voices are not locale-named; let it use its own default.
+        return "default"
+    script = detect_script(text)
+    return table.get(script) or table["latin"]
 
 
 class TTSError(Exception):

@@ -567,6 +567,26 @@ html[data-theme="light"] { color-scheme: only light; }
   background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
 }
+/* Speak toggle. Muted is a resting state, not an alarm, so it only dims —
+   the crossed-out glyph already says which state it is in. Speaking is the
+   state a person is looking for the button BECAUSE of, so it is the loud
+   one: it has to be findable at a glance while audio is playing. */
+.composer-voice-btn.is-muted {
+  opacity: 0.55;
+}
+.composer-voice-btn.is-speaking {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: #22c55e;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .composer-voice-btn.is-speaking svg {
+    animation: kazma-speak-pulse 1.2s ease-in-out infinite;
+  }
+}
+@keyframes kazma-speak-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
 .composer-voice-btn.is-live-disabled {
   opacity: 0.5;
   pointer-events: none;
