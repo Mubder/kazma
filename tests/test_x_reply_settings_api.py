@@ -295,3 +295,61 @@ def test_the_panel_sends_the_open_card():
         "runXReplyPreview must send the open subject card, or the dry run "
         "silently falls back to saved config"
     )
+
+
+# ── "Is this thing actually on?" ──────────────────────────────────────────
+#
+# The dry run reads the card in the EDITOR; everything else reads SAVED
+# config. So an operator can have a preview drafting happily and a completely
+# inert feature at the same moment. That is exactly what happened on the first
+# live test: subject typed, preview working, `enabled` never saved, and a real
+# mention on X went nowhere with nothing on screen to explain it.
+
+def _reason(**over):
+    from kazma_ui.x_reply_api import _live_reason
+
+    class _X:
+        def __init__(self, ok): self._ok = ok
+        def can_post(self): return self._ok
+
+    return _live_reason(_cfg(**over), _X(over.pop("_connector", True)))
+
+
+def test_live_reason_flags_a_disabled_connector(monkeypatch):
+    from kazma_ui.x_reply_api import _live_reason
+
+    class _X:
+        def can_post(self): return False
+
+    assert "not posting-ready" in _live_reason(_cfg(), _X())
+
+
+def test_live_reason_flags_unsaved_enable():
+    """The exact first-run state: everything typed, nothing saved."""
+    assert "Auto-reply is OFF" in _reason(enabled=False)
+
+
+def test_live_reason_flags_mode_off():
+    assert "Mode is 'off'" in _reason(mode="off")
+
+
+def test_live_reason_flags_no_saved_subjects():
+    r = _reason(subjects=())
+    assert "No subjects are SAVED" in r
+    assert "not saved until you press Save" in r
+
+
+def test_live_reason_flags_empty_allowlist():
+    assert "nobody can summon" in _reason(summoners=())
+
+
+def test_live_reason_flags_a_stopped_poller(monkeypatch):
+    """Saved and correct, but the loop only starts at boot."""
+    monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: False)
+    r = _reason()
+    assert "poller is not running" in r and "restart" in r
+
+
+def test_live_reason_says_live_when_it_is(monkeypatch):
+    monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: True)
+    assert _reason().startswith("Live in draft mode")

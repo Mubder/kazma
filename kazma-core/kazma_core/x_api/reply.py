@@ -33,6 +33,7 @@ from typing import Any
 
 from kazma_core.x_api.stance import (
     MODE_AUTO,
+    ClassifierUnavailable,
     MODE_DRAFT,
     MOODS,
     ReplyConfig,
@@ -40,6 +41,7 @@ from kazma_core.x_api.stance import (
     classify,
     get_reply_config,
     mood_from_text,
+    no_match_detail,
 )
 
 logger = logging.getLogger(__name__)
@@ -553,11 +555,24 @@ async def handle_summon(
         return SummonResult(False, "skipped", reason=rail,
                             parent_id=parent_id, summon_id=summon_id)
 
-    subject = await classify(parent_text, cfg)
+    try:
+        subject = await classify(parent_text, cfg)
+    except ClassifierUnavailable as exc:
+        reason = (
+            f"the subject classifier could not run ({exc}) — this is NOT "
+            "'your subject did not match'. Check the active model in "
+            "Settings → Models."
+        )
+        await asyncio.to_thread(store.mark_failed, summon_id, reason)
+        return SummonResult(
+            False, "failed", reason=reason,
+            parent_id=parent_id, summon_id=summon_id,
+        )
     if subject is None:
         reason = (
             "no declared subject matched this post — Kazma does not have a "
-            "view on it, so it said nothing"
+            "view on it, so it said nothing. "
+            + no_match_detail(parent_text, cfg.subjects)
         )
         await asyncio.to_thread(store.mark_skipped, summon_id, reason)
         return SummonResult(False, "skipped", reason=reason,
@@ -683,13 +698,19 @@ async def preview_reply(
                 False, "skipped", reason=f"no subject with id {subject_id!r}"
             )
     else:
-        subject = await classify(parent_text, cfg)
+        try:
+            subject = await classify(parent_text, cfg)
+        except ClassifierUnavailable as exc:
+            return SummonResult(
+                False, "failed",
+                reason=f"the subject classifier could not run ({exc})",
+            )
         if subject is None:
             return SummonResult(
                 False, "skipped",
                 reason=(
                     "no declared subject matched this post — live, Kazma would "
-                    "say nothing"
+                    "say nothing. " + no_match_detail(parent_text, cfg.subjects)
                 ),
             )
 
