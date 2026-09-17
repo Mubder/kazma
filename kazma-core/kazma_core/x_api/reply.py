@@ -53,6 +53,7 @@ __all__ = [
     "handle_summon",
     "preview_reply",
     "parse_tweet_url",
+    "reply_target_id",
     "draft_reply",
     "screen_draft",
     "check_stance",
@@ -123,6 +124,26 @@ class SummonResult:
             "parent_id": self.parent_id,
             "summon_id": self.summon_id,
         }
+
+
+def reply_target_id(summon_id: str, parent_id: str) -> str:
+    """The tweet we POST as a reply to.
+
+    X only allows replies to posts that mention this account or that this
+    account wrote. The *parent* of a summon usually does neither — the
+    mention tweet does. Live 2026-09-18: approving a draft under
+    ``in_reply_to_tweet_id=<parent>`` returned HTTP 403 "You can only reply
+    to or quote posts where you are mentioned or are the author" against a
+    perfectly valid Read+Write app.
+
+    Poller summons use the mention's tweet id. ``/x roast`` uses
+    ``manual:<parent>`` and still targets the parent (and will 403 if
+    that post does not mention us — that is X's rule, not a token problem).
+    """
+    sid = (summon_id or "").strip()
+    if sid and not sid.lower().startswith("manual:"):
+        return sid
+    return (parent_id or "").strip()
 
 
 def parse_tweet_url(raw: str) -> tuple[str, str]:
@@ -674,7 +695,9 @@ async def handle_summon(
     # daily/monthly caps) and records the ledger row on success.
     from kazma_core.x_api.booking import publish_x_post
 
-    ok, payload = await publish_x_post(text=draft, reply_to_id=parent_id)
+    ok, payload = await publish_x_post(
+        text=draft, reply_to_id=reply_target_id(summon_id, parent_id)
+    )
     if not ok:
         err = str(payload.get("error") or "publish failed")
         await asyncio.to_thread(store.mark_failed, summon_id, err)
@@ -777,6 +800,27 @@ async def preview_reply(
     )
 
 
+def _republishable(rec: Any) -> bool:
+    """A publish that failed on the wire still has an approvable draft.
+
+    Screen failures (violence, stance, empty) are not this: those drafts
+    must not reach POST /2/tweets just because the operator hits Approve
+    again. The live 403 rows are — the text was already held, X refused
+    the *target*, and Retry would only spend another model call.
+    """
+    from kazma_core.x_api.reply_store import STATUS_FAILED
+
+    if rec.status != STATUS_FAILED:
+        return False
+    if not (rec.draft_text or "").strip():
+        return False
+    reason = (rec.reason or "").lower()
+    return any(
+        m in reason
+        for m in ("http", "x auth", "x api", "x rate", "mentioned", "are the author")
+    )
+
+
 async def approve_summon(summon_id: str) -> SummonResult:
     """Publish a draft that was held for approval.
 
@@ -792,14 +836,22 @@ async def approve_summon(summon_id: str) -> SummonResult:
     if rec is None:
         return SummonResult(False, "failed", reason="unknown summon id",
                             summon_id=summon_id)
-    if rec.status != STATUS_AWAITING:
+    if rec.status != STATUS_AWAITING and not _republishable(rec):
         return SummonResult(
             False, "skipped",
             reason=f"nothing to approve (status={rec.status})",
             parent_id=rec.parent_id, summon_id=summon_id,
         )
+    if not (rec.draft_text or "").strip():
+        return SummonResult(
+            False, "failed", reason="no stored draft to post",
+            parent_id=rec.parent_id, summon_id=summon_id,
+        )
 
-    ok, payload = await publish_x_post(text=rec.draft_text, reply_to_id=rec.parent_id)
+    ok, payload = await publish_x_post(
+        text=rec.draft_text,
+        reply_to_id=reply_target_id(rec.summon_id, rec.parent_id),
+    )
     if not ok:
         err = str(payload.get("error") or "publish failed")
         await asyncio.to_thread(store.mark_failed, summon_id, err)

@@ -240,7 +240,7 @@
              style="color:var(--accent);">open on X</a>
           <span class="xs-row acts" style="margin-inline-start:auto;">
             <button class="btn btn-primary btn-sm"
-                    x-show="c.status === 'awaiting_approval'" x-cloak
+                    x-show="c.status === 'awaiting_approval' || (c.status === 'failed' && c.reply)" x-cloak
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('approve', c)">Approve</button>
             <button class="btn btn-danger btn-sm"

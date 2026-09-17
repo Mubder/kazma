@@ -358,7 +358,7 @@ async def test_auto_mode_publishes_and_records(_no_llm, monkeypatch):
     from kazma_core.x_api.reply_store import get_reply_store
 
     async def _publish(*, text, reply_to_id=""):
-        assert reply_to_id == "p13"
+        assert reply_to_id == "m13", "reply to the mention, not the parent"
         return True, {"posted": True, "tweet_id": "9001",
                       "url": "https://x.com/i/web/status/9001"}
 
@@ -402,6 +402,7 @@ async def test_approve_posts_the_stored_draft(_no_llm, monkeypatch):
 
     async def _publish(*, text, reply_to_id=""):
         sent["text"] = text
+        sent["reply_to_id"] = reply_to_id
         return True, {"tweet_id": "42", "url": "u"}
 
     _stub_draft(monkeypatch, text="the exact stored draft")
@@ -414,6 +415,72 @@ async def test_approve_posts_the_stored_draft(_no_llm, monkeypatch):
     res = await approve_summon("m15")
     assert res.action == "posted"
     assert sent["text"] == "the exact stored draft"
+    assert sent["reply_to_id"] == "m15", "approve must reply to the mention"
+
+
+def test_reply_target_is_the_mention_not_the_parent():
+    from kazma_core.x_api.reply import reply_target_id
+
+    mention = "2100705922142073166"
+    parent = "2002854021749743923"
+    assert reply_target_id(mention, parent) == mention
+    assert reply_target_id(mention, mention) == mention
+    assert reply_target_id("m13", "p13") == "m13"
+    assert reply_target_id(f"manual:{parent}", parent) == parent
+    assert reply_target_id("", parent) == parent
+
+
+@pytest.mark.asyncio
+async def test_approve_retries_a_wire_403(_no_llm, monkeypatch):
+    """Live 2026-09-18: X 403'd the parent target; the draft is still good."""
+    from kazma_core.x_api.reply import approve_summon
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    sent = {}
+
+    async def _publish(*, text, reply_to_id=""):
+        sent["reply_to_id"] = reply_to_id
+        sent["text"] = text
+        return True, {"tweet_id": "7", "url": "u"}
+
+    store = get_reply_store()
+    store.claim(
+        summon_id="2100705922142073166", parent_id="2002854021749743923",
+        target_handle="b_alfaris", summoner="b_alfaris",
+        parent_text="Elon Musk", summon_text="@KazmaAI what do you think? 😂",
+    )
+    store.mark_awaiting(
+        "2100705922142073166",
+        draft="the held roast", subject_id="voice",
+    )
+    store.mark_failed(
+        "2100705922142073166",
+        "X auth/permission error HTTP 403. You can only reply to or quote "
+        "posts where you are mentioned or are the author.",
+    )
+    monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
+    res = await approve_summon("2100705922142073166")
+    assert res.action == "posted"
+    assert sent["reply_to_id"] == "2100705922142073166"
+    assert sent["text"] == "the held roast"
+
+
+@pytest.mark.asyncio
+async def test_screen_failure_is_not_republishable(_no_llm, monkeypatch):
+    """A banned draft must not ride the 403-recovery path onto the wire."""
+    from kazma_core.x_api.reply import approve_summon
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    async def _publish(**kw):
+        raise AssertionError("screened drafts must not publish")
+
+    store = get_reply_store()
+    store.claim(summon_id="bad1", parent_id="p", target_handle="t", summoner="s")
+    store.mark_awaiting("bad1", draft="they should die", subject_id="voice")
+    store.mark_failed("bad1", "draft contains a banned construction ('should die')")
+    monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
+    res = await approve_summon("bad1")
+    assert res.action == "skipped"
 
 
 @pytest.mark.asyncio
