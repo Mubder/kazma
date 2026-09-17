@@ -106,11 +106,21 @@ def detect_script(text: str) -> str:
     return "latin" if latin else "unknown"
 
 
-def pick_voice_for_text(text: str, configured: str | None, provider: str) -> str:
+def pick_voice_for_text(
+    text: str,
+    configured: str | None,
+    provider: str,
+    overrides: dict[str, str] | None = None,
+) -> str:
     """Resolve the voice to synthesize *text* with.
 
     An explicit voice always wins — an operator who typed a voice name meant
     it. Only ``auto``, ``default``, empty and ``none`` delegate to the text.
+
+    *overrides* maps a script name (``"arabic"`` / ``"latin"``) to the voice
+    the operator chose for it in Settings, so "Arabic replies in this voice,
+    English replies in that one" is expressible. Anything missing falls back
+    to the built-in default for that script.
 
     Live, 2026-09-17: ``voice.tts_voice`` was pinned to ``ar-SA-HamedNeural``
     and the route applied it to every reply, so English answers full of git
@@ -125,6 +135,10 @@ def pick_voice_for_text(text: str, configured: str | None, provider: str) -> str
         # Provider's voices are not locale-named; let it use its own default.
         return "default"
     script = detect_script(text)
+    if overrides:
+        chosen = str(overrides.get(script) or "").strip()
+        if chosen and chosen.lower() not in {AUTO_VOICE, "default", "none"}:
+            return chosen
     return table.get(script) or table["latin"]
 
 

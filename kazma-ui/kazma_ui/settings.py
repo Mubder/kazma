@@ -1022,6 +1022,16 @@ class SettingsRouterBuilder:
                     return default
                 return str(v)
 
+            def _mask(key: str) -> str:
+                """``"********"`` when a secret is stored, else ``""``.
+
+                Never returns the value. `_prepare_value_for_storage` treats
+                the mask as "unchanged", so a save that echoes it back does
+                not overwrite the real secret with asterisks.
+                """
+                v = config_store.get(key)
+                return "********" if v is not None and str(v).strip() else ""
+
             def _get_bool(key: str, default: bool = False) -> bool:
                 v = config_store.get(key)
                 if v is None:
@@ -1038,6 +1048,14 @@ class SettingsRouterBuilder:
                 "stt_base_url": _get_val("voice.stt_base_url", ""),
                 "tts_provider": _get_val("voice.tts_provider", "edgetts"),
                 "tts_voice": _get_val("voice.tts_voice", "default"),
+                "tts_voice_en": _get_val("voice.tts_voice_en", ""),
+                "tts_voice_ar": _get_val("voice.tts_voice_ar", ""),
+                # Secrets go out MASKED, never in clear. The page shows
+                # whether one is set; the value stays in the vault.
+                "stt_api_key": _mask("voice.stt_api_key"),
+                "livekit_url": _get_val("voice.livekit.url", ""),
+                "livekit_api_key": _mask("voice.livekit.api_key"),
+                "livekit_api_secret": _mask("voice.livekit.api_secret"),
                 "stt_language": _get_val("voice.stt_language", "auto"),
                 "tts_output_format": _get_val("voice.tts_output_format", "mp3"),
             }
@@ -1052,6 +1070,22 @@ class SettingsRouterBuilder:
             config_store.set("voice.stt_base_url", req.stt_base_url or "", category="voice")
             config_store.set("voice.tts_provider", req.tts_provider, category="voice")
             config_store.set("voice.tts_voice", req.tts_voice, category="voice")
+            config_store.set("voice.tts_voice_en", req.tts_voice_en, category="voice")
+            config_store.set("voice.tts_voice_ar", req.tts_voice_ar, category="voice")
+            # A masked field means "leave it alone". Writing the mask through
+            # would replace a working credential with asterisks — the same
+            # shape as the Test button that once blanked every provider key.
+            from kazma_core.config_store import is_masked_secret_placeholder
+
+            for field, key in (
+                ("stt_api_key", "voice.stt_api_key"),
+                ("livekit_api_key", "voice.livekit.api_key"),
+                ("livekit_api_secret", "voice.livekit.api_secret"),
+            ):
+                val = getattr(req, field, "") or ""
+                if val and not is_masked_secret_placeholder(val):
+                    config_store.set(key, val, category="voice")
+            config_store.set("voice.livekit.url", req.livekit_url or "", category="voice")
             config_store.set("voice.stt_language", req.stt_language, category="voice")
             config_store.set("voice.tts_output_format", req.tts_output_format, category="voice")
             return {"status": "ok"}

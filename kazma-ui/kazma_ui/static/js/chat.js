@@ -6254,7 +6254,10 @@
   function toggleSpeakMessage(msgEl) {
     if (!window.KazmaVoice) return;
     var id = _speakId(msgEl);
-    if (KazmaVoice.isSpeaking(id)) { KazmaVoice.stopTTS(); return; }
+    // Busy, not just speaking: a second click during synthesis must CANCEL,
+    // not queue a second clip. Two overlapping clips were audible and
+    // unstoppable, because only the last one had a handle (2026-09-17).
+    if (KazmaVoice.isBusy(id)) { KazmaVoice.stopTTS(); return; }
     var text = (msgEl.querySelector('.message-text') || {}).textContent || '';
     if (!text.trim()) { KS.toast('Nothing to read in this message', 'info', 2000); return; }
     KazmaVoice.playTTS(text, null, id);

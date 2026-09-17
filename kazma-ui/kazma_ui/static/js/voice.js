@@ -213,10 +213,23 @@
   var _currentUrl = null;
   var _currentOwner = null;      // opaque id of whatever asked for this clip
   var _speakListeners = [];
+  // Generation token. Synthesis takes SECONDS for a long reply, so a second
+  // click lands while the first request is still in flight. Without this,
+  // both responses arrived, each assigned `_currentAudio`, and the first
+  // clip kept playing with nothing pointing at it — audible, duplicated and
+  // impossible to stop. Every request captures the generation it started in
+  // and discards itself if that is no longer current.
+  var _speakGen = 0;
+  var _pendingController = null; // aborts the in-flight fetch
+  var _pendingOwner = null;
 
   function _notifySpeakChange() {
+    // Report the BUSY owner, not just the speaking one: a click during
+    // synthesis must already show a stop affordance, or the person clicks
+    // again and gets a second clip.
+    var owner = busyOwner();
     for (var i = 0; i < _speakListeners.length; i++) {
-      try { _speakListeners[i](_currentOwner); } catch (e) { /* a bad listener must not break audio */ }
+      try { _speakListeners[i](owner); } catch (e) { /* a bad listener must not break audio */ }
     }
   }
 
@@ -226,6 +239,14 @@
   }
 
   function stopTTS() {
+    // Invalidate anything in flight FIRST, so a response that arrives after
+    // this call cannot install itself as the current clip.
+    _speakGen++;
+    if (_pendingController) {
+      try { _pendingController.abort(); } catch (e) { /* already settled */ }
+      _pendingController = null;
+    }
+    _pendingOwner = null;
     if (_currentAudio) {
       try { _currentAudio.pause(); _currentAudio.currentTime = 0; } catch (e) { /* already gone */ }
       _currentAudio = null;
@@ -244,9 +265,27 @@
     return live && _currentOwner === owner;
   }
 
+  /** Speaking OR still synthesizing. What a stop button should react to:
+      a person who clicked and heard nothing yet still wants to cancel. */
+  function isBusy(owner) {
+    var busy = isSpeaking() || !!_pendingController;
+    if (owner === undefined) return busy;
+    if (isSpeaking()) return _currentOwner === owner;
+    return !!_pendingController && _pendingOwner === owner;
+  }
+
+  function busyOwner() {
+    if (isSpeaking()) return _currentOwner;
+    return _pendingController ? _pendingOwner : null;
+  }
+
   function speakingOwner() {
     return isSpeaking() ? _currentOwner : null;
   }
+
+  // Leaving the page must not leave audio running. Each Kazma tab is a real
+  // navigation, so this fires on every move between Chat and Workspace.
+  window.addEventListener('pagehide', function() { stopTTS(); });
 
   /**
    * Speak `text`. `owner` is an opaque id (a message id) so a caller can ask
@@ -256,8 +295,15 @@
   async function playTTS(text, provider, owner) {
     if (!isTtsEnabled() || _ttsUnavailable) return;
     provider = provider || getTtsProvider();
-    // One voice at a time — a new reply supersedes the previous clip.
+    // One voice at a time — a new reply supersedes the previous clip. This
+    // also bumps the generation, cancelling any request still in flight.
     stopTTS();
+    var gen = _speakGen;
+    var controller = null;
+    try { controller = new AbortController(); } catch (e) { controller = null; }
+    _pendingController = controller;
+    _pendingOwner = owner === undefined ? null : owner;
+    _notifySpeakChange();   // let the UI show it is working on it
 
     try {
       var formData = new FormData();
@@ -269,7 +315,12 @@
       formData.append('voice', 'auto');
       formData.append('output_format', 'mp3');
 
-      var resp = await fetch('/api/voice/tts', { method: 'POST', body: formData });
+      var resp = await fetch('/api/voice/tts', {
+        method: 'POST',
+        body: formData,
+        signal: controller ? controller.signal : undefined,
+      });
+      if (gen !== _speakGen) return;   // superseded while synthesizing
       if (!resp.ok) {
         // 503 = TTS not configured/usable on the server (misconfig hint).
         // Latch it off for the session instead of re-probing on every
@@ -285,6 +336,7 @@
         return;
       }
       var audioBlob = await resp.blob();
+      if (gen !== _speakGen) return;   // stopped while the body downloaded
       var url = URL.createObjectURL(audioBlob);
       var audio = new Audio(url);
       _currentAudio = audio;
@@ -300,8 +352,15 @@
       await audio.play();
       _notifySpeakChange();
     } catch (err) {
+      if (err && err.name === 'AbortError') return;  // we cancelled it
       console.warn('[Voice] TTS playback failed:', err);
-      stopTTS();
+      if (gen === _speakGen) stopTTS();
+    } finally {
+      if (gen === _speakGen && _pendingController === controller) {
+        _pendingController = null;
+        _pendingOwner = null;
+        _notifySpeakChange();
+      }
     }
   }
 
@@ -762,6 +821,8 @@
     stopTTS: stopTTS,
     isSpeaking: isSpeaking,
     speakingOwner: speakingOwner,
+    isBusy: isBusy,
+    busyOwner: busyOwner,
     onSpeakStateChange: onSpeakStateChange,
     handleVoiceCommand: handleVoiceCommand,
     getSttProvider: getSttProvider,
