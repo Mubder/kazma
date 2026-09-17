@@ -125,3 +125,11 @@ blocks the call. Inspect with any SQLite browser or
 - Free tier is tight. Your X developer dashboard is the source of truth for quota.
 - An Automated label is **your** action in X settings; Kazma cannot flip it.
 - If keys leak, regenerate them in the dashboard, then Settings → X → Disconnect and save the new four.
+
+## Replying to other people's posts
+
+This page covers posting and scheduling from your own account. Replying to a
+post Kazma is *summoned* under — in a tone you pick, arguing a view you wrote —
+is a separate feature with its own subjects, caps and approval flow: see
+[X auto-reply](./x-auto-reply.md). It reuses the credentials, the ToU policy
+and the audit log documented here.

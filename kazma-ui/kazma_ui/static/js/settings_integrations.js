@@ -857,6 +857,150 @@
                 this.xSaving = false;
             }
         },
+
+        // ── X auto-reply ─────────────────────────────────────────────
+
+        async loadXReply() {
+            this.xReplyLoading = true;
+            try {
+                const data = await this._fetch('/api/x/reply');
+                if (data && data.ok !== false) {
+                    Object.assign(this.xReply, data);
+                    this.xReplySummonersText = (data.summoners || []).join(', ');
+                    this.xReplyProblems = [];
+                }
+            } catch (e) {
+                showToast('Failed to load auto-reply settings: ' + e.message, 'error');
+            } finally {
+                this.xReplyLoading = false;
+            }
+        },
+
+        xReplyAddSubject() {
+            this.xReply.subjects.push({
+                id: '', match: [], view: '', mood: 'dry', register: '',
+                hard_lines: [], examples: [], _matchText: '', _hardText: '', _exText: '',
+            });
+            this.xReplyOpen = this.xReply.subjects.length - 1;
+        },
+
+        xReplyRemoveSubject(i) {
+            this.xReply.subjects.splice(i, 1);
+            if (this.xReplyOpen === i) this.xReplyOpen = null;
+        },
+
+        // Keywords / hard lines / examples are edited as comma- or
+        // newline-separated text because a chip editor is more UI than this
+        // earns. Split on newline first so a multi-line example survives.
+        _xSplit(raw, multiline) {
+            if (!raw) return [];
+            const parts = multiline ? String(raw).split(/\n+/) : String(raw).split(/[,\n]+/);
+            return parts.map(function (s) { return s.trim(); }).filter(Boolean);
+        },
+
+        xReplySubjectPayload() {
+            const self = this;
+            return this.xReply.subjects.map(function (s) {
+                return {
+                    id: (s.id || '').trim(),
+                    match: s._matchText !== undefined ? self._xSplit(s._matchText, false) : (s.match || []),
+                    view: s.view || '',
+                    mood: s.mood || 'dry',
+                    register: s.register || '',
+                    hard_lines: s._hardText !== undefined ? self._xSplit(s._hardText, true) : (s.hard_lines || []),
+                    examples: s._exText !== undefined ? self._xSplit(s._exText, true) : (s.examples || []),
+                };
+            });
+        },
+
+        async saveXReply() {
+            this.xReplySaving = true;
+            this.xReplyProblems = [];
+            try {
+                const resp = await fetch('/api/x/reply', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        enabled: !!this.xReply.enabled,
+                        mode: this.xReply.mode || 'off',
+                        summoners: this._xSplit(this.xReplySummonersText, false),
+                        trigger: this.xReply.trigger || '',
+                        max_replies_per_day: Number(this.xReply.max_replies_per_day) || 0,
+                        max_replies_per_target_per_day: Number(this.xReply.max_replies_per_target_per_day) || 0,
+                        cooldown_per_thread_s: Number(this.xReply.cooldown_per_thread_s) || 0,
+                        min_target_followers: Number(this.xReply.min_target_followers) || 0,
+                        poll_interval_s: Number(this.xReply.poll_interval_s) || 600,
+                        summoner_policy: this.xReply.summoner_policy || 'allowlist',
+                        allow_emoji_mood: !!this.xReply.allow_emoji_mood,
+                        subjects: this.xReplySubjectPayload(),
+                    }),
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                if (!resp.ok || data.ok === false) {
+                    this.xReplyProblems = data.problems || [];
+                    showToast(data.error || data.detail || 'Save failed', 'error');
+                    return;
+                }
+                Object.assign(this.xReply, data);
+                this.xReplySummonersText = (data.summoners || []).join(', ');
+                // Warnings are advisory (e.g. anyone + auto): the save
+                // succeeded, the operator should know what they turned on.
+                (data.warnings || []).forEach(function (w) { showToast(w, 'warning'); });
+                if (data.restart_required_for_poller) {
+                    showToast('Saved. Restart Kazma to start the mentions poller.', 'warning');
+                } else {
+                    showToast('Auto-reply settings saved.', 'success');
+                }
+            } catch (e) {
+                showToast('Save failed: ' + e.message, 'error');
+            } finally {
+                this.xReplySaving = false;
+            }
+        },
+
+        // The point of the panel: see what a view produces before it ships.
+        // Publishes nothing and records nothing, so it can be run as many
+        // times as it takes to get the voice right.
+        async runXReplyPreview() {
+            if (!this.xReplyPreview.text.trim()) {
+                showToast('Paste the post you want a reply to.', 'error');
+                return;
+            }
+            this.xReplyPreview.busy = true;
+            this.xReplyPreview.result = null;
+            try {
+                const resp = await fetch('/api/x/reply/preview', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                    credentials: 'same-origin',
+                    body: JSON.stringify({
+                        parent_text: this.xReplyPreview.text,
+                        parent_handle: this.xReplyPreview.handle,
+                        subject_id: this.xReplyPreview.subject_id,
+                        mood: this.xReplyPreview.mood,
+                    }),
+                });
+                const data = await resp.json().catch(function () { return {}; });
+                this.xReplyPreview.result = data;
+                if (!resp.ok && !data.reason) {
+                    showToast(data.error || 'Preview failed', 'error');
+                }
+            } catch (e) {
+                showToast('Preview failed: ' + e.message, 'error');
+            } finally {
+                this.xReplyPreview.busy = false;
+            }
+        },
+
+        async loadXReplyRecent() {
+            try {
+                const data = await this._fetch('/api/x/reply/recent?limit=15');
+                this.xReplyRecent = (data && data.rows) || [];
+            } catch (e) {
+                this.xReplyRecent = [];
+            }
+        },
         };
     };
 })(typeof window !== "undefined" ? window : globalThis);

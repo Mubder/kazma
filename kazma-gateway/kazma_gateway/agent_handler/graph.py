@@ -31,6 +31,7 @@ from .commands import (
     _try_kb_command,
     _try_model_command,
     _try_research_command,
+    _try_x_command,
     _try_skill_command,
     _try_swarm_command,
     _build_slash_ctx,
@@ -1367,6 +1368,17 @@ def create_graph_handler(
             msg, _store, manager, thread_id,
         )
         if research_handled:
+            return
+
+        # ── X auto-reply slash-command intercept ──────────────────
+        # /x roast|approve|list|subjects|poll. Intercepted before the graph
+        # because drafting a reply is a deterministic pipeline with its own
+        # allowlist, caps and content screen — routing it through the agent
+        # would let the model decide whether the rails applied.
+        x_handled = await _try_x_command(
+            msg, _store, manager, thread_id,
+        )
+        if x_handled:
             return
 
         # ── Agent Skills slash-command intercept ──────────────────

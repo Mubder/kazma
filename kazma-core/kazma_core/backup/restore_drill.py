@@ -262,10 +262,26 @@ def _check_vault_opens(backup: Path, res: DrillResult) -> None:
             return
 
         vault = SecretVault(db_path=str(copy))
-        names = [
-            str(s.get("name") or "") for s in vault.list_secrets() if s.get("name")
-        ]
-        opened = sum(1 for n in names[:5] if vault.retrieve(n) is not None)
+        # Decrypt each sample AS ITS OWN TENANT. `retrieve(name)` with no
+        # argument resolves the ambient ContextVar, and the drill runs
+        # context-less — so every tenant-scoped row came back None and was
+        # counted as "did not open". On this install 34 of 67 rows are scoped
+        # to `default`, so a sample of five could easily report "the backup's
+        # key opens NOTHING" about a backup whose key is perfectly fine.
+        # A false alarm on recoverability is worse than no drill: it sends the
+        # operator to rebuild a vault that was never broken.
+        sample = [
+            (str(s.get("name") or ""), s.get("tenant"))
+            for s in vault.list_secrets()
+            if s.get("name")
+        ][:5]
+        opened = sum(
+            1
+            for name, tenant in sample
+            if vault.retrieve(name, None if tenant in (None, "global") else str(tenant))
+            is not None
+        )
+        names = [n for n, _ in sample]
         res.add(
             "vault:decrypt", opened > 0,
             f"{opened}/{min(5, len(names))} sampled secrets decrypt "

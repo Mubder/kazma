@@ -153,11 +153,16 @@ class XClient:
                     duration_ms=duration_ms,
                 )
                 raise XApiError("X API returned a non-JSON success body.")
+            # `data` is a dict for writes (POST /2/tweets) and a LIST for every
+            # read (mentions timeline, /2/tweets?ids=, any timeline). Assuming
+            # dict raised AttributeError *after* a successful 200, inside the
+            # audit line — the call had already worked (2026-09-17 tier probe).
             data = parsed.get("data") or {}
+            single_id = data.get("id") if isinstance(data, dict) else None
             log_x_event(
                 action=action, method=method, endpoint=path, status="success",
                 http_status=resp.status_code,
-                tweet_id=str(data.get("id") or "") or audit_tweet_id,
+                tweet_id=str(single_id or "") or audit_tweet_id,
                 request_body=json_body, response_body=parsed,
                 duration_ms=duration_ms,
             )
@@ -221,6 +226,64 @@ class XClient:
         )
         tweet = data.get("data") or data
         return tweet
+
+    async def get_mentions(
+        self,
+        user_id: str,
+        *,
+        since_id: str = "",
+        max_results: int = 25,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """``GET /2/users/:id/mentions`` — tweets mentioning this account.
+
+        Returns ``(tweets, includes)``. ``includes["users"]`` carries the
+        authors, because a mention is useless without knowing who sent it
+        (the summoner allowlist is the first gate on every reply).
+
+        **Not available on the Free tier** — it 403s there. The account this
+        was built against probed HTTP 200 on 2026-09-17, i.e. Basic or above.
+        Read quota is the scarce resource: poll interval is operator config
+        (``connectors.x.reply.poll_interval_s``), not a constant here.
+        """
+        params = [
+            f"max_results={max(5, min(100, int(max_results)))}",
+            "tweet.fields=author_id,conversation_id,referenced_tweets,created_at,text",
+            "expansions=author_id,referenced_tweets.id,referenced_tweets.id.author_id",
+            "user.fields=username,public_metrics",
+        ]
+        sid = str(since_id or "").strip()
+        if sid:
+            params.append(f"since_id={sid}")
+        path = f"/2/users/{str(user_id).strip()}/mentions?" + "&".join(params)
+        data = await self._request("GET", path, audit_action="read_mentions")
+        tweets = data.get("data")
+        includes = data.get("includes")
+        return (
+            list(tweets) if isinstance(tweets, list) else [],
+            dict(includes) if isinstance(includes, dict) else {},
+        )
+
+    async def get_tweet(self, tweet_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        """``GET /2/tweets/:id`` — one tweet plus its author. Basic tier and up.
+
+        Used to fetch the *parent* of a summon: the post being replied to,
+        whose text the drafter reacts to and whose author's follower count
+        feeds the small-account floor.
+        """
+        params = (
+            "tweet.fields=author_id,conversation_id,created_at,text"
+            "&expansions=author_id&user.fields=username,public_metrics"
+        )
+        data = await self._request(
+            "GET", f"/2/tweets/{str(tweet_id).strip()}?{params}",
+            audit_action="read_tweet", audit_tweet_id=str(tweet_id).strip(),
+        )
+        tweet = data.get("data")
+        includes = data.get("includes")
+        return (
+            dict(tweet) if isinstance(tweet, dict) else {},
+            dict(includes) if isinstance(includes, dict) else {},
+        )
 
     async def delete_tweet(self, tweet_id: str) -> dict[str, Any]:
         tid = str(tweet_id).strip()

@@ -22,6 +22,7 @@ const sidebars = {
         'guide/recent-features',
         'guide/email-integration',
         'guide/x-publisher',
+        'guide/x-auto-reply',
         'guide/document-intelligence',
         'guide/document-phases',
         'guide/document-rendering',

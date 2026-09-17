@@ -2823,6 +2823,275 @@
                 <a href="/docs/guide/x-publisher" style="color:var(--accent);">{{ t('settings.x_docs_link') }}</a>
             </p>
 
+            <!-- ── Auto-reply ─────────────────────────────────────
+                 Subjects and the views Kazma argues from. Separate
+                 from the credentials above because the failure modes
+                 are different: credentials are wrong or missing,
+                 subjects are *silently inert* when malformed, which
+                 is why saving validates and the dry-run exists. -->
+            <div style="margin-top:28px;padding-top:20px;border-top:1px solid var(--border);"
+                 x-init="loadXReply()">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                    <h4 style="margin:0;">Auto-reply</h4>
+                    <button class="btn btn-sm btn-secondary" @click="loadXReply()" :disabled="xReplyLoading"
+                            x-text="xReplyLoading ? '…' : 'Refresh'"></button>
+                </div>
+                <p style="margin:8px 0 16px;font-size:0.85rem;color:var(--text-secondary);">
+                    Kazma replies to a post only when it matches a subject you declare below,
+                    and argues the view you wrote. No matching subject means no reply — it
+                    never improvises a position.
+                </p>
+
+                <template x-if="!xReply.connector_ready">
+                    <p style="font-size:0.85rem;color:var(--warning,#c80);margin-bottom:12px;">
+                        The X connector is not posting-ready yet — save and test the credentials above first.
+                    </p>
+                </template>
+
+                <label class="toggle-row">
+                    <span class="toggle">
+                        <input type="checkbox" x-model="xReply.enabled">
+                        <span class="toggle-slider"></span>
+                    </span>
+                    <span>Enable auto-reply</span>
+                </label>
+
+                <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;">
+                    <div class="form-group">
+                        <label for="xr-mode">Mode</label>
+                        <select id="xr-mode" class="form-input" x-model="xReply.mode">
+                            <option value="off">off — never reply</option>
+                            <option value="draft">draft — ask me before posting</option>
+                            <option value="auto">auto — post without asking</option>
+                        </select>
+                        <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;"
+                           x-show="xReply.mode === 'auto'">
+                            Auto publishes text you have not read, under your name. Start with draft.
+                        </p>
+                    </div>
+                    <div class="form-group">
+                        <label for="xr-summoners">Who can summon it</label>
+                        <input id="xr-summoners" type="text" class="form-input"
+                               x-model="xReplySummonersText" placeholder="yourhandle, cohost"
+                               autocomplete="off">
+                        <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                            Comma-separated handles. Empty means nobody.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="xr-trigger">Trigger phrase (optional)</label>
+                    <input id="xr-trigger" type="text" class="form-input" x-model="xReply.trigger"
+                           placeholder="what do you think" autocomplete="off">
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                        When set, a mention must contain this to count as a summon.
+                    </p>
+                </div>
+
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:8px;">
+                    <div class="form-group">
+                        <label for="xr-day">Max replies / day</label>
+                        <input id="xr-day" type="number" class="form-input"
+                               x-model.number="xReply.max_replies_per_day" min="0" max="50">
+                    </div>
+                    <div class="form-group">
+                        <label for="xr-target">Max per account / day</label>
+                        <input id="xr-target" type="number" class="form-input"
+                               x-model.number="xReply.max_replies_per_target_per_day" min="0" max="10">
+                    </div>
+                    <div class="form-group">
+                        <label for="xr-cooldown">Thread cooldown (s)</label>
+                        <input id="xr-cooldown" type="number" class="form-input"
+                               x-model.number="xReply.cooldown_per_thread_s" min="0" max="86400">
+                    </div>
+                    <div class="form-group">
+                        <label for="xr-floor">Min follower count</label>
+                        <input id="xr-floor" type="number" class="form-input"
+                               x-model.number="xReply.min_target_followers" min="0" max="1000000">
+                    </div>
+                    <div class="form-group">
+                        <label for="xr-poll">Poll interval (s)</label>
+                        <input id="xr-poll" type="number" class="form-input"
+                               x-model.number="xReply.poll_interval_s" min="60" max="3600">
+                    </div>
+                </div>
+                <p style="font-size:0.78rem;color:var(--text-tertiary);margin:-4px 0 16px;">
+                    The follower floor stops unsolicited replies at small accounts. Polling
+                    mentions needs a paid X plan and spends monthly read quota.
+                </p>
+
+                <!-- Subjects -->
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-top:20px;">
+                    <h5 style="margin:0;">Subjects <span style="color:var(--text-tertiary);font-weight:400;"
+                        x-text="'(' + (xReply.subjects ? xReply.subjects.length : 0) + ')'"></span></h5>
+                    <button class="btn btn-sm btn-secondary" @click="xReplyAddSubject()">+ Add subject</button>
+                </div>
+
+                <template x-if="!xReply.subjects || !xReply.subjects.length">
+                    <p style="font-size:0.85rem;color:var(--text-tertiary);margin-top:8px;">
+                        No subjects yet. Until you add one, Kazma declines every summon.
+                    </p>
+                </template>
+
+                <template x-for="(s, i) in xReply.subjects" :key="i">
+                    <div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:10px;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn btn-sm btn-secondary"
+                                    @click="xReplyOpen = (xReplyOpen === i ? null : i)"
+                                    x-text="xReplyOpen === i ? '▾' : '▸'"></button>
+                            <strong x-text="s.id || '(unnamed)'"></strong>
+                            <span style="color:var(--text-tertiary);font-size:0.8rem;" x-text="s.mood"></span>
+                            <span style="flex:1;"></span>
+                            <button class="btn btn-sm btn-danger" @click="xReplyRemoveSubject(i)">Remove</button>
+                        </div>
+                        <div x-show="xReplyOpen === i" style="margin-top:12px;">
+                            <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                                <div class="form-group">
+                                    <label>Id</label>
+                                    <input type="text" class="form-input" x-model="s.id"
+                                           placeholder="iran" autocomplete="off">
+                                </div>
+                                <div class="form-group">
+                                    <label>Mood</label>
+                                    <select class="form-input" x-model="s.mood">
+                                        <template x-for="m in xReply.moods" :key="m">
+                                            <option :value="m" x-text="m"></option>
+                                        </template>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Keywords</label>
+                                <input type="text" class="form-input"
+                                       :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
+                                       @input="s._matchText = $event.target.value"
+                                       placeholder="iran, tehran, طهران" autocomplete="off">
+                                <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                                    Matched as whole words, so "iran" will not fire on "Tirana".
+                                </p>
+                            </div>
+                            <div class="form-group">
+                                <label>Your view — this is what Kazma argues</label>
+                                <textarea class="form-input" rows="5" x-model="s.view"
+                                          placeholder="I think X because Y. Be specific — vague instructions produce generic replies."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Register (optional)</label>
+                                <input type="text" class="form-input" x-model="s.register"
+                                       placeholder="gulf arabic" autocomplete="off">
+                            </div>
+                            <div class="form-group">
+                                <label>Hard lines — one per line</label>
+                                <textarea class="form-input" rows="3"
+                                          :value="s._hardText !== undefined ? s._hardText : (s.hard_lines || []).join('\n')"
+                                          @input="s._hardText = $event.target.value"
+                                          placeholder="never attack Iranians as a people"></textarea>
+                                <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                                    Added on top of the universal rules (no slurs, no threats, no
+                                    attacks on protected characteristics) which always apply.
+                                </p>
+                            </div>
+                            <div class="form-group">
+                                <label>Examples — one per line</label>
+                                <textarea class="form-input" rows="3"
+                                          :value="s._exText !== undefined ? s._exText : (s.examples || []).join('\n')"
+                                          @input="s._exText = $event.target.value"
+                                          placeholder="A reply you actually wrote."></textarea>
+                                <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                                    Worth more than the view for voice. Two or three is enough.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </template>
+
+                <template x-if="xReplyProblems.length">
+                    <ul style="margin-top:12px;color:var(--danger,#c33);font-size:0.85rem;">
+                        <template x-for="p in xReplyProblems" :key="p">
+                            <li x-text="p"></li>
+                        </template>
+                    </ul>
+                </template>
+
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;">
+                    <button class="btn btn-primary" @click="saveXReply()" :disabled="xReplySaving"
+                            x-text="xReplySaving ? '…' : 'Save auto-reply'"></button>
+                    <button class="btn btn-secondary" @click="loadXReplyRecent()">Recent summons</button>
+                </div>
+
+                <!-- Dry run -->
+                <div style="margin-top:24px;padding:14px;border:1px dashed var(--border);border-radius:8px;">
+                    <h5 style="margin:0 0 4px;">Try it</h5>
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 12px;">
+                        Drafts against a pasted post. Nothing is published or recorded, so
+                        iterate on the view until it sounds like you.
+                    </p>
+                    <div class="form-group">
+                        <label>Post text</label>
+                        <textarea class="form-input" rows="3" x-model="xReplyPreview.text"
+                                  placeholder="Paste the post you would be replying to."></textarea>
+                    </div>
+                    <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                        <div class="form-group">
+                            <label>Their handle (optional)</label>
+                            <input type="text" class="form-input" x-model="xReplyPreview.handle"
+                                   placeholder="someone" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label>Force a subject (optional)</label>
+                            <select class="form-input" x-model="xReplyPreview.subject_id">
+                                <option value="">auto-detect</option>
+                                <template x-for="s in xReply.subjects" :key="s.id">
+                                    <option :value="s.id" x-text="s.id"></option>
+                                </template>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="btn btn-secondary" @click="runXReplyPreview()" :disabled="xReplyPreview.busy"
+                            x-text="xReplyPreview.busy ? 'Drafting…' : 'Draft a reply'"></button>
+
+                    <template x-if="xReplyPreview.result">
+                        <div style="margin-top:12px;">
+                            <template x-if="xReplyPreview.result.draft">
+                                <div>
+                                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin:0 0 4px;">
+                                        subject: <span x-text="xReplyPreview.result.subject || '—'"></span>
+                                        · <span x-text="(xReplyPreview.result.draft || '').length"></span>/280
+                                    </p>
+                                    <div style="padding:10px;border-radius:6px;background:var(--bg-secondary);white-space:pre-wrap;"
+                                         x-text="xReplyPreview.result.draft"></div>
+                                </div>
+                            </template>
+                            <p x-show="xReplyPreview.result.reason"
+                               style="margin-top:8px;font-size:0.82rem;"
+                               :style="xReplyPreview.result.ok ? 'color:var(--text-tertiary)' : 'color:var(--warning,#c80)'"
+                               x-text="xReplyPreview.result.reason"></p>
+                        </div>
+                    </template>
+                </div>
+
+                <template x-if="xReplyRecent.length">
+                    <div style="margin-top:20px;">
+                        <h5 style="margin:0 0 8px;">Recent summons</h5>
+                        <div style="font-size:0.82rem;">
+                            <template x-for="r in xReplyRecent" :key="r.summon_id">
+                                <div style="padding:6px 0;border-bottom:1px solid var(--border);">
+                                    <strong x-text="r.status"></strong>
+                                    <span style="color:var(--text-tertiary);" x-text="r.subject ? ' · ' + r.subject : ''"></span>
+                                    <div style="color:var(--text-secondary);" x-text="r.draft || r.reason"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+
+                <p style="margin-top:16px;font-size:0.8rem;color:var(--text-tertiary);">
+                    Full guide:
+                    <a href="/docs/guide/x-auto-reply" style="color:var(--accent);">X auto-reply</a>
+                </p>
+            </div>
+
             <!-- X audit log lives on /scheduled now.
                  It answers "what did Kazma actually post", which is an
                  operational question rather than a configuration one, and it
