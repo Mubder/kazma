@@ -2368,7 +2368,10 @@ async def _try_x_command(
                 parent_id=parent_id,
                 parent_text=parent_text,
                 parent_handle=handle,
-                summoner=str(getattr(msg, "sender_id", "") or "").split(":")[-1],
+                # Recorded for the log, NOT matched against the X
+                # allowlist -- this is a gateway identity, not a handle.
+                summoner=str(getattr(msg, "sender_id", "") or ""),
+                trusted=True,
                 target_followers=followers,
                 cfg=cfg,
                 force_mode="draft",

@@ -53,7 +53,20 @@ __all__ = [
     "draft_reply",
     "screen_draft",
     "check_stance",
+    "DraftFailed",
 ]
+
+
+class DraftFailed(Exception):
+    """Drafting could not produce text, with the REASON attached.
+
+    This used to return "" and let ``screen_draft`` report "model returned
+    an empty draft" — true, useless, and identical whether the provider was
+    unconfigured, the key was rejected, the model name was unknown or the
+    request timed out. The operator saw one sentence that named none of
+    them. The real error is right there at the point of failure; it just
+    was not carried out.
+    """
 
 #: x.com/<handle>/status/<id>, twitter.com, /i/web/status/<id>, with or
 #: without query junk. The id is all we need to reply; the handle, when the
@@ -351,6 +364,25 @@ def _build_prompt(
     ]
 
 
+def _draft_error_text(exc: BaseException) -> str:
+    """Operator-facing reason. Names the thing to go fix, not the traceback."""
+    msg = str(exc).strip() or type(exc).__name__
+    low = msg.lower()
+    if "no usable api key" in low or "401" in low:
+        return (
+            f"the model provider rejected the credentials ({msg[:160]}). "
+            "Settings → Models: confirm the active provider's key is saved."
+        )
+    if "not found in any configured provider" in low or "unknown model" in low:
+        return (
+            f"the configured model is not available ({msg[:160]}). "
+            "Settings → Models: pick a model the active provider actually serves."
+        )
+    if "timeout" in low or "timed out" in low:
+        return f"the model call timed out ({msg[:160]})."
+    return f"the model call failed: {msg[:200]}"
+
+
 async def draft_reply(
     *,
     subject: Subject,
@@ -377,16 +409,19 @@ async def draft_reply(
                 provider = _client()
         if provider is None:
             logger.warning("[x-reply] no LLM provider available for drafting")
-            return ""
+            raise DraftFailed(
+                "no LLM provider is available — check Settings → Models that a "
+                "provider is enabled and its key is saved"
+            )
         resp = await provider.chat(
             _build_prompt(subject, parent_text, parent_handle, mood),
             max_tokens=200,
             temperature=0.9,
         )
         text = str(getattr(resp, "content", "") or "").strip()
-    except Exception:
+    except Exception as exc:
         logger.exception("[x-reply] drafting failed")
-        return ""
+        raise DraftFailed(_draft_error_text(exc)) from exc
 
     # Models like to wrap a one-liner in quotes or prefix it with "Reply:".
     text = re.sub(r"^\s*(?:reply|response)\s*:\s*", "", text, flags=re.IGNORECASE)
@@ -408,6 +443,7 @@ async def handle_summon(
     cfg: ReplyConfig | None = None,
     force_mode: str = "",
     summon_text: str = "",
+    trusted: bool = False,
 ) -> SummonResult:
     """Claim, gate, draft, screen, and publish-or-hold one summon.
 
@@ -435,10 +471,16 @@ async def handle_summon(
             reason="no subjects declared — nothing to argue from",
             parent_id=parent_id, summon_id=summon_id,
         )
-    # An empty allowlist means nobody. `force_mode` does not bypass this:
-    # the operator issuing /x is themselves checked, which is what makes the
-    # allowlist meaningful rather than decorative.
-    if summoner and not cfg.is_summoner(summoner):
+    # The allowlist holds X handles, and it gates who may summon ON X.
+    #
+    # `trusted` means the caller is an authenticated operator on a gateway
+    # (the `/x` command), not a handle on X. Checking them against it was a
+    # category error: Telegram passes `telegram:12345`, so the comparison was
+    # a numeric id against a list of X handles and could never match --
+    # `/x roast` was refused for everyone, including the operator, no matter
+    # what they put in the allowlist. The gateway's own auth is the
+    # authorization for that path; every other rail still applies.
+    if not trusted and summoner and not cfg.is_summoner(summoner):
         return SummonResult(
             False, "skipped",
             reason=f"@{summoner.lstrip('@')} is not in connectors.x.reply.summoners",
@@ -492,14 +534,22 @@ async def handle_summon(
     # produce the same reply. Only a TRUSTED summoner can dial it -- see
     # ReplyConfig.mood_override_allowed.
     mood = ""
-    if summon_text and cfg.mood_override_allowed(summoner):
+    if summon_text and (trusted or cfg.mood_override_allowed(summoner)):
         mood = mood_from_text(summon_text)
         if mood:
             logger.info("[x-reply] emoji set mood=%s for %s", mood, summon_id)
-    draft = await draft_reply(
-        subject=subject, parent_text=parent_text,
-        parent_handle=parent_handle, mood=mood,
-    )
+    try:
+        draft = await draft_reply(
+            subject=subject, parent_text=parent_text,
+            parent_handle=parent_handle, mood=mood,
+        )
+    except DraftFailed as exc:
+        reason = str(exc)
+        await asyncio.to_thread(store.mark_failed, summon_id, reason)
+        return SummonResult(
+            False, "failed", reason=reason, subject_id=subject.id,
+            parent_id=parent_id, summon_id=summon_id,
+        )
     screen = screen_draft(draft, subject)
     if not screen and cfg.stance_check:
         # The rule screen does not know what the operator's position IS. A
@@ -560,6 +610,7 @@ async def preview_reply(
     cfg: ReplyConfig | None = None,
     subject_id: str = "",
     mood: str = "",
+    subject_override: Subject | None = None,
 ) -> SummonResult:
     """Draft against *parent_text* without claiming, storing, or publishing.
 
@@ -577,14 +628,22 @@ async def preview_reply(
     post its keywords would not have matched.
     """
     cfg = cfg or get_reply_config()
-    if not cfg.subjects:
+
+    # *subject_override* is the subject as it exists in the editor RIGHT NOW,
+    # including edits not yet saved. Without it the dry run could only test
+    # stored config, so the tuning loop was: type a view, save it, try it,
+    # hate it, retype, save again — committing half-finished subjects to live
+    # config just to see what they produce. That is the opposite of a
+    # scratchpad.
+    subject: Subject | None
+    if subject_override is not None:
+        subject = subject_override
+    elif not cfg.subjects:
         return SummonResult(
             False, "skipped",
             reason="no subjects declared — nothing to argue from",
         )
-
-    subject: Subject | None
-    if subject_id:
+    elif subject_id:
         subject = cfg.subject_by_id(subject_id)
         if subject is None:
             return SummonResult(
@@ -603,10 +662,17 @@ async def preview_reply(
 
     # *mood* is passed straight in here (the panel has a picker), rather than
     # read off a summon — a preview has no summoner to trust.
-    draft = await draft_reply(
-        subject=subject, parent_text=parent_text,
-        parent_handle=parent_handle, mood=mood,
-    )
+    try:
+        draft = await draft_reply(
+            subject=subject, parent_text=parent_text,
+            parent_handle=parent_handle, mood=mood,
+        )
+    except DraftFailed as exc:
+        # The dry run is where an operator finds out their model config is
+        # wrong, so say which thing is wrong rather than "empty draft".
+        return SummonResult(
+            False, "failed", reason=str(exc), subject_id=subject.id
+        )
     screen = screen_draft(draft, subject)
     if not screen and cfg.stance_check:
         # Attended by definition — the operator is looking at it. A drifted

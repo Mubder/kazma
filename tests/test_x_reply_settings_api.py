@@ -27,10 +27,10 @@ from kazma_ui.x_reply_api import (
     _validate_subjects,
 )
 
-IRAN = Subject(
-    id="iran",
-    match=("iran", "tehran"),
-    view="The regime and the people are not the same thing.",
+VAR = Subject(
+    id="var",
+    match=("var", "offside"),
+    view="VAR has made football worse and the people defending it know it.",
     mood="roast",
 )
 
@@ -40,7 +40,7 @@ def _cfg(**over) -> ReplyConfig:
         enabled=True, mode="draft", summoners=("balfaris",), trigger="",
         max_replies_per_day=5, max_replies_per_target_per_day=1,
         cooldown_per_thread_s=3600, min_target_followers=500,
-        poll_interval_s=600, subjects=(IRAN,),
+        poll_interval_s=600, subjects=(VAR,),
     )
     base.update(over)
     return ReplyConfig(**base)
@@ -64,12 +64,12 @@ def _no_llm(monkeypatch):
 # ── Validation names the problem ──────────────────────────────────────────
 
 def test_subject_without_view_is_rejected():
-    problems = _validate_subjects([SubjectBody(id="iran", match=["iran"], view="")])
+    problems = _validate_subjects([SubjectBody(id="var", match=["var"], view="")])
     assert problems and "needs a view" in problems[0]
 
 
 def test_subject_without_keywords_is_rejected():
-    problems = _validate_subjects([SubjectBody(id="iran", match=[], view="v")])
+    problems = _validate_subjects([SubjectBody(id="var", match=[], view="v")])
     assert problems and "can never match" in problems[0]
 
 
@@ -80,8 +80,8 @@ def test_subject_without_id_is_rejected():
 
 def test_duplicate_ids_are_rejected():
     problems = _validate_subjects([
-        SubjectBody(id="iran", match=["iran"], view="v"),
-        SubjectBody(id="iran", match=["tehran"], view="v"),
+        SubjectBody(id="var", match=["var"], view="v"),
+        SubjectBody(id="var", match=["offside"], view="v"),
     ])
     assert any("duplicate id" in p for p in problems)
 
@@ -102,7 +102,7 @@ def test_whitespace_only_keyword_does_not_count():
 
 def test_a_good_subject_passes():
     assert _validate_subjects(
-        [SubjectBody(id="iran", match=["iran"], view="v", mood="roast")]
+        [SubjectBody(id="var", match=["var"], view="v", mood="roast")]
     ) == []
 
 
@@ -130,7 +130,7 @@ async def test_preview_publishes_nothing(monkeypatch, _no_llm):
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
 
-    res = await preview_reply(parent_text="Iran sanctions again", cfg=_cfg())
+    res = await preview_reply(parent_text="VAR ruined that match", cfg=_cfg())
     assert res.action == "preview" and res.draft == "a draft"
 
 
@@ -143,7 +143,7 @@ async def test_preview_records_nothing(monkeypatch, _no_llm):
         return "a draft"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
-    await preview_reply(parent_text="Iran", cfg=_cfg())
+    await preview_reply(parent_text="VAR", cfg=_cfg())
     assert get_reply_store().recent(limit=5) == []
 
 
@@ -164,7 +164,7 @@ async def test_preview_still_screens_the_draft(monkeypatch, _no_llm):
         return "they should die"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _bad)
-    res = await preview_reply(parent_text="Iran", cfg=_cfg())
+    res = await preview_reply(parent_text="VAR", cfg=_cfg())
     assert res.action == "failed" and "banned construction" in res.reason
 
 
@@ -177,13 +177,13 @@ async def test_preview_ignores_caps(monkeypatch, _no_llm):
     for i in range(5):
         store.claim(summon_id=f"s{i}", parent_id=f"p{i}",
                     target_handle="t", summoner="balfaris")
-        store.mark_posted(f"s{i}", tweet_id=f"t{i}", draft="d", subject_id="iran")
+        store.mark_posted(f"s{i}", tweet_id=f"t{i}", draft="d", subject_id="var")
 
     async def _draft(*, subject, parent_text, parent_handle="", mood=""):
         return "still drafts"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
-    res = await preview_reply(parent_text="Iran", cfg=_cfg(max_replies_per_day=1))
+    res = await preview_reply(parent_text="VAR", cfg=_cfg(max_replies_per_day=1))
     assert res.action == "preview"
 
 
@@ -194,7 +194,7 @@ async def test_preview_ignores_the_summoner_allowlist(monkeypatch, _no_llm):
         return "drafted"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
-    res = await preview_reply(parent_text="Iran", cfg=_cfg(summoners=()))
+    res = await preview_reply(parent_text="VAR", cfg=_cfg(summoners=()))
     assert res.action == "preview"
 
 
@@ -209,9 +209,9 @@ async def test_forced_subject_overrides_matching(monkeypatch, _no_llm):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await preview_reply(
-        parent_text="completely unrelated text", cfg=_cfg(), subject_id="iran"
+        parent_text="completely unrelated text", cfg=_cfg(), subject_id="var"
     )
-    assert res.action == "preview" and seen["id"] == "iran"
+    assert res.action == "preview" and seen["id"] == "var"
 
 
 @pytest.mark.asyncio
@@ -222,5 +222,76 @@ async def test_forced_unknown_subject_is_refused(_no_llm):
 
 @pytest.mark.asyncio
 async def test_preview_with_no_subjects_declines(_no_llm):
-    res = await preview_reply(parent_text="Iran", cfg=_cfg(subjects=()))
+    res = await preview_reply(parent_text="VAR", cfg=_cfg(subjects=()))
     assert res.action == "skipped" and "no subjects declared" in res.reason
+
+
+# ── Tuning an UNSAVED subject ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_preview_uses_an_unsaved_subject(monkeypatch, _no_llm):
+    """The dry run must test the card being edited, not only stored config.
+
+    Reading saved config only made the loop: type a view, save it, try it,
+    hate it, retype, save again — committing half-finished subjects to live
+    config just to see what they produce. The first thing an operator hit was
+    "no subjects declared" while looking at a subject they had just typed.
+    """
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+        seen["view"] = subject.view
+        seen["id"] = subject.id
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    scratch = Subject(id="scratch", match=("x",), view="an unsaved position")
+
+    # cfg has NO subjects — the exact state that produced the message.
+    res = await preview_reply(
+        parent_text="anything", cfg=_cfg(subjects=()), subject_override=scratch
+    )
+    assert res.action == "preview"
+    assert seen["view"] == "an unsaved position"
+    assert seen["id"] == "scratch"
+
+
+@pytest.mark.asyncio
+async def test_preview_without_an_override_still_needs_a_subject(_no_llm):
+    """The message stays correct when nothing is genuinely declared."""
+    res = await preview_reply(parent_text="anything", cfg=_cfg(subjects=()))
+    assert res.action == "skipped"
+    assert "no subjects declared" in res.reason
+
+
+@pytest.mark.asyncio
+async def test_an_unsaved_subject_still_gets_the_universal_hard_lines(
+    monkeypatch, _no_llm
+):
+    """A scratch subject is not a way around the rules that always apply."""
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+        seen["rules"] = subject.all_hard_lines()
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    await preview_reply(
+        parent_text="x", cfg=_cfg(subjects=()),
+        subject_override=Subject(id="scratch", match=("x",), view="v"),
+    )
+    assert any("protected characteristic" in r for r in seen["rules"])
+    assert any("never a people" in r for r in seen["rules"])
+
+
+def test_the_panel_sends_the_open_card():
+    """Grep-proof: the JS must post the expanded subject, or this is dead."""
+    import pathlib as _pl
+
+    js = _pl.Path(
+        "kazma-ui/kazma_ui/static/js/settings_integrations.js"
+    ).read_text(encoding="utf-8")
+    assert "subject: (this.xReplyOpen !== null" in js, (
+        "runXReplyPreview must send the open subject card, or the dry run "
+        "silently falls back to saved config"
+    )
