@@ -2870,14 +2870,34 @@
                         </p>
                     </div>
                     <div class="form-group">
-                        <label for="xr-summoners">Who can summon it</label>
-                        <input id="xr-summoners" type="text" class="form-input"
-                               x-model="xReplySummonersText" placeholder="yourhandle, cohost"
-                               autocomplete="off">
-                        <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
-                            Comma-separated handles. Empty means nobody.
+                        <label for="xr-policy">Who can summon it</label>
+                        <select id="xr-policy" class="form-input" x-model="xReply.summoner_policy">
+                            <option value="allowlist">only the handles I list</option>
+                            <option value="anyone">anyone who mentions me</option>
+                        </select>
+                        <p style="font-size:0.78rem;color:var(--warning,#c80);margin-top:4px;"
+                           x-show="xReply.summoner_policy === 'anyone'" x-cloak>
+                            Any stranger can trigger a reply. Subject matching, the caps,
+                            the follower floor and the content screen all still apply.
                         </p>
                     </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="xr-summoners">Trusted handles</label>
+                    <input id="xr-summoners" type="text" class="form-input"
+                           x-model="xReplySummonersText" placeholder="yourhandle, cohost"
+                           autocomplete="off">
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;"
+                       x-show="xReply.summoner_policy !== 'anyone'">
+                        Comma-separated. Empty means nobody — a config mistake must not
+                        open the account to the world.
+                    </p>
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;"
+                       x-show="xReply.summoner_policy === 'anyone'" x-cloak>
+                        Anyone can summon, but only these handles can set the tone with an
+                        emoji. Strangers get the subject's own mood.
+                    </p>
                 </div>
 
                 <div class="form-group">
@@ -2888,6 +2908,43 @@
                         When set, a mention must contain this to count as a summon.
                     </p>
                 </div>
+
+                <label class="toggle-row">
+                    <span class="toggle">
+                        <input type="checkbox" x-model="xReply.allow_emoji_mood">
+                        <span class="toggle-slider"></span>
+                    </span>
+                    <span>Let an emoji set the tone</span>
+                </label>
+                <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 12px;">
+                    &ldquo;what do you think Kazma? 😂&rdquo; gets a roast; the same line with
+                    🤬 gets an angry one. Tone only &mdash; an emoji can never reach the
+                    subject&rsquo;s view or its hard lines, and only trusted handles can set it.
+                    <span x-show="xReply.mood_emoji" x-cloak>
+                        <template x-for="(m, e) in xReply.mood_emoji" :key="e">
+                            <span style="margin-inline-end:6px;" x-text="e + ' ' + m"></span>
+                        </template>
+                    </span>
+                </p>
+
+                <label class="toggle-row">
+                    <span class="toggle">
+                        <input type="checkbox" x-model="xReply.stance_check">
+                        <span class="toggle-slider"></span>
+                    </span>
+                    <span>Check the draft argues your view</span>
+                </label>
+                <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 12px;">
+                    One extra short model call per reply. The content screen only catches
+                    threats and over-length &mdash; it has no idea what your position is, so a
+                    draft that quietly argues the other side passes it. This blocks
+                    contradictions and fence-sitting.
+                    <span x-show="xReply.mode === 'auto' && !xReply.stance_check" x-cloak
+                          style="color:var(--warning,#c80);">
+                        With this off and mode set to auto, nothing verifies a reply before
+                        it publishes.
+                    </span>
+                </p>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:8px;">
                     <div class="form-group">
@@ -3037,6 +3094,15 @@
                             <label>Their handle (optional)</label>
                             <input type="text" class="form-input" x-model="xReplyPreview.handle"
                                    placeholder="someone" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label>Tone (optional)</label>
+                            <select class="form-input" x-model="xReplyPreview.mood">
+                                <option value="">the subject's own</option>
+                                <template x-for="m in xReply.moods" :key="m">
+                                    <option :value="m" x-text="m"></option>
+                                </template>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label>Force a subject (optional)</label>

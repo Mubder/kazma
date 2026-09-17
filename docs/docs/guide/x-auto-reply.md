@@ -54,6 +54,7 @@ reads the current set back from any chat platform.
 | `summoner_policy` | `allowlist` | `allowlist` \| `anyone` |
 | `summoners` | *(empty)* | trusted handles. Under `allowlist`, **empty means nobody** |
 | `allow_emoji_mood` | `true` | let a trusted summoner's emoji set the tone |
+| `stance_check` | `true` | verify the draft argues your view before posting |
 | `trigger` | *(empty)* | optional phrase that must appear in the mention |
 | `max_replies_per_day` | `5` | across all targets |
 | `max_replies_per_target_per_day` | `1` | per account |
@@ -137,8 +138,19 @@ subjects:
 `match` is checked as **whole words** for ASCII keywords, so `iran` does not
 fire on `Tirana`. Non-Latin keywords fall back to containment.
 
-`view` is what Kazma argues from. Be specific — "I think X because Y" yields
-a sharp reply; "be negative about Iran" yields generic slop.
+`view` is what Kazma argues from, and the prompt tells the model it is "the
+ONLY view you may argue" and that it is explicitly not a neutral assistant.
+
+Write a position, not a topic. Three things make one hold:
+
+1. **State the premise as settled**, not as a question — "that is my starting
+   premise, not a conclusion I am open to relitigating in a reply".
+2. **Name the counter-framings you expect to meet**, so the reply has
+   something to push against rather than inventing an angle.
+3. **Fix the target.** "The regime, the IRGC and the state's actions — never
+   Iranians, who are its first victims." That is not softening the view; it is
+   what makes it land, and it is the difference between a sharp account and a
+   suspended one.
 
 `examples` are worth more than `view` for voice. Two or three replies you
 actually wrote will pin the register harder than a paragraph describing it.
@@ -150,6 +162,34 @@ Keyword match runs first: deterministic, free, auditable, and it never calls
 a model. Only when nothing matches does an LLM pick — and it chooses from
 your declared subject **ids or nothing**. It cannot mint a subject, so a
 hallucinated topic can never become a reply.
+
+### Stance check
+
+The content screen checks rules that are the same for every subject — threats,
+length, emptiness. **It has no idea what your position is.** A draft that
+quietly argues the other side, or sits on the fence, passes it cleanly.
+
+For a feature whose premise is "argue the view I wrote", that is the failure
+that matters: not a rude reply, but Kazma agreeing with the person you summoned
+it to answer.
+
+So after drafting, one short model call classifies the draft against your
+`view`: **argues**, **contradicts**, or **fence**. The last two block the
+draft the same way a banned construction does. It is closed-set — any other
+answer is treated as a non-answer, so the check cannot invent a verdict or be
+talked into approving.
+
+**When the check itself cannot run** (no provider, a timeout, a garbled
+answer) the behaviour is deliberately asymmetric:
+
+| mode | unusable check |
+|---|---|
+| `auto` | **blocks** — publishing an unverified reply under your name is the thing this exists to prevent, and a model outage is not a reason to relax it |
+| `draft` | **allows** — you read the draft before it posts, so you are the check |
+
+Costs one extra short call per reply. Turn it off with `stance_check: false`
+if you would rather not pay it — the panel warns if you do that while in
+`auto`, because then nothing verifies a reply before it publishes.
 
 ## Guardrails
 

@@ -933,6 +933,7 @@
                         poll_interval_s: Number(this.xReply.poll_interval_s) || 600,
                         summoner_policy: this.xReply.summoner_policy || 'allowlist',
                         allow_emoji_mood: !!this.xReply.allow_emoji_mood,
+                        stance_check: !!this.xReply.stance_check,
                         subjects: this.xReplySubjectPayload(),
                     }),
                 });

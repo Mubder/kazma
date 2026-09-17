@@ -62,6 +62,7 @@ class ReplyConfigBody(BaseModel):
     poll_interval_s: int = Field(default=600)
     summoner_policy: str = Field(default="allowlist")
     allow_emoji_mood: bool = Field(default=True)
+    stance_check: bool = Field(default=True)
     subjects: list[SubjectBody] = Field(default_factory=list)
 
 
@@ -141,6 +142,7 @@ def _payload() -> dict[str, Any]:
         "poll_interval_s": cfg.poll_interval_s,
         "summoner_policy": cfg.summoner_policy,
         "allow_emoji_mood": cfg.allow_emoji_mood,
+        "stance_check": cfg.stance_check,
         "subjects": [
             {
                 "id": s.id,
@@ -287,6 +289,12 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
         # replies. The other rails still hold: subject match, three caps, the
         # follower floor and the content screen.
         warnings: list[str] = []
+        if body.enabled and mode == MODE_AUTO and not body.stance_check:
+            warnings.append(
+                "Stance check is off and replies post unattended. Nothing "
+                "verifies a draft argues your view before it publishes — a "
+                "model that drifts will post the other side under your name."
+            )
         if body.enabled and policy == SUMMON_ANYONE and mode == MODE_AUTO:
             warnings.append(
                 "Anyone can summon and replies post unattended. A stranger's "
@@ -351,6 +359,11 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             (
                 "connectors.x.reply.allow_emoji_mood",
                 bool(body.allow_emoji_mood),
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.stance_check",
+                bool(body.stance_check),
                 _CATEGORY,
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),

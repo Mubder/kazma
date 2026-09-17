@@ -137,6 +137,7 @@ class ReplyConfig:
     subjects: tuple[Subject, ...] = field(default=())
     summoner_policy: str = SUMMON_ALLOWLIST
     allow_emoji_mood: bool = True
+    stance_check: bool = True
 
     def can_draft(self) -> bool:
         return self.enabled and self.mode in (MODE_DRAFT, MODE_AUTO) and bool(self.subjects)
@@ -312,6 +313,9 @@ def get_reply_config() -> ReplyConfig:
         ),
         allow_emoji_mood=_as_bool(
             _cs_get("connectors.x.reply.allow_emoji_mood"), True
+        ),
+        stance_check=_as_bool(
+            _cs_get("connectors.x.reply.stance_check"), True
         ),
     )
 
