@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## Part B battery: 401 without a secret is the gate, not a dead API (2026-09-17)
+
+The HTTP pack treated every non-200 as FAIL. On a secret-mode install,
+`/api/research/ready`, `/api/backup/*`, and `/api/pending-approvals` 401
+when PowerShell has no `X-Kazma-Secret` — that is auth working.
+`/health/details` can show 200 HTML because `Invoke-WebRequest` follows
+the login redirect; that is the login page, not a details leak. The
+script now loads `.env`, sends `Accept: application/json`, scores
+unauthenticated 401/303 as gate-PASS, and only treats 200 JSON details
+without a credential as a leak.
+
 ## `document_status` with no ids is a platform overview (2026-09-17)
 
 Part A of the full-system battery called `document_status` with no

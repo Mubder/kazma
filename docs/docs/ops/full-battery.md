@@ -83,24 +83,51 @@ Do not claim Telegram/Discord/Slack, backups, Postgres dumps, restic, or HITL bu
 
 ## Part B — HTTP / ops (you run this)
 
-PowerShell, from any directory. Loopback autologin may apply in a **browser**; this shell needs a secret header if `/api/*` is gated.
+PowerShell. Loopback autologin may apply in a **browser**; this shell is not a browser. Run it from the **live install** directory so `.env` can supply `KAZMA_SECRET` (the script never prints the value).
+
+A **401** on a gated `/api/*` when no secret was sent is the gate working, **not** a dead subsystem. `Invoke-WebRequest` follows redirects, so `/health/details` without a secret can show **200 HTML** — that is the **login page**, not a leak of model names. JSON with `active_model` and no credential **is** a leak.
 
 ```powershell
 $base = 'http://127.0.0.1:9090'
-$h = @{}
-if ($env:KAZMA_SECRET) { $h['X-Kazma-Secret'] = $env:KAZMA_SECRET }
+Set-Location 'C:\Users\balfa\kazma'   # live install; change if yours differs
 
-function Probe($name, $path, $expect = 200) {
-  try {
-    $r = Invoke-WebRequest -Uri ($base + $path) -Headers $h -UseBasicParsing -TimeoutSec 30
-    $ok = $r.StatusCode -eq $expect
-    $snip = if ($r.Content.Length -gt 180) { $r.Content.Substring(0, 180) } else { $r.Content }
-    [pscustomobject]@{ Name = $name; Code = [int]$r.StatusCode; Ok = $ok; Evidence = $snip }
-  } catch {
-    $code = 0
-    if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
-    [pscustomobject]@{ Name = $name; Code = $code; Ok = $false; Evidence = $_.Exception.Message }
+if (-not $env:KAZMA_SECRET) {
+  foreach ($p in @((Join-Path (Get-Location) '.env'), 'G:\GitHubRepos\kazma\.env')) {
+    if (-not (Test-Path $p)) { continue }
+    $line = Select-String -Path $p -Pattern '^\s*KAZMA_SECRET\s*=' | Select-Object -First 1
+    if (-not $line) { continue }
+    $val = ($line.Line -replace '^\s*KAZMA_SECRET\s*=\s*', '').Trim().Trim('"').Trim("'")
+    if ($val) { $env:KAZMA_SECRET = $val; break }
   }
+}
+$haveSecret = [bool]$env:KAZMA_SECRET
+$h = @{ Accept = 'application/json' }
+if ($haveSecret) { $h['X-Kazma-Secret'] = $env:KAZMA_SECRET }
+Write-Host ('Auth header: ' + $(if ($haveSecret) { 'X-Kazma-Secret set (from env or .env)' } else { 'NONE — gated routes should 401 (gate PASS)' }))
+
+function Probe($name, $path, [switch]$Gated) {
+  $code = 0; $body = ''
+  try {
+    $r = Invoke-WebRequest -Uri ($base + $path) -Headers $h -UseBasicParsing -TimeoutSec 30 -MaximumRedirection 0
+    $code = [int]$r.StatusCode; $body = [string]$r.Content
+  } catch {
+    $body = [string]$_.Exception.Message
+    if ($_.Exception.Response) { $code = [int]$_.Exception.Response.StatusCode }
+  }
+  $snip = if ($body.Length -gt 180) { $body.Substring(0, 180) } else { $body }
+  $html = $body -match '<!DOCTYPE html>|<html'
+  $ok = $false; $note = ''
+  if ($Gated -and -not $haveSecret) {
+    if ($code -eq 401) { $ok = $true; $note = 'gate-401' }
+    elseif ($code -in 302, 303) { $ok = $true; $note = 'gate-redirect' }
+    elseif ($code -eq 200 -and $html) { $ok = $true; $note = 'login-html (redirect followed)' }
+    elseif ($code -eq 200 -and $body -match 'active_model') { $ok = $false; $note = 'LEAK details JSON unauthenticated' }
+    else { $note = 'unexpected unauth response' }
+  } else {
+    $ok = ($code -eq 200) -and -not $html
+    if ($html) { $note = 'got HTML, wanted JSON' }
+  }
+  [pscustomobject]@{ Name = $name; Code = $code; Ok = $ok; Note = $note; Evidence = $snip }
 }
 
 $rows = @(
@@ -109,15 +136,16 @@ $rows = @(
   (Probe 'deep' '/health/deep'),
   (Probe 'auth' '/api/auth/status'),
   (Probe 'app-status' '/api/status'),
-  (Probe 'research-ready' '/api/research/ready'),
-  (Probe 'backup-list' '/api/backup/list'),
-  (Probe 'backup-status' '/api/backup/status'),
-  (Probe 'pending-hitl' '/api/pending-approvals'),
-  (Probe 'health-details' '/health/details')
+  (Probe 'research-ready' '/api/research/ready' -Gated),
+  (Probe 'backup-list' '/api/backup/list' -Gated),
+  (Probe 'backup-status' '/api/backup/status' -Gated),
+  (Probe 'pending-hitl' '/api/pending-approvals' -Gated),
+  (Probe 'health-details' '/health/details' -Gated)
 )
 $rows | Format-Table -AutoSize
 $failed = @($rows | Where-Object { -not $_.Ok })
 if ($failed.Count) { Write-Host "PART B FAIL:" ($failed.Name -join ', ') } else { Write-Host 'PART B: all HTTP probes returned expected codes' }
+if (-not $haveSecret) { Write-Host 'Gated APIs were only checked for 401. Re-run with KAZMA_SECRET (or .env in this directory) to prove the JSON bodies.' }
 ```
 
 Then, still in PowerShell, from the **repo** (or the deploy clone you actually run):
@@ -136,10 +164,11 @@ cd 'G:\GitHubRepos\kazma'   # or C:\Users\balfa\kazma if that is the live proces
 | `/health/deep` | 200, `"ok": true` | 503 — the `failed` array **is** the broken part (config / recall / workspace / research / brain / database) |
 | `/api/auth/status` | 200; if you are behind nginx, `undeclared_proxy` must not be latched | 401 unexpected; or proxy latch while you thought you were direct |
 | `/api/status` | `"status":"ok"` (or `"degraded"` with named `init_errors`) | 500 / empty |
-| `/api/research/ready` | JSON with backends | 500 |
-| `/api/backup/list` | JSON `backups` (empty list is PASS) | 401 without a secret when you expected open; 500 |
-| `/api/pending-approvals` | JSON list (empty is PASS) | 500 |
-| `/health/details` | 200 **with** auth; 401 without a secret on a locked install is PASS | 200 **without** auth (leak) |
+| `/api/research/ready` | **With secret:** JSON backends. **No secret:** 401 (gate PASS — body not verified) | 500; 200 without a secret (should be gated) |
+| `/api/backup/list` | **With secret:** JSON `backups` (empty list is PASS). **No secret:** 401 | 500; 200 without a secret |
+| `/api/backup/status` | Same as backup-list | 500; 200 without a secret |
+| `/api/pending-approvals` | **With secret:** JSON list (empty is PASS). **No secret:** 401 | 500; 200 without a secret |
+| `/health/details` | **With secret:** JSON (`checks`, not HTML). **No secret:** 401 JSON, or 303 `/login`, or 200 login HTML if redirects were followed | **200 JSON** with `active_model` and no credential (leak). 500 |
 | `kazma_guard.py --status` | Guard sees the same `build.commit` as `/health/live` | Guard down, or commit mismatch (process did not pick up the pull) |
 
 **Human clicks (one each, 30 seconds)**
