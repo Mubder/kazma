@@ -332,9 +332,19 @@ def get_document_rollout() -> DocumentRollout:
     return _normalize_rollout(enabled, shadow, authoritative)
 
 
+def _production() -> bool:
+    import os
+
+    return (os.environ.get("KAZMA_PRODUCTION") or "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
 def get_document_config() -> DocumentConfig:
     """Re-read the ConfigStore and return a validated immutable snapshot."""
     defaults = DocumentConfig(storage_root=_default_storage_root())
+    if _production():
+        defaults = replace(defaults, security_malware_fail_closed=True)
     try:
         from kazma_core.config_store import get_config_store
 

@@ -411,5 +411,17 @@ class VoiceSettingsUpdate(BaseModel):
     stt_base_url: str = ""
     tts_provider: str = "edgetts"
     tts_voice: str = "default"
+    # Per-language voices, used when tts_voice is "auto". A single voice
+    # cannot serve a bilingual install: pinning one meant English replies
+    # were read by an Arabic voice, letter by letter (2026-09-17).
+    tts_voice_en: str = ""
+    tts_voice_ar: str = ""
+    # Read by /api/voice/stt since it shipped, but never settable from the
+    # UI — the one field you could not configure was the credential.
+    stt_api_key: str = ""
     stt_language: str = "auto"
     tts_output_format: str = "mp3"
+    # Live duplex voice. Also used, also had no UI.
+    livekit_url: str = ""
+    livekit_api_key: str = ""
+    livekit_api_secret: str = ""

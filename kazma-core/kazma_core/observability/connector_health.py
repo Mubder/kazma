@@ -77,10 +77,9 @@ class ConnectorStatus:
 
 def _vault_get(key: str) -> str:
     try:
-        from kazma_core.security.vault import get_vault
+        from kazma_core.security.vault import retrieve_with_tenant_ladder
 
-        vault = get_vault()
-        return str(vault.retrieve(key) or "") if vault else ""
+        return retrieve_with_tenant_ladder(key)
     except Exception:  # noqa: BLE001
         return ""
 

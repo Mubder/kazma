@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
-import subprocess
 import httpx
 from kazma_core.tools.file_write import _get_workspace
 
@@ -112,7 +112,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
     try:
         from kazma_core.git_identity import get_app_installation_token
 
-        token = get_app_installation_token() or ""
+        token = (await asyncio.to_thread(get_app_installation_token)) or ""
     except Exception:
         token = ""
     if not token:
@@ -213,8 +213,8 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             )
         )
 
-    def _run() -> tuple[int, str]:
-        r = subprocess.run(
+    async def _run() -> tuple[int, str]:
+        r = await run_off_loop(
             cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30
         )
         # Capture BOTH streams — git often puts the real auth error on stderr
@@ -237,7 +237,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
         )
         return r.returncode, out
 
-    def _remote_has_commit(ref: str, sha: str) -> bool:
+    async def _remote_has_commit(ref: str, sha: str) -> bool:
         """Verify the remote actually points at *sha* (don't trust local exit codes).
 
         Some auth failures make ``git push origin main`` print a benign
@@ -248,7 +248,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             ls_cmd = ["git", "-c", "credential.helper=", "-c", f"http.extraheader={auth_header}"]
             ls_target = remote_url if remote_url else remote
             ls_cmd.extend(["ls-remote", ls_target, ref])
-            r = subprocess.run(
+            r = await run_off_loop(
                 ls_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=20
             )
             out = r.stdout.strip()
@@ -265,9 +265,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             return False
 
     try:
-        returncode, output = _run()
+        returncode, output = await _run()
 
-        def _refresh_and_retry(prev_output: str) -> str | None:
+        async def _refresh_and_retry(prev_output: str) -> str | None:
             """Clear token cache, mint a fresh token, rebuild cmd, retry once.
 
             Returns the retry output string if a retry happened, else None.
@@ -286,7 +286,9 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
                 )
 
                 invalidate_app_token_cache()
-                fresh = mint_app_installation_token(force=True)
+                fresh = await asyncio.to_thread(
+                    mint_app_installation_token, force=True
+                )
             except Exception:
                 fresh = None
 
@@ -310,14 +312,14 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             # _remote_has_commit() uses the fresh auth_header too.
             cmd[:] = new_cmd
 
-            return _run()[1]
+            return (await _run())[1]
 
         token_prefix = (token[:4] + "***") if token else "none"
 
         # ── Path 1: explicit failure (non-zero exit) ──
         if returncode != 0:
             if action == "push" and _looks_like_auth_failure(output):
-                retried = _refresh_and_retry(output)
+                retried = await _refresh_and_retry(output)
                 if retried is not None:
                     # Verify the retry actually landed.
                     if target_branch:
@@ -326,7 +328,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
                                 ["git", "rev-parse", "HEAD"], cwd=cwd,
                                 capture_output=True, text=True, timeout=5,
                             )).stdout.strip()
-                            if head_sha and _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
+                            if head_sha and await _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
                                 return retried
                         except Exception:
                             pass
@@ -364,7 +366,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
 
             if looks_noop and ahead_n > 0 and head_sha:
                 # Local is ahead but push said "up to date" — verify the remote.
-                if not _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
+                if not await _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
                     logger.warning(
                         "[git_push_pull] Push reported up-to-date but HEAD is %d commit(s) "
                         "ahead and remote does NOT have %s — treating as auth failure",
@@ -376,10 +378,10 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
                         "(local is ahead, remote unchanged). This is usually an auth/token failure "
                         "that git surfaced as a no-op. Attempting token refresh...\n"
                     )
-                    retried = _refresh_and_retry(synthetic)
+                    retried = await _refresh_and_retry(synthetic)
                     if retried is not None:
                         # Verify the retry landed.
-                        if _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
+                        if await _remote_has_commit(f"refs/heads/{target_branch}", head_sha):
                             return retried
                         diag = (
                             "[Kazma] Auth failed or rejected after token refresh. "
@@ -403,7 +405,7 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             await run_off_loop(pull_cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=30)
 
             # Retry push
-            rc2, out2 = _run()
+            rc2, out2 = await _run()
             if rc2 != 0:
                 diag = f"[Kazma] Auth failed or rejected after rebase. (Used token prefix: {token_prefix}).\n"
                 return diag + out2
@@ -485,7 +487,7 @@ async def git_merge(source_branch: str) -> str:
 
 async def github_create_pr(title: str, body: str, head: str, base: str = "main") -> str:
     """Create a new Pull Request on the GitHub repository."""
-    owner_repo = _resolve_owner_repo()
+    owner_repo = await _resolve_owner_repo()
     if isinstance(owner_repo, str):
         return owner_repo  # error message
 
@@ -523,7 +525,7 @@ async def github_create_pr(title: str, body: str, head: str, base: str = "main")
 
 async def github_merge_pr(number: int, commit_title: str | None = None, merge_method: str = "squash") -> str:
     """Merge an open Pull Request on GitHub."""
-    owner_repo = _resolve_owner_repo()
+    owner_repo = await _resolve_owner_repo()
     if isinstance(owner_repo, str):
         return owner_repo
 
@@ -566,7 +568,7 @@ async def github_merge_pr(number: int, commit_title: str | None = None, merge_me
 
 async def github_create_issue(title: str, body: str, labels: list[str] | None = None) -> str:
     """Create a new Issue on GitHub."""
-    owner_repo = _resolve_owner_repo()
+    owner_repo = await _resolve_owner_repo()
     if isinstance(owner_repo, str):
         return owner_repo
 
@@ -604,7 +606,7 @@ async def github_create_issue(title: str, body: str, labels: list[str] | None = 
 
 async def github_comment_issue(number: int, body: str) -> str:
     """Post a comment on a GitHub Issue or Pull Request."""
-    owner_repo = _resolve_owner_repo()
+    owner_repo = await _resolve_owner_repo()
     if isinstance(owner_repo, str):
         return owner_repo
 
@@ -646,9 +648,14 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
     workspace's ``origin`` remote (consistent with ``github_create_pr``).
     Uses the shared ``GitHubClient`` when available.
     """
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    def _ok(text: str) -> str:
+        return fence_untrusted(text, source=f"github:issues:{state}")
+
     # Resolve repo: explicit arg → workspace remote.
     if not repo:
-        owner_repo = _resolve_owner_repo()
+        owner_repo = await _resolve_owner_repo()
         if isinstance(owner_repo, str):
             return owner_repo
         slug = f"{owner_repo[0]}/{owner_repo[1]}"
@@ -662,7 +669,7 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
                 issues = await gh.request(
                     "GET", f"/repos/{slug}/issues", params={"state": state},
                 )
-            return _format_issues(issues, state)
+            return _ok(_format_issues(issues, state))
         except Exception as e:
             return f"Error listing issues: {e}"
 
@@ -678,7 +685,7 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
                 headers=headers,
             )
             if r.status_code == 200:
-                return _format_issues(r.json(), state)
+                return _ok(_format_issues(r.json(), state))
             return f"Failed to fetch issues (status {r.status_code}): {r.text}"
     except Exception as e:
         return f"Error listing issues: {e}"
@@ -695,7 +702,7 @@ def _format_issues(issues: list, state: str) -> str:
     return "\n".join(results) or f"No {state} issues found."
 
 
-def _resolve_owner_repo() -> tuple[str, str] | str:
+async def _resolve_owner_repo() -> tuple[str, str] | str:
     """Resolve (owner, repo) from the workspace git remote.
 
     Returns an error-message string on failure (so callers can return it
@@ -712,7 +719,7 @@ def _resolve_owner_repo() -> tuple[str, str] | str:
     # Fallback: parse locally.
     cwd = _get_workspace()
     try:
-        res = subprocess.run(
+        res = await run_off_loop(
             ["git", "remote", "get-url", "origin"],
             cwd=cwd, capture_output=True, text=True, timeout=5,
         )

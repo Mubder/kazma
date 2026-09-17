@@ -190,3 +190,58 @@ def test_no_second_hidden_autospeak_switch():
         "a localStorage auto-speak gate is a second source of truth that no "
         "settings screen shows"
     )
+
+
+# ── the settings page must cover every voice key ───────────────────────────
+
+
+def test_per_language_voices_are_used_when_auto():
+    over = {"latin": "en-GB-RyanNeural", "arabic": "ar-EG-SalmaNeural"}
+    assert pick_voice_for_text(EN, AUTO_VOICE, "edgetts", over) == "en-GB-RyanNeural"
+    assert pick_voice_for_text(AR, AUTO_VOICE, "edgetts", over) == "ar-EG-SalmaNeural"
+
+
+def test_an_unset_per_language_voice_falls_back_to_the_builtin():
+    over = {"latin": "", "arabic": "   "}
+    assert pick_voice_for_text(EN, AUTO_VOICE, "edgetts", over) == "en-US-AriaNeural"
+    assert pick_voice_for_text(AR, AUTO_VOICE, "edgetts", over) == "ar-SA-HamedNeural"
+
+
+def test_a_pinned_voice_still_beats_per_language_choices():
+    over = {"latin": "en-GB-RyanNeural", "arabic": "ar-EG-SalmaNeural"}
+    assert pick_voice_for_text(EN, "en-US-GuyNeural", "edgetts", over) == "en-US-GuyNeural"
+
+
+def test_every_persisted_voice_key_is_settable():
+    """A key the code READS but no form can WRITE is a dead setting.
+
+    `voice.stt_api_key` was exactly that: `/api/voice/stt` had read it since
+    it shipped, and the only field an operator could not configure was the
+    credential.
+    """
+    from kazma_ui.models import VoiceSettingsUpdate
+
+    fields = set(VoiceSettingsUpdate.model_fields)
+    for required in (
+        "stt_api_key", "tts_voice_en", "tts_voice_ar",
+        "livekit_url", "livekit_api_key", "livekit_api_secret",
+    ):
+        assert required in fields, f"{required} is read by the app but not settable"
+
+
+def test_secrets_are_masked_on_read_and_a_masked_save_is_a_no_op():
+    """Round-tripping the form must not overwrite a key with asterisks.
+
+    This is the shape of the incident where pressing Test blanked every
+    provider API key: a read that cannot see the secret, written straight
+    back.
+    """
+    import inspect
+
+    from kazma_ui import settings as settings_mod
+
+    src = inspect.getsource(settings_mod)
+    assert '"stt_api_key": _mask(' in src, "a stored key must never be echoed"
+    assert "is_masked_secret_placeholder(val)" in src, (
+        "saving the mask back must be ignored, not written through"
+    )

@@ -845,6 +845,9 @@ class AsyncMCPManager:
             lines.append(str(result["description"]))
         else:
             lines.append(str(result))
+        # Fence once, at spec_tools (the native-tool SoT the gate enforces).
+        # Fencing here AND in spec_tools AND in tool_builtins triple-wrapped
+        # a 5-char payload to 2 KB of banners (audit 2026-09-17 follow-up).
         return {"content": "\n".join(lines), "is_error": False, "messages": messages}
 
     async def _reply_server_request(
@@ -2214,16 +2217,18 @@ class UnifiedToolExecutor:
                         for a in allow_raw.split(",")
                         if a.strip()
                     }
-                    tier = classify_mcp_tool(tool_name)
-                    prod = (_os_mcp.environ.get("KAZMA_PRODUCTION") or "").lower() in (
-                        "1", "true", "on", "yes",
+                    _tier = classify_mcp_tool(tool_name)
+                    logger.debug(
+                        "[MCP] %s classified %s — HITL unless allowlisted",
+                        tool_name,
+                        _tier,
                     )
-                    # Production: HITL for every tool not on the allowlist.
-                    # Dev/default: danger + unknown only (safe name patterns skip).
-                    if prod:
-                        force_hitl = tool_name.lower() not in allowlist
-                    else:
-                        force_hitl = tier in ("danger", "unknown")
+                    # Tool *names* are supplied by the third-party server. A
+                    # name matching a safe verb (`read_env`, `get_file`) used
+                    # to skip HITL in the default posture — only production
+                    # force-gated. Names are the same untrusted channel as
+                    # output (audit 2026-09-17). Allowlist is the only skip.
+                    force_hitl = tool_name.lower() not in allowlist
                     # The supervisor graph may already BE the HITL authority
                     # for this turn. `LocalToolRegistry.execute` has skipped
                     # this same bus gate on that signal for a while: a second

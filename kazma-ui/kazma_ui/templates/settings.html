@@ -2918,13 +2918,34 @@
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_custom_help') }}</p>
                         </div>
 
-                        <div class="form-group" x-show="voiceForm.stt_provider === 'nvidia'" style="margin-top:8px;" x-cloak>
+                        {# Base URL is not NVIDIA-only: any OpenAI-compatible STT server
+                           (faster-whisper, a local whisper.cpp) needs it, and the operator's
+                           install had one pointed at 127.0.0.1:9000 with no way to see or
+                           change it here. #}
+                        <div class="form-group" x-show="voiceForm.stt_provider !== 'openai' || voiceForm.stt_base_url" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.stt_base_url') }}</label>
                             <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
                                    placeholder="http://127.0.0.1:9000/v1"
                                    @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">
                                 {{ t('voice.stt_base_help') }}
+                            </p>
+                        </div>
+
+                        {# The STT API key. `/api/voice/stt` has read `voice.stt_api_key`
+                           since it shipped, but nothing could set it — the one field you
+                           could not configure was the credential. Sent masked, and a save
+                           that echoes the mask leaves the stored secret untouched. #}
+                        <div class="form-group">
+                            <label>STT API key</label>
+                            <input type="password" class="form-control" x-model="voiceForm.stt_api_key"
+                                   placeholder="Leave blank to keep the stored key"
+                                   autocomplete="new-password"
+                                   @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">
+                                Stored encrypted in the vault. Shown as
+                                <code>********</code> when one is set — clearing the box does
+                                not delete it.
                             </p>
                         </div>
 
@@ -2979,11 +3000,43 @@
                         <div class="form-group">
                             <label>{{ t('voice.tts_voice') }}</label>
                             <select class="form-select" x-model="ttsVoiceType" @change="onTtsVoiceTypeChange()">
+                                <option value="auto">Auto — match the message language</option>
                                 <template x-for="model in voiceModels" :key="model">
                                     <option :value="model" x-text="model"></option>
                                 </template>
                                 <option value="custom">{{ t('voice.tts_voice_custom') }}</option>
                             </select>
+                            <p class="form-help" style="margin-top:4px;" x-show="ttsVoiceType === 'auto'" x-cloak>
+                                Picks a voice per reply from the text. Anything else here pins one
+                                voice to every reply, in every language.
+                            </p>
+                        </div>
+
+                        {# Per-language voices. Only meaningful under Auto: with a pinned voice
+                           there is nothing to choose between. A single voice cannot serve a
+                           bilingual install — that is what read English replies aloud in Arabic. #}
+                        <div x-show="ttsVoiceType === 'auto'" x-cloak>
+                            <div class="form-group">
+                                <label>English voice</label>
+                                <select class="form-select" x-model="voiceForm.tts_voice_en" @change="saveVoiceSettings()">
+                                    <option value="">Default (en-US-AriaNeural)</option>
+                                    <template x-for="model in latinVoices()" :key="'en-' + model">
+                                        <option :value="model" x-text="model"></option>
+                                    </template>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Arabic voice</label>
+                                <select class="form-select" x-model="voiceForm.tts_voice_ar" @change="saveVoiceSettings()">
+                                    <option value="">Default (ar-SA-HamedNeural)</option>
+                                    <template x-for="model in arabicVoices()" :key="'ar-' + model">
+                                        <option :value="model" x-text="model"></option>
+                                    </template>
+                                </select>
+                                <p class="form-help" style="margin-top:4px;" x-show="!arabicVoices().length" x-cloak>
+                                    No Arabic voices reported by this provider.
+                                </p>
+                            </div>
                         </div>
 
                         <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;" x-cloak>
@@ -3001,6 +3054,40 @@
                                 <option value="opus">{{ t('voice.format_opus') }}</option>
                                 <option value="flac">{{ t('voice.format_flac') }}</option>
                             </select>
+                        </div>
+
+                        {# Live duplex voice (the speaker button in the composer). These
+                           three keys were read by the LiveKit path and had no controls
+                           anywhere, so the feature could only be configured by editing
+                           the database by hand. #}
+                        <h4 style="margin-top:20px;">Live duplex voice (LiveKit)</h4>
+                        <p class="form-help" style="margin-bottom:8px;">
+                            Optional. Only needed for the live, interrupt-anytime mode —
+                            recording and read-aloud work without it.
+                        </p>
+                        <div class="form-group">
+                            <label>LiveKit URL</label>
+                            <input type="text" class="form-control" x-model="voiceForm.livekit_url"
+                                   placeholder="wss://your-project.livekit.cloud"
+                                   @change="saveVoiceSettings()">
+                        </div>
+                        <div class="form-group">
+                            <label>LiveKit API key</label>
+                            <input type="password" class="form-control" x-model="voiceForm.livekit_api_key"
+                                   placeholder="Leave blank to keep the stored key"
+                                   autocomplete="new-password"
+                                   @change="saveVoiceSettings()">
+                        </div>
+                        <div class="form-group">
+                            <label>LiveKit API secret</label>
+                            <input type="password" class="form-control" x-model="voiceForm.livekit_api_secret"
+                                   placeholder="Leave blank to keep the stored secret"
+                                   autocomplete="new-password"
+                                   @change="saveVoiceSettings()">
+                            <p class="form-help" style="margin-top:4px;">
+                                Both are stored encrypted in the vault and shown as
+                                <code>********</code> once set.
+                            </p>
                         </div>
                     </div>
                 </div>

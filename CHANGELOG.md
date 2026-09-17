@@ -1,5 +1,77 @@
 # CHANGELOG
 
+## Deep audit 2026-09-17: the gates were still looking at the wrong shape
+
+Follow-up to the 2026-09-16 cold-read. The defects below were green in
+`tests/test_static_gates.py` because the gates inspect AST shape (top-level
+`Expr`, innermost `FunctionDef`, one ContextVar, a tool's own name). The
+live path used a nested helper, a lambda, a second ContextVar, or a
+third-party name.
+
+**Tenant ContextVars now move together.** `tenant_context` (vault, default
+`None`) and `safety.hitl` (memory tools, default `"default"`) exported the
+same getter names and were not the same variable. The tool worker bound
+only HITL; vault reads the other. Swarm workers, connector-health, and
+offsite backup therefore saw Settings-saved keys as missing. Setters
+mirror both ways; swarm dispatch installs `task.metadata["tenant_id"]` or
+`"default"` before `get_client`; connector-health / cloud-sync / X config
+share `retrieve_with_tenant_ladder` (current → `default` → global).
+Gateway `/documents` uses `resolve_tenant_id(platform, sender)`.
+
+**MCP names are untrusted in every posture.** Allowlist is the only HITL
+skip. `prompts/get` and `prompts/list` are fenced (tools/call and
+resources/read already were).
+
+**Detached work is retained.** SSE persist after disconnect uses
+`spawn_background` instead of a discarded `create_task` inside a lambda.
+Ops-alert asyncio delivery uses the same helper (the thread path was
+already retained).
+
+**`git_push` / `git_pull` no longer pin the event loop.** Token mint
+(`httpx.Client`, 15s) and `subprocess.run` (30s + ls-remote) go through
+`asyncio.to_thread` / `run_off_loop`. Nested `_run()` was invisible to the blocking gate (a nested `FunctionDef`
+looks like a threadpool). The gate now flags `create_task` inside a
+`Lambda`; treating every nested sync def as on-loop false-positives
+legitimate `to_thread` wrappers, so that half stays a source-level fix.
+
+**`turn_failed` now carries `error_message` on `SupervisorState`.**
+LangGraph drops undeclared keys; `TurnResult.error` was always `None`.
+
+**The proposal-tool filter had never run.** `graph_tool_worker` imported
+`kazma_core.safety.commitment.proposals.is_proposal_tool` inside
+`except Exception: pass` since 2026-09-04 (`e0305120`). That module has
+never existed in git history, so the import raised `ImportError` on
+**every** turn with pending tool calls for thirteen days. `x_post` /
+`x_schedule_post` / `book_x_post` were invocable directly the whole
+time; commitment-authorize was the only remaining choke. The module now
+exists, the filter fails closed, and the baked fallback list is
+parity-tested against `PROPOSAL_TOOLS`.
+
+**`database_client` is locked down.** No default `checkpoints.db`; Kazma
+internal DBs are denied; remote hosts other than loopback need
+`KAZMA_DB_CLIENT_ALLOWED_HOSTS`; inspect uses the readonly authorizer and
+quoted identifiers; SQLite work is `to_thread`; results are fenced.
+
+**Untrusted readers fenced:** email From/To, calendar summaries/locations,
+GitHub issue titles. `FENCED_TOOL_FUNCTIONS` covers spec_tools, calendar,
+git issues, and database_client.
+
+Also: `resolve_redirects` takes `block_unresolved=True` on every hop
+(peer-assert after connect was already there); malware `fail_closed`
+defaults on under `KAZMA_PRODUCTION=1`; Docker entrypoint no longer
+`|| true`s a failed SQLite→Postgres migrate; `/api/saas/status` is
+admin-gated when a secret is configured (open mode still serves it, so
+Settings → Ops does not go blank on a no-secret install); dialect
+pipelines no longer call the LLM (tokenizer-only); MCP prompt/list
+fencing lives once in `spec_tools` (not also in manager + tool_builtins);
+`UNWIRED_INVENTORY.md` no longer lists deleted sources as retained.
+
+Regressions: `tests/test_audit_2026_09_17_regressions.py`. The vault
+tripwire that would log a miss when a name exists under some other tenant
+stays reverted — do not re-land it until the Linux SHUTDOWN hang is
+reproduced (`docs/KNOWN_GAPS.md`).
+
+
 ## Deep audit 2026-09-16: seven defects that every gate we had said were fine
 
 A cold-read audit of the whole tree. Every finding below shipped, and every

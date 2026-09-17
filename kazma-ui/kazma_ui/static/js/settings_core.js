@@ -358,8 +358,16 @@
             stt_base_url: '',
             tts_provider: 'edgetts',
             tts_voice: 'default',
+            // Per-language voices, used when tts_voice is 'auto'. Empty means
+            // "use the built-in default for that script".
+            tts_voice_en: '',
+            tts_voice_ar: '',
+            stt_api_key: '',
             stt_language: 'auto',
             tts_output_format: 'mp3',
+            livekit_url: '',
+            livekit_api_key: '',
+            livekit_api_secret: '',
         },
         voiceProviders: { stt: ['openai', 'groq', 'cohere', 'nvidia', 'faster-whisper'], tts: ['edgetts', 'openai', 'nvidia', 'kokoro', 'coqui'] },
         voiceModels: [],

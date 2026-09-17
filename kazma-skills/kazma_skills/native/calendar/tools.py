@@ -58,7 +58,14 @@ async def list_events(
         return f"Error: {exc.hint}"
     except Exception as exc:  # noqa: BLE001
         return f"Error: could not list events — {type(exc).__name__}: {exc}"
-    return f"Calendar: {backend.name}\n{_fmt(events)}"
+    listing = f"Calendar: {backend.name}\n{_fmt(events)}"
+    try:
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        return fence_untrusted(listing, source="calendar")
+    except Exception:
+        logger.debug("prompt fence unavailable for calendar", exc_info=True)
+        return listing
 
 
 async def create_event(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sqlite3
@@ -46,6 +47,110 @@ def _is_path_allowed(path_str: str) -> bool:
         return False
 
 
+_INTERNAL_DB_NAMES = frozenset(
+    {
+        "vault.db",
+        "settings.db",
+        "checkpoints.db",
+        "memory_state.db",
+        "memory_ops.db",
+        "memory.db",
+        "hitl_gates.db",
+        "snapshots.db",
+        "cron.db",
+        "chat_sessions.db",
+        "documents.db",
+        "swarm_tasks.db",
+        "agent_artifacts.db",
+        "audit.db",
+        "llm_calls.db",
+    }
+)
+
+
+def _quote_ident(name: str) -> str:
+    """Quote a SQLite identifier. Never interpolate raw table names."""
+    return '"' + str(name).replace('"', '""') + '"'
+
+
+def _is_internal_kazma_db(path: Path) -> bool:
+    """True for Kazma's own SQLite files (conversation/secrets/state)."""
+    name = path.name.lower()
+    if name in {"vault.db", "hitl_gates.db"}:
+        return True
+    if name not in _INTERNAL_DB_NAMES:
+        return False
+    try:
+        from kazma_core.paths import data_dir
+
+        path.resolve().relative_to(data_dir().resolve())
+        return True
+    except (ValueError, OSError, Exception):
+        return False
+
+
+def _deny_internal(db_uri: str) -> str | None:
+    if db_uri == ":memory:":
+        return None
+    try:
+        p = Path(db_uri).expanduser().resolve()
+    except Exception:
+        return None
+    if _is_internal_kazma_db(p):
+        return (
+            f"Error: querying Kazma internal database {p.name!r} is not allowed. "
+            "Pass a workspace SQLite file."
+        )
+    return None
+
+
+def _install_readonly_authorizer(conn: sqlite3.Connection) -> None:
+    _SQLITE_FUNCTION = getattr(sqlite3, "SQLITE_FUNCTION", 31)
+    _SAFE_SQL_FUNCTIONS = frozenset(
+        {
+            "count", "sum", "avg", "min", "max", "total", "group_concat",
+            "length", "lower", "upper", "substr", "substring", "trim",
+            "ltrim", "rtrim", "replace", "instr", "like", "glob", "ifnull",
+            "coalesce", "nullif", "abs", "round", "typeof", "hex", "quote",
+            "printf", "unicode", "char", "date", "time", "datetime",
+            "julianday", "strftime", "json", "json_extract",
+            "json_array_length", "json_type", "json_valid", "bm25",
+            "highlight", "snippet", "rank",
+        }
+    )
+
+    def authorizer_callback(action, arg1, arg2, dbname, trigger_name):
+        if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ):
+            return sqlite3.SQLITE_OK
+        if action == getattr(sqlite3, "SQLITE_PRAGMA", 19):
+            # inspect_db_schema needs table_info; execute_db_query forbids PRAGMA
+            # via the SQL keyword gate. Allow table_info / index_list only.
+            pragma = str(arg1 or "").lower()
+            if pragma in ("table_info", "index_list", "foreign_key_list"):
+                return sqlite3.SQLITE_OK
+            return sqlite3.SQLITE_DENY
+        if action == _SQLITE_FUNCTION:
+            fname = (arg2 or arg1 or "").lower()
+            if fname in _SAFE_SQL_FUNCTIONS:
+                return sqlite3.SQLITE_OK
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_DENY
+
+    conn.set_authorizer(authorizer_callback)
+
+
+def _fence_result(text: str, source: str) -> str:
+    if not text or text.startswith("Error"):
+        return text
+    try:
+        from kazma_core.safety.prompt_fence import fence_untrusted
+
+        return fence_untrusted(text, source=source)
+    except Exception:
+        logger.debug("prompt fence unavailable for database_client", exc_info=True)
+        return text
+
+
 def _connect_sqlite(db_uri: str) -> sqlite3.Connection:
     """Connect to SQLite and attempt to load sqlite_vec extension if available."""
     conn = sqlite3.connect(db_uri)
@@ -54,6 +159,10 @@ def _connect_sqlite(db_uri: str) -> sqlite3.Connection:
 
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
+    except Exception:
+        pass
+    try:
+        conn.enable_load_extension(False)
     except Exception:
         pass
     return conn
@@ -73,42 +182,49 @@ async def inspect_db_schema(db_uri: str) -> str:
         scope_err = _workspace_scope_error(p, db_uri, "reads")
         if scope_err:
             return scope_err
+        denied = _deny_internal(db_uri)
+        if denied:
+            return denied
         if not _is_path_allowed(db_uri):
             return f"Error: Database access denied for path: {db_uri}"
         if not p.exists():
             return f"Error: Database file not found: {db_uri}"
 
-    try:
+    def _inspect() -> str:
         conn = _connect_sqlite(db_uri)
-        cursor = conn.cursor()
-
-        # Get list of tables
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
-        tables = [row[0] for row in cursor.fetchall()]
-
-        if not tables:
+        try:
+            _install_readonly_authorizer(conn)
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name NOT LIKE 'sqlite_%';"
+            )
+            tables = [row[0] for row in cursor.fetchall()]
+            if not tables:
+                return "No user-defined tables found in the database."
+            report = ["# Database Schema Report", ""]
+            for table in tables:
+                report.append(f"## Table: `{table}`")
+                report.append("| Column | Type | Nullable | Default | PK |")
+                report.append("| :--- | :--- | :---: | :--- | :---: |")
+                cursor.execute(f"PRAGMA table_info({_quote_ident(table)});")
+                columns = cursor.fetchall()
+                for col in columns:
+                    cid, name, col_type, notnull, dflt_value, pk = col
+                    nullable = "No" if notnull else "Yes"
+                    is_pk = "🟢" if pk else ""
+                    report.append(
+                        f"| `{name}` | {col_type or 'BLOB'} | {nullable} | "
+                        f"{dflt_value or 'NULL'} | {is_pk} |"
+                    )
+                report.append("")
+            return "\n".join(report)
+        finally:
             conn.close()
-            return "No user-defined tables found in the database."
 
-        report = ["# Database Schema Report", ""]
-        for table in tables:
-            report.append(f"## Table: `{table}`")
-            report.append("| Column | Type | Nullable | Default | PK |")
-            report.append("| :--- | :--- | :---: | :--- | :---: |")
-
-            cursor.execute(f"PRAGMA table_info({table});")
-            columns = cursor.fetchall()
-            for col in columns:
-                # col matches: (cid, name, type, notnull, dflt_value, pk)
-                cid, name, col_type, notnull, dflt_value, pk = col
-                nullable = "No" if notnull else "Yes"
-                is_pk = "🟢" if pk else ""
-                report.append(f"| `{name}` | {col_type or 'BLOB'} | {nullable} | {dflt_value or 'NULL'} | {is_pk} |")
-            report.append("")
-
-        conn.close()
-        return "\n".join(report)
-
+    try:
+        text = await asyncio.to_thread(_inspect)
+        return _fence_result(text, source=f"db_schema:{db_uri}")
     except Exception as e:
         logger.error("Error inspecting database schema %s: %s", db_uri, e)
         return f"Error inspecting database: {e}"
@@ -178,98 +294,34 @@ async def execute_db_query(
         scope_err = _workspace_scope_error(p, db_uri, "reads")
         if scope_err:
             return scope_err
+        denied = _deny_internal(db_uri)
+        if denied:
+            return denied
         if not _is_path_allowed(db_uri):
             return f"Error: Database access denied for path: {db_uri}"
         if not p.exists():
             return f"Error: Database file not found: {db_uri}"
 
-    try:
+    def _query() -> str:
         conn = _connect_sqlite(db_uri)
-        conn.row_factory = sqlite3.Row
+        try:
+            conn.row_factory = sqlite3.Row
+            _install_readonly_authorizer(conn)
+            cursor = conn.execute(query, params or [])
+            rows = cursor.fetchmany(limit)
+            if not rows:
+                return "[]"
+            return json.dumps(
+                [dict(row) for row in rows],
+                ensure_ascii=False,
+                indent=2,
+            )
+        finally:
+            conn.close()
 
-        # Read-only authorizer: allow SELECT/READ plus safe scalar/aggregate
-        # functions (COUNT, LIKE, substr, length, …). Deny writes and DDL.
-        # P1: previously only SELECT/READ were allowed, so COUNT/LIKE failed
-        # with "not authorized to use function" and broke agent diagnostics.
-        _SQLITE_FUNCTION = getattr(sqlite3, "SQLITE_FUNCTION", 31)
-        _SAFE_SQL_FUNCTIONS = frozenset(
-            {
-                # aggregates
-                "count",
-                "sum",
-                "avg",
-                "min",
-                "max",
-                "total",
-                "group_concat",
-                # scalars / string
-                "length",
-                "lower",
-                "upper",
-                "substr",
-                "substring",
-                "trim",
-                "ltrim",
-                "rtrim",
-                "replace",
-                "instr",
-                "like",
-                "glob",
-                "ifnull",
-                "coalesce",
-                "nullif",
-                "abs",
-                "round",
-                "typeof",
-                "hex",
-                "quote",
-                "printf",
-                "unicode",
-                "char",
-                # datetime
-                "date",
-                "time",
-                "datetime",
-                "julianday",
-                "strftime",
-                # json (when extension present)
-                "json",
-                "json_extract",
-                "json_array_length",
-                "json_type",
-                "json_valid",
-                # FTS5 helpers
-                "bm25",
-                "highlight",
-                "snippet",
-                "rank",
-            }
-        )
-
-        def authorizer_callback(action, arg1, arg2, dbname, trigger_name):
-            if action in (sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ):
-                return sqlite3.SQLITE_OK
-            if action == _SQLITE_FUNCTION:
-                # SQLite authorizer: SQLITE_FUNCTION → (None, function_name)
-                # See sqlite3_set_authorizer: zName1=NULL, zName2=func name.
-                fname = (arg2 or arg1 or "").lower()
-                if fname in _SAFE_SQL_FUNCTIONS:
-                    return sqlite3.SQLITE_OK
-                return sqlite3.SQLITE_DENY
-            return sqlite3.SQLITE_DENY
-
-        conn.set_authorizer(authorizer_callback)
-
-        cursor = conn.execute(query, params or [])
-        rows = cursor.fetchmany(limit)
-        conn.close()
-
-        if not rows:
-            return "[]"
-
-        result = [dict(row) for row in rows]
-        return json.dumps(result, ensure_ascii=False, indent=2)
-
+    try:
+        text = await asyncio.to_thread(_query)
+        return _fence_result(text, source=f"db_query:{db_uri}")
     except Exception as e:
         logger.error("SQL query execution failed: %s", e)
         return f"SQL Error: Query execution failed. Check syntax and permissions. Detail: {e}"
@@ -277,7 +329,7 @@ async def execute_db_query(
 
 async def sqlite_query(
     query: str,
-    db_path: str = "kazma-data/checkpoints.db",
+    db_path: str = "",
     params: list[Any] | None = None,
     limit: int = 100,
 ) -> str:
@@ -294,6 +346,11 @@ async def sqlite_query(
     Returns:
         JSON string representing rows, or safety/execution error messages.
     """
+    if not str(db_path or "").strip():
+        return (
+            "Error: db_path is required. Pass a workspace SQLite file — "
+            "Kazma internal databases are not queryable."
+        )
     return await execute_db_query(db_uri=db_path, query=query, params=params, limit=limit)
 
 
@@ -465,18 +522,22 @@ def _remote_host_error(db_uri: str, dialect: str) -> str | None:
     if not host:
         return "Error: could not parse a host from the database URI."
 
+    if host in ("localhost", "127.0.0.1", "::1"):
+        logger.info("[database_client] %s query -> loopback %r", dialect, host)
+        return None
+
     allowed_raw = (os.environ.get("KAZMA_DB_CLIENT_ALLOWED_HOSTS") or "").strip()
-    if allowed_raw:
-        allowed = {h.strip().lower() for h in allowed_raw.split(",") if h.strip()}
-        if host not in allowed:
-            logger.warning(
-                "[database_client] refused %s connection to %r "
-                "(not in KAZMA_DB_CLIENT_ALLOWED_HOSTS)", dialect, host,
-            )
-            return (
-                f"Error: host {host!r} is not in KAZMA_DB_CLIENT_ALLOWED_HOSTS. "
-                "Add it there to allow this connection."
-            )
+    allowed = {h.strip().lower() for h in allowed_raw.split(",") if h.strip()}
+    if host not in allowed:
+        logger.warning(
+            "[database_client] refused %s connection to %r "
+            "(not in KAZMA_DB_CLIENT_ALLOWED_HOSTS)", dialect, host,
+        )
+        return (
+            f"Error: host {host!r} is not in KAZMA_DB_CLIENT_ALLOWED_HOSTS. "
+            "Loopback is allowed without an allowlist; add this host there "
+            "to allow this connection."
+        )
 
     logger.info("[database_client] %s query -> host %r", dialect, host)
     return None
@@ -499,7 +560,10 @@ async def execute_db_query_any(
         if host_err:
             return host_err
     if dialect == "mongodb":
-        return await _query_mongodb(db_uri, query, params, limit)
+        return _fence_result(
+            await _query_mongodb(db_uri, query, params, limit),
+            source=f"db:mongo:{db_uri}",
+        )
 
     # SQL dialects — enforce read-only.
     err = _validate_readonly_sql(query)
@@ -507,9 +571,15 @@ async def execute_db_query_any(
         return err
 
     if dialect == "postgres":
-        return await _query_postgres(db_uri, query, params, limit)
+        return _fence_result(
+            await _query_postgres(db_uri, query, params, limit),
+            source=f"db:postgres:{db_uri}",
+        )
     if dialect == "mysql":
-        return await _query_mysql(db_uri, query, params, limit)
+        return _fence_result(
+            await _query_mysql(db_uri, query, params, limit),
+            source=f"db:mysql:{db_uri}",
+        )
     # SQLite — delegate to the existing path-validated implementation.
     return await execute_db_query(db_uri=db_uri, query=query, params=params, limit=limit)
 

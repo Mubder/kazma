@@ -37,7 +37,7 @@ from typing import Any
 from kazma_core.config_store import apply_sqlite_pragmas
 from kazma_core.tenant_context import get_current_tenant_id
 
-__all__ = ["SecretVault", "get_vault", "reset_vault"]
+__all__ = ["SecretVault", "get_vault", "reset_vault", "retrieve_with_tenant_ladder"]
 
 logger = logging.getLogger(__name__)
 
@@ -411,6 +411,35 @@ class SecretVault:
                     # has no recoverable failure mode.
                     logger.debug("[Vault] close() failed", exc_info=True)
                 self._conn = None
+
+
+def retrieve_with_tenant_ladder(name: str) -> str:
+    """Decrypt *name* walking current tenant → ``default`` → global.
+
+    Settings-saved secrets live under the operator's tenant (``default`` on a
+    single-user install). ``retrieve()`` with no tenant sees ONLY global
+    rows, so a background loop that never installed a context reads every
+    Settings key as missing. This is the ladder ``x_api.config`` already
+    used; connector-health and offsite backup now share it.
+    """
+    vault = get_vault()
+    if vault is None:
+        return ""
+    tenants: list[str | None] = []
+    current = get_current_tenant_id()
+    if current:
+        tenants.append(current)
+    for fallback in ("default", None):
+        if fallback not in tenants:
+            tenants.append(fallback)
+    for tid in tenants:
+        try:
+            val = vault.retrieve(name, tid)
+        except Exception:
+            val = None
+        if val and str(val).strip():
+            return str(val).strip()
+    return ""
 
 
 # ── Singleton ──────────────────────────────────────────────────────────────

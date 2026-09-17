@@ -81,14 +81,27 @@ _current_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
 )
 
 
+def _mirror_vault_tenant(tenant_id: str) -> None:
+    """Keep tenant_context in lockstep. Never go through its set() (recurse)."""
+    try:
+        from kazma_core import tenant_context as _tc
+
+        _tc._current_tenant_id.set(tenant_id)
+    except Exception:
+        pass
+
+
 def set_current_tenant_id(tenant_id: str) -> contextvars.Token[str]:
     """Set the active tenant_id for the current async task context."""
-    return _current_tenant_id.set(tenant_id)
+    token = _current_tenant_id.set(tenant_id)
+    _mirror_vault_tenant(tenant_id)
+    return token
 
 
 def reset_current_tenant_id(token: contextvars.Token[str]) -> None:
     """Reset the tenant_id context to its previous state."""
     _current_tenant_id.reset(token)
+    _mirror_vault_tenant(_current_tenant_id.get())
 
 
 def get_current_tenant_id() -> str:

@@ -280,6 +280,7 @@ async def resolve_redirects(
     url: str,
     *,
     max_hops: int = MAX_REDIRECT_HOPS,
+    block_unresolved: bool = True,
     **request_kwargs: Any,
 ) -> str:
     """Walk a redirect chain, validating **every** hop, and return the final URL.
@@ -296,6 +297,11 @@ async def resolve_redirects(
         client: An ``httpx.AsyncClient``.
         url: Starting URL. Validated before the first request.
         max_hops: Redirect budget; exceeding it raises :class:`SSRFError`.
+        block_unresolved: Reject hops whose host does not resolve (default
+            True). Callers used to pass ``block_unresolved=True`` only on
+            the first URL; this helper had no parameter so hop 0 was
+            fail-open too (audit 2026-09-17). Peer-assert after connect
+            remains the live rebinding backstop.
         **request_kwargs: Passed to each ``client.request`` call.
 
     Returns:
@@ -307,7 +313,7 @@ async def resolve_redirects(
     """
     import httpx
 
-    validate_url(url)
+    validate_url(url, block_unresolved=block_unresolved)
     current = url
     for _ in range(max_hops):
         resp = await client.request(
@@ -319,7 +325,7 @@ async def resolve_redirects(
         if not location:
             return current
         current = str(httpx.URL(current).join(location))
-        validate_url(current)  # every hop, not just the first
+        validate_url(current, block_unresolved=block_unresolved)
     raise SSRFError(
         f"Blocked URL '{url}': more than {max_hops} redirects."
     )

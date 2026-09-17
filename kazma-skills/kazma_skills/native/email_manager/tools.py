@@ -124,13 +124,19 @@ async def email_get(
 
             body = fence_untrusted(body + truncated, source=f"email:{msg.id}")
             subject = fence_untrusted(msg.subject, source=f"email:{msg.id}")
+            from_addr = fence_untrusted(msg.from_addr, source=f"email:{msg.id}:from")
+            to_addrs = fence_untrusted(
+                ", ".join(msg.to_addrs), source=f"email:{msg.id}:to"
+            )
         except Exception:
             logger.debug("prompt fence unavailable for email_get", exc_info=True)
             subject = msg.subject
+            from_addr = msg.from_addr
+            to_addrs = ", ".join(msg.to_addrs)
         return (
             f"{banner}\n"
-            f"**From:** {msg.from_addr}\n"
-            f"**To:** {', '.join(msg.to_addrs)}\n"
+            f"**From:** {from_addr}\n"
+            f"**To:** {to_addrs}\n"
             f"**Date:** {msg.date}\n"
             f"**Subject:** {subject}\n"
             f"**Labels:** {', '.join(msg.labels) or '—'}\n"

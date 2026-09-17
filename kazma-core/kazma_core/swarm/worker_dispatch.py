@@ -207,10 +207,21 @@ async def dispatch_worker(
                 """Run the worker dispatch, honoring per-task workspace + commitment scope."""
                 from kazma_core.ide.workspace_scope import workspace_scope
                 from kazma_core.safety.commitment.scope import swarm_scope
+                from kazma_core.tenant_context import tenant_scope
 
-                # Both managers no-op when their token is None, so always wrap.
-                async with workspace_scope(_ws_id), swarm_scope(_scope_token):
-                    return await worker.dispatch(prompt, context=context)
+                tid = None
+                if isinstance(context, SwarmDispatchContext):
+                    raw = (context.metadata or {}).get("tenant_id")
+                    if raw:
+                        tid = str(raw)
+                # Settings-saved API keys live under tenant 'default'. A
+                # worker with no ContextVar reads every vault:// pointer as
+                # missing and the registry substitutes a different provider
+                # (audit 2026-09-17). Install metadata tenant, else default.
+                with tenant_scope(tid or "default"):
+                    # Both managers no-op when their token is None, so always wrap.
+                    async with workspace_scope(_ws_id), swarm_scope(_scope_token):
+                        return await worker.dispatch(prompt, context=context)
 
             try:
                 raw_result = await timeout_guard.execute(

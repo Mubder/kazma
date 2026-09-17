@@ -385,14 +385,22 @@ def _dispatch(text: str) -> None:
     if loop is not None:
         # Already on an event loop: fire and forget. Never await here — the
         # caller is usually inside an exception handler on a hot path.
-        task = loop.create_task(_deliver(text))
+        # spawn_background keeps a strong ref (audit 2026-09-17: a local
+        # Task + add_done_callback is not enough; the loop's ref is weak).
+        from kazma_core.background import spawn_background
+
+        task = spawn_background(_deliver(text), name="ops-alert")
 
         def _report(t: asyncio.Task) -> None:
-            exc = t.exception() if not t.cancelled() else None
-            if exc is not None:
-                logger.warning("[ops_alerts] delivery raised: %s", exc)
-            elif t.done() and t.result() is False:
-                logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+            if t.cancelled():
+                return
+            try:
+                if t.exception() is not None:
+                    return  # spawn_background already logs the exception
+                if t.result() is False:
+                    logger.warning("[ops_alerts] alert was NOT delivered anywhere")
+            except Exception:
+                logger.debug("[ops_alerts] delivery callback", exc_info=True)
 
         task.add_done_callback(_report)
         return

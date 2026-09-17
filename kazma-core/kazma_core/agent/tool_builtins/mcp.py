@@ -50,11 +50,11 @@ def register_mcp_tools(registry: Any) -> None:
     )
     async def mcp_read_resource(server: str, uri: str) -> str:
         from kazma_core.mcp.spec_tools import mcp_read_resource as _fn
-        from kazma_core.safety.prompt_fence import fence_untrusted
 
-        # A third-party MCP server's resource body is untrusted content; the
-        # tool description already said so, but nothing enforced it (F-09).
-        return fence_untrusted(await _fn(server, uri), source=f"mcp:{server}:{uri}")
+        # Fence lives in spec_tools (and manager.read_resource uses
+        # fence_resource). Do not wrap again — nested fences ballooned a
+        # 5-char payload to 2 KB of banners (audit 2026-09-17 follow-up).
+        return await _fn(server, uri)
     @registry.register(
         description=(
             "List MCP prompts (name + description). Optional server=. "

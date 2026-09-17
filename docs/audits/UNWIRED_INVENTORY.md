@@ -1,6 +1,6 @@
 # Unwired / Library-Only Inventory
 
-**Date:** 2026-07-13  
+**Date:** 2026-07-13 (reviewed 2026-09-17)  
 **Purpose:** Track modules that are fully implemented and tested but **not
 wired into the production runtime** (agent runner, swarm engine, gateway
 dispatch, or web/TUI live paths). They are **kept on purpose** so future
@@ -21,9 +21,9 @@ These are live; listed only for contrast:
 | Agent / LangGraph | `kazma_core/agent/*`, `agent_runner.py` |
 | HITL (graph + bus + pipeline) | `safety/hitl.py`, `swarm/safety.py`, gateway buses |
 | Platform adapters | `kazma_gateway/adapters/*` |
-| SSE chat | `kazma_ui/sse_chat.py` |
+| SSE chat | `kazma_ui/sse_chat/` |
 | Swarm task SSE | `kazma_ui/swarm_sse.py` + `swarm_panel/` (wired 2026-07-13) |
-| Tool registries | `agent/tool_registry.py` (agent), `tools/registry.py` (swarm) |
+| Tool registries | `agent/tool_registry.py` (agent). The old swarm `tools/registry.py` source is gone (`.pyc` only — do not resurrect). |
 | Security used live | `security/ssrf.py`, `security/vault.py` |
 | RBAC engine instance | Constructed in `mcp/manager.UnifiedToolExecutor` (minimal use) |
 
@@ -37,19 +37,19 @@ These are live; listed only for contrast:
 | `authorization_flow.py` | ~350 | `test_authorization_flow.py` | **Wired** — `division_runtime` + `/api/divisions/*` when `KAZMA_DIVISION` is set |
 | `division_sandbox.py` | ~280 | `test_division_sandbox.py` | **Wired** — membership ensure + MCP allowlist via `check_division_tool` |
 | `permissions.py` + `kazma-permissions.yaml` | ~200 | `test_permissions.py` | **Wired** into `LocalToolRegistry.execute` when a `users:` list or `KAZMA_PERMISSIONS_ENFORCE=1` |
-| `tool_sandbox.py` | ~120 | `test_sandbox.py` | Alternate tool sandbox (HITL path is live instead) |
+| ~~`tool_sandbox.py`~~ | — | — | **Removed.** Source gone; leftover `__pycache__` only. HITL is the live sandbox. |
 | `majlis.py` | ~350 | `test_majlis.py` | **Wired** — `majlis_runtime.maybe_majlis_short_circuit` on gateway greeting/farewell |
 | `security/certification.py` | ~340 | `test_certification.py` | **Wired** — basic certify after `install_from_any` |
 | `security/linter.py` | ~480 | via certification tests | **Wired** — lint on skill install |
 | `security/dependency_scanner.py` | ~880 | `test_dependency_scanner.py` | **Wired** — `GET /api/security/deps` |
 | `security/disclosure.py` | ~490 | `test_disclosure.py` | **Wired** — `GET/POST /api/security/disclosure` (+ ack/status); security.txt still live |
 | `security/hardening.py` + `audit_trail.py` | ~890 | `test_hardening.py` | **Wired** — `GET /api/security/hardening` |
-| `docs/` package | ~400 | `test_doc_generator.py` | Doc generator (Docusaurus is hand-written) |
+| ~~`kazma_core/docs/` package~~ | — | — | **Removed.** Docusaurus under `docs/docs/` is hand-written. |
 | `kazma_gateway/swarm_notify.py` | ~370 | `test_swarm_notify.py` | Opt-in Telegram notify: `maybe_notify_dispatch` on swarm dispatch when `SWARM_BOT_TOKEN` is set |
 
 ### Explicit non-goals for cleanup
 
-- Do not archive `delegation/` until product chooses: wire into SwarmEngine **or** drop the dual model.
+- `delegation/` is already gone. Do not re-add it.
 - Do not strip `kazma_core.__init__` re-exports of Majlis/RBAC/Authorization without a deprecation cycle.
 - Do not remove `RBACEngine` — it is constructed on the live tool executor path.
 

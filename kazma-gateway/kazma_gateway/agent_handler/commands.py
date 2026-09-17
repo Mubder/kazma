@@ -1327,11 +1327,20 @@ async def _try_documents_command(
 
     tenant = "default"
     try:
-        from kazma_core.tenant_context import get_current_tenant_id
+        from kazma_core.memory.config import resolve_tenant_id
 
-        tenant = (get_current_tenant_id() or "default").strip() or "default"
+        tenant = resolve_tenant_id(
+            msg.platform or "unknown",
+            sender_id=str(msg.sender_id or ""),
+            prefer_context=True,
+        )
     except Exception:  # pragma: no cover - defensive
-        pass
+        try:
+            from kazma_core.tenant_context import get_current_tenant_id
+
+            tenant = (get_current_tenant_id() or "default").strip() or "default"
+        except Exception:
+            pass
 
     try:
         from kazma_core.documents.ingestion import get_ingestion_service

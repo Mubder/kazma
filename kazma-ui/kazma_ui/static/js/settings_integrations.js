@@ -146,7 +146,10 @@
                 const models = await this._fetch(`/api/voice/voices?provider=${provider}`);
                 if (Array.isArray(models)) {
                     this.voiceModels = models;
-                    if (this.voiceModels.includes(this.voiceForm.tts_voice)) {
+                    var cur = String(this.voiceForm.tts_voice || '').toLowerCase();
+                    if (cur === 'auto') {
+                        this.ttsVoiceType = 'auto';
+                    } else if (this.voiceModels.includes(this.voiceForm.tts_voice)) {
                         this.ttsVoiceType = this.voiceForm.tts_voice;
                     } else {
                         this.ttsVoiceType = 'custom';
@@ -277,6 +280,23 @@
                 this.saveVoiceSettings();
             }
         },
+
+        /** Voices whose locale tag starts with `prefix` (e.g. 'ar-', 'en-').
+         *  edge-tts names every voice `<lang>-<REGION>-<Name>Neural`, which is
+         *  what makes a per-language pick possible at all; providers whose
+         *  voices are not locale-named return nothing here and the dropdown
+         *  falls back to its Default entry. */
+        _voicesForLang(prefix) {
+            return (this.voiceModels || []).filter(function(v) {
+                return typeof v === 'string' && v.toLowerCase().indexOf(prefix) === 0;
+            });
+        },
+        // METHODS, not getters. `settingsApp()` composes its parts with
+        // Object.assign, which INVOKES a getter on the source and copies the
+        // resulting value — so a getter here is evaluated once, while
+        // voiceModels is still [], and freezes as an empty array forever.
+        arabicVoices() { return this._voicesForLang('ar-'); },
+        latinVoices() { return this._voicesForLang('en-'); },
 
         async loadEmailStatus() {
             this.emailLoading = true;

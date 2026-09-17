@@ -135,6 +135,10 @@ async def text_to_speech(
         text,
         str(db_voice) if db_voice is not None else voice,
         provider,
+        {
+            "latin": str(cs.get("voice.tts_voice_en") or ""),
+            "arabic": str(cs.get("voice.tts_voice_ar") or ""),
+        },
     )
 
     db_output_format = cs.get("voice.tts_output_format")

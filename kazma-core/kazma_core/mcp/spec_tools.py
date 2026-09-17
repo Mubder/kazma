@@ -33,7 +33,11 @@ async def mcp_list_resources(server: str = "") -> str:
         name = row.get("name") or ""
         srv = row.get("_mcp_server") or server
         lines.append(f"{srv}: {name} {uri}".strip())
-    return "\n".join(lines)
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    return fence_untrusted(
+        "\n".join(lines), source=f"mcp_resources:{server or 'all'}"
+    )
 
 
 async def mcp_read_resource(server: str, uri: str) -> str:
@@ -42,6 +46,7 @@ async def mcp_read_resource(server: str, uri: str) -> str:
     if mgr is None:
         return "Error: MCP manager is not connected."
     result = await mgr.read_resource((server or "").strip(), (uri or "").strip())
+    # Already wrapped by AsyncMCPManager.read_resource → fence_resource.
     return str(result.get("content") or "")
 
 
@@ -59,7 +64,11 @@ async def mcp_list_prompts(server: str = "") -> str:
         desc = row.get("description") or ""
         srv = row.get("_mcp_server") or server
         lines.append(f"{srv}: {name} — {desc}".strip(" —"))
-    return "\n".join(lines)
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    return fence_untrusted(
+        "\n".join(lines), source=f"mcp_prompts:{server or 'all'}"
+    )
 
 
 async def mcp_get_prompt(server: str, name: str, arguments: str = "") -> str:
@@ -77,4 +86,9 @@ async def mcp_get_prompt(server: str, name: str, arguments: str = "") -> str:
         except json.JSONDecodeError:
             args = None
     result = await mgr.get_prompt((server or "").strip(), (name or "").strip(), args)
-    return str(result.get("content") or "")
+    from kazma_core.safety.prompt_fence import fence_untrusted
+
+    return fence_untrusted(
+        str(result.get("content") or ""),
+        source=f"mcp_prompt:{server}/{name}",
+    )

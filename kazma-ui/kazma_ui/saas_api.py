@@ -20,7 +20,12 @@ def create_saas_router() -> APIRouter:
         from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
 
         secret = get_kazma_secret()
-        if secret and not is_authenticated(request, secret):
+        if not secret:
+            # Open mode — the rest of the API is unauthenticated; there is
+            # no admin role to require. Gating status here blanked
+            # Settings → Ops on a no-secret install (audit 2026-09-17).
+            return None
+        if not is_authenticated(request, secret):
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
         principal = get_request_principal(request) or {}
         # Shared secret = full admin; multi-user needs admin role
@@ -32,6 +37,9 @@ def create_saas_router() -> APIRouter:
 
     @router.get("/status")
     async def saas_status(request: Request) -> JSONResponse:
+        denied = _require_admin(request)
+        if denied:
+            return denied
         from kazma_core.db.backend import get_backend, get_database_url, is_postgres
         from kazma_core.security.platform_rbac import list_users, multi_user_enabled
         from kazma_core.security.oidc import oidc_configured

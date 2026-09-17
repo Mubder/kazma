@@ -1,7 +1,25 @@
+import json
+import re
+
 import pytest
 import asyncio
 from kazma_core.agent.tool_registry import LocalToolRegistry
 from kazma_core.tools.web_search import web_search, _run_search
+
+
+def _json_payload(content: str) -> str:
+    """Pull the JSON array/object out of a fenced tool result."""
+    text = content or ""
+    m = re.search(
+        r"--- BEGIN OBSERVATION ---\n(.*?)\n--- END OBSERVATION ---",
+        text,
+        re.S,
+    )
+    inner = (m.group(1) if m else text).strip()
+    for i, ch in enumerate(inner):
+        if ch in "[{":
+            return inner[i:]
+    return inner
 
 @pytest.mark.asyncio
 async def test_sqlite_query_with_comments():
@@ -17,7 +35,7 @@ async def test_sqlite_query_with_comments():
         },
     )
     assert result_with_comments["is_error"] is False
-    data1 = json.loads(result_with_comments["content"])
+    data1 = json.loads(_json_payload(result_with_comments["content"]))
     assert data1 == [{"val": 1}] or data1 == []
 
     # 2. Test multi-line comments
@@ -29,7 +47,7 @@ async def test_sqlite_query_with_comments():
         },
     )
     assert result_with_multiline_comments["is_error"] is False
-    data2 = json.loads(result_with_multiline_comments["content"])
+    data2 = json.loads(_json_payload(result_with_multiline_comments["content"]))
     assert data2 == [{"val": 2}] or data2 == []
 
     # 3. Test nested comments and mixed comment styles
