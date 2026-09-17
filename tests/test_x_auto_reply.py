@@ -1199,3 +1199,62 @@ def test_ceilings_leave_room_for_reasoning_tokens():
     assert r._VERDICT_MAX_TOKENS >= 400
     src = inspect.getsource(st._llm_pick)
     assert "max_tokens=600" in src, "the subject classifier ceiling regressed"
+
+
+# ── "no match" and "never looked" are different answers ───────────────────
+
+@pytest.mark.asyncio
+async def test_classifier_failure_is_not_a_no_match(monkeypatch):
+    """Live, 2026-09-17: the poller found two real summons, the keyword pass
+    missed, the LLM fallback raised because the profile's key was unusable,
+    the exception was swallowed, and the log said "no declared subject matched
+    - not replying". The operator was told their subject did not fit a post the
+    classifier never actually read."""
+    from kazma_core.x_api.stance import ClassifierUnavailable
+
+    async def _broken(*a, **k):
+        raise ClassifierUnavailable("no usable API key")
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _broken)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="cf1", parent_id="p1", parent_text="nothing matches this",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+    )
+    assert res.action == "failed"
+    assert "classifier could not run" in res.reason
+    assert "no declared subject" not in res.reason
+
+
+@pytest.mark.asyncio
+async def test_a_genuine_no_match_still_says_so(monkeypatch):
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="cf2", parent_id="p2", parent_text="nothing matches this",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+    )
+    assert res.action == "skipped" and "no declared subject" in res.reason
+
+
+@pytest.mark.asyncio
+async def test_a_keyword_hit_never_reaches_the_classifier(monkeypatch):
+    """A working keyword is immune to a broken classifier."""
+    from kazma_core.x_api.stance import ClassifierUnavailable
+
+    async def _broken(*a, **k):
+        raise ClassifierUnavailable("should not be reached")
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _broken)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="cf3", parent_id="p3", parent_text="that VAR call again",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+    )
+    assert res.action == "awaiting_approval"

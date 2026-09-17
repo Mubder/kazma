@@ -33,6 +33,7 @@ from typing import Any
 
 from kazma_core.x_api.stance import (
     MODE_AUTO,
+    ClassifierUnavailable,
     MODE_DRAFT,
     MOODS,
     ReplyConfig,
@@ -553,7 +554,19 @@ async def handle_summon(
         return SummonResult(False, "skipped", reason=rail,
                             parent_id=parent_id, summon_id=summon_id)
 
-    subject = await classify(parent_text, cfg)
+    try:
+        subject = await classify(parent_text, cfg)
+    except ClassifierUnavailable as exc:
+        reason = (
+            f"the subject classifier could not run ({exc}) — this is NOT "
+            "'your subject did not match'. Check the active model in "
+            "Settings → Models."
+        )
+        await asyncio.to_thread(store.mark_failed, summon_id, reason)
+        return SummonResult(
+            False, "failed", reason=reason,
+            parent_id=parent_id, summon_id=summon_id,
+        )
     if subject is None:
         reason = (
             "no declared subject matched this post — Kazma does not have a "
@@ -683,7 +696,13 @@ async def preview_reply(
                 False, "skipped", reason=f"no subject with id {subject_id!r}"
             )
     else:
-        subject = await classify(parent_text, cfg)
+        try:
+            subject = await classify(parent_text, cfg)
+        except ClassifierUnavailable as exc:
+            return SummonResult(
+                False, "failed",
+                reason=f"the subject classifier could not run ({exc})",
+            )
         if subject is None:
             return SummonResult(
                 False, "skipped",

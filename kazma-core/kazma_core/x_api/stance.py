@@ -49,7 +49,19 @@ __all__ = [
     "SUMMON_ALLOWLIST",
     "SUMMON_ANYONE",
     "mood_from_text",
+    "ClassifierUnavailable",
 ]
+
+
+class ClassifierUnavailable(Exception):
+    """The LLM classifier could not run — which is NOT "no match".
+
+    Live, 2026-09-17: the poller found two real summons, the keyword pass
+    missed, the LLM fallback raised (the profile's key was unusable), the
+    exception was swallowed, and the log said "no declared subject matched
+    — not replying". The operator was told their subject did not match a
+    post the classifier never actually looked at.
+    """
 
 MODE_OFF = "off"
 MODE_DRAFT = "draft"
@@ -402,10 +414,11 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
             temperature=0.0,
         )
         answer = str(getattr(resp, "content", "") or "").strip().lower()
-    except Exception:
-        logger.debug("[x-reply] LLM classification failed — treating as no match",
-                     exc_info=True)
-        return None
+    except Exception as exc:
+        # NOT a no-match. Swallowing this told the operator their subject did
+        # not fit a post the classifier never read.
+        logger.warning("[x-reply] subject classifier could not run: %s", exc)
+        raise ClassifierUnavailable(str(exc)[:200]) from exc
 
     answer = re.sub(r"[^a-z0-9_\-]", "", answer.split()[0] if answer.split() else "")
     for subject in subjects:
@@ -435,6 +448,8 @@ async def classify(
         return hit
     if not allow_llm:
         return None
+    # Propagates ClassifierUnavailable — the caller must be able to tell
+    # "your keywords did not match" from "the classifier never ran".
     hit = await _llm_pick(text, cfg.subjects)
     if hit is not None:
         logger.info("[x-reply] subject %r matched via classifier", hit.id)
