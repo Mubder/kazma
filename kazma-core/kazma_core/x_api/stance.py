@@ -127,6 +127,22 @@ class Subject:
     hard_lines: tuple[str, ...] = ()
     examples: tuple[str, ...] = ()
 
+    def is_catch_all(self) -> bool:
+        """``*`` as a keyword means "any post".
+
+        The rule this product is built on is that Kazma never invents a
+        position — not that it must stay silent on subjects the operator has
+        not enumerated. Those are different things, and conflating them meant
+        an operator who wanted it to answer everything had no way to say so.
+
+        A catch-all is still a DECLARED subject: it has a view the operator
+        wrote, its own hard lines, and it passes the same screen and stance
+        check. What it drops is the requirement to predict the topic in
+        advance. Specific subjects are always tried first, so adding one does
+        not blunt the others.
+        """
+        return "*" in self.match
+
     def mood_hint(self) -> str:
         return MOODS.get(self.mood.strip().lower(), MOODS["dry"])
 
@@ -362,7 +378,9 @@ def _keyword_hit(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     fall back to a plain containment check.
     """
     low = (text or "").lower()
-    for subject in subjects:
+    # Specific subjects first; a catch-all is the floor, never the ceiling.
+    specific = [s for s in subjects if not s.is_catch_all()]
+    for subject in specific:
         for kw in subject.match:
             if not kw:
                 continue
@@ -371,6 +389,9 @@ def _keyword_hit(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
                     return subject
             elif kw in low:
                 return subject
+    for subject in subjects:
+        if subject.is_catch_all():
+            return subject
     return None
 
 
@@ -449,6 +470,11 @@ async def classify(
         return hit
     if not allow_llm:
         return None
+    if any(sub.is_catch_all() for sub in cfg.subjects):
+        # _keyword_hit already returns the catch-all, so reaching here means
+        # there is none. Guard anyway: a catch-all must never cost a model
+        # call, because "answer everything" is the cheapest possible rule.
+        return None
     # Propagates ClassifierUnavailable — the caller must be able to tell
     # "your keywords did not match" from "the classifier never ran".
     hit = await _llm_pick(text, cfg.subjects)
@@ -468,13 +494,17 @@ def no_match_detail(text: str, subjects: tuple[Subject, ...]) -> str:
     already in hand at the moment of the miss; it was simply not written down.
     """
     if not subjects:
-        return "no subjects are declared"
+        return (
+            "no subjects are declared — add one, or give a subject the keyword "
+            "* to have it answer every post"
+        )
     parts = []
     for s in subjects[:4]:
         kws = ", ".join(s.match[:8])
         parts.append(f"{s.id} [{kws}]")
     more = "" if len(subjects) <= 4 else f" (+{len(subjects) - 4} more)"
+    tip = " — add * as a keyword to answer every post"
     head = " ".join((text or "").split())[:90]
     return (
-        f"checked {'; '.join(parts)}{more} — none present in: “{head}…”"
+        f"checked {'; '.join(parts)}{more} — none present in: “{head}…”{tip}"
     )
