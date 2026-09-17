@@ -209,9 +209,13 @@ Report:
 | File gone | PASS/FAIL | |
 
 If a card never appears, Result=FAIL Evidence="no interrupt / no pending approval". Do not invent a success. Do not send email, post to X, or dispatch swarm.
+
+The operator — not the model — scores the two HITL-card rows. The model cannot see the screen. "The write executed once" is not evidence a card appeared.
 ```
 
 **How to score C**
+
+**You** score the card rows. The model cannot see Approve/Deny. If it reports those rows PASS because the tool "executed once," ignore that and use what **you** saw.
 
 | What you saw | Meaning |
 |--------------|---------|

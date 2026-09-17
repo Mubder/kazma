@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Part C battery: the operator scores the HITL cards (2026-09-17)
+
+The model cannot see Approve/Deny. A Part C report that marks
+"HITL card appeared" PASS because `file_write` executed once is not
+evidence a card was shown. The operator scores those two rows from the
+UI; write-landed / file-gone can still PASS from tool output.
+
 ## Part B battery: 401 without a secret is the gate, not a dead API (2026-09-17)
 
 The HTTP pack treated every non-200 as FAIL. On a secret-mode install,
