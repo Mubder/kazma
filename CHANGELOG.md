@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## Part C: post-approve tool success is not "no card" (2026-09-17)
+
+On Telegram the operator got `⚠️ Approval required` for `file_write` and
+`file_delete`, then approved. The model still marked those rows FAIL
+because the tool result after resume was ordinary success. That payload
+is expected. Card rows are **OPERATOR**-scored. The uuid in
+`hitl approve <uuid>` is the thread_id (same on both cards is expected).
+
 ## Part C battery: the operator scores the HITL cards (2026-09-17)
 
 The model cannot see Approve/Deny. A Part C report that marks

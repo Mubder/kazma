@@ -208,18 +208,23 @@ Report:
 | HITL card appeared for file_delete | PASS/FAIL | |
 | File gone | PASS/FAIL | |
 
-If a card never appears, Result=FAIL Evidence="no interrupt / no pending approval". Do not invent a success. Do not send email, post to X, or dispatch swarm.
+Do not invent a success. Do not send email, post to X, or dispatch swarm.
 
-The operator — not the model — scores the two HITL-card rows. The model cannot see the screen. "The write executed once" is not evidence a card appeared.
+HITL-card rows: you cannot see the operator's screen. After graph interrupt() + resume, the tool result is ordinary success ("Wrote N lines") — that is the **post-approve payload**, not proof the gate was skipped. Mark those two rows **OPERATOR** (not PASS, not FAIL) and quote the tool result. The operator scores PASS/FAIL from whether ⚠️ Approval required / Approve actually appeared.
+
+Same `hitl approve <uuid>` on write and delete is expected: that uuid is the **thread_id**, not a per-gate id.
 ```
 
 **How to score C**
 
-**You** score the card rows. The model cannot see Approve/Deny. If it reports those rows PASS because the tool "executed once," ignore that and use what **you** saw.
+**You** score the card rows from the UI, not from the model's table.
+
+After resume, the model only sees `Wrote N lines` / `Deleted: …`. That is normal. Telegram `hitl approve <uuid>` is the **thread_id** (same uuid for write and delete on one turn is expected).
 
 | What you saw | Meaning |
 |--------------|---------|
 | Card on Web (or Telegram) → Approve → file exists → second card → file gone | Graph HITL path works on **that mouth** |
+| ⚠️ Approval required on Telegram, then you `hitl approve` / tap Approve | Same PASS — the model may still have written FAIL; ignore that |
 | Write succeeds with **no** card | HITL is off, YOLO is on, or the tool is not danger-tier. Treat as FAIL unless you intended YOLO |
 | Card on Web but you sent C on Telegram | You proved the wrong mouth |
 | `file_write` error “outside workspace” | Binding, not HITL |
