@@ -2542,11 +2542,11 @@
                         </p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_gmail_oauth_client_id') }}</label>
-                            <input type="text" class="form-control" x-model="emailGmailOAuth.client_id" placeholder="….apps.googleusercontent.com" autocomplete="off">
+                            <input type="text" class="form-input" x-model="emailGmailOAuth.client_id" placeholder="….apps.googleusercontent.com" autocomplete="off">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_gmail_oauth_client_secret') }}</label>
-                            <input type="password" class="form-control" x-model="emailGmailOAuth.client_secret" placeholder="Client secret (GOCSPX-…)" autocomplete="new-password">
+                            <input type="password" class="form-input" x-model="emailGmailOAuth.client_secret" placeholder="Client secret (GOCSPX-…)" autocomplete="new-password">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_oauth_help') }}</p>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -2561,11 +2561,11 @@
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">imap.gmail.com:993 · smtp.gmail.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_gmail_address') }}</label>
-                            <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                            <input type="email" class="form-input" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_gmail_app_password') }}</label>
-                            <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            <input type="password" class="form-input" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_gmail_app_password_help') }}</p>
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('imap')" :disabled="emailSaving"
@@ -2578,11 +2578,11 @@
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">pop.gmail.com:995 · smtp.gmail.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_gmail_address') }}</label>
-                            <input type="email" class="form-control" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
+                            <input type="email" class="form-input" x-model="emailGmail.address" placeholder="you@gmail.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_gmail_app_password') }}</label>
-                            <input type="password" class="form-control" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            <input type="password" class="form-input" x-model="emailGmail.app_password" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveGmailProtocol('pop')" :disabled="emailSaving"
                                 x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
@@ -2617,15 +2617,15 @@
                         <p style="font-size:0.85rem;color:var(--text-muted);margin:0 0 12px 0;">{{ t('settings.email_ms_oauth_desc') }}</p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_ms_client_id') }}</label>
-                            <input type="text" class="form-control" x-model="emailMs.client_id" placeholder="Azure app (client) ID" autocomplete="off">
+                            <input type="text" class="form-input" x-model="emailMs.client_id" placeholder="Azure app (client) ID" autocomplete="off">
                         </div>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_ms_client_secret') }}</label>
-                            <input type="password" class="form-control" x-model="emailMs.client_secret" placeholder="Optional for public clients" autocomplete="new-password">
+                            <input type="password" class="form-input" x-model="emailMs.client_secret" placeholder="Optional for public clients" autocomplete="new-password">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_ms_tenant') }}</label>
-                            <input type="text" class="form-control" x-model="emailMs.tenant_id" placeholder="common">
+                            <input type="text" class="form-input" x-model="emailMs.tenant_id" placeholder="common">
                             <p class="form-help" style="margin-top:4px;">{{ t('settings.email_ms_redirect_help') }}</p>
                         </div>
                         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
@@ -2657,11 +2657,11 @@
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:993 · smtp.office365.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_ms_address') }}</label>
-                            <input type="email" class="form-control" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                            <input type="email" class="form-input" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_ms_password') }}</label>
-                            <input type="password" class="form-control" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
+                            <input type="password" class="form-input" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveMsProtocol('imap')" :disabled="emailSaving"
                                 x-text="emailSaving ? '…' : t('settings.email_save_imap')"></button>
@@ -2673,11 +2673,11 @@
                         <p style="font-size:0.75rem;color:var(--text-tertiary);margin:0 0 12px 0;font-family:var(--font-mono);">outlook.office365.com:995 · smtp.office365.com:587</p>
                         <div class="form-group" style="margin-bottom:8px;">
                             <label>{{ t('settings.email_ms_address') }}</label>
-                            <input type="email" class="form-control" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
+                            <input type="email" class="form-input" x-model="emailMsProtocol.address" placeholder="you@contoso.com" autocomplete="username">
                         </div>
                         <div class="form-group" style="margin-bottom:12px;">
                             <label>{{ t('settings.email_ms_password') }}</label>
-                            <input type="password" class="form-control" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
+                            <input type="password" class="form-input" x-model="emailMsProtocol.password" placeholder="Password or app password" autocomplete="new-password">
                         </div>
                         <button class="btn btn-primary btn-sm" @click="saveMsProtocol('pop')" :disabled="emailSaving"
                                 x-text="emailSaving ? '…' : t('settings.email_save_pop')"></button>
@@ -2879,7 +2879,7 @@
                     </label>
                 </div>
 
-                <div class="two-col-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                <div class="two-col-grid">
                     <!-- Speech to Text (STT) Configuration -->
                     <div>
                         <h4 style="margin:0 0 12px 0; display:flex; align-items:center; gap:8px;">
@@ -2914,7 +2914,7 @@
 
                         <div class="form-group" x-show="sttModelType === 'custom'" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.stt_custom_id') }}</label>
-                            <input type="text" class="form-control" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
+                            <input type="text" class="form-input" x-model="voiceForm.stt_model" placeholder="e.g. openai/whisper-large-v3" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.stt_custom_help') }}</p>
                         </div>
 
@@ -2924,7 +2924,7 @@
                            change it here. #}
                         <div class="form-group" x-show="voiceForm.stt_provider !== 'openai' || voiceForm.stt_base_url" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.stt_base_url') }}</label>
-                            <input type="text" class="form-control" x-model="voiceForm.stt_base_url"
+                            <input type="text" class="form-input" x-model="voiceForm.stt_base_url"
                                    placeholder="http://127.0.0.1:9000/v1"
                                    @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">
@@ -2938,7 +2938,7 @@
                            that echoes the mask leaves the stored secret untouched. #}
                         <div class="form-group">
                             <label>STT API key</label>
-                            <input type="password" class="form-control" x-model="voiceForm.stt_api_key"
+                            <input type="password" class="form-input" x-model="voiceForm.stt_api_key"
                                    placeholder="Leave blank to keep the stored key"
                                    autocomplete="new-password"
                                    @change="saveVoiceSettings()">
@@ -2977,7 +2977,7 @@
                         </div>
                         <div class="form-group" x-show="sttLanguageType === 'custom'" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.stt_language_code') }}</label>
-                            <input type="text" class="form-control" x-model="voiceForm.stt_language" placeholder="ISO-639-1, e.g. ar" @change="saveVoiceSettings()">
+                            <input type="text" class="form-input" x-model="voiceForm.stt_language" placeholder="ISO-639-1, e.g. ar" @change="saveVoiceSettings()">
                         </div>
                     </div>
 
@@ -3041,7 +3041,7 @@
 
                         <div class="form-group" x-show="ttsVoiceType === 'custom'" style="margin-top:8px;" x-cloak>
                             <label>{{ t('voice.tts_custom_id') }}</label>
-                            <input type="text" class="form-control" x-model="voiceForm.tts_voice" placeholder="Enter custom voice ID" @change="saveVoiceSettings()">
+                            <input type="text" class="form-input" x-model="voiceForm.tts_voice" placeholder="Enter custom voice ID" @change="saveVoiceSettings()">
                             <p class="form-help" style="margin-top:4px;">{{ t('voice.tts_custom_help') }}</p>
                         </div>
 
@@ -3067,20 +3067,20 @@
                         </p>
                         <div class="form-group">
                             <label>LiveKit URL</label>
-                            <input type="text" class="form-control" x-model="voiceForm.livekit_url"
+                            <input type="text" class="form-input" x-model="voiceForm.livekit_url"
                                    placeholder="wss://your-project.livekit.cloud"
                                    @change="saveVoiceSettings()">
                         </div>
                         <div class="form-group">
                             <label>LiveKit API key</label>
-                            <input type="password" class="form-control" x-model="voiceForm.livekit_api_key"
+                            <input type="password" class="form-input" x-model="voiceForm.livekit_api_key"
                                    placeholder="Leave blank to keep the stored key"
                                    autocomplete="new-password"
                                    @change="saveVoiceSettings()">
                         </div>
                         <div class="form-group">
                             <label>LiveKit API secret</label>
-                            <input type="password" class="form-control" x-model="voiceForm.livekit_api_secret"
+                            <input type="password" class="form-input" x-model="voiceForm.livekit_api_secret"
                                    placeholder="Leave blank to keep the stored secret"
                                    autocomplete="new-password"
                                    @change="saveVoiceSettings()">
