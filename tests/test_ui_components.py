@@ -468,6 +468,17 @@ class TestCSSDesignSystem:
         assert ".form-input" in css
         assert ".form-select" in css
         assert ".form-textarea" in css
+        # Voice/Email used Bootstrap's .form-control with no rules; keep the
+        # alias so a leftover class still gets Kazma chrome.
+        assert ".form-control" in css
+        assert ".form-help" in css
+
+    def test_settings_voice_email_use_kazma_form_classes(self):
+        html = (_TEMPLATES_DIR / "settings.html").read_text(encoding="utf-8")
+        assert 'class="form-control"' not in html, (
+            "Settings Voice/Email fields must use form-input, not unstyled "
+            "form-control (no CSS rule existed for that class)."
+        )
 
     def test_has_table_styles(self, css):
         assert "thead th" in css or ".table-container" in css

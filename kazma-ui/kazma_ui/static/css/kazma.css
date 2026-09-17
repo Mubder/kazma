@@ -1190,7 +1190,8 @@ button { cursor: pointer; font-family: inherit; }
 }
 .form-input,
 .form-select,
-.form-textarea {
+.form-textarea,
+.form-control {
   padding: var(--sp-2) var(--sp-3);
   background: var(--bg-surface);
   border: 1px solid var(--border);
@@ -1201,20 +1202,36 @@ button { cursor: pointer; font-family: inherit; }
   outline: none;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
+.form-group > .form-input,
+.form-group > .form-select,
+.form-group > .form-textarea,
+.form-group > .form-control {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
 .form-input:focus,
 .form-select:focus,
-.form-textarea:focus {
+.form-textarea:focus,
+.form-control:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-glow);
 }
-.form-input::placeholder { color: var(--text-muted); }
+.form-input::placeholder,
+.form-control::placeholder { color: var(--text-muted); }
 .form-textarea { resize: vertical; min-height: 80px; }
 .form-select { cursor: pointer; }
 .form-range { width: 100%; accent-color: var(--accent); }
-.form-hint {
+.form-hint,
+.form-help {
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: 2px;
+}
+.two-col-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
 }
 .form-error {
   font-size: 0.75rem;
@@ -4083,7 +4100,8 @@ details.kazma-working > summary {
 }
 [data-theme="light"] .form-input,
 [data-theme="light"] .form-select,
-[data-theme="light"] .form-textarea {
+[data-theme="light"] .form-textarea,
+[data-theme="light"] .form-control {
   background: var(--bg-primary);
   border-color: var(--border);
 }
@@ -4412,10 +4430,12 @@ details.kazma-working > summary {
 }
 [dir="rtl"] .form-input,
 [dir="rtl"] .form-select,
-[dir="rtl"] .form-textarea {
+[dir="rtl"] .form-textarea,
+[dir="rtl"] .form-control {
   text-align: right;
 }
-[dir="rtl"] .form-hint {
+[dir="rtl"] .form-hint,
+[dir="rtl"] .form-help {
   text-align: right;
 }
 
