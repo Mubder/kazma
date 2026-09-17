@@ -2837,9 +2837,10 @@
                             x-text="xReplyLoading ? '…' : 'Refresh'"></button>
                 </div>
                 <p style="margin:8px 0 12px;font-size:0.85rem;color:var(--text-secondary);">
-                    Kazma replies to a post only when it matches a subject you declare below,
-                    and argues the view you wrote. No matching subject means no reply — it
-                    never improvises a position.
+                    Mention @yourhandle and Kazma replies. No subject is required — the
+                    emoji in the mention picks the tone (😂 roast, 🤬 angry, 🙄 dry, ❤️
+                    supportive). Add a subject only when you want a declared view on a
+                    topic; those still win over the default voice.
                 </p>
 
                 <!-- Live status. The dry run reads the card in the editor;
@@ -3002,7 +3003,9 @@
 
                 <template x-if="!xReply.subjects || !xReply.subjects.length">
                     <p style="font-size:0.85rem;color:var(--text-tertiary);margin-top:8px;">
-                        No subjects yet. Until you add one, Kazma declines every summon.
+                        No subjects — that is fine. Kazma still replies; the summon emoji
+                        picks the tone. Add a subject when you want it to argue a view you
+                        wrote, or give one the keyword <code>*</code> to write the voice yourself.
                     </p>
                 </template>
 
@@ -3099,16 +3102,14 @@
                 <div style="margin-top:24px;padding:14px;border:1px dashed var(--border);border-radius:8px;">
                     <h5 style="margin:0 0 4px;">Try it</h5>
                     <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 12px;">
-                        Drafts against a pasted post. Nothing is published or recorded, so
-                        iterate on the view until it sounds like you.
+                        Drafts against a pasted post. Nothing is published or recorded.
+                        Pick a tone below to see how the emoji would land.
                         <span x-show="xReplyOpen !== null" x-cloak>
                             Uses the subject card you have open, including edits you have not
                             saved.
                         </span>
-                        <span x-show="xReplyOpen === null && !xReply.subjects.length" x-cloak
-                              style="color:var(--warning,#c80);">
-                            Add a subject first &mdash; with none declared there is nothing for
-                            Kazma to argue.
+                        <span x-show="xReplyOpen === null && !xReply.subjects.length" x-cloak>
+                            No subject open — this drafts in voice-only mode (emoji/tone picker).
                         </span>
                     </p>
                     <div class="form-group">

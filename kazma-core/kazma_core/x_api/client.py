@@ -24,10 +24,15 @@ __all__ = ["XApiError", "XClient", "user_agent"]
 
 API_HOST = "https://api.x.com"
 
-#: Cap what we *read* from X before parse/audit. Tweet JSON is tiny; this
-#: stops a runaway HTML/error dump from filling x_audit.db or RAM. Request
-#: bodies we send are already small (tweet text).
-_MAX_RESPONSE_BYTES = 8192
+#: Cap what we *read* from X before parse/audit.
+#: Writes (POST /2/tweets) return a tiny tweet object — 8 KB is plenty and
+#: keeps a runaway HTML dump out of x_audit.db.
+#: Reads (mentions timeline + expansions) are not tiny. 8 KB truncated the
+#: JSON mid-object, the parser treated a 200 as "non-JSON success body",
+#: and the poller backed off an hour. 512 KB covers a full mentions page.
+_MAX_WRITE_RESPONSE_BYTES = 8192
+_MAX_READ_RESPONSE_BYTES = 512 * 1024
+_MAX_RESPONSE_BYTES = _MAX_WRITE_RESPONSE_BYTES  # back-compat alias
 
 
 def _bounded_response(resp: httpx.Response, limit: int = _MAX_RESPONSE_BYTES) -> tuple[Any, str, bool]:
@@ -138,7 +143,12 @@ class XClient:
 
         duration_ms = int((time.monotonic() - started) * 1000)
 
-        parsed, body_text, truncated = _bounded_response(resp)
+        limit = (
+            _MAX_WRITE_RESPONSE_BYTES
+            if method.upper() in ("POST", "PUT", "PATCH", "DELETE")
+            else _MAX_READ_RESPONSE_BYTES
+        )
+        parsed, body_text, truncated = _bounded_response(resp, limit=limit)
 
         if resp.status_code in (200, 201):
             if not isinstance(parsed, dict):

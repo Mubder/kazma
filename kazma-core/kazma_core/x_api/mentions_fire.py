@@ -16,12 +16,12 @@ interval is operator config with a 60s floor, and ``since_id`` means a quiet
 account costs one near-empty response per poll rather than a re-read of the
 window.
 
-**A summon is not a mention.** Most mentions must be ignored. Four gates
-before anything is drafted: the author is on the allowlist, the trigger
-phrase is present (when configured), the mention actually replies to
-something, and the parent is not the operator's own post. Everything that
-survives goes to :func:`kazma_core.x_api.reply.handle_summon`, which claims
-it idempotently before spending a model call.
+**A summon is a mention that passed the cheap gates.** Allowlist (or
+``anyone``), optional trigger phrase, not our own tweet. A standalone
+``@handle 😂`` is a summon — we reply to that tweet. A reply under someone
+else's post still reacts to the parent. Everything that survives goes to
+:func:`kazma_core.x_api.reply.handle_summon`, which claims it idempotently
+before spending a model call.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "start_mentions_loop",
     "stop_mentions_loop",
+    "ensure_mentions_loop",
     "get_mentions_task",
     "poll_once",
 ]
@@ -78,6 +79,26 @@ async def stop_mentions_loop() -> None:
             pass
         _loop_task = None
         logger.info("[x-mentions] poller stopped")
+
+
+async def ensure_mentions_loop() -> bool:
+    """Start or stop the poller to match live config. Returns whether it is running.
+
+    Called from boot AND from Settings save, so turning auto-reply on in a
+    running server no longer needs a restart. Config is re-read under
+    tenant ``default`` because connector credentials are tenant-scoped.
+    """
+    from kazma_core.tenant_context import tenant_scope
+    from kazma_core.x_api.stance import get_reply_config
+
+    with tenant_scope("default"):
+        cfg = get_reply_config()
+    if cfg.can_draft():
+        await start_mentions_loop()
+        task = get_mentions_task()
+        return task is not None and not task.done()
+    await stop_mentions_loop()
+    return False
 
 
 async def _loop(poll_interval: float | None) -> None:
@@ -218,48 +239,65 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
         author = users.get(str(tweet.get("author_id") or ""))
         summoner = str((author or {}).get("username") or "").lower()
 
-        def _skip(reason: str) -> None:
-            # Logged, not just collected. Every gate below used to decide in
-            # silence, so a cycle that saw a mention and dropped it looked
-            # identical in the log to a cycle that saw nothing -- which is
-            # what made "I mentioned it and nothing happened" take four
-            # database queries to answer instead of one grep.
+        async def _skip(reason: str, *, persist: bool = True) -> None:
+            # Logged AND stored. A skip that only lived in the log made
+            # "I mentioned it and nothing happened" unanswerable from
+            # Conversations, which is the surface that exists to answer it.
             logger.info("[x-mentions] %s skipped: %s", tid, reason)
             results.append({"mention": tid, "action": "skipped", "reason": reason})
+            if not persist:
+                return
+            if await asyncio.to_thread(store.seen, tid):
+                return
+            claimed = await asyncio.to_thread(
+                lambda: store.claim(
+                    summon_id=tid, parent_id="",
+                    target_handle="", summoner=summoner,
+                    parent_text="", summon_text=text,
+                )
+            )
+            if claimed:
+                await asyncio.to_thread(store.mark_skipped, tid, reason)
 
         if summoner and summoner == my_handle:
-            _skip("own tweet")
+            await _skip("own tweet", persist=False)
             continue
         if not cfg.is_summoner(summoner):
-            _skip(f"@{summoner} not an allowlisted summoner")
+            await _skip(f"@{summoner} not an allowlisted summoner")
             continue
         if cfg.trigger and cfg.trigger not in text.lower():
-            _skip("trigger phrase absent")
+            await _skip("trigger phrase absent")
             continue
 
         parent_id = _parent_id(tweet)
-        if not parent_id:
-            _skip("mention is not a reply — nothing to react to")
-            continue
         if await asyncio.to_thread(store.seen, tid):
-            _skip("already handled")
+            await _skip("already handled", persist=False)
             continue
 
-        # Fetch the post being replied to. One read per genuine summon,
-        # which is why every cheap gate above runs first.
-        try:
-            parent, p_includes = await client.get_tweet(parent_id)
-        except XApiError as exc:
-            _skip(f"parent unreadable: {exc}")
-            continue
-        parent_text = str(parent.get("text") or "")
-        p_users = _index_users(p_includes)
-        p_author = p_users.get(str(parent.get("author_id") or ""))
-        parent_handle = str((p_author or {}).get("username") or "").lower()
+        # A standalone `@KazmaAI 😂` is still a summon — reply TO that tweet,
+        # reacting to its text. The old "must be a reply under someone else"
+        # rule is what made mention-the-bot feel broken.
+        parent_text = text
+        parent_handle = summoner
+        target_followers = None
+        p_author: dict[str, Any] | None = author if isinstance(author, dict) else None
 
-        if parent_handle and parent_handle == my_handle:
-            _skip("parent is our own post")
-            continue
+        if parent_id:
+            try:
+                parent, p_includes = await client.get_tweet(parent_id)
+            except XApiError as exc:
+                await _skip(f"parent unreadable: {exc}")
+                continue
+            parent_text = str(parent.get("text") or "") or text
+            p_users = _index_users(p_includes)
+            p_author = p_users.get(str(parent.get("author_id") or ""))
+            parent_handle = str((p_author or {}).get("username") or summoner).lower()
+            # Replying under our own post is a conversation with the bot,
+            # not a loop: we never @-mention ourselves in drafts, and
+            # summoner == me is already skipped above.
+            target_followers = _followers(p_author)
+        else:
+            parent_id = tid
 
         result = await handle_summon(
             summon_id=tid,
@@ -267,7 +305,7 @@ async def poll_once(cfg: Any = None) -> list[dict[str, Any]]:
             parent_text=parent_text,
             parent_handle=parent_handle,
             summoner=summoner,
-            target_followers=_followers(p_author),
+            target_followers=target_followers,
             cfg=cfg,
             # The mention carries the emoji that dials the tone.
             summon_text=text,

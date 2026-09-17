@@ -1,5 +1,34 @@
 # CHANGELOG
 
+## X auto-reply: emoji is the dial, no subject required (2026-09-18)
+
+The live miss: three real `@KazmaAI` summons (including `@KazmaAI what do you
+think? 😂` under an Elon tweet) were seen, claimed, and skipped because the
+only saved subject was Iran keywords. The poller worked. The product did not
+match the intent — mention + emoji, reply.
+
+**Voice-only is now the default path.** Zero subjects, or a post that matches
+none of them, still drafts a reply. The emoji in the mention picks the tone
+(😂 roast, 🤬 angry, 🙄 dry, ❤️ supportive). A declared subject still wins
+when its keywords (or the classifier, which now sees the *view*) hit. A
+hallucinated subject id is still discarded.
+
+Also wired, because each was a reason "I mentioned it and nothing happened"
+took a night to diagnose:
+
+- **Save starts the poller.** Enabling auto-reply no longer waits for a restart.
+- **Conversations can Approve / Deny / Retry.** Retry re-opens a skipped or
+  failed summon against *current* config, so the three live skips can be
+  replayed after this lands. `/x deny` and `/x retry` on the gateway too.
+- **Standalone `@handle 😂` is a summon.** We reply to that tweet. Replies
+  under our own posts are a conversation, not a skip.
+- **Tweet text is fenced** before it reaches the drafter or classifier.
+- **Mentions reads are capped at 512 KB**, not 8 KB. The 8 KB cap truncated
+  a valid 200 into "non-JSON success body" and would have parked the poller
+  for an hour the moment the timeline was not tiny.
+
+`draft` is still the mode to start in. Voice-only + `auto` will post.
+
 ## X auto-reply: a settings panel, a tone dial, and an open-to-everyone switch (2026-09-17)
 
 **Settings → Integrations → X → Auto-reply.** Modes, caps, the allowlist, and

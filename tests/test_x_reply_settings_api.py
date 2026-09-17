@@ -124,7 +124,7 @@ async def test_preview_publishes_nothing(monkeypatch, _no_llm):
     async def _publish(**kw):
         raise AssertionError("preview must never publish")
 
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         return "a draft"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -139,7 +139,7 @@ async def test_preview_records_nothing(monkeypatch, _no_llm):
     """No store row — otherwise iterating would burn the idempotency key."""
     from kazma_core.x_api.reply_store import get_reply_store
 
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         return "a draft"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -148,19 +148,23 @@ async def test_preview_records_nothing(monkeypatch, _no_llm):
 
 
 @pytest.mark.asyncio
-async def test_preview_still_honours_no_subject(monkeypatch):
-    """The rule being tuned is not suspended for the tuning tool."""
+async def test_preview_unmatched_uses_voice(monkeypatch):
+    """Unmatched posts still draft — voice-only, so the dry run can tune tone."""
     async def _none(*a, **k):
         return None
 
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        return "a voice draft"
+
     monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await preview_reply(parent_text="best shawarma in Kuwait", cfg=_cfg())
-    assert res.action == "skipped" and "no declared subject" in res.reason
+    assert res.action == "preview" and res.subject_id == "voice"
 
 
 @pytest.mark.asyncio
 async def test_preview_still_screens_the_draft(monkeypatch, _no_llm):
-    async def _bad(*, subject, parent_text, parent_handle="", mood=""):
+    async def _bad(*, subject, parent_text, parent_handle="", mood="", **_k):
         return "they should die"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _bad)
@@ -179,7 +183,7 @@ async def test_preview_ignores_caps(monkeypatch, _no_llm):
                     target_handle="t", summoner="balfaris")
         store.mark_posted(f"s{i}", tweet_id=f"t{i}", draft="d", subject_id="var")
 
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         return "still drafts"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -190,7 +194,7 @@ async def test_preview_ignores_caps(monkeypatch, _no_llm):
 @pytest.mark.asyncio
 async def test_preview_ignores_the_summoner_allowlist(monkeypatch, _no_llm):
     """The caller is an authenticated operator in Settings, not a stranger."""
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         return "drafted"
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
@@ -203,7 +207,7 @@ async def test_forced_subject_overrides_matching(monkeypatch, _no_llm):
     """Check how a view reads against a post its keywords would not match."""
     seen = {}
 
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         seen["id"] = subject.id
         return "drafted"
 
@@ -221,9 +225,13 @@ async def test_forced_unknown_subject_is_refused(_no_llm):
 
 
 @pytest.mark.asyncio
-async def test_preview_with_no_subjects_declines(_no_llm):
+async def test_preview_with_no_subjects_uses_voice(monkeypatch, _no_llm):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        return "voice draft"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await preview_reply(parent_text="VAR", cfg=_cfg(subjects=()))
-    assert res.action == "skipped" and "no subjects declared" in res.reason
+    assert res.action == "preview" and res.subject_id == "voice"
 
 
 # ── Tuning an UNSAVED subject ─────────────────────────────────────────────
@@ -239,7 +247,7 @@ async def test_preview_uses_an_unsaved_subject(monkeypatch, _no_llm):
     """
     seen = {}
 
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         seen["view"] = subject.view
         seen["id"] = subject.id
         return "drafted"
@@ -257,11 +265,14 @@ async def test_preview_uses_an_unsaved_subject(monkeypatch, _no_llm):
 
 
 @pytest.mark.asyncio
-async def test_preview_without_an_override_still_needs_a_subject(_no_llm):
-    """The message stays correct when nothing is genuinely declared."""
+async def test_preview_without_an_override_still_drafts_in_voice(monkeypatch, _no_llm):
+    """Zero saved subjects is voice-only, not a dead panel."""
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        return "voice draft"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await preview_reply(parent_text="anything", cfg=_cfg(subjects=()))
-    assert res.action == "skipped"
-    assert "no subjects declared" in res.reason
+    assert res.action == "preview" and res.subject_id == "voice"
 
 
 @pytest.mark.asyncio
@@ -271,7 +282,7 @@ async def test_an_unsaved_subject_still_gets_the_universal_hard_lines(
     """A scratch subject is not a way around the rules that always apply."""
     seen = {}
 
-    async def _draft(*, subject, parent_text, parent_handle="", mood=""):
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
         seen["rules"] = subject.all_hard_lines()
         return "drafted"
 
@@ -333,10 +344,11 @@ def test_live_reason_flags_mode_off():
     assert "Mode is 'off'" in _reason(mode="off")
 
 
-def test_live_reason_flags_no_saved_subjects():
+def test_live_reason_voice_only_when_no_subjects(monkeypatch):
+    monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: True)
     r = _reason(subjects=())
-    assert "No subjects are SAVED" in r
-    assert "not saved until you press Save" in r
+    assert "voice-only" in r
+    assert "emoji" in r
 
 
 def test_live_reason_flags_empty_allowlist():
@@ -347,7 +359,7 @@ def test_live_reason_flags_a_stopped_poller(monkeypatch):
     """Saved and correct, but the loop only starts at boot."""
     monkeypatch.setattr("kazma_ui.x_reply_api._poller_running", lambda: False)
     r = _reason()
-    assert "poller is not running" in r and "restart" in r
+    assert "poller is not running" in r
 
 
 def test_live_reason_says_live_when_it_is(monkeypatch):

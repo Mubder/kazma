@@ -948,7 +948,9 @@
                 // Warnings are advisory (e.g. anyone + auto): the save
                 // succeeded, the operator should know what they turned on.
                 (data.warnings || []).forEach(function (w) { showToast(w, 'warning'); });
-                if (data.restart_required_for_poller) {
+                if (data.poller_running) {
+                    showToast('Auto-reply saved. Mentions poller is live.', 'success');
+                } else if (data.restart_required_for_poller) {
                     showToast('Saved. Restart Kazma to start the mentions poller.', 'warning');
                 } else {
                     showToast('Auto-reply settings saved.', 'success');
