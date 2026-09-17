@@ -246,13 +246,61 @@ Only if the corresponding product is how you use Kazma:
 
 ---
 
+## Part D — restic / Postgres dump / migrate+vault
+
+Run from the **live install** directory. Never restore onto the live tree. Never print passphrases, vault keys, or DSNs.
+
+`/api/backup/list` `"postgres": false` means the **universal generation's dump was stale or skipped at copy time**, not “this install is SQLite”. Check `KAZMA_DB_BACKEND` and `kazma-data/backups/pg/pg_shared_*.dump` (magic `PGDMP`).
+
+```powershell
+Set-Location 'C:\Users\balfa\kazma'   # live install
+$env:KAZMA_DATA_DIR = (Resolve-Path '.\kazma-data')
+$env:KAZMA_USER_HOME = (Resolve-Path '.\.kazma')
+if (-not $env:KAZMA_RESTIC_PASSWORD -and (Test-Path '.\.kazma\restic.pass')) {
+  $env:KAZMA_RESTIC_PASSWORD = (Get-Content '.\.kazma\restic.pass' -Raw).Trim()
+}
+
+# Restore drill: sqlite integrity + vault decrypt + pg dump TOC. Non-zero = FAIL.
+& '.venv\Scripts\python.exe' -m kazma_core.backup.restore_drill
+
+# restic: local + offsite snapshot lists (newest DATA, not restic latest).
+& '.venv\Scripts\python.exe' -m kazma_core.backup.restore --list
+
+# Restore rehearsal into TEMP, then delete the target. Not the live install.
+$dst = Join-Path $env:TEMP 'kazma-restore-rehearsal'
+if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+New-Item -ItemType Directory -Path $dst | Out-Null
+& '.venv\Scripts\python.exe' -m kazma_core.backup.restore --target $dst
+# Expect: env present, config present, databases readable. Then delete $dst.
+
+# Postgres dumps (SKIP if KAZMA_DB_BACKEND is sqlite / no KAZMA_DATABASE_URL).
+& '.venv\Scripts\python.exe' scripts\pg_backup.py list
+
+# migrate: export+verify+dry-import. Writes staging under kazma-data/.migrate-export-*
+# Prefer a copy of the tree, not the live install, if you do not want staging there.
+# kazma migrate export --out $env:TEMP\kazma-bundle.zip --no-assets
+# kazma migrate verify $env:TEMP\kazma-bundle.zip
+# kazma migrate import $env:TEMP\kazma-bundle.zip --workspace $env:TEMP\kazma-dry --dry-run
+```
+
+**How to score D**
+
+| Probe | PASS | FAIL | SKIP |
+|-------|------|------|------|
+| Restore drill | All checks ok, including `vault:decrypt` with stored secrets | Any FAIL; vault key opens nothing | No universal backup yet |
+| restic `--list` | ≥1 restore point; local and offsite counts if a remote is set | No passphrase, repo missing, snapshots fail | restic not on PATH and no repo |
+| Restore rehearsal | `.env` + `kazma.yaml` + readable DBs in the TEMP target | restic restore error; no `.env` | — |
+| PG dumps | `pg_shared_*.dump` with `PGDMP` magic; not stale past 8h | Backend is postgres and no dump / bad magic | SQLite backend |
+| migrate verify | Bundle valid; vault pairing `match` (or `empty` on a new target) | Hash/tamper errors; `mismatch` without `--reset-vault-key` | — |
+
+Offsite write probe is `remote_writable()` on `s3:` / `rclone:` (PUT+DELETE under `locks/`). A remote that lists but cannot write is FAIL.
+
+---
+
 ## Still not in this battery
 
 These need a dedicated drill, not this pack:
 
-- `kazma migrate export/verify/import` and vault-key pairing
-- restic/S3 write probe and restore
-- Postgres `pg_dump` / `verify_required_pg_tables`
 - Multi-replica sticky sessions
 - OIDC login
 - Document Arabic/OCR visual
