@@ -58,7 +58,7 @@ Result is PASS, FAIL, or SKIP (SKIP only if the feature is honestly not configur
 10. Swarm — do NOT dispatch. Confirm check_swarm_task (or equivalent) is registered and answers. FAIL on import/"No swarm".
 11. HITL config — config_read safety.require_approval_for. Do not call a danger tool.
 12. MCP — mcp_list_resources (not mcp_test_server; that is write-tier). SKIP if no servers.
-13. Documents — document_status or list. SKIP if documents.enabled is false.
+13. Documents — document_status with **no** document_id/job_id (platform overview: enabled, workers, catalog). Empty catalog = PASS. SKIP if documents.enabled is false.
 14. Email — email_list folder=INBOX limit=1. Do not send.
 15. Calendar — list_events. FAIL if the user has Google connected and the tool returns silent sandbox.
 16. Voice — config_read voice.stt_provider and voice.tts_provider. SKIP if voice disabled.

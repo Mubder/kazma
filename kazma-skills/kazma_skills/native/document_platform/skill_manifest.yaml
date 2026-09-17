@@ -23,8 +23,9 @@ tools:
   document_status:
     arabic_name: "حالة المستند"
     description: >
-      Report the durable processing state for a document_id or job_id,
-      including stage, attempt count, and any safe error diagnostics.
+      With no ids: tenant document-platform overview (enabled, workers,
+      queue, catalog count, recent titles). With document_id or job_id:
+      that job's stage, attempt count, and any safe error diagnostics.
     category: document
     prompt_chain:
       - "اعرض حالة معالجة المستند"

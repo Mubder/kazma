@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## `document_status` with no ids is a platform overview (2026-09-17)
+
+Part A of the full-system battery called `document_status` with no
+`document_id`/`job_id` and got `Error: provide document_id or job_id` —
+argument validation, not a dead pipeline. A bare call now returns enabled /
+workers / queue / catalog count (empty catalog is a healthy empty, not an
+error). Lookup by id is unchanged.
+
 ## Audit-only diagnostics + context identity (2026-09-17)
 
 Part A of the full-system battery said "read-only tools only" / "do not

@@ -96,3 +96,47 @@ async def test_document_status_uses_tenant_context(wired_service, tmp_path, monk
         assert status2.startswith("Error")
     finally:
         reset_current_tenant_id(token2)
+
+
+@pytest.mark.asyncio
+async def test_document_status_no_id_is_platform_overview(wired_service):
+    """Bare document_status is a health/catalog probe, not a missing-arg error."""
+    from kazma_skills.native.document_platform import tools
+
+    token = set_current_tenant_id("tenant-overview")
+    try:
+        out = await tools.document_status()
+    finally:
+        reset_current_tenant_id(token)
+
+    assert not out.startswith("Error"), out
+    assert "Document platform overview" in out
+    assert "enabled:" in out
+    assert "documents: 0" in out
+    assert "catalog: empty" in out
+
+
+@pytest.mark.asyncio
+async def test_document_status_overview_includes_imported_doc(
+    wired_service, tmp_path, monkeypatch
+):
+    from kazma_skills.native.document_platform import tools
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "n.txt").write_text("overview", encoding="utf-8")
+    monkeypatch.setattr(
+        "kazma_core.workspace.binding.resolve_active_root", lambda: ws
+    )
+    token = set_current_tenant_id("tenant-overview-2")
+    await wired_service.start_workers()
+    try:
+        imported = await tools.document_import("n.txt")
+        doc_id = imported.split("document_id:")[1].split()[0].strip()
+        overview = await tools.document_status()
+        assert "Document platform overview" in overview
+        assert doc_id in overview
+        assert "documents: 1" in overview
+    finally:
+        await wired_service.stop_workers()
+        reset_current_tenant_id(token)

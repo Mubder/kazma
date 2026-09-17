@@ -89,7 +89,7 @@ See [Document Intelligence](./document-intelligence.md).
 | Tool | Purpose |
 |---|---|
 | `document_import` | Workspace-safe file → durable ingest + parse |
-| `document_status` | Job / document state |
+| `document_status` | Job / document state; no ids → tenant platform overview |
 | `document_read` | Paged fenced content by opaque id |
 | `document_index` | Publish into a Knowledge library (`library_id`) |
 | `document_search` | Search library (fenced hits) |

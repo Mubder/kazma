@@ -125,11 +125,16 @@ async def document_import(path: str, title: str = "") -> str:
 
 
 async def document_status(document_id: str = "", job_id: str = "") -> str:
-    """Report the durable job state for a document or job opaque ID."""
+    """Report job state for an id, or the tenant's document-platform overview.
+
+    Empty ``document_id`` / ``job_id`` is a health/catalog probe (enabled,
+    workers, queue, recent documents) — not an error. A specific id still
+    returns that job's stage/attempts.
+    """
 
     import asyncio
 
-    tenant, _ws, _actor = _scope()
+    tenant, _ws, actor = _scope()
     try:
         svc = await _ensure_service()
         if job_id.strip():
@@ -146,7 +151,7 @@ async def document_status(document_id: str = "", job_id: str = "") -> str:
             if not jobs:
                 return "Error: document not found or has no jobs"
             return _format_status(jobs[0])
-        return "Error: provide document_id or job_id"
+        return await asyncio.to_thread(_platform_overview, svc, tenant, actor)
     except Exception as exc:  # noqa: BLE001
         logger.warning("[document_platform] status failed: %s", type(exc).__name__)
         return f"Error reading status: {type(exc).__name__}"
@@ -375,4 +380,61 @@ def _format_status(status: dict[str, Any]) -> str:
     ]
     if status.get("error_code"):
         lines.append(f"  error: {status['error_code']} — {status.get('error_message')}")
+    return "\n".join(lines)
+
+
+def _platform_overview(svc: Any, tenant: str, actor: str) -> str:
+    """No-id ``document_status``: prove the coordinator answers, not a lookup."""
+    from kazma_core.documents.config import get_document_rollout
+
+    rollout = get_document_rollout()
+    workers = "running" if getattr(svc, "worker_running", False) else "stopped"
+    concurrency = getattr(getattr(svc, "config", None), "worker_concurrency", "?")
+    storage = ""
+    try:
+        health = svc.health()
+        storage = str((health or {}).get("storage_root") or "")
+    except Exception:
+        logger.debug("[document_platform] health() skipped", exc_info=True)
+    queue_bit = ""
+    try:
+        cap = svc.capacity_snapshot(tenant_id=tenant)
+        q = (cap or {}).get("queue") or {}
+        if isinstance(q, dict) and "error" not in q:
+            queue_bit = (
+                f"  queue: depth={q.get('depth', 0)} "
+                f"leases={q.get('active_leases', 0)} "
+                f"dead_letter={q.get('dead_letter', 0)}"
+            )
+    except Exception:
+        logger.debug("[document_platform] capacity_snapshot skipped", exc_info=True)
+
+    try:
+        rows = list(svc.list_documents(tenant_id=tenant, actor_id=actor) or [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[document_platform] list_documents failed: %s", type(exc).__name__)
+        return f"Error listing documents: {type(exc).__name__}"
+
+    lines = [
+        "Document platform overview",
+        f"  enabled: {bool(rollout.enabled)}  mode: {rollout.mode}",
+        f"  workers: {workers} (concurrency={concurrency})",
+    ]
+    if storage:
+        lines.append(f"  storage_root: {storage}")
+    if queue_bit:
+        lines.append(queue_bit)
+    lines.append(f"  documents: {len(rows)}")
+    if not rows:
+        lines.append("  catalog: empty")
+        return "\n".join(lines)
+    lines.append("  recent:")
+    for row in list(reversed(rows))[:8]:
+        title = str(row.get("title") or "").replace("\n", " ").strip()[:80]
+        state = row.get("state") or "unknown"
+        did = row.get("document_id") or "?"
+        lines.append(f"    - {did}  state={state}  {title}".rstrip())
+    extra = len(rows) - 8
+    if extra > 0:
+        lines.append(f"    … {extra} more")
     return "\n".join(lines)
