@@ -68,6 +68,7 @@ const sidebars = {
       label: 'Ops',
       items: [
         'ops/production-checklist',
+        'ops/full-battery',
         'ops/diagnosis-map',
         'ops/opentelemetry',
         'ops/postgres-and-saas',

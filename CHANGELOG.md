@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Full-system battery (2026-09-17)
+
+Ops pack that names the broken part: chat read-only probe, HTTP/ops
+PowerShell, one HITL `file_write` → Approve → delete. Lives at
+`docs/docs/ops/full-battery.md`. A green chat table is not a green
+install.
+
 ## Deep audit 2026-09-17: the gates were still looking at the wrong shape
 
 Follow-up to the 2026-09-16 cold-read. The defects below were green in
