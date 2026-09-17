@@ -661,3 +661,122 @@ def test_trusted_is_independent_of_policy():
     assert cfg.is_trusted_summoner("a_stranger") is False
     assert cfg.mood_override_allowed("balfaris") is True
     assert cfg.mood_override_allowed("a_stranger") is False
+
+
+# ── The conversation log keeps both sides ─────────────────────────────────
+#
+# The store originally kept handles, Kazma's draft and the outcome — but not
+# what the other person actually said. That log shows Kazma talking to itself:
+# a reply with no idea what provoked it, which is unreadable and makes "why
+# did it say that?" unanswerable without opening X and rebuilding the thread.
+#
+# Both texts are captured at CLAIM time, not later: the poller has them in
+# hand, re-fetching costs read quota, and once a tweet is deleted it is simply
+# gone.
+
+@pytest.mark.asyncio
+async def test_both_sides_are_recorded(_no_llm, monkeypatch):
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    _stub_draft(monkeypatch, text="Bold take from a fresh account.")
+    await handle_summon(
+        summon_id="c1", parent_id="p1",
+        parent_text="Iran is obviously the aggressor here",
+        parent_handle="someone", summoner="balfaris",
+        target_followers=9_000, cfg=_cfg(),
+        summon_text="what do you think Kazma? \U0001F602",
+    )
+    rec = get_reply_store().get("c1")
+    assert rec.parent_text == "Iran is obviously the aggressor here"
+    assert "\U0001F602" in rec.summon_text
+    assert rec.draft_text == "Bold take from a fresh account."
+    assert rec.summoner == "balfaris"
+    assert rec.target_handle == "someone"
+
+
+@pytest.mark.asyncio
+async def test_a_skipped_summon_still_records_what_was_said(monkeypatch):
+    """The unanswered question is 'why didn't it reply?' — so the incoming
+    post has to survive even when nothing was drafted."""
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="c2", parent_id="p2",
+        parent_text="best shawarma in Kuwait City",
+        parent_handle="someone", summoner="balfaris",
+        target_followers=9_000, cfg=_cfg(),
+        summon_text="Kazma?",
+    )
+    assert res.action == "skipped"
+    rec = get_reply_store().get("c2")
+    assert rec.parent_text == "best shawarma in Kuwait City"
+    assert rec.draft_text == ""
+    assert "no declared subject" in rec.reason
+
+
+def test_long_texts_are_bounded():
+    """A 20k-character quote-tweet chain must not become a 20k DB row."""
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    store = get_reply_store()
+    store.claim(
+        summon_id="c3", parent_id="p3", target_handle="t", summoner="s",
+        parent_text="x" * 9000, summon_text="y" * 9000,
+    )
+    rec = store.get("c3")
+    assert len(rec.parent_text) == 2000
+    assert len(rec.summon_text) == 500
+
+
+def test_older_stores_gain_the_columns(tmp_path):
+    """An install that predates the log must not silently keep the old shape.
+
+    CREATE TABLE IF NOT EXISTS is a no-op on an existing table, so without the
+    additive migration an upgraded store would keep working and quietly never
+    record a conversation.
+    """
+    import sqlite3
+
+    from kazma_core.x_api.reply_store import XReplyStore
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        """CREATE TABLE x_replies (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               summon_id TEXT NOT NULL UNIQUE,
+               parent_id TEXT NOT NULL DEFAULT '',
+               target_handle TEXT NOT NULL DEFAULT '',
+               summoner TEXT NOT NULL DEFAULT '',
+               subject_id TEXT NOT NULL DEFAULT '',
+               status TEXT NOT NULL DEFAULT 'drafting',
+               draft_text TEXT NOT NULL DEFAULT '',
+               proposal_id TEXT NOT NULL DEFAULT '',
+               tweet_id TEXT NOT NULL DEFAULT '',
+               reason TEXT NOT NULL DEFAULT '',
+               tenant_id TEXT NOT NULL DEFAULT 'default',
+               created_at REAL NOT NULL,
+               updated_at REAL NOT NULL
+           );"""
+    )
+    conn.execute(
+        "INSERT INTO x_replies (summon_id, created_at, updated_at) "
+        "VALUES ('legacy', 1.0, 1.0)"
+    )
+    conn.commit()
+    conn.close()
+
+    store = XReplyStore(db)
+    rec = store.get("legacy")
+    assert rec is not None, "the pre-existing row must survive the migration"
+    assert rec.parent_text == ""
+    assert store.claim(
+        summon_id="fresh", parent_id="p", target_handle="t", summoner="s",
+        parent_text="now recorded",
+    )
+    assert store.get("fresh").parent_text == "now recorded"

@@ -189,6 +189,51 @@ async def x_reply_recent(limit: int = 20) -> JSONResponse:
         return _safe_error(exc)
 
 
+@router.get("/conversations")
+async def x_reply_conversations(limit: int = 30) -> JSONResponse:
+    """Whole exchanges, newest first — who summoned, what was said, what Kazma said.
+
+    Distinct from ``/recent``, which is a state list for the settings panel.
+    This is the reading view: three turns per row, so "why did it say that?"
+    is answerable without opening X and reconstructing the thread by hand.
+
+    Skipped and failed summons are included on purpose. "It did not reply"
+    is the most common question, and an exchange showing the incoming post
+    with `no declared subject matched` against it is the answer.
+    """
+    try:
+        from kazma_core.x_api.reply_store import get_reply_store
+
+        rows = get_reply_store().recent(limit=max(1, min(100, int(limit))))
+        out = []
+        for r in rows:
+            out.append({
+                "summon_id": r.summon_id,
+                "parent_id": r.parent_id,
+                # Who wrote the post being replied to.
+                "target": r.target_handle,
+                "said": r.parent_text,
+                # Who called Kazma in, and how.
+                "summoner": r.summoner,
+                "summon": r.summon_text,
+                # What Kazma said, or why it did not.
+                "reply": r.draft_text,
+                "status": r.status,
+                "subject": r.subject_id,
+                "reason": r.reason,
+                "tweet_id": r.tweet_id,
+                "url": (
+                    f"https://x.com/i/web/status/{r.tweet_id}"
+                    if r.tweet_id else
+                    (f"https://x.com/i/web/status/{r.parent_id}" if r.parent_id else "")
+                ),
+                "at": r.created_at,
+            })
+        return JSONResponse({"ok": True, "rows": out})
+    except Exception as exc:  # noqa: BLE001
+        return _safe_error(exc)
+
+
 @protected_router.put("", dependencies=[Depends(_csrf)])
 async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
     try:

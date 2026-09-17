@@ -199,10 +199,24 @@ badly can be fixed and retried immediately.
 /x poll                    force one mentions poll (paid plan)
 ```
 
-Every summon is recorded in `kazma-data/x_replies.db` with its subject,
-draft, outcome and reason — including the ones that were skipped, so
-"why didn't it reply?" always has an answer. Every X API call is in
-`x_audit.db` as before.
+### The Conversations tab
+
+**X Studio → Conversations** shows whole exchanges rather than a list of
+outgoing posts: what the other account said, who summoned Kazma and how (emoji
+included), and what Kazma replied — or why it didn't.
+
+The posted list on the Studio tab cannot answer this. A reply read without its
+parent is a non-sequitur, and the most common question is the one about the
+replies that never happened. Skipped and failed summons are listed for exactly
+that reason: the incoming post shown against `no declared subject matched` is
+the answer.
+
+Both sides are captured at claim time, not fetched later — the poller has them
+in hand, re-fetching costs read quota, and a deleted tweet is gone for good.
+The parent post is stored up to 2,000 characters and the summon up to 500.
+
+Every summon is also in `kazma-data/x_replies.db` with its subject, draft,
+outcome and reason. Every X API call is in `x_audit.db` as before.
 
 ## Kill switches
 

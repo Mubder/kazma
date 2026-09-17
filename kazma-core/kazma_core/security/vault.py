@@ -530,26 +530,39 @@ def retrieve_scoped(name: str) -> str | None:
             return None
         return val if (val is not None and str(val) != "") else None
 
-    # First rung covers current-tenant AND global in one query, because
-    # Vault.retrieve already falls back tenant -> global. This is the hot
-    # path and it costs exactly what the old bare retrieve() cost.
     current = get_current_tenant_id()
-    hit = _try(current or None)
-    if hit is not None:
-        return hit
 
-    # Only on a miss do we ask about posture. That probe reads
-    # `platform.users` through ConfigStore, and this function is called from
-    # ConfigStore's own resolver — running it eagerly made every vaulted read
-    # re-enter ConfigStore.get() (measured: nesting depth 2), which is the
-    # re-entrancy class that once deadlocked the whole application from a
-    # single swarm approval. On the miss path it runs at most once, and the
-    # thread-local guard above stops it recursing into itself.
-    if current == "default":
-        return None  # already tried, and it falls back to global
-    if not _operator_default_rung_allowed():
+    if current:
+        # The caller knows its own scope. Vault.retrieve already falls back
+        # tenant -> global in one query, so this rung covers both and the
+        # posture probe never runs on the hot path.
+        hit = _try(current)
+        if hit is not None:
+            return hit
+        if current == "default":
+            return None  # tried, and it covered global too
+        # A caller with its OWN tenant does not get the operator's rung —
+        # that is the cross-tenant read, and the posture gate below would
+        # allow it on a single-operator box where it is harmless. Keep it
+        # for context-less callers only, which is what the rung is for.
         return None
-    return _try("default")
+
+    # Context-less: `default` BEFORE global. Order is not cosmetic — when a
+    # name exists in both scopes the tenant-scoped row must win, which is
+    # what Vault.retrieve itself does and what the whole notion of scoping
+    # means. Getting this backwards returns the stale global copy of a
+    # credential the operator re-saved through Settings.
+    #
+    # The probe behind this rung reads `platform.users` through ConfigStore,
+    # and this function is called FROM ConfigStore's resolver — so it is
+    # memoized (see _operator_default_rung_allowed) rather than run per read.
+    # Eager per-read probing measured at nesting depth 2 on the provider-key
+    # path, the re-entrancy class that once deadlocked the application.
+    if _operator_default_rung_allowed():
+        hit = _try("default")
+        if hit is not None:
+            return hit
+    return _try(None)
 
 
 def retrieve_with_tenant_ladder(name: str) -> str:

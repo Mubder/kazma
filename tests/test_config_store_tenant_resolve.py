@@ -290,3 +290,38 @@ def test_single_tenant_is_re_probed(_vault, monkeypatch):
     posture["multi"] = True
     monkeypatch.setattr(vault_mod, "_POSTURE_TTL_S", 0.0)
     assert vault_mod.retrieve_scoped("cfg:k") is None
+
+
+def test_tenant_scope_beats_a_stale_global_copy(_vault, monkeypatch):
+    """Order is not cosmetic: `default` must be tried BEFORE global.
+
+    A first cut of the ladder queried global first (Vault.retrieve already
+    falls back tenant -> global, so one call looked like it covered both).
+    When a name exists in BOTH scopes that returns the stale global copy of a
+    credential the operator has since re-saved through Settings — silently,
+    and looking exactly like a wrong key. Caught by
+    tests/test_x_publisher.py::test_vault_get_resolves_tenant_scoped_secrets,
+    which asserts the call order rather than just the result.
+    """
+    _single_tenant(monkeypatch)
+    _store_as(_vault, None, "cfg:dual_scoped", "GLOBAL-stale")
+    _store_as(_vault, "default", "cfg:dual_scoped", "DEFAULT-fresh")
+
+    assert vault_mod.retrieve_scoped("cfg:dual_scoped") == "DEFAULT-fresh"
+
+
+def test_a_scoped_caller_does_not_get_the_operator_rung(_vault, monkeypatch):
+    """`default` is the rung for context-LESS callers only.
+
+    A caller that already resolved its own tenant and missed must not fall
+    through to the operator's secrets, even on a single-operator box where
+    the posture gate would wave it through.
+    """
+    _single_tenant(monkeypatch)
+    _store_as(_vault, "default", "cfg:only_default", "operator-secret")
+
+    token = set_current_tenant_id("tenant-b")
+    try:
+        assert vault_mod.retrieve_scoped("cfg:only_default") is None
+    finally:
+        reset_current_tenant_id(token)

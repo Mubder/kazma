@@ -56,6 +56,13 @@ CREATE TABLE IF NOT EXISTS x_replies (
     target_handle TEXT NOT NULL DEFAULT '',
     summoner TEXT NOT NULL DEFAULT '',
     subject_id TEXT NOT NULL DEFAULT '',
+    -- The other half of the conversation. Without these the log shows
+    -- Kazma talking to itself: a handle, a draft, and no idea what was
+    -- said to provoke it. Stored at claim time because the poller has
+    -- them in hand and re-fetching later costs read quota (and on a
+    -- deleted tweet is impossible).
+    parent_text TEXT NOT NULL DEFAULT '',
+    summon_text TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'drafting',
     draft_text TEXT NOT NULL DEFAULT '',
     proposal_id TEXT NOT NULL DEFAULT '',
@@ -88,6 +95,8 @@ class ReplyRecord:
         self.target_handle = str(row["target_handle"])
         self.summoner = str(row["summoner"])
         self.subject_id = str(row["subject_id"])
+        self.parent_text = str(row["parent_text"] or "")
+        self.summon_text = str(row["summon_text"] or "")
         self.status = str(row["status"])
         self.draft_text = str(row["draft_text"])
         self.proposal_id = str(row["proposal_id"])
@@ -105,6 +114,8 @@ class ReplyRecord:
             "target": self.target_handle,
             "summoner": self.summoner,
             "subject": self.subject_id,
+            "parent_text": self.parent_text,
+            "summon_text": self.summon_text,
             "status": self.status,
             "draft": self.draft_text,
             "proposal_id": self.proposal_id,
@@ -138,6 +149,21 @@ class XReplyStore:
             conn = self._connect()
             try:
                 conn.executescript(_CREATE)
+                # Additive migration for stores created before the
+                # conversation log existed. CREATE TABLE IF NOT EXISTS is
+                # a no-op on an existing table, so new columns need this
+                # or an upgraded install silently keeps the old shape.
+                have = {
+                    str(r[1])
+                    for r in conn.execute('PRAGMA table_info(x_replies)')
+                }
+                for col in ('parent_text', 'summon_text'):
+                    if col not in have:
+                        conn.execute(
+                            f'ALTER TABLE x_replies ADD COLUMN {col} '
+                            "TEXT NOT NULL DEFAULT ''"
+                        )
+                        logger.info('[x-reply] added column %s', col)
                 conn.commit()
             finally:
                 conn.close()
@@ -151,6 +177,8 @@ class XReplyStore:
         parent_id: str,
         target_handle: str,
         summoner: str,
+        parent_text: str = "",
+        summon_text: str = "",
         tenant_id: str = "default",
     ) -> bool:
         """Claim *summon_id* for processing. False if already claimed.
@@ -167,11 +195,13 @@ class XReplyStore:
                 conn.execute(
                     """INSERT INTO x_replies
                        (summon_id, parent_id, target_handle, summoner, status,
-                        tenant_id, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        parent_text, summon_text, tenant_id, created_at,
+                        updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         str(summon_id), str(parent_id), str(target_handle).lstrip("@").lower(),
                         str(summoner).lstrip("@").lower(), STATUS_DRAFTING,
+                        str(parent_text or "")[:2000], str(summon_text or "")[:500],
                         str(tenant_id or "default"), now, now,
                     ),
                 )

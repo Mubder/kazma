@@ -351,6 +351,11 @@ async def handle_summon(
             parent_id=parent_id,
             target_handle=parent_handle,
             summoner=summoner,
+            # Both sides of the conversation, kept now: the poller has them
+            # in hand, and re-fetching later costs read quota or is simply
+            # impossible once the tweet is deleted.
+            parent_text=parent_text,
+            summon_text=summon_text,
         )
     )
     if not claimed:

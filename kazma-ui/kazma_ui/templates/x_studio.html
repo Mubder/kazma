@@ -33,6 +33,17 @@
   .xs-thread .grow { flex: 1; min-width: 180px; }
   .xs-thread label { display: block; font-size: .72rem; color: var(--text-muted); margin-bottom: 4px; }
   .xs-thread input { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text-primary); }
+  .xs-tabs { display: flex; gap: .25rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-subtle); }
+  .xs-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: .5rem .9rem; font: inherit; font-size: .85rem; color: var(--text-muted); cursor: pointer; }
+  .xs-tabs button.on { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 600; }
+  .xs-tabs .count { font-size: .68rem; color: var(--text-muted); margin-inline-start: .3rem; }
+  .xs-conv { border-top: 1px solid var(--border-subtle); padding: .8rem 0; }
+  .xs-conv:first-of-type { border-top: 0; }
+  .xs-turn { display: flex; gap: .6rem; padding: .3rem 0; font-size: .84rem; }
+  .xs-turn .who { flex-shrink: 0; min-width: 8.5rem; color: var(--text-muted); font-size: .76rem; padding-top: .1rem; }
+  .xs-turn .what { flex: 1; min-width: 0; word-break: break-word; unicode-bidi: isolate; text-align: start; white-space: pre-wrap; }
+  .xs-turn.kazma .what { border-inline-start: 2px solid var(--accent); padding-inline-start: .6rem; }
+  .xs-conv .foot { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin-top: .4rem; font-size: .7rem; color: var(--text-muted); }
   .xs-week { display: flex; gap: 4px; margin-bottom: .75rem; }
   .xs-day { flex: 1; text-align: center; font-size: .68rem; padding: 6px 2px; border-radius: 6px; background: var(--bg-elevated); color: var(--text-muted); }
   .xs-day.has { color: var(--accent-light); background: var(--accent-subtle); }
@@ -57,7 +68,18 @@
     <a href="/settings?tab=x" style="color:var(--accent);margin-inline-start:.5rem;">{{ t('x_studio.open_settings') }}</a>
   </div>
 
-  <div class="two-col-grid">
+  <div class="xs-tabs" role="tablist">
+    <button role="tab" :class="tab === 'studio' ? 'on' : ''"
+            :aria-selected="tab === 'studio'"
+            @click="tab = 'studio'">{{ t('x_studio.title') }}</button>
+    <button role="tab" :class="tab === 'conversations' ? 'on' : ''"
+            :aria-selected="tab === 'conversations'"
+            @click="tab = 'conversations'; loadConversations()">Conversations<span
+            class="count" x-show="conversations.length" x-cloak
+            x-text="conversations.length"></span></button>
+  </div>
+
+  <div class="two-col-grid" x-show="tab === 'studio'">
     <div class="xs-card xs-compose">
       <h2>{{ t('x_studio.composer') }}</h2>
       <textarea x-model="text" @input="onInput()" maxlength="2000"
@@ -158,6 +180,56 @@
         </div>
       </template>
     </div>
+  </div>
+
+  <!-- Conversations: the other half of the log.
+       The cards above answer "what did Kazma post". This answers "what was
+       it replying to, and who called it in" — which the posted list cannot,
+       because a reply out of context reads as a non-sequitur. Skipped and
+       failed summons are here too: "why didn't it reply?" is the most
+       common question and the incoming post plus the reason IS the answer. -->
+  <div class="xs-card" x-show="tab === 'conversations'" x-cloak>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+      <h2 style="margin:0;">Conversations</h2>
+      <button class="btn btn-secondary btn-sm" @click="loadConversations()"
+              :disabled="convLoading" x-text="convLoading ? '…' : t('x_studio.refresh')"></button>
+    </div>
+
+    <p x-show="!convLoading && !conversations.length" x-cloak
+       style="font-size:.84rem;color:var(--text-muted);margin-top:.75rem;">
+      No summons yet. Kazma replies when someone mentions it under a post that
+      matches a subject you declared —
+      <a href="/settings?tab=x" style="color:var(--accent);">set that up in Settings</a>.
+    </p>
+
+    <template x-for="c in conversations" :key="c.summon_id">
+      <div class="xs-conv">
+        <div class="xs-turn">
+          <span class="who" x-text="'@' + (c.target || 'someone') + ' posted'"></span>
+          <span class="what" :dir="textDir(c.said)"
+                x-text="c.said || '(text not recorded)'"></span>
+        </div>
+        <div class="xs-turn" x-show="c.summon" x-cloak>
+          <span class="who" x-text="'@' + (c.summoner || '?') + ' summoned'"></span>
+          <span class="what" :dir="textDir(c.summon)" x-text="c.summon"></span>
+        </div>
+        <div class="xs-turn kazma" x-show="c.reply" x-cloak>
+          <span class="who">Kazma replied</span>
+          <span class="what" :dir="textDir(c.reply)" x-text="c.reply"></span>
+        </div>
+        <div class="xs-turn" x-show="!c.reply && c.reason" x-cloak>
+          <span class="who">Kazma did not reply</span>
+          <span class="what" style="color:var(--text-muted);" x-text="c.reason"></span>
+        </div>
+        <div class="foot">
+          <span class="xs-pill" :class="c.status === 'failed' ? 'bad' : ''" x-text="c.status"></span>
+          <span x-show="c.subject" x-cloak x-text="c.subject"></span>
+          <span x-text="convWhen(c.at)"></span>
+          <a x-show="c.url" x-cloak :href="c.url" target="_blank" rel="noopener"
+             style="color:var(--accent);">open on X</a>
+        </div>
+      </div>
+    </template>
   </div>
 </div>
 {% endblock %}
