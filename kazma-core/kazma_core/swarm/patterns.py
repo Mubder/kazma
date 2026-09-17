@@ -116,8 +116,14 @@ async def _synthesize_refined_output(
 
     try:
         from kazma_core.model_registry import get_model_registry
+        from kazma_core.tenant_context import get_current_tenant_id, tenant_scope
+
         registry = get_model_registry()
-        provider = registry.get_client()
+        if not get_current_tenant_id():
+            with tenant_scope("default"):
+                provider = registry.get_client()
+        else:
+            provider = registry.get_client()
         if provider is not None:
             messages = [
                 {"role": "system", "content": "You are a Refiner. Distill worker outputs into key findings, code, and next actions. Output in Markdown."},

@@ -113,6 +113,13 @@ tree. Assume the same class exists elsewhere.
 
   The vault's fallback direction is right and should not be widened.
 
+  **Call sites patched 2026-09-17 (the class is not gone):** swarm
+  dispatch installs tenant before `get_client`; HITL and
+  `tenant_context` setters mirror each other; connector-health, cloud
+  backup and X config share `retrieve_with_tenant_ladder`. The tripwire
+  inside `retrieve` is still reverted. New background readers must use
+  the ladder or `tenant_scope("default")`.
+
   **Attempted and REVERTED, 2026-09-17.** The fix tried was a runtime
   tripwire: have `retrieve` log, once per name, when it returns `None` for a
   name that does exist under some tenant. A static list of entry points would
@@ -302,24 +309,11 @@ deliberately absent from the `shell_exec` allowlist precisely because one
 approval should not become a credential dump, and an MCP tool called `read_env`
 runs with no approval at all.
 
-This is **closed in production**. `KAZMA_PRODUCTION=1` forces HITL for every
-MCP tool not on `KAZMA_MCP_SAFE_ALLOWLIST`, regardless of name. It is open in
-the default/dev posture, where `force_hitl` is `tier in ("danger", "unknown")`
-and a `safe` classification skips it. The code that does this carries the
-comment *"safe name patterns are not enough (list_keys, get_env, export_data,
-…)"* — the reasoning is already written down; only the production branch acts
-on it.
-
-Servers default to `trust="approval_required"`, so this needs a server the
-operator connected and a tool name chosen by that server. That is within scope:
-the threat model already treats MCP *output* as untrusted. Tool *names* are the
-same channel and are currently trusted.
-
-Mitigations today: run with `KAZMA_PRODUCTION=1`, or set
-`KAZMA_MCP_SAFE_ALLOWLIST` to the tools you actually want unattended, or only
-connect servers you would let run unattended anyway. The real repair is to stop
-classifying third-party tools by their own names in every posture, which is a
-gating change with a real UX cost and has not been made.
+**Closed 2026-09-17 in every posture.** Allowlist is the only HITL skip;
+`read_env` / `get_file` / `list_env_vars` no longer run unattended because
+their names look safe. `KAZMA_MCP_SAFE_ALLOWLIST` is the opt-out for tools
+you actually want unattended. Classification by name remains as a log
+label; it is not a gate.
 
 **A bus-less approval has no session grant and no YOLO.** One decision, one
 tool call — those are properties of a chat thread, and a separate process has

@@ -21,9 +21,16 @@ async def get_system_stats() -> str:
         A formatted markdown string presenting the system metrics.
     """
     try:
-        # CPU Info
+        import asyncio
+
+        # CPU Info — interval=0.1 sleeps the calling thread; never do that
+        # on the SSE event loop (audit 2026-09-17).
         cpu_count = psutil.cpu_count(logical=True)
-        cpu_percent = psutil.cpu_percent(interval=0.1)
+
+        def _cpu() -> float:
+            return psutil.cpu_percent(interval=0.1)
+
+        cpu_percent = await asyncio.to_thread(_cpu)
 
         # Virtual Memory Info
         vm = psutil.virtual_memory()

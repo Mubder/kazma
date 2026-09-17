@@ -92,22 +92,12 @@ class KuwaitiPipeline(BasePipeline):
             "dialect_meanings": {t.text: t.dialect_meaning for t in dialect_tokens if t.dialect_meaning},
         }
 
-        # Real LLM call with dialect-specific system prompt
-        try:
-            from kazma_core.model_registry import get_model_registry
-            provider = get_model_registry().get_client()
-            if provider is not None:
-                messages = [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": request.text},
-                ]
-                response = await provider.chat(messages)
-                text = response.content
-            else:
-                text = request.text
-        except Exception as exc:
-            logger.warning("[KuwaitiPipeline] LLM call failed: %s", exc)
-            text = request.text
+        # Do NOT call the LLM here. Live routing only uses the tokenizer
+        # for a dialect boost (routing_engine.py). A provider.chat() on
+        # this path was a parallel mouth outside the supervisor, HITL,
+        # turn_failed, and tenant bind (audit 2026-09-17). Echo the
+        # request; DialectRouter.route() is a classifier, not a brain.
+        text = request.text
 
         return AgentResponse(
             text=text,
@@ -144,22 +134,8 @@ class MSAPipeline(BasePipeline):
             "normalized_words": sum(1 for t in token_result.tokens if t.dialect_meaning is not None),
         }
 
-        # Real LLM call with MSA-specific system prompt
-        try:
-            from kazma_core.model_registry import get_model_registry
-            provider = get_model_registry().get_client()
-            if provider is not None:
-                messages = [
-                    {"role": "system", "content": self.system_prompt},
-                    {"role": "user", "content": request.text},
-                ]
-                response = await provider.chat(messages)
-                text = response.content
-            else:
-                text = request.text
-        except Exception as exc:
-            logger.warning("[MSAPipeline] LLM call failed: %s", exc)
-            text = request.text
+        # Classifier only — see KuwaitiPipeline.execute.
+        text = request.text
 
         return AgentResponse(
             text=text,

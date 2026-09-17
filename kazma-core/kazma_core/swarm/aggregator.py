@@ -212,7 +212,12 @@ def _get_llm_provider() -> Any | None:
     """Return an LLM provider from the global registry."""
     try:
         from kazma_core.model_registry import get_model_registry
+        from kazma_core.tenant_context import get_current_tenant_id, tenant_scope
+
         registry = get_model_registry()
-        return registry.get_client()
+        if get_current_tenant_id():
+            return registry.get_client()
+        with tenant_scope("default"):
+            return registry.get_client()
     except Exception:
         return None

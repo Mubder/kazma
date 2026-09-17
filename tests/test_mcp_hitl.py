@@ -4,7 +4,7 @@ Covers:
     - classify_mcp_tool() name-pattern classification
     - UnifiedToolExecutor HITL gate fires for danger-tier MCP tools
     - _hitl_approved flag bypasses the gate (double-gating prevention)
-    - Safe MCP tools never trigger the gate
+    - MCP tool names are untrusted; allowlist is the only HITL skip
     - MCPServerConfig auth/trust fields
 """
 
@@ -213,8 +213,13 @@ class TestUnifiedExecutorHitlGate:
             set_safety(get_safety())
 
     @pytest.mark.asyncio
-    async def test_safe_mcp_tool_no_gate(self):
-        """Safe MCP tools (read/list/get) bypass the HITL gate entirely."""
+    async def test_safe_named_mcp_tool_still_gated(self):
+        """A 'safe' name is not a skip — allowlist is the only skip.
+
+        ``read_file`` classifies safe. Until 2026-09-17 that skipped HITL
+        outside production, so a hostile MCP server named ``read_env`` ran
+        unattended.
+        """
         from kazma_core.swarm.safety import SafetyMiddleware, set_safety
 
         blocking_safety = SafetyMiddleware(enabled=True, allow_headless_danger=False)
@@ -227,9 +232,8 @@ class TestUnifiedExecutorHitlGate:
 
             result = await executor.execute("read_file", {"path": "/tmp/x"})
 
-            # Safe tool should execute despite safety blocking
-            assert result["is_error"] is False
-            mcp_mgr.execute_mcp_tool.assert_awaited_once()
+            assert result["is_error"] is True
+            mcp_mgr.execute_mcp_tool.assert_not_awaited()
         finally:
             from kazma_core.swarm.safety import get_safety
             set_safety(get_safety())

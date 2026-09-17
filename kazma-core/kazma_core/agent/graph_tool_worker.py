@@ -22,6 +22,16 @@ from kazma_core.summarizer import _normalize_msg
 
 logger = logging.getLogger(__name__)
 
+# Baked copy of ``PROPOSAL_TOOLS`` for the ImportError path. Parity-tested
+# against the module — a fourth publish tool added there must land here too.
+_PROPOSAL_PUBLISH_FALLBACK = frozenset(
+    {
+        "x_post",
+        "x_schedule_post",
+        "book_x_post",
+    }
+)
+
 def _last_user_text(state: SupervisorState) -> str:
     """Most recent user message text (the commitment gate anchors relative
     phrases to it). Returns '' if none — the gate then degrades to audit-only."""
@@ -212,7 +222,32 @@ def _commitment_resolve_gate(
                     _still_open.append(_tc)
             pending = _still_open
         except Exception:
-            pass
+            logger.error(
+                "[ToolWorker] proposal-tool filter failed — blocking publish tools",
+                exc_info=True,
+            )
+            _kept = []
+            for _tc in pending:
+                _tname = str(_tc.get("name") or "")
+                _looks_proposal = (
+                    _tname in _PROPOSAL_PUBLISH_FALLBACK
+                    or "proposal" in _tname.lower()
+                )
+                if _looks_proposal:
+                    semantic_blocked.append(ToolResult(
+                        tool_call_id=str(_tc.get("id") or ""),
+                        name=_tname,
+                        content=(
+                            f"Proposal tool '{_tname}' could not be classified "
+                            "(filter error) and cannot be invoked directly."
+                        ),
+                        is_error=True,
+                        duration_ms=0,
+                        outcome="terminal",
+                    ))
+                else:
+                    _kept.append(_tc)
+            pending = _kept
 
     if semantic_hold:
         if not allow_interrupt:

@@ -280,6 +280,13 @@ class SupervisorState(TypedDict, total=False):
     a real result (the "model stopped thinking" symptom).
     """
 
+    error_message: str
+    """Honest failure text paired with ``turn_failed``. Must be declared —
+    undeclared keys are dropped by LangGraph, so ``TurnResult.error`` used
+    to read None while the assistant message carried the only copy (audit
+    2026-09-17). Same class as the 2026-08-03 ``force_synthesis`` miss.
+    """
+
     force_synthesis: bool
     """When True, ``respond_node`` MUST run a final synthesis LLM call.
 
@@ -431,6 +438,7 @@ def initial_supervisor_state(
         _research_depth_nudged=False,
         _research_pipeline_nudged=False,
         turn_failed=False,
+        error_message="",
         mission_rounds_used=0,
         mission_hard_rounds=_mission_hard if _mode == "mission" else 0,
         recovery_probes=0,

@@ -75,11 +75,9 @@ def _read_config(key: str, default: str = "") -> str:
 
 def _read_vault(key: str) -> str:
     try:
-        from kazma_core.security.vault import get_vault
-        vault = get_vault()
-        if vault is None:
-            return ""
-        return str(vault.retrieve(key) or "")
+        from kazma_core.security.vault import retrieve_with_tenant_ladder
+
+        return retrieve_with_tenant_ladder(key)
     except Exception:
         return ""
 

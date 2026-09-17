@@ -102,7 +102,7 @@ BLOCKING_CALLS = {
 }
 #: Sync helpers whose body opens SQLite; calling them from async def is the
 #: same pin as an inline connect (audit M-14 memory_api ``_conn()``).
-BLOCKING_HELPERS = {"_conn"}
+BLOCKING_HELPERS = {"_conn", "_connect_sqlite"}
 
 #: ``(file, function)`` pairs that are deliberately exempt, each with a reason.
 BLOCKING_ALLOWLIST: dict[tuple[str, str], str] = {
@@ -202,6 +202,33 @@ def test_no_bare_create_task():
             )
             if dotted in ("asyncio.create_task", "asyncio.ensure_future") or is_loop_create:
                 offenders.append(f"{rel}:{node.lineno}")
+
+    # create_task inside a Lambda is the same discard — the Call is not an
+    # Expr statement, so the walk above misses
+    # `call_soon_threadsafe(lambda: loop.create_task(...))` (audit 2026-09-17).
+    for path in _product_files():
+        rel = _rel(path)
+        if rel in allowed_files:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Lambda):
+                continue
+            for sub in ast.walk(node):
+                if not isinstance(sub, ast.Call):
+                    continue
+                dotted = _dotted(sub.func)
+                is_loop_create = (
+                    isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == "create_task"
+                    and isinstance(sub.func.value, ast.Name)
+                    and sub.func.value.id == "loop"
+                )
+                if dotted in ("asyncio.create_task", "asyncio.ensure_future") or is_loop_create:
+                    offenders.append(f"{rel}:lambda:{sub.lineno}")
 
     assert not offenders, (
         "Fire-and-forget asyncio task: the event loop keeps only a weak "
@@ -338,6 +365,43 @@ def test_no_unfenced_web_tool_output(rel):
 #: module → {function: must_fence}. False means "this function returns only
 #: our own text" and needs a reason in the comment beside it.
 FENCED_TOOL_FUNCTIONS: dict[str, dict[str, bool]] = {
+    "kazma-core/kazma_core/mcp/spec_tools.py": {
+        # Body already fenced in AsyncMCPManager.read_resource (fence_resource).
+        "mcp_read_resource": False,
+        "mcp_get_prompt": True,
+        "mcp_list_prompts": True,
+        # Server-supplied names/URIs are the same untrusted channel as prompt
+        # descriptions — an MCP server can put a payload in a resource name.
+        "mcp_list_resources": True,
+    },
+    "kazma-skills/kazma_skills/native/calendar/tools.py": {
+        "list_events": True,
+        "create_event": False,
+        "update_event": False,
+        "delete_event": False,
+        "find_free_slots": False,
+    },
+    "kazma-skills/kazma_skills/native/git_github_manager/tools.py": {
+        "git_status": False,
+        "git_commit": False,
+        "git_push": False,
+        "git_pull": False,
+        "git_push_pull": False,
+        "git_checkout": False,
+        "git_merge": False,
+        "github_create_pr": False,
+        "github_merge_pr": False,
+        "github_create_issue": False,
+        "github_comment_issue": False,
+        "github_list_issues": True,
+    },
+    "kazma-skills/kazma_skills/native/database_client/tools.py": {
+        "inspect_db_schema": True,
+        "execute_db_query": True,
+        # Thin alias of execute_db_query — that function fences.
+        "sqlite_query": False,
+        "execute_db_query_any": True,
+    },
     "kazma-core/kazma_core/tools/read_url.py": {
         # Return remote-authored bytes in some form — all must fence.
         "read_url": True,
@@ -367,7 +431,12 @@ def _fences_somewhere(node: ast.AST) -> bool:
     for sub in ast.walk(node):
         if isinstance(sub, ast.Call):
             name = _dotted(sub.func)
-            if name in {"fence_untrusted", "format_untrusted_block", "fence_resource"}:
+            if name in {
+                "fence_untrusted",
+                "format_untrusted_block",
+                "fence_resource",
+                "_fence_result",
+            }:
                 return True
     return False
 
@@ -415,7 +484,7 @@ SECURITY_ENV_MARKERS = (
     "AUTH_DISABLED", "BYPASS", "ALLOW_UNGATED", "ALLOW_LOCAL", "ALLOW_MUTATE",
     "GATEWAY_ADMINS", "CANONICAL_FLOOR", "DEMO_MODE", "TRUSTED_IN_PROD",
     "AUTOLOGIN_HOSTS", "STRICT_ALLOWLIST", "CHAOS_ENABLED",
-    "DISABLE_COST_BREAKER", "YOLO_TTL",
+    "DISABLE_COST_BREAKER", "YOLO_TTL", "SAFE_ALLOWLIST",
 )
 
 

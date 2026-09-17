@@ -569,16 +569,20 @@ async def _stream_langgraph_events(
                     # T5: schedule on the captured turn loop from whichever
                     # thread fired the callback (get_event_loop() would raise
                     # RuntimeError off-loop and drop the persist silently).
-                    _turn_loop.call_soon_threadsafe(
-                        lambda: _turn_loop.create_task(
+                    def _schedule_persist() -> None:
+                        from kazma_core.background import spawn_background
+
+                        spawn_background(
                             _persist_detached_reply(
                                 graph, config, session_id, thread_id,
                                 streamed_text=content_acc,
                                 interrupted=interrupted,
                                 reply_turn_id=reply_turn_id,
-                            )
+                            ),
+                            name=f"sse-persist:{thread_id[:12]}",
                         )
-                    )
+
+                    _turn_loop.call_soon_threadsafe(_schedule_persist)
 
                 pump_task.add_done_callback(_on_pump_done)
 

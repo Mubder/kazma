@@ -1680,6 +1680,7 @@ async def supervisor_node(
             **_mission_carry,
             "next_node": NodeName.RESPOND,
             "turn_failed": True,
+            "error_message": error_content,
             "last_model": str(routed_model or state.get("last_model") or ""),
             "messages": messages
             + [
