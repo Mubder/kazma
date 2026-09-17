@@ -79,7 +79,7 @@
             x-text="conversations.length"></span></button>
   </div>
 
-  <div class="two-col-grid" x-show="tab === 'studio'">
+  <div class="two-col-grid" x-show="tab === 'studio'" x-cloak>
     <div class="xs-card xs-compose">
       <h2>{{ t('x_studio.composer') }}</h2>
       <textarea x-model="text" @input="onInput()" maxlength="2000"

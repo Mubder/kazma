@@ -501,7 +501,7 @@ def _operator_default_rung_allowed() -> bool:
     return allowed
 
 
-def retrieve_scoped(name: str) -> str | None:
+def retrieve_scoped(name: str, vault: Any | None = None) -> str | None:
     """Decrypt *name* walking current tenant → ``default`` → global.
 
     Returns the RAW value (no strip) or ``None``, so callers that store
@@ -519,7 +519,12 @@ def retrieve_scoped(name: str) -> str | None:
     :func:`_operator_default_rung_allowed`. ``Vault.retrieve``'s own
     tenant→global fallback is untouched.
     """
-    vault = get_vault()
+    # *vault* lets a caller pass the handle it already holds. ConfigStore
+    # obtains one through its own `_try_get_vault` and must not have this
+    # function quietly resolve a second (possibly different) instance behind
+    # its back -- which also silently bypassed the patch point its tests use.
+    if vault is None:
+        vault = get_vault()
     if vault is None:
         return None
 

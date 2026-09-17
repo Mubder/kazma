@@ -2865,7 +2865,7 @@
                             <option value="auto">auto — post without asking</option>
                         </select>
                         <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;"
-                           x-show="xReply.mode === 'auto'">
+                           x-show="xReply.mode === 'auto'" x-cloak>
                             Auto publishes text you have not read, under your name. Start with draft.
                         </p>
                     </div>
@@ -2889,7 +2889,7 @@
                            x-model="xReplySummonersText" placeholder="yourhandle, cohost"
                            autocomplete="off">
                     <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;"
-                       x-show="xReply.summoner_policy !== 'anyone'">
+                       x-show="xReply.summoner_policy !== 'anyone'" x-cloak>
                         Comma-separated. Empty means nobody — a config mistake must not
                         open the account to the world.
                     </p>
@@ -3002,7 +3002,7 @@
                             <span style="flex:1;"></span>
                             <button class="btn btn-sm btn-danger" @click="xReplyRemoveSubject(i)">Remove</button>
                         </div>
-                        <div x-show="xReplyOpen === i" style="margin-top:12px;">
+                        <div x-show="xReplyOpen === i" style="margin-top:12px;" x-cloak>
                             <div class="two-col-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                                 <div class="form-group">
                                     <label>Id</label>
@@ -3132,7 +3132,7 @@
                             <p x-show="xReplyPreview.result.reason"
                                style="margin-top:8px;font-size:0.82rem;"
                                :style="xReplyPreview.result.ok ? 'color:var(--text-tertiary)' : 'color:var(--warning,#c80)'"
-                               x-text="xReplyPreview.result.reason"></p>
+                               x-text="xReplyPreview.result.reason" x-cloak></p>
                         </div>
                     </template>
                 </div>
