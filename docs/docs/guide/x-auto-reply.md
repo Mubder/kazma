@@ -5,8 +5,8 @@ a view **you wrote**. It is off by default and has no opinions of its own.
 
 The governing rule: **no declared subject means no reply.** If a post does not
 match a subject you configured, Kazma says nothing and tells you why. It never
-falls back to a generic take, because a bot that improvises a position on
-Iran under your handle is a different product from one that repeats yours.
+falls back to a generic take, because a bot that improvises a position
+under your handle is a different product from one that repeats yours.
 
 ## Two ways to summon it
 
@@ -121,22 +121,27 @@ answer angry is a small manipulation lever with no upside. Set
 
 ```yaml
 subjects:
-  - id: iran
-    match: ["iran", "tehran", "irgc", "إيران", "طهران"]
+  - id: var
+    match: ["var", "offside", "تحكيم"]
     mood: roast          # roast | angry | dry | deadpan | supportive
     register: gulf       # dialect / tone hint
     view: |
-      The regime and the Iranian people are not the same thing, and
-      conflating them is the laziest move in the discourse. I have no
-      patience for takes that treat 90 million people as one actor.
+      VAR has made football worse, not fairer. Three minutes of freeze-frame
+      to overturn a call nobody in the ground disputed is not precision, it
+      is theatre. I have no patience for "but it got the decision right".
     hard_lines:
-      - never attack Iranians as a people, only the state and its conduct
+      - never name or mock an individual referee
     examples:
-      - "Strong opinion for someone who learned this country existed on Tuesday."
+      - "Four minutes to draw a line through a knee. Riveting stuff."
 ```
 
-`match` is checked as **whole words** for ASCII keywords, so `iran` does not
-fire on `Tirana`. Non-Latin keywords fall back to containment.
+The subject here is deliberately mundane. Pick whatever you actually have
+opinions about — the mechanics are the same whether it is refereeing or
+something with real stakes, and the guardrails below matter more the higher
+those stakes are.
+
+`match` is checked as **whole words** for ASCII keywords, so `var` does not
+fire on `variable`. Non-Latin keywords fall back to containment.
 
 `view` is what Kazma argues from, and the prompt tells the model it is "the
 ONLY view you may argue" and that it is explicitly not a neutral assistant.
@@ -147,10 +152,11 @@ Write a position, not a topic. Three things make one hold:
    premise, not a conclusion I am open to relitigating in a reply".
 2. **Name the counter-framings you expect to meet**, so the reply has
    something to push against rather than inventing an angle.
-3. **Fix the target.** "The regime, the IRGC and the state's actions — never
-   Iranians, who are its first victims." That is not softening the view; it is
-   what makes it land, and it is the difference between a sharp account and a
-   suspended one.
+3. **Fix the target.** Name the institution, the decision or the argument —
+   never a group of people. "The rule and the people who wrote it" rather than
+   a nationality or a faith. That is not softening the view; it is what makes
+   it land, and on any charged subject it is the difference between a sharp
+   account and a suspended one.
 
 `examples` are worth more than `view` for voice. Two or three replies you
 actually wrote will pin the register harder than a paragraph describing it.

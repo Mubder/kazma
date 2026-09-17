@@ -3007,7 +3007,7 @@
                                 <div class="form-group">
                                     <label>Id</label>
                                     <input type="text" class="form-input" x-model="s.id"
-                                           placeholder="iran" autocomplete="off">
+                                           placeholder="var" autocomplete="off">
                                 </div>
                                 <div class="form-group">
                                     <label>Mood</label>
@@ -3023,9 +3023,9 @@
                                 <input type="text" class="form-input"
                                        :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
                                        @input="s._matchText = $event.target.value"
-                                       placeholder="iran, tehran, طهران" autocomplete="off">
+                                       placeholder="var, offside, تحكيم" autocomplete="off">
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
-                                    Matched as whole words, so "iran" will not fire on "Tirana".
+                                    Matched as whole words, so "var" will not fire on "variable".
                                 </p>
                             </div>
                             <div class="form-group">
@@ -3043,7 +3043,7 @@
                                 <textarea class="form-input" rows="3"
                                           :value="s._hardText !== undefined ? s._hardText : (s.hard_lines || []).join('\n')"
                                           @input="s._hardText = $event.target.value"
-                                          placeholder="never attack Iranians as a people"></textarea>
+                                          placeholder="never name or mock an individual referee"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
                                     Added on top of the universal rules (no slurs, no threats, no
                                     attacks on protected characteristics) which always apply.

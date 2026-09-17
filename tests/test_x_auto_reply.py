@@ -28,14 +28,19 @@ from kazma_core.x_api.reply_store import (
 from kazma_core.x_api.stance import MODE_AUTO, MODE_DRAFT, ReplyConfig, Subject, classify
 
 
-IRAN = Subject(
-    id="iran",
-    match=("iran", "tehran", "طهران"),
-    view="The regime and its people are not the same thing.",
+# A deliberately mundane subject. It still exercises everything the fixture
+# needs to: a strong stance, an ASCII keyword that is a substring of unrelated
+# words ("var" inside "variable"), and a non-ASCII keyword.
+VAR = Subject(
+    id="var",
+    match=("var", "offside", "تحكيم"),
+    view="VAR has made football worse and the people defending it know it.",
     mood="roast",
-    hard_lines=("never attack Iranians as a people",),
+    hard_lines=("never name or mock an individual referee",),
 )
-FOOTBALL = Subject(id="football", match=("offside",), view="VAR ruined it.", mood="dry")
+COFFEE = Subject(
+    id="coffee", match=("espresso",), view="Dark roast is a cover-up.", mood="dry"
+)
 
 
 def _cfg(**over) -> ReplyConfig:
@@ -49,7 +54,7 @@ def _cfg(**over) -> ReplyConfig:
         cooldown_per_thread_s=3600,
         min_target_followers=500,
         poll_interval_s=600,
-        subjects=(IRAN, FOOTBALL),
+        subjects=(VAR, COFFEE),
     )
     base.update(over)
     return ReplyConfig(**base)
@@ -71,7 +76,7 @@ def _no_llm(monkeypatch):
     monkeypatch.setattr(stance_mod, "_llm_pick", _never)
 
 
-def _stub_draft(monkeypatch, text="Tehran called, they want their talking points back."):
+def _stub_draft(monkeypatch, text="Four minutes to draw a line through a knee. Riveting stuff."):
     async def _draft(*, subject, parent_text, parent_handle="", mood=""):
         return text
 
@@ -99,20 +104,20 @@ def test_parse_tweet_url(raw, expect_id, expect_handle):
 
 @pytest.mark.asyncio
 async def test_keyword_match_picks_subject(_no_llm):
-    got = await classify("Thoughts on Iran sanctions?", _cfg())
-    assert got is not None and got.id == "iran"
+    got = await classify("Thoughts on the VAR decision?", _cfg())
+    assert got is not None and got.id == "var"
 
 
 @pytest.mark.asyncio
 async def test_substring_does_not_match(_no_llm):
-    """`iran` must not fire on `Tirana`. Whole-word only for ASCII keywords."""
-    assert await classify("Landed in Tirana this morning", _cfg(), allow_llm=False) is None
+    """`var` must not fire on `variable`. Whole-word only for ASCII keywords."""
+    assert await classify("Declare the variable up top", _cfg(), allow_llm=False) is None
 
 
 @pytest.mark.asyncio
 async def test_non_ascii_keyword_matches(_no_llm):
-    got = await classify("الوضع في طهران", _cfg())
-    assert got is not None and got.id == "iran"
+    got = await classify("قرار التحكيم كان خاطئا", _cfg())
+    assert got is not None and got.id == "var"
 
 
 @pytest.mark.asyncio
@@ -157,7 +162,7 @@ async def test_classifier_cannot_invent_a_subject(monkeypatch):
 async def test_non_summoner_is_refused(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m2", parent_id="p2", parent_text="Iran again",
+        summon_id="m2", parent_id="p2", parent_text="VAR again",
         parent_handle="target", summoner="a_stranger",
         target_followers=10_000, cfg=_cfg(),
     )
@@ -168,7 +173,7 @@ async def test_non_summoner_is_refused(_no_llm, monkeypatch):
 async def test_empty_allowlist_means_nobody(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m3", parent_id="p3", parent_text="Iran",
+        summon_id="m3", parent_id="p3", parent_text="VAR",
         parent_handle="target", summoner="balfaris",
         target_followers=10_000, cfg=_cfg(summoners=()),
     )
@@ -179,7 +184,7 @@ async def test_empty_allowlist_means_nobody(_no_llm, monkeypatch):
 async def test_disabled_config_drafts_nothing(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m4", parent_id="p4", parent_text="Iran",
+        summon_id="m4", parent_id="p4", parent_text="VAR",
         parent_handle="t", summoner="balfaris", cfg=_cfg(enabled=False),
     )
     assert res.action == "skipped" and "off" in res.reason
@@ -189,7 +194,7 @@ async def test_disabled_config_drafts_nothing(_no_llm, monkeypatch):
 async def test_small_account_floor(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m5", parent_id="p5", parent_text="Iran",
+        summon_id="m5", parent_id="p5", parent_text="VAR",
         parent_handle="tiny", summoner="balfaris",
         target_followers=40, cfg=_cfg(),
     )
@@ -201,7 +206,7 @@ async def test_unknown_follower_count_does_not_block(_no_llm, monkeypatch):
     """The paste path usually cannot know; unknown must not mean refuse."""
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m6", parent_id="p6", parent_text="Iran",
+        summon_id="m6", parent_id="p6", parent_text="VAR",
         parent_handle="t", summoner="balfaris",
         target_followers=None, cfg=_cfg(),
     )
@@ -221,7 +226,7 @@ async def test_same_summon_is_handled_once(_no_llm, monkeypatch):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     kw = dict(
-        parent_id="p7", parent_text="Iran", parent_handle="t",
+        parent_id="p7", parent_text="VAR", parent_handle="t",
         summoner="balfaris", target_followers=9_000, cfg=_cfg(),
     )
     first = await handle_summon(summon_id="dupe", **kw)
@@ -236,7 +241,7 @@ async def test_result_carries_the_approvable_id(_no_llm, monkeypatch):
     """The approve prompt quotes summon_id; parent_id would never resolve."""
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m8", parent_id="p8", parent_text="Iran",
+        summon_id="m8", parent_id="p8", parent_text="VAR",
         parent_handle="t", summoner="balfaris",
         target_followers=9_000, cfg=_cfg(),
     )
@@ -252,11 +257,11 @@ async def test_per_target_daily_cap(_no_llm, monkeypatch):
     store = get_reply_store()
     store.claim(summon_id="old", parent_id="other", target_handle="victim",
                 summoner="balfaris")
-    store.mark_posted("old", tweet_id="t1", draft="d", subject_id="iran")
+    store.mark_posted("old", tweet_id="t1", draft="d", subject_id="var")
 
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m9", parent_id="p9", parent_text="Iran",
+        summon_id="m9", parent_id="p9", parent_text="VAR",
         parent_handle="victim", summoner="balfaris",
         target_followers=9_000, cfg=_cfg(),
     )
@@ -270,11 +275,11 @@ async def test_thread_cooldown(_no_llm, monkeypatch):
     store = get_reply_store()
     store.claim(summon_id="prev", parent_id="thread1", target_handle="a",
                 summoner="balfaris")
-    store.mark_posted("prev", tweet_id="t2", draft="d", subject_id="iran")
+    store.mark_posted("prev", tweet_id="t2", draft="d", subject_id="var")
 
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m10", parent_id="thread1", parent_text="Iran",
+        summon_id="m10", parent_id="thread1", parent_text="VAR",
         parent_handle="b", summoner="balfaris",
         target_followers=9_000, cfg=_cfg(),
     )
@@ -289,11 +294,11 @@ async def test_daily_cap(_no_llm, monkeypatch):
     for i in range(2):
         store.claim(summon_id=f"s{i}", parent_id=f"p{i}", target_handle=f"h{i}",
                     summoner="balfaris")
-        store.mark_posted(f"s{i}", tweet_id=f"t{i}", draft="d", subject_id="iran")
+        store.mark_posted(f"s{i}", tweet_id=f"t{i}", draft="d", subject_id="var")
 
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="m11", parent_id="p11", parent_text="Iran",
+        summon_id="m11", parent_id="p11", parent_text="VAR",
         parent_handle="new", summoner="balfaris",
         target_followers=9_000, cfg=_cfg(max_replies_per_day=2),
     )
@@ -303,20 +308,20 @@ async def test_daily_cap(_no_llm, monkeypatch):
 # ── The draft screen ──────────────────────────────────────────────────────
 
 def test_screen_blocks_violence():
-    assert screen_draft("they should die honestly", IRAN) is not None
-    assert screen_draft("kill them all", IRAN) is not None
+    assert screen_draft("they should die honestly", VAR) is not None
+    assert screen_draft("kill them all", VAR) is not None
 
 
 def test_screen_blocks_overlong():
-    assert screen_draft("x" * 281, IRAN) is not None
+    assert screen_draft("x" * 281, VAR) is not None
 
 
 def test_screen_blocks_empty():
-    assert screen_draft("   ", IRAN) is not None
+    assert screen_draft("   ", VAR) is not None
 
 
 def test_screen_passes_a_roast():
-    assert screen_draft("Bold take from someone who just googled this.", IRAN) is None
+    assert screen_draft("Bold take from someone who just googled this.", VAR) is None
 
 
 @pytest.mark.asyncio
@@ -333,7 +338,7 @@ async def test_screened_draft_never_posts(_no_llm, monkeypatch):
     monkeypatch.setattr(reply_mod, "draft_reply", _bad)
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
     res = await handle_summon(
-        summon_id="m12", parent_id="p12", parent_text="Iran",
+        summon_id="m12", parent_id="p12", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_AUTO),
     )
@@ -357,7 +362,7 @@ async def test_auto_mode_publishes_and_records(_no_llm, monkeypatch):
     # This test is about publish mechanics. The stance check is exercised in
     # its own section; here it must not fail closed for want of a provider.
     res = await handle_summon(
-        summon_id="m13", parent_id="p13", parent_text="Iran",
+        summon_id="m13", parent_id="p13", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_AUTO, stance_check=False),
     )
@@ -375,7 +380,7 @@ async def test_draft_mode_holds(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
     res = await handle_summon(
-        summon_id="m14", parent_id="p14", parent_text="Iran",
+        summon_id="m14", parent_id="p14", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_DRAFT),
     )
@@ -397,7 +402,7 @@ async def test_approve_posts_the_stored_draft(_no_llm, monkeypatch):
     _stub_draft(monkeypatch, text="the exact stored draft")
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
     await handle_summon(
-        summon_id="m15", parent_id="p15", parent_text="Iran",
+        summon_id="m15", parent_id="p15", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_DRAFT),
     )
@@ -419,7 +424,7 @@ async def test_approve_is_not_replayable(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
     await handle_summon(
-        summon_id="m16", parent_id="p16", parent_text="Iran",
+        summon_id="m16", parent_id="p16", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_DRAFT),
     )
@@ -510,7 +515,7 @@ async def test_emoji_overrides_the_subject_mood(_no_llm, monkeypatch):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     await handle_summon(
-        summon_id="e1", parent_id="p1", parent_text="Iran",
+        summon_id="e1", parent_id="p1", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(), summon_text="what do you think Kazma? \U0001F92C",
     )
@@ -527,7 +532,7 @@ async def test_no_emoji_keeps_the_subject_mood(_no_llm, monkeypatch):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     await handle_summon(
-        summon_id="e2", parent_id="p2", parent_text="Iran",
+        summon_id="e2", parent_id="p2", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(), summon_text="what do you think Kazma?",
     )
@@ -549,7 +554,7 @@ async def test_stranger_cannot_dial_the_tone(_no_llm, monkeypatch):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await handle_summon(
-        summon_id="e3", parent_id="p3", parent_text="Iran",
+        summon_id="e3", parent_id="p3", parent_text="VAR",
         parent_handle="t", summoner="a_stranger", target_followers=9_000,
         cfg=_cfg(summoner_policy=SUMMON_ANYONE),
         summon_text="Kazma \U0001F92C",
@@ -568,7 +573,7 @@ async def test_emoji_can_be_switched_off(_no_llm, monkeypatch):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     await handle_summon(
-        summon_id="e4", parent_id="p4", parent_text="Iran",
+        summon_id="e4", parent_id="p4", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(allow_emoji_mood=False), summon_text="Kazma \U0001F92C",
     )
@@ -579,9 +584,9 @@ def test_mood_never_reaches_the_hard_lines():
     """Tone is a prompt line; the hard lines are not negotiable by emoji."""
     from kazma_core.x_api.reply import _build_prompt
 
-    system = _build_prompt(IRAN, "a post", "someone", "angry")[0]["content"]
+    system = _build_prompt(VAR, "a post", "someone", "angry")[0]["content"]
     assert "Blunt and indignant" in system, "the mood was applied"
-    for rule in IRAN.all_hard_lines():
+    for rule in VAR.all_hard_lines():
         assert rule in system, "a hard line went missing when the mood changed"
 
 
@@ -591,7 +596,7 @@ def test_mood_never_reaches_the_hard_lines():
 async def test_anyone_policy_lets_a_stranger_summon(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="o1", parent_id="p1", parent_text="Iran",
+        summon_id="o1", parent_id="p1", parent_text="VAR",
         parent_handle="t", summoner="a_stranger", target_followers=9_000,
         cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
@@ -618,7 +623,7 @@ async def test_anyone_still_needs_a_declared_subject(monkeypatch):
 async def test_anyone_still_honours_the_follower_floor(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="o3", parent_id="p3", parent_text="Iran",
+        summon_id="o3", parent_id="p3", parent_text="VAR",
         parent_handle="tiny", summoner="a_stranger", target_followers=40,
         cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
@@ -632,11 +637,11 @@ async def test_anyone_still_honours_the_daily_cap(_no_llm, monkeypatch):
     store = get_reply_store()
     store.claim(summon_id="prev", parent_id="other", target_handle="x",
                 summoner="whoever")
-    store.mark_posted("prev", tweet_id="t1", draft="d", subject_id="iran")
+    store.mark_posted("prev", tweet_id="t1", draft="d", subject_id="var")
 
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="o4", parent_id="p4", parent_text="Iran",
+        summon_id="o4", parent_id="p4", parent_text="VAR",
         parent_handle="t", summoner="a_stranger", target_followers=9_000,
         cfg=_cfg(summoner_policy=SUMMON_ANYONE, max_replies_per_day=1),
     )
@@ -683,13 +688,13 @@ async def test_both_sides_are_recorded(_no_llm, monkeypatch):
     _stub_draft(monkeypatch, text="Bold take from a fresh account.")
     await handle_summon(
         summon_id="c1", parent_id="p1",
-        parent_text="Iran is obviously the aggressor here",
+        parent_text="VAR is obviously working fine",
         parent_handle="someone", summoner="balfaris",
         target_followers=9_000, cfg=_cfg(),
         summon_text="what do you think Kazma? \U0001F602",
     )
     rec = get_reply_store().get("c1")
-    assert rec.parent_text == "Iran is obviously the aggressor here"
+    assert rec.parent_text == "VAR is obviously working fine"
     assert "\U0001F602" in rec.summon_text
     assert rec.draft_text == "Bold take from a fresh account."
     assert rec.summoner == "balfaris"
@@ -820,7 +825,7 @@ async def test_argues_passes(monkeypatch):
     from kazma_core.x_api.reply import check_stance
 
     _verdict(monkeypatch, "argues")
-    assert await check_stance("a sharp reply", IRAN, unattended=True) is None
+    assert await check_stance("a sharp reply", VAR, unattended=True) is None
 
 
 @pytest.mark.asyncio
@@ -828,7 +833,7 @@ async def test_contradicting_draft_is_blocked(monkeypatch):
     from kazma_core.x_api.reply import check_stance
 
     _verdict(monkeypatch, "contradicts")
-    reason = await check_stance("actually they had a point", IRAN, unattended=False)
+    reason = await check_stance("actually they had a point", VAR, unattended=False)
     assert reason and "AGAINST the declared view" in reason
 
 
@@ -838,7 +843,7 @@ async def test_fence_sitting_is_blocked(monkeypatch):
     from kazma_core.x_api.reply import check_stance
 
     _verdict(monkeypatch, "fence")
-    reason = await check_stance("there are points on both sides", IRAN, unattended=False)
+    reason = await check_stance("there are points on both sides", VAR, unattended=False)
     assert reason and "fence" in reason
 
 
@@ -848,7 +853,7 @@ async def test_unknown_verdict_blocks_when_unattended(monkeypatch):
     from kazma_core.x_api.reply import check_stance
 
     _verdict(monkeypatch, "banana")
-    reason = await check_stance("something", IRAN, unattended=True)
+    reason = await check_stance("something", VAR, unattended=True)
     assert reason and "could not run" in reason
 
 
@@ -859,7 +864,7 @@ async def test_unknown_verdict_allows_when_attended(monkeypatch):
     from kazma_core.x_api.reply import check_stance
 
     _verdict(monkeypatch, "banana")
-    assert await check_stance("something", IRAN, unattended=False) is None
+    assert await check_stance("something", VAR, unattended=False) is None
 
 
 @pytest.mark.asyncio
@@ -867,7 +872,7 @@ async def test_no_provider_blocks_when_unattended(monkeypatch):
     from kazma_core.x_api.reply import check_stance
 
     _no_provider(monkeypatch)
-    reason = await check_stance("something", IRAN, unattended=True)
+    reason = await check_stance("something", VAR, unattended=True)
     assert reason and "could not run" in reason
 
 
@@ -883,8 +888,8 @@ async def test_a_raising_classifier_does_not_raise_out(monkeypatch):
         "kazma_core.model_registry.get_model_registry",
         lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
     )
-    assert await check_stance("x", IRAN, unattended=False) is None
-    assert await check_stance("x", IRAN, unattended=True) is not None
+    assert await check_stance("x", VAR, unattended=False) is None
+    assert await check_stance("x", VAR, unattended=True) is not None
 
 
 # ── end to end ────────────────────────────────────────────────────────────
@@ -898,12 +903,12 @@ async def test_auto_mode_will_not_publish_a_contradicting_draft(_no_llm, monkeyp
         published["n"] += 1
         return True, {"tweet_id": "nope"}
 
-    _stub_draft(monkeypatch, text="Honestly Iran had every right here.")
+    _stub_draft(monkeypatch, text="Honestly VAR has been a huge success.")
     monkeypatch.setattr("kazma_core.x_api.booking.publish_x_post", _publish)
     _verdict(monkeypatch, "contradicts")
 
     res = await handle_summon(
-        summon_id="s1", parent_id="p1", parent_text="Iran",
+        summon_id="s1", parent_id="p1", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_AUTO),
     )
@@ -913,11 +918,11 @@ async def test_auto_mode_will_not_publish_a_contradicting_draft(_no_llm, monkeyp
 
 @pytest.mark.asyncio
 async def test_draft_mode_does_not_offer_a_contradicting_draft(_no_llm, monkeypatch):
-    _stub_draft(monkeypatch, text="Honestly Iran had every right here.")
+    _stub_draft(monkeypatch, text="Honestly VAR has been a huge success.")
     _verdict(monkeypatch, "contradicts")
 
     res = await handle_summon(
-        summon_id="s2", parent_id="p2", parent_text="Iran",
+        summon_id="s2", parent_id="p2", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(mode=MODE_DRAFT),
     )
@@ -940,7 +945,7 @@ async def test_the_check_can_be_switched_off(_no_llm, monkeypatch):
         lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
     )
     res = await handle_summon(
-        summon_id="s3", parent_id="p3", parent_text="Iran",
+        summon_id="s3", parent_id="p3", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(stance_check=False),
     )
@@ -967,7 +972,7 @@ async def test_rule_screen_still_runs_first(_no_llm, monkeypatch):
         lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
     )
     res = await handle_summon(
-        summon_id="s4", parent_id="p4", parent_text="Iran",
+        summon_id="s4", parent_id="p4", parent_text="VAR",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
     )
@@ -989,7 +994,7 @@ async def test_trusted_caller_skips_the_x_allowlist(_no_llm, monkeypatch):
     """
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="t1", parent_id="p1", parent_text="Iran",
+        summon_id="t1", parent_id="p1", parent_text="VAR",
         parent_handle="someone", summoner="telegram:12345",
         target_followers=9_000, cfg=_cfg(), force_mode="draft", trusted=True,
     )
@@ -1001,7 +1006,7 @@ async def test_untrusted_caller_is_still_gated(_no_llm, monkeypatch):
     """The bypass is for authenticated gateway callers only."""
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="t2", parent_id="p2", parent_text="Iran",
+        summon_id="t2", parent_id="p2", parent_text="VAR",
         parent_handle="someone", summoner="telegram:12345",
         target_followers=9_000, cfg=_cfg(),
     )
@@ -1019,7 +1024,7 @@ async def test_a_trusted_caller_can_set_the_tone(_no_llm, monkeypatch):
 
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     await handle_summon(
-        summon_id="t3", parent_id="p3", parent_text="Iran",
+        summon_id="t3", parent_id="p3", parent_text="VAR",
         parent_handle="someone", summoner="telegram:12345",
         target_followers=9_000, cfg=_cfg(), force_mode="draft", trusted=True,
         summon_text="roast him 🤬",
@@ -1032,7 +1037,7 @@ async def test_trusted_does_not_lift_the_other_rails(_no_llm, monkeypatch):
     """Only the allowlist is bypassed — caps and subjects still hold."""
     _stub_draft(monkeypatch)
     res = await handle_summon(
-        summon_id="t4", parent_id="p4", parent_text="Iran",
+        summon_id="t4", parent_id="p4", parent_text="VAR",
         parent_handle="tiny", summoner="telegram:12345",
         target_followers=40, cfg=_cfg(), force_mode="draft", trusted=True,
     )
@@ -1050,3 +1055,71 @@ def test_the_command_passes_trusted():
         "/x roast must mark itself a gateway caller, or the X allowlist "
         "refuses the operator's own command"
     )
+
+
+# ── A failed draft must name its cause ────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_drafting_failure_names_the_cause(_no_llm, monkeypatch):
+    """"model returned an empty draft" was true, useless, and identical for
+    an unconfigured provider, a rejected key, an unknown model and a timeout.
+
+    The real error exists at the point of failure; it was just swallowed. An
+    operator testing the feature for the first time got one sentence that
+    named none of the four things they might need to fix.
+    """
+    from kazma_core.x_api.reply import DraftFailed
+
+    async def _boom(*, subject, parent_text, parent_handle="", mood=""):
+        raise DraftFailed("the model provider rejected the credentials (401)")
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _boom)
+    res = await handle_summon(
+        summon_id="d1", parent_id="p1", parent_text="VAR",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+    )
+    assert res.action == "failed"
+    assert "rejected the credentials" in res.reason
+    assert "empty draft" not in res.reason
+
+
+@pytest.mark.asyncio
+async def test_preview_failure_names_the_cause(_no_llm, monkeypatch):
+    from kazma_core.x_api.reply import DraftFailed, preview_reply
+
+    async def _boom(*, subject, parent_text, parent_handle="", mood=""):
+        raise DraftFailed("the configured model is not available")
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _boom)
+    res = await preview_reply(parent_text="VAR", cfg=_cfg(), subject_id="var")
+    assert res.action == "failed" and "not available" in res.reason
+
+
+@pytest.mark.asyncio
+async def test_no_provider_says_so(monkeypatch, _no_llm):
+    """The commonest first-run cause gets its own sentence."""
+    from kazma_core.x_api.reply import DraftFailed, draft_reply
+
+    monkeypatch.setattr(
+        "kazma_core.model_registry.get_model_registry",
+        lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: None)})(),
+    )
+    with pytest.raises(DraftFailed) as err:
+        await draft_reply(subject=VAR, parent_text="VAR")
+    assert "no LLM provider" in str(err.value)
+
+
+@pytest.mark.parametrize(
+    "raw,expect",
+    [
+        ("LLM call failed (HTTP 401): no usable API key", "rejected the credentials"),
+        ("Model 'x' not found in any configured provider", "not available"),
+        ("Request timed out after 60s", "timed out"),
+        ("something else entirely", "the model call failed"),
+    ],
+)
+def test_error_text_points_at_the_thing_to_fix(raw, expect):
+    from kazma_core.x_api.reply import _draft_error_text
+
+    assert expect in _draft_error_text(RuntimeError(raw))

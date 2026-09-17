@@ -342,8 +342,9 @@ def mood_from_text(text: str) -> str:
 def _keyword_hit(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     """First subject whose keyword appears as a WHOLE word in *text*.
 
-    Whole-word, not substring: a substring match on "iran" also fires on
-    "Iranian-American", "irrational" (no) and, more to the point, "Tirana".
+    Whole-word, not substring: a substring match on "var" also fires on
+    "variable", "variance" and "Varsity" — a keyword short enough to be useful
+    is short enough to be a fragment of something unrelated.
     Arabic and other non-Latin keywords have no ASCII word boundary, so they
     fall back to a plain containment check.
     """

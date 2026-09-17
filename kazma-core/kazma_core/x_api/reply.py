@@ -53,7 +53,20 @@ __all__ = [
     "draft_reply",
     "screen_draft",
     "check_stance",
+    "DraftFailed",
 ]
+
+
+class DraftFailed(Exception):
+    """Drafting could not produce text, with the REASON attached.
+
+    This used to return "" and let ``screen_draft`` report "model returned
+    an empty draft" — true, useless, and identical whether the provider was
+    unconfigured, the key was rejected, the model name was unknown or the
+    request timed out. The operator saw one sentence that named none of
+    them. The real error is right there at the point of failure; it just
+    was not carried out.
+    """
 
 #: x.com/<handle>/status/<id>, twitter.com, /i/web/status/<id>, with or
 #: without query junk. The id is all we need to reply; the handle, when the
@@ -351,6 +364,25 @@ def _build_prompt(
     ]
 
 
+def _draft_error_text(exc: BaseException) -> str:
+    """Operator-facing reason. Names the thing to go fix, not the traceback."""
+    msg = str(exc).strip() or type(exc).__name__
+    low = msg.lower()
+    if "no usable api key" in low or "401" in low:
+        return (
+            f"the model provider rejected the credentials ({msg[:160]}). "
+            "Settings → Models: confirm the active provider's key is saved."
+        )
+    if "not found in any configured provider" in low or "unknown model" in low:
+        return (
+            f"the configured model is not available ({msg[:160]}). "
+            "Settings → Models: pick a model the active provider actually serves."
+        )
+    if "timeout" in low or "timed out" in low:
+        return f"the model call timed out ({msg[:160]})."
+    return f"the model call failed: {msg[:200]}"
+
+
 async def draft_reply(
     *,
     subject: Subject,
@@ -377,16 +409,19 @@ async def draft_reply(
                 provider = _client()
         if provider is None:
             logger.warning("[x-reply] no LLM provider available for drafting")
-            return ""
+            raise DraftFailed(
+                "no LLM provider is available — check Settings → Models that a "
+                "provider is enabled and its key is saved"
+            )
         resp = await provider.chat(
             _build_prompt(subject, parent_text, parent_handle, mood),
             max_tokens=200,
             temperature=0.9,
         )
         text = str(getattr(resp, "content", "") or "").strip()
-    except Exception:
+    except Exception as exc:
         logger.exception("[x-reply] drafting failed")
-        return ""
+        raise DraftFailed(_draft_error_text(exc)) from exc
 
     # Models like to wrap a one-liner in quotes or prefix it with "Reply:".
     text = re.sub(r"^\s*(?:reply|response)\s*:\s*", "", text, flags=re.IGNORECASE)
@@ -503,10 +538,18 @@ async def handle_summon(
         mood = mood_from_text(summon_text)
         if mood:
             logger.info("[x-reply] emoji set mood=%s for %s", mood, summon_id)
-    draft = await draft_reply(
-        subject=subject, parent_text=parent_text,
-        parent_handle=parent_handle, mood=mood,
-    )
+    try:
+        draft = await draft_reply(
+            subject=subject, parent_text=parent_text,
+            parent_handle=parent_handle, mood=mood,
+        )
+    except DraftFailed as exc:
+        reason = str(exc)
+        await asyncio.to_thread(store.mark_failed, summon_id, reason)
+        return SummonResult(
+            False, "failed", reason=reason, subject_id=subject.id,
+            parent_id=parent_id, summon_id=summon_id,
+        )
     screen = screen_draft(draft, subject)
     if not screen and cfg.stance_check:
         # The rule screen does not know what the operator's position IS. A
@@ -619,10 +662,17 @@ async def preview_reply(
 
     # *mood* is passed straight in here (the panel has a picker), rather than
     # read off a summon — a preview has no summoner to trust.
-    draft = await draft_reply(
-        subject=subject, parent_text=parent_text,
-        parent_handle=parent_handle, mood=mood,
-    )
+    try:
+        draft = await draft_reply(
+            subject=subject, parent_text=parent_text,
+            parent_handle=parent_handle, mood=mood,
+        )
+    except DraftFailed as exc:
+        # The dry run is where an operator finds out their model config is
+        # wrong, so say which thing is wrong rather than "empty draft".
+        return SummonResult(
+            False, "failed", reason=str(exc), subject_id=subject.id
+        )
     screen = screen_draft(draft, subject)
     if not screen and cfg.stance_check:
         # Attended by definition — the operator is looking at it. A drifted
