@@ -113,6 +113,8 @@ class TestConstraints:
         cons = apply_plan_mode_constraints([])
         assert is_tool_allowed_under_constraints("file_read", cons) is True
         assert is_tool_allowed_under_constraints("codebase_search", cons) is True
+        assert is_tool_allowed_under_constraints("git_status", cons) is True
+        assert is_tool_allowed_under_constraints("config_read", cons) is True
         assert is_tool_allowed_under_constraints("file_write", cons) is False
         assert is_tool_allowed_under_constraints("file_apply_patch", cons) is False
         assert is_tool_allowed_under_constraints("shell_exec", cons) is False

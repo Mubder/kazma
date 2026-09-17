@@ -177,6 +177,30 @@ class TestDeterministicTrimAndWorkingMemory:
         assert not is_tool_allowed_under_constraints("generate_docx", cons)
         assert is_tool_allowed_under_constraints("read_document", cons)
         assert "read_document" in AUDIT_ONLY_ALLOWLIST
+        # Diagnostic reads used by the full-system battery (2026-09-17).
+        from kazma_core.agent.turn_input import audit_only_allowlist
+
+        allow = audit_only_allowlist()
+        for name in (
+            "git_status",
+            "config_read",
+            "research_readiness",
+            "check_swarm_task",
+            "email_list",
+            "list_events",
+            "x_status",
+            "list_scheduled",
+            "get_system_stats",
+            "document_status",
+            "mcp_list_resources",
+        ):
+            assert name in allow, name
+            assert is_tool_allowed_under_constraints(name, cons)
+        assert not is_tool_allowed_under_constraints("execute_db_query", cons)
+        assert not is_tool_allowed_under_constraints("file_write", cons)
+        assert not is_tool_allowed_under_constraints("mcp_test_server", cons)
+        assert not is_tool_allowed_under_constraints("vault_list", cons)
+        assert not is_tool_allowed_under_constraints("sqlite_query", cons)
 
     def test_goal_survives_40_round_deterministic_trim(self) -> None:
         """Invariant: active user goal is never purged by mid-loop trim."""

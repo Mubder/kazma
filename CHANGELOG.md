@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Audit-only diagnostics + context identity (2026-09-17)
+
+Part A of the full-system battery said "read-only tools only" / "do not
+write", which arms `audit_only`. The allowlist was a tiny named set
+(`file_read`, `web_search`, …), so `config_read`, `git_status`,
+`research_readiness`, `email_list`, `list_events`, `x_status`,
+`list_scheduled`, `get_system_stats`, `document_status`,
+`mcp_list_resources`, and `check_swarm_task` all failed with the same
+gate — not 14 dead subsystems. Effective allowlist is now the named set
+∪ HITL `read`/`safe` tools, minus vault/DB/host internals
+(`vault_list`, `execute_db_query`, `inspect_db_schema`, `sqlite_query`,
+`read_system_logs`, `list_active_processes`). Writes, `mcp_test_server`,
+and danger tools stay blocked.
+
+`context_info` now always prints `Workspace:` and `Model:` / `Provider:`
+from the live binding + active profile (not just the token bar).
+
 ## `/long mission` plus a pasted task now reaches the model (2026-09-17)
 
 A message that *started* with `/long mission` was handled as a slash
