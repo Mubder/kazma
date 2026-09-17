@@ -567,6 +567,7 @@ async def preview_reply(
     cfg: ReplyConfig | None = None,
     subject_id: str = "",
     mood: str = "",
+    subject_override: Subject | None = None,
 ) -> SummonResult:
     """Draft against *parent_text* without claiming, storing, or publishing.
 
@@ -584,14 +585,22 @@ async def preview_reply(
     post its keywords would not have matched.
     """
     cfg = cfg or get_reply_config()
-    if not cfg.subjects:
+
+    # *subject_override* is the subject as it exists in the editor RIGHT NOW,
+    # including edits not yet saved. Without it the dry run could only test
+    # stored config, so the tuning loop was: type a view, save it, try it,
+    # hate it, retype, save again — committing half-finished subjects to live
+    # config just to see what they produce. That is the opposite of a
+    # scratchpad.
+    subject: Subject | None
+    if subject_override is not None:
+        subject = subject_override
+    elif not cfg.subjects:
         return SummonResult(
             False, "skipped",
             reason="no subjects declared — nothing to argue from",
         )
-
-    subject: Subject | None
-    if subject_id:
+    elif subject_id:
         subject = cfg.subject_by_id(subject_id)
         if subject is None:
             return SummonResult(

@@ -3083,6 +3083,15 @@
                     <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 12px;">
                         Drafts against a pasted post. Nothing is published or recorded, so
                         iterate on the view until it sounds like you.
+                        <span x-show="xReplyOpen !== null" x-cloak>
+                            Uses the subject card you have open, including edits you have not
+                            saved.
+                        </span>
+                        <span x-show="xReplyOpen === null && !xReply.subjects.length" x-cloak
+                              style="color:var(--warning,#c80);">
+                            Add a subject first &mdash; with none declared there is nothing for
+                            Kazma to argue.
+                        </span>
                     </p>
                     <div class="form-group">
                         <label>Post text</label>

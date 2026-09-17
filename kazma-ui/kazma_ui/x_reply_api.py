@@ -67,6 +67,11 @@ class ReplyConfigBody(BaseModel):
 
 
 class PreviewBody(BaseModel):
+    # The subject as the editor holds it right now, unsaved edits and all.
+    # Without this the dry run could only test stored config, so tuning a
+    # view meant saving half-finished subjects to live config to see what
+    # they produce.
+    subject: SubjectBody | None = Field(default=None)
     parent_text: str = Field(default="")
     parent_handle: str = Field(default="")
     subject_id: str = Field(default="")
@@ -411,11 +416,31 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
         # Settings requests carry a tenant, but provider keys are tenant-scoped
         # vault rows and this is the one endpoint that spends a model call.
         with tenant_scope("default"):
+            override = None
+            if body.subject is not None and body.subject.view.strip():
+                from kazma_core.x_api.stance import Subject
+
+                override = Subject(
+                    id=body.subject.id.strip() or "(unsaved)",
+                    match=tuple(
+                        m.strip().lower() for m in body.subject.match if m.strip()
+                    ),
+                    view=body.subject.view.strip(),
+                    mood=body.subject.mood.strip().lower() or "dry",
+                    register=body.subject.register_hint.strip(),
+                    hard_lines=tuple(
+                        h.strip() for h in body.subject.hard_lines if h.strip()
+                    ),
+                    examples=tuple(
+                        e.strip() for e in body.subject.examples if e.strip()
+                    ),
+                )
             result = await preview_reply(
                 parent_text=text,
                 parent_handle=(body.parent_handle or "").strip().lstrip("@"),
                 subject_id=(body.subject_id or "").strip(),
                 mood=(body.mood or "").strip().lower(),
+                subject_override=override,
             )
         payload = result.to_dict()
         payload["ok"] = result.ok

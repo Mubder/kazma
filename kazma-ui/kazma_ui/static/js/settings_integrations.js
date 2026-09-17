@@ -975,11 +975,17 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     credentials: 'same-origin',
+                    // Send the subject card that is open, so an edit can be
+                    // tried before it is saved. Falls back to stored config
+                    // when nothing is expanded.
                     body: JSON.stringify({
                         parent_text: this.xReplyPreview.text,
                         parent_handle: this.xReplyPreview.handle,
                         subject_id: this.xReplyPreview.subject_id,
                         mood: this.xReplyPreview.mood,
+                        subject: (this.xReplyOpen !== null && this.xReply.subjects[this.xReplyOpen])
+                            ? this.xReplySubjectPayload()[this.xReplyOpen]
+                            : null,
                     }),
                 });
                 const data = await resp.json().catch(function () { return {}; });
