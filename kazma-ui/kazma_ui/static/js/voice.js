@@ -211,6 +211,19 @@
   // minutes of unstoppable speech and the only remedy was closing the tab.
   var _currentAudio = null;
   var _currentUrl = null;
+  var _currentOwner = null;      // opaque id of whatever asked for this clip
+  var _speakListeners = [];
+
+  function _notifySpeakChange() {
+    for (var i = 0; i < _speakListeners.length; i++) {
+      try { _speakListeners[i](_currentOwner); } catch (e) { /* a bad listener must not break audio */ }
+    }
+  }
+
+  /** Subscribe to start/stop. Called with the speaking owner id, or null. */
+  function onSpeakStateChange(cb) {
+    if (typeof cb === 'function') _speakListeners.push(cb);
+  }
 
   function stopTTS() {
     if (_currentAudio) {
@@ -221,64 +234,27 @@
       try { URL.revokeObjectURL(_currentUrl); } catch (e) { /* already revoked */ }
       _currentUrl = null;
     }
-    updateSpeakUI();
+    _currentOwner = null;
+    _notifySpeakChange();
   }
 
-  function isSpeaking() {
-    return !!(_currentAudio && !_currentAudio.paused);
+  function isSpeaking(owner) {
+    var live = !!(_currentAudio && !_currentAudio.paused);
+    if (owner === undefined) return live;
+    return live && _currentOwner === owner;
   }
 
-  // Auto-speak is a CLIENT-side gate on top of the server's voice.tts_reply.
-  // Kept per-browser so muting on your phone does not silence the desktop.
-  function autoSpeakEnabled() {
-    try {
-      return localStorage.getItem('kazma_tts_autospeak') !== '0';
-    } catch (e) { return true; }
+  function speakingOwner() {
+    return isSpeaking() ? _currentOwner : null;
   }
 
-  function setAutoSpeak(on) {
-    try { localStorage.setItem('kazma_tts_autospeak', on ? '1' : '0'); } catch (e) {}
-    if (!on) stopTTS();
-    updateSpeakUI();
-  }
-
-  function toggleAutoSpeak() {
-    var next = !autoSpeakEnabled();
-    setAutoSpeak(next);
-    try {
-      showToast(next ? 'Voice replies on' : 'Voice replies off — playback stopped', 'info', 2500);
-    } catch (e) { /* toast system absent */ }
-    return next;
-  }
-
-  function updateSpeakUI() {
-    var btn = document.getElementById('voice-speak-btn');
-    if (!btn) return;
-    var on = autoSpeakEnabled();
-    var speaking = isSpeaking();
-    btn.classList.toggle('is-muted', !on);
-    btn.classList.toggle('is-speaking', speaking);
-    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-    btn.title = speaking
-      ? 'Stop speaking (click to stop this reply)'
-      : (on ? 'Voice replies ON — click to turn off' : 'Voice replies OFF — click to turn on');
-    var onIcon = document.getElementById('speak-on-icon');
-    var offIcon = document.getElementById('speak-off-icon');
-    if (onIcon) onIcon.style.display = on ? '' : 'none';
-    if (offIcon) offIcon.style.display = on ? 'none' : '';
-  }
-
-  // One click, two jobs: if something is playing, STOP it (that is what a
-  // person reaching for this button almost always wants). Otherwise toggle
-  // whether future replies speak.
-  function toggleSpeak() {
-    if (isSpeaking()) { stopTTS(); return false; }
-    return toggleAutoSpeak();
-  }
-
-  async function playTTS(text, provider) {
+  /**
+   * Speak `text`. `owner` is an opaque id (a message id) so a caller can ask
+   * "is MY message the one playing?" — that is what lets each message show
+   * its own stop state instead of a single global toggle.
+   */
+  async function playTTS(text, provider, owner) {
     if (!isTtsEnabled() || _ttsUnavailable) return;
-    if (!autoSpeakEnabled()) return;
     provider = provider || getTtsProvider();
     // One voice at a time — a new reply supersedes the previous clip.
     stopTTS();
@@ -313,15 +289,16 @@
       var audio = new Audio(url);
       _currentAudio = audio;
       _currentUrl = url;
+      _currentOwner = owner === undefined ? null : owner;
       audio.onended = function() {
-        if (_currentAudio === audio) { _currentAudio = null; }
+        if (_currentAudio === audio) { _currentAudio = null; _currentOwner = null; }
         if (_currentUrl === url) { _currentUrl = null; }
         try { URL.revokeObjectURL(url); } catch (e) {}
-        updateSpeakUI();
+        _notifySpeakChange();
       };
-      updateSpeakUI();
+      _notifySpeakChange();
       await audio.play();
-      updateSpeakUI();
+      _notifySpeakChange();
     } catch (err) {
       console.warn('[Voice] TTS playback failed:', err);
       stopTTS();
@@ -392,7 +369,6 @@
     // The speak toggle needs no microphone — show it whenever TTS could
     // play, which is any browser. Reflect the stored preference at load so
     // a muted tab does not come back unmuted after a refresh.
-    updateSpeakUI();
     // Escape stops speech, the way it cancels everything else on the page.
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && isSpeaking()) stopTTS();
@@ -784,11 +760,9 @@
     stopRecording: stopRecording,
     playTTS: playTTS,
     stopTTS: stopTTS,
-    toggleSpeak: toggleSpeak,
-    toggleAutoSpeak: toggleAutoSpeak,
-    setAutoSpeak: setAutoSpeak,
-    autoSpeakEnabled: autoSpeakEnabled,
     isSpeaking: isSpeaking,
+    speakingOwner: speakingOwner,
+    onSpeakStateChange: onSpeakStateChange,
     handleVoiceCommand: handleVoiceCommand,
     getSttProvider: getSttProvider,
     getTtsProvider: getTtsProvider,
