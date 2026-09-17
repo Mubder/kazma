@@ -1613,6 +1613,27 @@ async def test_deny_parks_a_draft(_no_llm, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_retry_reopens_a_stuck_draft(_no_llm, monkeypatch):
+    """Live 2026-09-18: newest mention sat in `drafting` with no Retry button."""
+    from kazma_core.x_api.reply import retry_summon
+    from kazma_core.x_api.reply_store import STATUS_DRAFTING, get_reply_store
+
+    _stub_draft(monkeypatch)
+    monkeypatch.setattr(reply_mod, "get_reply_config", lambda: _cfg())
+    store = get_reply_store()
+    store.claim(
+        summon_id="2100724737114599833", parent_id="2002854021749743923",
+        target_handle="b_alfaris", summoner="b_alfaris",
+        parent_text="that VAR call again",
+        summon_text="@KazmaAI what do you think buddy? 😂",
+    )
+    assert store.get("2100724737114599833").status == STATUS_DRAFTING
+    res = await retry_summon("2100724737114599833")
+    assert res.action == "awaiting_approval"
+    assert res.draft
+
+
+@pytest.mark.asyncio
 async def test_retry_reopens_a_skip(_no_llm, monkeypatch):
     from kazma_core.x_api.reply import retry_summon
 

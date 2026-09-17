@@ -267,7 +267,13 @@ async def x_reply_conversations(limit: int = 30) -> JSONResponse:
                 "reply": r.draft_text,
                 "status": r.status,
                 "subject": r.subject_id,
-                "reason": r.reason,
+                "reason": (
+                    r.reason
+                    or (
+                        "Stuck while drafting — the model call never finished. Retry."
+                        if r.status == "drafting" else ""
+                    )
+                ),
                 "tweet_id": r.tweet_id,
                 "url": (
                     f"https://x.com/i/web/status/{r.tweet_id}"

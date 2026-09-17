@@ -251,7 +251,7 @@
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('deny', c)">Deny</button>
             <button class="btn btn-secondary btn-sm"
-                    x-show="c.status === 'skipped' || c.status === 'failed' || c.status === 'awaiting_approval'" x-cloak
+                    x-show="c.status === 'skipped' || c.status === 'failed' || c.status === 'awaiting_approval' || c.status === 'drafting'" x-cloak
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('retry', c)">Retry</button>
           </span>
