@@ -67,6 +67,8 @@ Mutating tools (`email_send`, `email_delete`, `email_categorize`) need HITL appr
 
 Official X API only — [X publisher](x-publisher). Create a Read + Write app at developer.x.com, put the **four OAuth 1.0a keys** in **Settings → X** (not chat). Compose on **X Studio** (`/x`): Post now, Schedule, reschedule, thread hops, delete. Your click on that page is the approval. Chat tools (`x_post`, `x_schedule_post`, `x_delete_post`) still need a HITL card (YOLO cannot skip). **All clocks** on Studio opens `/scheduled` (cron + X together); the Studio planner is X-only. Kill-switch: `KAZMA_X_POST=0`.
 
+**Mentions / auto-reply** is separate: [X auto-reply](x-auto-reply). Settings → X → Auto-reply, mode `draft`. A mention with a keyword hits that card’s against/support side. No card: 😂/👎 criticise *this* post, ❤️/👍 defend it, `شرايك` / both thumbs = opinion on this post. Quotes and status links are the text it reads. The public reply sits under your mention (X rule). Kill-switch: `KAZMA_X_REPLY=0`.
+
 ### How do I make the agent research the web?
 
 There is **no** `/research` slash command. Ask in **chat** (e.g. “Research X and cite sources”) or use **`/swarm research …`** for multi-worker dispatch. The agent uses `web_search`, `read_url` / `read_url_to_file`, optional `crawl_site`, and `digest_research_file`. See [Web research](web-research).

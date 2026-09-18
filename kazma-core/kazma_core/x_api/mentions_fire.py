@@ -330,9 +330,6 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
         if summoner and summoner == my_handle:
             await _skip("own tweet", persist=False)
             continue
-        if not cfg.is_summoner(summoner):
-            await _skip(f"@{summoner} not an allowlisted summoner")
-            continue
         if cfg.trigger and cfg.trigger not in text.lower():
             await _skip("trigger phrase absent")
             continue
@@ -383,6 +380,14 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             parent_id = source_id
         else:
             parent_id = tid
+
+        if not cfg.is_summoner(
+            summoner, parent_text=parent_text, summon_text=text,
+        ):
+            await _skip(
+                f"@{summoner} not a trusted summoner (no open-thread marker)"
+            )
+            continue
 
         result = await handle_summon(
             summon_id=tid,

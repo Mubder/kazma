@@ -67,6 +67,7 @@ class ReplyConfigBody(BaseModel):
     unmatched: str = Field(default="skip")
     use_knowledge: bool = Field(default=False)
     knowledge_library: str = Field(default="")
+    open_thread_marker: str = Field(default="")
     subjects: list[SubjectBody] = Field(default_factory=list)
 
 
@@ -166,6 +167,7 @@ def _payload() -> dict[str, Any]:
         "unmatched": cfg.unmatched,
         "use_knowledge": cfg.use_knowledge,
         "knowledge_library": cfg.knowledge_library,
+        "open_thread_marker": cfg.open_thread_marker,
         "subjects": [
             {
                 "id": s.id,
@@ -450,6 +452,11 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             (
                 "connectors.x.reply.knowledge_library",
                 (body.knowledge_library or "").strip(),
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.open_thread_marker",
+                (body.open_thread_marker or "").strip(),
                 _CATEGORY,
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),

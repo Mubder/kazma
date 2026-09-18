@@ -226,17 +226,21 @@ _OPINION_EN = (
 )
 _OPINION_AR = (
     "شرايك", "شرايكم", "شرايچ", "رأيك", "رايك", "رايكم", "رأيكم",
-    "شنو رايك", "وش رايك",
+    "شنو رايك", "وش رايك", "كيف", "شلون", "شنو", "ليش", "هل",
+)
+_QUESTION_EN = re.compile(
+    r"(?<!\w)(how|what|why|when|where|should|could|would)\b",
+    re.IGNORECASE,
 )
 
 
 def is_opinion_ask(text: str) -> bool:
-    """True when the mention is 'what do you think?' not a side vote.
+    """True when the mention is asking for a take, not voting a side.
 
-    Live 2026-09-19: ``شرايك … 👍🏻 والا 👎🏻؟`` was read as thumbs-up
-    (first emoji) or, worse, guessed as a Settings card. Both polarities
-    in one mention, or شرايك / what do you think, means react to THIS
-    post — do not force against/support and do not pick a country card.
+    Live 2026-09-19: ``How er can make use of this into Kazma framework?``
+    on an NVIDIA Dynamo post skipped because there was no subject keyword
+    and no 😂/against word. A question mark, شرايك, or how/what/why means
+    react to THIS post — do not stay silent and do not pick a country card.
     """
     body = str(text or "")
     if not body.strip():
@@ -247,8 +251,14 @@ def is_opinion_ask(text: str) -> bool:
         return True
     if "❤️" in body and "😂" in body:
         return True
+    if "?" in body or "؟" in body:
+        return True
     low = body.lower()
     if "what do you think" in low or "what do u think" in low:
+        return True
+    if "make use" in low or "into kazma" in low or "in kazma" in low:
+        return True
+    if _QUESTION_EN.search(low):
         return True
     for w in _OPINION_EN:
         if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):
@@ -333,6 +343,9 @@ class ReplyConfig:
     classify_llm: bool = False
     use_knowledge: bool = False
     knowledge_library: str = ""
+    #: If this token appears in the parent post (or the mention), strangers
+    #: may summon on that thread. Empty = never: only trusted handles.
+    open_thread_marker: str = ""
 
     def can_draft(self) -> bool:
         # Subjects are optional. Zero subjects = voice-only: reply to
@@ -345,17 +358,37 @@ class ReplyConfig:
         h = (handle or "").strip().lstrip("@").lower()
         return bool(h) and h in self.summoners
 
-    def is_summoner(self, handle: str) -> bool:
+    def is_summoner(
+        self,
+        handle: str,
+        *,
+        parent_text: str = "",
+        summon_text: str = "",
+    ) -> bool:
         """May this handle summon a reply at all?
 
         Under ``allowlist`` (the default) an empty list means nobody, never
         everybody — a config mistake must not open the account to the world.
-        Under ``anyone`` the gate is off and every other rail still applies:
-        subject match, the three caps, the follower floor, the screen.
+        Under ``anyone`` the gate is off and every other rail still applies.
+
+        ``open_thread_marker`` is the per-post exception: if that token is
+        in the parent tweet (the one you already summoned on) or in this
+        mention, a stranger may join. Without it, only trusted handles.
         """
         if self.summoner_policy == SUMMON_ANYONE:
             return bool((handle or "").strip())
-        return self.is_trusted_summoner(handle)
+        if self.is_trusted_summoner(handle):
+            return True
+        return self.thread_is_open(parent_text, summon_text)
+
+    def thread_is_open(self, *texts: str) -> bool:
+        tok = (self.open_thread_marker or "").strip()
+        if not tok:
+            return False
+        for t in texts:
+            if tok and tok in (t or ""):
+                return True
+        return False
 
     def mood_override_allowed(self, handle: str) -> bool:
         """The summon emoji is the tone dial.
@@ -543,6 +576,9 @@ def get_reply_config() -> ReplyConfig:
         ),
         knowledge_library=str(
             _cs_get("connectors.x.reply.knowledge_library", "") or ""
+        ).strip(),
+        open_thread_marker=str(
+            _cs_get("connectors.x.reply.open_thread_marker", "") or ""
         ).strip(),
     )
 

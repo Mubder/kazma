@@ -194,8 +194,17 @@ Agent mail ops use tools (`email_list`, …), not these HTTP routes. Guide: [Ema
 | POST | `/api/x/credentials` | Session + CSRF | Save four OAuth 1.0a keys (vaulted) + handle + caps. |
 | POST | `/api/x/test` | Session + CSRF | `GET /2/users/me` with stored keys. |
 | POST | `/api/x/disconnect` | Session + CSRF | Delete keys, disable posting. |
+| GET | `/api/x/reply` | Session | Auto-reply config + live poller status. |
+| POST | `/api/x/reply` | Session + CSRF | Save auto-reply settings; starts/stops the mentions poller. |
+| POST | `/api/x/reply/preview` | Session + CSRF | Dry-run a draft. Nothing published or recorded. |
+| GET | `/api/x/reply/conversations` | Session | Summon log (parent + mention + draft/reason). |
+| POST | `/api/x/reply/poll` | Session + CSRF | Fetch mentions from X now (ignores stuck cursor). |
+| POST | `/api/x/reply/approve` | Session + CSRF | Publish a held (or wire-failed) draft. |
+| POST | `/api/x/reply/deny` | Session + CSRF | Park a held draft. |
+| POST | `/api/x/reply/retry` | Session + CSRF | Re-run a skipped/failed/drafting summon. |
+| POST | `/api/x/reply/delete` | Session + CSRF | Delete the posted reply on X (if any) and drop the log row. |
 
-Chat tweets still go through `x_post` (always HITL + `proposal_id`). Guide: [X publisher](../guide/x-publisher).
+Chat tweets still go through `x_post` (always HITL + `proposal_id`). Guide: [X publisher](../guide/x-publisher). Mentions: [X auto-reply](../guide/x-auto-reply).
 
 ## Scheduled (cron + X)
 

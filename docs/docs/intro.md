@@ -34,7 +34,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 | Web search / scrape / research | [Web research](guide/web-research) |
 | **New features tour** (research sessions, KB re-index, explain panel, proxy) | [Recent features](guide/recent-features) |
 | Email (Gmail / Microsoft / sandbox) | [Email integration](guide/email-integration) |
-| Tweet via the official X API | **X Studio** (`/x`) · [X publisher](guide/x-publisher) |
+| Tweet via the official X API | **X Studio** (`/x`) · [X publisher](guide/x-publisher) · [X auto-reply](guide/x-auto-reply) |
 
 ## Documentation map
 
@@ -44,7 +44,7 @@ Everything user-facing lives under this Docusaurus site (`docs/docs/`). Historic
 - [Gateways & platforms](guide/gateways-and-platforms) · [CLI](guide/cli-reference) · [Skills, MCP & tools](guide/skills-mcp-and-tools)
 - [Native skills](guide/native-skills) · [Voice & media](guide/voice-and-media)
 - [Swarm](guide/swarm-orchestration) · [Memory & RAG](guide/memory-and-rag) · [Memory best path](guide/memory-best-path) · [Security](guide/security-and-safety) · [Commitment Layer](guide/commitment-layer)
-- [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Document Intelligence**](guide/document-intelligence) · [Document phases](guide/document-phases) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration) · [X publisher](guide/x-publisher)
+- [Web research](guide/web-research) · [Knowledge Library](guide/knowledge-library) · [**Document Intelligence**](guide/document-intelligence) · [Document phases](guide/document-phases) · [**Recent features**](guide/recent-features) · [Email](guide/email-integration) · [X publisher](guide/x-publisher) · [X auto-reply](guide/x-auto-reply)
 - [Arabic & cultural](guide/arabic-cultural-features) · [Deployment](guide/deployment) · [Development](guide/development)
 - [Troubleshooting](guide/troubleshooting-and-workarounds) · [FAQ](guide/faq) · [Glossary](guide/glossary) · [Roadmap](guide/roadmap-and-future)
 

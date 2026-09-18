@@ -128,8 +128,8 @@ blocks the call. Inspect with any SQLite browser or
 
 ## Replying to other people's posts
 
-This page covers posting and scheduling from your own account. Replying to a
-post Kazma is *summoned* under — in a tone you pick, arguing a view you wrote —
-is a separate feature with its own subjects, caps and approval flow: see
-[X auto-reply](./x-auto-reply.md). It reuses the credentials, the ToU policy
-and the audit log documented here.
+This page covers posting and scheduling from your own account. Replying when
+the account is **mentioned** — locked against/support cards, or a summon
+emoji/word for one-offs — is [X auto-reply](./x-auto-reply.md). Same
+credentials, ToU policy, and audit log. Conversations on X Studio is the
+summon log (Approve / Deny / Retry / Delete).

@@ -1,5 +1,29 @@
 # CHANGELOG
 
+## feat(x): open-thread marker; trusted mentions stay a discussion (2026-09-19)
+
+Default remains allowlist: only you. Set an **open-thread marker** (e.g.
+🗣️) and put it in your summon if you want anyone who replies on that
+post to get Kazma too. Without the marker, strangers are refused.
+
+Your own follow-ups no longer need 😂/`?` every time, and thread
+cooldown / per-target caps do not apply to trusted handles — a general
+question can be a conversation.
+
+## Fix — a how-question mention is a take on this post, not silence (2026-09-19)
+
+`@KazmaAI How er can make use of this into Kazma framework?` under an
+NVIDIA Dynamo tweet skipped: no country keyword, no 😂. A `?` / `؟`,
+how/what/why, `شرايك`, or "into kazma" is now an opinion ask — voice on
+*this* post, same as Ali's JSON thread.
+
+## docs: X auto-reply guide matches the shipped product (2026-09-19)
+
+Operator guide rewritten: keyword cards vs opinion-ask vs summon emoji,
+quotes/links under our own tweet, Conversations actions, config keys
+(`unmatched`, `classify_llm`, KB), kill-switches. Intro, FAQ, X publisher,
+env, recent-features, and API routes point at it.
+
 ## Fix — quoted tweets and status links are the post to read (2026-09-19)
 
 A follow-up `@KazmaAI @3li3 هذا https://t.co/…` under Kazma's own reply
