@@ -68,6 +68,7 @@ class ReplyConfigBody(BaseModel):
     use_knowledge: bool = Field(default=False)
     knowledge_library: str = Field(default="")
     open_thread_marker: str = Field(default="")
+    close_thread_marker: str = Field(default="")
     subjects: list[SubjectBody] = Field(default_factory=list)
 
 
@@ -168,6 +169,7 @@ def _payload() -> dict[str, Any]:
         "use_knowledge": cfg.use_knowledge,
         "knowledge_library": cfg.knowledge_library,
         "open_thread_marker": cfg.open_thread_marker,
+        "close_thread_marker": cfg.close_thread_marker,
         "subjects": [
             {
                 "id": s.id,
@@ -457,6 +459,11 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             (
                 "connectors.x.reply.open_thread_marker",
                 (body.open_thread_marker or "").strip(),
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.close_thread_marker",
+                (body.close_thread_marker or "").strip(),
                 _CATEGORY,
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),

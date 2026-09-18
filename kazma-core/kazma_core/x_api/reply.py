@@ -733,6 +733,7 @@ async def handle_summon(
     force_mode: str = "",
     summon_text: str = "",
     trusted: bool = False,
+    conversation_id: str = "",
 ) -> SummonResult:
     """Claim, gate, draft, screen, and publish-or-hold one summon.
 
@@ -768,8 +769,29 @@ async def handle_summon(
     # `/x roast` was refused for everyone, including the operator, no matter
     # what they put in the allowlist. The gateway's own auth is the
     # authorization for that path; every other rail still applies.
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    store = get_reply_store()
+    conv_id = (conversation_id or "").strip()
+    closed = bool(conv_id) and await asyncio.to_thread(
+        store.is_conversation_closed, conv_id,
+    )
+    operator = trusted or cfg.is_trusted_summoner(summoner)
+    if operator and cfg.marker_in(cfg.close_thread_marker, summon_text):
+        if conv_id:
+            await asyncio.to_thread(
+                store.close_conversation, conv_id, closed_by=summoner,
+            )
+        return SummonResult(
+            False, "skipped",
+            reason="thread closed — strangers will not get replies here",
+            parent_id=parent_id, summon_id=summon_id,
+        )
     if not trusted and summoner and not cfg.is_summoner(
-        summoner, parent_text=parent_text, summon_text=summon_text,
+        summoner,
+        parent_text=parent_text,
+        summon_text=summon_text,
+        conversation_closed=closed,
     ):
         return SummonResult(
             False, "skipped",
@@ -781,9 +803,6 @@ async def handle_summon(
             parent_id=parent_id, summon_id=summon_id,
         )
 
-    from kazma_core.x_api.reply_store import get_reply_store
-
-    store = get_reply_store()
     claimed = await asyncio.to_thread(
         lambda: store.claim(
             summon_id=summon_id,

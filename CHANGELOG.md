@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## feat(x): #Open / #Close as whole hashtags (2026-09-19)
+
+`#Open` is safe as the open-thread marker: it matches `#open` and does
+not match `#OpenAI`. `#Close` (configurable) from a trusted handle
+records the X conversation as closed — strangers stop getting replies;
+you can still talk.
+
 ## feat(x): open-thread marker; trusted mentions stay a discussion (2026-09-19)
 
 Default remains allowlist: only you. Set an **open-thread marker** (e.g.

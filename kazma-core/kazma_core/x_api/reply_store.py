@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS x_mentions_cursor (
     since_id TEXT NOT NULL DEFAULT '',
     updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS x_closed_threads (
+    conversation_id TEXT PRIMARY KEY,
+    closed_at REAL NOT NULL,
+    closed_by TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -345,6 +350,37 @@ class XReplyStore:
                     (STATUS_POSTED, str(parent_id)),
                 ).fetchone()
                 return float(row["t"] or 0.0) if row else 0.0
+            finally:
+                conn.close()
+
+    def close_conversation(self, conversation_id: str, *, closed_by: str = "") -> None:
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute(
+                    "INSERT OR REPLACE INTO x_closed_threads "
+                    "(conversation_id, closed_at, closed_by) VALUES (?, ?, ?)",
+                    (cid, time.time(), str(closed_by or "")),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def is_conversation_closed(self, conversation_id: str) -> bool:
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return False
+        with self._lock:
+            conn = self._connect()
+            try:
+                row = conn.execute(
+                    "SELECT 1 FROM x_closed_threads WHERE conversation_id = ?",
+                    (cid,),
+                ).fetchone()
+                return row is not None
             finally:
                 conn.close()
 
