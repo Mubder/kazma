@@ -39,6 +39,7 @@ from kazma_core.x_api.stance import (
     ReplyConfig,
     SIDE_AGAINST,
     SIDE_SUPPORT,
+    SUMMON_SUBJECT_ID,
     Subject,
     UNMATCHED_VOICE,
     classify,
@@ -283,7 +284,23 @@ async def check_stance(
         return None  # screen_draft already owns the empty case
 
     name = subject.id
-    if subject.side == SIDE_AGAINST:
+    if subject.id == SUMMON_SUBJECT_ID and subject.side == SIDE_AGAINST:
+        position = (
+            "AGAINST the main thing this post is about (as named in the post). "
+            "The draft must criticise that. Never defend it. Never switch to "
+            "a different Settings topic."
+        )
+        argues = "the draft criticises the post's topic"
+        contradicts = "the draft defends the post's topic or changes subject"
+    elif subject.id == SUMMON_SUBJECT_ID and subject.side == SIDE_SUPPORT:
+        position = (
+            "FOR the main thing this post is about (as named in the post). "
+            "The draft must support that. Never criticise it. Never switch to "
+            "a different Settings topic."
+        )
+        argues = "the draft supports the post's topic"
+        contradicts = "the draft criticises the post's topic or changes subject"
+    elif subject.side == SIDE_AGAINST:
         position = (
             f"AGAINST {name}. The draft must criticise {name}. "
             "Never defend it or sound sympathetic to it."
@@ -405,7 +422,39 @@ def _build_prompt(
     tone = MOODS.get((mood or subject.mood).strip().lower(), subject.mood_hint())
     voice_only = subject.is_catch_all() and not subject.is_sided()
     name = subject.id
-    if subject.side == SIDE_AGAINST:
+    if subject.id == SUMMON_SUBJECT_ID and subject.side == SIDE_AGAINST:
+        lines = [
+            "You write a single reply to a post on X. No Settings subject "
+            "matched. The summoner chose AGAINST this post.",
+            "ALWAYS criticise the main thing this post is about — the "
+            "product, person, company, or claim it names. If it is about "
+            "xAI, criticise xAI. Do not drift onto some other topic from "
+            "Settings that is not in this post.",
+            f"TONE ({tone}) is HOW you speak, not which side you take.",
+        ]
+        if subject.register:
+            lines.append(f"REGISTER: {subject.register}")
+        lines += [
+            "",
+            "HARD LINES — breaking any of these is worse than being unfunny:",
+        ]
+    elif subject.id == SUMMON_SUBJECT_ID and subject.side == SIDE_SUPPORT:
+        lines = [
+            "You write a single reply to a post on X. No Settings subject "
+            "matched. The summoner chose FOR this post.",
+            "ALWAYS support the main thing this post is about — the "
+            "product, person, company, or claim it names. Do not drift onto "
+            "some other topic from Settings that is not in this post.",
+            f"TONE ({tone}) is HOW you speak. An angry tone is anger AT "
+            "critics of that thing, not at the thing itself.",
+        ]
+        if subject.register:
+            lines.append(f"REGISTER: {subject.register}")
+        lines += [
+            "",
+            "HARD LINES — breaking any of these is worse than being unfunny:",
+        ]
+    elif subject.side == SIDE_AGAINST:
         lines = [
             f"You write a single reply to a post on X. You are AGAINST {name}.",
             f"ALWAYS criticise {name}. Never defend it, never sound sympathetic "
@@ -799,33 +848,52 @@ async def _handle_summon_claimed(
         return SummonResult(False, "skipped", reason=rail,
                             parent_id=parent_id, summon_id=summon_id)
 
+    classify_exc: ClassifierUnavailable | None = None
     try:
         subject = await classify(parent_text or summon_text, cfg)
     except ClassifierUnavailable as exc:
-        if cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects:
-            from kazma_core.x_api.stance import implicit_voice_subject
+        classify_exc = exc
+        subject = None
+    if subject is None:
+        from kazma_core.x_api.stance import (
+            implicit_summon_subject,
+            implicit_voice_subject,
+            side_from_summon,
+        )
 
-            logger.warning("[x-reply] classifier unavailable (%s) — voice-only", exc)
+        side = side_from_summon(summon_text)
+        if side:
+            subject = implicit_summon_subject(
+                side=side, mood=mood_from_text(summon_text) or "dry",
+            )
+            logger.info("[x-reply] unmatched — summon set side=%s", side)
+        elif cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects:
+            if classify_exc:
+                logger.warning(
+                    "[x-reply] classifier unavailable (%s) — voice-only",
+                    classify_exc,
+                )
             subject = implicit_voice_subject()
-        else:
+        elif classify_exc is not None:
             reason = (
-                f"the subject classifier could not run ({exc}) — this is NOT "
-                "'your subject did not match'. Check the active model."
+                f"the subject classifier could not run ({classify_exc}) — this "
+                "is NOT 'your subject did not match'. Check the active model."
             )
             await asyncio.to_thread(store.mark_failed, summon_id, reason)
             return SummonResult(
                 False, "failed", reason=reason,
                 parent_id=parent_id, summon_id=summon_id,
             )
-    if subject is None:
-        reason = (
-            "no declared subject matched this post — Kazma does not have a "
-            "view on it, so it said nothing. "
-            + no_match_detail(parent_text or summon_text, cfg.subjects)
-        )
-        await asyncio.to_thread(store.mark_skipped, summon_id, reason)
-        return SummonResult(False, "skipped", reason=reason,
-                            parent_id=parent_id, summon_id=summon_id)
+        else:
+            reason = (
+                "no declared subject matched this post — add a mention emoji "
+                "(😂 roast / ❤️ support) or a word (against / support), or a "
+                "Settings subject. "
+                + no_match_detail(parent_text or summon_text, cfg.subjects)
+            )
+            await asyncio.to_thread(store.mark_skipped, summon_id, reason)
+            return SummonResult(False, "skipped", reason=reason,
+                                parent_id=parent_id, summon_id=summon_id)
 
     # Emoji is the tone dial. Anyone who made it past is_summoner may set
     # it; `/x roast` (trusted) may set it even with a blank handle.
@@ -969,13 +1037,25 @@ async def preview_reply(
                     reason=f"the subject classifier could not run ({exc})",
                 )
         if subject is None:
-            return SummonResult(
-                False, "skipped",
-                reason=(
-                    "no declared subject matched this post — live, Kazma would "
-                    "say nothing. " + no_match_detail(parent_text, cfg.subjects)
-                ),
-            )
+            from kazma_core.x_api.stance import implicit_summon_subject
+
+            side = ""
+            m = (mood or "").strip().lower()
+            if m == "supportive":
+                side = SIDE_SUPPORT
+            elif m in ("roast", "angry", "dry", "deadpan"):
+                side = SIDE_AGAINST
+            if side:
+                subject = implicit_summon_subject(side=side, mood=m or "dry")
+            else:
+                return SummonResult(
+                    False, "skipped",
+                    reason=(
+                        "no declared subject matched — pick a roast/angry mood "
+                        "to criticise this post, or supportive to defend it. "
+                        + no_match_detail(parent_text, cfg.subjects)
+                    ),
+                )
 
     notes = ""
     if cfg.use_knowledge:

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## X auto-reply: unmatched summons can set side via emoji or a word (2026-09-19)
+
+You do not need a Settings card for every topic. If no subject matches,
+the mention can still choose a side for *this post*:
+
+- 😂 🤣 💀 🔥 🤬 😡 🙄 = against (criticise xAI, Grok, whatever the post is)
+- ❤️ 👏 💯 = support
+- words: `against` / `roast` / `ضد` vs `support` / `defend` / `دافع`
+
+A declared subject still wins first, so a Kuwait card cannot be overridden
+by a roast emoji. No emoji and no word = stay silent (strict default).
+
 ## X auto-reply: Support / Against per subject, emoji is tone only (2026-09-18)
 
 Subjects are a name + a side. Iran set to **against** means every reply

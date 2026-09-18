@@ -144,11 +144,39 @@ async def test_unmatched_stays_silent_when_subjects_exist(monkeypatch):
         parent_text="Best shawarma in Kuwait City?",
         parent_handle="someone", summoner="balfaris",
         target_followers=10_000, cfg=_cfg(),
-        summon_text="what do you think? \U0001F602",
+        summon_text="what do you think?",
     )
     assert res.action == "skipped"
     assert "no declared subject" in res.reason
     assert res.draft == ""
+
+
+@pytest.mark.asyncio
+async def test_unmatched_roast_emoji_criticises_this_post(monkeypatch):
+    """No Settings card: 😂 means against whatever the post is about."""
+    async def _none(*a, **k):
+        return None
+
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["id"] = subject.id
+        seen["side"] = subject.side
+        seen["mood"] = mood or subject.mood
+        return "drafted"
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    res = await handle_summon(
+        summon_id="m1e", parent_id="p1",
+        parent_text="xAI just shipped a new model",
+        parent_handle="someone", summoner="balfaris",
+        target_followers=10_000, cfg=_cfg(),
+        summon_text="@KazmaAI \U0001F602",
+    )
+    assert res.action == "awaiting_approval"
+    assert seen["id"] == "post" and seen["side"] == SIDE_AGAINST
+    assert seen["mood"] == "roast"
 
 
 @pytest.mark.asyncio
@@ -710,7 +738,7 @@ async def test_anyone_unmatched_still_needs_a_subject(monkeypatch):
         summon_id="o2", parent_id="p2", parent_text="best shawarma in Kuwait",
         parent_handle="t", summoner="a_stranger", target_followers=9_000,
         cfg=_cfg(summoner_policy=SUMMON_ANYONE),
-        summon_text="\U0001F602",
+        summon_text="what do you think",
     )
     assert res.action == "skipped"
     assert "no declared subject" in res.reason
@@ -1375,7 +1403,7 @@ async def test_no_match_names_what_was_checked(monkeypatch):
         parent_text="Elon Musk is tuning his algorithm again",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
-        summon_text="@KazmaAI what do you think? \U0001F602",
+        summon_text="@KazmaAI what do you think?",
     )
     assert res.action == "skipped"
     assert "checked" in res.reason
@@ -1611,6 +1639,31 @@ def test_prompt_fences_untrusted_tweet_text():
     assert "x_post" in user
     sysmsg = msgs[0]["content"]
     assert "TONE:" in sysmsg
+
+
+def test_side_from_summon_emoji_and_words():
+    from kazma_core.x_api.stance import side_from_summon
+
+    assert side_from_summon("@KazmaAI \U0001F602") == SIDE_AGAINST
+    assert side_from_summon("@KazmaAI \u2764\ufe0f") == SIDE_SUPPORT
+    assert side_from_summon("kazma against this") == SIDE_AGAINST
+    assert side_from_summon("kazma support this") == SIDE_SUPPORT
+    assert side_from_summon("what do you think") == ""
+
+
+def test_summon_against_prompt_does_not_name_settings_topics():
+    from kazma_core.x_api.reply import _build_prompt
+    from kazma_core.x_api.stance import implicit_summon_subject
+
+    sysmsg = _build_prompt(
+        implicit_summon_subject(side=SIDE_AGAINST, mood="roast"),
+        "xAI shipped a model",
+        "t",
+        "roast",
+    )[0]["content"]
+    assert "No Settings subject matched" in sysmsg
+    assert "criticise the main thing this post is about" in sysmsg
+    assert "Do not drift" in sysmsg
 
 
 def test_against_side_never_asks_the_model_to_support():
