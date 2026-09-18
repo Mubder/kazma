@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Fix — "شرايك 👍 والا 👎" is an opinion, not Kuwait (2026-09-19)
+
+Live: Ali's Arabic JSON/classifier post, summon
+``شرايك بكلام اخونا علي؟ 👍🏻 والا 👎🏻؟``. No Kuwait keyword. The draft was
+still checked against the Kuwait card and blocked as fence.
+
+A mention that asks for an opinion (شرايك / what do you think, or both
+👍 and 👎) now reacts to *this* post in voice. A Settings card only
+applies when one of its keywords is actually in the post.
+
 ## Fix — Arabic AI posts were tagged Kuwait then blocked as fence (2026-09-19)
 
 A long Arabic post about AI had no Kuwait keyword. The LLM classifier

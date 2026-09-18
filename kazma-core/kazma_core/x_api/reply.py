@@ -859,27 +859,43 @@ async def _handle_summon_claimed(
     except ClassifierUnavailable as exc:
         classify_exc = exc
         subject = None
+    if (
+        subject is not None
+        and not subject.matches(parent_text or "")
+    ):
+        logger.warning(
+            "[x-reply] dropping %s — none of its keywords appear in the post",
+            subject.id,
+        )
+        subject = None
     if subject is None:
         from kazma_core.x_api.stance import (
             implicit_summon_subject,
             implicit_voice_subject,
+            is_opinion_ask,
             side_from_summon,
         )
 
-        side = side_from_summon(summon_text)
-        if side:
-            subject = implicit_summon_subject(
-                side=side, mood=mood_from_text(summon_text) or "dry",
+        if is_opinion_ask(summon_text):
+            subject = implicit_voice_subject(
+                mood=mood_from_text(summon_text) or "dry",
             )
-            logger.info("[x-reply] unmatched — summon set side=%s", side)
-        elif cfg.classify_llm:
-            try:
-                subject = await classify(
-                    parent_text or summon_text, cfg, allow_llm=True,
+            logger.info("[x-reply] unmatched opinion ask — voice on this post")
+        else:
+            side = side_from_summon(summon_text)
+            if side:
+                subject = implicit_summon_subject(
+                    side=side, mood=mood_from_text(summon_text) or "dry",
                 )
-            except ClassifierUnavailable as exc:
-                classify_exc = exc
-                subject = None
+                logger.info("[x-reply] unmatched — summon set side=%s", side)
+            elif cfg.classify_llm:
+                try:
+                    subject = await classify(
+                        parent_text or summon_text, cfg, allow_llm=True,
+                    )
+                except ClassifierUnavailable as exc:
+                    classify_exc = exc
+                    subject = None
         if subject is None and (
             cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects
         ):
