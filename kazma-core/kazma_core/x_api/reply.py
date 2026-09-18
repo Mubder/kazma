@@ -427,9 +427,9 @@ def _build_prompt(
             "You write a single reply to a post on X. No Settings subject "
             "matched. The summoner chose AGAINST this post.",
             "ALWAYS criticise the main thing this post is about — the "
-            "product, person, company, or claim it names. If it is about "
-            "xAI, criticise xAI. Do not drift onto some other topic from "
-            "Settings that is not in this post.",
+            "product, person, company, or claim it names. Take that side "
+            "in the first sentence. Do not summarise both sides. Do not "
+            "drift onto a Settings topic that is not in this post.",
             f"TONE ({tone}) is HOW you speak, not which side you take.",
         ]
         if subject.register:
@@ -850,7 +850,12 @@ async def _handle_summon_claimed(
 
     classify_exc: ClassifierUnavailable | None = None
     try:
-        subject = await classify(parent_text or summon_text, cfg)
+        # Keywords only first. The LLM guess was tagging long Arabic AI
+        # posts as Kuwait and then blocking the draft as "fence". Summon
+        # emoji/words must win over that guess.
+        subject = await classify(
+            parent_text or summon_text, cfg, allow_llm=False,
+        )
     except ClassifierUnavailable as exc:
         classify_exc = exc
         subject = None
@@ -867,14 +872,24 @@ async def _handle_summon_claimed(
                 side=side, mood=mood_from_text(summon_text) or "dry",
             )
             logger.info("[x-reply] unmatched — summon set side=%s", side)
-        elif cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects:
+        elif cfg.classify_llm:
+            try:
+                subject = await classify(
+                    parent_text or summon_text, cfg, allow_llm=True,
+                )
+            except ClassifierUnavailable as exc:
+                classify_exc = exc
+                subject = None
+        if subject is None and (
+            cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects
+        ):
             if classify_exc:
                 logger.warning(
                     "[x-reply] classifier unavailable (%s) — voice-only",
                     classify_exc,
                 )
             subject = implicit_voice_subject()
-        elif classify_exc is not None:
+        elif subject is None and classify_exc is not None:
             reason = (
                 f"the subject classifier could not run ({classify_exc}) — this "
                 "is NOT 'your subject did not match'. Check the active model."
@@ -884,7 +899,7 @@ async def _handle_summon_claimed(
                 False, "failed", reason=reason,
                 parent_id=parent_id, summon_id=summon_id,
             )
-        else:
+        elif subject is None:
             reason = (
                 "no declared subject matched this post — add a mention emoji "
                 "(😂 roast / ❤️ support) or a word (against / support), or a "
@@ -1025,7 +1040,7 @@ async def preview_reply(
             )
     else:
         try:
-            subject = await classify(parent_text, cfg)
+            subject = await classify(parent_text, cfg, allow_llm=False)
         except ClassifierUnavailable as exc:
             if cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects:
                 from kazma_core.x_api.stance import implicit_voice_subject
@@ -1047,12 +1062,21 @@ async def preview_reply(
                 side = SIDE_AGAINST
             if side:
                 subject = implicit_summon_subject(side=side, mood=m or "dry")
-            else:
+            elif cfg.classify_llm:
+                try:
+                    subject = await classify(parent_text, cfg, allow_llm=True)
+                except ClassifierUnavailable as exc:
+                    return SummonResult(
+                        False, "failed",
+                        reason=f"the subject classifier could not run ({exc})",
+                    )
+            if subject is None:
                 return SummonResult(
                     False, "skipped",
                     reason=(
                         "no declared subject matched — pick a roast/angry mood "
-                        "to criticise this post, or supportive to defend it. "
+                        "or 👎 to criticise this post, or 👍 / supportive to "
+                        "defend it. "
                         + no_match_detail(parent_text, cfg.subjects)
                     ),
                 )

@@ -1,12 +1,23 @@
 # CHANGELOG
 
+## Fix — Arabic AI posts were tagged Kuwait then blocked as fence (2026-09-19)
+
+A long Arabic post about AI had no Kuwait keyword. The LLM classifier
+still guessed `Kuwait`, the draft stayed on the fence (it was about AI),
+and the stance check blocked it: "sits on the fence instead of arguing
+the declared view for 'Kuwait'".
+
+Keywords now win first; if they miss, the mention emoji/word sets the
+side for *this* post. The LLM guess is off unless you opt in. 👍 = support,
+👎 = against.
+
 ## X auto-reply: unmatched summons can set side via emoji or a word (2026-09-19)
 
 You do not need a Settings card for every topic. If no subject matches,
 the mention can still choose a side for *this post*:
 
-- 😂 🤣 💀 🔥 🤬 😡 🙄 = against (criticise xAI, Grok, whatever the post is)
-- ❤️ 👏 💯 = support
+- 😂 🤣 💀 🔥 🤬 😡 🙄 👎 = against (criticise xAI, Grok, whatever the post is)
+- ❤️ 👏 💯 👍 = support
 - words: `against` / `roast` / `ضد` vs `support` / `defend` / `دافع`
 
 A declared subject still wins first, so a Kuwait card cannot be overridden

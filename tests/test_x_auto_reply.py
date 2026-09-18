@@ -180,6 +180,36 @@ async def test_unmatched_roast_emoji_criticises_this_post(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_llm_cannot_tag_an_ai_post_as_kuwait_when_you_roast(monkeypatch):
+    """Live: long Arabic AI post was classified as Kuwait, then blocked as fence."""
+    kuwait = Subject(
+        id="Kuwait", match=("kuwait", "الكويت"), view="", side=SIDE_SUPPORT,
+    )
+
+    async def _guess_kuwait(*a, **k):
+        return kuwait
+
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["id"] = subject.id
+        seen["side"] = subject.side
+        return "drafted"
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _guess_kuwait)
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    res = await handle_summon(
+        summon_id="ai1", parent_id="p",
+        parent_text="نموذج ذكاء اصطناعي جديد يكتب بالعربية بطلاقة",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(kuwait, VAR)),
+        summon_text="@KazmaAI \U0001F602",
+    )
+    assert res.action == "awaiting_approval"
+    assert seen["id"] == "post" and seen["side"] == SIDE_AGAINST
+
+
+@pytest.mark.asyncio
 async def test_unmatched_voice_when_configured(monkeypatch):
     async def _none(*a, **k):
         return None
@@ -1344,8 +1374,15 @@ async def test_classifier_failure_is_not_a_no_match(monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
     )
-    assert res.action == "failed"
-    assert "classifier could not run" in res.reason
+    assert res.action == "skipped", "LLM guess is off; no emoji → stay silent"
+
+    res_llm = await handle_summon(
+        summon_id="cf2", parent_id="p2", parent_text="nothing matches this",
+        parent_handle="t", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(classify_llm=True),
+    )
+    assert res_llm.action == "failed"
+    assert "classifier could not run" in res_llm.reason
 
 
 @pytest.mark.asyncio
@@ -1646,6 +1683,8 @@ def test_side_from_summon_emoji_and_words():
 
     assert side_from_summon("@KazmaAI \U0001F602") == SIDE_AGAINST
     assert side_from_summon("@KazmaAI \u2764\ufe0f") == SIDE_SUPPORT
+    assert side_from_summon("@KazmaAI \U0001F44E") == SIDE_AGAINST  # thumbs down
+    assert side_from_summon("@KazmaAI \U0001F44D") == SIDE_SUPPORT  # thumbs up
     assert side_from_summon("kazma against this") == SIDE_AGAINST
     assert side_from_summon("kazma support this") == SIDE_SUPPORT
     assert side_from_summon("what do you think") == ""

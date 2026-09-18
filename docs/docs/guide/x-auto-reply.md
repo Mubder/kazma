@@ -6,8 +6,8 @@ It is off by default.
 **Subjects are optional, and strict by default once you have any.** With
 none declared, every summon still gets a voice-only reply (emoji sets the
 tone). Once you add a subject, a post that matches none of them stays
-**silent** unless the mention itself sets a side: 😂/🤬/🙄 criticise
-*this* post (e.g. roast xAI), ❤️ defend it, or the words `against` /
+**silent** unless the mention itself sets a side: 😂/🤬/🙄/👎 criticise
+*this* post (e.g. roast xAI), ❤️/👍 defend it, or the words `against` /
 `support`. A `*` catch-all or "reply anyway" still answers everything.
 A declared subject always wins over the mention — a support card cannot
 be flipped by a roast emoji.
