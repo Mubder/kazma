@@ -6,14 +6,13 @@ It is off by default.
 **Subjects are optional, and strict by default once you have any.** With
 none declared, every summon still gets a voice-only reply (emoji sets the
 tone). Once you add a subject, a post that matches none of them stays
-**silent** unless you add a `*` catch-all or set "reply anyway". That stops
-a generic take from sounding like the opposite of a view you did declare.
+**silent** unless you add a `*` catch-all or set "reply anyway". That stops a generic take from sounding like the opposite of a side you
+did declare.
 
-Each subject is a **side**: against or support. Iran/against always
-criticises Iran; Kuwait/support always defends Kuwait. Emoji only changes
-tone (😂 roast, 🤬 angry). An angry reply for Kuwait is angry *at critics
-of Kuwait*, never at Kuwait. Optional extra text is colour, not a second
-side.
+Each subject is a **side**: against or support. Against always criticises
+that topic; support always defends it. Emoji only changes tone (😂 roast,
+🤬 angry). An angry reply on a support subject is angry *at its critics*,
+never at the subject. Optional extra text is colour, not a second side.
 
 Write **hard lines** for what it must never say if you need more than the
 side. The stance check treats sympathy for the other side as a contradiction.

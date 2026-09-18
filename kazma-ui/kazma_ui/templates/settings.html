@@ -3059,7 +3059,7 @@
                                 <div class="form-group">
                                     <label>Id</label>
                                     <input type="text" class="form-input" x-model="s.id"
-                                           placeholder="Iran" autocomplete="off">
+                                           placeholder="topic" autocomplete="off">
                                 </div>
                                 <div class="form-group">
                                     <label>Side — always this, emoji is tone only</label>
@@ -3083,7 +3083,7 @@
                                 <input type="text" class="form-input"
                                        :value="s._matchText !== undefined ? s._matchText : (s.match || []).join(', ')"
                                        @input="s._matchText = $event.target.value"
-                                       placeholder="var, offside, تحكيم   —  or just *" autocomplete="off">
+                                       placeholder="name, alias, keyword  —  or just *" autocomplete="off">
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
                                     Matched as whole words, so "var" will not fire on "variable".
                                     Use <code>*</code> on its own to answer <strong>every</strong> post —
@@ -3094,10 +3094,10 @@
                             <div class="form-group">
                                 <label>Optional extra (who / why — still the same side)</label>
                                 <textarea class="form-input" rows="3" x-model="s.view"
-                                          placeholder="e.g. the regime and the IRGC, not civilians"></textarea>
+                                          placeholder="optional: who or what this side applies to"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
-                                    Against Iran + 😂 = roast Iran. Support Kuwait + 🤬 = angry
-                                    <em>for</em> Kuwait (anger at its critics, never at Kuwait).
+                                    Against + 😂 = roast that subject. Support + 🤬 = angry
+                                    <em>for</em> it (anger at its critics, never at the subject).
                                 </p>
                             </div>
                             <div class="form-group">
@@ -3110,11 +3110,10 @@
                                 <textarea class="form-input" rows="3"
                                           :value="s._hardText !== undefined ? s._hardText : (s.hard_lines || []).join('\n')"
                                           @input="s._hardText = $event.target.value"
-                                          placeholder="never name or mock an individual referee"></textarea>
+                                          placeholder="never praise the other side"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
-                                    Things it must never say. Example: never defend the Iranian
-                                    regime, never sound sympathetic to the IRGC. Added on top of
-                                    the universal rules (no slurs, no threats).
+                                    Things it must never say, on top of the universal rules
+                                    (no slurs, no threats).
                                 </p>
                             </div>
                             <div class="form-group">
