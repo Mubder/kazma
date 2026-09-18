@@ -110,6 +110,11 @@ UNMATCHED_SKIP = "skip"
 UNMATCHED_VOICE = "voice"
 _UNMATCHED = (UNMATCHED_SKIP, UNMATCHED_VOICE)
 
+#: Fixed polarity. Emoji is tone only; this is which side the reply takes.
+SIDE_AGAINST = "against"
+SIDE_SUPPORT = "support"
+_SIDES = (SIDE_AGAINST, SIDE_SUPPORT)
+
 #: Applied to EVERY subject on top of whatever the operator wrote. These are
 #: the lines that get an account suspended rather than merely disliked, and
 #: an operator editing a `view` at speed should not have to remember them.
@@ -160,6 +165,13 @@ class Subject:
     register: str = ""
     hard_lines: tuple[str, ...] = ()
     examples: tuple[str, ...] = ()
+    #: ``against`` | ``support`` | ``""``. When set, the reply ALWAYS takes
+    #: that side on this subject. Emoji only changes tone (roast/angry/dry),
+    #: never the side. Empty = legacy free-text ``view`` only.
+    side: str = ""
+
+    def is_sided(self) -> bool:
+        return self.side in _SIDES
 
     def is_catch_all(self) -> bool:
         """``*`` as a keyword means "any post".
@@ -307,10 +319,20 @@ def _parse_subjects(raw: Any) -> tuple[Subject, ...]:
         sid = str(item.get("id") or "").strip()
         view = str(item.get("view") or "").strip()
         match = _as_tuple(item.get("match"))
-        if not sid or not view or not match:
+        side = str(item.get("side") or "").strip().lower()
+        if side not in _SIDES:
+            side = ""
+        catch_all = "*" in match
+        if not sid or not match:
             logger.warning(
-                "[x-reply] subject %r skipped — id, match and view are all required",
+                "[x-reply] subject %r skipped — id and match are required",
                 sid or "<unnamed>",
+            )
+            continue
+        if not catch_all and not side and not view:
+            logger.warning(
+                "[x-reply] subject %r skipped — set against/support, or a view",
+                sid,
             )
             continue
         out.append(
@@ -322,6 +344,7 @@ def _parse_subjects(raw: Any) -> tuple[Subject, ...]:
                 register=str(item.get("register") or "").strip(),
                 hard_lines=_as_tuple(item.get("hard_lines")),
                 examples=_as_tuple(item.get("examples")),
+                side=side,
             )
         )
     return tuple(out)
@@ -461,7 +484,8 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     if not specifics:
         return None
     catalogue = "\n".join(
-        f"- {s.id}: keywords={', '.join(s.match[:6])}; view={s.view[:180]}"
+        f"- {s.id}: side={s.side or 'view'}; keywords={', '.join(s.match[:6])}; "
+        f"view={s.view[:180]}"
         for s in specifics
     )
     try:

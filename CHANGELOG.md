@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## X auto-reply: Support / Against per subject, emoji is tone only (2026-09-18)
+
+Subjects are a name + a side. Iran set to **against** means every reply
+criticises Iran — even if the post praises it, even if the summon is 😂.
+Kuwait set to **support** means every reply defends Kuwait — an angry
+emoji is anger *at its critics*, never at Kuwait.
+
+The long view box is optional extra colour. Emoji still picks roast /
+angry / dry as **tone**, never the side.
+
 ## X auto-reply: strict subjects, optional KB grounding (2026-09-18)
 
 Live: an Iran-subject draft on a Trump-vs-Iran post read as sympathetic to

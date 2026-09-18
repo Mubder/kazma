@@ -48,6 +48,7 @@ class SubjectBody(BaseModel):
     register_hint: str = Field(default="", alias="register")
     hard_lines: list[str] = Field(default_factory=list)
     examples: list[str] = Field(default_factory=list)
+    side: str = Field(default="")
 
 
 class ReplyConfigBody(BaseModel):
@@ -114,14 +115,21 @@ def _validate_subjects(subjects: list[SubjectBody]) -> list[str]:
             problems.append(f"Subject {label}: duplicate id.")
         else:
             seen.add(s.id.strip())
-        if not [m for m in s.match if m.strip()]:
+        kws = [m for m in s.match if m.strip()]
+        if not kws:
             problems.append(
                 f"Subject {label}: needs at least one keyword, or it can never match."
             )
-        if not s.view.strip():
+        catch_all = any(m.strip() == "*" for m in s.match)
+        side = (s.side or "").strip().lower()
+        if side and side not in ("against", "support"):
             problems.append(
-                f"Subject {label}: needs a view. Without one there is nothing "
-                "for Kazma to argue, and it would be inventing a position."
+                f"Subject {label}: side must be against or support, not {s.side!r}."
+            )
+        if not catch_all and side not in ("against", "support") and not s.view.strip():
+            problems.append(
+                f"Subject {label}: set against or support "
+                "(emoji is tone only — this is the side it always takes)."
             )
         if s.mood.strip().lower() not in MOODS:
             problems.append(
@@ -167,6 +175,7 @@ def _payload() -> dict[str, Any]:
                 "register": s.register,
                 "hard_lines": list(s.hard_lines),
                 "examples": list(s.examples),
+                "side": s.side,
             }
             for s in cfg.subjects
         ],
@@ -374,6 +383,11 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
                 "register": s.register_hint.strip(),
                 "hard_lines": [h.strip() for h in s.hard_lines if h.strip()],
                 "examples": [e.strip() for e in s.examples if e.strip()],
+                "side": (
+                    (s.side or "").strip().lower()
+                    if (s.side or "").strip().lower() in ("against", "support")
+                    else ""
+                ),
             }
             for s in body.subjects
         ]
@@ -612,9 +626,15 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
         # vault rows and this is the one endpoint that spends a model call.
         with tenant_scope("default"):
             override = None
-            if body.subject is not None and body.subject.view.strip():
+            if body.subject is not None and (
+                body.subject.view.strip()
+                or (body.subject.side or "").strip().lower() in ("against", "support")
+            ):
                 from kazma_core.x_api.stance import Subject
 
+                side = (body.subject.side or "").strip().lower()
+                if side not in ("against", "support"):
+                    side = ""
                 override = Subject(
                     id=body.subject.id.strip() or "(unsaved)",
                     match=tuple(
@@ -629,6 +649,7 @@ async def x_reply_preview(body: PreviewBody) -> JSONResponse:
                     examples=tuple(
                         e.strip() for e in body.subject.examples if e.strip()
                     ),
+                    side=side,
                 )
             result = await preview_reply(
                 parent_text=text,

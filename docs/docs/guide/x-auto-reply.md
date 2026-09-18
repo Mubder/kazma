@@ -9,9 +9,14 @@ tone). Once you add a subject, a post that matches none of them stays
 **silent** unless you add a `*` catch-all or set "reply anyway". That stops
 a generic take from sounding like the opposite of a view you did declare.
 
-Write **hard lines** for what it must never say (e.g. never defend the
-Iranian regime). The stance check now treats sympathy for the other side
-as a contradiction, in any language.
+Each subject is a **side**: against or support. Iran/against always
+criticises Iran; Kuwait/support always defends Kuwait. Emoji only changes
+tone (😂 roast, 🤬 angry). An angry reply for Kuwait is angry *at critics
+of Kuwait*, never at Kuwait. Optional extra text is colour, not a second
+side.
+
+Write **hard lines** for what it must never say if you need more than the
+side. The stance check treats sympathy for the other side as a contradiction.
 
 **Knowledge Base (optional).** Turn on "Ground drafts in the Knowledge
 Base" to pull a few fenced snippets from Kazma's KB into the draft. Facts

@@ -3049,7 +3049,8 @@
                                     @click="xReplyOpen = (xReplyOpen === i ? null : i)"
                                     x-text="xReplyOpen === i ? '▾' : '▸'"></button>
                             <strong x-text="s.id || '(unnamed)'"></strong>
-                            <span style="color:var(--text-tertiary);font-size:0.8rem;" x-text="s.mood"></span>
+                            <span style="color:var(--text-tertiary);font-size:0.8rem;"
+                                  x-text="(s.side ? s.side + ' · ' : '') + (s.mood || '')"></span>
                             <span style="flex:1;"></span>
                             <button class="btn btn-sm btn-danger" @click="xReplyRemoveSubject(i)">Remove</button>
                         </div>
@@ -3058,16 +3059,24 @@
                                 <div class="form-group">
                                     <label>Id</label>
                                     <input type="text" class="form-input" x-model="s.id"
-                                           placeholder="var" autocomplete="off">
+                                           placeholder="Iran" autocomplete="off">
                                 </div>
                                 <div class="form-group">
-                                    <label>Mood</label>
-                                    <select class="form-input" x-model="s.mood">
-                                        <template x-for="m in xReply.moods" :key="m">
-                                            <option :value="m" x-text="m"></option>
-                                        </template>
+                                    <label>Side — always this, emoji is tone only</label>
+                                    <select class="form-input" x-model="s.side">
+                                        <option value="against">against — always criticise</option>
+                                        <option value="support">support — always defend</option>
+                                        <option value="">(legacy: use the view text)</option>
                                     </select>
                                 </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Fallback mood (if the summon has no emoji)</label>
+                                <select class="form-input" x-model="s.mood">
+                                    <template x-for="m in xReply.moods" :key="m">
+                                        <option :value="m" x-text="m"></option>
+                                    </template>
+                                </select>
                             </div>
                             <div class="form-group">
                                 <label>Keywords</label>
@@ -3083,9 +3092,13 @@
                                 </p>
                             </div>
                             <div class="form-group">
-                                <label>Your view — this is what Kazma argues</label>
-                                <textarea class="form-input" rows="5" x-model="s.view"
-                                          placeholder="I think X because Y. Be specific — vague instructions produce generic replies."></textarea>
+                                <label>Optional extra (who / why — still the same side)</label>
+                                <textarea class="form-input" rows="3" x-model="s.view"
+                                          placeholder="e.g. the regime and the IRGC, not civilians"></textarea>
+                                <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                                    Against Iran + 😂 = roast Iran. Support Kuwait + 🤬 = angry
+                                    <em>for</em> Kuwait (anger at its critics, never at Kuwait).
+                                </p>
                             </div>
                             <div class="form-group">
                                 <label>Register (optional)</label>

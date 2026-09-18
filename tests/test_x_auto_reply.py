@@ -29,6 +29,8 @@ from kazma_core.x_api.reply_store import (
 from kazma_core.x_api.stance import (
     MODE_AUTO,
     MODE_DRAFT,
+    SIDE_AGAINST,
+    SIDE_SUPPORT,
     UNMATCHED_VOICE,
     ReplyConfig,
     Subject,
@@ -1609,6 +1611,27 @@ def test_prompt_fences_untrusted_tweet_text():
     assert "x_post" in user
     sysmsg = msgs[0]["content"]
     assert "TONE:" in sysmsg
+
+
+def test_against_side_never_asks_the_model_to_support():
+    from kazma_core.x_api.reply import _build_prompt
+
+    iran = Subject(id="Iran", match=("iran",), view="", side=SIDE_AGAINST)
+    roast = _build_prompt(iran, "Iran is great", "t", "roast")[0]["content"]
+    assert "AGAINST Iran" in roast
+    assert "ALWAYS criticise" in roast
+    assert "HOW you speak" in roast
+    assert "THE OPERATOR'S POSITION" not in roast
+
+
+def test_support_side_angry_is_anger_at_critics():
+    from kazma_core.x_api.reply import _build_prompt
+
+    kw = Subject(id="Kuwait", match=("kuwait",), view="", side=SIDE_SUPPORT)
+    angry = _build_prompt(kw, "Kuwait is a mess", "t", "angry")[0]["content"]
+    assert "FOR Kuwait" in angry
+    assert "ALWAYS support" in angry
+    assert "anger AT critics of Kuwait" in angry
 
 
 def test_pundit_prompt_forbids_sympathy_for_the_other_side():
