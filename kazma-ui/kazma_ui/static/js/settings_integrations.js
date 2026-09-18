@@ -878,7 +878,7 @@
 
         xReplyAddSubject() {
             this.xReply.subjects.push({
-                id: '', match: [], view: '', mood: 'dry', register: '',
+                id: '', match: [], view: '', mood: 'dry', side: 'against', register: '',
                 hard_lines: [], examples: [], _matchText: '', _hardText: '', _exText: '',
             });
             this.xReplyOpen = this.xReply.subjects.length - 1;
@@ -906,6 +906,7 @@
                     match: s._matchText !== undefined ? self._xSplit(s._matchText, false) : (s.match || []),
                     view: s.view || '',
                     mood: s.mood || 'dry',
+                    side: s.side || '',
                     register: s.register || '',
                     hard_lines: s._hardText !== undefined ? self._xSplit(s._hardText, true) : (s.hard_lines || []),
                     examples: s._exText !== undefined ? self._xSplit(s._exText, true) : (s.examples || []),
@@ -934,6 +935,9 @@
                         summoner_policy: this.xReply.summoner_policy || 'allowlist',
                         allow_emoji_mood: !!this.xReply.allow_emoji_mood,
                         stance_check: !!this.xReply.stance_check,
+                        unmatched: this.xReply.unmatched || 'skip',
+                        use_knowledge: !!this.xReply.use_knowledge,
+                        knowledge_library: this.xReply.knowledge_library || '',
                         subjects: this.xReplySubjectPayload(),
                     }),
                 });

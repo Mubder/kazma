@@ -63,9 +63,15 @@ def _no_llm(monkeypatch):
 
 # ── Validation names the problem ──────────────────────────────────────────
 
-def test_subject_without_view_is_rejected():
+def test_subject_without_side_or_view_is_rejected():
     problems = _validate_subjects([SubjectBody(id="var", match=["var"], view="")])
-    assert problems and "needs a view" in problems[0]
+    assert problems and any("against or support" in p for p in problems)
+
+
+def test_subject_with_side_does_not_need_a_view():
+    assert _validate_subjects(
+        [SubjectBody(id="Iran", match=["iran"], view="", side="against")]
+    ) == []
 
 
 def test_subject_without_keywords_is_rejected():
@@ -159,7 +165,7 @@ async def test_preview_unmatched_uses_voice(monkeypatch):
     monkeypatch.setattr(stance_mod, "_llm_pick", _none)
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await preview_reply(parent_text="best shawarma in Kuwait", cfg=_cfg())
-    assert res.action == "preview" and res.subject_id == "voice"
+    assert res.action == "skipped" and "no declared subject" in res.reason
 
 
 @pytest.mark.asyncio
