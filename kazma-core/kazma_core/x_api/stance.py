@@ -99,6 +99,7 @@ MOOD_EMOJI: dict[str, str] = {
     "🙄": "dry", "😐": "dry", "😑": "dry", "🫠": "dry", "🤨": "dry",
     "❤️": "supportive", "👏": "supportive", "💯": "supportive",
     "🙏": "supportive", "👍": "supportive",
+    "👎": "angry",
 }
 
 #: How the summoner allowlist is enforced.
@@ -194,7 +195,7 @@ def side_from_summon(text: str) -> str:
     unmatched path — roast 😂 on an xAI post means criticise xAI, not
     Iran. Supportive ❤️ means defend whatever the post is about.
 
-    Roast/angry/dry emoji → against. Heart/clap/100 → support.
+    Roast/angry/dry/👎 → against. Heart/clap/100/👍 → support.
     Words: against/roast/slam/ضد/هاجم vs support/defend/دافع/معاه.
     """
     body = str(text or "")
@@ -279,6 +280,7 @@ class ReplyConfig:
     allow_emoji_mood: bool = True
     stance_check: bool = True
     unmatched: str = UNMATCHED_SKIP
+    classify_llm: bool = False
     use_knowledge: bool = False
     knowledge_library: str = ""
 
@@ -483,6 +485,9 @@ def get_reply_config() -> ReplyConfig:
             .strip().lower() in _UNMATCHED
             else UNMATCHED_SKIP
         ),
+        classify_llm=_as_bool(
+            _cs_get("connectors.x.reply.classify_llm"), False
+        ),
         use_knowledge=_as_bool(
             _cs_get("connectors.x.reply.use_knowledge"), False
         ),
@@ -561,9 +566,10 @@ async def _llm_pick(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
         fenced = text[:1500]
     prompt = (
         "Classify the post below into exactly ONE of these subject ids, or "
-        "'none' if it fits none of them. Use the view, not just the "
-        "keywords — a post can belong to a subject without repeating a "
-        "keyword.\n\n"
+        "'none' if it is not clearly ABOUT any of them.\n"
+        "If the post does not name that topic, answer none. Do not pick a "
+        "subject just because it is on the list or looks like the operator's "
+        "country. When unsure, none.\n\n"
         f"Subjects:\n{catalogue}\n\n"
         f"Post:\n{fenced}\n\n"
         "Answer with the id alone. No explanation."
