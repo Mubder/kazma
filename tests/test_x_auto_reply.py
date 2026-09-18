@@ -2040,6 +2040,137 @@ async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_poll_once_reacts_to_a_quoted_tweet_under_our_reply(
+    _no_llm, monkeypatch
+):
+    """Quote of someone else in a reply to Kazma is the post to read."""
+    import kazma_core.x_api.mentions_fire as mf
+
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["parent"] = parent_text
+        seen["handle"] = parent_handle
+        return "drafted"
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id=""):
+            return (
+                [{
+                    "id": "77",
+                    "text": "@KazmaAI @3li3 هذا",
+                    "author_id": "2",
+                    "referenced_tweets": [
+                        {"type": "replied_to", "id": "44"},
+                        {"type": "quoted", "id": "99"},
+                    ],
+                }],
+                {
+                    "users": [
+                        {"id": "2", "username": "balfaris"},
+                        {"id": "9", "username": "3li3"},
+                    ],
+                    "tweets": [
+                        {"id": "44", "text": "our earlier reply", "author_id": "1"},
+                        {
+                            "id": "99",
+                            "text": "JSON ترجع ناقصة 50.7% من استدعاءات التصنيف",
+                            "author_id": "9",
+                        },
+                    ],
+                },
+            )
+
+        async def get_tweet(self, tid):
+            raise AssertionError(f"quoted tweet was in includes, not {tid}")
+
+    mf._identity = None
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    rows = await mf.poll_once(cfg=_cfg(subjects=()))
+    assert rows and rows[0]["action"] == "awaiting_approval"
+    assert "50.7" in seen["parent"]
+    assert seen["handle"] == "3li3"
+    mf._identity = None
+
+
+@pytest.mark.asyncio
+async def test_poll_once_reads_status_url_in_a_reply_to_us(_no_llm, monkeypatch):
+    import kazma_core.x_api.mentions_fire as mf
+
+    seen = {}
+    fetched = []
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["parent"] = parent_text
+        return "drafted"
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id=""):
+            return (
+                [{
+                    "id": "88",
+                    "text": "@KazmaAI @3li3 هذا https://x.com/3li3/status/2101070000000000099",
+                    "author_id": "2",
+                    "referenced_tweets": [{"type": "replied_to", "id": "44"}],
+                }],
+                {"users": [
+                    {"id": "2", "username": "balfaris"},
+                    {"id": "1", "username": "KazmaAI"},
+                ]},
+            )
+
+        async def get_tweet(self, tid):
+            fetched.append(tid)
+            if tid == "2101070000000000099":
+                return (
+                    {
+                        "id": "2101070000000000099",
+                        "text": "JSON broken classifier path",
+                        "author_id": "9",
+                    },
+                    {"users": [{"id": "9", "username": "3li3"}]},
+                )
+            return (
+                {"id": "44", "text": "kazma reply", "author_id": "1"},
+                {"users": [{"id": "1", "username": "KazmaAI"}]},
+            )
+
+    mf._identity = None
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    rows = await mf.poll_once(cfg=_cfg(subjects=()))
+    assert rows and rows[0]["action"] == "awaiting_approval"
+    assert fetched == ["2101070000000000099"]
+    assert "classifier" in seen["parent"]
+    mf._identity = None
+
+
+@pytest.mark.asyncio
 async def test_forget_removes_a_log_row_without_calling_x(_no_llm, monkeypatch):
     from kazma_core.x_api.reply import forget_summon
     from kazma_core.x_api.reply_store import get_reply_store

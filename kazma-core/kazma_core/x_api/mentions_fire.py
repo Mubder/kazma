@@ -16,12 +16,12 @@ interval is operator config with a 60s floor, and ``since_id`` means a quiet
 account costs one near-empty response per poll rather than a re-read of the
 window.
 
-**A summon is an @mention, not a thread reply to Kazma.** Allowlist (or
-``anyone``), optional trigger phrase, not our own tweet, not a reply whose
-parent we authored (X pre-fills ``@handle`` on those, so they appear in
-the mentions timeline anyway). A standalone ``@handle 😂`` is a summon —
-we reply to that tweet. A mention under someone else's post reacts to the
-parent. Everything that survives goes to
+**A summon is an @mention.** Allowlist (or ``anyone``), optional trigger,
+not our own tweet. A bare reply under Kazma's own post is ignored (X
+pre-fills @handle). A *quote* of someone else, or an x.com / t.co status
+link in the mention, is the post to react to even if the mention sits
+under our tweet. A standalone ``@handle 😂`` is a summon. Everything that
+survives goes to
 :func:`kazma_core.x_api.reply.handle_summon`, which claims it idempotently
 before spending a model call.
 """
@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,7 @@ _DEFAULT_POLL = 600.0
 #: token should not mean one doomed request every ten minutes forever.
 _MAX_CONSECUTIVE_ERRORS = 5
 _BACKOFF_S = 3600.0
+_TCO_RE = re.compile(r"https?://t\.co/[A-Za-z0-9]+", re.IGNORECASE)
 
 
 def get_mentions_task() -> asyncio.Task | None:
@@ -145,13 +147,54 @@ def _index_users(includes: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _parent_id(tweet: dict[str, Any]) -> str:
     """The tweet this mention replies to, or "" if it is a standalone post."""
+    return _ref_id(tweet, "replied_to")
+
+
+def _ref_id(tweet: dict[str, Any], typ: str) -> str:
     refs = tweet.get("referenced_tweets")
     if not isinstance(refs, list):
         return ""
     for ref in refs:
-        if isinstance(ref, dict) and ref.get("type") == "replied_to":
+        if isinstance(ref, dict) and ref.get("type") == typ:
             return str(ref.get("id") or "")
     return ""
+
+
+def _index_tweets(includes: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    tweets = includes.get("tweets")
+    if not isinstance(tweets, list):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for t in tweets:
+        if isinstance(t, dict) and t.get("id"):
+            out[str(t["id"])] = t
+    return out
+
+
+async def _tweet_id_from_text(text: str) -> str:
+    """Numeric status id from an x.com URL or a resolved t.co link."""
+    from kazma_core.x_api.reply import parse_tweet_url
+
+    tid, _handle = parse_tweet_url(text)
+    if tid:
+        return tid
+    m = _TCO_RE.search(text or "")
+    if not m:
+        return ""
+    url = m.group(0)
+
+    def _resolve() -> str:
+        import httpx
+
+        try:
+            r = httpx.get(url, follow_redirects=True, timeout=8.0)
+            return str(r.url)
+        except Exception:
+            return ""
+
+    final = await asyncio.to_thread(_resolve)
+    tid, _handle = parse_tweet_url(final)
+    return tid
 
 
 def _followers(user: dict[str, Any] | None) -> int | None:
@@ -294,39 +337,50 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             await _skip("trigger phrase absent")
             continue
 
-        parent_id = _parent_id(tweet)
+        replied_id = _parent_id(tweet)
+        quoted_id = _ref_id(tweet, "quoted")
+        url_id = "" if quoted_id else await _tweet_id_from_text(text)
+        # React to a quote or a pasted status URL, not to our own tweet
+        # the mention happens to sit under. Live 2026-09-19: quoting Ali's
+        # JSON post in a reply to Kazma was skipped as "own post" and the
+        # quoted text was never read.
+        source_id = quoted_id or url_id or replied_id
         if await asyncio.to_thread(store.seen, tid):
             await _skip("already handled", persist=False)
             continue
 
-        # A standalone `@KazmaAI 😂` is still a summon — reply TO that tweet,
-        # reacting to its text. The old "must be a reply under someone else"
-        # rule is what made mention-the-bot feel broken.
         parent_text = text
         parent_handle = summoner
         target_followers = None
         p_author: dict[str, Any] | None = author if isinstance(author, dict) else None
+        included = _index_tweets(includes)
 
-        if parent_id:
-            try:
-                parent, p_includes = await client.get_tweet(parent_id)
-            except XApiError as exc:
-                await _skip(f"parent unreadable: {exc}")
-                continue
-            parent_text = str(parent.get("text") or "") or text
+        if source_id:
+            parent = included.get(source_id)
+            p_includes = includes
+            if parent is None:
+                try:
+                    parent, p_includes = await client.get_tweet(source_id)
+                except XApiError as exc:
+                    await _skip(f"parent unreadable: {exc}")
+                    continue
+            parent_text = str((parent or {}).get("text") or "") or text
             p_users = _index_users(p_includes)
-            p_author = p_users.get(str(parent.get("author_id") or ""))
+            p_author = p_users.get(str((parent or {}).get("author_id") or ""))
             parent_handle = str((p_author or {}).get("username") or summoner).lower()
-            # Operator rule: summons are @mentions, not thread replies to
-            # Kazma. A reply to our own post almost always includes @handle
-            # (X pre-fills it), so it shows up in the mentions timeline —
-            # and must still be ignored.
-            if parent_handle and parent_handle == my_handle:
+            own_thread = (
+                parent_handle == my_handle
+                and source_id == replied_id
+                and not quoted_id
+                and not url_id
+            )
+            if own_thread:
                 await _skip(
                     "reply to our own post — only @mentions summon, not thread replies"
                 )
                 continue
             target_followers = _followers(p_author)
+            parent_id = source_id
         else:
             parent_id = tid
 

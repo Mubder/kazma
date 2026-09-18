@@ -296,8 +296,11 @@ class XClient:
         feeds the small-account floor.
         """
         params = (
-            "tweet.fields=author_id,conversation_id,created_at,text"
-            "&expansions=author_id&user.fields=username,public_metrics"
+            "tweet.fields=author_id,conversation_id,created_at,text,"
+            "referenced_tweets"
+            "&expansions=author_id,referenced_tweets.id,"
+            "referenced_tweets.id.author_id"
+            "&user.fields=username,public_metrics"
         )
         data = await self._request(
             "GET", f"/2/tweets/{str(tweet_id).strip()}?{params}",

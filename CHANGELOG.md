@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## Fix — quoted tweets and status links are the post to read (2026-09-19)
+
+A follow-up `@KazmaAI @3li3 هذا https://t.co/…` under Kazma's own reply
+was skipped as "reply to our own post" and never fetched the quoted
+original. Quotes and x.com / t.co status URLs are now the text we draft
+against, even when the mention sits in our thread. Bare "reply to Kazma
+with no quote and no link" is still ignored. X still only lets us *post*
+the reply under the mention (not under the original) — that is their
+rule, not a Kazma choice.
+
 ## Fix — "شرايك 👍 والا 👎" is an opinion, not Kuwait (2026-09-19)
 
 Live: Ali's Arabic JSON/classifier post, summon
