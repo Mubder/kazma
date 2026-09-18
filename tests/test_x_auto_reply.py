@@ -146,9 +146,35 @@ async def test_unmatched_stays_silent_when_subjects_exist(monkeypatch):
         target_followers=10_000, cfg=_cfg(),
         summon_text="@KazmaAI",
     )
+    assert res.action == "awaiting_approval"
+    assert res.subject_id == "voice"
+
+
+@pytest.mark.asyncio
+async def test_stranger_without_open_marker_is_refused(_no_llm, monkeypatch):
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="st1", parent_id="p1", parent_text="NVIDIA Dynamo AIPerf",
+        parent_handle="nvidiaai", summoner="random_user",
+        target_followers=10_000, cfg=_cfg(open_thread_marker="🗣️"),
+        summon_text="@KazmaAI how can we use this?",
+    )
     assert res.action == "skipped"
-    assert "no declared subject" in res.reason
-    assert res.draft == ""
+    assert "not a trusted summoner" in res.reason
+
+
+@pytest.mark.asyncio
+async def test_stranger_joins_when_parent_has_open_marker(_no_llm, monkeypatch):
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="st2", parent_id="p1",
+        parent_text="@KazmaAI 🗣️ how do we use Dynamo in this stack?",
+        parent_handle="balfaris", summoner="random_user",
+        target_followers=10_000, cfg=_cfg(open_thread_marker="🗣️"),
+        summon_text="@KazmaAI what about TTFT?",
+    )
+    assert res.action == "awaiting_approval"
+    assert res.subject_id == "voice"
 
 
 @pytest.mark.asyncio
@@ -313,7 +339,7 @@ async def test_non_summoner_is_refused(_no_llm, monkeypatch):
         parent_handle="target", summoner="a_stranger",
         target_followers=10_000, cfg=_cfg(),
     )
-    assert res.action == "skipped" and "summoners" in res.reason
+    assert res.action == "skipped" and "trusted summoner" in res.reason
 
 
 @pytest.mark.asyncio
@@ -342,8 +368,8 @@ async def test_small_account_floor(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
         summon_id="m5", parent_id="p5", parent_text="VAR",
-        parent_handle="tiny", summoner="balfaris",
-        target_followers=40, cfg=_cfg(),
+        parent_handle="tiny", summoner="a_stranger",
+        target_followers=40, cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert res.action == "skipped" and "followers" in res.reason
 
@@ -409,8 +435,8 @@ async def test_per_target_daily_cap(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
         summon_id="m9", parent_id="p9", parent_text="VAR",
-        parent_handle="victim", summoner="balfaris",
-        target_followers=9_000, cfg=_cfg(),
+        parent_handle="victim", summoner="a_stranger",
+        target_followers=9_000, cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert res.action == "skipped" and "already replied to @victim" in res.reason
 
@@ -427,8 +453,8 @@ async def test_thread_cooldown(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
         summon_id="m10", parent_id="thread1", parent_text="VAR",
-        parent_handle="b", summoner="balfaris",
-        target_followers=9_000, cfg=_cfg(),
+        parent_handle="b", summoner="a_stranger",
+        target_followers=9_000, cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert res.action == "skipped" and "cooldown" in res.reason
 
@@ -924,8 +950,8 @@ async def test_a_skipped_summon_still_records_what_was_said(_no_llm, monkeypatch
     res = await handle_summon(
         summon_id="c2", parent_id="p2",
         parent_text="best shawarma in Kuwait City",
-        parent_handle="someone", summoner="balfaris",
-        target_followers=40, cfg=_cfg(),
+        parent_handle="someone", summoner="a_stranger",
+        target_followers=40, cfg=_cfg(summoner_policy=SUMMON_ANYONE),
         summon_text="Kazma?",
     )
     assert res.action == "skipped"
@@ -1219,7 +1245,7 @@ async def test_untrusted_caller_is_still_gated(_no_llm, monkeypatch):
         parent_handle="someone", summoner="telegram:12345",
         target_followers=9_000, cfg=_cfg(),
     )
-    assert res.action == "skipped" and "summoners" in res.reason
+    assert res.action == "skipped" and "trusted summoner" in res.reason
 
 
 @pytest.mark.asyncio
@@ -1250,7 +1276,7 @@ async def test_trusted_does_not_lift_the_other_rails(_no_llm, monkeypatch):
         parent_handle="tiny", summoner="telegram:12345",
         target_followers=40, cfg=_cfg(), force_mode="draft", trusted=True,
     )
-    assert res.action == "skipped" and "followers" in res.reason
+    assert res.action == "awaiting_approval", "trusted discussion skips the follower floor"
 
 
 def test_the_command_passes_trusted():
@@ -1428,15 +1454,15 @@ async def test_classifier_failure_is_not_a_no_match(monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
         summon_id="cf1", parent_id="p1", parent_text="nothing matches this",
-        parent_handle="t", summoner="balfaris", target_followers=9_000,
-        cfg=_cfg(),
+        parent_handle="t", summoner="a_stranger", target_followers=9_000,
+        cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert res.action == "skipped", "LLM guess is off; no emoji → stay silent"
 
     res_llm = await handle_summon(
         summon_id="cf2", parent_id="p2", parent_text="nothing matches this",
-        parent_handle="t", summoner="balfaris", target_followers=9_000,
-        cfg=_cfg(classify_llm=True),
+        parent_handle="t", summoner="a_stranger", target_followers=9_000,
+        cfg=_cfg(summoner_policy=SUMMON_ANYONE, classify_llm=True),
     )
     assert res_llm.action == "failed"
     assert "classifier could not run" in res_llm.reason
@@ -1451,8 +1477,8 @@ async def test_a_genuine_no_match_still_says_so(monkeypatch):
     _stub_draft(monkeypatch)
     res = await handle_summon(
         summon_id="cf2", parent_id="p2", parent_text="nothing matches this",
-        parent_handle="t", summoner="balfaris", target_followers=9_000,
-        cfg=_cfg(),
+        parent_handle="t", summoner="a_stranger", target_followers=9_000,
+        cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert res.action == "skipped" and "no declared subject" in res.reason
 
@@ -1495,8 +1521,8 @@ async def test_no_match_names_what_was_checked(monkeypatch):
     res = await handle_summon(
         summon_id="nm1", parent_id="p1",
         parent_text="Elon Musk is tuning his algorithm again",
-        parent_handle="t", summoner="balfaris", target_followers=9_000,
-        cfg=_cfg(),
+        parent_handle="t", summoner="a_stranger", target_followers=9_000,
+        cfg=_cfg(summoner_policy=SUMMON_ANYONE),
         summon_text="@KazmaAI",
     )
     assert res.action == "skipped"
@@ -1870,8 +1896,8 @@ async def test_retry_reopens_a_skip(_no_llm, monkeypatch):
     _stub_draft(monkeypatch)
     first = await handle_summon(
         summon_id="r1", parent_id="p1", parent_text="VAR",
-        parent_handle="tiny", summoner="balfaris",
-        target_followers=40, cfg=_cfg(),
+        parent_handle="tiny", summoner="a_stranger",
+        target_followers=40, cfg=_cfg(summoner_policy=SUMMON_ANYONE),
     )
     assert first.action == "skipped"
     monkeypatch.setattr(reply_mod, "get_reply_config", lambda: _cfg())

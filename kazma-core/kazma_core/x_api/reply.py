@@ -171,6 +171,8 @@ async def _rail_error(
     parent_id: str,
     target_handle: str,
     target_followers: int | None,
+    summoner: str = "",
+    trusted: bool = False,
 ) -> str | None:
     """Return a refusal reason, or None when every cap passes.
 
@@ -193,7 +195,9 @@ async def _rail_error(
     ) >= cfg.max_replies_per_day:
         return f"daily auto-reply cap reached ({cfg.max_replies_per_day})"
 
-    if target_handle and cfg.max_replies_per_target_per_day:
+    operator = trusted or cfg.is_trusted_summoner(summoner)
+
+    if target_handle and cfg.max_replies_per_target_per_day and not operator:
         n = await asyncio.to_thread(
             store.posted_to_target_since, target_handle, now - 86400
         )
@@ -204,7 +208,7 @@ async def _rail_error(
                 "one account is what gets reported as targeted harassment."
             )
 
-    if parent_id and cfg.cooldown_per_thread_s:
+    if parent_id and cfg.cooldown_per_thread_s and not operator:
         last = await asyncio.to_thread(store.last_reply_in_thread, parent_id)
         if last and (now - last) < cfg.cooldown_per_thread_s:
             wait = int(cfg.cooldown_per_thread_s - (now - last))
@@ -213,9 +217,11 @@ async def _rail_error(
     # A roast aimed at a large account is banter; the same text aimed at
     # someone with forty followers is pointing a bot at a stranger. Only
     # enforced when the caller actually knows the count (the poller does,
-    # the paste path usually does not).
+    # the paste path usually does not). Trusted follow-ups skip this so a
+    # discussion with you is not killed by the floor.
     if (
-        target_followers is not None
+        not operator
+        and target_followers is not None
         and cfg.min_target_followers
         and target_followers < cfg.min_target_followers
     ):
@@ -762,10 +768,16 @@ async def handle_summon(
     # `/x roast` was refused for everyone, including the operator, no matter
     # what they put in the allowlist. The gateway's own auth is the
     # authorization for that path; every other rail still applies.
-    if not trusted and summoner and not cfg.is_summoner(summoner):
+    if not trusted and summoner and not cfg.is_summoner(
+        summoner, parent_text=parent_text, summon_text=summon_text,
+    ):
         return SummonResult(
             False, "skipped",
-            reason=f"@{summoner.lstrip('@')} is not in connectors.x.reply.summoners",
+            reason=(
+                f"@{summoner.lstrip('@')} is not a trusted summoner. "
+                "Put your open-thread marker in the post if strangers "
+                "should get a reply here."
+            ),
             parent_id=parent_id, summon_id=summon_id,
         )
 
@@ -842,6 +854,8 @@ async def _handle_summon_claimed(
         parent_id=parent_id,
         target_handle=parent_handle,
         target_followers=target_followers,
+        summoner=summoner,
+        trusted=trusted,
     )
     if rail:
         await asyncio.to_thread(store.mark_skipped, summon_id, rail)
@@ -897,7 +911,11 @@ async def _handle_summon_claimed(
                     classify_exc = exc
                     subject = None
         if subject is None and (
-            cfg.unmatched == UNMATCHED_VOICE or not cfg.subjects
+            cfg.unmatched == UNMATCHED_VOICE
+            or not cfg.subjects
+            or trusted
+            or cfg.is_trusted_summoner(summoner)
+            or cfg.thread_is_open(parent_text, summon_text)
         ):
             if classify_exc:
                 logger.warning(

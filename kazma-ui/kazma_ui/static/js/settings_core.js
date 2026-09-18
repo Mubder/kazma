@@ -447,7 +447,7 @@
             poll_interval_s: 600, subjects: [],
             summoner_policy: 'allowlist', allow_emoji_mood: true,
             stance_check: true, unmatched: 'skip', use_knowledge: false,
-            knowledge_library: '', mood_emoji: {},
+            knowledge_library: '', open_thread_marker: '', mood_emoji: {},
             moods: ['roast', 'angry', 'dry', 'deadpan', 'supportive'],
             connector_ready: false, can_draft: false, handle: '',
             poller_running: false, live_reason: '',

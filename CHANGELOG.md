@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## feat(x): open-thread marker; trusted mentions stay a discussion (2026-09-19)
+
+Default remains allowlist: only you. Set an **open-thread marker** (e.g.
+🗣️) and put it in your summon if you want anyone who replies on that
+post to get Kazma too. Without the marker, strangers are refused.
+
+Your own follow-ups no longer need 😂/`?` every time, and thread
+cooldown / per-target caps do not apply to trusted handles — a general
+question can be a conversation.
+
 ## Fix — a how-question mention is a take on this post, not silence (2026-09-19)
 
 `@KazmaAI How er can make use of this into Kazma framework?` under an

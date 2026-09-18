@@ -343,6 +343,9 @@ class ReplyConfig:
     classify_llm: bool = False
     use_knowledge: bool = False
     knowledge_library: str = ""
+    #: If this token appears in the parent post (or the mention), strangers
+    #: may summon on that thread. Empty = never: only trusted handles.
+    open_thread_marker: str = ""
 
     def can_draft(self) -> bool:
         # Subjects are optional. Zero subjects = voice-only: reply to
@@ -355,17 +358,37 @@ class ReplyConfig:
         h = (handle or "").strip().lstrip("@").lower()
         return bool(h) and h in self.summoners
 
-    def is_summoner(self, handle: str) -> bool:
+    def is_summoner(
+        self,
+        handle: str,
+        *,
+        parent_text: str = "",
+        summon_text: str = "",
+    ) -> bool:
         """May this handle summon a reply at all?
 
         Under ``allowlist`` (the default) an empty list means nobody, never
         everybody — a config mistake must not open the account to the world.
-        Under ``anyone`` the gate is off and every other rail still applies:
-        subject match, the three caps, the follower floor, the screen.
+        Under ``anyone`` the gate is off and every other rail still applies.
+
+        ``open_thread_marker`` is the per-post exception: if that token is
+        in the parent tweet (the one you already summoned on) or in this
+        mention, a stranger may join. Without it, only trusted handles.
         """
         if self.summoner_policy == SUMMON_ANYONE:
             return bool((handle or "").strip())
-        return self.is_trusted_summoner(handle)
+        if self.is_trusted_summoner(handle):
+            return True
+        return self.thread_is_open(parent_text, summon_text)
+
+    def thread_is_open(self, *texts: str) -> bool:
+        tok = (self.open_thread_marker or "").strip()
+        if not tok:
+            return False
+        for t in texts:
+            if tok and tok in (t or ""):
+                return True
+        return False
 
     def mood_override_allowed(self, handle: str) -> bool:
         """The summon emoji is the tone dial.
@@ -553,6 +576,9 @@ def get_reply_config() -> ReplyConfig:
         ),
         knowledge_library=str(
             _cs_get("connectors.x.reply.knowledge_library", "") or ""
+        ).strip(),
+        open_thread_marker=str(
+            _cs_get("connectors.x.reply.open_thread_marker", "") or ""
         ).strip(),
     )
 
