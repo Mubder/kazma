@@ -144,7 +144,7 @@ async def test_unmatched_stays_silent_when_subjects_exist(monkeypatch):
         parent_text="Best shawarma in Kuwait City?",
         parent_handle="someone", summoner="balfaris",
         target_followers=10_000, cfg=_cfg(),
-        summon_text="what do you think?",
+        summon_text="@KazmaAI",
     )
     assert res.action == "skipped"
     assert "no declared subject" in res.reason
@@ -207,6 +207,35 @@ async def test_llm_cannot_tag_an_ai_post_as_kuwait_when_you_roast(monkeypatch):
     )
     assert res.action == "awaiting_approval"
     assert seen["id"] == "post" and seen["side"] == SIDE_AGAINST
+
+
+@pytest.mark.asyncio
+async def test_arabic_ai_opinion_ask_is_not_kuwait(monkeypatch):
+    """شرايك + 👍 والا 👎 on an AI post must not become the Kuwait card."""
+    kuwait = Subject(
+        id="Kuwait", match=("kuwait", "الكويت"), view="", side=SIDE_SUPPORT,
+    )
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["id"] = subject.id
+        seen["side"] = subject.side
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    res = await handle_summon(
+        summon_id="ali1", parent_id="p",
+        parent_text=(
+            "درس سريع وفائدة أحياناً تحول مسار تصنيف أو استخراج بيانات "
+            "سريع إلى نموذج استدلال جديد JSON ترجع ناقصة"
+        ),
+        parent_handle="3li3", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(subjects=(kuwait, VAR)),
+        summon_text="@3li3 @KazmaAI شرايك بكلام اخونا علي؟ 👍🏻 والا 👎🏻؟",
+    )
+    assert res.action == "awaiting_approval"
+    assert seen["id"] == "voice"
+    assert seen["side"] == ""
 
 
 @pytest.mark.asyncio
@@ -768,7 +797,7 @@ async def test_anyone_unmatched_still_needs_a_subject(monkeypatch):
         summon_id="o2", parent_id="p2", parent_text="best shawarma in Kuwait",
         parent_handle="t", summoner="a_stranger", target_followers=9_000,
         cfg=_cfg(summoner_policy=SUMMON_ANYONE),
-        summon_text="what do you think",
+        summon_text="@KazmaAI",
     )
     assert res.action == "skipped"
     assert "no declared subject" in res.reason
@@ -1440,7 +1469,7 @@ async def test_no_match_names_what_was_checked(monkeypatch):
         parent_text="Elon Musk is tuning his algorithm again",
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
-        summon_text="@KazmaAI what do you think?",
+        summon_text="@KazmaAI",
     )
     assert res.action == "skipped"
     assert "checked" in res.reason
@@ -1676,6 +1705,16 @@ def test_prompt_fences_untrusted_tweet_text():
     assert "x_post" in user
     sysmsg = msgs[0]["content"]
     assert "TONE:" in sysmsg
+
+
+def test_thumbs_up_or_down_is_an_opinion_ask():
+    from kazma_core.x_api.stance import is_opinion_ask
+
+    assert is_opinion_ask("@KazmaAI شرايك بكلام اخونا علي؟ 👍🏻 والا 👎🏻؟")
+    assert is_opinion_ask("@KazmaAI what do you think? ❤️ or 😂")
+    assert is_opinion_ask("شرايك بالموضوع")
+    assert not is_opinion_ask("@KazmaAI 😂")
+    assert not is_opinion_ask("@KazmaAI 👍")
 
 
 def test_side_from_summon_emoji_and_words():

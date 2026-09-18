@@ -54,6 +54,7 @@ __all__ = [
     "implicit_voice_subject",
     "implicit_summon_subject",
     "side_from_summon",
+    "is_opinion_ask",
     "VOICE_SUBJECT_ID",
     "SUMMON_SUBJECT_ID",
 ]
@@ -220,6 +221,44 @@ def side_from_summon(text: str) -> str:
     return ""
 
 
+_OPINION_EN = (
+    "thoughts", "wdyt", "opinion",
+)
+_OPINION_AR = (
+    "شرايك", "شرايكم", "شرايچ", "رأيك", "رايك", "رايكم", "رأيكم",
+    "شنو رايك", "وش رايك",
+)
+
+
+def is_opinion_ask(text: str) -> bool:
+    """True when the mention is 'what do you think?' not a side vote.
+
+    Live 2026-09-19: ``شرايك … 👍🏻 والا 👎🏻؟`` was read as thumbs-up
+    (first emoji) or, worse, guessed as a Settings card. Both polarities
+    in one mention, or شرايك / what do you think, means react to THIS
+    post — do not force against/support and do not pick a country card.
+    """
+    body = str(text or "")
+    if not body.strip():
+        return False
+    has_up = "👍" in body
+    has_down = "👎" in body
+    if has_up and has_down:
+        return True
+    if "❤️" in body and "😂" in body:
+        return True
+    low = body.lower()
+    if "what do you think" in low or "what do u think" in low:
+        return True
+    for w in _OPINION_EN:
+        if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):
+            return True
+    for w in _OPINION_AR:
+        if w in body:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class Subject:
     """One operator-declared topic and the position to argue from."""
@@ -254,6 +293,17 @@ class Subject:
         not blunt the others.
         """
         return "*" in self.match
+
+    def matches(self, text: str) -> bool:
+        """True if this card is allowed for *text*.
+
+        Voice/summon/catch-all always match. A named Settings card matches
+        only when one of its keywords is actually in the post — so a
+        classifier cannot pin an AI tweet on a country card.
+        """
+        if self.id in (VOICE_SUBJECT_ID, SUMMON_SUBJECT_ID) or self.is_catch_all():
+            return True
+        return _keyword_hit(text, (self,)) is not None
 
     def mood_hint(self) -> str:
         return MOODS.get(self.mood.strip().lower(), MOODS["dry"])
@@ -531,6 +581,9 @@ def _keyword_hit(text: str, subjects: tuple[Subject, ...]) -> Subject | None:
     for subject in specific:
         for kw in subject.match:
             if not kw:
+                continue
+            # 1–2 Arabic letters match almost every sentence (في، من، أو).
+            if not kw.isascii() and len(kw) < 3:
                 continue
             if kw.isascii():
                 if re.search(rf"(?<!\w){re.escape(kw)}(?!\w)", low):
