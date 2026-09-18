@@ -70,7 +70,11 @@ Each card:
 
 Empty allowlist + `allowlist` policy = **nobody** can summon. `anyone` still has caps, follower floor, screen, and stance check.
 
-**Open-thread marker** (optional): a token you put in *your* mention (e.g. 🗣️). Without it, only trusted handles get a reply. With it in the parent post, anyone who mentions Kazma on that thread can get a reply. Trusted handles (you) can keep talking without extra emoji — thread cooldown and per-target caps do not apply to you, so a general question can be a back-and-forth.
+**Open-thread marker** (optional, e.g. `#Open`): put it in *your* mention. Without it, only trusted handles get a reply. With it, anyone who mentions Kazma on that post can get a reply. Hashtags match as a whole tag (`#Open` does not match `#OpenAI`).
+
+**Close-thread marker** (optional, e.g. `#Close`): mention `@KazmaAI #Close` in that conversation to stop strangers. You can still talk. The close is stored on the X conversation id so later polls stay closed.
+
+Trusted handles (you) can keep talking without extra emoji — thread cooldown and per-target caps do not apply to you, so a general question can be a back-and-forth.
 
 List order is priority: first card whose keyword appears wins.
 

@@ -381,11 +381,18 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
         else:
             parent_id = tid
 
+        conversation_id = str(tweet.get("conversation_id") or "")
+        closed = bool(conversation_id) and await asyncio.to_thread(
+            store.is_conversation_closed, conversation_id,
+        )
         if not cfg.is_summoner(
-            summoner, parent_text=parent_text, summon_text=text,
+            summoner,
+            parent_text=parent_text,
+            summon_text=text,
+            conversation_closed=closed,
         ):
             await _skip(
-                f"@{summoner} not a trusted summoner (no open-thread marker)"
+                f"@{summoner} not a trusted summoner (thread closed or no open marker)"
             )
             continue
 
@@ -399,6 +406,7 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
             cfg=cfg,
             # The mention carries the emoji that dials the tone.
             summon_text=text,
+            conversation_id=conversation_id,
         )
         row = result.to_dict()
         row["mention"] = tid

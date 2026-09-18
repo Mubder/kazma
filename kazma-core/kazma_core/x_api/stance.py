@@ -55,6 +55,7 @@ __all__ = [
     "implicit_summon_subject",
     "side_from_summon",
     "is_opinion_ask",
+    "marker_in_text",
     "VOICE_SUBJECT_ID",
     "SUMMON_SUBJECT_ID",
 ]
@@ -269,6 +270,25 @@ def is_opinion_ask(text: str) -> bool:
     return False
 
 
+def marker_in_text(text: str, marker: str) -> bool:
+    """True if *marker* appears in *text* as its own token.
+
+    Hashtags (``#Open``) match case-insensitively and do **not** match
+    ``#OpenAI``. Bare words use word boundaries. Emoji / punctuation
+    markers stay a literal substring.
+    """
+    tok = (marker or "").strip()
+    body = str(text or "")
+    if not tok or not body:
+        return False
+    if tok.startswith("#"):
+        core = re.escape(tok.lstrip("#"))
+        return bool(re.search(rf"(?i)(?<![#\w])#{core}(?!\w)", body))
+    if tok.isascii() and tok.replace("-", "").replace("_", "").isalnum():
+        return bool(re.search(rf"(?i)(?<!\w){re.escape(tok)}(?!\w)", body))
+    return tok in body
+
+
 @dataclass(frozen=True)
 class Subject:
     """One operator-declared topic and the position to argue from."""
@@ -346,6 +366,7 @@ class ReplyConfig:
     #: If this token appears in the parent post (or the mention), strangers
     #: may summon on that thread. Empty = never: only trusted handles.
     open_thread_marker: str = ""
+    close_thread_marker: str = ""
 
     def can_draft(self) -> bool:
         # Subjects are optional. Zero subjects = voice-only: reply to
@@ -364,6 +385,7 @@ class ReplyConfig:
         *,
         parent_text: str = "",
         summon_text: str = "",
+        conversation_closed: bool = False,
     ) -> bool:
         """May this handle summon a reply at all?
 
@@ -373,22 +395,29 @@ class ReplyConfig:
 
         ``open_thread_marker`` is the per-post exception: if that token is
         in the parent tweet (the one you already summoned on) or in this
-        mention, a stranger may join. Without it, only trusted handles.
+        mention, a stranger may join. ``close_thread_marker`` or a stored
+        closed conversation wins — strangers stop, you can still talk.
         """
-        if self.summoner_policy == SUMMON_ANYONE:
-            return bool((handle or "").strip())
         if self.is_trusted_summoner(handle):
             return True
+        if conversation_closed:
+            return False
+        if self.marker_in(self.close_thread_marker, parent_text, summon_text):
+            return False
+        if self.summoner_policy == SUMMON_ANYONE:
+            return bool((handle or "").strip())
         return self.thread_is_open(parent_text, summon_text)
 
     def thread_is_open(self, *texts: str) -> bool:
-        tok = (self.open_thread_marker or "").strip()
+        if self.marker_in(self.close_thread_marker, *texts):
+            return False
+        return self.marker_in(self.open_thread_marker, *texts)
+
+    def marker_in(self, marker: str, *texts: str) -> bool:
+        tok = (marker or "").strip()
         if not tok:
             return False
-        for t in texts:
-            if tok and tok in (t or ""):
-                return True
-        return False
+        return any(marker_in_text(t, tok) for t in texts)
 
     def mood_override_allowed(self, handle: str) -> bool:
         """The summon emoji is the tone dial.
@@ -579,6 +608,9 @@ def get_reply_config() -> ReplyConfig:
         ).strip(),
         open_thread_marker=str(
             _cs_get("connectors.x.reply.open_thread_marker", "") or ""
+        ).strip(),
+        close_thread_marker=str(
+            _cs_get("connectors.x.reply.close_thread_marker", "") or ""
         ).strip(),
     )
 

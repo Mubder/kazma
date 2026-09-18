@@ -2919,12 +2919,24 @@
                     <label for="xr-open-marker">Open-thread marker (optional)</label>
                     <input id="xr-open-marker" type="text" class="form-input"
                            x-model="xReply.open_thread_marker"
-                           placeholder="🗣️ or open"
+                           placeholder="#Open"
                            autocomplete="off">
                     <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
-                        Without this, only trusted handles get a reply. Put the marker in
+                        Without this, only trusted handles get a reply. Put the hashtag in
                         <em>your</em> mention if you want anyone who replies on that post
-                        to get Kazma too. Leave empty = strictly you.
+                        to get Kazma too. Matched as a whole tag: <code>#Open</code> does
+                        not match <code>#OpenAI</code>. Leave empty = strictly you.
+                    </p>
+                </div>
+                <div class="form-group" x-show="xReply.summoner_policy !== 'anyone'" x-cloak>
+                    <label for="xr-close-marker">Close-thread marker (optional)</label>
+                    <input id="xr-close-marker" type="text" class="form-input"
+                           x-model="xReply.close_thread_marker"
+                           placeholder="#Close"
+                           autocomplete="off">
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                        Mention Kazma with this tag to stop strangers on that thread.
+                        You can still talk. Example: <code>@KazmaAI #Close</code>.
                     </p>
                 </div>
 

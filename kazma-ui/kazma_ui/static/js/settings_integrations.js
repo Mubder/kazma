@@ -939,6 +939,7 @@
                         use_knowledge: !!this.xReply.use_knowledge,
                         knowledge_library: this.xReply.knowledge_library || '',
                         open_thread_marker: this.xReply.open_thread_marker || '',
+                        close_thread_marker: this.xReply.close_thread_marker || '',
                         subjects: this.xReplySubjectPayload(),
                     }),
                 });

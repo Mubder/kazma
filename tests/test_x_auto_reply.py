@@ -177,6 +177,42 @@ async def test_stranger_joins_when_parent_has_open_marker(_no_llm, monkeypatch):
     assert res.subject_id == "voice"
 
 
+def test_open_hashtag_does_not_match_openai():
+    from kazma_core.x_api.stance import marker_in_text
+
+    assert marker_in_text("join with #Open please", "#Open")
+    assert marker_in_text("join with #open please", "#Open")
+    assert not marker_in_text("talking about #OpenAI today", "#Open")
+    assert not marker_in_text("Opening night", "#Open")
+
+
+@pytest.mark.asyncio
+async def test_close_marker_stops_strangers(_no_llm, monkeypatch):
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    _stub_draft(monkeypatch)
+    cfg = _cfg(open_thread_marker="#Open", close_thread_marker="#Close")
+    closed = await handle_summon(
+        summon_id="cl1", parent_id="p1",
+        parent_text="@KazmaAI #Open dynamo thread",
+        parent_handle="balfaris", summoner="balfaris",
+        target_followers=9_000, cfg=cfg,
+        summon_text="@KazmaAI #Close",
+        conversation_id="conv-1",
+    )
+    assert closed.action == "skipped" and "thread closed" in closed.reason
+    assert get_reply_store().is_conversation_closed("conv-1")
+    res = await handle_summon(
+        summon_id="cl2", parent_id="p1",
+        parent_text="@KazmaAI #Open dynamo thread",
+        parent_handle="balfaris", summoner="random_user",
+        target_followers=9_000, cfg=cfg,
+        summon_text="@KazmaAI and TTFT?",
+        conversation_id="conv-1",
+    )
+    assert res.action == "skipped" and "trusted summoner" in res.reason
+
+
 @pytest.mark.asyncio
 async def test_unmatched_roast_emoji_criticises_this_post(monkeypatch):
     """No Settings card: 😂 means against whatever the post is about."""
