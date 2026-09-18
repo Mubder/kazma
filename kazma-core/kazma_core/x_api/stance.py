@@ -52,7 +52,10 @@ __all__ = [
     "ClassifierUnavailable",
     "no_match_detail",
     "implicit_voice_subject",
+    "implicit_summon_subject",
+    "side_from_summon",
     "VOICE_SUBJECT_ID",
+    "SUMMON_SUBJECT_ID",
 ]
 
 
@@ -133,6 +136,19 @@ UNIVERSAL_HARD_LINES: tuple[str, ...] = (
 #: picks the topic. Stance-check is skipped because there is nothing to
 #: contradict.
 VOICE_SUBJECT_ID = "voice"
+#: Unmatched summon: the mention itself chose against/support for THIS post.
+SUMMON_SUBJECT_ID = "post"
+_SUMMON_VIEW = (
+    "the claim, product, person, company, or institution this post is about "
+    "— as named in the post. Do not pick a different target, and do not "
+    "drag in a Settings subject that is not in this post."
+)
+_AGAINST_WORDS = (
+    "against", "roast", "slam", "criticize", "criticise", "attack",
+)
+_AGAINST_AR = ("ضد", "هاجم", "اهجم", "انقد", "انتقد")
+_SUPPORT_WORDS = ("support", "defend")
+_SUPPORT_AR = ("دافع", "أيد", "ايد", "معاه")
 _VOICE_VIEW = (
     "You have no declared political position on this post. React to what "
     "it actually says, in the requested tone. Be specific to THIS post. "
@@ -152,6 +168,55 @@ def implicit_voice_subject(*, mood: str = "dry") -> Subject:
     if m not in MOODS:
         m = "dry"
     return Subject(id=VOICE_SUBJECT_ID, match=("*",), view=_VOICE_VIEW, mood=m)
+
+
+def implicit_summon_subject(*, side: str, mood: str = "dry") -> Subject:
+    """No Settings card matched; the summoner set the side in the mention.
+
+    Not a catch-all: stance check still runs. ``id`` is ``post`` so the
+    drafter aims at whatever this tweet is about, not at a Settings card.
+    """
+    s = (side or "").strip().lower()
+    if s not in _SIDES:
+        s = SIDE_AGAINST
+    m = (mood or "dry").strip().lower()
+    if m not in MOODS:
+        m = "dry"
+    return Subject(
+        id=SUMMON_SUBJECT_ID, match=(), view=_SUMMON_VIEW, mood=m, side=s,
+    )
+
+
+def side_from_summon(text: str) -> str:
+    """Against/support from the mention: magic words first, then emoji.
+
+    Declared subjects still win in :func:`classify`. This is only the
+    unmatched path — roast 😂 on an xAI post means criticise xAI, not
+    Iran. Supportive ❤️ means defend whatever the post is about.
+
+    Roast/angry/dry emoji → against. Heart/clap/100 → support.
+    Words: against/roast/slam/ضد/هاجم vs support/defend/دافع/معاه.
+    """
+    body = str(text or "")
+    low = body.lower()
+    for w in _SUPPORT_WORDS:
+        if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):
+            return SIDE_SUPPORT
+    for w in _SUPPORT_AR:
+        if w in body:
+            return SIDE_SUPPORT
+    for w in _AGAINST_WORDS:
+        if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):
+            return SIDE_AGAINST
+    for w in _AGAINST_AR:
+        if w in body:
+            return SIDE_AGAINST
+    mood = mood_from_text(body)
+    if mood == "supportive":
+        return SIDE_SUPPORT
+    if mood in ("roast", "angry", "dry", "deadpan"):
+        return SIDE_AGAINST
+    return ""
 
 
 @dataclass(frozen=True)

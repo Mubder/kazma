@@ -6,8 +6,11 @@ It is off by default.
 **Subjects are optional, and strict by default once you have any.** With
 none declared, every summon still gets a voice-only reply (emoji sets the
 tone). Once you add a subject, a post that matches none of them stays
-**silent** unless you add a `*` catch-all or set "reply anyway". That stops a generic take from sounding like the opposite of a side you
-did declare.
+**silent** unless the mention itself sets a side: 😂/🤬/🙄 criticise
+*this* post (e.g. roast xAI), ❤️ defend it, or the words `against` /
+`support`. A `*` catch-all or "reply anyway" still answers everything.
+A declared subject always wins over the mention — a support card cannot
+be flipped by a roast emoji.
 
 Each subject is a **side**: against or support. Against always criticises
 that topic; support always defends it. Emoji only changes tone (😂 roast,
