@@ -7,6 +7,13 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-09-19:** [X auto-reply](./x-auto-reply) — mention the connected
+account and Kazma drafts a reply. Settings cards lock **against / support**;
+emoji is tone on a match and **side** when nothing matches (`شرايك` or 👍
+and 👎 together = opinion on *this* post). Quotes and status links are the
+text it reads, even under Kazma’s own tweet. X Studio → Conversations is
+the log (Refresh polls X). Kill-switch `KAZMA_X_REPLY=0`.
+
 This page is the **operator-facing tour** of the features landed in the
 research → KB → memory polish tranche (including the **/memory** admin
 graph/rename/hub work). Use it to turn features on, try them once, and find

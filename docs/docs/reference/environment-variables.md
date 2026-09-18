@@ -297,8 +297,9 @@ Native skill `x-publisher`. Credentials live in Settings → X (vaulted ConfigSt
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KAZMA_X_POST` | unset (on if Settings enabled) | `0` hard-disables posting (Studio, chat, and scheduled fire). |
+| `KAZMA_X_POST` | unset (on if Settings enabled) | `0` hard-disables posting (Studio, chat, scheduled fire, and auto-reply publishes). |
 | `KAZMA_X_SCHEDULE` | unset (on) | `0` disables scheduling only (`book_x_post` / Studio Schedule). |
+| `KAZMA_X_REPLY` | unset (on if Settings enabled) | `0` disables mention auto-reply only. Scheduled posts still work. |
 | `X_API_KEY` | unset | OAuth 1.0a consumer key (else `connectors.x.api_key`). |
 | `X_API_KEY_SECRET` | unset | Consumer secret. |
 | `X_ACCESS_TOKEN` | unset | User access token. |

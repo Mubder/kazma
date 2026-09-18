@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## docs: X auto-reply guide matches the shipped product (2026-09-19)
+
+Operator guide rewritten: keyword cards vs opinion-ask vs summon emoji,
+quotes/links under our own tweet, Conversations actions, config keys
+(`unmatched`, `classify_llm`, KB), kill-switches. Intro, FAQ, X publisher,
+env, recent-features, and API routes point at it.
+
 ## Fix — quoted tweets and status links are the post to read (2026-09-19)
 
 A follow-up `@KazmaAI @3li3 هذا https://t.co/…` under Kazma's own reply
