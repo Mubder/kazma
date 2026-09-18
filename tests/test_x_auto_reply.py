@@ -26,7 +26,14 @@ from kazma_core.x_api.reply_store import (
     STATUS_POSTED,
     reset_reply_store,
 )
-from kazma_core.x_api.stance import MODE_AUTO, MODE_DRAFT, ReplyConfig, Subject, classify
+from kazma_core.x_api.stance import (
+    MODE_AUTO,
+    MODE_DRAFT,
+    UNMATCHED_VOICE,
+    ReplyConfig,
+    Subject,
+    classify,
+)
 
 
 # A deliberately mundane subject. It still exercises everything the fixture
@@ -113,7 +120,7 @@ async def test_keyword_match_picks_subject(_no_llm):
 async def test_substring_does_not_match(_no_llm):
     """`var` must not fire on `variable`. Whole-word only for ASCII keywords."""
     got = await classify("Declare the variable up top", _cfg(), allow_llm=False)
-    assert got is not None and got.id == "voice", "substring miss is voice, not VAR"
+    assert got is None, "substring miss must not fire VAR, and skip unmatched"
 
 
 @pytest.mark.asyncio
@@ -123,8 +130,8 @@ async def test_non_ascii_keyword_matches(_no_llm):
 
 
 @pytest.mark.asyncio
-async def test_unmatched_falls_back_to_voice(monkeypatch):
-    """No keyword hit is not silence — voice-only, emoji still sets tone."""
+async def test_unmatched_stays_silent_when_subjects_exist(monkeypatch):
+    """Declared subjects mean skip, not a generic take that can flip polarity."""
     async def _none(*a, **k):
         return None
 
@@ -137,9 +144,27 @@ async def test_unmatched_falls_back_to_voice(monkeypatch):
         target_followers=10_000, cfg=_cfg(),
         summon_text="what do you think? \U0001F602",
     )
+    assert res.action == "skipped"
+    assert "no declared subject" in res.reason
+    assert res.draft == ""
+
+
+@pytest.mark.asyncio
+async def test_unmatched_voice_when_configured(monkeypatch):
+    async def _none(*a, **k):
+        return None
+
+    monkeypatch.setattr(stance_mod, "_llm_pick", _none)
+    _stub_draft(monkeypatch)
+    res = await handle_summon(
+        summon_id="m1v", parent_id="p1",
+        parent_text="Best shawarma in Kuwait City?",
+        parent_handle="someone", summoner="balfaris",
+        target_followers=10_000, cfg=_cfg(unmatched=UNMATCHED_VOICE),
+        summon_text="what do you think? \U0001F602",
+    )
     assert res.action == "awaiting_approval"
     assert res.subject_id == "voice"
-    assert res.draft
 
 
 @pytest.mark.asyncio
@@ -157,8 +182,8 @@ async def test_classifier_cannot_invent_a_subject(monkeypatch):
         lambda: type("R", (), {"get_client": staticmethod(lambda *a, **k: _Provider())})(),
     )
     got = await classify("something unrelated entirely", _cfg())
-    assert got is not None and got.id == "voice"
-    assert got.id != "geopolitics"
+    assert got is None
+    assert got != "geopolitics"
 
 
 # ── Gates ─────────────────────────────────────────────────────────────────
@@ -672,7 +697,7 @@ async def test_anyone_policy_lets_a_stranger_summon(_no_llm, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_anyone_unmatched_still_replies_in_voice(monkeypatch):
+async def test_anyone_unmatched_still_needs_a_subject(monkeypatch):
     """Opening the gate plus no keyword hit still drafts — emoji is the dial."""
     async def _none(*a, **k):
         return None
@@ -685,8 +710,8 @@ async def test_anyone_unmatched_still_replies_in_voice(monkeypatch):
         cfg=_cfg(summoner_policy=SUMMON_ANYONE),
         summon_text="\U0001F602",
     )
-    assert res.action == "awaiting_approval"
-    assert res.subject_id == "voice"
+    assert res.action == "skipped"
+    assert "no declared subject" in res.reason
 
 
 @pytest.mark.asyncio
@@ -1289,9 +1314,8 @@ async def test_classifier_failure_is_not_a_no_match(monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
     )
-    assert res.action == "awaiting_approval"
-    assert res.subject_id == "voice"
-    assert "classifier could not run" not in res.reason
+    assert res.action == "failed"
+    assert "classifier could not run" in res.reason
 
 
 @pytest.mark.asyncio
@@ -1306,7 +1330,7 @@ async def test_a_genuine_no_match_still_says_so(monkeypatch):
         parent_handle="t", summoner="balfaris", target_followers=9_000,
         cfg=_cfg(),
     )
-    assert res.action == "awaiting_approval" and res.subject_id == "voice"
+    assert res.action == "skipped" and "no declared subject" in res.reason
 
 
 @pytest.mark.asyncio
@@ -1351,8 +1375,10 @@ async def test_no_match_names_what_was_checked(monkeypatch):
         cfg=_cfg(),
         summon_text="@KazmaAI what do you think? \U0001F602",
     )
-    assert res.action == "awaiting_approval"
-    assert res.subject_id == "voice"
+    assert res.action == "skipped"
+    assert "checked" in res.reason
+    assert "var" in res.reason
+    assert "Elon Musk" in res.reason
 
 
 def test_no_match_detail_lists_keywords_and_the_post():
@@ -1583,6 +1609,24 @@ def test_prompt_fences_untrusted_tweet_text():
     assert "x_post" in user
     sysmsg = msgs[0]["content"]
     assert "TONE:" in sysmsg
+
+
+def test_pundit_prompt_forbids_sympathy_for_the_other_side():
+    from kazma_core.x_api.reply import _build_prompt
+
+    sysmsg = _build_prompt(VAR, "a post", "t", "angry")[0]["content"]
+    assert "Never sound sympathetic" in sysmsg
+    assert "THE OPERATOR'S POSITION" in sysmsg
+
+
+def test_knowledge_notes_are_fenced_and_cannot_override_the_view():
+    from kazma_core.x_api.reply import _build_prompt
+
+    sysmsg = _build_prompt(
+        VAR, "a post", "t", knowledge_notes="<kazma:data source=\"knowledge\" untrusted=\"true\">\n- a fact\n"
+    )[0]["content"]
+    assert "source=\"knowledge\"" in sysmsg or "knowledge" in sysmsg
+    assert "position wins" in sysmsg.lower()
 
 
 def test_voice_prompt_does_not_claim_a_position():

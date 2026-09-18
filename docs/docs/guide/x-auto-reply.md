@@ -3,11 +3,20 @@
 Kazma can reply when someone mentions it — in a tone the **emoji** picks.
 It is off by default.
 
-**Subjects are optional.** With none declared, every summon still gets a
-reply in voice-only mode: react to the post, don't invent a crusade, emoji
-sets roast / angry / dry / supportive. Add a subject when you want a
-*declared view* on a topic; those still win over the default voice. A
-hallucinated topic still cannot become a reply.
+**Subjects are optional, and strict by default once you have any.** With
+none declared, every summon still gets a voice-only reply (emoji sets the
+tone). Once you add a subject, a post that matches none of them stays
+**silent** unless you add a `*` catch-all or set "reply anyway". That stops
+a generic take from sounding like the opposite of a view you did declare.
+
+Write **hard lines** for what it must never say (e.g. never defend the
+Iranian regime). The stance check now treats sympathy for the other side
+as a contradiction, in any language.
+
+**Knowledge Base (optional).** Turn on "Ground drafts in the Knowledge
+Base" to pull a few fenced snippets from Kazma's KB into the draft. Facts
+only: they never override the subject's view. Leave the library id blank
+to search all libraries.
 
 ## Two ways to summon it
 

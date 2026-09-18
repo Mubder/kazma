@@ -934,6 +934,9 @@
                         summoner_policy: this.xReply.summoner_policy || 'allowlist',
                         allow_emoji_mood: !!this.xReply.allow_emoji_mood,
                         stance_check: !!this.xReply.stance_check,
+                        unmatched: this.xReply.unmatched || 'skip',
+                        use_knowledge: !!this.xReply.use_knowledge,
+                        knowledge_library: this.xReply.knowledge_library || '',
                         subjects: this.xReplySubjectPayload(),
                     }),
                 });

@@ -159,7 +159,7 @@ async def test_preview_unmatched_uses_voice(monkeypatch):
     monkeypatch.setattr(stance_mod, "_llm_pick", _none)
     monkeypatch.setattr(reply_mod, "draft_reply", _draft)
     res = await preview_reply(parent_text="best shawarma in Kuwait", cfg=_cfg())
-    assert res.action == "preview" and res.subject_id == "voice"
+    assert res.action == "skipped" and "no declared subject" in res.reason
 
 
 @pytest.mark.asyncio

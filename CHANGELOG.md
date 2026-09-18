@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## X auto-reply: strict subjects, optional KB grounding (2026-09-18)
+
+Live: an Iran-subject draft on a Trump-vs-Iran post read as sympathetic to
+Iran ("those planning a war on Iran aren't Muslims…"). The subject matched;
+the draft flipped polarity. Stance check is now meaning-based (any language)
+and treats "don't attack them / they are the victims" as **contradicts**.
+The pundit prompt forbids steelmanning the other side. Hard-lines hint in
+Settings: write the things it must never say.
+
+**If no subject matches, stay silent** (default). Emoji-only voice still
+runs when you have zero subjects, or a `*` catch-all, or you set
+"reply anyway". That stops a generic take on a political post when Iran is
+the only declared view.
+
+**Optional Knowledge Base grounding.** Settings → X → "Ground drafts in the
+Knowledge Base" pulls a few fenced snippets into the draft. They never
+override the subject view. Off by default; optional library id.
+
 ## X auto-reply: @mentions only; Conversations sorts by tweet time (2026-09-18)
 
 Summons are **@mentions**, not replies on Kazma's own thread. X pre-fills

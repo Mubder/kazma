@@ -63,6 +63,9 @@ class ReplyConfigBody(BaseModel):
     summoner_policy: str = Field(default="allowlist")
     allow_emoji_mood: bool = Field(default=True)
     stance_check: bool = Field(default=True)
+    unmatched: str = Field(default="skip")
+    use_knowledge: bool = Field(default=False)
+    knowledge_library: str = Field(default="")
     subjects: list[SubjectBody] = Field(default_factory=list)
 
 
@@ -152,6 +155,9 @@ def _payload() -> dict[str, Any]:
         "summoner_policy": cfg.summoner_policy,
         "allow_emoji_mood": cfg.allow_emoji_mood,
         "stance_check": cfg.stance_check,
+        "unmatched": cfg.unmatched,
+        "use_knowledge": cfg.use_knowledge,
+        "knowledge_library": cfg.knowledge_library,
         "subjects": [
             {
                 "id": s.id,
@@ -415,6 +421,21 @@ async def x_reply_save(body: ReplyConfigBody) -> JSONResponse:
             (
                 "connectors.x.reply.stance_check",
                 bool(body.stance_check),
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.unmatched",
+                "voice" if (body.unmatched or "").strip().lower() == "voice" else "skip",
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.use_knowledge",
+                bool(body.use_knowledge),
+                _CATEGORY,
+            ),
+            (
+                "connectors.x.reply.knowledge_library",
+                (body.knowledge_library or "").strip(),
                 _CATEGORY,
             ),
             ("connectors.x.reply.subjects", subjects, _CATEGORY),

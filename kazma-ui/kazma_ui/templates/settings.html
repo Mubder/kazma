@@ -2953,14 +2953,47 @@
                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 12px;">
                     One extra short model call per reply. The content screen only catches
                     threats and over-length &mdash; it has no idea what your position is, so a
-                    draft that quietly argues the other side passes it. This blocks
-                    contradictions and fence-sitting.
+                    draft that quietly argues the other side (or sounds sympathetic to it)
+                    passes it. This blocks contradictions, fence-sitting, and
+                    &ldquo;don&rsquo;t attack them&rdquo; polarity flips.
                     <span x-show="xReply.mode === 'auto' && !xReply.stance_check" x-cloak
                           style="color:var(--warning,#c80);">
                         With this off and mode set to auto, nothing verifies a reply before
                         it publishes.
                     </span>
                 </p>
+
+                <div class="form-group">
+                    <label for="xr-unmatched">If no subject matches</label>
+                    <select id="xr-unmatched" class="form-input" x-model="xReply.unmatched">
+                        <option value="skip">stay silent (strict)</option>
+                        <option value="voice">reply anyway, emoji sets the tone</option>
+                    </select>
+                    <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
+                        Strict is the default once you have subjects. A <code>*</code> keyword
+                        still answers everything. With zero subjects, emoji-only voice is used
+                        either way.
+                    </p>
+                </div>
+
+                <label class="toggle-row">
+                    <span class="toggle">
+                        <input type="checkbox" x-model="xReply.use_knowledge">
+                        <span class="toggle-slider"></span>
+                    </span>
+                    <span>Ground drafts in the Knowledge Base</span>
+                </label>
+                <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 8px;">
+                    Pulls a few snippets from Kazma&rsquo;s KB into the draft as fenced
+                    facts. They never override the subject&rsquo;s view. Off by default.
+                </p>
+                <div class="form-group" x-show="xReply.use_knowledge" x-cloak>
+                    <label for="xr-kblib">Library id (optional)</label>
+                    <input id="xr-kblib" type="text" class="form-input"
+                           x-model="xReply.knowledge_library"
+                           placeholder="leave blank to search all libraries"
+                           autocomplete="off">
+                </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:8px;">
                     <div class="form-group">
@@ -3066,8 +3099,9 @@
                                           @input="s._hardText = $event.target.value"
                                           placeholder="never name or mock an individual referee"></textarea>
                                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin-top:4px;">
-                                    Added on top of the universal rules (no slurs, no threats, no
-                                    attacks on protected characteristics) which always apply.
+                                    Things it must never say. Example: never defend the Iranian
+                                    regime, never sound sympathetic to the IRGC. Added on top of
+                                    the universal rules (no slurs, no threats).
                                 </p>
                             </div>
                             <div class="form-group">

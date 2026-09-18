@@ -103,6 +103,13 @@ SUMMON_ALLOWLIST = "allowlist"
 SUMMON_ANYONE = "anyone"
 _SUMMON_POLICIES = (SUMMON_ALLOWLIST, SUMMON_ANYONE)
 
+#: What to do when no declared subject matches.
+#: ``skip`` (default) — stay silent. ``voice`` — reply with no position,
+#: emoji picking the tone. A ``*`` catch-all still answers everything.
+UNMATCHED_SKIP = "skip"
+UNMATCHED_VOICE = "voice"
+_UNMATCHED = (UNMATCHED_SKIP, UNMATCHED_VOICE)
+
 #: Applied to EVERY subject on top of whatever the operator wrote. These are
 #: the lines that get an account suspended rather than merely disliked, and
 #: an operator editing a `view` at speed should not have to remember them.
@@ -194,6 +201,9 @@ class ReplyConfig:
     summoner_policy: str = SUMMON_ALLOWLIST
     allow_emoji_mood: bool = True
     stance_check: bool = True
+    unmatched: str = UNMATCHED_SKIP
+    use_knowledge: bool = False
+    knowledge_library: str = ""
 
     def can_draft(self) -> bool:
         # Subjects are optional. Zero subjects = voice-only: reply to
@@ -378,6 +388,19 @@ def get_reply_config() -> ReplyConfig:
         stance_check=_as_bool(
             _cs_get("connectors.x.reply.stance_check"), True
         ),
+        unmatched=(
+            str(_cs_get("connectors.x.reply.unmatched", UNMATCHED_SKIP) or UNMATCHED_SKIP)
+            .strip().lower()
+            if str(_cs_get("connectors.x.reply.unmatched", UNMATCHED_SKIP) or "")
+            .strip().lower() in _UNMATCHED
+            else UNMATCHED_SKIP
+        ),
+        use_knowledge=_as_bool(
+            _cs_get("connectors.x.reply.use_knowledge"), False
+        ),
+        knowledge_library=str(
+            _cs_get("connectors.x.reply.knowledge_library", "") or ""
+        ).strip(),
     )
 
 
@@ -503,11 +526,11 @@ async def classify(
 ) -> Subject | None:
     """Match *text* to a declared subject, or return ``None``.
 
-    Empty text returns ``None`` (nothing to react to). Everything else
-    returns a Subject: a keyword/LLM hit when one exists, otherwise the
-    implicit voice catch-all so a summon still gets a reply and the emoji
-    can set the tone. Silence is reserved for the rails (allowlist, caps,
-    screen), not for "we did not predict this topic".
+    Empty text returns ``None``. No subjects at all still returns the
+    implicit voice catch-all (emoji-only mode). When specific subjects
+    exist and none match: ``unmatched=skip`` (default) returns ``None``
+    so the summon stays silent; ``unmatched=voice`` returns the voice
+    catch-all. A ``*`` subject is a keyword hit and never reaches this.
     """
     cfg = cfg or get_reply_config()
     if not (text or "").strip():
@@ -523,16 +546,20 @@ async def classify(
         try:
             hit = await _llm_pick(text, cfg.subjects)
         except ClassifierUnavailable as exc:
-            logger.warning(
-                "[x-reply] subject classifier could not run (%s) — "
-                "falling back to voice-only", exc,
-            )
-            return implicit_voice_subject()
+            if cfg.unmatched == UNMATCHED_VOICE:
+                logger.warning(
+                    "[x-reply] classifier could not run (%s) — voice-only", exc,
+                )
+                return implicit_voice_subject()
+            raise
         if hit is not None:
             logger.info("[x-reply] subject %r matched via classifier", hit.id)
             return hit
-    logger.info("[x-reply] no declared subject matched — voice-only reply")
-    return implicit_voice_subject()
+    if cfg.unmatched == UNMATCHED_VOICE:
+        logger.info("[x-reply] no declared subject matched — voice-only reply")
+        return implicit_voice_subject()
+    logger.info("[x-reply] no declared subject matched — not replying")
+    return None
 
 
 def no_match_detail(text: str, subjects: tuple[Subject, ...]) -> str:
