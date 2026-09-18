@@ -135,7 +135,7 @@ jobs:
       # Keyless signature bundles (*.sigstore.json) next to each artifact.
       # Verify with: python -m sigstore verify identity ...
       - name: Sign artifacts with Sigstore
-        uses: sigstore/gh-action-sigstore-python@v3.0.0
+        uses: sigstore/gh-action-sigstore-python@v3.5.0
         with:
           inputs: |
             ./dist/kazma-*.whl
