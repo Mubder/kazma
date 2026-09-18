@@ -197,6 +197,54 @@ async def _tweet_id_from_text(text: str) -> str:
     return tid
 
 
+async def _walk_off_ours(
+    client: Any,
+    tweet: dict[str, Any],
+    includes: dict[str, Any],
+    my_user_id: str,
+    *,
+    hops: int = 8,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Climb replied_to / quoted until the post is not ours.
+
+    Deep-thread follow-ups sit under Kazma's last reply, so the immediate
+    parent is us. One extra hop after leaving our tweets prefers the
+    original (SpaceX/NVIDIA/…) over the operator's previous @mention.
+    """
+    from kazma_core.x_api.client import XApiError
+
+    current = dict(tweet or {})
+    inc = dict(includes or {})
+    my = str(my_user_id or "")
+    for _ in range(max(1, hops)):
+        author = str(current.get("author_id") or "")
+        if author and my and author != my:
+            up = _ref_id(current, "quoted") or _ref_id(current, "replied_to")
+            if up:
+                bundled = _index_tweets(inc).get(up)
+                nxt, ninc = bundled, inc
+                if nxt is None:
+                    try:
+                        nxt, ninc = await client.get_tweet(up)
+                    except XApiError:
+                        nxt = None
+                if nxt and str(nxt.get("author_id") or "") != my:
+                    return dict(nxt), dict(ninc or inc)
+            return current, inc
+        up = _ref_id(current, "quoted") or _ref_id(current, "replied_to")
+        if not up:
+            return current, inc
+        bundled = _index_tweets(inc).get(up)
+        if bundled is not None:
+            current = bundled
+            continue
+        try:
+            current, inc = await client.get_tweet(up)
+        except XApiError:
+            return current, inc
+    return current, inc
+
+
 def _followers(user: dict[str, Any] | None) -> int | None:
     if not isinstance(user, dict):
         return None
@@ -372,10 +420,27 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
                 and not url_id
             )
             if own_thread:
-                await _skip(
-                    "reply to our own post — only @mentions summon, not thread replies"
+                # Live 2026-09-19: @KazmaAI How would you assess it vs Whisper
+                # sat under our last reply and was skipped. Trusted follow-ups
+                # (and #Open strangers) must keep talking; walk up to the
+                # original post so the draft is not about our own tweet.
+                parent, p_includes = await _walk_off_ours(
+                    client, parent or {}, p_includes, uid,
                 )
-                continue
+                parent_text = str((parent or {}).get("text") or "") or text
+                p_users = _index_users(p_includes)
+                p_author = p_users.get(str((parent or {}).get("author_id") or ""))
+                parent_handle = str(
+                    (p_author or {}).get("username") or summoner
+                ).lower()
+                source_id = str((parent or {}).get("id") or source_id)
+                still_ours = parent_handle == my_handle
+                if still_ours and not cfg.is_trusted_summoner(summoner):
+                    await _skip(
+                        "reply to our own post — only @mentions summon, "
+                        "not thread replies"
+                    )
+                    continue
             target_followers = _followers(p_author)
             parent_id = source_id
         else:

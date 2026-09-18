@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fix — deep-thread @KazmaAI follow-ups were skipped as own-post (2026-09-19)
+
+`@KazmaAI How would you assess it relative to Whisper?` under our last
+reply was skipped ("reply to our own post") with no parent text. Trusted
+follow-ups now walk up the reply chain to the original post and draft
+against that. Strangers still need #Open.
+
 ## feat(x): #Open / #Close as whole hashtags (2026-09-19)
 
 `#Open` is safe as the open-thread marker: it matches `#open` and does

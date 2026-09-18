@@ -34,7 +34,7 @@ When a card matches, its **side** (against / support) is locked. A roast emoji c
 | Reply under someone else's post | That parent post |
 | Quote of someone else (even under Kazma's own tweet) | The **quoted** post |
 | `هذا` + `x.com/…/status/…` or `t.co/…` in a reply to Kazma | The linked post |
-| Bare reply under Kazma with no quote and no link | **Ignored** (X pre-fills @handle) |
+| Bare reply under Kazma with no quote and no link | **You** (trusted): walks up to the original post and drafts. **Strangers**: ignored unless `#Open` |
 
 X only lets this account **post** a reply on a tweet that mentions it or that it wrote. The public reply therefore sits **under your mention**, not under the original. The *text* it drafts against is still the original when a quote or link is present.
 

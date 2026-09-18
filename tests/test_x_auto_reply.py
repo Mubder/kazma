@@ -2110,10 +2110,10 @@ async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
                 [{
                     "id": "55",
                     "text": "@KazmaAI nah",
-                    "author_id": "2",
+                    "author_id": "9",
                     "referenced_tweets": [{"type": "replied_to", "id": "44"}],
                 }],
-                {"users": [{"id": "2", "username": "balfaris"}]},
+                {"users": [{"id": "9", "username": "random_user"}]},
             )
 
         async def get_tweet(self, tid):
@@ -2130,6 +2130,83 @@ async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
     rows = await mf.poll_once(cfg=_cfg(subjects=()))
     assert rows and rows[0]["action"] == "skipped"
     assert "own post" in rows[0]["reason"]
+    mf._identity = None
+
+
+@pytest.mark.asyncio
+async def test_poll_once_trusted_followup_walks_to_the_original(
+    _no_llm, monkeypatch
+):
+    """Deep thread: mention under our reply still reads SpaceX, not us."""
+    import kazma_core.x_api.mentions_fire as mf
+
+    seen = {}
+    fetched = []
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["parent"] = parent_text
+        seen["handle"] = parent_handle
+        return "drafted"
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id=""):
+            return (
+                [{
+                    "id": "77",
+                    "text": (
+                        "@KazmaAI @SpaceXAI How would you assess it "
+                        "relative to the Whisper model from @OpenAI?"
+                    ),
+                    "author_id": "2",
+                    "referenced_tweets": [{"type": "replied_to", "id": "44"}],
+                    "conversation_id": "10",
+                }],
+                {"users": [{"id": "2", "username": "balfaris"}]},
+            )
+
+        async def get_tweet(self, tid):
+            fetched.append(tid)
+            if tid == "44":
+                return (
+                    {
+                        "id": "44",
+                        "text": "Kazma's previous reply about the speech model",
+                        "author_id": "1",
+                        "referenced_tweets": [{"type": "replied_to", "id": "10"}],
+                    },
+                    {"users": [{"id": "1", "username": "KazmaAI"}]},
+                )
+            if tid == "10":
+                return (
+                    {
+                        "id": "10",
+                        "text": "New speech model from SpaceXAI, not Whisper",
+                        "author_id": "8",
+                    },
+                    {"users": [{"id": "8", "username": "spacexai"}]},
+                )
+            raise AssertionError(tid)
+
+    mf._identity = None
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    rows = await mf.poll_once(cfg=_cfg(subjects=()))
+    assert rows and rows[0]["action"] == "awaiting_approval"
+    assert "Whisper" in seen.get("parent", "") or "speech model" in seen.get("parent", "")
+    assert seen.get("handle") == "spacexai"
+    assert "44" in fetched and "10" in fetched
     mf._identity = None
 
 
