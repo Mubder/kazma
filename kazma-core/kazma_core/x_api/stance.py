@@ -226,17 +226,21 @@ _OPINION_EN = (
 )
 _OPINION_AR = (
     "شرايك", "شرايكم", "شرايچ", "رأيك", "رايك", "رايكم", "رأيكم",
-    "شنو رايك", "وش رايك",
+    "شنو رايك", "وش رايك", "كيف", "شلون", "شنو", "ليش", "هل",
+)
+_QUESTION_EN = re.compile(
+    r"(?<!\w)(how|what|why|when|where|should|could|would)\b",
+    re.IGNORECASE,
 )
 
 
 def is_opinion_ask(text: str) -> bool:
-    """True when the mention is 'what do you think?' not a side vote.
+    """True when the mention is asking for a take, not voting a side.
 
-    Live 2026-09-19: ``شرايك … 👍🏻 والا 👎🏻؟`` was read as thumbs-up
-    (first emoji) or, worse, guessed as a Settings card. Both polarities
-    in one mention, or شرايك / what do you think, means react to THIS
-    post — do not force against/support and do not pick a country card.
+    Live 2026-09-19: ``How er can make use of this into Kazma framework?``
+    on an NVIDIA Dynamo post skipped because there was no subject keyword
+    and no 😂/against word. A question mark, شرايك, or how/what/why means
+    react to THIS post — do not stay silent and do not pick a country card.
     """
     body = str(text or "")
     if not body.strip():
@@ -247,8 +251,14 @@ def is_opinion_ask(text: str) -> bool:
         return True
     if "❤️" in body and "😂" in body:
         return True
+    if "?" in body or "؟" in body:
+        return True
     low = body.lower()
     if "what do you think" in low or "what do u think" in low:
+        return True
+    if "make use" in low or "into kazma" in low or "in kazma" in low:
+        return True
+    if _QUESTION_EN.search(low):
         return True
     for w in _OPINION_EN:
         if re.search(rf"(?<!\w){re.escape(w)}(?!\w)", low):

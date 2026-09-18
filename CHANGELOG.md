@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Fix — a how-question mention is a take on this post, not silence (2026-09-19)
+
+`@KazmaAI How er can make use of this into Kazma framework?` under an
+NVIDIA Dynamo tweet skipped: no country keyword, no 😂. A `?` / `؟`,
+how/what/why, `شرايك`, or "into kazma" is now an opinion ask — voice on
+*this* post, same as Ali's JSON thread.
+
 ## docs: X auto-reply guide matches the shipped product (2026-09-19)
 
 Operator guide rewritten: keyword cards vs opinion-ask vs summon emoji,

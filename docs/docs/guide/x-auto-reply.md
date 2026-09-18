@@ -16,7 +16,7 @@ A reply is always **one subject + one side**. Emoji is **tone** when a Settings 
 Walk this list. The first hit wins.
 
 1. **Keyword on a Settings card** — whole word for ASCII, containment for other scripts. Cards are tried **top to bottom**. Put specific topics above broad ones.
-2. **Opinion ask** — `شرايك` / `what do you think` / both 👍 and 👎 (or ❤️ and 😂) in the same mention. Reacts to *this* post in voice. Does not pick a country card.
+2. **Opinion ask** — `شرايك` / `what do you think` / a `?` / `؟` / how-what-why / both 👍 and 👎 (or ❤️ and 😂) in the same mention. Reacts to *this* post in voice. Does not pick a country card.
 3. **Summon side** — one polarity in the mention:
    - 😂 🤣 💀 🔥 🤬 😡 🙄 👎 or `against` / `roast` / `ضد` / `هاجم` → **criticise this post**
    - ❤️ 👏 💯 🙏 👍 or `support` / `defend` / `دافع` / `معاه` → **defend this post**

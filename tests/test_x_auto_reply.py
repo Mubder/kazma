@@ -239,6 +239,34 @@ async def test_arabic_ai_opinion_ask_is_not_kuwait(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_how_can_we_use_this_in_kazma_is_voice(monkeypatch):
+    """NVIDIA Dynamo post + a how-question must not stay silent."""
+    seen = {}
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", **_k):
+        seen["id"] = subject.id
+        seen["parent"] = parent_text
+        return "drafted"
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    res = await handle_summon(
+        summon_id="nv1", parent_id="p",
+        parent_text=(
+            "Your LLM endpoint works. But how does it perform when traffic "
+            "increases? NVIDIA Dynamo AIPerf helps you measure TTFT"
+        ),
+        parent_handle="nvidiaai", summoner="balfaris", target_followers=9_000,
+        cfg=_cfg(),
+        summon_text=(
+            "@NVIDIAAI @KazmaAI How er can make use of this into Kazma framework?"
+        ),
+    )
+    assert res.action == "awaiting_approval"
+    assert seen["id"] == "voice"
+    assert "Dynamo" in seen["parent"]
+
+
+@pytest.mark.asyncio
 async def test_unmatched_voice_when_configured(monkeypatch):
     async def _none(*a, **k):
         return None
@@ -1713,8 +1741,12 @@ def test_thumbs_up_or_down_is_an_opinion_ask():
     assert is_opinion_ask("@KazmaAI شرايك بكلام اخونا علي؟ 👍🏻 والا 👎🏻؟")
     assert is_opinion_ask("@KazmaAI what do you think? ❤️ or 😂")
     assert is_opinion_ask("شرايك بالموضوع")
+    assert is_opinion_ask(
+        "@NVIDIAAI @KazmaAI How er can make use of this into Kazma framework?"
+    )
     assert not is_opinion_ask("@KazmaAI 😂")
     assert not is_opinion_ask("@KazmaAI 👍")
+    assert not is_opinion_ask("@KazmaAI check this")
 
 
 def test_side_from_summon_emoji_and_words():
