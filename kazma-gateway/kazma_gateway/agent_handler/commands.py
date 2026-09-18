@@ -2199,6 +2199,7 @@ async def _try_x_command(
         /x approve <summon_id>        — publish a held draft
         /x deny <summon_id>           — discard a held draft
         /x retry <summon_id>          — re-run a skipped/failed summon
+        /x delete <summon_id>         — delete the posted reply on X and drop the log row
         /x list                       — recent summons and their state
         /x poll                       — force one mentions poll (paid tiers)
         /x subjects                   — the declared subjects
@@ -2227,6 +2228,7 @@ async def _try_x_command(
             "`/x approve <summon_id>` — publish a held draft\n"
             "`/x deny <summon_id>` — discard a held draft\n"
             "`/x retry <summon_id>` — re-run a skipped/failed summon\n"
+            "`/x delete <summon_id>` — delete the posted reply on X (or drop the log row)\n"
             "`/x list` — recent summons\n"
             "`/x subjects` — declared subjects and views\n"
             "`/x poll` — force one mentions poll (paid tier only)\n\n"
@@ -2308,6 +2310,19 @@ async def _try_x_command(
             res = await deny_summon(rest.split()[0])
             if res.ok:
                 await _send("⏭️ Denied — nothing posted.")
+            else:
+                await _send(f"❌ {res.reason}")
+            return True
+
+        if sub == "delete":
+            if not rest:
+                await _send("Usage: `/x delete <summon_id>` (see `/x list`).")
+                return True
+            from kazma_core.x_api.reply import forget_summon
+
+            res = await forget_summon(rest.split()[0])
+            if res.ok:
+                await _send(f"🗑️ {res.reason}")
             else:
                 await _send(f"❌ {res.reason}")
             return True

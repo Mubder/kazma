@@ -254,6 +254,9 @@
                     x-show="c.status === 'skipped' || c.status === 'failed' || c.status === 'awaiting_approval' || c.status === 'drafting'" x-cloak
                     :disabled="convBusy === c.summon_id"
                     @click="convAction('retry', c)">Retry</button>
+            <button class="btn btn-danger btn-sm"
+                    :disabled="convBusy === c.summon_id"
+                    @click="convAction('delete', c)">Delete</button>
           </span>
         </div>
       </div>

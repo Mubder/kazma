@@ -1794,3 +1794,112 @@ async def test_empty_cursor_looks_back_when_since_id_is_a_handled_summon(
     assert calls == ["2100705922142073166", ""]
     assert rows and rows[0]["mention"] == "2100999999999999999"
     mf._identity = None
+
+
+@pytest.mark.asyncio
+async def test_poll_once_skips_replies_to_our_own_posts(_no_llm, monkeypatch):
+    """@prefill on a reply to Kazma is still a thread reply, not a summon."""
+    import kazma_core.x_api.mentions_fire as mf
+
+    class _Xcfg:
+        def can_post(self):
+            return True
+        credentials = None
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def verify_credentials(self):
+            return {"id": "1", "username": "KazmaAI"}
+
+        async def get_mentions(self, uid, since_id=""):
+            return (
+                [{
+                    "id": "55",
+                    "text": "@KazmaAI nah",
+                    "author_id": "2",
+                    "referenced_tweets": [{"type": "replied_to", "id": "44"}],
+                }],
+                {"users": [{"id": "2", "username": "balfaris"}]},
+            )
+
+        async def get_tweet(self, tid):
+            assert tid == "44"
+            return (
+                {"id": "44", "text": "a Kazma post", "author_id": "1"},
+                {"users": [{"id": "1", "username": "KazmaAI"}]},
+            )
+
+    mf._identity = None
+    monkeypatch.setattr("kazma_core.x_api.client.XClient", _Client)
+    monkeypatch.setattr("kazma_core.x_api.config.get_x_config", lambda: _Xcfg())
+    _stub_draft(monkeypatch)
+    rows = await mf.poll_once(cfg=_cfg(subjects=()))
+    assert rows and rows[0]["action"] == "skipped"
+    assert "own post" in rows[0]["reason"]
+    mf._identity = None
+
+
+@pytest.mark.asyncio
+async def test_forget_removes_a_log_row_without_calling_x(_no_llm, monkeypatch):
+    from kazma_core.x_api.reply import forget_summon
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    async def _delete(**kw):
+        raise AssertionError("no tweet_id — must not hit X")
+
+    monkeypatch.setattr("kazma_core.x_api.booking.delete_x_post", _delete)
+    store = get_reply_store()
+    store.claim(summon_id="gone1", parent_id="p", target_handle="t", summoner="s")
+    store.mark_skipped("gone1", "nope")
+    res = await forget_summon("gone1")
+    assert res.ok and res.action == "deleted"
+    assert store.get("gone1") is None
+
+
+@pytest.mark.asyncio
+async def test_forget_deletes_the_posted_tweet(_no_llm, monkeypatch):
+    from kazma_core.x_api.reply import forget_summon
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    seen = {}
+
+    async def _delete(*, tweet_id):
+        seen["id"] = tweet_id
+        return True, {"deleted": True, "tweet_id": tweet_id}
+
+    monkeypatch.setattr("kazma_core.x_api.booking.delete_x_post", _delete)
+    store = get_reply_store()
+    store.claim(summon_id="p1", parent_id="p", target_handle="t", summoner="s")
+    store.mark_awaiting("p1", draft="the reply", subject_id="voice")
+    store.mark_posted("p1", tweet_id="777", draft="the reply")
+    res = await forget_summon("p1")
+    assert res.ok and seen["id"] == "777"
+    assert store.get("p1") is None
+
+
+def test_recent_orders_by_tweet_time_not_created_at():
+    """Retry used to bump created_at and jump an old summon to the top."""
+    from kazma_core.x_api.reply_store import get_reply_store
+
+    store = get_reply_store()
+    store.claim(
+        summon_id="2100000000000000001", parent_id="p",
+        target_handle="t", summoner="s", parent_text="older mention",
+    )
+    store.mark_skipped("2100000000000000001", "old")
+    store.claim(
+        summon_id="2100000000000000099", parent_id="p",
+        target_handle="t", summoner="s", parent_text="newer mention",
+    )
+    store.mark_skipped("2100000000000000099", "new")
+    # Pretend we retried the OLD one — new created_at, same snowflake.
+    store.release("2100000000000000001")
+    store.claim(
+        summon_id="2100000000000000001", parent_id="p",
+        target_handle="t", summoner="s", parent_text="older mention retried",
+    )
+    ids = [r.summon_id for r in store.recent(limit=10)]
+    assert ids[0] == "2100000000000000099", ids
+    assert ids[1] == "2100000000000000001", ids

@@ -26,6 +26,10 @@ and handles summons automatically. `GET /2/users/:id/mentions` is **not
 available on the Free tier**; it returns 403 there. The poller logs that
 clearly and backs off rather than hammering it.
 
+A summon is an **@mention**, not a reply on Kazma's own thread. Replying
+to a Kazma post (even when X pre-fills `@KazmaAI`) does not draft. A
+standalone `@KazmaAI 😂` or a mention under someone else's post does.
+
 Both triggers feed the same drafting core, so anything you tune with `/x
 roast` behaves identically when the poller fires it.
 
@@ -315,6 +319,7 @@ whole thing instantly.
 /x approve <summon_id>     publish a held draft
 /x deny <summon_id>        discard a held draft
 /x retry <summon_id>       re-run a skipped/failed summon
+/x delete <summon_id>      delete the posted reply on X (or drop the log row)
 /x list                    recent summons and their state
 /x subjects                what Kazma has views on
 /x poll                    force one mentions poll (paid plan)

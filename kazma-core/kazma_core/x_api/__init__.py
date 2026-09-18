@@ -10,6 +10,7 @@ from kazma_core.x_api.reply import (
     SummonResult,
     approve_summon,
     deny_summon,
+    forget_summon,
     handle_summon,
     retry_summon,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "approve_summon",
     "deny_summon",
     "evaluate_post",
+    "forget_summon",
     "get_reply_config",
     "get_x_config",
     "handle_summon",
