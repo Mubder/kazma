@@ -93,7 +93,7 @@ jobs:
       # exists so a stranger can verify the artifact was built from this repo,
       # at this commit, by this workflow, and see exactly what is inside it.
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
 
       - name: Build wheel + sdist
         run: |
