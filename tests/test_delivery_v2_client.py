@@ -1231,6 +1231,7 @@ class TestGateAuthoritativeFailPosture:
         ingest = js_function_body(src, "function _ingestStatus(status)")
         assert "_serverGatesAuth = !!status.gates_authoritative;" in ingest
         assert "status.gate_views" in ingest
+        assert "status.hitl" not in ingest
         # reset on session switch — a previous session's authority must not
         # leak into the next session's card painting
         reset = src.split("function _resetSessionTurnState()", 1)[1][:800]

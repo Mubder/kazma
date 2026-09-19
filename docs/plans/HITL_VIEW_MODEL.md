@@ -1,7 +1,7 @@
 # Plan: HITL view model — join before paint, one resolver
 
 **Date:** 2026-09-19
-**Status:** BINDING (E landing; Playwright 1 still unclaimed)
+**Status:** BINDING (F landing; Playwright 1 and 4 unclaimed)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.
 **Does not replace:** [`HITL_GATE_REGISTRY_PLAN.md`](HITL_GATE_REGISTRY_PLAN.md) (P6 — decision SoT) or [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble renderer). Those layers stay. This plan is the missing **join** between them, plus every other mouth that still derives “what should I show?” on its own.
 
@@ -203,7 +203,7 @@ If a PR cannot delete at least one of these (once that PR’s turn has come), it
 
 `rebuild()` may remain as TurnView internals. It is not a product state and must not be required for refresh-mid-pause once A1 lands.
 
-Leftover, **not** A1: the singular `hitl` object on `/status`. E stopped the web client from reading it (`gate_views` / `paused` are the live question). Kill the payload in F or a one-line follow-up.
+Leftover from A1, **killed in F:** the singular `hitl` object on `/status`. Checkpoint pending still feeds `paused`.
 
 ---
 
@@ -212,10 +212,10 @@ Leftover, **not** A1: the singular `hitl` object on `/status`. E stopped the web
 Today (`sse_chat/__init__.py`):
 
 ```json
-{ "generating", "paused", "hitl", "gates", "gates_authoritative" }
+{ "generating", "paused", "gates_authoritative", "gate_views" }
 ```
 
-`gates` is `live_gates_async` rows. Chat.js is the only JS consumer (`_serverGates`). Dashboard/TUI do not read it.
+`gates` and the singular `hitl` object are off the wire. Chat consumes `gate_views`. Dashboard/TUI poll `/api/pending-approvals`, not this endpoint.
 
 | PR | Wire |
 |---|---|
@@ -316,7 +316,7 @@ Remove or invert early-returns when the job is catch-up:
 
 **Files:** `chat.js`, `tests/test_approval_reattaches_the_stream.py`, `tests/test_delivery_reconciles.py`.
 
-Kill singular `/status.hitl` here or immediately after, once nothing reads it.
+Kill singular `/status.hitl` here or immediately after, once nothing reads it. **Killed in F.**
 
 ### F — CI gate; grep demoted; diagnosis map
 

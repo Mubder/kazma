@@ -1165,10 +1165,12 @@ NotImplementedError` from `playwright/_impl/_transport.py` or
   so `-m "not slow"` silently excluded it), and CI now installs the light
   pure-wheel deps (pillow/pymupdf/sqlite-vec/pypdfium2/numpy — without numpy
   the belief-graph PPR silently runs its degraded uniform-seed path) that the
-  `.[test]`-only install left `importorskip`ing/degrading. Still blind:
-  Playwright **one smoke** is a separate CI job (`tests/e2e/test_smoke.py`,
-  polls `/health/live`); the full e2e matrix stays out. Torch-bearing
-  `rag` extra is still too heavy for CI.
+  `.[test]`-only install left `importorskip`ing/degrading. Playwright is a
+  separate CI job: smoke (`tests/e2e/test_smoke.py`, polls `/health/live`)
+  plus a named GATE step for HITL view-model incidents 2 and 3
+  (`tests/e2e/test_hitl_view_model.py`). Remaining `tests/e2e` files run in
+  the same job. Incidents 1 and 4 stay unclaimed (no app-graph pause
+  harness). Torch-bearing `rag` extra is still too heavy for CI.
 
 ### 25. Long-Task Continue Protocol & Partial Pause (`agent/long_task.py`)
 

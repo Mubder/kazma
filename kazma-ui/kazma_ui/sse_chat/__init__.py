@@ -1273,43 +1273,18 @@ def create_sse_chat_router(
         # Check if a detached turn is running for this thread (SSE or WS)
         is_running = thread_id and is_turn_running(thread_id)
         paused = bool(thread_id) and is_thread_paused(thread_id)
-        hitl: dict[str, Any] | None = None
+        # HITL_VIEW_MODEL F: singular ``hitl`` is off the wire. Checkpoint
+        # pending still feeds ``paused`` so a restart without in-memory
+        # ``_paused_threads`` does not look idle.
+        checkpoint_pending = False
         if thread_id:
             try:
-                from kazma_ui.hitl_status import (
-                    hitl_thread_status,
-                    persisted_hitl_for_thread,
-                )
+                from kazma_ui.hitl_status import hitl_thread_status
 
-                gate = "idle"
-                try:
-                    gate = await hitl_thread_status(thread_id, graph=_get_graph())
-                except Exception:
-                    gate = "idle"
-                part = persisted_hitl_for_thread(thread_id)
-                payload: dict[str, Any] = {}
-                if isinstance(part, dict):
-                    raw_payload = part.get("payload")
-                    payload = raw_payload if isinstance(raw_payload, dict) else {}
-                    hitl = {
-                        "state": str(part.get("state") or "pending"),
-                        "tool": str(part.get("tool") or payload.get("tool") or ""),
-                        "interrupt_id": str(
-                            part.get("interrupt_id")
-                            or payload.get("interrupt_id")
-                            or ""
-                        ),
-                        "gate": gate,
-                    }
-                elif gate != "idle":
-                    hitl = {
-                        "state": gate,
-                        "tool": "",
-                        "interrupt_id": "",
-                        "gate": gate,
-                    }
+                gate = await hitl_thread_status(thread_id, graph=_get_graph())
+                checkpoint_pending = str(gate or "") == "pending"
             except Exception:
-                hitl = None
+                checkpoint_pending = False
 
         # ── Gate registry (P2): the live-gates list rides along so the
         # client renders decision truth (one entry per gate — a second
@@ -1365,7 +1340,7 @@ def create_sse_chat_router(
                 paused = True
             elif any(bool(v.get("interactive")) for v in gate_views if isinstance(v, dict)):
                 paused = True
-            elif isinstance(hitl, dict) and str(hitl.get("gate") or "") == "pending":
+            elif checkpoint_pending:
                 paused = True
 
         return {
@@ -1373,7 +1348,6 @@ def create_sse_chat_router(
             "thread_id": thread_id,
             "generating": bool(is_running),
             "paused": bool(paused),
-            "hitl": hitl,
             "gates_authoritative": gates_authoritative,
             "gate_views": gate_views,
         }

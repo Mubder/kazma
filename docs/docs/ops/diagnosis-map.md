@@ -35,7 +35,8 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 3. Danger tools pass **one of** three HITL **execution** paths; **decision** truth is `hitl_gates.db`. Swarm FanOut is **tri-state**, not first-wins.  
 4. Workspace root has **one** resolver: `workspace.binding.resolve_active_root()` (also `file_write._get_workspace`).  
 5. Runtime settings SoT is **ConfigStore** (`get_config_store()`), not ad-hoc files.  
-6. Turn Delivery: `close_turn` is the only closer; the client **projects**. No second painter.
+6. Turn Delivery: `close_turn` is the only closer; the client **projects**. No second painter.  
+7. HITL **view**: join transcript + registry **before** paint. `resolve_gate_views` is the only answer to “what state is this gate in.” JS paints `part.view` / `status.gate_views`. Pending is the only interactive state.
 
 ---
 
@@ -47,7 +48,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | YOLO “on” but still asks approval | `thread_id` ContextVar vs session_id | WS resume uses `ainvoke` + `enable_yolo(thread)` | §2, §4 HITL A |
 | Danger tools run with **no** prompt | Which **graph** is live (`_graph_holder` recompiled?) | `hitl_config` omitted at a build site | §3 Graph build |
 | Approve button does nothing | Resume **thread_id** matches interrupt; registry **claim** 409? | Checkpointer present; `Command(resume=…)`; `hitl_gates.db` row state | §4 HITL A, gate registry |
-| Ghost / pre-stamped **Approved** card / second question only on dashboard | `hitl_gates.py` — `pending` is the only live-button state | `close_turn` + `_serverGates`; never infer Approved from a missing row | Gate registry (bottom) |
+| Ghost / pre-stamped **Approved** card / second question only on dashboard | `resolve_gate_views` + `gate_views`; `pending` is the only interactive state | Join `/messages` + `/status` before paint; never infer Approved from a missing row | §4 HITL view, gate registry |
 | Double approval / hang after Approve | `_graph_hitl_gate_ctx` / `_hitl_approved_ctx` | Bus should skip when graph already approved; **H-8** no second gate from `execute()` | §4 double-gate |
 | IDE write **denied by HITL** | IDE uses **bus** (HITL B), not graph interrupt | NullBus fail-closed without platform bus | §4 B, §7 Tools |
 | Settings toggle has **no effect** | Key names: YAML nested vs ConfigStore flat | Consumer function actually reads the key | §6 Config layers |
@@ -95,8 +96,8 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | Graph source | `_graph_holder` (post-recompile) | same holder; **idle unless** `KAZMA_WS_GRAPH=1` |
 | `recursion_limit` | long-task budgets | same helper when graph is enabled |
 | Turn end | SSE `event: done` | `idle` + `stream_end` (journaled) |
-| HITL emit | SSE `hitl_approval` frame | telemetry `hitl_approval` (scan) |
-| HITL resume | `POST /api/approve/{thread_id}` | WS `approve_tool` **off** unless `KAZMA_WS_GRAPH=1` |
+| HITL emit | SSE `hitl` frame carries `view` | telemetry `hitl_approval` (scan) |
+| HITL resume | `POST /api/approve/{thread_id}` (200/409 carry `view` + `gate_id`) | WS `approve_tool` **off** unless `KAZMA_WS_GRAPH=1` |
 | YOLO | `/yolo` slash in stream | same, only if WS graph is on |
 | Env context | per-turn `build_env_context()` | same when graph is on |
 | Soul inject | fenced self-improvement block | (see gateway for TG path) |
@@ -115,7 +116,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 - `kazma-ui/kazma_ui/sse_chat/` (package)  
 - `kazma-ui/kazma_ui/turn_runtime.py` (`close_turn`)  
 - `kazma-ui/kazma_ui/routes/ws_chat.py`  
-- `kazma-ui/kazma_ui/static/js/chat.js` (`renderTurn`, `_paintHitlFromDoc`, `_serverGates`)  
+- `kazma-ui/kazma_ui/static/js/chat.js` (`renderTurn`, `_serverGateViews`, TurnView)  
 - `kazma-ui/kazma_ui/static/js/modules/turn_document.js`  
 - `kazma-ui/kazma_ui/static/js/stores/agentStore.js`  
 - `kazma-ui/kazma_ui/session_manager.py`  
@@ -180,13 +181,31 @@ After graph Approve, ContextVars prevent a second bus prompt. Breaking this = ha
 - 1 platform → that adapter.  
 - 2+ platforms → **`FanOutBusAdapter`** (**tri-state**: `True` settles; `False` is a vote until `expected_voters` or deadline — not first-boolean-wins; not web `claim_gate`).
 
+### View — join before paint, one resolver, one submit
+
+`kazma_ui/gate_view.py` `resolve_gate_views(parts, live_rows, *, authoritative)` runs at the wire (`GET /messages` stamps `part.view`, `GET …/status` returns `gate_views`, journal `hitl` frames carry `view`, approve 200/409 carry `view` + `gate_id`). JS looks up `live_gate_views[id] ?? part.view` and omits chrome when there is none. It does not re-derive.
+
+`loadSession` does `Promise.all` of `/messages?stats=1` and `/status` and ingests views **before** the first TurnView pass. Identity is `gate_id` (plus alias), not `thread_id`.
+
+| Mouth | How it sees pending | How it submits |
+|-------|---------------------|----------------|
+| Web bubble | `gate_views` / `part.view` → TurnView | `POST /api/approve/{thread_id}` |
+| Dashboard | `/api/pending-approvals`, dedup by `gate_id` / alias | same POST |
+| TUI | same list; shown-set keyed by gate id | same POST |
+| Telegram / Discord / Slack | native keyboard | `hitl approve {thread_id}` (graph has one open interrupt) |
+| Swarm FanOut | in-memory Events | **tri-state** — do not retarget web `claim_gate` |
+| Pipeline checkpoints | swarm panel | `approve_checkpoint` + `settle_gate` |
+
+Do not flatten mouths that are already honest. Gateway sequential approve-by-thread is correct. FanOut first-wins was a named incident (H-12).
+
 ### Related files
 
 - `safety/hitl.py`, `safety/yolo.py`, `safety/hitl_grants.py`  
 - `agent/tool_registry.py`, `agent/graph_tool_worker.py`  
 - `swarm/safety.py`, `swarm/bus.py`, `swarm/checkpoint_manager.py`  
-- `safety/hitl_gates.py`, `kazma_ui/turn_runtime.py`, `chat.js` `_serverGates`  
+- `safety/hitl_gates.py`, `kazma_ui/gate_view.py`, `kazma_ui/turn_runtime.py`, `chat.js` `_serverGateViews`  
 - Gateway `*_bus.py` adapters  
+- `tests/test_gate_view.py` (corpus) · `tests/e2e/test_hitl_view_model.py` (Playwright 2 and 3 — CI gate)  
 
 ---
 
@@ -402,6 +421,7 @@ Adding a **fourth** site without the fence is a security regression.
 | Research stack | `python scripts/smoke_research_stack.py` |
 | SearXNG / recovery unit | `tests/test_searxng_discovery.py`, `tests/test_hard_page_recovery.py` |
 | Settings → HITL list | ConfigStore `safety.require_approval_for` → `get_hitl_config` |
+| HITL view (join / paint / submit) | `tests/test_gate_view.py`; Playwright 2+3 in `tests/e2e/test_hitl_view_model.py` (CI gate) |
 | Compile | `py_compile` on touched modules |
 
 When you **merge** two paths into one, add a test that would have failed under the old dual-path bug.
@@ -421,6 +441,7 @@ When you **merge** two paths into one, add a test that would have failed under t
 | 2026-09 | HITL Gate Registry | Decision = `hitl_gates.db`; execution = checkpoint. No inferred Approved |
 | 2026-09 | FanOut tri-state | Do not restore first-boolean-wins; web `claim_gate` stays 200/409 |
 | 2026-09 | Turn Delivery V2 | `close_turn` only closer; no second `chat.js` painter |
+| 2026-09 | HITL view model | Join before paint; `resolve_gate_views` only; submit through `POST /api/approve/{thread_id}` (gateway slash stays thread-id) |
 
 ---
 
@@ -531,7 +552,9 @@ done while a question was outstanding → `kazma_core/safety/hitl_gates.py`
 
 - `pending` is the ONLY state that renders live buttons; readers use the
   registry (`hitl_thread_status`, `close_turn`, `/api/pending-approvals`,
-  chat.js `_serverGates`).
+  `status.gate_views`). Chat paints `part.view` / `gate_views`; it does
+  not re-derive. Dashboard and TUI poll the pending list keyed by
+  `gate_id`, not `thread_id`.
 - A pending row + paused checkpoint ⇒ the turn stays OPEN (silence rule).
   Paused + no covering row ⇒ backfill from the snapshot and stay open.
   A pending row + NOT paused ⇒ orphan, settled in `close_turn`.
