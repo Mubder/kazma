@@ -43,9 +43,12 @@
           if (settings.tts_provider) {
             localStorage.setItem(TTS_PROVIDER_KEY, settings.tts_provider);
           }
-          if (settings.enabled !== undefined) {
-            localStorage.setItem(TTS_ENABLED_KEY, settings.enabled ? 'true' : 'false');
-          }
+          // Do NOT copy settings.enabled onto kazma.ttsEnabled.
+          // Voice.enabled is the STT/TTS subsystem (Telegram STT, Edge TTS,
+          // …). The browser key is only `/voice on|off`. Copying enabled=true
+          // re-armed auto-speak after every refresh, so `/voice off` never
+          // stuck. Typed chat no longer auto-plays; this still must not
+          // clobber a mute the operator set.
         }
       }
     } catch (e) {
@@ -293,7 +296,12 @@
    * its own stop state instead of a single global toggle.
    */
   async function playTTS(text, provider, owner) {
-    if (!isTtsEnabled() || _ttsUnavailable) return;
+    // `_ttsUnavailable` is a server 503 latch (no TTS configured).
+    // `/voice off` mutes unsolicited playback only. An explicit 🔊 click
+    // (owner set) always tries — that is the opt-in, and a leftover
+    // kazma.ttsEnabled=false from the old Settings sync must not brick it.
+    if (_ttsUnavailable) return;
+    if (!owner && !isTtsEnabled()) return;
     provider = provider || getTtsProvider();
     // One voice at a time — a new reply supersedes the previous clip. This
     // also bumps the generation, cancelling any request still in flight.

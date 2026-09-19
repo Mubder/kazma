@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Fix — web chat no longer auto-plays TTS after every reply (2026-09-19)
+
+Typed replies stay silent. Click 🔊 on the message to hear it. Settings →
+Voice on (needed for Telegram STT) no longer re-arms browser speech on
+refresh. Live voice and Telegram voice-note replies are unchanged.
+
 ## Fix — deep-thread @KazmaAI follow-ups were skipped as own-post (2026-09-19)
 
 `@KazmaAI How would you assess it relative to Whisper?` under our last

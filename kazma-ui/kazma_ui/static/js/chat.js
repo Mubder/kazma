@@ -3412,13 +3412,12 @@
           }
           updateContextBadgeSoon();
         }
-        // Play TTS for the assistant's response. Skipped while live voice
-        // is streaming — that socket speaks the reply itself (sentence by
-        // sentence), and both mouths firing would double-speak the turn.
-        if (tokenAccum && window.KazmaVoice && !interrupted &&
-            !(window.KazmaVoice.isStreaming && window.KazmaVoice.isStreaming())) {
-          window.KazmaVoice.playTTS(tokenAccum);
-        }
+        // Typed-chat replies stay silent. Speak is the 🔊 on the message
+        // (toggleSpeakMessage). Live voice (/ws/voice) still speaks itself.
+        // Telegram/Discord/Slack auto voice-notes are Settings tts_reply
+        // after a voice inbound — not this SSE path. Auto-playing here is
+        // what made the tab talk after every reply, then again after a
+        // refresh once Settings Voice was on.
         } finally {
         // Flush any throttled live paint so the final frame shows the FULL
         // accumulated text (the last token batch may still be coalesced).
