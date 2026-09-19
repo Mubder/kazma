@@ -365,21 +365,26 @@
   }
 
   function _attachJournal(reason) {
-    if (activeStream || _attachInFlight) return;
     if (!chatSessionId) return;
+    // A dead handle is not a live stream. Treating `activeStream` as
+    // proof of liveness left a paused thread with nobody reading the
+    // journal (2026-09-14).
+    if (activeStream && !_streamIsLive()) {
+      try { activeStream.abort(); } catch (eDead) { /* already dead */ }
+      activeStream = null;
+    }
+    if (_streamIsLive() || _attachInFlight) return;
     var stream = window.KazmaStream;
     if (!stream || typeof stream.sse !== 'function') return;
     // An Approve click is a deliberate operator action, never a cursor
-    // loop — it must never be rationed by the reopen budget. Live
-    // 2026-09-04: after a turn with a few stream hiccups the budget was
-    // exhausted, the post-approve attach was silently declined, and the
-    // CoT sat frozen for 3+ minutes (heartbeats journaled server-side,
-    // nobody attached) until the pending-approval poll painted the next
-    // card. Reset the budget for approve-driven attaches and SAY SO when
-    // a decline happens.
-    if (reason === 'approve-json' || reason === 'approve-409') {
+    // loop — it must never be rationed by the reopen budget. Same for a
+    // thread that is still paused: exhausting the budget left a live
+    // question with no stream. Reset and SAY SO when a decline happens.
+    var waiveBudget = reason === 'approve-json' || reason === 'approve-409'
+      || _awaitingApproval || _serverPaused || hasLiveGate();
+    if (waiveBudget) {
       if (_reopenCount > 0) {
-        console.warn('[KazmaChat] Reopen budget reset by approve attach');
+        console.warn('[KazmaChat] Reopen budget reset by ' + (reason || 'pause') + ' attach');
       }
       _reopenCount = 0;
     }
@@ -525,14 +530,16 @@
         } else {
           endTurn();
         }
-        if (!data && !_awaitingApproval) {
+        if (!data) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
       },
       onError: function() {
         if (!_mine()) return;
         activeStream = null;
-        if (_awaitingApproval) return;
+        // HITL pause closes the HTTP body. That is catch-up, not a failed
+        // turn — always resync. Skipping because `_awaitingApproval` left
+        // the bubble on a frozen card with no journal tail.
         _resyncDelivery('sse-fail');
       }
     };
@@ -713,33 +720,15 @@
       if (_sseEpoch !== epochAtFetch) return; // a new turn started meanwhile
       var status = pair[0] || {};
       var messages = pair[1] || [];
-      var generating = !!status.generating;
-      var paused = !!status.paused;
-      _serverGenerating = generating;
-      _serverPaused = paused;
-      _serverHitl = (status.hitl && typeof status.hitl === 'object') ? status.hitl : null;
-      _serverGates = Array.isArray(status.gates) ? status.gates : [];
-      _serverGatesAuth = !!status.gates_authoritative;
-      _serverThreadId = String(status.thread_id || '');
+      _ingestStatus(status);
+      var generating = _serverGenerating;
+      var paused = _serverPaused;
       var lastMsg = messages.length ? messages[messages.length - 1] : null;
-      var pendingGate = false;
-      if (_serverGates && _serverGates.length) {
-        for (var gi = 0; gi < _serverGates.length; gi++) {
-          if (String(_serverGates[gi].state || '') === 'pending') { pendingGate = true; break; }
-        }
-      }
-      var hitlPending = !!(_serverHitl && String(_serverHitl.gate || '') === 'pending');
-      var liveHitl = pendingGate || hitlPending || paused;
+      var liveHitl = _statusHasLiveHitl(status) || paused;
 
       // Registry answered authoritatively and the thread is idle → stamp
       // fossil live-button cards resolved (see _reconcileHitlCardsWithGates).
       if (!generating && !liveHitl) _reconcileHitlCardsWithGates();
-      // Hydration painted pending parts as 'awaiting' (disabled, sorted as
-      // settled) because the registry had not answered yet. Now it has:
-      // re-render so a live gate rebuilds with buttons, and a claimed one
-      // keeps its settled label. Without this pass the awaiting paint is
-      // permanent — hasLiveGate() becomes true from the registry while the
-      // card still has no buttons (2026-09-19, refresh on a live pause).
       _rerenderHitlDocs();
 
       // Server idle (no live gate) after /abort or restart: do not keep the
@@ -747,16 +736,47 @@
       if (!generating && !liveHitl && _awaitingApproval) {
         _releaseHitlComposer('resync-idle');
       }
-      if (liveHitl && !_awaitingApproval) pauseForApproval(_serverHitl);
-      if (liveHitl && !hasLiveGate()) {
+      if (liveHitl && !_awaitingApproval) {
+        var liveView = _firstInteractiveView();
+        pauseForApproval(liveView ? _payloadFromView(liveView) : null);
+      }
+      // Catch-up never skips because a card "looks" settled. Paint every
+      // interactive view, then recover from the pending list even when
+      // chrome is omitted or frozen.
+      if (liveHitl) {
         _paintLiveGates();
         setTimeout(recoverMissedApproval, 0);
+      }
+
+      // This-turn durable (parts + interim text) even if the stream is live.
+      // Previous-turn lastMsg is NOT this turn — skip it while paused so
+      // we do not paint an older answer over a live question (2026-08-27).
+      if (lastMsg && lastMsg.role === 'assistant' && _messageIsThisTurn(lastMsg)) {
+        if (isPlanOnlyMessage(lastMsg.content)) {
+          try { tryIngestPlanFromText(lastMsg.content); } catch (ePlan) { /* ignore */ }
+        } else {
+          applyTurnEvent({
+            type: 'hydrate',
+            source: 'resync',
+            turn_id: lastMsg.turn_id || _liveTurnId,
+            content: lastMsg.content,
+            parts: lastMsg.parts,
+            activity: lastMsg.activity,
+            model: lastMsg.model || '',
+            open: lastMsg.open,
+            pending: lastMsg.pending,
+          });
+          if (!generating && !liveHitl && (lastMsg.content || '').trim()) {
+            _forcePaintDoneContent(lastMsg.content);
+          }
+        }
       }
 
       // Still running server-side → keep waiting honestly AND re-attach a
       // live SSE stream from the journal cursor — but only when the stream
       // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
-      // trigger churned connections for no gain.
+      // trigger churned connections for no gain. This-turn durable already
+      // projected above; this return must not skip that work.
       if (generating || liveHitl) {
         if (_streamIsLive()) {
           // A live stream owns this turn — NEVER abort it here. Aborting a
@@ -772,13 +792,22 @@
           } catch (e2) { /* ignore */ }
           return;
         }
-        _awaitingReply = true;
-        noteTurnActivity();
         try {
           _setStatusStrip(paused
             ? ti('waiting_approval', 'Waiting for approval…')
             : ti('thinking', 'Kazma is thinking…'));
         } catch (e2) { /* ignore */ }
+        // A stream that just closed (sse-fail / truncated) while paused
+        // must not attach in this same tick: attach → close → resync
+        // loops forever if the reopen budget is also waived. The
+        // reconciler attaches on its timer. Visibility/focus/reconcile
+        // still reopen a dead handle.
+        var closedHere = reason === 'sse-fail' || reason === 'sse-truncated';
+        if (liveHitl && closedHere) {
+          return;
+        }
+        _awaitingReply = true;
+        noteTurnActivity();
         if (_reopenSseRef) {
           try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
         }
@@ -792,14 +821,8 @@
       // answer, and painting it over the live bubble swapped the visible
       // text for an older message on every app-switch (2026-08-27).
       //
-      // "Genuinely" is the whole point. This used to ask the DOM — scan the
-      // transcript for an enabled button — which answered TRUE for a FOSSIL
-      // card left over from a gate that had already settled. The only
-      // unconditional route back to server truth then declined to run, and
-      // the bubble kept its placeholder until a refresh (2026-09-19,
-      // sequential Allow-tool clicks). hasLiveGate() reads the document and
-      // the gate registry, so a card nobody can act on cannot disarm the
-      // recovery any more.
+      // "Genuinely" is any view.interactive. A fossil pending stamp, a
+      // frozen card, or a dead stream handle cannot disarm this path.
       if (hasLiveGate()) return;
 
       // Idle: paint durable assistant text even if the row still carries a
@@ -1254,8 +1277,7 @@
   var _awaitingApproval = false;
   var _serverGenerating = false;
   var _serverPaused = false;
-  var _serverHitl = null;
-  var _serverGates = [];
+  var _serverGateViews = [];
   var _serverGatesAuth = false;
   var _serverThreadId = '';
   var _attachInFlight = false;
@@ -1295,9 +1317,9 @@
     _supersededLive = false;
     _serverGenerating = false;
     _serverPaused = false;
-    _serverHitl = null;
-    _serverGates = [];
+    _serverGateViews = [];
     _serverGatesAuth = false;
+    _clearHitlOverlay();
     _serverThreadId = '';
     _lastInterruptedThreadId = '';
     _awaitingApproval = false;
@@ -1308,6 +1330,99 @@
     // "Done" task card for a turn that never happened (2026-09-03).
     _taskCardEvent({ t: 'reset' });
   }
+
+  /** Apply a /status payload. Join-before-paint: call this BEFORE TurnView
+   *  renders hydrated history so live views exist on the first pass. */
+  function _ingestStatus(status) {
+    status = status || {};
+    _serverGenerating = !!status.generating;
+    _serverPaused = !!status.paused;
+    _serverGateViews = Array.isArray(status.gate_views) ? status.gate_views : [];
+    _serverGatesAuth = !!status.gates_authoritative;
+    if (status.thread_id) _serverThreadId = String(status.thread_id);
+  }
+
+  function _viewIsPending(v) {
+    return !!(v && v.interactive === true);
+  }
+
+  function _firstInteractiveView() {
+    var list = _serverGateViews || [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      if (_viewIsPending(list[i])) return list[i];
+    }
+    return null;
+  }
+
+  /** Optimistic inflight until approve 200/409/4xx/catch or 15s→resync. */
+  var _hitlOverlay = {};
+  var _HITL_OVERLAY_MS = 15000;
+
+  function _setHitlOverlay(iid, view) {
+    iid = String(iid || '');
+    if (!iid || !view) return;
+    var prev = _hitlOverlay[iid];
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    var timer = setTimeout(function () {
+      _clearHitlOverlay(iid);
+      try { _resyncDelivery('overlay-ttl'); } catch (eOv) { /* ignore */ }
+    }, _HITL_OVERLAY_MS);
+    _hitlOverlay[iid] = { view: view, timer: timer };
+  }
+
+  function _clearHitlOverlay(iid) {
+    if (!iid) {
+      var k;
+      for (k in _hitlOverlay) {
+        if (!Object.prototype.hasOwnProperty.call(_hitlOverlay, k)) continue;
+        if (_hitlOverlay[k] && _hitlOverlay[k].timer) clearTimeout(_hitlOverlay[k].timer);
+      }
+      _hitlOverlay = {};
+      return;
+    }
+    iid = String(iid);
+    var rec = _hitlOverlay[iid];
+    if (rec && rec.timer) clearTimeout(rec.timer);
+    delete _hitlOverlay[iid];
+  }
+
+  function _mergeGateView(view) {
+    if (!view || typeof view !== 'object') return;
+    var iid = String(view.interrupt_id || view.gate_id || '');
+    if (!iid) return;
+    var list = (_serverGateViews || []).slice();
+    var i, found = false;
+    for (i = 0; i < list.length; i++) {
+      var v = list[i] || {};
+      if (String(v.interrupt_id || '') === iid || String(v.gate_id || '') === iid) {
+        list[i] = view;
+        found = true;
+        break;
+      }
+    }
+    if (!found) list.push(view);
+    _serverGateViews = list;
+  }
+
+  function _applyApproveView(body, fallbackIid) {
+    body = body || {};
+    var iid = String(body.interrupt_id || (body.view && body.view.interrupt_id) || fallbackIid || '');
+    _clearHitlOverlay(iid);
+    if (body.view && typeof body.view === 'object') _mergeGateView(body.view);
+    return body.view || null;
+  }
+
+  function _statusHasLiveHitl(status) {
+    var views = (status && Array.isArray(status.gate_views))
+      ? status.gate_views : (_serverGateViews || []);
+    var i;
+    for (i = 0; i < views.length; i++) {
+      if (_viewIsPending(views[i])) return true;
+    }
+    return !!(status && status.paused);
+  }
+
   /** Progress-idle failsafe — only fires when NO activity for IDLE ms (not wall-clock). */
   var _turnWatchdogTimer = null;
   /** Desync healer: if agent store is idle but Stop is still on, release. */
@@ -3472,7 +3587,7 @@
         // Truncated stream (no terminal frame): reconcile with durable
         // truth after the lock settles — paints the persisted reply when
         // the turn already finished, re-attaches when still generating.
-        if (truncated && (!hasLiveGate())) {
+        if (truncated) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
         // Interrupted (HITL) turn with no rendered card anywhere = silently
@@ -3481,7 +3596,8 @@
         // tab switch) is included: the interrupt event may have fired AFTER
         // this tab's stream dropped, so `interrupted` stays false and the
         // pending approval would otherwise be invisible until auto-deny.
-        if ((interrupted || truncated) && !hasLiveGate() && !_serverGenerating) {
+        // Frozen or omitted chrome must not skip this.
+        if ((interrupted || truncated) && !_serverGenerating) {
           setTimeout(recoverMissedApproval, 1200);
         }
         }
@@ -3548,8 +3664,10 @@
         activeStream = null;
         // HITL pause closes the HTTP body. That is not a failed turn — the
         // card is already on screen. Overwriting it with "network error"
-        // was the live-vs-refresh mismatch (2026-09-01).
-        if (_awaitingApproval) {
+        // was the live-vs-refresh mismatch (2026-09-01). Catch-up still
+        // runs: do not skip resync because `_awaitingApproval`.
+        if (_awaitingApproval || hasLiveGate()) {
+          _resyncDelivery('sse-fail');
           if (!_serverGenerating) setTimeout(recoverMissedApproval, 400);
           return;
         }
@@ -5189,29 +5307,8 @@
       turn_id: _liveTurnId,
       source: 'timeout',
     });
-    if (messagesEl) {
-      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
-        var btns = card.querySelectorAll('button');
-        var live = false;
-        for (var i = 0; i < btns.length; i++) {
-          if (!btns[i].disabled) live = true;
-        }
-        if (!live) return;
-        _stopHitlCountdown(card);
-        btns.forEach(function (b) { b.disabled = true; });
-        card.className = 'hitl-approval-card hitl-denied';
-        var actions = card.querySelector('.hitl-approval-actions');
-        if (actions) {
-          actions.innerHTML = '<span class="hitl-status hitl-denied">' + escapeHtml(text) + '</span>';
-        }
-        // Timeout is a decision too — record it in the document so the
-        // model and the screen agree, then collapse to the one-line bar.
-        // TurnView re-orders the settled card above the continuing reply
-        // on the next pass; nothing moves nodes by hand any more.
-        _noteGateDecided({ interrupt_id: card.getAttribute('data-interrupt-id') || '' }, 'timeout');
-        _collapseClaimedHitlCard(card);
-      });
-    }
+    // Chrome comes from TurnView after the document update. Do not
+    // className-stamp cards here (HITL_VIEW_MODEL C).
     _awaitingApproval = false;
     if (window.showToast) {
       try { window.showToast(text, 'warning', 6000); } catch (e) { /* ignore */ }
@@ -5226,14 +5323,7 @@
     if (messagesEl) {
       messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
         if (_hitlCardIsClaimed(card)) return;
-        card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-        card.className = 'hitl-approval-card hitl-denied';
-        var actions = card.querySelector('.hitl-approval-actions');
-        if (actions) {
-          actions.innerHTML = '<span class="hitl-status hitl-denied">Aborted — send a new message</span>';
-        }
         _noteGateDecided({ interrupt_id: card.getAttribute('data-interrupt-id') || '' }, 'denied');
-        _collapseClaimedHitlCard(card);
       });
     }
     _clearStoreApproval();
@@ -5246,23 +5336,40 @@
   /**
    * Is a gate genuinely waiting on the operator?
    *
-   * Answered from the DOCUMENT and the gate registry — never by scanning
-   * the transcript for an enabled <button>.
+   * Answered from live views only: any view.interactive. Never the
+   * document part stamp, never a DOM scan, never a frozen card.
    *
-   * The DOM scan is what made this predicate dangerous. It returned true
-   * for a FOSSIL card whose gate had already settled, and eight recovery
-   * paths early-returned on it, so the only unconditional route back to
-   * server truth switched itself off exactly when a turn had gone quiet.
-   * That is how "approved twice then silence" survived every individual
-   * fix: each fix narrowed one guard, and the next path hit another one.
+   * The DOM scan (and later the leftover pending stamp) made this
+   * predicate dangerous. It returned true for a FOSSIL card whose gate
+   * had already settled, and recovery paths early-returned on it, so the
+   * only unconditional route back to server truth switched itself off
+   * exactly when a turn had gone quiet.
    */
   function hasLiveGate() {
+    var i;
+    var views = _serverGateViews || [];
+    for (i = 0; i < views.length; i++) {
+      if (_viewIsPending(views[i])) return true;
+    }
+    return false;
+  }
+
+  /** Durable row for the turn this tab is projecting, not a previous reply. */
+  function _messageIsThisTurn(msg) {
+    if (!msg) return false;
+    var tid = String(msg.turn_id || '');
+    if (tid && _liveTurnId && tid === String(_liveTurnId)) return true;
+    if (msg.open || msg.pending) return true;
+    var parts = msg.parts;
+    if (!Array.isArray(parts) || !parts.length) return false;
     var TD = window.KazmaTurnDocument;
-    var doc = _docs[_liveTurnId];
-    if (!TD || !doc || typeof TD.hitlPartsOf !== 'function') return false;
-    var gates = TD.hitlPartsOf(doc.parts || []);
-    for (var i = 0; i < gates.length; i++) {
-      if (_hitlDisplayState(gates[i]) === 'pending') return true;
+    if (!TD || typeof TD.hitlPartsOf !== 'function') return false;
+    var gates = TD.hitlPartsOf(parts);
+    var i, iid, v;
+    for (i = 0; i < gates.length; i++) {
+      iid = _hitlInterruptIdOf(gates[i]);
+      v = iid ? _gateViewById(iid) : null;
+      if (v && _viewIsPending(v)) return true;
     }
     return false;
   }
@@ -5304,29 +5411,20 @@
   }
 
   function _hitlAlreadyClaimed(data) {
+    // Document + views only. A frozen/claimed DOM card must not drop a
+    // pending frame for a later interrupt (HITL_VIEW_MODEL E).
     var iid = _hitlInterruptIdOf(data);
-    var tool = _hitlToolOf(data);
-    var part = _openHitlPart();
-    if (part) {
-      var st = String(part.state || 'pending');
-      var pid = _hitlInterruptIdOf(part);
-      var ptool = _hitlToolOf(part);
-      if (st !== 'pending') {
-        if (iid && pid && iid === pid) return true;
-        if (!iid && !pid && tool && ptool && tool === ptool) return true;
-      }
+    if (!iid) return false;
+    var view = _gateViewById(iid);
+    if (!view) {
+      var ov = _hitlOverlay[iid];
+      if (ov && ov.view) view = ov.view;
     }
-    if (messagesEl) {
-      var cards = messagesEl.querySelectorAll('.hitl-approval-card');
-      for (var i = 0; i < cards.length; i++) {
-        if (!_hitlCardIsClaimed(cards[i])) continue;
-        var cid = String(cards[i].getAttribute('data-interrupt-id') || '');
-        if (iid && cid && iid === cid) return true;
-        var ctool = String(cards[i].getAttribute('data-tool') || '');
-        if (!iid && !cid && tool && ctool && tool === ctool) return true;
-      }
-    }
-    return false;
+    if (view && !_viewIsPending(view)) return true;
+    var part = _hitlPartById(iid);
+    if (!part) return false;
+    var st = _hitlDisplayState(part);
+    return !!(st && st !== 'pending');
   }
 
   /** Existing HITL card for this interrupt. Never reuse a claimed card for a new gate. */
@@ -5412,18 +5510,6 @@
     } catch (e) { /* ignore */ }
   }
 
-  /** Fallback when the inline bubble card did not land — keep a card on
-   *  the chat page (the Alpine strip under the transcript), not only on
-   *  Dashboard. Cleared as soon as hasInlineApprovalCard() is true. */
-  function _showStoreApproval(data) {
-    if (!data) return;
-    try {
-      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-        Alpine.store('agent').pendingApproval = data;
-      }
-    } catch (e) { /* ignore */ }
-  }
-
   function _payloadFromGate(g) {
     g = g || {};
     var p = (g.payload && typeof g.payload === 'object') ? g.payload : {};
@@ -5441,15 +5527,18 @@
     };
   }
 
+  function _payloadFromView(v) {
+    var out = _payloadFromGate(v);
+    if (!out.interrupt_id && v) out.interrupt_id = String(v.interrupt_id || '');
+    return out;
+  }
+
   /**
    * Re-paint every turn that holds a gate the registry currently lists as
    * pending.
    *
-   * Hydration resolves those parts to 'awaiting' (no buttons, sorted as
-   * settled) because `_serverGates` is empty until /status returns. Once
-   * the snapshot is in, `_hitlDisplayState` would return 'pending' — but
-   * nothing re-renders, `hasLiveGate()` goes true from the registry, and
-   * the frozen card is left on screen with no way to answer it.
+   * After /status lands, re-paint turns whose views became pending so a
+   * frozen card (data-hitl-shown) can rebuild with live buttons.
    *
    * Only covering pending rows are touched. Historical awaiting cards
    * with no registry row stay frozen: that is the ghost-card defence, and
@@ -5461,11 +5550,11 @@
     var TD = window.KazmaTurnDocument;
     if (!TD || typeof TD.hitlPartsOf !== 'function') return;
     var pendingIds = {};
-    var list = _serverGates || [];
+    var list = _serverGateViews || [];
     var i;
     for (i = 0; i < list.length; i++) {
-      if (String((list[i] || {}).state || '') !== 'pending') continue;
-      var gid = String(list[i].gate_id || '');
+      if (!_viewIsPending(list[i])) continue;
+      var gid = String((list[i] || {}).gate_id || (list[i] || {}).interrupt_id || '');
       if (gid) pendingIds[gid] = true;
     }
     var id, doc, gates, g, iid, touch;
@@ -5494,33 +5583,18 @@
    * second pending question belongs on screen next to the first.
    */
   function _paintLiveGates() {
-    var list = _serverGates || [];
+    var list = _serverGateViews || [];
     var i;
     for (i = 0; i < list.length; i++) {
-      if (String((list[i] || {}).state || '') !== 'pending') continue;
-      var payload = _payloadFromGate(list[i]);
+      if (!_viewIsPending(list[i])) continue;
+      var payload = _payloadFromView(list[i]);
       applyTurnEvent({
         type: 'hitl',
         state: 'pending',
         tool: payload.tool,
         interrupt_id: payload.interrupt_id,
         payload: payload,
-        turn_id: _liveTurnId,
-        source: 'gates',
-      });
-    }
-    if (_serverHitl && String(_serverHitl.gate || '') === 'pending' && _serverHitl.tool) {
-      applyTurnEvent({
-        type: 'hitl',
-        state: 'pending',
-        tool: _serverHitl.tool || '',
-        interrupt_id: _serverHitl.interrupt_id || '',
-        payload: {
-          thread_id: _serverThreadId || chatSessionId || '',
-          tool: _serverHitl.tool || '',
-          interrupt_id: _serverHitl.interrupt_id || '',
-          message: '',
-        },
+        view: list[i],
         turn_id: _liveTurnId,
         source: 'gates',
       });
@@ -5540,8 +5614,10 @@
     var open = _openHitlPart();
     if (open && String(open.state || 'pending') === 'pending') return;
     var pendingIids = {};
-    (_serverGates || []).forEach(function (g) {
-      if (String((g || {}).state || '') === 'pending') pendingIids[String(g.gate_id || '')] = true;
+    (_serverGateViews || []).forEach(function (g) {
+      if (!_viewIsPending(g)) return;
+      var id = String((g && (g.gate_id || g.interrupt_id)) || '');
+      if (id) pendingIids[id] = true;
     });
     messagesEl.querySelectorAll('.hitl-approval-card').forEach(function (card) {
       if (_hitlCardIsClaimed(card)) return;
@@ -5560,18 +5636,7 @@
         if (!btns[i].disabled) { live = true; break; }
       }
       if (!live) return;
-      _stopHitlCountdown(card);
-      btns.forEach(function (b) { b.disabled = true; });
-      card.className = 'hitl-approval-card hitl-denied';
-      var actions = card.querySelector('.hitl-approval-actions');
-      if (actions) {
-        actions.innerHTML = '<span class="hitl-status hitl-denied">No longer pending</span>';
-      }
-      // Registry truth goes into the document, not just onto the card:
-      // a stamp the model never learned about is exactly the DOM/document
-      // divergence this refactor exists to remove.
       _noteGateDecided({ interrupt_id: cid }, 'error');
-      _collapseClaimedHitlCard(card);
     });
     // The store's fallback strip lives OUTSIDE messagesEl and carries no
     // interrupt id, so the sweep above can never reach it. An authoritative
@@ -5606,11 +5671,23 @@
     return TD.hitlPartOf(doc.parts);
   }
 
+  function _hitlPartById(iid) {
+    iid = String(iid || '');
+    if (!iid) return null;
+    var TD = window.KazmaTurnDocument;
+    var doc = _docs[_liveTurnId] || null;
+    if (!TD || !doc || typeof TD.hitlPartsOf !== 'function') return null;
+    var gates = TD.hitlPartsOf(doc.parts || []);
+    var i;
+    for (i = 0; i < gates.length; i++) {
+      if (_hitlInterruptIdOf(gates[i]) === iid) return gates[i];
+    }
+    return null;
+  }
+
   function recoverMissedApproval() {
-    if (hasLiveGate()) return;
     if (_serverGenerating && !_serverPaused) return;
     _paintLiveGates();
-    if (hasLiveGate()) return;
     var existing = _openHitlPart();
     if (existing && String(existing.state || 'pending') !== 'pending') {
       /* a settled part must not block a live gate painted above */
@@ -5627,12 +5704,10 @@
         turn_id: _liveTurnId,
         source: 'recover-open',
       });
-      if (hasLiveGate()) return;
     }
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(payload) {
-        if (hasLiveGate()) return;
         var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
         if (!pending.length) return;
         var hit = null;
@@ -5749,13 +5824,7 @@
       if (left <= 0) {
         _stopHitlCountdown(card);
         card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-        card.className = 'hitl-approval-card hitl-denied';
-        var act = card.querySelector('.hitl-approval-actions');
-        if (act) act.innerHTML = '<span class="hitl-status hitl-denied">' +
-          escapeHtml(ti('approval_expired', 'Approval timed out — continuing without this tool.')) + '</span>';
-        row.textContent = '';
-        _noteGateDecided(data, 'timeout');
-        _collapseClaimedHitlCard(card);
+        row.textContent = ti('waiting_server', 'Waiting for the server…');
         return;
       }
       var m = Math.floor(left / 60);
@@ -5873,9 +5942,6 @@
       content = _bubbleContent(currentMsgEl);
     }
     if (!content) {
-      // Inline bubble never materialized — keep the chat-page Alpine card
-      // so approval is not dashboard-only.
-      _showStoreApproval(data);
       return null;
     }
     var iid = _hitlInterruptIdOf(data);
@@ -5914,8 +5980,7 @@
       content.appendChild(_semCard);
       _revealHitlCard(_semCard);
       _attachHitlCountdown(_semCard, data);
-      if (hasInlineApprovalCard()) _clearStoreApproval();
-      else _showStoreApproval(data);
+      _clearStoreApproval();
       scrollToBottom();
       _semCard.querySelectorAll('.hitl-sem-opt').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -6073,27 +6138,13 @@
     content.appendChild(card);
     _revealHitlCard(card);
     _attachHitlCountdown(card, data);
-    if (hasInlineApprovalCard()) {
-      _clearStoreApproval();
-    } else if (opts && opts.store === false) {
-      // Historical/claimed paint — must not arm the live fallback.
-    } else {
-      _showStoreApproval(data);
-    }
+    _clearStoreApproval();
     scrollToBottom();
 
     function setCardState(state, label) {
       _stopHitlCountdown(card);
-      card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-      card.className = 'hitl-approval-card hitl-' + state;
-      var actions = card.querySelector('.hitl-approval-actions');
-      if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
-      // Decision made. Put it in the DOCUMENT — the card's position then
-      // follows from the declared slot order (settled gates above the
-      // answer), instead of this function reaching in to move the node and
-      // leaving the model still saying "pending" until a server frame
-      // happened to arrive.
       try { card.setAttribute('data-hitl-shown', state); } catch (eS) { /* ignore */ }
+      void label;
       // Record the DECISION, and only a decision.
       //
       // Two bugs lived in the one-line ternary this replaces. It mapped
@@ -6185,12 +6236,24 @@
 
       _pinLiveAssistantBubble();
 
+      var ovIid = String(data.interrupt_id || '');
+      var ovView = {
+        gate_id: ovIid,
+        interrupt_id: ovIid,
+        tool: String(data.tool || ''),
+        kind: String(data.kind || 'security'),
+        state: 'inflight',
+        interactive: false,
+        slot: 'settled',
+      };
+      _setHitlOverlay(ovIid, ovView);
       applyTurnEvent({
         type: 'hitl',
         state: 'inflight',
         tool: data.tool || '',
         interrupt_id: data.interrupt_id || '',
         payload: data,
+        view: ovView,
         turn_id: _liveTurnId,
         source: 'approve',
       });
@@ -6208,6 +6271,7 @@
           return { status: r.status, body: {} };
         });
       }).then(function(res) {
+        var acceptedView = _applyApproveView(res.body, ovIid);
         if (res.status === 409) {
           var running409 = !!(res.body && (res.body.running
             || res.body.hitl_state === 'inflight'
@@ -6216,7 +6280,8 @@
             applyTurnEvent({
               type: 'hitl', state: 'inflight', tool: data.tool || '',
               interrupt_id: (res.body && res.body.interrupt_id) || data.interrupt_id || '',
-              payload: data, turn_id: _liveTurnId, source: 'approve-409',
+              payload: data, view: acceptedView || ovView,
+              turn_id: _liveTurnId, source: 'approve-409',
             });
             _awaitingApproval = false;
             _awaitingReply = true;
@@ -6230,7 +6295,8 @@
           }
           applyTurnEvent({
             type: 'hitl', state: 'error', tool: data.tool || '',
-            payload: data, turn_id: _liveTurnId, source: 'approve-409',
+            payload: data, view: acceptedView,
+            turn_id: _liveTurnId, source: 'approve-409',
           });
           _resyncDelivery('approve-409');
           return;
@@ -6248,7 +6314,8 @@
         applyTurnEvent({
           type: 'hitl', state: hitlState, tool: data.tool || '',
           interrupt_id: data.interrupt_id || '',
-          payload: data, turn_id: _liveTurnId, source: 'approve-accepted',
+          payload: data, view: acceptedView || ovView,
+          turn_id: _liveTurnId, source: 'approve-accepted',
         });
         // Decision accepted — the graph is running again. Clear the HITL
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
@@ -6273,6 +6340,7 @@
         _reattachAfterApproval('approve-json');
         _resyncDelivery('approve-json');
       }).catch(function(err) {
+        _clearHitlOverlay(ovIid);
         applyTurnEvent({
           type: 'hitl', state: 'error', tool: data.tool || '',
           payload: data, turn_id: _liveTurnId, source: 'approve-error',
@@ -6850,20 +6918,23 @@
     renderSessionList();
     resetSessionStats();
 
-    // Fetch the session messages from the API and render them.
-    // ?stats=1 opts into the envelope {messages, total_tokens, total_cost}
-    // so cumulative badges are correct after refresh; the legacy bare-list
-    // shape is still handled for old servers.
-    fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages?stats=1')
-      .then(function(r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.json();
-      })
-      .then(function(payload) {
+    // Join transcript + registry BEFORE the first paint (HITL_VIEW_MODEL A1).
+    Promise.all([
+      fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/messages?stats=1')
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        }),
+      fetch('/api/chat/sessions/' + encodeURIComponent(sessionId) + '/status')
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .catch(function() { return null; }),
+    ]).then(function(pair) {
+        var payload = pair[0];
         // Guard against race: user switched sessions while fetch was in flight
         if (chatSessionId !== sessionId) { _loadInFlightFor = null; return; }
         _loadMsgAttempts = 0;
         _loadInFlightFor = null;
+        _ingestStatus(pair[1]);
 
         var messages = payload;
         if (payload && !Array.isArray(payload) && Array.isArray(payload.messages)) {
@@ -7488,7 +7559,10 @@
     if (!TD || typeof TD.activityOf !== 'function') return [];
     // Same resolver the cards are ordered and labelled with, so the
     // workbench row for a gate cannot contradict the card next to it.
-    return TD.activityOf((doc && doc.parts) || [], _hitlDisplayState);
+    return TD.activityOf((doc && doc.parts) || [], function (part) {
+      var s = _hitlDisplayState(part);
+      return s == null ? 'error' : s;
+    });
   }
 
   // ── Slot painters ──────────────────────────────────────────────────
@@ -7641,70 +7715,45 @@
   /**
    * What state should this gate's card SHOW?
    *
-   * Ported wholesale from _paintHitlFromDoc, because this part was never
-   * the bug — it is the safety rule that a card must never claim
-   * "Approved" without evidence. The gate registry (P2) is decision truth
-   * and overrides a stale part stamp in either direction.
-   *
-   * Returns one of:
-   *   pending   — live buttons, the operator can answer
-   *   awaiting  — a gate we know of but cannot confirm is live: shown,
-   *               disabled, honest. (Hydration lands here: a historical
-   *               part can carry a stale `pending` stamp long after the
-   *               gate settled, and minting live buttons for it was the
-   *               2026-09-03 ghost card. Painting NOTHING is not the
-   *               alternative any more — the slot would go missing and
-   *               the render invariant would fire.)
-   *   inflight / approved / denied / timeout / error / settled
+   * HITL_VIEW_MODEL A1: the server already answered. Live overlay
+   * (``_serverGateViews``) wins; else the ``view`` stamped on the part at
+   * /messages read. No view → omit (null). Never re-derive from part.state,
+   * hydrate flags, or a DOM claimed-scan.
    */
-  function _hitlDisplayState(part) {
-    var state = String((part && part.state) || 'pending');
-    var iid = _hitlInterruptIdOf(part);
-    var gateRow = _hitlGateRow(iid);
-    // A decision this tab made and the server confirmed outranks a registry
-    // snapshot taken before it. Only a LOCAL decision earns this — a merely
-    // hydrated 'approved' still loses to a pending row, which is what keeps
-    // "never invent Approved" intact.
-    if (part && part.decided_locally && state !== 'pending') return state;
-    if (gateRow && String(gateRow.state || '') === 'pending') return 'pending';
-    if (gateRow && (gateRow.state === 'claimed' || gateRow.state === 'resuming')) {
-      return state === 'pending' ? 'inflight' : state;
-    }
-    if (state !== 'pending') return state;
-    // Pending part, no registry claim. Order below is the fail posture and
-    // must not be reshuffled.
-    //
-    // 1. Hydration first: a persisted part says `pending` long after its
-    //    gate settled, so a restored transcript shows the gate without
-    //    claiming it is answerable.
-    if (_hydratingSession) return 'awaiting';
-    // 2. Registry answered authoritatively and NO row covers this
-    //    interrupt. Show live buttons and do NOT infer a claim from
-    //    leftover status — this deliberately runs BEFORE the claim
-    //    inference below. A stale click is recoverable (the server
-    //    re-verifies and answers "no longer pending"); a fabricated
-    //    Approved stamp is the incident. _hitlShouldLock still returns
-    //    false here, so the composer stays free: an empty authoritative
-    //    list means no live gate, and the next prompt is a new turn.
-    if (_serverGatesAuth && !gateRow) return 'pending';
-    // 3. Registry did not answer: thin fallback. This tab's own click (or
-    //    a persisted claim) is the only evidence accepted for "running".
-    if (_hitlAlreadyClaimed(part)) return 'inflight';
-    return 'pending';
-  }
-
-  function _hitlGateRow(iid) {
-    if (!iid || !_serverGates || !_serverGates.length) return null;
-    for (var i = 0; i < _serverGates.length; i++) {
-      if (String(_serverGates[i].gate_id || '') === String(iid)) return _serverGates[i];
+  function _gateViewById(iid) {
+    iid = String(iid || '');
+    if (!iid) return null;
+    var list = _serverGateViews || [];
+    var i, v;
+    for (i = 0; i < list.length; i++) {
+      v = list[i] || {};
+      if (String(v.interrupt_id || '') === iid || String(v.gate_id || '') === iid) {
+        return v;
+      }
     }
     return null;
   }
 
-  /** Lock the composer only on registry-confirmed live gates. */
+  function _gateViewOf(part) {
+    var iid = _hitlInterruptIdOf(part);
+    var ov = iid && _hitlOverlay[iid];
+    if (ov && ov.view) return ov.view;
+    var live = _gateViewById(iid);
+    if (live) return live;
+    if (part && part.view && typeof part.view === 'object') return part.view;
+    return null;
+  }
+
+  function _hitlDisplayState(part) {
+    var v = _gateViewOf(part);
+    if (!v) return null;
+    return String(v.state || '');
+  }
+
+  /** Lock the composer only when the view says the gate is interactive. */
   function _hitlShouldLock(part) {
-    var row = _hitlGateRow(_hitlInterruptIdOf(part));
-    return !!(row && String(row.state || '') === 'pending');
+    var v = _gateViewOf(part);
+    return !!(v && v.interactive);
   }
 
   /**
@@ -7721,7 +7770,9 @@
     // independent answer to "what state is this gate in" — lock/store
     // (whether the card has live buttons) could disagree with position
     // and label even though all three are the same fact.
-    var show = resolvedState || _hitlDisplayState(part);
+    var show = (resolvedState != null && resolvedState !== '')
+      ? String(resolvedState) : _hitlDisplayState(part);
+    if (!show) return null;
     var card = renderHitlCard(payload, {
       lock: show === 'pending' && _hitlShouldLock(part),
       store: show === 'pending',
@@ -7741,7 +7792,9 @@
     // Label from the state TurnView ORDERED by. Re-resolving here is what
     // let a card sort as pending (below the answer) while painting
     // "Approved — running…" on top of it.
-    var show = resolvedState || _hitlDisplayState(part);
+    var show = (resolvedState != null && resolvedState !== '')
+      ? String(resolvedState) : _hitlDisplayState(part);
+    if (!show) return;
     if (show === 'pending') {
       // Only a gate the registry confirms is live gets a ticker. Re-arming
       // it on every render of anything that merely *looks* pending is what
@@ -7855,9 +7908,6 @@
     // Only an operator click earns this. A client timeout/error is a
     // display guess — the ticker must not outrank a still-pending
     // registry row, for the same reason a card must not invent Approved.
-    if (state === 'approved' || state === 'denied') {
-      ev.decided_locally = true;
-    }
     applyTurnEvent(ev);
   }
 

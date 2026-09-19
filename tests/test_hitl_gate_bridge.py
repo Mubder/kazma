@@ -70,6 +70,7 @@ async def test_pending_items_hide_hash_twin():
     items = await pending_items_from_registry()
     assert items is not None and len(items) == 1
     assert items[0]["interrupt_id"] == "intr-1"
+    assert items[0]["gate_id"] == "intr-1"
 
 
 async def test_pending_from_payload_registers_row():
@@ -209,3 +210,6 @@ def test_pending_item_carries_approval_deadline(monkeypatch):
     )
     item = gate_row_to_pending_item(row)
     assert item["approval_deadline"] == 2300.0
+    assert item["gate_id"] == "g1"
+    assert item["interrupt_id"] == "g1"
+    assert "alias_id" in item

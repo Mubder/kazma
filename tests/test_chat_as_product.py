@@ -167,11 +167,10 @@ def test_approval_card_recovered_when_stream_dies() -> None:
     approval card must therefore fire on a truncated stream AND on SSE final
     failure, not only on a clean `interrupted` terminal frame."""
     js = _CHAT_JS.read_text(encoding="utf-8")
-    # The corroborating check reads the DOCUMENT (hasLiveGate), not a DOM
-    # scan for an enabled button: a fossil card used to make this look like
-    # "a gate is already showing", so the recovery never ran and the real
-    # pending approval stayed invisible until auto-deny.
-    assert "(interrupted || truncated) && !hasLiveGate()" in js
+    # HITL_VIEW_MODEL E: truncated/interrupted catch-up must run even when
+    # a frozen card makes the bubble look settled. hasLiveGate() is no
+    # longer a reason to skip recoverMissedApproval.
+    assert "(interrupted || truncated) && !_serverGenerating" in js
     assert "setTimeout(recoverMissedApproval, 800)" in js
     assert "setTimeout(recoverMissedApproval, 1200)" in js
 

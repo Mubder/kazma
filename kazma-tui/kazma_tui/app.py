@@ -515,30 +515,50 @@ class KazmaTUI(App[None]):
                 data = response.json()
                 pending_list = data.get("pending", [])
 
-                # Reconcile: threads no longer pending were resolved elsewhere
-                # (Telegram/Web) — without this they suppressed the modal for
-                # any future approval on the same thread, forever.
-                _live = {i.get("thread_id") for i in pending_list if i.get("thread_id")}
+                def _gate_key(it: dict) -> str:
+                    return str(
+                        (it or {}).get("gate_id")
+                        or (it or {}).get("interrupt_id")
+                        or (it or {}).get("thread_id")
+                        or ""
+                    )
+
+                # Reconcile: gates no longer pending were resolved elsewhere.
+                # Key by gate, not thread — a sequential second pause on the
+                # same thread must still surface (HITL_VIEW_MODEL D).
+                _live = {_gate_key(i) for i in pending_list if _gate_key(i)}
                 self._shown_approvals &= _live
 
                 for item in pending_list:
                     thread_id = item.get("thread_id")
-                    if thread_id and thread_id not in self._shown_approvals:
+                    gate_key = _gate_key(item)
+                    if gate_key and gate_key not in self._shown_approvals:
                         # Don't stack multiple modals — skip if one is already open
                         if isinstance(self.screen, HitlApprovalScreen):
                             break
-                        self._shown_approvals.add(thread_id)
+                        self._shown_approvals.add(gate_key)
                         tool_name = item.get("tool_name", "unknown")
                         arguments = item.get("arguments", {})
                         message = item.get("message", "")
+                        interrupt_id = str(item.get("interrupt_id") or item.get("gate_id") or "")
+                        gate_id = str(item.get("gate_id") or interrupt_id)
 
-                        def handle_dismiss(approved: bool | None) -> None:
-                            self.run_worker(self._submit_hitl_decision(thread_id, approved))
+                        def handle_dismiss(
+                            approved: bool | None,
+                            _tid: str = str(thread_id or ""),
+                            _gid: str = gate_id,
+                            _iid: str = interrupt_id,
+                        ) -> None:
+                            self.run_worker(
+                                self._submit_hitl_decision(
+                                    _tid, approved, gate_id=_gid, interrupt_id=_iid
+                                )
+                            )
 
                         screen = HitlApprovalScreen(
-                            thread_id=thread_id,
+                            thread_id=str(thread_id or ""),
                             tool_name=tool_name,
-                            arguments=arguments,
+                            arguments=arguments or {},
                             message=message
                         )
                         self.push_screen(screen, handle_dismiss)
@@ -546,12 +566,24 @@ class KazmaTUI(App[None]):
         except Exception as exc:
             logger.debug("Failed to check pending approvals: %s", exc)
 
-    async def _submit_hitl_decision(self, thread_id: str, approved: bool | None) -> None:
+    async def _submit_hitl_decision(
+        self,
+        thread_id: str,
+        approved: bool | None,
+        *,
+        gate_id: str = "",
+        interrupt_id: str = "",
+    ) -> None:
         """Post the user's HITL decision back to the FastAPI backend."""
         import httpx
         from kazma_tui.widgets.toast import Toast
 
         decision = "approve" if approved else "deny"
+        body: dict = {"action": decision}
+        if interrupt_id:
+            body["interrupt_id"] = interrupt_id
+        if gate_id:
+            body["gate_id"] = gate_id
         try:
             from kazma_core.runtime.local_api import auth_headers, candidate_api_bases
 
@@ -562,7 +594,7 @@ class KazmaTUI(App[None]):
                     try:
                         response = await client.post(
                             f"{_base}/api/approve/{thread_id}",
-                            json={"action": decision},
+                            json=body,
                             headers=headers,
                         )
                         if response.status_code < 500:
@@ -579,8 +611,9 @@ class KazmaTUI(App[None]):
             logger.exception("Failed to submit HITL decision")
             self.push_screen(Toast(f"Failed to submit decision: {exc}", "error"))
         finally:
-            if thread_id in self._shown_approvals:
-                self._shown_approvals.remove(thread_id)
+            key = gate_id or interrupt_id or thread_id
+            if key in self._shown_approvals:
+                self._shown_approvals.remove(key)
 
     def update_localization(self) -> None:
         """Apply dynamic translations and text mirroring based on preferred language."""

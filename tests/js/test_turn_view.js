@@ -631,6 +631,16 @@ function feed(events, turnId) {
   );
   assert("without a resolver it falls back to part.state",
     bare.map(e => e.key).join(",") === "text,hitl:a", bare.map(e => e.key));
+  const omitted = TV.slotPlan(
+    { parts: [
+      { type: "hitl", interrupt_id: "ghost", state: "pending" },
+      { type: "text", text: "x" },
+    ] },
+    { text: true }, TD,
+    () => null,
+  );
+  assert("a null view omits the gate (honest empty)",
+    omitted.map((p) => p.key).join(",") === "text", omitted.map((p) => p.key));
 }
 
 {

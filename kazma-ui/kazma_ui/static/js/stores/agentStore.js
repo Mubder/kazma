@@ -210,15 +210,8 @@ function registerAgentStore() {
       // buttons must not keep the approval lock on after the gate settled,
       // and a genuinely pending gate must hold it even if its card has not
       // painted yet. Falls back to the DOM predicate for cached clients.
-      const inlineApproval = !!(
-        chat && (
-          (typeof chat.hasLiveGate === 'function' && chat.hasLiveGate()) ||
-          (typeof chat.hasLiveGate !== 'function' &&
-            typeof chat.hasInlineApprovalCard === 'function' &&
-            chat.hasInlineApprovalCard())
-        )
-      );
-      if (this.pendingApproval || inlineApproval) {
+      const liveGate = !!(chat && typeof chat.hasLiveGate === 'function' && chat.hasLiveGate());
+      if (liveGate) {
         this._turnActive = false;
         if (chat && typeof chat.pauseForApproval === 'function') {
           chat.pauseForApproval(this.pendingApproval);
@@ -232,30 +225,14 @@ function registerAgentStore() {
       this.isThinking = false;
       this.activeTool = null;
       this._turnActive = false;
+      // Data for WS submitApproval only — there is no second card. TurnView
+      // paints the inline bubble; Alpine strip is gone (HITL_VIEW_MODEL C).
+      this.pendingApproval = approval;
       const chat = this._chat();
-      // Inline card is the only HITL UI. Never set pendingApproval when we
-      // can render inline — that was the duplicated YOLO card (bottom Alpine
-      // + message stream). Keep pendingApproval as fallback only.
-      // Dedupe lives in chat.js renderHitlCard (idempotent on a live card):
-      // suppressing here because SSE "will render it later" left the turn
-      // silently paused when that frame never arrived.
       if (chat && typeof chat._hitlApproval === 'function') {
-        // Keep the chat-page Alpine card until inline paint proves it
-        // landed. Clearing first left Dashboard as the only UI when
-        // renderHitlCard returned early (2026-09-02).
-        this.pendingApproval = approval;
         chat._hitlApproval(approval);
-        // A card that EXISTS is proof the inline paint landed — live buttons
-        // are not the test. Requiring them left this fallback on screen with
-        // four clickable buttons after a refresh, for a gate the server had
-        // already settled and the reconcile had just stamped "No longer
-        // pending" (the ghost card, 2026-09-03).
-        var landed = !!(chat.hasInlineApprovalCard && chat.hasInlineApprovalCard())
-          || !!(chat.hitlCardExistsFor && chat.hitlCardExistsFor(approval));
-        if (landed) this.pendingApproval = null;
         return;
       }
-      this.pendingApproval = approval;
       if (chat && typeof chat.pauseForApproval === 'function') {
         chat.pauseForApproval(approval);
       }

@@ -158,7 +158,9 @@ def test_abort_generation_retires_live_turn_before_stop_wait() -> None:
         / "hitl_approval.js"
     ).read_text(encoding="utf-8")
     assert "if (card) card.remove();" in dash
-    assert "seenTid" in dash
+    assert "seenTid" not in dash
+    assert "item.gate_id || item.interrupt_id" in dash
+    assert "payload.gate_id" in dash
 
 
 def test_chained_hitl_card_appends_below_previous() -> None:
@@ -255,7 +257,8 @@ def test_hitl_is_not_epoch_gated_and_paints_from_status_gates() -> None:
         "_resetTurnState()", 1
     )[0]
     assert "this.pendingApproval = approval;" in pause
-    assert "hasInlineApprovalCard()" in pause
+    assert "hasInlineApprovalCard()" not in pause
+    assert "chat._hitlApproval(approval)" in pause
 
 
 def test_chat_client_boots_under_node() -> None:
@@ -352,16 +355,14 @@ def test_hydrate_pending_without_gate_does_not_lock_composer() -> None:
     """
     js = _js()
     state = js_function_body(js, "function _hitlDisplayState(part)")
-    assert "_hydratingSession" in state and "'awaiting'" in state, (
-        "hydration must show the gate without claiming it is live"
-    )
-    # Never invent a claim from leftover status.
-    assert "_hitlAlreadyClaimed(part)" in state
+    assert "_gateViewOf" in state
+    assert "'awaiting'" not in state
+    assert "_hydratingSession" not in state
     lock = js_function_body(js, "function _hitlShouldLock(part)")
-    assert "_hitlGateRow" in lock and "'pending'" in lock
+    assert "v.interactive" in lock
     build = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
     assert "_hitlShouldLock(part)" in build, (
-        "the builder locks the composer without consulting the registry"
+        "the builder locks the composer without consulting the view"
     )
     assert "if (lockComposer) pauseForApproval(data);" in js
 
@@ -374,10 +375,12 @@ def test_hitl_display_state_never_invents_approved() -> None:
     """
     js = _js()
     state = js_function_body(js, "function _hitlDisplayState(part)")
-    # Registry truth wins in BOTH directions: a pending row re-opens a card
-    # a stale part called settled, and a claimed row settles a stale pending.
-    assert "if (gateRow && String(gateRow.state || '') === 'pending') return 'pending';" in state
-    assert "'claimed'" in state and "'resuming'" in state and "'inflight'" in state
+    # A1: the server already resolved. The client looks up a view; it does
+    # not re-derive Approved from a part stamp or a local click.
+    assert "part.state" not in state
+    assert "decided_locally" not in state
+    assert "_gateViewOf" in state
+    assert "return String(v.state || '')" in state
 
 
 def test_hitl_card_suppression_is_interrupt_scoped_not_global() -> None:
@@ -410,9 +413,7 @@ def test_hitl_card_suppression_is_interrupt_scoped_not_global() -> None:
     # that is the shape that made one gate's card suppress the next one's.
     assert "hasInlineApprovalCard()) return;" not in rhc
     assert "hasLiveGate()) return;" not in rhc
-    store_block = rhc.split("if (hasInlineApprovalCard()) {", 1)[1][:300]
-    assert "_clearStoreApproval();" in store_block
-    assert "return;" not in store_block.split("}", 1)[0]
+    assert "function _showStoreApproval" not in js
     assert "return card;" in js_function_body(js, "function renderHitlCard(data, opts)"), (
         "the builder must hand its node back so TurnView can place it"
     )
@@ -493,43 +494,43 @@ def test_a_gate_has_exactly_one_state_for_ordering_and_labelling() -> None:
     js = _js()
     assert "gateState: _hitlDisplayState," in js, "chat.js no longer supplies the resolver"
     painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
-    assert "resolvedState || _hitlDisplayState(part)" in painter
-    # The painter is handed entry.state at the call site.
+    assert "_hitlDisplayState(part)" in painter
     assert "_paintHitlSlotCard(el, entry.part, ctx, entry.state)" in js
-    # And the builder — lock/store (live buttons vs frozen) is the same fact
-    # as position and label. Re-resolving in build was the fourth answer.
     assert "_buildHitlSlotCard(entry.part, ctx, entry.state)" in js
     builder = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
-    assert "resolvedState || _hitlDisplayState(part)" in builder
+    assert "_hitlDisplayState(part)" in builder
+    assert "if (!show) return null" in builder
+
+
+def test_load_session_joins_status_before_first_paint() -> None:
+    """A1: messages + status land before TurnView hydrates history.
+
+    Painting messages alone then guessing HITL state is the race that
+    minted ghost buttons and frozen Waiting cards.
+    """
+    js = _js()
+    load = js_function_body(js, "function loadSession(sessionId)")
+    assert "Promise.all([" in load
+    assert "/status" in load
+    assert "/messages?stats=1" in load
+    ingest_at = load.index("_ingestStatus(pair[1])")
+    render_at = load.index("TVh.render(")
+    assert ingest_at < render_at, "status ingested after the first hydrate paint"
+    assert "status.gates" not in load
+    assert "gate_views" in js_function_body(js, "function _ingestStatus(status)")
 
 
 def test_awaiting_card_rebuilds_when_registry_says_pending() -> None:
-    """Refresh on a live pause used to freeze the card forever.
-
-    Hydration resolves a pending part to ``awaiting`` (no buttons, sorted
-    as settled) because ``_serverGates`` is empty until /status returns.
-    After the snapshot lands, ``_hitlDisplayState`` would return
-    ``pending`` — but nothing re-rendered, ``hasLiveGate()`` went true
-    from the registry, and the frozen card kept "Waiting for approval…"
-    with no buttons.
-
-    Two halves, both required: TurnView must rebuild a node whose frozen
-    chrome cannot represent ``pending``, and resync must re-render the
-    covering turns once the registry has answered. Historical awaiting
-    cards with no covering row must NOT be re-rendered — that is the
-    ghost-card defence.
-    """
+    """Rebuild remains for a frozen node that later becomes pending."""
     js = _js()
     view = _view_js()
     assert "renderers.rebuild" in view, "TurnView no longer asks whether to rebuild"
     assert "function _rerenderHitlDocs()" in js
     resync = js_function_body(js, "function _resyncDelivery(reason)")
     assert "_rerenderHitlDocs()" in resync
-    # After gates are applied, not before — otherwise the rebuild would
-    # still see an empty registry and leave the card frozen.
-    gates_at = resync.index("_serverGates = Array.isArray(status.gates)")
+    ingest_at = resync.index("_ingestStatus(status)")
     rerender_at = resync.index("_rerenderHitlDocs()")
-    assert gates_at < rerender_at, "re-render ran before the registry snapshot landed"
+    assert ingest_at < rerender_at, "re-render ran before views were ingested"
 
     rebuild = js_function_body(js, "rebuild: function(entry, el)")
     assert "entry.kind !== 'hitl'" in rebuild or "entry.kind !== \"hitl\"" in rebuild
@@ -539,7 +540,6 @@ def test_awaiting_card_rebuilds_when_registry_says_pending() -> None:
     rerender = js_function_body(js, "function _rerenderHitlDocs()")
     assert "pendingIds" in rerender
     assert "renderTurn(doc, { source: 'gates' })" in rerender
-    # Only covering pending rows — not every hydrated HITL part.
     assert "pendingIds[iid]" in rerender
 
 
@@ -565,7 +565,9 @@ def test_a_countdown_never_delivers_a_verdict_about_the_past() -> None:
         "an expired deadline can arm a ticker again — the first tick will "
         "stamp a gate the operator approved as timed out"
     )
-    # …and it is only armed for a gate the registry confirms is live.
+    assert "_noteGateDecided" not in cd, (
+        "the ticker still writes timeout into the document"
+    )
     painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
     assert "if (_hitlShouldLock(part))" in painter
     assert "_attachHitlCountdown" in painter
@@ -609,24 +611,20 @@ def test_a_confirmed_local_decision_outranks_a_stale_registry_row() -> None:
     """
     js = _js()
     state = js_function_body(js, "function _hitlDisplayState(part)")
-    assert "part.decided_locally" in state
-    local_at = state.index("decided_locally")
-    row_at = state.index("gateRow.state || '') === 'pending'")
-    assert local_at < row_at, (
-        "a stale pending registry row is overriding a confirmed local "
-        "decision again"
-    )
+    assert "decided_locally" not in state
     note = js_function_body(js, "function _noteGateDecided(data, state)")
-    assert "ev.decided_locally = true" in note
-    guard_at = note.index("state === 'approved' || state === 'denied'")
-    flag_at = note.index("ev.decided_locally = true")
-    assert guard_at < flag_at, (
-        "timeout/error still set decided_locally — a client ticker can "
-        "invent a denial that outranks a still-pending registry row"
-    )
+    assert "decided_locally" not in note
+    assert "_setHitlOverlay" in js
+    assert "_applyApproveView" in js
+    assert "_HITL_OVERLAY_MS" in js
     turndoc = _turndoc_js()
-    assert "if (ev.decided_locally) hitlPart.decided_locally = true;" in turndoc
-    assert "ck !== 'decided_locally'" in turndoc, "hydrate no longer strips the flag"
+    assert "decided_locally" not in turndoc
+    misc = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "routes_direct" / "misc.py"
+    ).read_text(encoding="utf-8")
+    assert "def _attach_hitl_view(" in misc
+    assert "_attach_hitl_view(" in misc.split("return _JSONResponse(", 1)[1]
 
 
 def test_the_answer_is_painted_the_same_way_everywhere() -> None:
@@ -663,9 +661,13 @@ def test_recovery_paths_never_disarm_on_a_dom_scan() -> None:
     assert "hasInlineApprovalCard()" not in resync, (
         "the authoritative resync can decline again"
     )
-    # The document-derived predicate is what logic may consult.
+    # HITL_VIEW_MODEL E: live = any view.interactive. A leftover pending
+    # stamp on the document must not look like a live gate.
     live = js_function_body(js, "function hasLiveGate()")
-    assert "hitlPartsOf" in live and "_hitlDisplayState" in live
+    assert "_viewIsPending" in live
+    assert "_serverGateViews" in live
+    assert "hitlPartsOf" not in live
+    assert "_hitlDisplayState" not in live
     # The DOM predicate survives for exactly one job: deciding whether the
     # Alpine store fallback is needed.
     dom = js_function_body(js, "function hasInlineApprovalCard()")
@@ -926,19 +928,19 @@ def test_store_approval_fallback_never_outlives_the_inline_card() -> None:
 
     # 1. A card that EXISTS is proof the paint landed — live buttons are not
     #    the test.
-    assert "function hitlCardExistsFor(data)" in js
-    assert "hitlCardExistsFor: hitlCardExistsFor," in js
+    html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
+    ).read_text(encoding="utf-8")
+    assert "function _showStoreApproval" not in js
+    assert 'class="hitl-approval-card"' not in html
     pause = store.split("_pauseForApproval(approval) {", 1)[1].split(
         "_resetTurnState()", 1
     )[0]
-    assert "chat.hitlCardExistsFor(approval)" in pause
-    assert "if (landed) this.pendingApproval = null;" in pause
-
-    # 2. An authoritative gate list with nothing pending retires the strip.
+    assert "hasInlineApprovalCard" not in pause
     rec = js.split("function _reconcileHitlCardsWithGates()", 1)[1].split(
         "/** Server-truth recovery", 1
     )[0]
-    assert "anyPending" in rec
     assert "_clearStoreApproval()" in rec
 
 
@@ -1135,11 +1137,13 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
     )[0]
     assert "_noteGateDecided(data," in set_state
     assert "_collapseClaimedHitlCard(card);" in set_state
+    assert "className" not in set_state
     sem = js.split("_semCard.querySelectorAll('.hitl-sem-opt')", 1)[1][:900]
     assert "_noteGateDecided(data," in sem
     timeout = js_function_body(js, "function markApprovalTimedOut(msg)")
-    assert "_noteGateDecided(" in timeout
-    assert "_collapseClaimedHitlCard(card);" in timeout
+    assert "_noteGateDecided(" not in timeout
+    assert "applyTurnEvent({" in timeout
+    assert "card.className" not in timeout
     # Collapsed bar shows the decision chip in the header (actions hidden).
     collapse = js.split("function _collapseClaimedHitlCard(card)", 1)[1].split(
         "\n  function renderHitlCard", 1
@@ -1173,7 +1177,8 @@ def test_claim_frame_does_not_unglue_the_collapsed_bar() -> None:
     assert "data-hitl-shown" in paint
     assert "if (already === show) return;" in paint
     release = js_function_body(js, "function _releaseHitlComposer(reason)")
-    assert "_collapseClaimedHitlCard(card);" in release
+    assert "_noteGateDecided" in release
+    assert "className" not in release
     css = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
@@ -1256,31 +1261,17 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
     the only authority for live questions (§30)."""
     js = _js()
     assert js.count("data && data.replay) return;") >= 3
-    # The second ghost source: hydration itself painted stale pending
-    # parts (frame guards alone weren't enough — the persisted part still
-    # says 'pending'). A hydrated gate now resolves to 'awaiting': the card
-    # is SHOWN, with its buttons disabled, so the transcript is honest and
-    # the slot is present — the registry resync is still the only thing
-    # that can make it clickable.
-    #
-    # Note the change of shape. The old rule was "paint NOTHING while
-    # hydrating", which is exactly the move that leaves a gate with no node
-    # on screen; the render invariant would now report that as a missing
-    # slot. Showing it disabled says the same thing without lying and
-    # without going silent.
+    # Ghost source two: a stale pending part. Join-before-paint + server
+    # view means a part with no covering live row is error chrome (or
+    # omitted), never live buttons. Hydration no longer returns 'awaiting'.
     state = js_function_body(js, "function _hitlDisplayState(part)")
-    assert "if (_hydratingSession) return 'awaiting';" in state
+    assert "if (_hydratingSession) return 'awaiting';" not in state
+    assert "_gateViewOf" in state
     painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
-    assert "if (show === 'awaiting')" in painter
     assert "b.disabled = true" in painter
-    # Round 3: the FLASH itself was the Alpine fallback being armed by a
-    # CLAIMED historical card (renderHitlCard lit pendingApproval whenever
-    # the painted card had no enabled buttons). Only a live card arms the
-    # fallback — the builder passes store:false for everything else.
     build = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
     assert "store: show === 'pending'," in build
-    rhc = js_function_body(js, "function renderHitlCard(data, opts)")
-    assert "opts && opts.store === false" in rhc
+    assert "function _showStoreApproval" not in js
     hitl_guards = js.count("st === 'pending' && data && data.replay) return;")
     assert hitl_guards == 2  # attach + send onHitl handlers
     store = (

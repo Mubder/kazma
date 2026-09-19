@@ -39,7 +39,7 @@ def test_listed_x_show_have_x_cloak() -> None:
             'x-show="$store.search.loading"',
         ),
         REPO / "kazma-ui/kazma_ui/templates/chat.html": (
-            'x-show="$store.agent?.pendingApproval?.message"',
+            'x-show="error"',
         ),
         REPO / "kazma-ui/kazma_ui/templates/ide.html": (
             'x-show="result"',

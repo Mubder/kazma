@@ -40,8 +40,10 @@ def test_abort_releases_hitl_gate_and_composer() -> None:
     status = init.split("async def get_session_status", 1)[1].split(
         "async def delete_session", 1
     )[0]
-    assert 'str(g.get("state") or "") == "pending"' in status
+    assert 'str(getattr(g, "state", "") or "") == "pending"' in status
     assert 'hitl.get("gate")' in status
+    assert '"gate_views": gate_views' in status
+    assert '"gates": gates' not in status
 
 
 def test_command_resume_ignores_own_drive_task() -> None:
@@ -247,10 +249,7 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     )
     assert "_serverGenerating && !_serverPaused" not in state
     assert "statusInflight" not in state
-    # Only this tab's own click (or a persisted claim) counts as inflight.
-    assert "_hitlAlreadyClaimed(part)" in state
-    # Locking the composer is a separate, stricter question than showing
-    # live buttons: only a registry row that says `pending` may lock.
+    assert "_hitlAlreadyClaimed" not in state
     lock = js_function_body(chat, "function _hitlShouldLock(part)")
     assert "_awaitingApproval" not in lock
     build = js_function_body(chat, "function _buildHitlSlotCard(part, ctx, resolvedState)")
@@ -266,13 +265,15 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
 def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     """Empty interrupt_id must not treat ANY claimed card as this gate."""
     chat = _src(_CHAT_JS)
-    claimed = chat.split("function _hitlAlreadyClaimed(data)", 1)[1].split(
-        "function _findHitlCard", 1
-    )[0]
+    claimed = js_function_body(chat, "function _hitlAlreadyClaimed(data)")
     assert "if (!iid) return true" not in claimed
-    assert "iid === cid" in claimed
+    assert "if (!iid) return false;" in claimed
+    assert "querySelectorAll" not in claimed
+    assert "messagesEl" not in claimed
     assert "host.contains" not in claimed
-    assert "tool === ctool" in claimed
+    assert "tool === ctool" not in claimed
+    assert "_gateViewById" in claimed
+    assert "_hitlPartById" in claimed
     find = chat.split("function _findHitlCard", 1)[1].split(
         "function _notifyHitlResolved", 1
     )[0]
@@ -281,8 +282,8 @@ def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     dash = _src(_UI / "static" / "js" / "hitl_approval.js")
     assert "kazma:hitl-resolved" in dash
     # _findHitlCard survives for one job — "is a card for this gate already
-    # on screen?" (hitlCardExistsFor / _hitlAlreadyClaimed), which is
-    # genuinely a question about what the operator can see.
+    # on screen?" (hitlCardExistsFor). _hitlAlreadyClaimed no longer asks
+    # the DOM; it reads views + the document part for this interrupt.
     find = chat.split("function _findHitlCard", 1)[1].split(
         "function _notifyHitlResolved", 1
     )[0]

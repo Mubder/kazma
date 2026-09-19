@@ -1317,44 +1317,53 @@ def create_sse_chat_router(
         # ``gates_authoritative`` tells the client the registry answered:
         # only then may it treat the LIST (including an empty list) as
         # truth. A read failure must not look like "no live gates".
-        gates: list[dict[str, Any]] = []
         gates_authoritative = False
+        live_row_objs: list[Any] = []
         if thread_id:
             try:
                 from kazma_ui.hitl_gate_bridge import registry_on
 
                 if registry_on():
-                    from kazma_core.safety.hitl import approval_deadline_from
                     from kazma_core.safety.hitl_gates import live_gates_async
 
-                    gates = []
-                    for g in await live_gates_async(thread_id):
-                        item = {
-                            "gate_id": g.gate_id,
-                            "state": g.state,
-                            "tool": g.tool,
-                            "kind": g.kind,
-                            "decision": g.decision,
-                            "message": g.message,
-                            "payload": g.payload(),
-                        }
-                        if g.state == "pending":
-                            try:
-                                dl = approval_deadline_from(g.created_at)
-                                if dl:
-                                    item["approval_deadline"] = dl
-                            except Exception:
-                                pass
-                        gates.append(item)
+                    live_row_objs = list(await live_gates_async(thread_id))
                     gates_authoritative = True
             except Exception:
-                gates = []
+                live_row_objs = []
                 gates_authoritative = False
+
+        # HITL_VIEW_MODEL A1: ``gate_views`` is the wire. ``gates`` is gone.
+        gate_views: list[dict[str, Any]] = []
+        try:
+            from kazma_ui.gate_view import resolve_gate_views
+
+            parts_for_view: list[Any] = []
+            if session:
+                for m in reversed(list(getattr(session, "messages", None) or [])):
+                    if not isinstance(m, dict):
+                        continue
+                    if str(m.get("role") or "").lower() != "assistant":
+                        continue
+                    raw_parts = m.get("parts")
+                    parts_for_view = raw_parts if isinstance(raw_parts, list) else []
+                    break
+            gate_views = list(
+                resolve_gate_views(
+                    parts_for_view,
+                    live_row_objs,
+                    authoritative=gates_authoritative,
+                )
+            )
+        except Exception:
+            logger.debug("[SSE] gate_views stamp skipped", exc_info=True)
+            gate_views = []
 
         # In-memory `_paused_threads` dies on restart. A durable pending
         # gate (or hitl_thread_status=pending) is still a live question.
         if not paused:
-            if any(str(g.get("state") or "") == "pending" for g in gates):
+            if any(str(getattr(g, "state", "") or "") == "pending" for g in live_row_objs):
+                paused = True
+            elif any(bool(v.get("interactive")) for v in gate_views if isinstance(v, dict)):
                 paused = True
             elif isinstance(hitl, dict) and str(hitl.get("gate") or "") == "pending":
                 paused = True
@@ -1365,8 +1374,8 @@ def create_sse_chat_router(
             "generating": bool(is_running),
             "paused": bool(paused),
             "hitl": hitl,
-            "gates": gates,
             "gates_authoritative": gates_authoritative,
+            "gate_views": gate_views,
         }
 
     @r.delete("/api/chat/sessions/{session_id}")
@@ -1682,6 +1691,20 @@ def create_sse_chat_router(
                 out[-1] = merged
             return out
 
+        live_rows_for_view: list[Any] = []
+        views_authoritative = False
+        thread_id = str((session.thread_id if session else "") or session_id or "")
+        if thread_id:
+            try:
+                from kazma_ui.gate_view import live_snapshot_async
+
+                live_rows_for_view, views_authoritative = await live_snapshot_async(
+                    thread_id
+                )
+            except Exception:
+                logger.debug("[SSE] gate-view snapshot skipped", exc_info=True)
+                live_rows_for_view, views_authoritative = [], False
+
         payload: list[dict[str, Any]] = []
         for msg in messages:
             if not _visible(msg):
@@ -1714,6 +1737,20 @@ def create_sse_chat_router(
                 from kazma_ui.turn_document import hydrate_message
 
                 item = hydrate_message(item)
+            stamped_parts = item.get("parts") if isinstance(item.get("parts"), list) else None
+            if stamped_parts:
+                try:
+                    from kazma_ui.gate_view import stamp_parts_for_read
+
+                    stamped = stamp_parts_for_read(
+                        stamped_parts,
+                        live_rows_for_view,
+                        authoritative=views_authoritative,
+                    )
+                    if stamped is not None:
+                        item["parts"] = stamped
+                except Exception:
+                    logger.debug("[SSE] hitl view stamp skipped", exc_info=True)
             payload.append(item)
         payload = _coalesce_assistant_runs(payload)
         if stats:
