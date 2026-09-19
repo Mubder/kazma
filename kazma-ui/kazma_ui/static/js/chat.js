@@ -5259,28 +5259,8 @@
       turn_id: _liveTurnId,
       source: 'timeout',
     });
-    if (messagesEl) {
-      messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
-        var btns = card.querySelectorAll('button');
-        var live = false;
-        for (var i = 0; i < btns.length; i++) {
-          if (!btns[i].disabled) live = true;
-        }
-        if (!live) return;
-        _stopHitlCountdown(card);
-        btns.forEach(function (b) { b.disabled = true; });
-        card.className = 'hitl-approval-card hitl-denied';
-        var actions = card.querySelector('.hitl-approval-actions');
-        if (actions) {
-          actions.innerHTML = '<span class="hitl-status hitl-denied">' + escapeHtml(text) + '</span>';
-        }
-        // Timeout is a decision too — record it in the document so the
-        // model and the screen agree, then collapse to the one-line bar.
-        // TurnView re-orders the settled card above the continuing reply
-        // on the next pass; nothing moves nodes by hand any more.
-        _collapseClaimedHitlCard(card);
-      });
-    }
+    // Chrome comes from TurnView after the document update. Do not
+    // className-stamp cards here (HITL_VIEW_MODEL C).
     _awaitingApproval = false;
     if (window.showToast) {
       try { window.showToast(text, 'warning', 6000); } catch (e) { /* ignore */ }
@@ -5295,14 +5275,7 @@
     if (messagesEl) {
       messagesEl.querySelectorAll('.hitl-approval-card').forEach(function(card) {
         if (_hitlCardIsClaimed(card)) return;
-        card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-        card.className = 'hitl-approval-card hitl-denied';
-        var actions = card.querySelector('.hitl-approval-actions');
-        if (actions) {
-          actions.innerHTML = '<span class="hitl-status hitl-denied">Aborted — send a new message</span>';
-        }
         _noteGateDecided({ interrupt_id: card.getAttribute('data-interrupt-id') || '' }, 'denied');
-        _collapseClaimedHitlCard(card);
       });
     }
     _clearStoreApproval();
@@ -5486,18 +5459,6 @@
     } catch (e) { /* ignore */ }
   }
 
-  /** Fallback when the inline bubble card did not land — keep a card on
-   *  the chat page (the Alpine strip under the transcript), not only on
-   *  Dashboard. Cleared as soon as hasInlineApprovalCard() is true. */
-  function _showStoreApproval(data) {
-    if (!data) return;
-    try {
-      if (window.Alpine && Alpine.store && Alpine.store('agent')) {
-        Alpine.store('agent').pendingApproval = data;
-      }
-    } catch (e) { /* ignore */ }
-  }
-
   function _payloadFromGate(g) {
     g = g || {};
     var p = (g.payload && typeof g.payload === 'object') ? g.payload : {};
@@ -5640,18 +5601,7 @@
         if (!btns[i].disabled) { live = true; break; }
       }
       if (!live) return;
-      _stopHitlCountdown(card);
-      btns.forEach(function (b) { b.disabled = true; });
-      card.className = 'hitl-approval-card hitl-denied';
-      var actions = card.querySelector('.hitl-approval-actions');
-      if (actions) {
-        actions.innerHTML = '<span class="hitl-status hitl-denied">No longer pending</span>';
-      }
-      // Registry truth goes into the document, not just onto the card:
-      // a stamp the model never learned about is exactly the DOM/document
-      // divergence this refactor exists to remove.
       _noteGateDecided({ interrupt_id: cid }, 'error');
-      _collapseClaimedHitlCard(card);
     });
     // The store's fallback strip lives OUTSIDE messagesEl and carries no
     // interrupt id, so the sweep above can never reach it. An authoritative
@@ -5947,9 +5897,6 @@
       content = _bubbleContent(currentMsgEl);
     }
     if (!content) {
-      // Inline bubble never materialized — keep the chat-page Alpine card
-      // so approval is not dashboard-only.
-      _showStoreApproval(data);
       return null;
     }
     var iid = _hitlInterruptIdOf(data);
@@ -5988,8 +5935,7 @@
       content.appendChild(_semCard);
       _revealHitlCard(_semCard);
       _attachHitlCountdown(_semCard, data);
-      if (hasInlineApprovalCard()) _clearStoreApproval();
-      else _showStoreApproval(data);
+      _clearStoreApproval();
       scrollToBottom();
       _semCard.querySelectorAll('.hitl-sem-opt').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -6147,27 +6093,13 @@
     content.appendChild(card);
     _revealHitlCard(card);
     _attachHitlCountdown(card, data);
-    if (hasInlineApprovalCard()) {
-      _clearStoreApproval();
-    } else if (opts && opts.store === false) {
-      // Historical/claimed paint — must not arm the live fallback.
-    } else {
-      _showStoreApproval(data);
-    }
+    _clearStoreApproval();
     scrollToBottom();
 
     function setCardState(state, label) {
       _stopHitlCountdown(card);
-      card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-      card.className = 'hitl-approval-card hitl-' + state;
-      var actions = card.querySelector('.hitl-approval-actions');
-      if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
-      // Decision made. Put it in the DOCUMENT — the card's position then
-      // follows from the declared slot order (settled gates above the
-      // answer), instead of this function reaching in to move the node and
-      // leaving the model still saying "pending" until a server frame
-      // happened to arrive.
       try { card.setAttribute('data-hitl-shown', state); } catch (eS) { /* ignore */ }
+      void label;
       // Record the DECISION, and only a decision.
       //
       // Two bugs lived in the one-line ternary this replaces. It mapped

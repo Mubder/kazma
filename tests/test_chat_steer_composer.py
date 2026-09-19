@@ -255,7 +255,8 @@ def test_hitl_is_not_epoch_gated_and_paints_from_status_gates() -> None:
         "_resetTurnState()", 1
     )[0]
     assert "this.pendingApproval = approval;" in pause
-    assert "hasInlineApprovalCard()" in pause
+    assert "hasInlineApprovalCard()" not in pause
+    assert "chat._hitlApproval(approval)" in pause
 
 
 def test_chat_client_boots_under_node() -> None:
@@ -410,9 +411,7 @@ def test_hitl_card_suppression_is_interrupt_scoped_not_global() -> None:
     # that is the shape that made one gate's card suppress the next one's.
     assert "hasInlineApprovalCard()) return;" not in rhc
     assert "hasLiveGate()) return;" not in rhc
-    store_block = rhc.split("if (hasInlineApprovalCard()) {", 1)[1][:300]
-    assert "_clearStoreApproval();" in store_block
-    assert "return;" not in store_block.split("}", 1)[0]
+    assert "function _showStoreApproval" not in js
     assert "return card;" in js_function_body(js, "function renderHitlCard(data, opts)"), (
         "the builder must hand its node back so TurnView can place it"
     )
@@ -923,19 +922,19 @@ def test_store_approval_fallback_never_outlives_the_inline_card() -> None:
 
     # 1. A card that EXISTS is proof the paint landed — live buttons are not
     #    the test.
-    assert "function hitlCardExistsFor(data)" in js
-    assert "hitlCardExistsFor: hitlCardExistsFor," in js
+    html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
+    ).read_text(encoding="utf-8")
+    assert "function _showStoreApproval" not in js
+    assert 'class="hitl-approval-card"' not in html
     pause = store.split("_pauseForApproval(approval) {", 1)[1].split(
         "_resetTurnState()", 1
     )[0]
-    assert "chat.hitlCardExistsFor(approval)" in pause
-    assert "if (landed) this.pendingApproval = null;" in pause
-
-    # 2. An authoritative gate list with nothing pending retires the strip.
+    assert "hasInlineApprovalCard" not in pause
     rec = js.split("function _reconcileHitlCardsWithGates()", 1)[1].split(
         "/** Server-truth recovery", 1
     )[0]
-    assert "anyPending" in rec
     assert "_clearStoreApproval()" in rec
 
 
@@ -1132,12 +1131,13 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
     )[0]
     assert "_noteGateDecided(data," in set_state
     assert "_collapseClaimedHitlCard(card);" in set_state
+    assert "className" not in set_state
     sem = js.split("_semCard.querySelectorAll('.hitl-sem-opt')", 1)[1][:900]
     assert "_noteGateDecided(data," in sem
     timeout = js_function_body(js, "function markApprovalTimedOut(msg)")
     assert "_noteGateDecided(" not in timeout
     assert "applyTurnEvent({" in timeout
-    assert "_collapseClaimedHitlCard(card);" in timeout
+    assert "card.className" not in timeout
     # Collapsed bar shows the decision chip in the header (actions hidden).
     collapse = js.split("function _collapseClaimedHitlCard(card)", 1)[1].split(
         "\n  function renderHitlCard", 1
@@ -1171,7 +1171,8 @@ def test_claim_frame_does_not_unglue_the_collapsed_bar() -> None:
     assert "data-hitl-shown" in paint
     assert "if (already === show) return;" in paint
     release = js_function_body(js, "function _releaseHitlComposer(reason)")
-    assert "_collapseClaimedHitlCard(card);" in release
+    assert "_noteGateDecided" in release
+    assert "className" not in release
     css = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "css" / "kazma.css"
@@ -1262,14 +1263,9 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
     assert "_gateViewOf" in state
     painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
     assert "b.disabled = true" in painter
-    # Round 3: the FLASH itself was the Alpine fallback being armed by a
-    # CLAIMED historical card (renderHitlCard lit pendingApproval whenever
-    # the painted card had no enabled buttons). Only a live card arms the
-    # fallback — the builder passes store:false for everything else.
     build = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
     assert "store: show === 'pending'," in build
-    rhc = js_function_body(js, "function renderHitlCard(data, opts)")
-    assert "opts && opts.store === false" in rhc
+    assert "function _showStoreApproval" not in js
     hitl_guards = js.count("st === 'pending' && data && data.replay) return;")
     assert hitl_guards == 2  # attach + send onHitl handlers
     store = (

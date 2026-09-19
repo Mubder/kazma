@@ -225,6 +225,13 @@ def test_2_refresh_mid_pause_has_live_buttons(live_server: str) -> None:
             assert approve.first.is_enabled(), (
                 "in-bubble Approve is present but disabled"
             )
+            all_enabled = page.locator(".hitl-approval-card button:enabled")
+            inline_enabled = page.locator(
+                ".message-assistant .hitl-approval-card button:enabled"
+            )
+            assert all_enabled.count() == inline_enabled.count(), (
+                "a second HITL card (Alpine strip) still has live buttons"
+            )
         finally:
             browser.close()
         try:

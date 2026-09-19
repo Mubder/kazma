@@ -378,9 +378,10 @@ class TestYoloAllowedPlumbing:
         src = self._src("kazma-ui/kazma_ui/static/js/hitl_approval.js")
         assert "item.yolo_allowed !== false" in src
 
-    def test_alpine_fallback_card_hides_yolo_button(self) -> None:
+    def test_alpine_fallback_card_is_gone(self) -> None:
         src = self._src("kazma-ui/kazma_ui/templates/chat.html")
-        assert "pendingApproval?.yolo_allowed !== false" in src
+        assert "pendingApproval?.yolo_allowed" not in src
+        assert 'class="hitl-approval-card"' not in src
 
     def test_agent_store_forwards_yolo_allowed(self) -> None:
         src = self._src("kazma-ui/kazma_ui/static/js/stores/agentStore.js")
