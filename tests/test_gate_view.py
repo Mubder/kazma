@@ -217,6 +217,25 @@ def test_stamp_omits_view_when_not_authoritative() -> None:
     assert "view" not in stamped[0]
 
 
+def test_view_for_interrupt_claimed_row_is_inflight(tmp_path) -> None:
+    from kazma_core.safety import hitl_gates as hg
+    from kazma_core.safety.hitl_gates import claim_gate, register_gate
+    from kazma_ui.gate_view import view_for_interrupt
+
+    hg.set_db_path_for_tests(str(tmp_path / "gates.db"))
+    try:
+        register_gate(_row("g1", "pending"))
+        claim_gate("g1", "approve", "web:test")
+        v = view_for_interrupt("t1", "g1", tool="file_write")
+        assert v is not None
+        assert v["state"] == "inflight"
+        assert v["interactive"] is False
+        assert v["slot"] == "settled"
+        assert v["gate_id"] == "g1"
+    finally:
+        hg.set_db_path_for_tests(None)
+
+
 def test_status_and_messages_wire_is_additive() -> None:
     """A0: gate_views is added; gates stays until A1."""
     from pathlib import Path

@@ -176,35 +176,26 @@ assert("partKey separates gates",
 assert("partKey is stable across a state change",
   TD.partKey(gates[1]) === TD.partKey({ type: "hitl", interrupt_id: "def", state: "approved" }));
 
-// ── decided_locally: evidence this tab watched the decision ─────────
+// ── view on a decision event (B: approve 200, not decided_locally) ──
 // The renderer lets it outrank a stale gate-registry row, so where it comes
 // from matters. 2026-09-19: between an approve and the next /status resync,
 // the registry still listed the gate as pending and sorted the settled card
 // back underneath the answer until a refresh.
-var localDecision = TD.applyEvent(TD.empty("t9"), {
+var viewed = TD.applyEvent(TD.empty("t9"), {
   type: "hitl", state: "approved", interrupt_id: "L1", tool: "shell_exec",
-  decided_locally: true,
+  view: { interrupt_id: "L1", state: "inflight", interactive: false, slot: "settled" },
 });
-var lp = localDecision.parts.filter(function (p) { return p.type === "hitl"; })[0];
-assert("a local decision is marked on the part", lp && lp.decided_locally === true);
+var vp = viewed.parts.filter(function (p) { return p.type === "hitl"; })[0];
+assert("approve 200 view rides on the part", vp && vp.view && vp.view.state === "inflight");
+assert("decided_locally is gone", vp && vp.decided_locally === undefined);
 
-var serverStamp = TD.applyEvent(TD.empty("t9"), {
-  type: "hitl", state: "approved", interrupt_id: "L1", tool: "shell_exec",
-});
-var sp = serverStamp.parts.filter(function (p) { return p.type === "hitl"; })[0];
-assert("a server frame is NOT marked local", sp && sp.decided_locally === undefined);
-
-// It must not survive a round trip through the server. A persisted part
-// cannot vouch for "this tab watched the operator decide", and inheriting
-// the flag across a refresh would let a stale part beat a pending gate row —
-// re-opening the invent-an-approval hole the registry rule exists to close.
 var rehydrated = TD.applyEvent(TD.empty("t9"), {
   type: "hydrate",
-  parts: [{ type: "hitl", state: "approved", interrupt_id: "L1", decided_locally: true }],
+  parts: [{ type: "hitl", state: "approved", interrupt_id: "L1", view: { state: "approved" } }],
   content: "done",
 });
 var rp = rehydrated.parts.filter(function (p) { return p.type === "hitl"; })[0];
-assert("hydrate strips decided_locally", rp && rp.decided_locally === undefined);
+assert("hydrate keeps the view", rp && rp.view && rp.view.state === "approved");
 assert("hydrate keeps the rest of the gate", rp && rp.interrupt_id === "L1" && rp.state === "approved");
 
 // ── activityOf is not a third opinion about a gate ──────────────────

@@ -1,7 +1,7 @@
 # Plan: HITL view model — join before paint, one resolver
 
 **Date:** 2026-09-19
-**Status:** BINDING (A1 landing)
+**Status:** BINDING (B landing)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.
 **Does not replace:** [`HITL_GATE_REGISTRY_PLAN.md`](HITL_GATE_REGISTRY_PLAN.md) (P6 — decision SoT) or [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble renderer). Those layers stay. This plan is the missing **join** between them, plus every other mouth that still derives “what should I show?” on its own.
 

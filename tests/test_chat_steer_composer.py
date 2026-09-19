@@ -564,7 +564,9 @@ def test_a_countdown_never_delivers_a_verdict_about_the_past() -> None:
         "an expired deadline can arm a ticker again — the first tick will "
         "stamp a gate the operator approved as timed out"
     )
-    # …and it is only armed for a gate the registry confirms is live.
+    assert "_noteGateDecided" not in cd, (
+        "the ticker still writes timeout into the document"
+    )
     painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
     assert "if (_hitlShouldLock(part))" in painter
     assert "_attachHitlCountdown" in painter
@@ -608,21 +610,20 @@ def test_a_confirmed_local_decision_outranks_a_stale_registry_row() -> None:
     """
     js = _js()
     state = js_function_body(js, "function _hitlDisplayState(part)")
-    # A1: paint is a view lookup. decided_locally is still written on click
-    # (B deletes it once approve 200 carries the view) but it must not
-    # outrank the server view.
     assert "decided_locally" not in state
     note = js_function_body(js, "function _noteGateDecided(data, state)")
-    assert "ev.decided_locally = true" in note
-    guard_at = note.index("state === 'approved' || state === 'denied'")
-    flag_at = note.index("ev.decided_locally = true")
-    assert guard_at < flag_at, (
-        "timeout/error still set decided_locally — a client ticker can "
-        "invent a denial that outranks a still-pending registry row"
-    )
+    assert "decided_locally" not in note
+    assert "_setHitlOverlay" in js
+    assert "_applyApproveView" in js
+    assert "_HITL_OVERLAY_MS" in js
     turndoc = _turndoc_js()
-    assert "if (ev.decided_locally) hitlPart.decided_locally = true;" in turndoc
-    assert "ck !== 'decided_locally'" in turndoc, "hydrate no longer strips the flag"
+    assert "decided_locally" not in turndoc
+    misc = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "routes_direct" / "misc.py"
+    ).read_text(encoding="utf-8")
+    assert "def _attach_hitl_view(" in misc
+    assert "_attach_hitl_view(" in misc.split("return _JSONResponse(", 1)[1]
 
 
 def test_the_answer_is_painted_the_same_way_everywhere() -> None:
@@ -1134,7 +1135,8 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
     sem = js.split("_semCard.querySelectorAll('.hitl-sem-opt')", 1)[1][:900]
     assert "_noteGateDecided(data," in sem
     timeout = js_function_body(js, "function markApprovalTimedOut(msg)")
-    assert "_noteGateDecided(" in timeout
+    assert "_noteGateDecided(" not in timeout
+    assert "applyTurnEvent({" in timeout
     assert "_collapseClaimedHitlCard(card);" in timeout
     # Collapsed bar shows the decision chip in the header (actions hidden).
     collapse = js.split("function _collapseClaimedHitlCard(card)", 1)[1].split(

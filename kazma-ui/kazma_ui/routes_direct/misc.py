@@ -40,6 +40,39 @@ def _get_snapshot_store() -> Any:
     return _snapshot_store
 
 
+def _attach_hitl_view(
+    payload: dict[str, Any],
+    thread_id: str,
+    interrupt_id: str = "",
+    *,
+    tool: str = "",
+    state_hint: str = "",
+) -> dict[str, Any]:
+    """Stamp ``view`` + ``gate_id`` on an approve 200/409 body. Never raises."""
+    out = dict(payload)
+    iid = str(
+        interrupt_id
+        or out.get("interrupt_id")
+        or out.get("gate_id")
+        or ""
+    ).strip()
+    hint = str(state_hint or out.get("hitl_state") or "").strip()
+    try:
+        from kazma_ui.gate_view import view_for_interrupt
+
+        view = view_for_interrupt(
+            thread_id, iid, tool=tool, state_hint=hint
+        )
+        if view:
+            out["view"] = view
+            out["gate_id"] = view.get("gate_id") or iid
+    except Exception:
+        logger.debug("[HITL] approve view stamp skipped", exc_info=True)
+    if iid and not out.get("interrupt_id"):
+        out["interrupt_id"] = iid
+    return out
+
+
 def _current_tenant() -> str:
     try:
         from kazma_core.tenant_context import get_current_tenant_id
@@ -637,16 +670,21 @@ def register_misc_routes(self: Any) -> None:
                         thread_id,
                     )
                     return _JSONResponse(
-                        {
-                            "ok": False,
-                            "status": "expired",
-                            "thread_id": thread_id,
-                            "content": "",
-                            "error": "No pending approval for this thread (already resumed or expired).",
-                            "reason": "not_pending",
-                            "running": False,
-                            "hitl_state": "settled",
-                        },
+                        _attach_hitl_view(
+                            {
+                                "ok": False,
+                                "status": "expired",
+                                "thread_id": thread_id,
+                                "content": "",
+                                "error": "No pending approval for this thread (already resumed or expired).",
+                                "reason": "not_pending",
+                                "running": False,
+                                "hitl_state": "settled",
+                            },
+                            thread_id,
+                            str(body.get("interrupt_id") or ""),
+                            state_hint="settled",
+                        ),
                         status_code=409,
                     )
                 if pre is not None:
@@ -746,15 +784,20 @@ def register_misc_routes(self: Any) -> None:
                     except Exception:
                         pass
                     return _JSONResponse(
-                        {
-                            "ok": False,
-                            "error": "This approval is no longer pending.",
-                            "reason": "not_pending",
-                            "running": True,
-                            "turn_id": _claimed_turn,
-                            "interrupt_id": _claimed_iid,
-                            "hitl_state": "inflight",
-                        },
+                        _attach_hitl_view(
+                            {
+                                "ok": False,
+                                "error": "This approval is no longer pending.",
+                                "reason": "not_pending",
+                                "running": True,
+                                "turn_id": _claimed_turn,
+                                "interrupt_id": _claimed_iid,
+                                "hitl_state": "inflight",
+                            },
+                            thread_id,
+                            _claimed_iid,
+                            state_hint="inflight",
+                        ),
                         status_code=409,
                     )
 
@@ -853,14 +896,20 @@ def register_misc_routes(self: Any) -> None:
                     in ("approved", "denied", "inflight", "settled", "done")
                 ):
                     return _JSONResponse(
-                        {
-                            "ok": False,
-                            "error": "This approval is no longer pending.",
-                            "reason": "not_pending",
-                            "running": False,
-                            "interrupt_id": _stored_iid,
-                            "hitl_state": _stored_state or "settled",
-                        },
+                        _attach_hitl_view(
+                            {
+                                "ok": False,
+                                "error": "This approval is no longer pending.",
+                                "reason": "not_pending",
+                                "running": False,
+                                "interrupt_id": _stored_iid,
+                                "hitl_state": _stored_state or "settled",
+                            },
+                            thread_id,
+                            _stored_iid,
+                            tool=pending_tool_name,
+                            state_hint=_stored_state or "settled",
+                        ),
                         status_code=409,
                     )
                 stamp_hitl_part_state(
@@ -934,18 +983,23 @@ def register_misc_routes(self: Any) -> None:
 
                 _resume_task.add_done_callback(_clear_inflight)
 
+                _ok_iid = str(_stamp_payload.get("interrupt_id") or "")
                 return _JSONResponse(
-                    {
-                        "ok": True,
-                        "approved": approved,
-                        "thread_id": thread_id,
-                        "turn_id": _resume_turn,
-                        "running": True,
-                        "interrupt_id": str(
-                            _stamp_payload.get("interrupt_id") or ""
-                        ),
-                        "hitl_state": "approved" if approved else "denied",
-                    }
+                    _attach_hitl_view(
+                        {
+                            "ok": True,
+                            "approved": approved,
+                            "thread_id": thread_id,
+                            "turn_id": _resume_turn,
+                            "running": True,
+                            "interrupt_id": _ok_iid,
+                            "hitl_state": "approved" if approved else "denied",
+                        },
+                        thread_id,
+                        _ok_iid,
+                        tool=pending_tool_name,
+                        state_hint="approved" if approved else "denied",
+                    )
                 )
         except Exception:
             logger.exception("[HITL] Failed to resume graph for thread=%s", thread_id)

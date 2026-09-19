@@ -23,6 +23,7 @@ __all__ = [
     "interrupt_id_of",
     "resolve_gate_views",
     "stamp_parts_for_read",
+    "view_for_interrupt",
     "live_snapshot",
     "live_snapshot_async",
 ]
@@ -307,6 +308,50 @@ def stamp_parts_for_read(
         return None
     views = resolve_gate_views(parts, live_rows, authoritative=authoritative)
     return apply_views_to_parts(parts, views)
+
+
+def view_for_interrupt(
+    thread_id: str,
+    interrupt_id: str,
+    *,
+    tool: str = "",
+    state_hint: str = "",
+) -> GateView | None:
+    """Display view for one interrupt after a claim/409. Never raises.
+
+    After approve CAS the live row is claimed/resuming, so the view is
+    inflight (not pending). If the snapshot misses, return a non-interactive
+    inflight view so the client does not jump the card back under the answer.
+    """
+    iid = str(interrupt_id or "").strip()
+    if not iid:
+        return None
+    try:
+        rows, auth = live_snapshot(thread_id)
+        part = {
+            "type": "hitl",
+            "interrupt_id": iid,
+            "tool": tool,
+            "state": state_hint or "pending",
+        }
+        views = resolve_gate_views([part], rows, authoritative=bool(auth) or bool(rows))
+        if views:
+            return views[0]
+    except Exception:
+        logger.debug("[gate_view] view_for_interrupt failed", exc_info=True)
+    hint = str(state_hint or "inflight").strip().lower() or "inflight"
+    if hint == "pending":
+        hint = "inflight"
+    interactive = hint == "pending"
+    return {
+        "gate_id": iid,
+        "interrupt_id": iid,
+        "tool": str(tool or ""),
+        "kind": "security",
+        "state": hint,
+        "interactive": interactive,
+        "slot": "pending" if interactive else "settled",
+    }
 
 
 def attach_view_to_hitl_frame(frame: dict[str, Any], thread_id: str) -> dict[str, Any]:

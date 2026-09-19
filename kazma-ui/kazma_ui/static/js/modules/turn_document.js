@@ -439,23 +439,7 @@
     var type = String(ev.type || '');
     if (type === 'hydrate') {
       if (Array.isArray(ev.parts) && ev.parts.length) {
-        // Strip `decided_locally` off anything read back from the server.
-        // It means "this tab watched the operator decide and the server
-        // confirm", which a persisted part cannot vouch for — and it lets a
-        // part outrank a pending gate row, so inheriting it across a refresh
-        // would re-open exactly the invent-an-approval hole the registry
-        // rule exists to close.
-        next.parts = ev.parts.map(function (p) {
-          if (!p || p.type !== 'hitl' || !p.decided_locally) return p;
-          var clean = {};
-          var ck;
-          for (ck in p) {
-            if (Object.prototype.hasOwnProperty.call(p, ck) && ck !== 'decided_locally') {
-              clean[ck] = p[ck];
-            }
-          }
-          return clean;
-        });
+        next.parts = ev.parts;
       }
       if (ev.content) {
         next.parts = mergeParts(next.parts, [{ type: 'text', text: String(ev.content) }]);
@@ -515,7 +499,6 @@
       // renderer lets it outrank a stale gate-registry row; see the hydrate
       // branch, which strips it, because a part read back from the server is
       // never this tab's live decision.
-      if (ev.decided_locally) hitlPart.decided_locally = true;
       if (ev.view && typeof ev.view === 'object') hitlPart.view = ev.view;
       else if (hitlPayload && typeof hitlPayload === 'object' && hitlPayload.view
           && typeof hitlPayload.view === 'object') {

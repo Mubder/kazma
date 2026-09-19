@@ -1280,6 +1280,7 @@
     _serverHitl = null;
     _serverGateViews = [];
     _serverGatesAuth = false;
+    _clearHitlOverlay();
     _serverThreadId = '';
     _lastInterruptedThreadId = '';
     _awaitingApproval = false;
@@ -1305,6 +1306,64 @@
 
   function _viewIsPending(v) {
     return !!(v && (v.interactive === true || String(v.state || '') === 'pending'));
+  }
+
+  /** Optimistic inflight until approve 200/409/4xx/catch or 15s→resync. */
+  var _hitlOverlay = {};
+  var _HITL_OVERLAY_MS = 15000;
+
+  function _setHitlOverlay(iid, view) {
+    iid = String(iid || '');
+    if (!iid || !view) return;
+    var prev = _hitlOverlay[iid];
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    var timer = setTimeout(function () {
+      _clearHitlOverlay(iid);
+      try { _resyncDelivery('overlay-ttl'); } catch (eOv) { /* ignore */ }
+    }, _HITL_OVERLAY_MS);
+    _hitlOverlay[iid] = { view: view, timer: timer };
+  }
+
+  function _clearHitlOverlay(iid) {
+    if (!iid) {
+      var k;
+      for (k in _hitlOverlay) {
+        if (!Object.prototype.hasOwnProperty.call(_hitlOverlay, k)) continue;
+        if (_hitlOverlay[k] && _hitlOverlay[k].timer) clearTimeout(_hitlOverlay[k].timer);
+      }
+      _hitlOverlay = {};
+      return;
+    }
+    iid = String(iid);
+    var rec = _hitlOverlay[iid];
+    if (rec && rec.timer) clearTimeout(rec.timer);
+    delete _hitlOverlay[iid];
+  }
+
+  function _mergeGateView(view) {
+    if (!view || typeof view !== 'object') return;
+    var iid = String(view.interrupt_id || view.gate_id || '');
+    if (!iid) return;
+    var list = (_serverGateViews || []).slice();
+    var i, found = false;
+    for (i = 0; i < list.length; i++) {
+      var v = list[i] || {};
+      if (String(v.interrupt_id || '') === iid || String(v.gate_id || '') === iid) {
+        list[i] = view;
+        found = true;
+        break;
+      }
+    }
+    if (!found) list.push(view);
+    _serverGateViews = list;
+  }
+
+  function _applyApproveView(body, fallbackIid) {
+    body = body || {};
+    var iid = String(body.interrupt_id || (body.view && body.view.interrupt_id) || fallbackIid || '');
+    _clearHitlOverlay(iid);
+    if (body.view && typeof body.view === 'object') _mergeGateView(body.view);
+    return body.view || null;
   }
 
   function _statusHasLiveHitl(status) {
@@ -5219,7 +5278,6 @@
         // model and the screen agree, then collapse to the one-line bar.
         // TurnView re-orders the settled card above the continuing reply
         // on the next pass; nothing moves nodes by hand any more.
-        _noteGateDecided({ interrupt_id: card.getAttribute('data-interrupt-id') || '' }, 'timeout');
         _collapseClaimedHitlCard(card);
       });
     }
@@ -5771,13 +5829,7 @@
       if (left <= 0) {
         _stopHitlCountdown(card);
         card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-        card.className = 'hitl-approval-card hitl-denied';
-        var act = card.querySelector('.hitl-approval-actions');
-        if (act) act.innerHTML = '<span class="hitl-status hitl-denied">' +
-          escapeHtml(ti('approval_expired', 'Approval timed out — continuing without this tool.')) + '</span>';
-        row.textContent = '';
-        _noteGateDecided(data, 'timeout');
-        _collapseClaimedHitlCard(card);
+        row.textContent = ti('waiting_server', 'Waiting for the server…');
         return;
       }
       var m = Math.floor(left / 60);
@@ -6207,12 +6259,24 @@
 
       _pinLiveAssistantBubble();
 
+      var ovIid = String(data.interrupt_id || '');
+      var ovView = {
+        gate_id: ovIid,
+        interrupt_id: ovIid,
+        tool: String(data.tool || ''),
+        kind: String(data.kind || 'security'),
+        state: 'inflight',
+        interactive: false,
+        slot: 'settled',
+      };
+      _setHitlOverlay(ovIid, ovView);
       applyTurnEvent({
         type: 'hitl',
         state: 'inflight',
         tool: data.tool || '',
         interrupt_id: data.interrupt_id || '',
         payload: data,
+        view: ovView,
         turn_id: _liveTurnId,
         source: 'approve',
       });
@@ -6230,6 +6294,7 @@
           return { status: r.status, body: {} };
         });
       }).then(function(res) {
+        var acceptedView = _applyApproveView(res.body, ovIid);
         if (res.status === 409) {
           var running409 = !!(res.body && (res.body.running
             || res.body.hitl_state === 'inflight'
@@ -6238,7 +6303,8 @@
             applyTurnEvent({
               type: 'hitl', state: 'inflight', tool: data.tool || '',
               interrupt_id: (res.body && res.body.interrupt_id) || data.interrupt_id || '',
-              payload: data, turn_id: _liveTurnId, source: 'approve-409',
+              payload: data, view: acceptedView || ovView,
+              turn_id: _liveTurnId, source: 'approve-409',
             });
             _awaitingApproval = false;
             _awaitingReply = true;
@@ -6252,7 +6318,8 @@
           }
           applyTurnEvent({
             type: 'hitl', state: 'error', tool: data.tool || '',
-            payload: data, turn_id: _liveTurnId, source: 'approve-409',
+            payload: data, view: acceptedView,
+            turn_id: _liveTurnId, source: 'approve-409',
           });
           _resyncDelivery('approve-409');
           return;
@@ -6270,7 +6337,8 @@
         applyTurnEvent({
           type: 'hitl', state: hitlState, tool: data.tool || '',
           interrupt_id: data.interrupt_id || '',
-          payload: data, turn_id: _liveTurnId, source: 'approve-accepted',
+          payload: data, view: acceptedView || ovView,
+          turn_id: _liveTurnId, source: 'approve-accepted',
         });
         // Decision accepted — the graph is running again. Clear the HITL
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
@@ -6295,6 +6363,7 @@
         _reattachAfterApproval('approve-json');
         _resyncDelivery('approve-json');
       }).catch(function(err) {
+        _clearHitlOverlay(ovIid);
         applyTurnEvent({
           type: 'hitl', state: 'error', tool: data.tool || '',
           payload: data, turn_id: _liveTurnId, source: 'approve-error',
@@ -7689,7 +7758,10 @@
   }
 
   function _gateViewOf(part) {
-    var live = _gateViewById(_hitlInterruptIdOf(part));
+    var iid = _hitlInterruptIdOf(part);
+    var ov = iid && _hitlOverlay[iid];
+    if (ov && ov.view) return ov.view;
+    var live = _gateViewById(iid);
     if (live) return live;
     if (part && part.view && typeof part.view === 'object') return part.view;
     return null;
@@ -7859,9 +7931,6 @@
     // Only an operator click earns this. A client timeout/error is a
     // display guess — the ticker must not outrank a still-pending
     // registry row, for the same reason a card must not invent Approved.
-    if (state === 'approved' || state === 'denied') {
-      ev.decided_locally = true;
-    }
     applyTurnEvent(ev);
   }
 
