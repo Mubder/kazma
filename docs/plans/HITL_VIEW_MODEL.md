@@ -1,7 +1,7 @@
 # Plan: HITL view model — join before paint, one resolver
 
 **Date:** 2026-09-19
-**Status:** BINDING (D landing)
+**Status:** BINDING (E landing; Playwright 1 still unclaimed)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.
 **Does not replace:** [`HITL_GATE_REGISTRY_PLAN.md`](HITL_GATE_REGISTRY_PLAN.md) (P6 — decision SoT) or [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble renderer). Those layers stay. This plan is the missing **join** between them, plus every other mouth that still derives “what should I show?” on its own.
 
@@ -203,7 +203,7 @@ If a PR cannot delete at least one of these (once that PR’s turn has come), it
 
 `rebuild()` may remain as TurnView internals. It is not a product state and must not be required for refresh-mid-pause once A1 lands.
 
-Leftover, **not** A1: the singular `hitl` object on `/status`. Kill in E or a one-line follow-up once `gate_views` is the live question.
+Leftover, **not** A1: the singular `hitl` object on `/status`. E stopped the web client from reading it (`gate_views` / `paused` are the live question). Kill the payload in F or a one-line follow-up.
 
 ---
 

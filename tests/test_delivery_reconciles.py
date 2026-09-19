@@ -43,6 +43,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._js_source import js_function_body
+
 _ROOT = Path(__file__).resolve().parents[1]
 _JS = _ROOT / "kazma-ui" / "kazma_ui" / "static" / "js"
 _CHAT = _JS / "chat.js"
@@ -225,3 +227,52 @@ class TestTheLatchesAreGone:
             if "activeStream" in line and "_reopenSseRef" in line
         ]
         assert not offenders, offenders
+
+
+class TestCatchUpCannotDecline:
+    """HITL_VIEW_MODEL E: recovery must not skip because a card looks settled."""
+
+    def test_resync_projects_this_turn_before_the_live_stream_return(self, chat: str) -> None:
+        resync = js_function_body(chat, "function _resyncDelivery(reason)")
+        project_at = resync.index("_messageIsThisTurn(lastMsg)")
+        live_at = resync.index("if (_streamIsLive()) {")
+        assert project_at < live_at, (
+            "this-turn durable is projected only after the live-stream return"
+        )
+        assert "if (liveHitl) {" in resync
+        assert "_paintLiveGates();" in resync
+        assert "setTimeout(recoverMissedApproval, 0)" in resync
+        assert "liveHitl && !hasLiveGate()" not in resync
+
+    def test_on_error_during_hitl_still_resyncs(self, chat: str) -> None:
+        default_err = js_function_body(chat, "function _defaultAttachCallbacks(epoch)")
+        on_err = default_err.split("onError: function()", 1)[1]
+        assert "if (_awaitingApproval) return;" not in on_err
+        assert "_resyncDelivery('sse-fail')" in on_err
+        send_on_err = chat.split("onError: function(msg)", 1)[1].split(
+            "function retry()", 1
+        )[0]
+        assert "_resyncDelivery('sse-fail')" in send_on_err
+        assert "if (_awaitingApproval) {" not in send_on_err.split(
+            "if (_awaitingApproval || hasLiveGate())", 1
+        )[0]
+
+    def test_claimed_guard_does_not_scan_the_dom(self, chat: str) -> None:
+        claimed = js_function_body(chat, "function _hitlAlreadyClaimed(data)")
+        assert "querySelectorAll" not in claimed
+        assert "messagesEl" not in claimed
+        assert "_gateViewById" in claimed
+
+    def test_recover_missed_does_not_no_op_on_a_live_looking_card(self, chat: str) -> None:
+        recover = js_function_body(chat, "function recoverMissedApproval()")
+        assert "if (hasLiveGate()) return;" not in recover
+        assert "_paintLiveGates();" in recover
+        assert "'/api/pending-approvals'" in recover
+
+    def test_has_live_gate_is_interactive_views_only(self, chat: str) -> None:
+        live = js_function_body(chat, "function hasLiveGate()")
+        assert "_viewIsPending" in live
+        assert "hitlPartsOf" not in live
+        pending = js_function_body(chat, "function _viewIsPending(v)")
+        assert "v.interactive === true" in pending
+        assert "state || '') === 'pending'" not in pending

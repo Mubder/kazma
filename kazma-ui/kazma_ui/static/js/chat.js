@@ -365,21 +365,26 @@
   }
 
   function _attachJournal(reason) {
-    if (activeStream || _attachInFlight) return;
     if (!chatSessionId) return;
+    // A dead handle is not a live stream. Treating `activeStream` as
+    // proof of liveness left a paused thread with nobody reading the
+    // journal (2026-09-14).
+    if (activeStream && !_streamIsLive()) {
+      try { activeStream.abort(); } catch (eDead) { /* already dead */ }
+      activeStream = null;
+    }
+    if (_streamIsLive() || _attachInFlight) return;
     var stream = window.KazmaStream;
     if (!stream || typeof stream.sse !== 'function') return;
     // An Approve click is a deliberate operator action, never a cursor
-    // loop — it must never be rationed by the reopen budget. Live
-    // 2026-09-04: after a turn with a few stream hiccups the budget was
-    // exhausted, the post-approve attach was silently declined, and the
-    // CoT sat frozen for 3+ minutes (heartbeats journaled server-side,
-    // nobody attached) until the pending-approval poll painted the next
-    // card. Reset the budget for approve-driven attaches and SAY SO when
-    // a decline happens.
-    if (reason === 'approve-json' || reason === 'approve-409') {
+    // loop — it must never be rationed by the reopen budget. Same for a
+    // thread that is still paused: exhausting the budget left a live
+    // question with no stream. Reset and SAY SO when a decline happens.
+    var waiveBudget = reason === 'approve-json' || reason === 'approve-409'
+      || _awaitingApproval || _serverPaused || hasLiveGate();
+    if (waiveBudget) {
       if (_reopenCount > 0) {
-        console.warn('[KazmaChat] Reopen budget reset by approve attach');
+        console.warn('[KazmaChat] Reopen budget reset by ' + (reason || 'pause') + ' attach');
       }
       _reopenCount = 0;
     }
@@ -525,14 +530,16 @@
         } else {
           endTurn();
         }
-        if (!data && !_awaitingApproval) {
+        if (!data) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
       },
       onError: function() {
         if (!_mine()) return;
         activeStream = null;
-        if (_awaitingApproval) return;
+        // HITL pause closes the HTTP body. That is catch-up, not a failed
+        // turn — always resync. Skipping because `_awaitingApproval` left
+        // the bubble on a frozen card with no journal tail.
         _resyncDelivery('sse-fail');
       }
     };
@@ -729,16 +736,47 @@
       if (!generating && !liveHitl && _awaitingApproval) {
         _releaseHitlComposer('resync-idle');
       }
-      if (liveHitl && !_awaitingApproval) pauseForApproval(_serverHitl);
-      if (liveHitl && !hasLiveGate()) {
+      if (liveHitl && !_awaitingApproval) {
+        var liveView = _firstInteractiveView();
+        pauseForApproval(liveView ? _payloadFromView(liveView) : null);
+      }
+      // Catch-up never skips because a card "looks" settled. Paint every
+      // interactive view, then recover from the pending list even when
+      // chrome is omitted or frozen.
+      if (liveHitl) {
         _paintLiveGates();
         setTimeout(recoverMissedApproval, 0);
+      }
+
+      // This-turn durable (parts + interim text) even if the stream is live.
+      // Previous-turn lastMsg is NOT this turn — skip it while paused so
+      // we do not paint an older answer over a live question (2026-08-27).
+      if (lastMsg && lastMsg.role === 'assistant' && _messageIsThisTurn(lastMsg)) {
+        if (isPlanOnlyMessage(lastMsg.content)) {
+          try { tryIngestPlanFromText(lastMsg.content); } catch (ePlan) { /* ignore */ }
+        } else {
+          applyTurnEvent({
+            type: 'hydrate',
+            source: 'resync',
+            turn_id: lastMsg.turn_id || _liveTurnId,
+            content: lastMsg.content,
+            parts: lastMsg.parts,
+            activity: lastMsg.activity,
+            model: lastMsg.model || '',
+            open: lastMsg.open,
+            pending: lastMsg.pending,
+          });
+          if (!generating && !liveHitl && (lastMsg.content || '').trim()) {
+            _forcePaintDoneContent(lastMsg.content);
+          }
+        }
       }
 
       // Still running server-side → keep waiting honestly AND re-attach a
       // live SSE stream from the journal cursor — but only when the stream
       // is genuinely DEAD. Aborting a healthy stream on every focus/visibility
-      // trigger churned connections for no gain.
+      // trigger churned connections for no gain. This-turn durable already
+      // projected above; this return must not skip that work.
       if (generating || liveHitl) {
         if (_streamIsLive()) {
           // A live stream owns this turn — NEVER abort it here. Aborting a
@@ -754,13 +792,22 @@
           } catch (e2) { /* ignore */ }
           return;
         }
-        _awaitingReply = true;
-        noteTurnActivity();
         try {
           _setStatusStrip(paused
             ? ti('waiting_approval', 'Waiting for approval…')
             : ti('thinking', 'Kazma is thinking…'));
         } catch (e2) { /* ignore */ }
+        // A stream that just closed (sse-fail / truncated) while paused
+        // must not attach in this same tick: attach → close → resync
+        // loops forever if the reopen budget is also waived. The
+        // reconciler attaches on its timer. Visibility/focus/reconcile
+        // still reopen a dead handle.
+        var closedHere = reason === 'sse-fail' || reason === 'sse-truncated';
+        if (liveHitl && closedHere) {
+          return;
+        }
+        _awaitingReply = true;
+        noteTurnActivity();
         if (_reopenSseRef) {
           try { _reopenSseRef('resync-' + (reason || '?')); } catch (e3) { /* ignore */ }
         }
@@ -774,14 +821,8 @@
       // answer, and painting it over the live bubble swapped the visible
       // text for an older message on every app-switch (2026-08-27).
       //
-      // "Genuinely" is the whole point. This used to ask the DOM — scan the
-      // transcript for an enabled button — which answered TRUE for a FOSSIL
-      // card left over from a gate that had already settled. The only
-      // unconditional route back to server truth then declined to run, and
-      // the bubble kept its placeholder until a refresh (2026-09-19,
-      // sequential Allow-tool clicks). hasLiveGate() reads the document and
-      // the gate registry, so a card nobody can act on cannot disarm the
-      // recovery any more.
+      // "Genuinely" is any view.interactive. A fossil pending stamp, a
+      // frozen card, or a dead stream handle cannot disarm this path.
       if (hasLiveGate()) return;
 
       // Idle: paint durable assistant text even if the row still carries a
@@ -1236,7 +1277,6 @@
   var _awaitingApproval = false;
   var _serverGenerating = false;
   var _serverPaused = false;
-  var _serverHitl = null;
   var _serverGateViews = [];
   var _serverGatesAuth = false;
   var _serverThreadId = '';
@@ -1277,7 +1317,6 @@
     _supersededLive = false;
     _serverGenerating = false;
     _serverPaused = false;
-    _serverHitl = null;
     _serverGateViews = [];
     _serverGatesAuth = false;
     _clearHitlOverlay();
@@ -1298,14 +1337,22 @@
     status = status || {};
     _serverGenerating = !!status.generating;
     _serverPaused = !!status.paused;
-    _serverHitl = (status.hitl && typeof status.hitl === 'object') ? status.hitl : null;
     _serverGateViews = Array.isArray(status.gate_views) ? status.gate_views : [];
     _serverGatesAuth = !!status.gates_authoritative;
     if (status.thread_id) _serverThreadId = String(status.thread_id);
   }
 
   function _viewIsPending(v) {
-    return !!(v && (v.interactive === true || String(v.state || '') === 'pending'));
+    return !!(v && v.interactive === true);
+  }
+
+  function _firstInteractiveView() {
+    var list = _serverGateViews || [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      if (_viewIsPending(list[i])) return list[i];
+    }
+    return null;
   }
 
   /** Optimistic inflight until approve 200/409/4xx/catch or 15s→resync. */
@@ -1373,8 +1420,6 @@
     for (i = 0; i < views.length; i++) {
       if (_viewIsPending(views[i])) return true;
     }
-    var hitl = (status && status.hitl) || _serverHitl;
-    if (hitl && String(hitl.gate || '') === 'pending') return true;
     return !!(status && status.paused);
   }
 
@@ -3542,7 +3587,7 @@
         // Truncated stream (no terminal frame): reconcile with durable
         // truth after the lock settles — paints the persisted reply when
         // the turn already finished, re-attaches when still generating.
-        if (truncated && (!hasLiveGate())) {
+        if (truncated) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
         // Interrupted (HITL) turn with no rendered card anywhere = silently
@@ -3551,7 +3596,8 @@
         // tab switch) is included: the interrupt event may have fired AFTER
         // this tab's stream dropped, so `interrupted` stays false and the
         // pending approval would otherwise be invisible until auto-deny.
-        if ((interrupted || truncated) && !hasLiveGate() && !_serverGenerating) {
+        // Frozen or omitted chrome must not skip this.
+        if ((interrupted || truncated) && !_serverGenerating) {
           setTimeout(recoverMissedApproval, 1200);
         }
         }
@@ -3618,8 +3664,10 @@
         activeStream = null;
         // HITL pause closes the HTTP body. That is not a failed turn — the
         // card is already on screen. Overwriting it with "network error"
-        // was the live-vs-refresh mismatch (2026-09-01).
-        if (_awaitingApproval) {
+        // was the live-vs-refresh mismatch (2026-09-01). Catch-up still
+        // runs: do not skip resync because `_awaitingApproval`.
+        if (_awaitingApproval || hasLiveGate()) {
+          _resyncDelivery('sse-fail');
           if (!_serverGenerating) setTimeout(recoverMissedApproval, 400);
           return;
         }
@@ -5288,15 +5336,14 @@
   /**
    * Is a gate genuinely waiting on the operator?
    *
-   * Answered from the DOCUMENT and the gate registry — never by scanning
-   * the transcript for an enabled <button>.
+   * Answered from live views only: any view.interactive. Never the
+   * document part stamp, never a DOM scan, never a frozen card.
    *
-   * The DOM scan is what made this predicate dangerous. It returned true
-   * for a FOSSIL card whose gate had already settled, and eight recovery
-   * paths early-returned on it, so the only unconditional route back to
-   * server truth switched itself off exactly when a turn had gone quiet.
-   * That is how "approved twice then silence" survived every individual
-   * fix: each fix narrowed one guard, and the next path hit another one.
+   * The DOM scan (and later the leftover pending stamp) made this
+   * predicate dangerous. It returned true for a FOSSIL card whose gate
+   * had already settled, and recovery paths early-returned on it, so the
+   * only unconditional route back to server truth switched itself off
+   * exactly when a turn had gone quiet.
    */
   function hasLiveGate() {
     var i;
@@ -5304,12 +5351,25 @@
     for (i = 0; i < views.length; i++) {
       if (_viewIsPending(views[i])) return true;
     }
+    return false;
+  }
+
+  /** Durable row for the turn this tab is projecting, not a previous reply. */
+  function _messageIsThisTurn(msg) {
+    if (!msg) return false;
+    var tid = String(msg.turn_id || '');
+    if (tid && _liveTurnId && tid === String(_liveTurnId)) return true;
+    if (msg.open || msg.pending) return true;
+    var parts = msg.parts;
+    if (!Array.isArray(parts) || !parts.length) return false;
     var TD = window.KazmaTurnDocument;
-    var doc = _docs[_liveTurnId];
-    if (!TD || !doc || typeof TD.hitlPartsOf !== 'function') return false;
-    var gates = TD.hitlPartsOf(doc.parts || []);
+    if (!TD || typeof TD.hitlPartsOf !== 'function') return false;
+    var gates = TD.hitlPartsOf(parts);
+    var i, iid, v;
     for (i = 0; i < gates.length; i++) {
-      if (_hitlDisplayState(gates[i]) === 'pending') return true;
+      iid = _hitlInterruptIdOf(gates[i]);
+      v = iid ? _gateViewById(iid) : null;
+      if (v && _viewIsPending(v)) return true;
     }
     return false;
   }
@@ -5351,29 +5411,20 @@
   }
 
   function _hitlAlreadyClaimed(data) {
+    // Document + views only. A frozen/claimed DOM card must not drop a
+    // pending frame for a later interrupt (HITL_VIEW_MODEL E).
     var iid = _hitlInterruptIdOf(data);
-    var tool = _hitlToolOf(data);
-    var part = _openHitlPart();
-    if (part) {
-      var st = String(part.state || 'pending');
-      var pid = _hitlInterruptIdOf(part);
-      var ptool = _hitlToolOf(part);
-      if (st !== 'pending') {
-        if (iid && pid && iid === pid) return true;
-        if (!iid && !pid && tool && ptool && tool === ptool) return true;
-      }
+    if (!iid) return false;
+    var view = _gateViewById(iid);
+    if (!view) {
+      var ov = _hitlOverlay[iid];
+      if (ov && ov.view) view = ov.view;
     }
-    if (messagesEl) {
-      var cards = messagesEl.querySelectorAll('.hitl-approval-card');
-      for (var i = 0; i < cards.length; i++) {
-        if (!_hitlCardIsClaimed(cards[i])) continue;
-        var cid = String(cards[i].getAttribute('data-interrupt-id') || '');
-        if (iid && cid && iid === cid) return true;
-        var ctool = String(cards[i].getAttribute('data-tool') || '');
-        if (!iid && !cid && tool && ctool && tool === ctool) return true;
-      }
-    }
-    return false;
+    if (view && !_viewIsPending(view)) return true;
+    var part = _hitlPartById(iid);
+    if (!part) return false;
+    var st = _hitlDisplayState(part);
+    return !!(st && st !== 'pending');
   }
 
   /** Existing HITL card for this interrupt. Never reuse a claimed card for a new gate. */
@@ -5548,22 +5599,6 @@
         source: 'gates',
       });
     }
-    if (_serverHitl && String(_serverHitl.gate || '') === 'pending' && _serverHitl.tool) {
-      applyTurnEvent({
-        type: 'hitl',
-        state: 'pending',
-        tool: _serverHitl.tool || '',
-        interrupt_id: _serverHitl.interrupt_id || '',
-        payload: {
-          thread_id: _serverThreadId || chatSessionId || '',
-          tool: _serverHitl.tool || '',
-          interrupt_id: _serverHitl.interrupt_id || '',
-          message: '',
-        },
-        turn_id: _liveTurnId,
-        source: 'gates',
-      });
-    }
   }
 
   /** §30 decision truth: once /status answers with the authoritative gate
@@ -5636,11 +5671,23 @@
     return TD.hitlPartOf(doc.parts);
   }
 
+  function _hitlPartById(iid) {
+    iid = String(iid || '');
+    if (!iid) return null;
+    var TD = window.KazmaTurnDocument;
+    var doc = _docs[_liveTurnId] || null;
+    if (!TD || !doc || typeof TD.hitlPartsOf !== 'function') return null;
+    var gates = TD.hitlPartsOf(doc.parts || []);
+    var i;
+    for (i = 0; i < gates.length; i++) {
+      if (_hitlInterruptIdOf(gates[i]) === iid) return gates[i];
+    }
+    return null;
+  }
+
   function recoverMissedApproval() {
-    if (hasLiveGate()) return;
     if (_serverGenerating && !_serverPaused) return;
     _paintLiveGates();
-    if (hasLiveGate()) return;
     var existing = _openHitlPart();
     if (existing && String(existing.state || 'pending') !== 'pending') {
       /* a settled part must not block a live gate painted above */
@@ -5657,12 +5704,10 @@
         turn_id: _liveTurnId,
         source: 'recover-open',
       });
-      if (hasLiveGate()) return;
     }
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(payload) {
-        if (hasLiveGate()) return;
         var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
         if (!pending.length) return;
         var hit = null;

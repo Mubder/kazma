@@ -44,6 +44,8 @@ from pathlib import Path
 
 import pytest
 
+from tests._js_source import js_function_body
+
 _CHAT_JS = (
     Path(__file__).resolve().parents[1]
     / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
@@ -116,3 +118,19 @@ class TestTheReasonSurvives:
         2026-09-04 defect: budget exhausted, attach declined, CoT frozen.
         """
         assert "reason === 'approve-json' || reason === 'approve-409'" in src
+
+
+class TestCatchUpCannotDeclineAPause:
+    """HITL_VIEW_MODEL E: a paused thread must still be able to attach."""
+
+    def test_a_dead_handle_does_not_block_attach(self, src: str) -> None:
+        body = js_function_body(src, "function _attachJournal(reason)")
+        assert "if (activeStream || _attachInFlight) return;" not in body
+        assert "_streamIsLive()" in body
+        assert "activeStream.abort()" in body
+        assert "if (_streamIsLive() || _attachInFlight) return;" in body
+
+    def test_paused_attach_is_not_rationed_by_the_reopen_budget(self, src: str) -> None:
+        body = js_function_body(src, "function _attachJournal(reason)")
+        assert "_awaitingApproval || _serverPaused || hasLiveGate()" in body
+        assert "waiveBudget" in body

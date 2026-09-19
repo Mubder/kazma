@@ -661,9 +661,13 @@ def test_recovery_paths_never_disarm_on_a_dom_scan() -> None:
     assert "hasInlineApprovalCard()" not in resync, (
         "the authoritative resync can decline again"
     )
-    # The document-derived predicate is what logic may consult.
+    # HITL_VIEW_MODEL E: live = any view.interactive. A leftover pending
+    # stamp on the document must not look like a live gate.
     live = js_function_body(js, "function hasLiveGate()")
-    assert "hitlPartsOf" in live and "_hitlDisplayState" in live
+    assert "_viewIsPending" in live
+    assert "_serverGateViews" in live
+    assert "hitlPartsOf" not in live
+    assert "_hitlDisplayState" not in live
     # The DOM predicate survives for exactly one job: deciding whether the
     # Alpine store fallback is needed.
     dom = js_function_body(js, "function hasInlineApprovalCard()")

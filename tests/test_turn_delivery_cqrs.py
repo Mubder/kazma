@@ -265,13 +265,15 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
 def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     """Empty interrupt_id must not treat ANY claimed card as this gate."""
     chat = _src(_CHAT_JS)
-    claimed = chat.split("function _hitlAlreadyClaimed(data)", 1)[1].split(
-        "function _findHitlCard", 1
-    )[0]
+    claimed = js_function_body(chat, "function _hitlAlreadyClaimed(data)")
     assert "if (!iid) return true" not in claimed
-    assert "iid === cid" in claimed
+    assert "if (!iid) return false;" in claimed
+    assert "querySelectorAll" not in claimed
+    assert "messagesEl" not in claimed
     assert "host.contains" not in claimed
-    assert "tool === ctool" in claimed
+    assert "tool === ctool" not in claimed
+    assert "_gateViewById" in claimed
+    assert "_hitlPartById" in claimed
     find = chat.split("function _findHitlCard", 1)[1].split(
         "function _notifyHitlResolved", 1
     )[0]
@@ -280,8 +282,8 @@ def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     dash = _src(_UI / "static" / "js" / "hitl_approval.js")
     assert "kazma:hitl-resolved" in dash
     # _findHitlCard survives for one job — "is a card for this gate already
-    # on screen?" (hitlCardExistsFor / _hitlAlreadyClaimed), which is
-    # genuinely a question about what the operator can see.
+    # on screen?" (hitlCardExistsFor). _hitlAlreadyClaimed no longer asks
+    # the DOM; it reads views + the document part for this interrupt.
     find = chat.split("function _findHitlCard", 1)[1].split(
         "function _notifyHitlResolved", 1
     )[0]
