@@ -43,12 +43,22 @@ _GITHUB_HTTPS = re.compile(
     r"/?$",
     re.IGNORECASE,
 )
+_GITHUB_BLOB = re.compile(
+    r"^https?://(?:www\.)?github\.com/"
+    r"(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)"
+    r"/blob/(?P<ref>[^/]+)/(?P<blobpath>.+)$",
+    re.IGNORECASE,
+)
 _OWNER_REPO = re.compile(
     r"^(?P<owner>[A-Za-z0-9_.-]+)/(?P<repo>[A-Za-z0-9_.-]+)$"
 )
 _NPX_SKILLS = re.compile(
     r"(?:npx\s+skills\s+add\s+|skills\s+add\s+)"
     r"(?P<source>\S+)",
+    re.IGNORECASE,
+)
+_SKILL_FLAG = re.compile(
+    r"--skill(?:\s+|=)(?P<skill>[A-Za-z0-9][A-Za-z0-9_-]*)",
     re.IGNORECASE,
 )
 
@@ -93,7 +103,8 @@ class InstallResult:
 def parse_github_source(source: str) -> dict[str, str] | None:
     """Parse a user/agent-provided source into owner/repo/ref/subpath.
 
-    Accepts owner/repo, GitHub URLs, and ``npx skills add …`` phrases.
+    Accepts owner/repo, GitHub tree/blob URLs, and ``npx skills add …``
+    phrases (including ``--skill name``).
     """
     raw = (source or "").strip()
     if not raw:
@@ -101,6 +112,10 @@ def parse_github_source(source: str) -> dict[str, str] | None:
 
     # Strip common wrappers
     raw = raw.strip("`\"'")
+    skill = ""
+    sm = _SKILL_FLAG.search(raw)
+    if sm:
+        skill = (sm.group("skill") or "").strip()
     npx = _NPX_SKILLS.search(raw)
     if npx:
         raw = npx.group("source").strip()
@@ -108,23 +123,43 @@ def parse_github_source(source: str) -> dict[str, str] | None:
     # Drop trailing fragments
     raw = raw.rstrip("/").removesuffix(".git")
 
+    def _with_skill(parsed: dict[str, str]) -> dict[str, str]:
+        if skill:
+            parsed["skill"] = skill
+        return parsed
+
     m = _GITHUB_HTTPS.match(raw)
     if m:
-        return {
+        return _with_skill({
             "owner": m.group("owner"),
             "repo": m.group("repo").removesuffix(".git"),
             "ref": m.group("ref") or "",
             "subpath": (m.group("subpath") or "").strip("/"),
-        }
+        })
+
+    blob = _GITHUB_BLOB.match(raw)
+    if blob:
+        blobpath = (blob.group("blobpath") or "").strip("/")
+        if blobpath.lower().endswith("skill.md"):
+            parent = blobpath.rsplit("/", 1)[0] if "/" in blobpath else ""
+            subpath = parent
+        else:
+            subpath = blobpath
+        return _with_skill({
+            "owner": blob.group("owner"),
+            "repo": blob.group("repo").removesuffix(".git"),
+            "ref": blob.group("ref") or "",
+            "subpath": subpath,
+        })
 
     m = _OWNER_REPO.match(raw)
     if m:
-        return {
+        return _with_skill({
             "owner": m.group("owner"),
             "repo": m.group("repo"),
             "ref": "",
             "subpath": "",
-        }
+        })
 
     # Bare skill slug that looks like a GitHub path without scheme
     if "github.com/" in raw.lower():
@@ -342,7 +377,10 @@ async def install_from_github(
             message="Unrecognized source",
             source=source,
             errors=[
-                "Expected owner/repo, a GitHub URL, or `npx skills add owner/repo`. "
+                "Expected owner/repo, a GitHub URL (tree or blob/…/SKILL.md), "
+                "or `npx skills add owner/repo [--skill name]`. "
+                "A documentation page is not a skill repo — use the GitHub "
+                "source the page names (e.g. typesafe-ai/skills). "
                 f"Got: {source!r}"
             ],
         )
@@ -381,6 +419,14 @@ async def install_from_github(
             )
 
         skill_dirs = _find_skill_dirs(search_root)
+        skill_hint = (parsed.get("skill") or "").strip()
+        if skill_hint and skill_dirs:
+            filtered = [
+                d for d in skill_dirs
+                if d.name == skill_hint
+            ]
+            if filtered:
+                skill_dirs = filtered
         if not skill_dirs:
             return InstallResult(
                 success=False,

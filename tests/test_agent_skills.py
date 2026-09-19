@@ -102,6 +102,28 @@ class TestParseGithubSource:
         assert p["owner"] == "shadcn"
         assert p["repo"] == "improve"
 
+    def test_npx_skill_flag(self):
+        p = parse_github_source(
+            "npx skills add typesafe-ai/skills --skill typesafe-ai"
+        )
+        assert p is not None
+        assert p["owner"] == "typesafe-ai"
+        assert p["repo"] == "skills"
+        assert p["skill"] == "typesafe-ai"
+
+    def test_blob_skill_md_url(self):
+        p = parse_github_source(
+            "https://github.com/typesafe-ai/skills/blob/main/skills/typesafe-ai/SKILL.md"
+        )
+        assert p is not None
+        assert p["owner"] == "typesafe-ai"
+        assert p["repo"] == "skills"
+        assert p["ref"] == "main"
+        assert p["subpath"] == "skills/typesafe-ai"
+
+    def test_docs_page_is_not_a_github_source(self):
+        assert parse_github_source("https://docs.typesafe.ai/agent-skill") is None
+
     def test_invalid(self):
         assert parse_github_source("not a source") is None
 

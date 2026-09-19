@@ -279,6 +279,62 @@ def _canonical_page_url(url: str) -> str:
     return f"{parsed.scheme}://{netloc}{path}"
 
 
+def _llms_txt_urls_for_seed(seed: str) -> list[str]:
+    """Candidate llmstxt.org index URLs for a docs seed (origin first)."""
+    parsed = urlparse(seed)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return []
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    out = [f"{origin}/llms-full.txt", f"{origin}/llms.txt"]
+    path = parsed.path or "/"
+    if path not in ("", "/"):
+        parent = path.rsplit("/", 1)[0]
+        if parent:
+            out.append(f"{origin}{parent}/llms.txt")
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for u in out:
+        if u not in seen:
+            seen.add(u)
+            ordered.append(u)
+    return ordered
+
+
+def _urls_from_llms_txt(text: str, base_url: str) -> list[str]:
+    """Pull page URLs out of an llmstxt.org index (markdown links + bare URLs)."""
+    if not text or not str(text).strip():
+        return []
+    return _extract_links_from_text(text, base_url)
+
+
+async def _llms_txt_discover(seed: str) -> list[str]:
+    """Fetch /llms-full.txt then /llms.txt and harvest linked pages.
+
+    Fail-open: a missing or tiny file is not an error. Never raises.
+    """
+    found: list[str] = []
+    for url in _llms_txt_urls_for_seed(seed):
+        try:
+            text, final = await _http_get_text(url, timeout=15.0)
+        except Exception:
+            continue
+        if not text or len(text) < 40:
+            continue
+        if _looks_like_bot_block_html(text):
+            continue
+        pages = _urls_from_llms_txt(text, final or url)
+        if pages:
+            logger.info(
+                "[kb_discover] %s contributed %d URLs", url, len(pages)
+            )
+            found.extend(pages)
+            # llms-full.txt is the complete corpus; no need to also fetch
+            # the shorter /llms.txt from the same origin.
+            if url.endswith("llms-full.txt"):
+                break
+    return found
+
+
 def _order_urls_seed_first(seed: str, urls: list[str]) -> list[str]:
     """De-dupe by canonical form (seed first). Entries are canonical URLs."""
     seen: set[str] = set()
@@ -392,7 +448,14 @@ def _in_scope(seed_url: str, candidate: str, mode: str) -> bool:
             return False
         seed_topic = _seed_topic_segments(seed_url)
         if not seed_topic:
-            return False  # can't determine topic → reject to be safe
+            # Docs-root / noise-only seeds (`docs.typesafe.ai/`,
+            # `/introduction`) have no product topic. Fail-closed used to
+            # drop a 234-URL Firecrawl map to the seed page alone. Fall
+            # back to path-prefix: a docs root prefixes `/` (whole host);
+            # `/docs/overview` prefixes `/docs/`.
+            return (urlparse(candidate).path or "").startswith(
+                _seed_prefix(seed_url)
+            )
         cand_segments = {s.lower() for s in (urlparse(candidate).path or "").split("/") if s}
         return bool(seed_topic & cand_segments)
     # prefix (legacy default — kept for explicit opt-in)
@@ -682,7 +745,33 @@ async def kb_discover_pages(
             u for u in raw
             if not _is_infra_url(u) and _in_scope(seed, u, scope_mode)
         ]
-        return _order_urls_seed_first(seed, in_scope)
+        ordered = _order_urls_seed_first(seed, in_scope)
+        dropped = max(0, len({_canonical_page_url(u) for u in raw if u}) - len(ordered))
+        if dropped >= 10 and len(raw) >= 10 and len(ordered) < 5:
+            logger.warning(
+                "[kb_discover] scope=%s kept %d/%d URLs for %s "
+                "(dropped %d — seed has no topic segment?)",
+                scope_mode, len(ordered), len(raw), seed, dropped,
+            )
+        return ordered
+
+    # llmstxt.org index: merge into every later tier so a docs host that
+    # publishes /llms.txt is crawled as the author intended, not as whatever
+    # a map/sitemap happened to return.
+    llms_urls = await _llms_txt_discover(seed)
+    if llms_urls:
+        await _safe_progress(
+            on_progress,
+            f"llms.txt contributed {len(llms_urls)} URLs",
+        )
+
+    def _with_llms(raw: list[str] | None) -> list[str]:
+        merged: list[str] = []
+        if raw:
+            merged.extend(raw)
+        if llms_urls:
+            merged.extend(llms_urls)
+        return merged
 
     # ── 0. Firecrawl /v1/map (strongest tier for bot-walled sites) ───
     # Runs server-side on Firecrawl's browser farm, so the target's bot
@@ -695,6 +784,7 @@ async def kb_discover_pages(
         await _safe_progress(on_progress, "querying Firecrawl /v1/map for site URLs…")
         mapped = await _firecrawl_map_discover(seed)
         if mapped:
+            mapped = _with_llms(mapped)
             await _safe_progress(on_progress, f"Firecrawl returned {len(mapped)} URLs; scoping…")
             ordered = _scope_and_order(mapped)
             if ordered and not _is_sparse_discovery(seed, ordered):
@@ -718,7 +808,7 @@ async def kb_discover_pages(
         await _safe_progress(on_progress, f"parsing {len(sitemap_docs)} sitemap doc(s)…")
         for doc in sitemap_docs:
             discovered.extend(_extract_urls_from_sitemap(doc))
-        ordered = _scope_and_order(discovered)
+        ordered = _scope_and_order(_with_llms(discovered))
         if ordered and not _is_sparse_discovery(seed, ordered):
             logger.info(
                 "[kb_discover] sitemap yielded %d in-scope URLs for %s",
@@ -738,7 +828,7 @@ async def kb_discover_pages(
         await _safe_progress(on_progress, "expanding seed via Jina Reader (nav link harvest)…")
         jina_links = await _jina_expand_seed(seed)
         if jina_links:
-            ordered = _scope_and_order(jina_links)
+            ordered = _scope_and_order(_with_llms(jina_links))
             if ordered and not _is_sparse_discovery(seed, ordered):
                 logger.info(
                     "[kb_discover] Jina seed-expand yielded %d in-scope URLs for %s",
@@ -753,14 +843,25 @@ async def kb_discover_pages(
         else:
             await _safe_progress(on_progress, "Jina seed-expand unavailable; falling back to link-walk")
 
+    # llms.txt alone can be a complete corpus when map/sitemap/Jina
+    # were sparse after scoping (or Firecrawl was not configured).
+    if llms_urls:
+        ordered = _scope_and_order(llms_urls)
+        if ordered and not _is_sparse_discovery(seed, ordered):
+            logger.info(
+                "[kb_discover] llms.txt yielded %d in-scope URLs for %s",
+                len(ordered), seed,
+            )
+            return ordered
+
     # ── 3. BFS link-walk fallback (Playwright / httpx / Jina) ─────────
     await _safe_progress(on_progress, "rendering seed page to discover nav links…")
     bfs_urls = await _bfs_discover(seed, scope_mode, on_progress=on_progress)
     if bfs_urls and not _is_sparse_discovery(seed, bfs_urls):
-        return _order_urls_seed_first(seed, bfs_urls)
+        return _order_urls_seed_first(seed, _with_llms(bfs_urls))
     if bfs_urls:
         # Sparse but non-empty — still better than seed-only.
-        return _order_urls_seed_first(seed, bfs_urls)
+        return _order_urls_seed_first(seed, _with_llms(bfs_urls))
     # BFS also found nothing usable — the seed page itself was unfetchable
     # (likely bot-walled).  Tell the user why this dropped to "just the
     # seed" so they know to enable a fetch backend rather than seeing an

@@ -130,9 +130,65 @@ def test_tree_scope_strips_generic_segments():
 
     # Only 'shipx' is the topic; everything else is noise.
     assert _seed_topic_segments("https://x.com/docs/v1/en/overview/shipx") == {"shipx"}
-    # No distinctive segments → empty set → tree scope rejects everything
-    # (safe default; user should pick a more specific seed).
+    # No distinctive segments → empty set → tree falls back to prefix
+    # (docs.typesafe.ai/ used to ingest 1 page from a 234-URL map).
     assert _seed_topic_segments("https://x.com/docs/overview") == set()
+    assert _in_scope(
+        "https://x.com/docs/overview", "https://x.com/docs/guide", "tree"
+    )
+    assert not _in_scope(
+        "https://x.com/docs/overview", "https://x.com/blog/x", "tree"
+    )
+
+
+def test_tree_scope_docs_root_keeps_the_whole_host():
+    """Dedicated docs hosts have no product topic in the path.
+
+    Live 2026-09-19: Firecrawl mapped 234 URLs for https://docs.typesafe.ai/
+    then tree-scope dropped every one of them (empty topic → reject) and
+    the job indexed the homepage only.
+    """
+    seed = "https://docs.typesafe.ai/"
+    from kazma_core.stores.knowledge_ingest import _seed_topic_segments
+
+    assert _seed_topic_segments(seed) == set()
+    assert _in_scope(seed, "https://docs.typesafe.ai/", "tree")
+    assert _in_scope(seed, "https://docs.typesafe.ai/introduction", "tree")
+    assert _in_scope(seed, "https://docs.typesafe.ai/agent-skill", "tree")
+    assert _in_scope(seed, "https://docs.typesafe.ai/sdk/python/api", "tree")
+    assert not _in_scope(seed, "https://evil.com/introduction", "tree")
+
+
+def test_tree_scope_noise_only_leaf_still_crawls_the_docs_host():
+    """`/introduction` is a noise segment, so topic is empty; prefix of a
+    leaf under the host root is `/` — the rest of the docs host stays in."""
+    seed = "https://docs.typesafe.ai/introduction"
+    assert _in_scope(seed, "https://docs.typesafe.ai/agent-skill", "tree")
+    assert _in_scope(seed, "https://docs.typesafe.ai/sdk/python", "tree")
+    assert not _in_scope(seed, "https://other.example/introduction", "tree")
+
+
+def test_llms_txt_index_harvests_markdown_and_bare_urls():
+    from kazma_core.stores.knowledge_ingest import (
+        _llms_txt_urls_for_seed,
+        _urls_from_llms_txt,
+    )
+
+    seed = "https://docs.typesafe.ai/"
+    assert _llms_txt_urls_for_seed(seed)[:2] == [
+        "https://docs.typesafe.ai/llms-full.txt",
+        "https://docs.typesafe.ai/llms.txt",
+    ]
+    text = (
+        "# TypeSafe\n\n"
+        "- [Agent skill](https://docs.typesafe.ai/agent-skill): install\n"
+        "- [Quickstart](/introduction/quickstart.md)\n"
+        "https://docs.typesafe.ai/sdk/python/api\n"
+    )
+    urls = _urls_from_llms_txt(text, seed)
+    assert "https://docs.typesafe.ai/agent-skill" in urls
+    assert "https://docs.typesafe.ai/introduction/quickstart" in urls
+    assert "https://docs.typesafe.ai/sdk/python/api" in urls
 
 
 def test_tree_is_the_default_scope_mode():

@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Fix — skill install went silent after two approvals; KB crawl of a docs host ingested 1 page (2026-09-19)
+
+Asking Kazma to install https://docs.typesafe.ai/agent-skill approved
+`install_agent_skill` then `python_exec`; the server finished (1815-char
+reply) but the bubble stayed on *Action required…* until refresh. A
+finished turn now overwrites that HITL placeholder; an interrupted `done`
+no longer closes the journal attach between sequential gates.
+
+Crawling https://docs.typesafe.ai/ mapped 234 URLs then indexed the
+homepage only: tree-scope with no product topic fail-closed. Empty topic
+now falls back to path-prefix (a docs root is the whole host). Discovery
+also harvests `/llms.txt` / `/llms-full.txt`. Skill install accepts GitHub
+blob URLs and `npx skills add owner/repo --skill name`.
+
 ## feat(x): Knowledge grounding is a real Try-it path (2026-09-19)
 
 Settings → X → Ground drafts in the Knowledge Base now picks a library from

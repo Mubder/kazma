@@ -254,15 +254,19 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _forcePaintDoneContent(raw)" in src
         assert "function _isWatchdogNotice(text)" in src
-        assert "data.content && !_awaitingApproval" in src
+        assert "The agent paused to ask for permission" in src
+        assert "data.content && !interrupted" in src
         assert "_forcePaintDoneContent(data.content)" in src
         # The visibility check must run BEFORE the empty-terminal watchdog.
-        at_ack = src.index("if (data && data.content && !_awaitingApproval)")
+        at_ack = src.index("if (data && data.content && !interrupted)")
         at_watchdog = src.index("if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {")
         assert at_ack < at_watchdog, (
             "done-content force-paint must precede the empty-terminal fallback"
         )
         assert "_resyncDelivery('empty-terminal')" in src
+        # Fossil HITL wait must not block idle+durable paint (placeholder
+        # stayed until refresh after sequential Allow-tool, 2026-09-19).
+        assert "if (hasInlineApprovalCard() || _awaitingApproval) return;" not in src
 
     def test_terminal_push_suppressed_for_capacity_acks(self, monkeypatch):
         """The done-frame content fallback must not mint a Web Push for
