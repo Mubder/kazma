@@ -40,6 +40,7 @@ from kazma_core.x_api.stance import (
     SIDE_AGAINST,
     SIDE_SUPPORT,
     SUMMON_SUBJECT_ID,
+    VOICE_SUBJECT_ID,
     Subject,
     UNMATCHED_VOICE,
     classify,
@@ -117,9 +118,12 @@ class SummonResult:
     #: result because the approval prompt has to quote it back to the operator
     #: — quoting parent_id there would look right and never resolve.
     summon_id: str = ""
+    #: Set when Knowledge grounding ran (even if it found nothing). Absent
+    #: when the Settings toggle is off, so the Try-it panel stays quiet.
+    knowledge: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out = {
             "ok": self.ok,
             "action": self.action,
             "reason": self.reason,
@@ -130,6 +134,9 @@ class SummonResult:
             "parent_id": self.parent_id,
             "summon_id": self.summon_id,
         }
+        if self.knowledge is not None:
+            out["knowledge"] = self.knowledge
+        return out
 
 
 def reply_target_id(summon_id: str, parent_id: str) -> str:
@@ -622,39 +629,101 @@ def _draft_error_text(exc: BaseException) -> str:
     return f"the model call failed: {msg[:200]}"
 
 
-async def _knowledge_notes(query: str, *, library: str = "") -> str:
+@dataclass(frozen=True)
+class KnowledgeGrounding:
+    """What the KB lookup produced. Empty notes = draft without facts."""
+
+    notes: str = ""
+    hit_count: int = 0
+    library_ids: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "used": self.hit_count > 0,
+            "hits": self.hit_count,
+            "libraries": list(self.library_ids),
+        }
+
+
+_SYNTHETIC_SUBJECT_IDS = frozenset(
+    {
+        SUMMON_SUBJECT_ID.lower(),
+        VOICE_SUBJECT_ID.lower(),
+        "*",
+    }
+)
+
+
+def _kb_query(subject: Subject | None, parent_text: str) -> str:
+    """Search the post. Do not prefix synthetic subject ids.
+
+    Live drafts used ``f"{subject.id} {tweet}"``. Opinion-ask subjects are
+    id ``post`` and voice catch-alls are ``voice`` / ``*`` — those tokens
+    polluted FTS and pulled unrelated chunks. A named Settings card id
+    (Kuwait, Iran, …) can still help a short tweet.
+    """
+    text = " ".join((parent_text or "").split())
+    sid = (getattr(subject, "id", None) or "").strip()
+    if sid and sid.lower() not in _SYNTHETIC_SUBJECT_IDS:
+        return f"{sid} {text}".strip()[:400]
+    return text[:400]
+
+
+def _knowledge_notes_sync(query: str, library: str = "") -> KnowledgeGrounding:
     """Best-effort KB snippets. Never raises. Empty if unused or unavailable."""
     q = (query or "").strip()
     if not q:
-        return ""
+        return KnowledgeGrounding()
     try:
+        from kazma_core.memory.federated_search import resolve_kb_library_ids
         from kazma_core.safety.prompt_fence import format_untrusted_block
         from kazma_core.stores.knowledge import get_knowledge_store
         from kazma_core.stores.knowledge_index import get_knowledge_index
+        from kazma_core.tenant_context import get_current_tenant_id
 
-        index = get_knowledge_index()
         store = get_knowledge_store()
+        index = get_knowledge_index()
         lib = (library or "").strip()
+        tenant = (get_current_tenant_id() or "").strip() or "default"
         if lib:
-            hits = await index.search(q, lib, top_k=3)
+            row = store.get_library_for_tenant(lib, tenant)
+            if row is None:
+                row = store.get_library(lib)
+            if row is None or int(row.get("chunk_count") or 0) <= 0:
+                return KnowledgeGrounding()
+            ids = [str(row["id"])]
         else:
-            libs = store.list_libraries(include_archived=False) or []
-            if not libs:
-                return ""
-            hits = await index.search_all(q, [str(x["id"]) for x in libs], top_k=3)
+            ids = list(resolve_kb_library_ids(q, mode="all_active") or [])
+        if not ids:
+            return KnowledgeGrounding()
+        hits = index.search_all_sync(q, ids, top_k=3)
         chunks: list[str] = []
+        libs_used: list[str] = []
         for hit in hits[:3]:
-            text = " ".join(str(getattr(hit, "content", "") or "").split())[:400]
-            if text:
-                chunks.append(text)
+            text = " ".join(str(getattr(hit, "content", "") or "").split())[:280]
+            if not text:
+                continue
+            title = (getattr(hit, "document_title", "") or "").strip()
+            lid = str(getattr(hit, "library_id", "") or "")
+            label = title or lid
+            chunks.append(f"- [{label}] {text}" if label else f"- {text}")
+            if lid and lid not in libs_used:
+                libs_used.append(lid)
         if not chunks:
-            return ""
-        return format_untrusted_block(
-            "\n".join(f"- {c}" for c in chunks), source="knowledge"
+            return KnowledgeGrounding()
+        return KnowledgeGrounding(
+            notes=format_untrusted_block("\n".join(chunks), source="knowledge"),
+            hit_count=len(chunks),
+            library_ids=tuple(libs_used),
         )
     except Exception:
         logger.debug("[x-reply] knowledge lookup failed", exc_info=True)
-        return ""
+        return KnowledgeGrounding()
+
+
+async def _knowledge_notes(query: str, *, library: str = "") -> KnowledgeGrounding:
+    """KB lookup off the event loop. Embeddings/FTS are sync."""
+    return await asyncio.to_thread(_knowledge_notes_sync, query, library)
 
 
 async def draft_reply(
@@ -970,10 +1039,10 @@ async def _handle_summon_claimed(
         mood = mood_from_text(summon_text)
         if mood:
             logger.info("[x-reply] emoji set mood=%s for %s", mood, summon_id)
-    notes = ""
+    grounding = KnowledgeGrounding()
     if cfg.use_knowledge:
-        notes = await _knowledge_notes(
-            f"{subject.id} {(parent_text or summon_text or '')[:240]}",
+        grounding = await _knowledge_notes(
+            _kb_query(subject, parent_text or summon_text or ""),
             library=cfg.knowledge_library,
         )
     try:
@@ -981,7 +1050,7 @@ async def _handle_summon_claimed(
             subject=subject, parent_text=parent_text or summon_text,
             parent_handle=parent_handle, mood=mood,
             summon_text=summon_text,
-            knowledge_notes=notes,
+            knowledge_notes=grounding.notes,
         )
     except DraftFailed as exc:
         reason = str(exc)
@@ -1134,12 +1203,13 @@ async def preview_reply(
                     ),
                 )
 
-    notes = ""
+    grounding = KnowledgeGrounding()
     if cfg.use_knowledge:
-        notes = await _knowledge_notes(
-            f"{subject.id} {parent_text[:240]}",
+        grounding = await _knowledge_notes(
+            _kb_query(subject, parent_text),
             library=cfg.knowledge_library,
         )
+    kd = grounding.to_dict() if cfg.use_knowledge else None
 
     # *mood* is passed straight in here (the panel has a picker), rather than
     # read off a summon — a preview has no summoner to trust.
@@ -1147,13 +1217,14 @@ async def preview_reply(
         draft = await draft_reply(
             subject=subject, parent_text=parent_text,
             parent_handle=parent_handle, mood=mood,
-            knowledge_notes=notes,
+            knowledge_notes=grounding.notes,
         )
     except DraftFailed as exc:
         # The dry run is where an operator finds out their model config is
         # wrong, so say which thing is wrong rather than "empty draft".
         return SummonResult(
-            False, "failed", reason=str(exc), subject_id=subject.id
+            False, "failed", reason=str(exc), subject_id=subject.id,
+            knowledge=kd,
         )
     screen = screen_draft(draft, subject)
     if not screen and cfg.stance_check and not subject.is_catch_all():
@@ -1163,11 +1234,13 @@ async def preview_reply(
         screen = await check_stance(draft, subject, unattended=False)
     if screen:
         return SummonResult(
-            False, "failed", reason=screen, draft=draft, subject_id=subject.id
+            False, "failed", reason=screen, draft=draft, subject_id=subject.id,
+            knowledge=kd,
         )
     return SummonResult(
         True, "preview", draft=draft, subject_id=subject.id,
         reason="preview only — nothing was posted or recorded",
+        knowledge=kd,
     )
 
 

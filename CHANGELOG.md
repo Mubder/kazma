@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## feat(x): Knowledge grounding is a real Try-it path (2026-09-19)
+
+Settings → X → Ground drafts in the Knowledge Base now picks a library from
+the Knowledge page (not a raw id). Search uses the post text (named cards
+may prefix; `post`/`voice` do not). Up to three fenced snippets; the side
+still wins. Try it reports how many landed. Empty KB does not skip the
+summon.
+
 ## docs: FAQ / recent-features catch the walk-up and TTS opt-in (2026-09-19)
 
 Operator FAQ and recent-features now match the guides: trusted X follow-ups

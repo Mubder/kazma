@@ -98,7 +98,15 @@ Catch-all `*` and unmatched **voice** skip this check (there is no claim to drif
 
 ## Knowledge Base (optional)
 
-Settings → “Ground drafts in the Knowledge Base”. A few fenced snippets. If they conflict with the side, **the side wins**. Off by default.
+Off by default. When on, each draft searches the Knowledge Library (hybrid lexical + semantic) and injects up to three **fenced** snippets as facts. If they conflict with the card’s **side**, **the side wins**. Empty or failed lookup does not skip the summon — it drafts without notes.
+
+Opinion-ask / voice-only summons search the **post text**, not a synthetic id (`post` / `voice`). A named Settings card (Kuwait, …) may prefix the query so a short tweet still hits.
+
+1. Ingest a library on **Knowledge** (`/knowledge`) until it has chunks.
+2. Settings → X → Auto-reply → **Ground drafts in the Knowledge Base**.
+3. Pick one library, or leave **All libraries with chunks**.
+4. **Try it** with a real post. The preview says how many snippets landed (`KB: 2 snippets from …` or `KB on, no snippets matched`).
+5. Approve from Conversations only if the draft used those facts the way you want.
 
 ## Conversations
 

@@ -3009,15 +3009,25 @@
                     <span>Ground drafts in the Knowledge Base</span>
                 </label>
                 <p style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 8px;">
-                    Pulls a few snippets from Kazma&rsquo;s KB into the draft as fenced
-                    facts. They never override the subject&rsquo;s view. Off by default.
+                    Pulls up to three fenced snippets into the draft as facts.
+                    They never override the card&rsquo;s against/support side.
+                    Off by default. Ingest a library on
+                    <a href="/knowledge">Knowledge</a> first, then <strong>Try it</strong>
+                    — the preview says how many snippets landed.
                 </p>
                 <div class="form-group" x-show="xReply.use_knowledge" x-cloak>
-                    <label for="xr-kblib">Library id (optional)</label>
-                    <input id="xr-kblib" type="text" class="form-input"
-                           x-model="xReply.knowledge_library"
-                           placeholder="leave blank to search all libraries"
-                           autocomplete="off">
+                    <label for="xr-kblib">Library</label>
+                    <select id="xr-kblib" class="form-input" x-model="xReply.knowledge_library">
+                        <option value="">All libraries with chunks</option>
+                        <template x-for="lib in xReplyLibraries" :key="lib.id">
+                            <option :value="lib.id"
+                                    x-text="(lib.name || lib.id) + ' (' + (lib.chunk_count || 0) + ' chunks)'"></option>
+                        </template>
+                    </select>
+                    <p x-show="!xReplyLibraries.length" x-cloak
+                       style="font-size:0.78rem;color:var(--text-tertiary);margin:4px 0 0;">
+                        No libraries yet. Add one on the Knowledge page, then reload this tab.
+                    </p>
                 </div>
 
                 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-top:8px;">
@@ -3223,6 +3233,15 @@
                                     <p style="font-size:0.78rem;color:var(--text-tertiary);margin:0 0 4px;">
                                         subject: <span x-text="xReplyPreview.result.subject || '—'"></span>
                                         · <span x-text="(xReplyPreview.result.draft || '').length"></span>/280
+                                        <span x-show="xReplyPreview.result.knowledge && xReplyPreview.result.knowledge.used" x-cloak>
+                                            · KB: <span x-text="xReplyPreview.result.knowledge.hits"></span>
+                                            snippet<span x-text="xReplyPreview.result.knowledge.hits === 1 ? '' : 's'"></span>
+                                            <span x-show="(xReplyPreview.result.knowledge.libraries || []).length"
+                                                  x-text="' from ' + (xReplyPreview.result.knowledge.libraries || []).join(', ')"></span>
+                                        </span>
+                                        <span x-show="xReplyPreview.result.knowledge && !xReplyPreview.result.knowledge.used" x-cloak>
+                                            · KB on, no snippets matched
+                                        </span>
                                     </p>
                                     <div style="padding:10px;border-radius:6px;background:var(--bg-secondary);white-space:pre-wrap;"
                                          x-text="xReplyPreview.result.draft"></div>

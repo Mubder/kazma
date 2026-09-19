@@ -453,6 +453,7 @@
             poller_running: false, live_reason: '',
         },
         xReplySummonersText: '',
+        xReplyLibraries: [],
         xReplyLoading: false,
         xReplySaving: false,
         xReplyProblems: [],
