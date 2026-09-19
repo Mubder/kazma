@@ -668,6 +668,17 @@ function feed(events, turnId) {
   );
   assert("a null view omits the gate (honest empty)",
     omitted.map((p) => p.key).join(",") === "text", omitted.map((p) => p.key));
+  const claimed = TV.slotPlan(
+    { parts: [
+      { type: "hitl", interrupt_id: "done", state: "approved" },
+      { type: "text", text: "x" },
+    ] },
+    { text: true }, TD,
+    () => null,
+  );
+  assert("a claimed gate with no view still sits ABOVE the answer",
+    claimed.map((p) => p.key).join(",") === "hitl:done,text",
+    claimed.map((p) => p.key));
 }
 
 {

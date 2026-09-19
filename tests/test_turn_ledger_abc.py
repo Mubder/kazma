@@ -330,9 +330,10 @@ def test_terminal_cot_swap_preserves_expansion() -> None:
     # back in; removing it removes the class of bug, not just this instance.)
     assert "existingCot.replaceWith(cot);" not in chat
     paint = js_function_body(chat, "function _paintWorkbenchSlot(panel, doc)")
-    assert "is-collapsed" not in paint, (
-        "the workbench painter is touching expansion again"
+    assert "classList.add('is-collapsed')" not in paint, (
+        "the workbench painter is collapsing the live fold again"
     )
+    assert "toggle('is-collapsed'" not in paint
     assert "list.innerHTML = html;" in paint  # rows are replaced, the panel is not
     restored = chat.split("function _buildRestoredWorkbench(activity)", 1)[1].split("\n  function ", 1)[0]
     assert "is-collapsed" in restored  # history builds still start collapsed

@@ -235,6 +235,17 @@ def test_open_turn_pin_skips_bubbles_nested_in_cot() -> None:
     assert "closest('.agent-progress')" in pin
 
 
+def test_claimed_hitl_without_live_view_stays_settled() -> None:
+    """Omit-from-plan dropped claimed cards to keptTail under the answer."""
+    js = _js()
+    lookup = js_function_body(js, "function _gateViewOf(part)")
+    assert "ps !== 'pending'" in lookup
+    assert "slot: 'settled'" in lookup
+    build = js.split("if (entry.kind === 'workbench') {", 1)[1][:1200]
+    assert "is-collapsed" in build
+    assert "is-active" in build
+
+
 def test_hitl_frames_ingest_gate_views() -> None:
     """Settle/done frames carry view + gate_views; the client must consume them."""
     js = _js()
@@ -244,7 +255,8 @@ def test_hitl_frames_ingest_gate_views() -> None:
     assert "_ingestFrameGateViews(data)" in ar
     assert "view: (data && data.view) || undefined" in ar
     ingest = js_function_body(js, "function _ingestFrameGateViews(data)")
-    assert "_serverGateViews = data.gate_views" in ingest
+    assert "_serverGateViews = out" in ingest
+    assert "v.interactive" in ingest
     click = js.split("function submitApproval(action, scope)", 1)[1]
     # Decision is approved/denied; inflight is the overlay, not part.state
     # (HITL_RANK would then reject the settle frame).
