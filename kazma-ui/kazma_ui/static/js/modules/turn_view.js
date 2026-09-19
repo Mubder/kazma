@@ -165,10 +165,15 @@
       key = order[i];
       p = byKey[key];
       var shownRaw = resolve(p);
-      // null / omit: the host has no view yet (registry unread). Honest
-      // empty — a card we cannot substantiate is a quiet invented claim
-      // (HITL_VIEW_MODEL A1). The default resolver never returns null.
-      if (shownRaw == null || shownRaw === '' || shownRaw === 'omit') continue;
+      // null / omit: no live view yet. A PENDING gate stays omitted
+      // (honest empty). A CLAIMED gate in the document must keep its
+      // slot — skipping it left the DOM card unplanned (keptTail) under
+      // the answer (2026-09-20 sequential).
+      if (shownRaw == null || shownRaw === '' || shownRaw === 'omit') {
+        var partState = String((p && p.state) || '');
+        if (!partState || partState === 'pending') continue;
+        shownRaw = partState;
+      }
       var shown = String(shownRaw);
       // `state` is the resolved answer, carried so the painter uses THIS
       // value rather than resolving again and possibly differently.

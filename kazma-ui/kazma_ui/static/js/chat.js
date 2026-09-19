@@ -1347,10 +1347,37 @@
     if (status.thread_id) _serverThreadId = String(status.thread_id);
   }
 
-  /** Journal HITL/done frames carry gate_views. Do not touch generating/paused. */
+  /** Journal HITL/done frames carry gate_views. Do not touch generating/paused.
+   *  Incoming overwrites by id. A partial snapshot must not drop prior
+   *  non-pending views — that omitted the claimed cards from slotPlan and
+   *  they fell to keptTail UNDER the answer (2026-09-20 sequential). */
   function _ingestFrameGateViews(data) {
     if (!data || !Array.isArray(data.gate_views)) return;
-    _serverGateViews = data.gate_views;
+    var incoming = data.gate_views;
+    var by = {};
+    var seen = {};
+    var i, v, id, out;
+    var prev = _serverGateViews || [];
+    for (i = 0; i < prev.length; i++) {
+      v = prev[i] || {};
+      id = String(v.interrupt_id || v.gate_id || '');
+      if (id) by[id] = v;
+    }
+    for (i = 0; i < incoming.length; i++) {
+      v = incoming[i] || {};
+      id = String(v.interrupt_id || v.gate_id || '');
+      if (!id) continue;
+      by[id] = v;
+      seen[id] = true;
+    }
+    out = incoming.slice();
+    for (id in by) {
+      if (!Object.prototype.hasOwnProperty.call(by, id) || seen[id]) continue;
+      v = by[id];
+      if (v && v.interactive) continue;
+      out.push(v);
+    }
+    _serverGateViews = out;
     _serverGatesAuth = true;
     try { _rerenderHitlDocs(); } catch (eGv) { /* ignore */ }
   }
@@ -7629,9 +7656,18 @@
     var done = !!(doc && (doc.status === 'done' || doc.status === 'error'));
     panel.classList.toggle('is-done', done);
     panel.classList.toggle('is-active', !done);
-    // Expansion is the reader's. The next turn's begin folds previous
-    // panels. Touching it here yanked the answer up the screen.
-    panel.classList.remove('kazma-cot-restored');
+    // Live fold stays OPEN so thoughts are readable. Do not collapse at
+    // the terminal frame (that yanked the answer). Next beginTurn folds
+    // previous panels.
+    if (!done) {
+      panel.classList.remove('is-collapsed', 'kazma-cot-restored');
+      var liveChev2 = panel.querySelector('.agent-progress-chevron');
+      if (liveChev2) liveChev2.textContent = '\u25BE';
+      var liveHdr2 = panel.querySelector('.agent-progress-header');
+      if (liveHdr2) liveHdr2.setAttribute('aria-expanded', 'true');
+    } else {
+      panel.classList.remove('kazma-cot-restored');
+    }
     var titleEl = panel.querySelector('.agent-progress-title');
     if (titleEl) {
       titleEl.textContent = done
@@ -7687,7 +7723,18 @@
         return t;
       }
       if (entry.kind === 'workbench') {
-        return _buildRestoredWorkbench(_activityOfDoc(ctx.doc)) || null;
+        var panel = _buildRestoredWorkbench(_activityOfDoc(ctx.doc));
+        if (!panel) return null;
+        var finished = ctx.doc && (ctx.doc.status === 'done' || ctx.doc.status === 'error');
+        if (!finished) {
+          panel.classList.remove('is-collapsed', 'is-done', 'kazma-cot-restored');
+          panel.classList.add('is-active');
+          var liveChev = panel.querySelector('.agent-progress-chevron');
+          if (liveChev) liveChev.textContent = '\u25BE';
+          var liveHdr = panel.querySelector('.agent-progress-header');
+          if (liveHdr) liveHdr.setAttribute('aria-expanded', 'true');
+        }
+        return panel;
       }
       if (entry.kind === 'hitl') return _buildHitlSlotCard(entry.part, ctx, entry.state);
       return null;
@@ -7782,7 +7829,17 @@
     if (ov && ov.view) return ov.view;
     var live = _gateViewById(iid);
     if (live) return live;
-    if (part && part.view && typeof part.view === 'object') return part.view;
+    var stamped = (part && part.view && typeof part.view === 'object')
+      ? part.view : null;
+    var ps = String((part && part.state) || '').toLowerCase();
+    // A claimed part with no covering live row must stay SETTLED in the
+    // plan. Omitting it left the DOM card unplanned (keptTail) under the
+    // answer. Mirrors gate_view._view_from_part_alone for terminal stamps.
+    if (ps && ps !== 'pending') {
+      if (stamped && !stamped.interactive) return stamped;
+      return { state: ps, interactive: false, slot: 'settled' };
+    }
+    if (stamped) return stamped;
     return null;
   }
 
