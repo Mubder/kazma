@@ -100,9 +100,11 @@
     return 'hitl:' + interruptIdOf(part, TD);
   }
 
-  function isPendingGate(part) {
-    return String((part && part.state) || 'pending') === 'pending';
-  }
+  // There is deliberately no `isPendingGate(part)` helper. It answered "is
+  // this gate pending" from the raw part stamp, which is the second opinion
+  // that got a card sorted as pending while it was painted as approved
+  // (2026-09-19). Ordering asks the host's resolver, via slotPlan's
+  // `gateState`, and nothing else may ask anything else.
 
   function textOf(doc, TD) {
     if (TD && typeof TD.textOf === 'function') {
@@ -118,9 +120,8 @@
    * Pure: no DOM, no element lookups. `has.workbench` / `has.text` let the
    * caller veto a slot it has nothing to put in (a turn with no activity
    * rows must not mint an empty panel).
-   */
-  /**
-   * ...`gateState` resolves a gate part to the state the UI should treat it
+   *
+   * `gateState` resolves a gate part to the state the UI should treat it
    * as. It is REQUIRED to be the same function the painter labels with.
    *
    * Sorting and painting used to answer "what state is this gate in"
@@ -314,6 +315,9 @@
      * `renderers`:
      *   build(entry, ctx)      → element | null   (null: nothing to show)
      *   paint(entry, el, ctx)                     (update in place)
+     *   rebuild(entry, el, ctx)→ bool             (true: this node cannot
+     *                                              represent entry.state;
+     *                                              tear it out and build())
      *   discard(key, el, ctx)  → bool             (default false — KEEP)
      *   has(kind, doc, ctx)    → bool             (veto an empty slot)
      *   gateState(part)        → string           (ONE answer for a gate's
@@ -321,8 +325,17 @@
      *                                              ordering and labelling —
      *                                              see slotPlan)
      *
-     * A hitl entry carries `state`: the resolved value. paint() must label
-     * from `entry.state`, never re-resolve — that is the whole point.
+     * A hitl entry carries `state`: the resolved value. paint() AND build()
+     * must use `entry.state`, never re-resolve — that is the whole point.
+     *
+     * rebuild is the reversible half of hydration's 'awaiting' posture. A
+     * pending part is painted disabled while the registry is unknown, so
+     * refresh cannot mint ghost Approve buttons. When the registry later
+     * says the gate is live, paint-in-place cannot restore those buttons
+     * (awaiting replaced the actions HTML). rebuild returns true, the slot
+     * is torn out, and build() mints a real live card. That is not contract
+     * 4 (ambiguity never deletes): the renderer is stating a known fact
+     * about THIS node, not guessing.
      */
     function render(el, doc, renderers, meta) {
       renderers = renderers || {};
@@ -364,6 +377,17 @@
           // node whose listeners may have been dropped with it.
           node = null;
           delete slots[entry.key];
+        }
+        if (node && typeof renderers.rebuild === 'function') {
+          var mustRebuild = false;
+          try { mustRebuild = !!renderers.rebuild(entry, node, ctx); } catch (eRb) {
+            mustRebuild = false;
+          }
+          if (mustRebuild) {
+            try { if (node.parentNode) node.parentNode.removeChild(node); } catch (eRm) { /* ignore */ }
+            node = null;
+            delete slots[entry.key];
+          }
         }
         if (!node && typeof renderers.build === 'function') {
           try { node = renderers.build(entry, ctx) || null; } catch (eB) { node = null; }
@@ -546,7 +570,6 @@
     slotPlan: slotPlan,
     bubbleContent: bubbleContent,
     gateSlotKey: gateSlotKey,
-    isPendingGate: isPendingGate,
     SLOT_ATTR: SLOT_ATTR,
   };
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

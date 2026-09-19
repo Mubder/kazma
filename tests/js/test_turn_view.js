@@ -633,6 +633,84 @@ function feed(events, turnId) {
     bare.map(e => e.key).join(",") === "text,hitl:a", bare.map(e => e.key));
 }
 
+{
+  // Hydration paints a pending part as 'awaiting' (disabled, sorted as
+  // settled) because the registry has not answered yet. Paint-in-place
+  // cannot put the buttons back — awaiting replaced the actions HTML.
+  // When the registry later says pending, rebuild must tear the frozen
+  // node out so build() mints a live card, which then sorts BELOW the
+  // answer. Without this, a refresh on a live pause leaves "Waiting for
+  // approval…" with no buttons forever.
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+  const rend = makeRenderers(env);
+  rend.rebuild = (entry, el) => {
+    if (entry.kind !== "hitl" || String(entry.state || "") !== "pending") return false;
+    const shown = String(el.getAttribute("data-hitl-shown") || "");
+    return !!(shown && shown !== "pending");
+  };
+  const origPaint = rend.paint;
+  rend.paint = (entry, el, ctx) => {
+    origPaint(entry, el, ctx);
+    if (entry.kind === "hitl") el.setAttribute("data-hitl-shown", entry.state);
+  };
+  rend.gateState = () => "awaiting";
+  const doc = feed([
+    { type: "hitl", state: "pending", interrupt_id: "g1", tool: "file_write",
+      payload: { interrupt_id: "g1" } },
+    { type: "done", content: "working…" },
+  ]);
+  env.view.render(bubble, doc, rend);
+  let s = shape(bubble);
+  assert("hydrate awaiting sorts ABOVE the answer",
+    s.indexOf("card(g1:awaiting)") < s.indexOf("text"), s);
+
+  env.built = [];
+  rend.gateState = () => "pending";
+  env.view.render(bubble, doc, rend);
+  s = shape(bubble);
+  assert("a live registry row rebuilds the frozen card",
+    env.built.indexOf("hitl:g1") >= 0, env.built);
+  assert("the rebuilt card sorts BELOW the answer",
+    s.indexOf("text") < s.indexOf("card(g1:pending)"), s);
+  assert("and the label matches the new order",
+    s.indexOf("card(g1:pending)") >= 0, s);
+}
+
+{
+  // Rebuild is consent, not a second deleter. A settled freeze
+  // (awaiting → approved) must keep the same node — contract 4.
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+  const rend = makeRenderers(env);
+  rend.rebuild = (entry, el) => {
+    if (entry.kind !== "hitl" || String(entry.state || "") !== "pending") return false;
+    const shown = String(el.getAttribute("data-hitl-shown") || "");
+    return !!(shown && shown !== "pending");
+  };
+  const origPaint = rend.paint;
+  rend.paint = (entry, el, ctx) => {
+    origPaint(entry, el, ctx);
+    if (entry.kind === "hitl") el.setAttribute("data-hitl-shown", entry.state);
+  };
+  rend.gateState = () => "awaiting";
+  const doc = feed([
+    { type: "hitl", state: "pending", interrupt_id: "g1", payload: { interrupt_id: "g1" } },
+    { type: "done", content: "done" },
+  ]);
+  env.view.render(bubble, doc, rend);
+  env.built = [];
+  rend.gateState = () => "approved";
+  env.view.render(bubble, doc, rend);
+  assert("settling an awaiting card does not rebuild",
+    env.built.indexOf("hitl:g1") < 0, env.built);
+  const s = shape(bubble);
+  assert("the settled card stays above the answer",
+    s.indexOf("card(g1:approved)") < s.indexOf("text"), s);
+}
+
 // ══════════════════════════════════════════════════════════
 // 13. INCIDENT 2026-09-01 — the You bubble is never a paint target
 // ══════════════════════════════════════════════════════════

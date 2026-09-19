@@ -253,7 +253,7 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     # live buttons: only a registry row that says `pending` may lock.
     lock = js_function_body(chat, "function _hitlShouldLock(part)")
     assert "_awaitingApproval" not in lock
-    build = js_function_body(chat, "function _buildHitlSlotCard(part, ctx)")
+    build = js_function_body(chat, "function _buildHitlSlotCard(part, ctx, resolvedState)")
     assert "lock: show === 'pending' && _hitlShouldLock(part)," in build
     status = _src(_INIT)
     sess = status.split("async def get_session_status", 1)[1].split(
