@@ -56,7 +56,12 @@ _DELETED_DOM_MOVERS = (
 
 
 def test_dom_movers_stay_deleted() -> None:
-    """The render half of Turn Delivery V2 (KD-4) replaced all of these."""
+    """The render half of Turn Delivery V2 (KD-4) replaced all of these.
+
+    HITL_VIEW_MODEL F: this grep keeps the movers deleted. It is not the
+    proof of display-state correctness — that is ``resolve_gate_views``
+    (``tests/test_gate_view.py``) plus Playwright incidents 2 and 3.
+    """
     js = _js()
     for gone in _DELETED_DOM_MOVERS:
         assert gone not in js, f"{gone} is back — the bubble has two writers again"
@@ -372,6 +377,10 @@ def test_hitl_display_state_never_invents_approved() -> None:
 
     A stale click is recoverable — the server re-verifies and answers "no
     longer pending". A fabricated Approved stamp is the incident.
+
+    ``_hitlDisplayState`` is a lookup of ``view``, not a second resolver.
+    Display-state proof is the Python corpus and Playwright 2/3, not this
+    grep (HITL_VIEW_MODEL F).
     """
     js = _js()
     state = js_function_body(js, "function _hitlDisplayState(part)")

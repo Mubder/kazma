@@ -1,5 +1,43 @@
 # CHANGELOG
 
+## Fix — HITL view: join before paint, one resolver, one submit (2026-09-20)
+
+The last weeks of live HITL failures were the **view**: the client painted,
+then guessed (`awaiting`, `decided_locally`, Alpine strip, DOM claimed-scan,
+dashboard collapse by `thread_id`). Decision truth was already
+`hitl_gates.db`. This series joins the transcript with the registry
+**before any surface paints**.
+
+`resolve_gate_views` in `kazma_ui/gate_view.py` is the only function that
+answers “what state is this gate in.” `/messages` stamps `part.view`,
+`/status` returns `gate_views` (not `gates`, not a singular `hitl` object),
+journal `hitl` frames carry `view`, and `POST /api/approve/{thread_id}`
+200/409 include `view` + `gate_id`. JS looks up that view and omits chrome
+when there is none. Registry `pending` is the only interactive state.
+A click is a 15s inflight overlay, not a stamp that beats the registry.
+The client countdown does not write `timeout`.
+
+Web, dashboard, and TUI submit through the same POST. Dashboard and TUI
+key pending rows by `gate_id` (plus alias), so two live gates on one
+thread stay two cards. Telegram/Discord/Slack still `hitl approve
+{thread_id}` — the graph has one open interrupt. Swarm FanOut stays
+tri-state.
+
+Catch-up cannot decline a live pause: `hasLiveGate()` is any view
+`interactive`; resync projects this turn even if the stream looks live;
+`onError` during HITL resyncs; `_hitlAlreadyClaimed` is document/views
+only; attach treats a dead handle as dead and waives the reopen budget
+while paused.
+
+Playwright incidents **2** (refresh mid-pause: live Approve, no Alpine
+twin) and **3** (refresh after settle: Approved, no buttons) are a CI
+gate in the Playwright smoke job. **1** (sequential approve in the same
+bubble) and **4** (approve then look before the next `/status`) stay
+unclaimed until an app-graph pause harness exists. Source-grep still
+locks deleted DOM movers; it is not the proof of display-state.
+
+Plan: `docs/plans/HITL_VIEW_MODEL.md`. Diagnosis: [diagnosis map](docs/docs/ops/diagnosis-map.md) §4.
+
 ## Security — minting a web session must state its authority (2026-09-19)
 
 `create_session` took `role: str | None = None` and stored `role or "admin"`,

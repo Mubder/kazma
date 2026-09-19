@@ -41,9 +41,10 @@ def test_abort_releases_hitl_gate_and_composer() -> None:
         "async def delete_session", 1
     )[0]
     assert 'str(getattr(g, "state", "") or "") == "pending"' in status
-    assert 'hitl.get("gate")' in status
+    assert "checkpoint_pending" in status
     assert '"gate_views": gate_views' in status
     assert '"gates": gates' not in status
+    assert '"hitl": hitl' not in status
 
 
 def test_command_resume_ignores_own_drive_task() -> None:
@@ -259,7 +260,8 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
         "async def delete_session", 1
     )[0]
     assert "hitl_thread_status" in sess
-    assert '"gate"' in sess or "'gate'" in sess
+    assert "checkpoint_pending" in sess
+    assert '"hitl": hitl' not in sess
 
 
 def test_hitl_claimed_match_is_interrupt_scoped() -> None:

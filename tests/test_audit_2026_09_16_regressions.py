@@ -433,12 +433,35 @@ def test_postgres_and_e2e_have_ci_coverage():
         "test_delivery_v2_e2e.py",
         "test_e2e_playwright.py",
         "test_memory_playwright.py",
+        "test_hitl_view_model.py",
     ):
         assert orphan in ci, (
             f"tests/e2e/{orphan} runs in no CI job: fast_test.py excludes "
             "tests/e2e and playwright-smoke only ran test_smoke.py "
             "(audit F-7)."
         )
+    hitl_gate = [
+        line
+        for line in ci.splitlines()
+        if "test_hitl_view_model.py" in line
+    ]
+    assert hitl_gate, "HITL view-model Playwright is not in ci.yml"
+    for line in hitl_gate:
+        assert "|| true" not in line, (
+            "the HITL view-model Playwright step ends in `|| true`, so "
+            "incidents 2 and 3 cannot fail CI (HITL_VIEW_MODEL F)."
+        )
+    hitl_e2e = (
+        REPO_ROOT / "tests" / "e2e" / "test_hitl_view_model.py"
+    ).read_text(encoding="utf-8")
+    assert "def test_2_refresh_mid_pause" in hitl_e2e
+    assert "def test_3_refresh_after_settle" in hitl_e2e
+    assert "def test_1_" not in hitl_e2e, (
+        "Playwright 1 is unclaimed (F0: no app-graph pause harness)"
+    )
+    assert "def test_4_" not in hitl_e2e, (
+        "Playwright 4 is unclaimed (F0: no app-graph pause harness)"
+    )
 
 
 def test_conftest_db_guard_is_failsafe_by_default():

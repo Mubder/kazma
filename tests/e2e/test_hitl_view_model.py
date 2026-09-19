@@ -1,12 +1,14 @@
-"""F0 — HITL view-model Playwright: incidents 2 and 3 against today's tree.
+"""HITL view-model Playwright: incidents 2 and 3.
 
-Plan: ``docs/plans/HITL_VIEW_MODEL.md``. These tests encode the *desired*
-refresh behaviour. They may fail on current ``main`` (hydrate paints
-``awaiting`` before ``/status``). They are NOT in the Playwright CI job yet;
-A1 is the PR that must turn them green.
+Plan: ``docs/plans/HITL_VIEW_MODEL.md``. Refresh mid-pause (live Approve,
+no Alpine twin) and refresh after settle (Approved, no buttons). These
+are a CI gate in the Playwright smoke job (HITL_VIEW_MODEL F). Incidents
+1 and 4 stay unclaimed: F0 found that ``create_app()`` does not pause
+from preloaded ``tool_calls_pending``.
 
 Does not start the operator's live server. In-process uvicorn, isolated
-``KAZMA_DATA_DIR``.
+``KAZMA_DATA_DIR``. ``importorskip`` only when Playwright is absent,
+same as ``test_smoke.py``.
 """
 
 from __future__ import annotations

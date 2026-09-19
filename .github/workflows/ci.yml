@@ -194,6 +194,15 @@ jobs:
         run: python -m pytest tests/e2e/test_smoke.py -q --timeout=180
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: HITL view-model (incidents 2 and 3 — GATE)
+        # HITL_VIEW_MODEL F. fast_test.py excludes tests/e2e. This step is
+        # the merge gate for refresh-mid-pause and refresh-after-settle.
+        # Incidents 1 and 4 stay unclaimed (F0: create_app() supervisor
+        # does not pause). No || true. importorskip only when Playwright
+        # is absent, same as smoke.
+        run: python -m pytest tests/e2e/test_hitl_view_model.py -q --timeout=180
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Remaining e2e suites
         # scripts/fast_test.py excludes everything under tests/e2e, and this
         # job only ever ran test_smoke.py — so test_delivery_v2_e2e.py,
@@ -204,8 +213,7 @@ jobs:
           python -m pytest -q --timeout=300 \
             tests/e2e/test_delivery_v2_e2e.py \
             tests/e2e/test_e2e_playwright.py \
-            tests/e2e/test_memory_playwright.py \
-            tests/e2e/test_hitl_view_model.py
+            tests/e2e/test_memory_playwright.py
         env:
           KAZMA_DB_BACKEND: sqlite
 
