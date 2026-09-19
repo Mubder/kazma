@@ -164,7 +164,12 @@
     for (i = 0; i < order.length; i++) {
       key = order[i];
       p = byKey[key];
-      var shown = String(resolve(p) || 'pending');
+      var shownRaw = resolve(p);
+      // null / omit: the host has no view yet (registry unread). Honest
+      // empty — a card we cannot substantiate is a quiet invented claim
+      // (HITL_VIEW_MODEL A1). The default resolver never returns null.
+      if (shownRaw == null || shownRaw === '' || shownRaw === 'omit') continue;
+      var shown = String(shownRaw);
       // `state` is the resolved answer, carried so the painter uses THIS
       // value rather than resolving again and possibly differently.
       var entry = { key: key, kind: 'hitl', part: p, state: shown };

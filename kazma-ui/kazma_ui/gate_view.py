@@ -153,7 +153,7 @@ def _view_from_row(row: Any, *, part: Mapping[str, Any] | None = None) -> GateVi
     tool = _part_tool(part) if part else ""
     kind = _part_kind(part) if part else ""
     if st == "pending":
-        return _view(
+        out = _view(
             gate_id=gid,
             interrupt_id=iid or gid,
             tool=tool or _row_tool(row),
@@ -162,6 +162,15 @@ def _view_from_row(row: Any, *, part: Mapping[str, Any] | None = None) -> GateVi
             interactive=True,
             slot="pending",
         )
+        try:
+            pl = row.payload() if hasattr(row, "payload") else None
+            if isinstance(pl, dict) and pl:
+                out["payload"] = pl  # type: ignore[typeddict-unknown-key]
+                if not out["tool"]:
+                    out["tool"] = str(pl.get("tool") or pl.get("tool_name") or "")
+        except Exception:
+            pass
+        return out
     if st in _INFLIGHT_ROW_STATES:
         return _view(
             gate_id=gid,

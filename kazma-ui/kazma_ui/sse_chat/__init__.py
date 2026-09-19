@@ -1317,7 +1317,6 @@ def create_sse_chat_router(
         # ``gates_authoritative`` tells the client the registry answered:
         # only then may it treat the LIST (including an empty list) as
         # truth. A read failure must not look like "no live gates".
-        gates: list[dict[str, Any]] = []
         gates_authoritative = False
         live_row_objs: list[Any] = []
         if thread_id:
@@ -1325,36 +1324,15 @@ def create_sse_chat_router(
                 from kazma_ui.hitl_gate_bridge import registry_on
 
                 if registry_on():
-                    from kazma_core.safety.hitl import approval_deadline_from
                     from kazma_core.safety.hitl_gates import live_gates_async
 
-                    gates = []
                     live_row_objs = list(await live_gates_async(thread_id))
-                    for g in live_row_objs:
-                        item = {
-                            "gate_id": g.gate_id,
-                            "state": g.state,
-                            "tool": g.tool,
-                            "kind": g.kind,
-                            "decision": g.decision,
-                            "message": g.message,
-                            "payload": g.payload(),
-                        }
-                        if g.state == "pending":
-                            try:
-                                dl = approval_deadline_from(g.created_at)
-                                if dl:
-                                    item["approval_deadline"] = dl
-                            except Exception:
-                                pass
-                        gates.append(item)
                     gates_authoritative = True
             except Exception:
-                gates = []
                 live_row_objs = []
                 gates_authoritative = False
 
-        # Additive (HITL_VIEW_MODEL A0). Chat still reads ``gates`` until A1.
+        # HITL_VIEW_MODEL A1: ``gate_views`` is the wire. ``gates`` is gone.
         gate_views: list[dict[str, Any]] = []
         try:
             from kazma_ui.gate_view import resolve_gate_views
@@ -1383,7 +1361,9 @@ def create_sse_chat_router(
         # In-memory `_paused_threads` dies on restart. A durable pending
         # gate (or hitl_thread_status=pending) is still a live question.
         if not paused:
-            if any(str(g.get("state") or "") == "pending" for g in gates):
+            if any(str(getattr(g, "state", "") or "") == "pending" for g in live_row_objs):
+                paused = True
+            elif any(bool(v.get("interactive")) for v in gate_views if isinstance(v, dict)):
                 paused = True
             elif isinstance(hitl, dict) and str(hitl.get("gate") or "") == "pending":
                 paused = True
@@ -1394,7 +1374,6 @@ def create_sse_chat_router(
             "generating": bool(is_running),
             "paused": bool(paused),
             "hitl": hitl,
-            "gates": gates,
             "gates_authoritative": gates_authoritative,
             "gate_views": gate_views,
         }

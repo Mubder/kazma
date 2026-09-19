@@ -1,7 +1,7 @@
 # Plan: HITL view model — join before paint, one resolver
 
 **Date:** 2026-09-19
-**Status:** BINDING (F0 + A0 landing)
+**Status:** BINDING (A1 landing)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.
 **Does not replace:** [`HITL_GATE_REGISTRY_PLAN.md`](HITL_GATE_REGISTRY_PLAN.md) (P6 — decision SoT) or [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble renderer). Those layers stay. This plan is the missing **join** between them, plus every other mouth that still derives “what should I show?” on its own.
 
@@ -220,7 +220,7 @@ Today (`sse_chat/__init__.py`):
 | PR | Wire |
 |---|---|
 | **A0** | **Add** `gate_views`. Keep `gates`. Old clients ignore the new field |
-| **A1** | Chat consumes `gate_views`. **Drop `gates` from the JSON** in the same PR. Tests that grep `status.gates` move with it |
+| **A1** | Chat consumes `gate_views`. **`gates` dropped from the JSON.** |
 
 Keeping both on the wire is two representations of one fact on one endpoint — the sort/paint split again. This is the operator app’s own `/status`; there is no external contract worth a compatibility window.
 

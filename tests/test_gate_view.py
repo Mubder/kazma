@@ -226,7 +226,7 @@ def test_status_and_messages_wire_is_additive() -> None:
         / "kazma-ui" / "kazma_ui" / "sse_chat" / "__init__.py"
     ).read_text(encoding="utf-8")
     assert '"gate_views": gate_views' in src
-    assert '"gates": gates' in src
+    assert '"gates": gates' not in src
     assert "stamp_parts_for_read" in src
 
 

@@ -1228,27 +1228,25 @@ class TestGateAuthoritativeFailPosture:
 
     def test_client_tracks_and_resets_the_flag(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        assert "_serverGatesAuth = !!status.gates_authoritative;" in src
+        ingest = js_function_body(src, "function _ingestStatus(status)")
+        assert "_serverGatesAuth = !!status.gates_authoritative;" in ingest
+        assert "status.gate_views" in ingest
         # reset on session switch — a previous session's authority must not
         # leak into the next session's card painting
         reset = src.split("function _resetSessionTurnState()", 1)[1][:800]
         assert "_serverGatesAuth = false;" in reset
+        assert "_serverGateViews = []" in reset
 
-    def test_no_row_under_authority_renders_live_buttons(self):
+    def test_no_row_under_authority_does_not_mint_live_buttons(self):
+        """A1: authoritative empty list + leftover pending part is error/omit,
+        not live buttons. Ghost Approve was the other face of inventing a claim.
+        """
         src = _CHAT_JS.read_text(encoding="utf-8")
         body = js_function_body(src, "function _hitlDisplayState(part)")
-        assert "if (_serverGatesAuth && !gateRow) return 'pending';" in body, (
-            "authoritative fail-posture branch missing"
-        )
-        # Negative control: it must run BEFORE leftover-claim inference, or
-        # a stale local claim fabricates "Approved — running…" under a
-        # registry that says no such gate is live.
-        auth_at = body.find("if (_serverGatesAuth && !gateRow)")
-        legacy_at = body.find("_hitlAlreadyClaimed(part)")
-        assert 0 <= auth_at < legacy_at
-        # Live buttons, but never a composer lock: an empty authoritative
-        # list means no live gate, so the next prompt is a new turn.
+        assert "return 'pending'" not in body
+        assert "_gateViewOf" in body
+        assert "if (!v) return null;" in body
         lock = js_function_body(src, "function _hitlShouldLock(part)")
-        assert "_hitlGateRow" in lock
+        assert "v.interactive" in lock
         assert "_serverGatesAuth" not in lock
         assert "statusInflight" not in src

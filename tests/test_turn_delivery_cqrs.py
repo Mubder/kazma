@@ -40,8 +40,10 @@ def test_abort_releases_hitl_gate_and_composer() -> None:
     status = init.split("async def get_session_status", 1)[1].split(
         "async def delete_session", 1
     )[0]
-    assert 'str(g.get("state") or "") == "pending"' in status
+    assert 'str(getattr(g, "state", "") or "") == "pending"' in status
     assert 'hitl.get("gate")' in status
+    assert '"gate_views": gate_views' in status
+    assert '"gates": gates' not in status
 
 
 def test_command_resume_ignores_own_drive_task() -> None:
@@ -247,10 +249,7 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     )
     assert "_serverGenerating && !_serverPaused" not in state
     assert "statusInflight" not in state
-    # Only this tab's own click (or a persisted claim) counts as inflight.
-    assert "_hitlAlreadyClaimed(part)" in state
-    # Locking the composer is a separate, stricter question than showing
-    # live buttons: only a registry row that says `pending` may lock.
+    assert "_hitlAlreadyClaimed" not in state
     lock = js_function_body(chat, "function _hitlShouldLock(part)")
     assert "_awaitingApproval" not in lock
     build = js_function_body(chat, "function _buildHitlSlotCard(part, ctx, resolvedState)")

@@ -2,7 +2,7 @@
 
 The registry (`kazma_core.safety.hitl_gates`) is the DECISION-TRUTH store
 (P6). Web readers (`hitl_thread_status`, pending-approvals, ``close_turn``,
-chat via ``gates`` + ``gates_authoritative``) treat a registry row as the
+chat via ``gate_views`` + ``gates_authoritative``) treat a registry row as the
 answer. Kill-switch off or a registry outage degrades to a **thin
 execution fallback**: a live checkpoint interrupt is pending (live card),
 never an inferred Approved stamp. ``created_missing`` / ``orphaned``

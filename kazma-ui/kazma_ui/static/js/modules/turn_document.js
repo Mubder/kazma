@@ -516,6 +516,11 @@
       // branch, which strips it, because a part read back from the server is
       // never this tab's live decision.
       if (ev.decided_locally) hitlPart.decided_locally = true;
+      if (ev.view && typeof ev.view === 'object') hitlPart.view = ev.view;
+      else if (hitlPayload && typeof hitlPayload === 'object' && hitlPayload.view
+          && typeof hitlPayload.view === 'object') {
+        hitlPart.view = hitlPayload.view;
+      }
       next.parts = mergeParts(next.parts, [hitlPart]);
       // Any pending gate pauses the turn — not just the newest one. With one
       // part per gate, "the last hitl part" is the gate asked most recently,
