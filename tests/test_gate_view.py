@@ -255,3 +255,63 @@ def test_apply_views_copies() -> None:
     out = apply_views_to_parts(parts, views)
     assert out is not parts
     assert out[0]["view"]["interactive"] is True
+
+
+def test_attach_view_decision_frame_beats_pending_row(tmp_path) -> None:
+    """Emit-before-CAS: frame is approved, live row still pending.
+
+    The stamped view must follow the frame, not the leftover pending row.
+    """
+    from kazma_core.safety import hitl_gates as hg
+    from kazma_core.safety.hitl_gates import register_gate
+    from kazma_ui.gate_view import attach_view_to_hitl_frame
+
+    hg.set_db_path_for_tests(str(tmp_path / "gates.db"))
+    try:
+        register_gate(_row("g1", "pending"))
+        frame = {
+            "type": "hitl",
+            "data": {
+                "state": "approved",
+                "interrupt_id": "g1",
+                "tool": "file_write",
+                "thread_id": "t1",
+            },
+        }
+        out = attach_view_to_hitl_frame(frame, "t1")
+        view = (out.get("data") or {}).get("view") or {}
+        assert view.get("state") == "approved"
+        assert view.get("interactive") is False
+        assert view.get("slot") == "settled"
+        assert "gate_views" in (out.get("data") or {})
+    finally:
+        hg.set_db_path_for_tests(None)
+
+
+def test_approve_emits_after_cas() -> None:
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "routes_direct"
+        / "misc.py"
+    ).read_text(encoding="utf-8")
+    claim_at = src.index("await _gate_claimed(")
+    emit_at = src.index("get_turn_broker().emit(")
+    assert claim_at < emit_at, "journal emit still runs before the registry CAS"
+
+
+def test_delivery_stamps_hitl_and_done_frames() -> None:
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "delivery.py"
+    ).read_text(encoding="utf-8")
+    assert "is_hitl_frame_type" in src
+    assert "attach_gate_views_to_done_frame" in src
+    assert 'ftype in ("done", "turn_complete")' in src

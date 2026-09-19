@@ -482,12 +482,14 @@
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         pauseForApproval(data);
+        _ingestFrameGateViews(data);
         applyTurnEvent({
           type: 'hitl',
           state: 'pending',
           tool: (data && data.tool) || '',
           interrupt_id: (data && data.interrupt_id) || '',
           payload: data || {},
+          view: (data && data.view) || undefined,
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
         });
@@ -501,12 +503,14 @@
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         if (st === 'pending') pauseForApproval(data);
         else _awaitingApproval = false;
+        _ingestFrameGateViews(data);
         applyTurnEvent({
           type: 'hitl',
           state: st,
           tool: (data && data.tool) || '',
           interrupt_id: (data && data.interrupt_id) || '',
           payload: data || {},
+          view: (data && data.view) || undefined,
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
         });
@@ -514,6 +518,7 @@
       onDone: function(data) {
         if (!_mine()) return;
         activeStream = null;
+        _ingestFrameGateViews(data);
         if (data && data.content) {
           applyTurnEvent({
             type: 'done',
@@ -1340,6 +1345,14 @@
     _serverGateViews = Array.isArray(status.gate_views) ? status.gate_views : [];
     _serverGatesAuth = !!status.gates_authoritative;
     if (status.thread_id) _serverThreadId = String(status.thread_id);
+  }
+
+  /** Journal HITL/done frames carry gate_views. Do not touch generating/paused. */
+  function _ingestFrameGateViews(data) {
+    if (!data || !Array.isArray(data.gate_views)) return;
+    _serverGateViews = data.gate_views;
+    _serverGatesAuth = true;
+    try { _rerenderHitlDocs(); } catch (eGv) { /* ignore */ }
   }
 
   function _viewIsPending(v) {
@@ -3487,6 +3500,7 @@
         // the partial paint for now and reconcile with server truth —
         // this used to sit on "CoT + small text" until a manual refresh.
         var truncated = !data;
+        _ingestFrameGateViews(data);
         try {
         // Terminal frame is SoT — ALWAYS replace-paint, even when plan
         // tokens already arrived (glued ```plan + answer used to be skipped
@@ -3616,12 +3630,14 @@
         _clearStatusStrip();
         activeTypingEl = null;
         pauseForApproval(data);
+        _ingestFrameGateViews(data);
         applyTurnEvent({
           type: 'hitl',
           state: 'pending',
           tool: (data && data.tool) || '',
           interrupt_id: (data && data.interrupt_id) || '',
           payload: data || {},
+          view: (data && data.view) || undefined,
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
         });
@@ -3641,12 +3657,14 @@
         } else {
           _awaitingApproval = false;
         }
+        _ingestFrameGateViews(data);
         applyTurnEvent({
           type: 'hitl',
           state: st,
           tool: (data && data.tool) || '',
           interrupt_id: (data && data.interrupt_id) || '',
           payload: data || {},
+          view: (data && data.view) || undefined,
           turn_id: (data && data.turn_id) || _liveTurnId,
           source: 'sse',
         });
@@ -6272,7 +6290,7 @@
       _setHitlOverlay(ovIid, ovView);
       applyTurnEvent({
         type: 'hitl',
-        state: 'inflight',
+        state: hitlState,
         tool: data.tool || '',
         interrupt_id: data.interrupt_id || '',
         payload: data,
@@ -7772,19 +7790,7 @@
     if (ov && ov.view) return ov.view;
     var live = _gateViewById(iid);
     if (live) return live;
-    var stamped = (part && part.view && typeof part.view === 'object')
-      ? part.view : null;
-    // Registry answered and this id is not live: a leftover pending stamp
-    // is not a live question. Trusting part.view here sorted claimed cards
-    // as pending BELOW the finished reply (4-card sequential, 2026-09-20).
-    if (_serverGatesAuth) {
-      if (stamped && stamped.interactive) {
-        return { state: 'error', interactive: false, slot: 'settled' };
-      }
-      if (stamped) return stamped;
-      return { state: 'error', interactive: false, slot: 'settled' };
-    }
-    if (stamped) return stamped;
+    if (part && part.view && typeof part.view === 'object') return part.view;
     return null;
   }
 
