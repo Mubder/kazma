@@ -1241,12 +1241,20 @@ class TestGateAuthoritativeFailPosture:
     def test_no_row_under_authority_does_not_mint_live_buttons(self):
         """A1: authoritative empty list + leftover pending part is error/omit,
         not live buttons. Ghost Approve was the other face of inventing a claim.
+
+        Live 4-card sequential (2026-09-20): after the last approve, leftover
+        part.view.interactive still sorted as pending BELOW the reply.
+        ``_gateViewOf`` must not trust that stamp once the registry has
+        answered and the id is gone from live views.
         """
         src = _CHAT_JS.read_text(encoding="utf-8")
         body = js_function_body(src, "function _hitlDisplayState(part)")
         assert "return 'pending'" not in body
         assert "_gateViewOf" in body
         assert "if (!v) return null;" in body
+        lookup = js_function_body(src, "function _gateViewOf(part)")
+        assert "_serverGatesAuth" in lookup
+        assert "stamped.interactive" in lookup
         lock = js_function_body(src, "function _hitlShouldLock(part)")
         assert "v.interactive" in lock
         assert "_serverGatesAuth" not in lock

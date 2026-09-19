@@ -235,6 +235,28 @@ def test_open_turn_pin_skips_bubbles_nested_in_cot() -> None:
     assert "closest('.agent-progress')" in pin
 
 
+def test_sequential_hitl_does_not_mint_a_second_bubble() -> None:
+    """Live 4-card run (2026-09-20): a resume/heal turn_id painted a second
+    assistant row above the replay. One user row, one assistant bubble."""
+    js = _js()
+    body = js_function_body(js, "function _bubbleForTurn(turnId, paintable)")
+    assert "_assistantBubbleForOpenTurn(false)" in body
+    create_at = body.index("createAssistantMessage()")
+    reuse_at = body.index("_assistantBubbleForOpenTurn(false)")
+    assert reuse_at < create_at, "a new bubble is minted before reusing the open one"
+
+
+def test_claimed_hitl_header_is_not_approval_required() -> None:
+    """Collapsed claimed cards kept '⚠ Approval Required' next to an
+    Approved chip, which read as two states / wrong order."""
+    js = _js()
+    assert "function _setHitlHeaderTitle(" in js
+    assert 'class="hitl-header-title"' in js
+    paint = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
+    assert "_setHitlHeaderTitle" in paint
+    assert "Approval Required" in paint
+
+
 def test_hitl_is_not_epoch_gated_and_paints_from_status_gates() -> None:
     """A superseded SSE stream dropping approval_required left the card
     only on Dashboard. Pending gates from session status must paint too."""

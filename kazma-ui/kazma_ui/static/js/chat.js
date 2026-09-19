@@ -5839,6 +5839,29 @@
   // above it") is no longer a function that moves nodes — it is the slot
   // order TurnView declares. See modules/turn_view.js, contract 2.
 
+  /** Title in the header. Claimed cards must not keep "Approval Required"
+   *  next to an Approved chip — that was the 4-card sequential ordering
+   *  the operator read as two states on one card (2026-09-20). */
+  function _setHitlHeaderTitle(card, title) {
+    if (!card) return;
+    var header = card.querySelector('.hitl-approval-header');
+    if (!header) return;
+    var el = header.querySelector('.hitl-header-title');
+    var text = String(title || '');
+    if (el) {
+      if (el.textContent !== text) el.textContent = text;
+      return;
+    }
+    var n = header.firstChild;
+    while (n) {
+      if (n.nodeType === 3) {
+        n.textContent = text;
+        return;
+      }
+      n = n.nextSibling;
+    }
+  }
+
   /** Collapse a claimed card to a one-line CoT-style bar (click to expand).
    *  Keeps the decision visible in the timeline without a full card body
    *  sitting between the CoT and the streamed reply. The header chip is
@@ -6108,7 +6131,7 @@
     // offering a YOLO button there reads as "approve once" when it re-prompts.
     var yoloOk = data.yolo_allowed !== false;
     card.innerHTML =
-      '<div class="hitl-approval-header">\u26A0 Approval Required</div>' +
+      '<div class="hitl-approval-header"><span class="hitl-header-title">\u26A0 Approval Required</span></div>' +
       '<div class="hitl-approval-body">' +
         '<p><strong>Tool:</strong> <code>' + escapeHtml(data.tool || '') + '</code></p>' +
         (tools.length <= 1
@@ -7706,6 +7729,15 @@
     }
     if (el) return el;
     if (!paintable) return null;
+    // One user row, one assistant bubble. A HITL resume, persist heal, or
+    // journal replay that stamps a second turn_id must rebind the OPEN
+    // bubble — minting a new one is the duplicate-before-replay the 4-card
+    // sequential run painted (2026-09-20).
+    el = _assistantBubbleForOpenTurn(false);
+    if (el) {
+      TV.bind(id || 'live', el);
+      return el;
+    }
     el = createAssistantMessage();
     TV.bind(id || 'live', el);
     return el;
@@ -7740,7 +7772,19 @@
     if (ov && ov.view) return ov.view;
     var live = _gateViewById(iid);
     if (live) return live;
-    if (part && part.view && typeof part.view === 'object') return part.view;
+    var stamped = (part && part.view && typeof part.view === 'object')
+      ? part.view : null;
+    // Registry answered and this id is not live: a leftover pending stamp
+    // is not a live question. Trusting part.view here sorted claimed cards
+    // as pending BELOW the finished reply (4-card sequential, 2026-09-20).
+    if (_serverGatesAuth) {
+      if (stamped && stamped.interactive) {
+        return { state: 'error', interactive: false, slot: 'settled' };
+      }
+      if (stamped) return stamped;
+      return { state: 'error', interactive: false, slot: 'settled' };
+    }
+    if (stamped) return stamped;
     return null;
   }
 
@@ -7796,6 +7840,7 @@
       ? String(resolvedState) : _hitlDisplayState(part);
     if (!show) return;
     if (show === 'pending') {
+      _setHitlHeaderTitle(card, '\u26A0 Approval Required');
       // Only a gate the registry confirms is live gets a ticker. Re-arming
       // it on every render of anything that merely *looks* pending is what
       // let a stale part resurrect a countdown after the fact.
@@ -7832,23 +7877,25 @@
       // chip in the header (2026-09-03).
       var wasCollapsed = card.classList.contains('hitl-collapsed');
       card.className = 'hitl-approval-card hitl-' + kind + (wasCollapsed ? ' hitl-collapsed' : '');
+      var errLabel = show === 'timeout'
+        ? 'Approval timed out — continuing without this tool.'
+        : (show === 'error' ? 'No longer pending' : 'Denied');
       if (actions) {
-        var errLabel = show === 'timeout'
-          ? 'Approval timed out — continuing without this tool.'
-          : (show === 'error' ? 'No longer pending' : 'Denied');
         actions.innerHTML = '<span class="hitl-status hitl-' + kind + '">' +
           escapeHtml(errLabel) + '</span>';
       }
+      _setHitlHeaderTitle(card, _hitlToolOf(part) || errLabel);
       _collapseClaimedHitlCard(card);
       return;
     }
     if (show === 'approved' || show === 'inflight' || show === 'settled') {
       var wasCol = card.classList.contains('hitl-collapsed');
       card.className = 'hitl-approval-card hitl-approved' + (wasCol ? ' hitl-collapsed' : '');
+      var okLabel = show === 'inflight' ? 'Approved — running…' : 'Approved';
       if (actions) {
-        var okLabel = show === 'inflight' ? 'Approved — running…' : 'Approved';
         actions.innerHTML = '<span class="hitl-status hitl-approved">' + okLabel + '</span>';
       }
+      _setHitlHeaderTitle(card, _hitlToolOf(part) || okLabel);
       _collapseClaimedHitlCard(card);
     }
   }
