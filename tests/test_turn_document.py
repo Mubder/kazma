@@ -69,7 +69,14 @@ def test_merge_hitl_pending_cannot_replace_approved() -> None:
     assert (hitl[0].get("payload") or {}).get("path") == "x"
 
 
-def test_merge_hitl_new_interrupt_id_is_a_new_gate() -> None:
+def test_merge_hitl_new_interrupt_id_gets_its_own_slot() -> None:
+    """A turn that pauses twice keeps BOTH gates.
+
+    The 2026-09-19 "approved twice then silence" incident. ``_part_key``
+    used to return a bare ``("hitl",)``, so the second gate overwrote the
+    first: the document held one decision while the transcript showed two
+    cards, and the renderer had no authority left to reconcile against.
+    """
     first = [{
         "type": "hitl",
         "tool": "file_write",
@@ -86,9 +93,28 @@ def test_merge_hitl_new_interrupt_id_is_a_new_gate() -> None:
     }]
     merged = merge_parts(first, second)
     hitl = [p for p in merged if p.get("type") == "hitl"]
-    assert len(hitl) == 1
-    assert hitl[0]["state"] == "pending"
-    assert hitl[0]["interrupt_id"] == "two"
+    assert len(hitl) == 2
+    # Ask order is preserved — the transcript reads top to bottom.
+    assert hitl[0]["interrupt_id"] == "one"
+    assert hitl[0]["state"] == "approved", "the first gate must keep its claim"
+    assert hitl[1]["interrupt_id"] == "two"
+    assert hitl[1]["state"] == "pending"
+
+
+def test_hitl_part_of_prefers_the_gate_still_waiting() -> None:
+    """``/status`` must report the gate blocking the graph, not the newest."""
+    from kazma_ui.turn_document import hitl_part_of, hitl_parts_of
+
+    parts = [
+        {"type": "hitl", "tool": "a", "state": "approved", "interrupt_id": "one"},
+        {"type": "hitl", "tool": "b", "state": "pending", "interrupt_id": "two"},
+        {"type": "hitl", "tool": "c", "state": "approved", "interrupt_id": "three"},
+    ]
+    assert hitl_part_of(parts)["interrupt_id"] == "two"
+    assert len(hitl_parts_of(parts)) == 3
+    settled = [p for p in parts if p["state"] != "pending"]
+    assert hitl_part_of(settled)["interrupt_id"] == "three", "falls back to newest"
+    assert hitl_part_of([]) is None
 
 
 def test_merge_hitl_new_tool_without_ids_is_a_new_gate() -> None:

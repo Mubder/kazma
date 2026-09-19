@@ -21,8 +21,49 @@ _CHAT_JS = (
 )
 
 
+_MODULES = _CHAT_JS.parent / "modules"
+_TURN_VIEW_JS = _MODULES / "turn_view.js"
+_TURN_DOC_JS = _MODULES / "turn_document.js"
+
+
 def _js() -> str:
     return _CHAT_JS.read_text(encoding="utf-8")
+
+
+def _view_js() -> str:
+    return _TURN_VIEW_JS.read_text(encoding="utf-8")
+
+
+def _turndoc_js() -> str:
+    return _TURN_DOC_JS.read_text(encoding="utf-8")
+
+
+#: The DOM movers deleted by the keyed-render cutover. Each one answered a
+#: question about the transcript's SHAPE ("is this bubble historical? is that
+#: card trapped? where does this card go relative to the text?") because
+#: nothing owned the answer. modules/turn_view.js owns it now. They must stay
+#: deleted: while a mover exists, something starts calling it again, and the
+#: bubble has two writers once more.
+_DELETED_DOM_MOVERS = (
+    "function _placeHitlCard(",
+    "function _parkClaimedHitlCard(",
+    "function _rescueTurnDom(",
+    "function _hitlCardIsTrapped(",
+    "function _hitlHostContent(",
+    "function _syncCotPanel(",
+    "function _paintHitlFromDoc(",
+)
+
+
+def test_dom_movers_stay_deleted() -> None:
+    """The render half of Turn Delivery V2 (KD-4) replaced all of these."""
+    js = _js()
+    for gone in _DELETED_DOM_MOVERS:
+        assert gone not in js, f"{gone} is back — the bubble has two writers again"
+    # And the authority that replaced them is actually wired in.
+    assert "function _turnView()" in js
+    assert "TV.render(el, doc, _turnRenderers, meta)" in js
+    assert _TURN_VIEW_JS.is_file()
 
 
 def test_steer_menu_queues_draft_instead_of_autosend() -> None:
@@ -121,31 +162,69 @@ def test_abort_generation_retires_live_turn_before_stop_wait() -> None:
 
 
 def test_chained_hitl_card_appends_below_previous() -> None:
-    """A later interrupt must not paint above the card already approved."""
+    """A later interrupt must not paint above the card already approved.
+
+    Card order is no longer produced by moving nodes. ``slotPlan`` declares
+    it — ``[workbench] [settled gates] [answer] [pending gates]`` — and the
+    ordering pass in ``render`` makes the DOM match. The behaviour is
+    exercised for real in tests/js/test_turn_view.js ("the settled gate
+    stays above the pending one", "gates keep ask order"), which replays
+    the frame sequences instead of grepping for a mover.
+    """
+    view = _view_js()
+    plan = js_function_body(view, "function slotPlan(doc, has, TD)")
+    # Ask order in, ask order out.
+    assert "order.push(key)" in plan
+    assert "settled" in plan and "pending" in plan
+    # The declared sequence: workbench, settled gates, answer, pending gates.
+    tail = plan.split("var plan = [];", 1)[1]
+    i_work = tail.index("has.workbench")
+    i_settled = tail.index("settled[i]")
+    i_text = tail.index("has.text")
+    i_pending = tail.index("pending[i]")
+    assert i_work < i_settled < i_text < i_pending, (
+        "the declared slot order changed — settled decisions must precede "
+        "the answer they unblocked, and a live question must follow the "
+        "text that provoked it"
+    )
+
+
+def test_a_gate_is_identified_by_its_interrupt_id_everywhere() -> None:
+    """The document and the renderer must agree on what "a gate" is.
+
+    Root cause of the whole class. ``_part_key`` returned a bare ``hitl``,
+    so a turn could hold only ONE gate: a second approval overwrote the
+    first, the transcript kept both cards, and every reconciliation between
+    the two was a guess. Identity now comes from one function, used by both
+    the document (to dedupe parts) and the view (to key DOM slots).
+    """
+    turndoc = _turndoc_js()
+    assert "if (kind === 'hitl') return 'hitl:' + interruptIdOf(part);" in turndoc
+    assert "partKey: partKey," in turndoc, "the view needs the document's identity fn"
+    view = _view_js()
+    gate_key = js_function_body(view, "function gateSlotKey(part, TD)")
+    assert "TD.partKey(part)" in gate_key, (
+        "the view is computing its own slot identity — it will drift"
+    )
+    py = module_source(
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "turn_document.py"
+    )
+    assert 'return ("hitl", _interrupt_id_of(part))' in py, (
+        "the server-side projector still collapses every gate into one slot"
+    )
+
+
+def test_open_turn_pin_skips_bubbles_nested_in_cot() -> None:
+    """A .message swallowed by a CoT panel is not the open turn.
+
+    Pinning it put the approval card inside overflow:hidden / a collapsed
+    body, so the dashboard listed the gate and chat looked empty
+    (2026-09-02). Still relevant: _pinLiveAssistantBubble remains the
+    anchor for the progress panel and the card builder.
+    """
     js = _js()
-    assert "function _placeHitlCard(content, card)" in js
-    place = js.split("function _placeHitlCard(content, card)", 1)[1].split(
-        "function renderHitlCard", 1
-    )[0]
-    assert "lastCard" in place
-    assert "insertBefore(card, after.nextSibling)" in place
-    assert "_hitlHostContent" in place
-    # The old first-interrupt slot (right under CoT) is what stacked
-    # schedule_task above cancel_scheduled.
-    assert "insertBefore(card, progress.nextSibling)" not in js
-    rescue = js.split("function _rescueTurnDom(el)", 1)[1].split(
-        "function _answerFromDoc", 1
-    )[0]
-    assert "cursor.nextSibling" in rescue
-    assert "hitl-approval-card" in rescue
-    assert "function _hitlCardIsTrapped(card)" in js
-    has_inline = js.split("function hasInlineApprovalCard()", 1)[1].split(
-        "function _hitlInterruptIdOf", 1
-    )[0]
-    assert "_hitlCardIsTrapped" in has_inline
-    pin = js.split("function _assistantBubbleForOpenTurn(", 1)[1].split(
-        "function _pinLiveAssistantBubble", 1
-    )[0]
+    pin = js_function_body(js, "function _assistantBubbleForOpenTurn(create)")
     assert "closest('.agent-progress')" in pin
 
 
@@ -179,8 +258,43 @@ def test_hitl_is_not_epoch_gated_and_paints_from_status_gates() -> None:
     assert "hasInlineApprovalCard()" in pause
 
 
-def test_place_hitl_card_dom_harness_under_node() -> None:
-    """Placement must actually run, not just grep: card after CoT, never in it."""
+def test_chat_client_boots_under_node() -> None:
+    """The modules must RUN together, not just parse.
+
+    `node --check` proves syntax. It does not catch a refactor that renames
+    a function and misses one call site, or drops a helper something still
+    references: the file parses, then throws ReferenceError in the browser
+    on load, and the chat page is blank while every suite here stays green —
+    because the rest of these tests assert on source TEXT.
+    """
+    import shutil
+    import subprocess
+
+    if shutil.which("node") is None:
+        import pytest
+
+        pytest.skip("node not available")
+    harness = Path(__file__).resolve().parent / "js" / "test_boot.js"
+    proc = subprocess.run(
+        ["node", str(harness)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=str(Path(__file__).resolve().parent.parent),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "FAIL" not in proc.stdout
+
+
+def test_turn_view_dom_harness_under_node() -> None:
+    """Rendering must actually run, not just grep.
+
+    Replaces ``test_place_hitl_card.js``: ``_placeHitlCard`` no longer
+    exists. Card ordering is not a function that moves nodes any more — it
+    is the slot order ``modules/turn_view.js`` declares, and the harness
+    below replays real frame sequences (including the 2026-09-19 sequential
+    approve) and asserts the resulting DOM.
+    """
     import shutil
     import subprocess
 
@@ -189,7 +303,7 @@ def test_place_hitl_card_dom_harness_under_node() -> None:
 
         pytest.skip("node not available")
     harness = (
-        Path(__file__).resolve().parent / "js" / "test_place_hitl_card.js"
+        Path(__file__).resolve().parent / "js" / "test_turn_view.js"
     )
     proc = subprocess.run(
         ["node", str(harness)],
@@ -211,12 +325,17 @@ def test_steer_post_sends_thread_id_and_does_not_require_local_turn_flag() -> No
 
 
 def test_auto_steer_requires_live_card_not_fossil_flag() -> None:
-    """After restart/abort, `_awaitingApproval` alone must not prefix /steer."""
+    """After restart/abort, `_awaitingApproval` alone must not prefix /steer.
+
+    The corroborating check reads the DOCUMENT now (hasLiveGate): a fossil
+    card with live-looking buttons is not a reason to rewrite the operator's
+    next prompt as a steer of a turn that already ended.
+    """
     js = _js()
     auto = js.split("if (_awaitingApproval && text && text.charAt(0) !== '/')", 1)
     assert len(auto) == 2
     body = auto[1][:1800]
-    assert "hasInlineApprovalCard()" in body
+    assert "hasLiveGate()" in body
     assert "no_active_task" in body
     assert "sending as a new message" in body
     assert "function _releaseHitlComposer" in js
@@ -225,14 +344,40 @@ def test_auto_steer_requires_live_card_not_fossil_flag() -> None:
 
 
 def test_hydrate_pending_without_gate_does_not_lock_composer() -> None:
+    """Only a registry-confirmed live gate may lock the composer.
+
+    A historical part carries ``pending`` long after its gate settled, so
+    hydrating a session must not produce live Approve buttons and must not
+    steal the next prompt as a /steer.
+    """
     js = _js()
-    # See tests/_js_source.py: slicing between two named functions widens
-    # silently when anything is inserted between them.
-    paint = js_function_body(js, "function _paintHitlFromDoc(el, doc)")
-    assert "renderHitlCard(hitl.payload, { lock: false })" in paint
-    assert "_awaitingApproval" not in paint
-    assert "function renderHitlCard(data, opts)" in js
+    state = js_function_body(js, "function _hitlDisplayState(part)")
+    assert "_hydratingSession" in state and "'awaiting'" in state, (
+        "hydration must show the gate without claiming it is live"
+    )
+    # Never invent a claim from leftover status.
+    assert "_hitlAlreadyClaimed(part)" in state
+    lock = js_function_body(js, "function _hitlShouldLock(part)")
+    assert "_hitlGateRow" in lock and "'pending'" in lock
+    build = js_function_body(js, "function _buildHitlSlotCard(part, ctx)")
+    assert "_hitlShouldLock(part)" in build, (
+        "the builder locks the composer without consulting the registry"
+    )
     assert "if (lockComposer) pauseForApproval(data);" in js
+
+
+def test_hitl_display_state_never_invents_approved() -> None:
+    """§30: a card may never claim "Approved" without evidence.
+
+    A stale click is recoverable — the server re-verifies and answers "no
+    longer pending". A fabricated Approved stamp is the incident.
+    """
+    js = _js()
+    state = js_function_body(js, "function _hitlDisplayState(part)")
+    # Registry truth wins in BOTH directions: a pending row re-opens a card
+    # a stale part called settled, and a claimed row settles a stale pending.
+    assert "if (gateRow && String(gateRow.state || '') === 'pending') return 'pending';" in state
+    assert "'claimed'" in state and "'resuming'" in state and "'inflight'" in state
 
 
 def test_hitl_card_suppression_is_interrupt_scoped_not_global() -> None:
@@ -245,14 +390,94 @@ def test_hitl_card_suppression_is_interrupt_scoped_not_global() -> None:
     rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
         "function setCardState(state, label)", 1
     )[0]
-    guard = rhc.split("if (hasInlineApprovalCard()) {", 1)[1].split(
-        "// Phase 3", 1
-    )[0]
-    # Same-interrupt cards skip (idempotent WS+SSE delivery) …
-    assert "_findHitlCard(iid" in guard
-    assert "_hitlCardIsClaimed(liveSameCard)" in guard
-    # … a DIFFERENT interrupt's card must fall through and paint.
-    assert "return;" in guard
+    # The suppression guard is GONE, not narrowed. It was a heuristic answer
+    # to "does a card for this gate already exist?", asked of the transcript.
+    # TurnView calls renderHitlCard only when the gate's slot is empty, and
+    # the slot key IS the interrupt id — so one gate cannot suppress another
+    # and the same gate cannot be painted twice.
+    for banned in (
+        "_findHitlCard(iid",
+        "_hitlCardIsClaimed(liveSameCard)",
+        "if (_hitlAlreadyClaimed(data)) return;",
+        "old.remove()",          # it also deleted other gates' cards on the way in
+    ):
+        assert banned not in rhc, (
+            f"{banned} is back in the card builder — it will eat the next "
+            "gate's card again (2026-09-02)"
+        )
+    # The only thing a live-card DOM scan may still decide here is whether
+    # the Alpine store fallback is needed. It must never cause a RETURN —
+    # that is the shape that made one gate's card suppress the next one's.
+    assert "hasInlineApprovalCard()) return;" not in rhc
+    assert "hasLiveGate()) return;" not in rhc
+    store_block = rhc.split("if (hasInlineApprovalCard()) {", 1)[1][:300]
+    assert "_clearStoreApproval();" in store_block
+    assert "return;" not in store_block.split("}", 1)[0]
+    assert "return card;" in js_function_body(js, "function renderHitlCard(data, opts)"), (
+        "the builder must hand its node back so TurnView can place it"
+    )
+
+
+def test_a_silent_turn_reports_itself() -> None:
+    """The detector this bug class never had.
+
+    Every incident was found by the OPERATOR: the server had the answer, the
+    bubble showed a placeholder, and nothing in the client knew the
+    difference. TurnView re-derives what should be on screen after every
+    pass and compares it to what is, so a regression surfaces as a
+    diagnostic plus one authoritative resync rather than as a person waiting
+    at a blank bubble.
+    """
+    view = _view_js()
+    verify = js_function_body(
+        view, "function verify(el, content, doc, slots, report, ctx)"
+    )
+    # The three ways a turn can be silent.
+    assert "'text-missing'" in verify   # the answer has no host at all
+    assert "'text-blank'" in verify     # the host is there and empty
+    assert "'gate-missing:'" in verify  # a gate that could have shown, did not
+    assert "onInvariant(" in verify
+    # A reporter must never break the render it is reporting on.
+    assert "catch (e) { /* a reporter must never break a render */ }" in verify
+
+    js = _js()
+    handler = js_function_body(js, "function _onRenderInvariant(info)")
+    assert "console.error(" in handler
+    assert "diag('render-invariant'" in handler
+    assert "_resyncDelivery('invariant-' + info.code)" in handler
+    # Report always, recover sparingly: hydration paints the whole
+    # transcript at once and ends with its own resync, and a systematically
+    # broken render must not become a fetch storm.
+    assert "if (_hydratingSession) return;" in handler
+    assert "if (_invariantSeen[key]) return;" in handler
+    assert "_invariantResyncs >= _INVARIANT_RESYNC_MAX" in handler
+    reset = js_function_body(js, "function _resetSessionTurnState()")
+    assert "_invariantSeen = {};" in reset
+    assert "_invariantResyncs = 0;" in reset
+
+
+def test_recovery_paths_never_disarm_on_a_dom_scan() -> None:
+    """A recovery path that can decline is not a recovery path.
+
+    ``hasInlineApprovalCard()`` scanned the transcript for an enabled
+    button, so it answered TRUE for a fossil card whose gate had already
+    settled — and eight recovery paths early-returned on it. That is how
+    the only unconditional route back to server truth switched itself off
+    exactly when a turn had gone quiet, and why "approved twice then
+    silence" survived every individual fix (2026-09-19).
+    """
+    js = _js()
+    resync = js_function_body(js, "function _resyncDelivery(reason)")
+    assert "hasInlineApprovalCard()" not in resync, (
+        "the authoritative resync can decline again"
+    )
+    # The document-derived predicate is what logic may consult.
+    live = js_function_body(js, "function hasLiveGate()")
+    assert "hitlPartsOf" in live and "_hitlDisplayState" in live
+    # The DOM predicate survives for exactly one job: deciding whether the
+    # Alpine store fallback is needed.
+    dom = js_function_body(js, "function hasInlineApprovalCard()")
+    assert "querySelectorAll('.hitl-approval-card')" in dom
 
 
 def test_stale_hitl_cards_reconcile_to_registry_when_idle() -> None:
@@ -404,12 +629,14 @@ def test_live_task_card_single_writer_and_liveness() -> None:
         "away the reader's scroll position"
     )
     assert "el.scrollTop = el.scrollHeight;" in steps
-    # Live turns no longer build an in-bubble workbench - the terminal
-    # branch swaps in the durable summary when the turn ends.
-    cot = js.split("function _syncCotPanel(el, activity, status, meta)", 1)[1].split(
-        "function _paintHitlFromDoc(el, doc)", 1
-    )[0]
+    # Live turns no longer build an in-bubble workbench: the bubble's
+    # workbench is ONE slot, painted from the document's activity rows, and
+    # it feeds the card rather than competing with it.
+    cot = js_function_body(js, "function _paintWorkbenchSlot(panel, doc)")
     assert "_taskCardEvent({ t: 'doc' })" in cot
+    assert "if (list._kzCotHTML === html) return;" in cot, (
+        "identical markup re-assigned — tears the subtree down every frame"
+    )
 
 
 def test_live_task_card_behaviors_under_node() -> None:
@@ -461,13 +688,14 @@ def test_live_task_card_never_hides_a_live_turn() -> None:
 def test_approval_freeze_is_scoped_to_the_card_decided() -> None:
     """Two concurrent approval cards is a supported state.
 
-    _placeHitlCard deliberately stacks a second card after the first, but
-    _freezeHitlButtons disabled every card in the transcript. Approving the
-    first killed the second's buttons; nothing re-enables them
-    (_reconcileHitlCardsWithGates only ever disables), and with no enabled
-    button left hasInlineApprovalCard() went false - so onDone took the
-    endTurn branch while the graph was still parked on the untouched
-    interrupt. Card gone, no reply (2026-09-03).
+    The document holds one part per gate, so the renderer stacks a second
+    card after the first — but _freezeHitlButtons used to disable every card
+    in the transcript. Approving the first killed the second's buttons;
+    nothing re-enables them (_reconcileHitlCardsWithGates only ever
+    disables), and with no enabled button left the "is anything waiting?"
+    check went false — so onDone took the endTurn branch while the graph was
+    still parked on the untouched interrupt. Card gone, no reply
+    (2026-09-03).
     """
     js = _js()
     assert "function _freezeHitlButtons(scope)" in js
@@ -477,7 +705,7 @@ def test_approval_freeze_is_scoped_to_the_card_decided() -> None:
     )
     # Deciding gate A does not mean the turn stopped waiting on gate B.
     submit = js.split("function submitApproval(action, scope)", 1)[1]
-    assert "_awaitingApproval = hasInlineApprovalCard();" in submit
+    assert "_awaitingApproval = hasLiveGate();" in submit
     assert "_liveHitlDeadline()" in submit
     # The deadline has to be readable off the node for that to work.
     assert "card.setAttribute('data-approval-deadline'" in js
@@ -584,19 +812,25 @@ def test_live_placeholder_is_never_a_bubble_identity() -> None:
     reach the DOM.
     """
     js = _js()
-    render = js_function_body(js, "function renderTurn(doc, meta)")
-    assert "if (turnId && turnId !== 'live') {" in render
-    # Both halves guarded: the lookup AND the stamp.
-    assert render.count("turnId !== 'live'") >= 2, (
-        "one of the lookup/stamp pair is unguarded — the magnet is back"
+    # The bubble for a turn is found in a REGISTRY, not by querySelector on
+    # the turn id — so 'live' is a map key that gets renamed on promotion,
+    # and can never be a selector that matches a leftover bubble.
+    resolve = js_function_body(js, "function _bubbleForTurn(turnId, paintable)")
+    assert "TV.elFor(id)" in resolve
+    assert "TV.promote('live', id)" in resolve
+    assert "querySelector" not in resolve, (
+        "the paint target is being looked up in the DOM again"
     )
-    lookup = render.split('.message-assistant[data-turn-id="', 1)[0]
-    assert "turnId !== 'live'" in lookup
-    stamp = render.split("el.setAttribute('data-turn-id', turnId)", 1)[0]
-    assert stamp.rstrip().endswith("{")
-    assert "turnId !== 'live'" in stamp.rsplit("if (", 1)[-1]
+    render = js_function_body(js, "function renderTurn(doc, meta)")
+    assert 'data-turn-id="' not in render, (
+        "renderTurn is matching bubbles by attribute again — the magnet is back"
+    )
+    # Promotion must not clobber a different bubble already holding the id.
+    promote = js_function_body(_view_js(), "function promote(fromId, toId)")
+    assert "delete byTurn[from]" in promote
+    assert "if (byTurn[to] && byTurn[to] !== el) return byTurn[to];" in promote
     # A turn that never got a real id can still leave one behind (older
-    # builds, restored transcripts). beginTurn releases it, now via
+    # builds, restored transcripts). beginTurn releases it via
     # _resetTurnState. Assert the invariant where it lives AND that the call
     # chain still reaches it: pinning it inline in beginTurn failed the build
     # over a refactor while the behaviour was intact (2026-09-12).
@@ -622,14 +856,16 @@ def test_progress_only_frames_never_mint_an_empty_bubble() -> None:
     assert "var mayCreate = create !== false;" in js
     assert "return mayCreate ? createAssistantMessage() : null;" in js
     assert "function _docHasBubbleContent(doc)" in js
-    render = js.split("function renderTurn(doc, meta)", 1)[1].split(
-        "function applyTurnEvent(ev)", 1
-    )[0]
+    render = js_function_body(js, "function renderTurn(doc, meta)")
     assert "_docHasBubbleContent(doc)" in render
-    assert "_assistantBubbleForOpenTurn(_paintable)" in render
-    assert "_assistantBubbleForOpenTurn()" not in render, (
+    assert "_bubbleForTurn(turnId, paintable)" in render
+    assert "createAssistantMessage()" not in render, (
         "an unconditional mint is back in the paint path"
     )
+    # The mint lives behind the paintable flag, in the resolver.
+    resolve = js_function_body(js, "function _bubbleForTurn(turnId, paintable)")
+    assert "if (!paintable) return null;" in resolve
+    assert "el = createAssistantMessage();" in resolve
     # A finished turn still earns its bubble: the durable one-line workbench
     # summary and the approval card both need a host.
     host = js.split("function _docHasBubbleContent(doc)", 1)[1].split(
@@ -690,25 +926,28 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
     On claim the card must park between the CoT block and .message-text
     and collapse to the CoT-style one-line bar (click to re-expand)."""
     js = _js()
-    assert "function _parkClaimedHitlCard(card)" in js
     assert "function _collapseClaimedHitlCard(card)" in js
-    park = js.split("function _parkClaimedHitlCard(card)", 1)[1].split(
-        "function _collapseClaimedHitlCard(card)", 1
-    )[0]
-    assert "message-text" in park
-    # All three claim paths: security approve/deny, semantic option,
-    # watchdog timeout.
+    # Parking is no longer a node move: a settled gate sorts above the
+    # answer because slotPlan says so (see
+    # test_chained_hitl_card_appends_below_previous and the DOM harness).
+    # What each claim path must still do is tell the DOCUMENT, so the model
+    # and the screen agree without waiting for a server frame — and collapse
+    # the card to its one-line bar.
+    assert "function _noteGateDecided(data, state)" in js
+    decide = js_function_body(js, "function _noteGateDecided(data, state)")
+    assert "applyTurnEvent({" in decide and "type: 'hitl'" in decide
+    # All four claim paths: security approve/deny, semantic option,
+    # watchdog timeout, registry reconcile.
     set_state = js.split("function setCardState(state, label)", 1)[1].split(
         "function appendAssistantText", 1
     )[0]
-    assert "_parkClaimedHitlCard(card);" in set_state
+    assert "_noteGateDecided(data," in set_state
     assert "_collapseClaimedHitlCard(card);" in set_state
     sem = js.split("_semCard.querySelectorAll('.hitl-sem-opt')", 1)[1][:900]
-    assert "_parkClaimedHitlCard(_semCard);" in sem
-    timeout = js.split("function markApprovalTimedOut(msg)", 1)[1].split(
-        "\n  function ", 1
-    )[0]
-    assert "_parkClaimedHitlCard(card);" in timeout
+    assert "_noteGateDecided(data," in sem
+    timeout = js_function_body(js, "function markApprovalTimedOut(msg)")
+    assert "_noteGateDecided(" in timeout
+    assert "_collapseClaimedHitlCard(card);" in timeout
     # Collapsed bar shows the decision chip in the header (actions hidden).
     collapse = js.split("function _collapseClaimedHitlCard(card)", 1)[1].split(
         "\n  function renderHitlCard", 1
@@ -729,15 +968,19 @@ def test_claim_frame_does_not_unglue_the_collapsed_bar() -> None:
     claim site must re-assert park+collapse, and the chip/chevron must
     never render outside the collapsed bar."""
     js = _js()
-    paint = js.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
-        "\n  function renderTurn(doc, meta)", 1
-    )[0]
+    paint = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx)")
     assert paint.count("_collapseClaimedHitlCard(card);") >= 2, (
-        "both claimed branches of the projector must re-assert the collapse"
+        "both claimed branches of the slot painter must re-assert the collapse"
     )
-    release = js.split("function _releaseHitlComposer", 1)[1].split(
-        "\n  function ", 1
-    )[0]
+    # Better than re-asserting: the wholesale className assignment now
+    # PRESERVES hitl-collapsed instead of stripping it and putting it back.
+    assert paint.count("hitl-collapsed") >= 2
+    assert "wasCollapsed ? ' hitl-collapsed' : ''" in paint
+    # And the painter is idempotent, so a repeated claim frame is a no-op
+    # rather than a re-stamp that flickers the bar.
+    assert "data-hitl-shown" in paint
+    assert "if (already === show) return;" in paint
+    release = js_function_body(js, "function _releaseHitlComposer(reason)")
     assert "_collapseClaimedHitlCard(card);" in release
     css = (
         Path(__file__).resolve().parent.parent
@@ -759,18 +1002,18 @@ def test_card_label_hysteresis_no_cot_autoexpand_card_reveal() -> None:
     assert "_TC_LABEL_MIN_MS" in render
     assert js.count("_TC_LABEL_MIN_MS") >= 2  # constant + use
     assert "_tc.labelShownAt = 0;" in js.split("case 'begin'", 1)[0] + js.split("if (ev.t === 'begin')", 1)[1][:800]
-    # (2) auto-expand removed: the placement sweep and both force-expands
-    # are gone; only un-done remains.
-    place = js.split("function _placeHitlCard(content, card)", 1)[1].split(
-        "\n  function ", 1
-    )[0]
-    assert "is-collapsed" not in place.replace("lastCard", "")  # no class surgery on panels
+    # (2) auto-expand removed. There is no placement sweep left to do class
+    # surgery on panels, and the renderer must not touch a workbench's
+    # expansion state either — locked behaviourally in
+    # tests/js/test_turn_view.js ("a collapsed workbench stays collapsed").
     assert js.count("classList.remove('is-collapsed', 'is-done')") == 0
+    view = _view_js()
+    assert "is-collapsed" not in view, (
+        "the renderer is doing expansion surgery — the chevron is the only opener"
+    )
     assert js.count("_revealHitlCard(") >= 3  # helper + both branches
     # (3) reveal bounces only live cards.
-    reveal = js.split("function _revealHitlCard(card)", 1)[1].split(
-        "\n  function renderHitlCard", 1
-    )[0]
+    reveal = js_function_body(js, "function _revealHitlCard(card)")
     assert "scrollIntoView" in reveal
     assert "document.hidden" in reveal
     assert "disabled" in reveal
@@ -823,20 +1066,28 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
     assert js.count("data && data.replay) return;") >= 3
     # The second ghost source: hydration itself painted stale pending
     # parts (frame guards alone weren't enough — the persisted part still
-    # says 'pending'). _paintHitlFromDoc must refuse pending paints while
-    # hydrating; the registry resync is the only pending painter on load.
-    paint = js.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
-        "\n  function renderTurn(doc, meta)", 1
-    )[0]
-    assert "if (_hydratingSession) return;" in paint
+    # says 'pending'). A hydrated gate now resolves to 'awaiting': the card
+    # is SHOWN, with its buttons disabled, so the transcript is honest and
+    # the slot is present — the registry resync is still the only thing
+    # that can make it clickable.
+    #
+    # Note the change of shape. The old rule was "paint NOTHING while
+    # hydrating", which is exactly the move that leaves a gate with no node
+    # on screen; the render invariant would now report that as a missing
+    # slot. Showing it disabled says the same thing without lying and
+    # without going silent.
+    state = js_function_body(js, "function _hitlDisplayState(part)")
+    assert "if (_hydratingSession) return 'awaiting';" in state
+    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx)")
+    assert "if (show === 'awaiting')" in painter
+    assert "b.disabled = true" in painter
     # Round 3: the FLASH itself was the Alpine fallback being armed by a
     # CLAIMED historical card (renderHitlCard lit pendingApproval whenever
-    # the painted card had no enabled buttons). Historical paints pass
-    # store:false; only a live card arms the fallback.
-    assert "renderHitlCard(hitl.payload, { lock: false, store: false });" in paint
-    rhc = js.split("function renderHitlCard(data, opts)", 1)[1].split(
-        "\n  function ", 1
-    )[0]
+    # the painted card had no enabled buttons). Only a live card arms the
+    # fallback — the builder passes store:false for everything else.
+    build = js_function_body(js, "function _buildHitlSlotCard(part, ctx)")
+    assert "store: show === 'pending'," in build
+    rhc = js_function_body(js, "function renderHitlCard(data, opts)")
     assert "opts && opts.store === false" in rhc
     hitl_guards = js.count("st === 'pending' && data && data.replay) return;")
     assert hitl_guards == 2  # attach + send onHitl handlers
@@ -1167,8 +1418,15 @@ def test_post_approve_attach_and_card_below_text() -> None:
     assert "_reopenCount = 0" in chat
     # A declined attach is no longer silent.
     assert "reopen budget exhausted" in chat
-    # New pending card lands below the streamed text (anchor becomes the
-    # message-text element, stacking below a previous card only when that
-    # card is already below the text).
-    assert "after = textEl;" in chat
-    assert "compareDocumentPosition(textEl) & 4" in chat
+    # New pending card lands below the streamed text. This is no longer an
+    # anchor computed with compareDocumentPosition — it is the declared slot
+    # order (pending gates come after the answer slot), exercised on a real
+    # DOM in tests/js/test_turn_view.js: "pending gate sits BELOW the interim
+    # text".
+    assert "compareDocumentPosition" not in chat, (
+        "card placement is computing anchors again instead of declaring order"
+    )
+    view = _TURN_VIEW_JS.read_text(encoding="utf-8")
+    plan = js_function_body(view, "function slotPlan(doc, has, TD)")
+    tail = plan.split("var plan = [];", 1)[1]
+    assert tail.index("has.text") < tail.index("pending[i]")

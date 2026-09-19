@@ -43,6 +43,18 @@ def _bootstrap_bind_and_secret() -> str:
         print(f"    {generated}")
         print("  Pin it with:  export KAZMA_SECRET='…'  (or put it in .env)\n")
 
+    # The secret check above asks "is there a secret?"; kazma_ui.auth asks
+    # "is this labelled production?". Neither asks "are you exposed?", so an
+    # auth kill switch plus a non-loopback bind used to start cleanly with a
+    # perfectly good secret and serve every /api endpoint to the network.
+    from kazma_core.security.boot_guard import check_exposure_posture
+
+    _ok, _msg = check_exposure_posture(host)
+    if _msg:
+        print(_msg)
+    if not _ok:
+        sys.exit(1)
+
     return host
 
 

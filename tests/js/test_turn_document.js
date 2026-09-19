@@ -129,6 +129,12 @@ assert("replay cannot regress approved to pending", replayHitl && replayHitl.sta
 assert("replay keeps payload", replayHitl && replayHitl.payload && replayHitl.payload.path === "x");
 assert("replay status stays streaming", replayed.status === "streaming");
 
+// ── Sequential gates: one part PER GATE, never one per turn ─────────
+// The 2026-09-19 "approved twice then silence" incident. partKey used to
+// return a bare "hitl", so this second gate OVERWROTE the first: the
+// document held one decision while the transcript showed two cards, and
+// the renderer had no authority left to reconcile against. Both gates must
+// survive, in the order they were asked, each keeping its own state.
 var secondGate = TD.applyEvent(replayed, {
   type: "hitl",
   state: "pending",
@@ -136,9 +142,39 @@ var secondGate = TD.applyEvent(replayed, {
   tool: "python_exec",
   payload: { tool: "python_exec", interrupt_id: "def" },
 });
-var secondHitl = secondGate.parts.filter(function (p) { return p.type === "hitl"; })[0];
-assert("new interrupt_id is a new gate", secondHitl && secondHitl.state === "pending" && secondHitl.interrupt_id === "def");
+var gates = secondGate.parts.filter(function (p) { return p.type === "hitl"; });
+assert("both gates survive", gates.length === 2, "got " + gates.length);
+assert("first gate keeps its claim", gates[0] && gates[0].interrupt_id === "abc" && gates[0].state === "approved");
+assert("second gate is its own part", gates[1] && gates[1].interrupt_id === "def" && gates[1].state === "pending");
+assert("gates keep ask order", gates[0].interrupt_id === "abc" && gates[1].interrupt_id === "def");
 assert("new gate pauses", secondGate.status === "paused");
+
+// A pending gate anywhere blocks the turn, even when a LATER gate settled.
+// Reading status off "the last hitl part" reported streaming while the
+// graph sat blocked on an earlier gate.
+var secondApproved = TD.applyEvent(secondGate, {
+  type: "hitl", state: "approved", interrupt_id: "def", tool: "python_exec",
+});
+assert("all gates settled resumes the turn", secondApproved.status === "streaming");
+var thirdPending = TD.applyEvent(secondApproved, {
+  type: "hitl", state: "pending", interrupt_id: "ghi", tool: "shell_exec",
+  payload: { tool: "shell_exec", interrupt_id: "ghi" },
+});
+assert("three gates tracked", thirdPending.parts.filter(function (p) { return p.type === "hitl"; }).length === 3);
+assert("a pending gate after settled ones still pauses", thirdPending.status === "paused");
+
+// hitlPartOf answers "what is being asked right now", not "what is newest".
+assert("hitlPartOf prefers the pending gate", TD.hitlPartOf(thirdPending.parts).interrupt_id === "ghi");
+assert("hitlPartsOf returns every gate", TD.hitlPartsOf(thirdPending.parts).length === 3);
+assert("hitlPartOf falls back to newest when all settled",
+  TD.hitlPartOf(secondApproved.parts).interrupt_id === "def");
+
+// Identity is shared with the renderer: distinct gates MUST key apart, or
+// two cards collapse onto one DOM slot.
+assert("partKey separates gates",
+  TD.partKey(gates[0]) !== TD.partKey(gates[1]));
+assert("partKey is stable across a state change",
+  TD.partKey(gates[1]) === TD.partKey({ type: "hitl", interrupt_id: "def", state: "approved" }));
 
 // ── Capacity fast-path: content-key dedupe + reset semantics ────────
 // chat.js paintCapacityReply forwards reply+turn_id but NOT seq, so the

@@ -62,7 +62,7 @@ def _build_test_app() -> FastAPI:
         resp = JSONResponse({"status": "ok", "authenticated": True})
         from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
 
-        sid = create_session(actor="test-login")
+        sid = create_session(actor="test-login", role="admin")
         resp.set_cookie(SESSION_COOKIE, sid, httponly=True, samesite="strict", path="/")
         resp.delete_cookie(SECRET_COOKIE, path="/")
         return resp
@@ -428,7 +428,7 @@ class TestAuthMiddlewareWithSecret:
         """Websocket succeeds with an opaque kazma-session cookie (not raw secret)."""
         from kazma_core.security.web_sessions import SESSION_COOKIE, create_session
 
-        sid = create_session(actor="test")
+        sid = create_session(actor="test", role="admin")
         self.client.cookies.set(SESSION_COOKIE, sid)
         try:
             with self.client.websocket_connect("/ws/dashboard") as ws:

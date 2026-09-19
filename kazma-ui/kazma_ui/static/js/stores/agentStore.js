@@ -206,9 +206,17 @@ function registerAgentStore() {
       // bottom card, so pendingApproval alone no longer signals a pending
       // approval (incident 2026-08-16 dedup).
       const chat = this._chat();
+      // Document truth, not a DOM scan: a fossil card with live-looking
+      // buttons must not keep the approval lock on after the gate settled,
+      // and a genuinely pending gate must hold it even if its card has not
+      // painted yet. Falls back to the DOM predicate for cached clients.
       const inlineApproval = !!(
-        chat && typeof chat.hasInlineApprovalCard === 'function' &&
-        chat.hasInlineApprovalCard()
+        chat && (
+          (typeof chat.hasLiveGate === 'function' && chat.hasLiveGate()) ||
+          (typeof chat.hasLiveGate !== 'function' &&
+            typeof chat.hasInlineApprovalCard === 'function' &&
+            chat.hasInlineApprovalCard())
+        )
       );
       if (this.pendingApproval || inlineApproval) {
         this._turnActive = false;

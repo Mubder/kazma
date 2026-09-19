@@ -210,9 +210,30 @@ def test_composer_clears_before_begin_turn() -> None:
 
 
 def test_collapsed_cot_cannot_eat_the_answer() -> None:
+    """The answer can no longer land inside the workbench panel.
+
+    _rescueTurnDom existed to LIFT .message-text back out of
+    .agent-progress-body after some other writer had nested it there —
+    a repair pass for a corruption the architecture allowed. Every
+    doc-derived node is now a flat sibling of .message-content (CSS
+    requires it too: .message-assistant > .message-content > .message-text),
+    so there is no container for the answer to be trapped in and nothing
+    left to rescue.
+    """
     chat = _src(_CHAT_JS)
-    assert "function _rescueTurnDom(el)" in chat
+    assert "function _rescueTurnDom(el)" not in chat, (
+        "a repair pass is back — something is nesting slots again"
+    )
     assert "function _answerFromDoc(TD, doc)" in chat
+    view = _src(_UI / "static" / "js" / "modules" / "turn_view.js")
+    # The ordering pass only ever inserts into the content host itself.
+    render_fn = js_function_body(view, "function render(el, doc, renderers, meta)")
+    assert "content.insertBefore(node, want || null);" in render_fn
+    # Exactly one insertion site, and it inserts into the content host.
+    assert view.count(".insertBefore(") == 1, (
+        "a second insertion site can put a slot somewhere other than the host"
+    )
+    assert "content.insertBefore(" in view
     stream = _src(_UI / "static" / "js" / "streaming.js")
     show = stream.split("function showTyping(el, text)", 1)[1].split("function hideTyping", 1)[0]
     assert "message-content" in show
@@ -229,11 +250,17 @@ def test_collapsed_cot_cannot_eat_the_answer() -> None:
 
 
 def test_user_bubble_survives_cot_rescue() -> None:
-    """CoT rescue/paint must never empty the sent You row (2026-09-01)."""
+    """Painting a turn must never empty the sent You row (2026-09-01).
+
+    The rescue pass that used to lift nodes around is gone; the renderer
+    refuses a user bubble outright, and the text painters still refuse a
+    target inside one.
+    """
     chat = _src(_CHAT_JS)
-    rescue = chat.split("function _rescueTurnDom(el)", 1)[1].split("\n  function ", 1)[0]
-    assert "_isUserBubble(el)" in rescue
-    assert "owner !== el" in rescue
+    view = _src(_UI / "static" / "js" / "modules" / "turn_view.js")
+    render_fn = js_function_body(view, "function render(el, doc, renderers, meta)")
+    assert "contains('message-user')" in render_fn
+    assert "reason: 'user-bubble'" in render_fn
     paint = chat.split("function _paintHTML(textEl, html)", 1)[1].split("\n  function ", 1)[0]
     assert "closest('.message-user')" in paint
     live = chat.split("function _paintLiveTextNow(textEl, final)", 1)[1].split("\n  function ", 1)[0]
@@ -247,23 +274,27 @@ def test_user_bubble_survives_cot_rescue() -> None:
     assert "_resetTurnState()" in begin, (
         "beginTurn no longer reaches the live-doc reset"
     )
-    render = chat.split("function renderTurn(doc, meta)", 1)[1].split("\n  function applyTurnEvent", 1)[0]
-    assert "_isUserBubble(el)" in render
     # Negative: a rescue that lifts every .message-text under the panel
-    # without an owner check is exactly the You-bubble-emptying bug.
-    planted = (
-        "var trapped = panel.querySelectorAll('.message-text, .hitl-approval-card');\n"
-        "content.insertBefore(trapped[i], anchor);\n"
-    )
-    assert "owner !== el" not in planted
-    assert "owner !== el" in rescue
+    # without an owner check is exactly the You-bubble-emptying bug. No
+    # lifting happens at all now.
+    assert "querySelectorAll('.message-text, .hitl-approval-card" not in chat
 
 
 def test_live_hitl_card_does_not_collapse_into_cot() -> None:
+    """A card is a sibling slot, so it cannot be inside the panel at all.
+
+    ``holdOpen`` used to keep the live CoT panel expanded specifically so a
+    card that had landed inside it stayed reachable. With flat slots the
+    question does not arise, and the panel's expansion is the reader's.
+    """
     chat = _src(_CHAT_JS)
-    assert "holdOpen" in chat
     assert "markApprovalTimedOut" in chat
     assert "approval_timeout" in _src(_STORE_JS)
+    view = _src(_UI / "static" / "js" / "modules" / "turn_view.js")
+    assert "hitl-approval-card" in view, "the view must own the card slot"
+    assert "is-collapsed" not in view, (
+        "the renderer is expanding/collapsing panels again"
+    )
 
 
 def test_duplicate_terminal_flush_never_wipes_the_reply() -> None:
@@ -291,13 +322,18 @@ def test_terminal_cot_swap_preserves_expansion() -> None:
     live panel's expansion instead of collapsing it (finalizeProgress never
     collapses; the swap must not smuggle the collapse back in)."""
     chat = _src(_CHAT_JS)
-    sync = chat.split("function _syncCotPanel(el, activity, status, meta)", 1)[1].split("\n  function ", 1)[0]
-    assert "existingCot && !existingCot.classList.contains('is-collapsed')" in sync
-    assert "cot.classList.remove('is-collapsed')" in sync
-    # Negative: an unconditional collapsed swap is the reported symptom.
-    assert "existingCot.replaceWith(cot);" in sync  # swap still happens…
+    # There is no terminal SWAP any more — the workbench is one slot, built
+    # once and repainted in place, so its expansion is simply never touched
+    # after the reader gets it. (The swap is what kept smuggling a collapse
+    # back in; removing it removes the class of bug, not just this instance.)
+    assert "existingCot.replaceWith(cot);" not in chat
+    paint = js_function_body(chat, "function _paintWorkbenchSlot(panel, doc)")
+    assert "is-collapsed" not in paint, (
+        "the workbench painter is touching expansion again"
+    )
+    assert "list.innerHTML = html;" in paint  # rows are replaced, the panel is not
     restored = chat.split("function _buildRestoredWorkbench(activity)", 1)[1].split("\n  function ", 1)[0]
-    assert "is-collapsed" in restored  # …but only history builds start collapsed
+    assert "is-collapsed" in restored  # history builds still start collapsed
 
 
 def test_cot_steps_do_not_trap_page_scroll() -> None:
@@ -312,20 +348,31 @@ def test_cot_steps_do_not_trap_page_scroll() -> None:
 
 
 def test_historical_render_never_captures_open_turn_pointer() -> None:
-    """A render targeting a bubble FOLLOWED by a user message is historical:
-    paint it, but never re-pin currentMsgEl. A late hydrate/resync for turn N
-    re-pinned its bubble, and turn N+1's first token painted into that old
-    bubble and re-stamped its turn id — the two replies crossed bubbles
-    ("my new message's answer appeared above the previous reply", 2026-09-02)."""
+    """A render for a closed turn must never re-pin the open-turn pointer.
+
+    A late hydrate/resync for turn N re-pinned its bubble, and turn N+1's
+    first token painted into that old bubble and re-stamped its turn id —
+    the two replies crossed bubbles ("my new message's answer appeared above
+    the previous reply", 2026-09-02).
+
+    "Is this the open turn?" used to be answered by walking
+    nextElementSibling looking for a user row — a guess about transcript
+    SHAPE, which is why it needed _prevOpenEl to undo the damage when the
+    interior painters moved nodes around underneath it. It is now a fact
+    about _liveTurnId, and nothing needs undoing.
+    """
     chat = _src(_CHAT_JS)
-    render = chat.split("function renderTurn(doc, meta)", 1)[1].split("\n  function applyTurnEvent", 1)[0]
-    assert "_prevOpenEl" in render
-    assert "message-user" in render
-    assert "if (!_historical) currentMsgEl = el;" in render
-    assert "if (_historical) currentMsgEl = _prevOpenEl;" in render
-    # The open turn's wait/paint flags are off-limits to historical renders.
-    assert "if (!_historical) _turnPainted = true;" in render
-    assert "if (!_historical && (doc.status === 'done'" in render
+    render = js_function_body(chat, "function renderTurn(doc, meta)")
+    assert "nextElementSibling" not in render, (
+        "the paint path is guessing 'historical' from sibling shape again"
+    )
+    assert "var open = !turnId || turnId === 'live' || turnId === _liveTurnId;" in render
+    assert "if (open) currentMsgEl = el;" in render
+    # The open turn's wait flag is off-limits to a closed turn's render.
+    assert "if (open && (doc.status === 'done'" in render
+    # …and so is the painted flag, which the "no response" fallback reads.
+    paint = js_function_body(chat, "function _paintTextSlot(textEl, doc, meta)")
+    assert "if (String(doc.turnId || '') === _liveTurnId) _turnPainted = true;" in paint
     # Negative: unconditional adoption at the head is exactly the bug.
     assert "\n    currentMsgEl = el;" not in render
 
@@ -334,7 +381,11 @@ def test_live_cot_goes_through_the_document() -> None:
     chat = _src(_CHAT_JS)
     log = chat.split("function logProgress(step)", 1)[1].split("\n  function ", 1)[0]
     assert "applyTurnEvent" in log
-    assert "function _syncCotPanel(el, activity, status, meta)" in chat
+    # The workbench is a document-derived SLOT now, not a panel synced
+    # alongside the answer by a second writer.
+    assert "function _paintWorkbenchSlot(panel, doc)" in chat
+    paint = js_function_body(chat, "function _paintWorkbenchSlot(panel, doc)")
+    assert "_activityOfDoc(doc)" in paint, "the workbench must read the document"
 
 
 def test_messages_get_hydrates_legacy_rows() -> None:

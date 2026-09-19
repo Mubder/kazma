@@ -168,12 +168,20 @@ def test_gap_status_resyncs_from_session_store() -> None:
 
 
 def test_load_session_paints_hitl_from_parts() -> None:
+    """History and live delivery must go through ONE painter.
+
+    Hydration used to have its own card path (_paintHitlFromDoc), so a
+    replayed transcript could disagree with a live one about what a gate
+    looks like. loadSession now builds the same TurnDocument and hands it to
+    the same TurnView render as every other frame.
+    """
     chat = _src(_CHAT_JS)
-    assert "function _paintHitlFromDoc(el, doc)" in chat
     load = chat.split("function loadSession(sessionId)", 1)[1].split(
         "function newSession", 1
     )[0]
-    assert "_paintHitlFromDoc" in load
+    assert "KazmaTurnDocument.fromMessage(msg)" in load
+    assert "TVh.render(painted, hydratedDoc, _turnRenderers, { source: 'hydrate' });" in load
+    assert "TVh.bind(hydratedId, painted);" in load
     assert "checkPendingApprovals" not in chat
     assert "source: 'pending-list'" not in chat
 
@@ -230,18 +238,23 @@ def test_pending_hitl_is_not_stamped_inflight_on_first_paint() -> None:
     live buttons (2026-09-01).
     """
     chat = _src(_CHAT_JS)
-    # Sliced to the end of the function, not to the next named one. The old
-    # form swallowed `_isWatchdogNotice` and `_forcePaintDoneContent` once they
-    # were inserted between the two, and failed on an `_awaitingApproval`
-    # reference belonging to a different function while this invariant was
-    # intact (2026-09-12).
-    paint = js_function_body(chat, "function _paintHitlFromDoc(el, doc)")
-    assert "_awaitingApproval" not in paint
-    assert "_serverGenerating && !_serverPaused" not in paint
-    assert "_hitlAlreadyClaimed(hitl)" in paint
-    assert "statusInflight" not in paint
-    assert "renderHitlCard(hitl.payload, { lock: false })" in paint
-    assert "renderHitlCard(hitl.payload, { lock: true })" in paint
+    # The decision now lives in one pure-ish function, so this invariant has
+    # one place to hold: what state does a gate's card SHOW?
+    state = js_function_body(chat, "function _hitlDisplayState(part)")
+    assert "_awaitingApproval" not in state, (
+        "the composer-lock flag is being read as evidence of a claim again — "
+        'that is what stamped "Approved — running…" with no click'
+    )
+    assert "_serverGenerating && !_serverPaused" not in state
+    assert "statusInflight" not in state
+    # Only this tab's own click (or a persisted claim) counts as inflight.
+    assert "_hitlAlreadyClaimed(part)" in state
+    # Locking the composer is a separate, stricter question than showing
+    # live buttons: only a registry row that says `pending` may lock.
+    lock = js_function_body(chat, "function _hitlShouldLock(part)")
+    assert "_awaitingApproval" not in lock
+    build = js_function_body(chat, "function _buildHitlSlotCard(part, ctx)")
+    assert "lock: show === 'pending' && _hitlShouldLock(part)," in build
     status = _src(_INIT)
     sess = status.split("async def get_session_status", 1)[1].split(
         "async def delete_session", 1
@@ -267,14 +280,23 @@ def test_hitl_claimed_match_is_interrupt_scoped() -> None:
     assert "kazma:hitl-resolved" in chat
     dash = _src(_UI / "static" / "js" / "hitl_approval.js")
     assert "kazma:hitl-resolved" in dash
-    paint = chat.split("function _paintHitlFromDoc(el, doc)", 1)[1].split(
-        "function renderTurn(doc, meta)", 1
+    # _findHitlCard survives for one job — "is a card for this gate already
+    # on screen?" (hitlCardExistsFor / _hitlAlreadyClaimed), which is
+    # genuinely a question about what the operator can see.
+    find = chat.split("function _findHitlCard", 1)[1].split(
+        "function _notifyHitlResolved", 1
     )[0]
-    assert "_findHitlCard" in paint
-    render = chat.split("function renderHitlCard(data, opts)", 1)[1].split(
-        "function submitApproval(action, scope)", 1
-    )[0]
-    assert "_findHitlCard" in render
+    assert "return null" in find
+    assert "_findHitlCard(iid, null)" in js_function_body(
+        chat, "function hitlCardExistsFor(data)"
+    )
+    # It must NOT be used to decide whether to paint. That rescan was a
+    # heuristic answer to "does a card for this gate exist?"; the slot key
+    # owns that answer now.
+    assert "_findHitlCard(iid, currentMsgEl)" not in chat
+    assert "_findHitlCard(iid, content)" not in chat
+    view = _src(_UI / "static" / "js" / "modules" / "turn_view.js")
+    assert "'hitl:' + interruptIdOf(part, TD)" in view
     approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
         "var onceBtn", 1
     )[0]
@@ -286,9 +308,18 @@ def test_hitl_card_is_not_torn_down_after_approve() -> None:
     render = chat.split("function renderHitlCard(data, opts)", 1)[1].split(
         "function submitApproval(action, scope)", 1
     )[0]
-    assert "_hitlAlreadyClaimed" in render
-    assert "_hitlCardIsClaimed(old)" in render
     assert "messagesEl.querySelectorAll('.hitl-approval-card').forEach" not in render
+    # The builder no longer removes ANY card on its way in — it does not
+    # even look at the others. Removal is the renderer's decision, and
+    # turn_view.js contract 4 says ambiguity never deletes: a slot goes only
+    # when the caller's discard() explicitly returns true, and chat.js
+    # answers false for every slot, because a decision is transcript.
+    assert "old.remove()" not in render
+    assert "_hitlCardIsClaimed(old)" not in render
+    discard = js_function_body(chat, "var _turnRenderers = {")
+    assert "discard: function() { return false; }," in discard, (
+        "a render pass can take a decision or an answer off screen again"
+    )
     approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
         "var onceBtn", 1
     )[0]

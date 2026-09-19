@@ -1,5 +1,124 @@
 # CHANGELOG
 
+## Security — minting a web session must state its authority (2026-09-19)
+
+`create_session` took `role: str | None = None` and stored `role or "admin"`,
+so a caller that did not think about authority silently minted a full admin
+session. That was defensible while the payload described one operator — but
+it already carries `user_id` and `tenant_id`. The moment sessions are
+per-user, "forgot to pass a role" becomes "issued an admin session", failing
+open at the one function whose job is to decide authority.
+
+`role` is now required. Every existing caller kept exactly the authority it
+already had, so **no behaviour changed**: login and OIDC always passed a
+role, and the auto-cookie path — reached only for loopback or a request
+carrying the secret header — now says `role="admin"` out loud instead of
+inheriting it. What is gone is the inheritance: a caller that says nothing
+does not run, and the auto-cookie line is visible as the one to revisit when
+sessions become per-user.
+
+Found while hand-reading the 27 TypeSafe flags the audit's own verification
+section never covered. It was the only thing in those 27 worth changing; the
+other 26 were four documented-by-design behaviours and 22 false positives,
+including four cases where the flagged code *was* the mitigation.
+
+## Security — a kill switch plus a public bind no longer starts silently (2026-09-19)
+
+Two guards existed and did not compose. `serve.py` / `kazma serve` refuse a
+non-loopback bind without a `KAZMA_SECRET` — they ask *"is there a secret?"*.
+`kazma_ui.auth` refuses `KAZMA_AUTH_DISABLED` / `KAZMA_DEMO_MODE` when
+`KAZMA_PRODUCTION` is set — it asks *"is this labelled production?"*. Neither
+asked **"are you exposed?"**, so this started cleanly and served every
+`/api/*` endpoint to the network:
+
+    KAZMA_HOST=0.0.0.0  KAZMA_SECRET=<strong>  KAZMA_AUTH_DISABLED=1
+
+The secret satisfies the boot check and the kill switch then makes the secret
+irrelevant. `KAZMA_PRODUCTION` is opt-in, so a VPS, a LAN box or a tunnel
+without that label inherited nothing from the auth-side guard either.
+
+New `kazma_core.security.boot_guard` is the single posture check both entry
+points call — one module, because the bind/secret logic was already
+copy-pasted into `serve.py` and the CLI, and a check that lives in each
+caller is one that goes missing from a caller.
+
+The two switches are not the same risk and are not treated the same.
+`KAZMA_AUTH_DISABLED` is a local-development convenience with no documented
+remote use: paired with a public bind it now **refuses to start**, naming the
+three ways out. `KAZMA_DEMO_MODE` exists precisely to serve a public demo
+without login (`fly.toml` carries it ready to uncomment), so it still starts
+and prints a loud banner instead. Loopback is never refused.
+
+Found by the TypeSafe audit (R2) — the one item in that sweep that survived
+being read against the real code.
+
+## Tests — the danger sweep asserted a mechanism, not the safety property (2026-09-19)
+
+`test_every_shipped_danger_tool_interrupts` failed for `x_post` and
+`x_schedule_post` with *"shipped as danger but did not interrupt for HITL"* —
+which reads exactly like an open hole. It was not one. **Neither tool can be
+invoked as an ordinary tool call at all**, in any argument shape: the
+commitment engine's proposal gate strips them from `pending` before the
+safe/danger split, so they never reach `interrupt()`. That is stricter than
+an interrupt, because with an interrupt there is an answer the operator can
+give that runs the call, and here there is not. The real publish path puts
+the *stored* drafts on an approval card, so the human check happens on text
+that was persisted rather than text the model re-typed.
+
+The sweep now asserts the property — `executed == []` — and accepts either
+mechanism, naming why the publish tools are exempt from the usual one. Two
+new locks pin the stricter path: every argument shape is refused (including
+a well-formed `proposal_id`), and the filter fails **closed** when it
+breaks. That last one has teeth for a reason — per the gate's own docstring,
+the tool worker imported the module inside `except Exception: pass` from
+2026-09-04, so the filter silently never ran until 2026-09-17.
+
+No behaviour changed; the gate was already correct. What changed is that a
+green suite now means what it says, and a red one will point at the real
+thing.
+
+## Fix — the chat bubble no longer has to "replace" the approval placeholder (2026-09-19)
+
+The silence-after-a-HITL-card class, fixed ~15 times since 2026-09-01 and
+back every time through a different path. It had three causes, all of them
+structural, and all three are gone.
+
+**The document could not hold two gates.** `_part_key` returned a bare
+`("hitl",)` — one approval slot per *turn*. A turn that paused twice
+(sequential *Allow this tool*) overwrote the first gate with the second,
+while the transcript kept both cards. The document said one decision, the
+screen said two, and every reconciliation between them was a guess. A gate
+is now keyed by its interrupt id: N gates, N parts, in ask order, each with
+its own state. A turn is paused while *any* gate is pending.
+
+**The renderer asked the DOM where to paint.** It looked a bubble up by
+turn id, fell back to a pointer, fell back to "last assistant bubble after
+the last user row", then walked siblings to guess whether that bubble was
+historical, then lifted nodes back out of the progress panel, then worked
+out whether a card had swallowed the answer. New `modules/turn_view.js`
+owns the bubble's children and derives them from the document: slots keyed
+by the same function the document dedupes with, in a declared order —
+workbench, settled decisions, answer, live questions. Rendering the same
+turn twice now moves nothing.
+
+**And the placeholder itself is gone.** *"Action required: the agent paused
+to ask permission"* used to be written into the answer element, so the
+reply had to overwrite it and every incident was a path where that did not
+happen. The answer slot holds the answer or nothing; the pause is the card
+next to it. There is nothing left to replace.
+
+Two things follow. A recovery path can no longer disarm itself — the
+"is an approval waiting?" check reads the document and the gate registry
+instead of scanning for a clickable button, which used to answer *yes* for
+a dead card and switch off the one unconditional route back to server
+truth. And a silent turn now reports itself: every render compares what
+should be on screen against what is, and a document with an answer over a
+blank bubble raises a console error and forces a resync instead of waiting
+for someone to notice.
+
+`tests/js/test_turn_view.js` replays each shipped incident as a frame
+sequence against a real DOM. Details: `docs/plans/TURN_RENDER_V2_KEYED_SLOTS.md`.
+
 ## Fix — skill install went silent after two approvals; KB crawl of a docs host ingested 1 page (2026-09-19)
 
 Asking Kazma to install https://docs.typesafe.ai/agent-skill approved
