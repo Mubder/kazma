@@ -441,3 +441,30 @@ class TestPendingInterruptIds:
         assert len(first) == 1 and len(second) == 1
         assert first[0]["interrupt_id"]
         assert first[0]["interrupt_id"] == second[0]["interrupt_id"]
+
+
+class TestPendingListKeyedByGate:
+    """HITL_VIEW_MODEL D: dashboard/TUI identity is the gate, not the thread."""
+
+    def test_dashboard_dedupes_by_gate_id_not_thread(self) -> None:
+        src = Path("kazma-ui/kazma_ui/static/js/hitl_approval.js").read_text(
+            encoding="utf-8"
+        )
+        assert "seenTid" not in src
+        assert "seenGid" in src
+        assert "item.gate_id || item.interrupt_id" in src
+        assert "data-gate-id" in src
+        assert "payload.gate_id" in src
+
+    def test_tui_shown_set_is_gate_keyed(self) -> None:
+        src = Path("kazma-tui/kazma_tui/app.py").read_text(encoding="utf-8")
+        assert "def _gate_key" in src
+        assert 'body["gate_id"]' in src or "body[\"gate_id\"]" in src
+        assert "gate_id=_gid" in src
+
+    def test_approve_accepts_gate_id_as_interrupt_id(self) -> None:
+        src = Path("kazma-ui/kazma_ui/routes_direct/misc.py").read_text(
+            encoding="utf-8"
+        )
+        assert "def _body_interrupt_id(" in src
+        assert 'body.get("gate_id")' in src

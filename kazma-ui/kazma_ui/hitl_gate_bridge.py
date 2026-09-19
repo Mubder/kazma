@@ -348,6 +348,8 @@ def gate_row_to_pending_item(row: Any) -> dict[str, Any]:
         "arguments": args,
         "message": str(getattr(row, "message", "") or payload.get("message") or ""),
         "yolo_allowed": payload.get("yolo_allowed", True),
+        "gate_id": str(getattr(row, "gate_id", "") or ""),
+        "alias_id": str(getattr(row, "alias_id", "") or ""),
         "interrupt_id": str(getattr(row, "gate_id", "") or ""),
         "kind": str(getattr(row, "kind", "") or "security"),
         "items": payload.get("items"),

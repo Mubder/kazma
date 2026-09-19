@@ -40,6 +40,13 @@ def _get_snapshot_store() -> Any:
     return _snapshot_store
 
 
+def _body_interrupt_id(body: dict[str, Any] | None) -> str:
+    """Prefer interrupt_id, then gate_id (dashboard/TUI send both)."""
+    if not isinstance(body, dict):
+        return ""
+    return str(body.get("interrupt_id") or body.get("gate_id") or "").strip()
+
+
 def _attach_hitl_view(
     payload: dict[str, Any],
     thread_id: str,
@@ -682,7 +689,7 @@ def register_misc_routes(self: Any) -> None:
                                 "hitl_state": "settled",
                             },
                             thread_id,
-                            str(body.get("interrupt_id") or ""),
+                            _body_interrupt_id(body),
                             state_hint="settled",
                         ),
                         status_code=409,
@@ -770,7 +777,7 @@ def register_misc_routes(self: Any) -> None:
                         _claimed_turn = resolve_reply_turn(thread_id, "") or ""
                     except Exception:
                         _claimed_turn = ""
-                    _claimed_iid = str(body.get("interrupt_id") or "")
+                    _claimed_iid = _body_interrupt_id(body)
                     try:
                         from kazma_ui.hitl_status import persisted_hitl_for_thread
 
@@ -871,7 +878,7 @@ def register_misc_routes(self: Any) -> None:
                         )
                 except Exception:
                     _stored_iid = ""
-                _req_iid = str(body.get("interrupt_id") or "").strip()
+                _req_iid = _body_interrupt_id(body)
                 if _stored_iid:
                     _stamp_payload["interrupt_id"] = _stored_iid
                 elif _req_iid:

@@ -113,14 +113,17 @@
     if (!list) return;
 
     if (!Array.isArray(pending)) pending = [];
-    // One card per thread: two registry rows for the same pause (native id
-    // + hash id) used to render two identical cards; the leftover 409'd.
-    var seenTid = {};
+    // One card per GATE, not per thread. Two-id twins (native + hash)
+    // collapse on gate_id/alias. Two live gates on the same thread stay
+    // two cards (HITL_VIEW_MODEL D).
+    var seenGid = {};
     pending = pending.filter(function (item) {
-      var tid = String((item && item.thread_id) || '');
-      if (!tid) return true;
-      if (seenTid[tid]) return false;
-      seenTid[tid] = true;
+      var gid = String((item && (item.gate_id || item.interrupt_id)) || '');
+      var alias = String((item && item.alias_id) || '');
+      if (!gid && !alias) return true;
+      if ((gid && seenGid[gid]) || (alias && seenGid[alias])) return false;
+      if (gid) seenGid[gid] = true;
+      if (alias) seenGid[alias] = true;
       return true;
     });
 
@@ -146,7 +149,8 @@
 
     list.innerHTML = pending.map(function (item) {
       var threadId = escapeHtml(item.thread_id || '');
-      var interruptId = escapeHtml(item.interrupt_id || '');
+      var interruptId = escapeHtml(item.interrupt_id || item.gate_id || '');
+      var gateId = escapeHtml(item.gate_id || item.interrupt_id || '');
       var toolName = escapeHtml(item.tool_name || item.tool || 'unknown');
       if (toolName === 'undefined' || toolName === 'null') toolName = 'unknown';
       var message = item.message != null ? String(item.message) : '';
@@ -170,7 +174,7 @@
                  escapeHtml(o.label || o.id) + '</button>';
         }).join(' ');
         return (
-          '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '">' +
+          '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '" data-gate-id="' + gateId + '">' +
           '  <div class="hitl-approval-header"><span class="hitl-tool-name">❓ Clarification</span>' +
             (threadId ? '<span class="hitl-thread-id">' + threadId + '</span>' : '') + '</div>' +
           '  <div class="hitl-approval-message" dir="auto">' + _sq + '</div>' +
@@ -183,7 +187,7 @@
       // hide the button so YOLO never reads as "approve once".
       var yoloOk = item.yolo_allowed !== false;
       return (
-        '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '">' +
+        '<div class="hitl-approval-card" data-thread-id="' + threadId + '" data-interrupt-id="' + interruptId + '" data-gate-id="' + gateId + '">' +
         '  <div class="hitl-approval-header">' +
         '    <span class="hitl-tool-name">' +
         (icon ? icon + ' ' : '') + toolName + '</span>' +
@@ -248,7 +252,9 @@
         // Bind the decision to THIS gate — without interrupt_id a stale card
         // could approve a newly raised, different gate on the same thread.
         var iid = card ? (card.getAttribute('data-interrupt-id') || '') : '';
+        var gid = card ? (card.getAttribute('data-gate-id') || '') : '';
         if (iid) payload.interrupt_id = iid;
+        if (gid) payload.gate_id = gid;
         payload.choices[tcid] = optId;
         fetch('/api/approve/' + encodeURIComponent(tid), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -281,7 +287,9 @@
     };
     // Bind the decision to THIS gate (stale-card protection, audit M-W1).
     var interruptId = card ? (card.getAttribute('data-interrupt-id') || '') : '';
+    var gateId = card ? (card.getAttribute('data-gate-id') || '') : '';
     if (interruptId) payload.interrupt_id = interruptId;
+    if (gateId) payload.gate_id = gateId;
 
     var url = '/api/approve/' + encodeURIComponent(threadId);
 

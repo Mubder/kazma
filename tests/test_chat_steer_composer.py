@@ -158,7 +158,9 @@ def test_abort_generation_retires_live_turn_before_stop_wait() -> None:
         / "hitl_approval.js"
     ).read_text(encoding="utf-8")
     assert "if (card) card.remove();" in dash
-    assert "seenTid" in dash
+    assert "seenTid" not in dash
+    assert "item.gate_id || item.interrupt_id" in dash
+    assert "payload.gate_id" in dash
 
 
 def test_chained_hitl_card_appends_below_previous() -> None:
