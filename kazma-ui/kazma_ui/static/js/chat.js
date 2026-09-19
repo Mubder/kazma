@@ -520,7 +520,7 @@
           });
           _forcePaintDoneContent(data.content);
         }
-        if (hasInlineApprovalCard() || _awaitingApproval) {
+        if (hasLiveGate() || _awaitingApproval) {
           refreshSessionsSoon();
         } else {
           endTurn();
@@ -741,7 +741,7 @@
         _releaseHitlComposer('resync-idle');
       }
       if (liveHitl && !_awaitingApproval) pauseForApproval(_serverHitl);
-      if (liveHitl && !hasInlineApprovalCard()) {
+      if (liveHitl && !hasLiveGate()) {
         _paintLiveGates();
         setTimeout(recoverMissedApproval, 0);
       }
@@ -778,15 +778,22 @@
         return;
       }
 
-      // Server idle with a durable assistant answer → paint server truth,
-      // unconditionally (applyFinal replaces the open-turn bubble).
-      // EXCEPT while an approval is still clickable: the graph is paused
-      // on HITL, so "idle + last durable reply" can be the PREVIOUS turn.
-      // A fossil `_awaitingApproval` after sequential Allow-tool clicks
-      // must NOT block the durable answer (placeholder-until-refresh,
-      // 2026-09-19). Live buttons are the only honest pause signal here;
-      // `liveHitl` already returned above when the server is still paused.
-      if (hasInlineApprovalCard()) return;
+      // Server idle with a durable assistant answer → paint server truth.
+      //
+      // EXCEPT while a gate is genuinely waiting: the graph is paused on
+      // HITL, so "idle + last durable reply" can be the PREVIOUS turn's
+      // answer, and painting it over the live bubble swapped the visible
+      // text for an older message on every app-switch (2026-08-27).
+      //
+      // "Genuinely" is the whole point. This used to ask the DOM — scan the
+      // transcript for an enabled button — which answered TRUE for a FOSSIL
+      // card left over from a gate that had already settled. The only
+      // unconditional route back to server truth then declined to run, and
+      // the bubble kept its placeholder until a refresh (2026-09-19,
+      // sequential Allow-tool clicks). hasLiveGate() reads the document and
+      // the gate registry, so a card nobody can act on cannot disarm the
+      // recovery any more.
+      if (hasLiveGate()) return;
 
       // Idle: paint durable assistant text even if the row still carries a
       // leftover `pending` flag (detached persist wrote the answer, then
@@ -1269,6 +1276,13 @@
 
   function _resetSessionTurnState() {
     _docs = {};
+    // The turn→bubble registry belongs to the transcript on screen. Leaving
+    // it populated across a session switch would let a turn id from the old
+    // session resolve to a node that is about to be thrown away.
+    var TVr = _turnView();
+    if (TVr) TVr.releaseAll();
+    _invariantSeen = {};
+    _invariantResyncs = 0;
     _liveTurnId = '';
     _retiredTurnIds = [];
     _supersededLive = false;
@@ -2072,8 +2086,6 @@
    */
   function _collapseFinishedWorkbenches() {
     if (!messagesEl) return;
-    var bubbles = messagesEl.querySelectorAll('.message-assistant');
-    for (var b = 0; b < bubbles.length; b++) _rescueTurnDom(bubbles[b]);
     var panels = messagesEl.querySelectorAll('.agent-progress.is-done');
     for (var i = 0; i < panels.length; i++) {
       var p = panels[i];
@@ -2195,6 +2207,21 @@
   function dumpDiagnostics() {
     var copy = _diag.slice();
     try { if (console.table) console.table(copy); else console.log(copy); } catch (e) { console.log(copy); }
+    // Which turns the renderer believes it owns, and what the live turn's
+    // document holds. The first question in every past incident here was
+    // "which bubble did it think it was painting into?" — now answerable
+    // without reading the DOM.
+    try {
+      var TVd = _turnView();
+      var liveDoc = _docs[_liveTurnId] || null;
+      console.log('[KazmaChat] render state', {
+        liveTurnId: _liveTurnId,
+        registry: TVd ? TVd.stats() : null,
+        status: liveDoc ? liveDoc.status : '(no doc)',
+        parts: liveDoc ? (liveDoc.parts || []).map(function (p) { return p.type; }) : [],
+        liveGate: hasLiveGate(),
+      });
+    } catch (eR) { /* diagnostics must never throw */ }
     return copy;
   }
 
@@ -2386,7 +2413,7 @@
       // paint a false "Done · 1s" heading while the turn is still running.
       if (!_serverActivitySeen) return;
       try {
-        if (hasInlineApprovalCard()) return;
+        if (hasLiveGate()) return;
         if (!window.Alpine || !Alpine.store || !Alpine.store('agent')) return;
         var store = Alpine.store('agent');
         if (store.pendingApproval) return;
@@ -3005,7 +3032,7 @@
     // new turn. A fossil `_awaitingApproval` after restart/abort (no live
     // card) must NOT rewrite the prompt as `/steer …`.
     if (_awaitingApproval && text && text.charAt(0) !== '/') {
-      if (!hasInlineApprovalCard()) {
+      if (!hasLiveGate()) {
         _awaitingApproval = false;
       } else {
         inputEl.value = '';
@@ -3429,7 +3456,7 @@
         // Live HITL card: keep the approval lock. Otherwise ALWAYS release
         // Stop / Enter — a painted reply with a stuck generating flag was
         // why the next message needed a Stop click first.
-        if (hasInlineApprovalCard() || _awaitingApproval) {
+        if (hasLiveGate() || _awaitingApproval) {
           if (!_awaitingApproval) pauseForApproval(null);
           if (showArchived) loadArchivedSessions(); else refreshSessionsSoon();
         } else {
@@ -3438,7 +3465,7 @@
         // Truncated stream (no terminal frame): reconcile with durable
         // truth after the lock settles — paints the persisted reply when
         // the turn already finished, re-attaches when still generating.
-        if (truncated && (!hasInlineApprovalCard())) {
+        if (truncated && (!hasLiveGate())) {
           setTimeout(function() { _resyncDelivery('sse-truncated'); }, 400);
         }
         // Interrupted (HITL) turn with no rendered card anywhere = silently
@@ -3447,7 +3474,7 @@
         // tab switch) is included: the interrupt event may have fired AFTER
         // this tab's stream dropped, so `interrupted` stays false and the
         // pending approval would otherwise be invisible until auto-deny.
-        if ((interrupted || truncated) && !hasInlineApprovalCard() && !_serverGenerating) {
+        if ((interrupted || truncated) && !hasLiveGate() && !_serverGenerating) {
           setTimeout(recoverMissedApproval, 1200);
         }
         }
@@ -3854,7 +3881,8 @@
   function ensureProgressPanel() {
     if (_isUserBubble(currentMsgEl)) currentMsgEl = null;
     _pinLiveAssistantBubble();
-    _rescueTurnDom(currentMsgEl);
+    // No rescue pass: TurnView keeps every doc-derived node a flat sibling
+    // of .message-content, so a panel can no longer swallow the answer.
     var content = _bubbleContent(currentMsgEl);
     if (!content) return null;
     var panel = _directChildByClass(content, 'agent-progress');
@@ -4967,6 +4995,13 @@
     if (welcome) welcome.remove();
 
     messagesEl.appendChild(wrapper);
+    // Register the bubble under its turn id at birth. A later frame for
+    // this turn then resolves by map lookup instead of a querySelector that
+    // can match whatever else the transcript happens to contain.
+    if (role === 'assistant' && opts && opts.turn_id) {
+      var TVa = _turnView();
+      if (TVa) TVa.bind(String(opts.turn_id), wrapper);
+    }
     updateContextBadgeSoon();
     return wrapper;
   }
@@ -5162,9 +5197,11 @@
         if (actions) {
           actions.innerHTML = '<span class="hitl-status hitl-denied">' + escapeHtml(text) + '</span>';
         }
-        // Timeout is a decision too: park above the continuing reply and
-        // collapse to the one-line bar.
-        _parkClaimedHitlCard(card);
+        // Timeout is a decision too — record it in the document so the
+        // model and the screen agree, then collapse to the one-line bar.
+        // TurnView re-orders the settled card above the continuing reply
+        // on the next pass; nothing moves nodes by hand any more.
+        _noteGateDecided({ interrupt_id: card.getAttribute('data-interrupt-id') || '' }, 'timeout');
         _collapseClaimedHitlCard(card);
       });
     }
@@ -5188,7 +5225,7 @@
         if (actions) {
           actions.innerHTML = '<span class="hitl-status hitl-denied">Aborted — send a new message</span>';
         }
-        _parkClaimedHitlCard(card);
+        _noteGateDecided({ interrupt_id: card.getAttribute('data-interrupt-id') || '' }, 'denied');
         _collapseClaimedHitlCard(card);
       });
     }
@@ -5196,47 +5233,40 @@
     diag('hitl-released', reason || '');
   }
 
-  function _hitlCardIsTrapped(card) {
-    if (!card || !card.closest) return false;
-    return !!card.closest('.agent-progress');
-  }
 
-  function _outerAssistantBubble(el) {
-    if (!el) return null;
-    var n = el;
-    var found = null;
-    while (n && n !== messagesEl) {
-      if (n.classList && n.classList.contains('message-assistant')) {
-        var parent = n.parentElement || n.parentNode;
-        var insideCot = parent && parent.closest ? parent.closest('.agent-progress') : null;
-        if (!insideCot) found = n;
-      }
-      n = n.parentElement || n.parentNode;
+
+
+  /**
+   * Is a gate genuinely waiting on the operator?
+   *
+   * Answered from the DOCUMENT and the gate registry — never by scanning
+   * the transcript for an enabled <button>.
+   *
+   * The DOM scan is what made this predicate dangerous. It returned true
+   * for a FOSSIL card whose gate had already settled, and eight recovery
+   * paths early-returned on it, so the only unconditional route back to
+   * server truth switched itself off exactly when a turn had gone quiet.
+   * That is how "approved twice then silence" survived every individual
+   * fix: each fix narrowed one guard, and the next path hit another one.
+   */
+  function hasLiveGate() {
+    var TD = window.KazmaTurnDocument;
+    var doc = _docs[_liveTurnId];
+    if (!TD || !doc || typeof TD.hitlPartsOf !== 'function') return false;
+    var gates = TD.hitlPartsOf(doc.parts || []);
+    for (var i = 0; i < gates.length; i++) {
+      if (_hitlDisplayState(gates[i]) === 'pending') return true;
     }
-    return found;
+    return false;
   }
 
-  function _hitlHostContent(el) {
-    var bubble = _outerAssistantBubble(el) || el;
-    var content = _bubbleContent(bubble);
-    if (content && !_hitlCardIsTrapped(content)) return content;
-    if (!bubble || !bubble.querySelectorAll) return content;
-    var all = bubble.querySelectorAll('.message-content');
-    var i;
-    for (i = 0; i < all.length; i++) {
-      if (!_hitlCardIsTrapped(all[i])) return all[i];
-    }
-    return content;
-  }
-
+  /** Is a clickable card actually on screen? A DOM question, and the only
+   *  thing it may decide is whether the Alpine store fallback is needed —
+   *  never whether a recovery path is allowed to run. */
   function hasInlineApprovalCard() {
     if (!messagesEl) return false;
     var cards = messagesEl.querySelectorAll('.hitl-approval-card');
     for (var i = 0; i < cards.length; i++) {
-      // A card inside CoT is not an inline approval — overflow:hidden and
-      // the collapsed body hide it, but enabled buttons still match, which
-      // blocked render + recoverMissedApproval (dashboard-only, 2026-09-02).
-      if (_hitlCardIsTrapped(cards[i])) continue;
       var btns = cards[i].querySelectorAll('button');
       for (var j = 0; j < btns.length; j++) {
         if (!btns[j].disabled) return true;
@@ -5404,8 +5434,18 @@
     };
   }
 
+  /**
+   * Feed EVERY pending gate into the document.
+   *
+   * The two "stop as soon as a card exists" guards that used to bracket
+   * this loop were there because a second card could not be represented:
+   * the document held one HITL slot per turn, so painting gate B destroyed
+   * gate A's card. Now a gate is a slot keyed by its interrupt id, cards
+   * are built from the document, and re-feeding a gate that already has a
+   * card is a no-op. Painting all of them is the correct behaviour — a
+   * second pending question belongs on screen next to the first.
+   */
   function _paintLiveGates() {
-    if (hasInlineApprovalCard()) return;
     var list = _serverGates || [];
     var i;
     for (i = 0; i < list.length; i++) {
@@ -5420,7 +5460,6 @@
         turn_id: _liveTurnId,
         source: 'gates',
       });
-      if (hasInlineApprovalCard()) return;
     }
     if (_serverHitl && String(_serverHitl.gate || '') === 'pending' && _serverHitl.tool) {
       applyTurnEvent({
@@ -5457,7 +5496,7 @@
       if (String((g || {}).state || '') === 'pending') pendingIids[String(g.gate_id || '')] = true;
     });
     messagesEl.querySelectorAll('.hitl-approval-card').forEach(function (card) {
-      if (_hitlCardIsClaimed(card) || _hitlCardIsTrapped(card)) return;
+      if (_hitlCardIsClaimed(card)) return;
       var cid = String(card.getAttribute('data-interrupt-id') || '');
       // Positive identification only: stamp a card whose interrupt id is
       // KNOWN and confirmed absent from the authoritative pending list. A
@@ -5480,7 +5519,10 @@
       if (actions) {
         actions.innerHTML = '<span class="hitl-status hitl-denied">No longer pending</span>';
       }
-      _parkClaimedHitlCard(card);
+      // Registry truth goes into the document, not just onto the card:
+      // a stamp the model never learned about is exactly the DOM/document
+      // divergence this refactor exists to remove.
+      _noteGateDecided({ interrupt_id: cid }, 'error');
       _collapseClaimedHitlCard(card);
     });
     // The store's fallback strip lives OUTSIDE messagesEl and carries no
@@ -5504,31 +5546,45 @@
   // RIGHT pending approval instead of guessing (audit P2).
   var _lastInterruptedThreadId = '';
 
+  /** The gate this turn is actually waiting on, else the most recent one.
+   *  A turn holds one part per gate, so "the last hitl part" is the gate
+   *  asked most recently — after a sequential approve that is the SETTLED
+   *  one, and reading it as "the open gate" reported the turn unblocked
+   *  while the graph sat waiting on an earlier question. */
   function _openHitlPart() {
     var doc = _docs[_liveTurnId] || null;
-    if (!doc || !doc.parts) return null;
-    for (var i = doc.parts.length - 1; i >= 0; i--) {
-      if (doc.parts[i] && doc.parts[i].type === 'hitl') return doc.parts[i];
-    }
-    return null;
+    var TD = window.KazmaTurnDocument;
+    if (!doc || !doc.parts || !TD || typeof TD.hitlPartOf !== 'function') return null;
+    return TD.hitlPartOf(doc.parts);
   }
 
   function recoverMissedApproval() {
-    if (hasInlineApprovalCard()) return;
+    if (hasLiveGate()) return;
     if (_serverGenerating && !_serverPaused) return;
     _paintLiveGates();
-    if (hasInlineApprovalCard()) return;
+    if (hasLiveGate()) return;
     var existing = _openHitlPart();
     if (existing && String(existing.state || 'pending') !== 'pending') {
       /* a settled part must not block a live gate painted above */
     } else if (existing && String(existing.state || '') === 'pending' && existing.payload) {
-      renderHitlCard(existing.payload, { lock: true });
-      if (hasInlineApprovalCard()) return;
+      // Route through the document, not straight at the DOM: the renderer
+      // builds the card from the part, so recovery and live delivery paint
+      // through the same path and cannot produce two different cards.
+      applyTurnEvent({
+        type: 'hitl',
+        state: 'pending',
+        tool: _hitlToolOf(existing),
+        interrupt_id: _hitlInterruptIdOf(existing),
+        payload: existing.payload,
+        turn_id: _liveTurnId,
+        source: 'recover-open',
+      });
+      if (hasLiveGate()) return;
     }
     fetch('/api/pending-approvals', { credentials: 'same-origin' })
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(payload) {
-        if (hasInlineApprovalCard()) return;
+        if (hasLiveGate()) return;
         var pending = (payload && Array.isArray(payload.pending)) ? payload.pending : [];
         if (!pending.length) return;
         var hit = null;
@@ -5574,52 +5630,6 @@
    *  already approved in this bubble. Inserting after `.agent-progress`
    *  put schedule_task above cancel_scheduled (2026-09-02). Always a
    *  direct child of the outer `.message-content` — never inside CoT. */
-  function _placeHitlCard(content, card) {
-    if (!card) return;
-    var host = _hitlHostContent(content) || content;
-    if (!host) return;
-    var kids = host.children;
-    var lastCard = null;
-    var progress = null;
-    var i;
-    for (i = 0; i < kids.length; i++) {
-      if (!kids[i].classList || kids[i] === card) continue;
-      if (kids[i].classList.contains('hitl-approval-card')) lastCard = kids[i];
-      else if (!progress && kids[i].classList.contains('agent-progress')) progress = kids[i];
-    }
-    // NEVER auto-expand a CoT panel (2026-09-03): expansion is the user's
-    // click only. The old sweep opened collapsed panels that trapped a
-    // card — with the card parked as a sibling, an auto-expanded panel
-    // just pushed the approval card below the fold while the reader was
-    // scrolled elsewhere. A trapped card is LIFTED out by the caller's
-    // cleanup, not revealed by expanding its cage.
-    var after = lastCard || progress;
-    // A card summoned while the bubble already carries streamed text must
-    // land BELOW that text (2026-09-04) — the question follows the content
-    // that provoked it. Inserting after the CoT put it at the TOP of the
-    // streaming text. Keep stacking below a previous card only when that
-    // card already sits below the text.
-    try {
-      var textEl = host.querySelector('.message-text');
-      if (
-        textEl && textEl.textContent && textEl.textContent.trim() &&
-        (!lastCard ||
-          // Node.DOCUMENT_POSITION_FOLLOWING == 4 (numeric: no DOM global
-          // needed — works in the Node test harness too).
-          (lastCard.compareDocumentPosition(textEl) & 4))
-      ) {
-        after = textEl;
-      }
-    } catch (eText) { /* compareDocumentPosition unavailable — keep anchor */ }
-    try {
-      if (after && after.parentNode === host && after !== card) {
-        if (after.nextSibling) host.insertBefore(card, after.nextSibling);
-        else host.appendChild(card);
-        return;
-      }
-    } catch (ePlace) { /* fall through to append */ }
-    try { host.appendChild(card); } catch (eAppend) { /* ignore */ }
-  }
 
   /** Countdown surface (2026-09-02): an unattended approval auto-denies at
    *  the watchdog deadline (server-stamped approval_deadline, epoch s).
@@ -5654,6 +5664,17 @@
     if (!card) return;
     var dl = _hitlDeadlineOf(data);
     if (!dl) return;
+    // Idempotent: the slot painter re-asserts the countdown on every render
+    // of a live gate, and a fresh row per frame would stack a new ticker
+    // under the card several times a second.
+    if (card.__cdTimer
+        && String(card.getAttribute('data-approval-deadline') || '') === String(dl)
+        && card.querySelector('.hitl-countdown')) {
+      return;
+    }
+    _stopHitlCountdown(card);
+    var oldRow = card.querySelector('.hitl-countdown');
+    if (oldRow && oldRow.parentNode) oldRow.parentNode.removeChild(oldRow);
     // Published on the node so _liveHitlDeadline can find it — the value
     // used to live only in this closure.
     try { card.setAttribute('data-approval-deadline', String(dl)); }
@@ -5673,7 +5694,7 @@
         if (act) act.innerHTML = '<span class="hitl-status hitl-denied">' +
           escapeHtml(ti('approval_expired', 'Approval timed out — continuing without this tool.')) + '</span>';
         row.textContent = '';
-        _parkClaimedHitlCard(card);
+        _noteGateDecided(data, 'timeout');
         _collapseClaimedHitlCard(card);
         return;
       }
@@ -5685,25 +5706,9 @@
     card.__cdTimer = setInterval(paint, 1000);
   }
 
-  /** Park a CLAIMED card between the CoT block and the reply text, so the
-   *  post-approval response streams BELOW it. While pending the card sits
-   *  at the bottom (chronology: narration → ask); on decision it moves up
-   *  (narration → ✓ card → reply). The streamed reply used to paint ABOVE
-   *  a bottom-docked card — "response on top of the card" (2026-09-03). */
-  function _parkClaimedHitlCard(card) {
-    if (!card || !card.parentNode) return;
-    var host = card.parentNode;
-    if (!host.classList || !host.classList.contains('message-content')) return;
-    var textEl = _directChildByClass(host, 'message-text');
-    if (textEl && textEl !== card.nextSibling) {
-      host.insertBefore(card, textEl);
-      return;
-    }
-    if (!textEl) {
-      var cot = _directChildByClass(host, 'agent-progress');
-      if (cot && cot.nextSibling) host.insertBefore(card, cot.nextSibling);
-    }
-  }
+  // The card-parking rule ("pending sits below the text, claimed moves
+  // above it") is no longer a function that moves nodes — it is the slot
+  // order TurnView declares. See modules/turn_view.js, contract 2.
 
   /** Collapse a claimed card to a one-line CoT-style bar (click to expand).
    *  Keeps the decision visible in the timeline without a full card body
@@ -5775,64 +5780,45 @@
     } catch (eRv) { /* never break the render */ }
   }
 
+  /**
+   * BUILD one approval card and return it. Does NOT decide where it goes —
+   * TurnView owns child order (modules/turn_view.js, contract 2).
+   *
+   * The thirty-odd lines of guards that used to open this function are
+   * deleted, not relocated: the _hitlAlreadyClaimed paint guard, the
+   * _findHitlCard rescan, the sweep that removed "other unclaimed pending
+   * cards" before minting a new one, and the hasInlineApprovalCard
+   * idempotency skip. Every one of them was a heuristic answer to "does a
+   * card for this gate already exist?" — a question asked of the transcript
+   * because nothing owned the answer. TurnView calls this only when the
+   * gate's slot is EMPTY, so the question cannot arise: one gate, one slot
+   * key, one node. Those guards were also load-bearing in the wrong
+   * direction: the sweep deleted a second gate's pending card, and the
+   * idempotency skip let the first live card on the page eat every later
+   * approval (2026-09-02, three watchdog auto-denials in a row).
+   */
   function renderHitlCard(data, opts) {
-    if (!data) return;
+    if (!data) return null;
     var lockComposer = !(opts && opts.lock === false);
-    // Idempotent: WS and SSE both deliver the approval (journal fan-out +
-    // SSE frame). The FIRST render wins; a second live card for the same
-    // interrupt duplicates buttons and double-fires resumes. Suppression
-    // used to live in the WS store (skip when SSE is live) — but when the
-    // SSE frame was late/lost NO card appeared at all and the paused turn
-    // went completely silent (2026-08-26 X-post incident).
-    if (_hitlAlreadyClaimed(data)) return;
     if (lockComposer) pauseForApproval(data);
     var targetThreadId = data.thread_id || chatSessionId || '';
-    _pinLiveAssistantBubble();
-    var content = _hitlHostContent(currentMsgEl);
+    // The renderer hands us the host it is rendering (opts.host). Only fall
+    // back to guessing the open bubble when something calls this outside a
+    // render pass — _pinLiveAssistantBubble picks "last assistant bubble
+    // after the last user row", which is the kind of guess this refactor
+    // exists to stop relying on, and it writes currentMsgEl as a side effect.
+    var content = (opts && opts.host) || null;
+    if (!content) {
+      _pinLiveAssistantBubble();
+      content = _bubbleContent(currentMsgEl);
+    }
     if (!content) {
       // Inline bubble never materialized — keep the chat-page Alpine card
       // so approval is not dashboard-only.
       _showStoreApproval(data);
-      return;
+      return null;
     }
     var iid = _hitlInterruptIdOf(data);
-    var existing = iid ? _findHitlCard(iid, currentMsgEl) : null;
-    if (existing && !_hitlCardIsTrapped(existing)) {
-      if (hasInlineApprovalCard()) _clearStoreApproval();
-      else _showStoreApproval(data);
-      return;
-    }
-    if (existing && _hitlCardIsTrapped(existing)) _placeHitlCard(content, existing);
-    var scope = _outerAssistantBubble(currentMsgEl) || content;
-    // Never strip a claimed card (Approved/Denied) — that is the
-    // disappear-then-live-again loop (cleanup 2026-09-01). Lift trapped
-    // cards for this interrupt; drop other unclaimed pending cards.
-    (scope.querySelectorAll ? scope.querySelectorAll('.hitl-approval-card') : []).forEach(function(old) {
-      if (_hitlCardIsClaimed(old)) {
-        if (_hitlCardIsTrapped(old)) _placeHitlCard(content, old);
-        return;
-      }
-      var oid = String(old.getAttribute('data-interrupt-id') || '');
-      if (iid && oid && oid === iid) {
-        _placeHitlCard(content, old);
-        return;
-      }
-      old.remove();
-    });
-    if (hasInlineApprovalCard()) {
-      // Idempotent skip — but ONLY for the SAME interrupt (WS + SSE both
-      // deliver the approval; first render wins). A DIFFERENT gate's pending
-      // card elsewhere in the transcript — or a stale pending card from an
-      // older turn — must not suppress this gate's card. The global check
-      // let the first live-button card on the page eat every later
-      // approval: cards landed dashboard-only while the gate auto-denied
-      // (2026-09-02 multi-gate sessions, three watchdog denials in a row).
-      var liveSameCard = iid ? _findHitlCard(iid, content) : null;
-      if (!iid || (liveSameCard && !_hitlCardIsClaimed(liveSameCard))) {
-        _clearStoreApproval();
-        return;
-      }
-    }
 
     // Phase 3: semantic clarify/confirm → render per-option buttons instead of
     // the generic Approve/Deny. The data carries kind + items[0].options from
@@ -5864,7 +5850,8 @@
                    escapeHtml(opt.id) + '">' + escapeHtml(opt.label || opt.id) + '</button>';
           }).join('') +
         '</div>';
-      _placeHitlCard(content, _semCard);
+      // Attach only — TurnView's next pass moves it to its declared slot.
+      content.appendChild(_semCard);
       _revealHitlCard(_semCard);
       _attachHitlCountdown(_semCard, data);
       if (hasInlineApprovalCard()) _clearStoreApproval();
@@ -5876,9 +5863,9 @@
           _semCard.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
           var act = _semCard.querySelector('.hitl-approval-actions');
           if (act) act.innerHTML = '<span class="hitl-status">Resolving\u2026</span>';
-          // Same claim treatment as the security card: park above the
-          // incoming reply and collapse to the one-line bar.
-          _parkClaimedHitlCard(_semCard);
+          // Record the decision in the document immediately; TurnView
+          // re-orders the settled card above the incoming reply.
+          _noteGateDecided(data, optId === 'cancel' ? 'denied' : 'approved');
           _collapseClaimedHitlCard(_semCard);
           tokenAccum = '';
           // Resolving a semantic choice resumes THIS turn \u2014 same rule as the
@@ -5918,13 +5905,23 @@
           });
         });
       });
-      return; // Don't render the security card
+      return _semCard; // Don't render the security card
     }
 
-    var textEl = content.querySelector('.message-text');
-    if (textEl && !textEl.innerHTML.trim()) {
-      textEl.innerHTML = KS.markdown ? KS.markdown('_Action required: The agent paused to ask for permission to run a tool._') : '<em>Action required: The agent paused to ask for permission to run a tool.</em>';
-    }
+    // NO placeholder is written into the answer slot.
+    //
+    // This is the line the whole bug class was named after: "_Action
+    // required: the agent paused…_" went into .message-text, and the reply
+    // then had to REPLACE it. Every incident was a path where that
+    // replacement did not happen, and the fix was always another way to
+    // force it. The card below already says an approval is required, with
+    // the tool and its arguments; the status strip says it too. Writing it
+    // a third time, into the one slot the answer needs, created a state
+    // where "paused" and "answered" are the same element — so failing to
+    // overwrite it is indistinguishable from silence.
+    //
+    // The answer slot now holds the answer or nothing at all, and the
+    // pause is a sibling slot. There is nothing left to replace.
 
     var tools = Array.isArray(data.tools) ? data.tools : [];
     var toolsHtml = '';
@@ -6012,7 +6009,8 @@
           : '') +
         '<button class="btn btn-sm btn-danger hitl-deny" data-scope="once">Deny</button>' +
       '</div>';
-    _placeHitlCard(content, card);
+    // Attach only — TurnView's next pass moves it to its declared slot.
+    content.appendChild(card);
     _revealHitlCard(card);
     _attachHitlCountdown(card, data);
     if (hasInlineApprovalCard()) {
@@ -6030,9 +6028,13 @@
       card.className = 'hitl-approval-card hitl-' + state;
       var actions = card.querySelector('.hitl-approval-actions');
       if (actions) actions.innerHTML = '<span class="hitl-status hitl-' + state + '">' + label + '</span>';
-      // Decision made: park between CoT and the reply text (the streamed
-      // answer must land BELOW the card) and collapse to the one-line bar.
-      _parkClaimedHitlCard(card);
+      // Decision made. Put it in the DOCUMENT — the card's position then
+      // follows from the declared slot order (settled gates above the
+      // answer), instead of this function reaching in to move the node and
+      // leaving the model still saying "pending" until a server frame
+      // happened to arrive.
+      try { card.setAttribute('data-hitl-shown', state); } catch (eS) { /* ignore */ }
+      _noteGateDecided(data, state === 'approved' ? 'approved' : 'denied');
       _collapseClaimedHitlCard(card);
     }
 
@@ -6176,7 +6178,7 @@
         // wait so a dead tail can re-attach (JSON approve is not an SSE).
         // Unless another card is still live: deciding gate A does not mean
         // the turn stopped waiting on gate B.
-        _awaitingApproval = hasInlineApprovalCard();
+        _awaitingApproval = hasLiveGate();
         _awaitingReply = true;
         if (_awaitingApproval) {
           _taskCardEvent({ t: 'approval', deadline: _liveHitlDeadline() });
@@ -6211,6 +6213,7 @@
     if (toolBtn) toolBtn.addEventListener('click', function() { submitApproval('approve', 'tool'); });
     if (yoloBtn) yoloBtn.addEventListener('click', function() { submitApproval('approve', 'yolo'); });
     if (denyBtn) denyBtn.addEventListener('click', function() { submitApproval('deny', 'once'); });
+    return card;
   }
 
   function editMessage(msgEl) {
@@ -6873,8 +6876,16 @@
             });
             if (role === 'assistant' && window.KazmaTurnDocument && KazmaTurnDocument.fromMessage) {
               var hydratedDoc = KazmaTurnDocument.fromMessage(msg);
-              if (msg.turn_id) _docs[String(msg.turn_id)] = hydratedDoc;
-              _paintHitlFromDoc(painted, hydratedDoc);
+              var hydratedId = String(msg.turn_id || hydratedDoc.turnId || '');
+              if (hydratedId) _docs[hydratedId] = hydratedDoc;
+              // Register the restored bubble, then render it like any other
+              // turn. History and live delivery go through ONE painter now,
+              // so a replayed transcript cannot disagree with a live one.
+              var TVh = _turnView();
+              if (TVh) {
+                if (hydratedId) TVh.bind(hydratedId, painted);
+                TVh.render(painted, hydratedDoc, _turnRenderers, { source: 'hydrate' });
+              }
             }
           }
         });
@@ -7300,42 +7311,6 @@
     init();
   }
 
-  function _rescueTurnDom(el) {
-    // Collapsed CoT must never own the answer. If .message-text (or the HITL
-    // card) landed inside .agent-progress-body, expanding CoT was the only
-    // way to see the reply (2026-09-01). Never lift nodes out of a nested
-    // .message — that emptied the You bubble after send.
-    if (!el || _isUserBubble(el)) return;
-    var content = _bubbleContent(el);
-    if (!content) return;
-    var panel = _directChildByClass(content, 'agent-progress');
-    var i;
-    if (panel) {
-      var body = panel.querySelector('.agent-progress-body') || panel;
-      var trapped = body.querySelectorAll('.message-text, .hitl-approval-card, .message-meta, .message-actions');
-      var cursor = panel;
-      for (i = 0; i < trapped.length; i++) {
-        var node = trapped[i];
-        var owner = node.closest ? node.closest('.message') : null;
-        if (owner && owner !== el) {
-          // Nested You-bubble text must stay put (lifting emptied it).
-          // HITL cards are the exception: they are the live approval UI.
-          if (!node.classList || !node.classList.contains('hitl-approval-card')) continue;
-        }
-        // Same-anchor insertBefore reverses the node list (later cards
-        // would land above earlier ones). Walk the cursor forward.
-        content.insertBefore(node, cursor.nextSibling);
-        cursor = node;
-      }
-    }
-    for (i = 0; i < content.children.length; i++) {
-      var n = content.children[i];
-      if (n.classList && n.classList.contains('message-text')) {
-        if (n.style.display === 'none') n.style.display = '';
-        n.classList.remove('typing-visible');
-      }
-    }
-  }
 
   /**
    * Does this document need a transcript bubble at all?
@@ -7371,228 +7346,380 @@
     return '';
   }
 
-  function _cssEscapeAttr(s) {
-    if (window.CSS && typeof CSS.escape === 'function') return CSS.escape(s);
-    return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+
+  // ══ Render authority (Turn Delivery V2, KD-4) ═══════════════════════
+  //
+  // The V2 plan shipped the delivery half — journal, seq, cursor resume,
+  // snapshot resync — and specified this half too:
+  //
+  //   "Client paints from state, not events. […] one render() applies
+  //    state→DOM idempotently."
+  //
+  // It was never built. renderTurn kept asking the DOM where to paint, and
+  // three separate writers (renderHitlCard, _syncCotPanel, appendMessage)
+  // fought over one bubble's children while _rescueTurnDom ran afterwards
+  // to undo the mis-nesting. modules/turn_view.js is the missing authority:
+  // it owns the child list, derived from the document, keyed by the same
+  // partKey the document dedupes with. Everything below is the adapter.
+
+  var _view = null;
+  function _turnView() {
+    if (_view) return _view;
+    var TV = window.KazmaTurnView;
+    if (!TV || typeof TV.create !== 'function') return null;
+    _view = TV.create({
+      turnDocument: window.KazmaTurnDocument,
+      onInvariant: _onRenderInvariant,
+    });
+    return _view;
   }
 
-  function _syncCotPanel(el, activity, status, meta) {
-    if (!el || !activity || !activity.length) return;
-    if (_isUserBubble(el)) return;
-    meta = meta || {};
-    var hitlLive = false;
+  /** One resync per (turn, failure kind) — enough to recover, never a loop. */
+  var _invariantSeen = {};
+  /** ...and a hard ceiling per session, so a systematically broken render
+   *  reports every time but cannot turn into a fetch storm. */
+  var _invariantResyncs = 0;
+  var _INVARIANT_RESYNC_MAX = 3;
+
+  /**
+   * The renderer noticed it had gone silent.
+   *
+   * Every past incident in this class was found by the OPERATOR: the server
+   * had the answer, the bubble showed a placeholder, and nothing in the
+   * client knew the difference. TurnView re-derives what should be on
+   * screen after every pass and calls this when it isn't. A regression is
+   * now a console error plus one authoritative resync, not a person waiting.
+   */
+  function _onRenderInvariant(info) {
+    info = info || {};
+    var key = String(info.turnId || '?') + ':' + String(info.code || '?');
+    try { diag('render-invariant', key + ' ' + (info.issues || []).join(',')); } catch (e) { /* ignore */ }
+    console.error('[KazmaChat] render invariant ' + key, info);
+    // Report ALWAYS, recover sparingly. Hydration paints the whole
+    // transcript in one go, so resyncing from inside it would fire once per
+    // historical turn — and loadSession already ends with one authoritative
+    // resync, which is the same fetch done once.
+    if (_hydratingSession) return;
+    if (_invariantSeen[key]) return;
+    _invariantSeen[key] = 1;
+    if (_invariantResyncs >= _INVARIANT_RESYNC_MAX) return;
+    _invariantResyncs++;
+    try { _resyncDelivery('invariant-' + info.code); } catch (e2) { /* ignore */ }
+  }
+
+  function _activityOfDoc(doc) {
+    var TD = window.KazmaTurnDocument;
+    if (!TD || typeof TD.activityOf !== 'function') return [];
+    return TD.activityOf((doc && doc.parts) || []);
+  }
+
+  // ── Slot painters ──────────────────────────────────────────────────
+
+  function _paintTextSlot(textEl, doc, meta) {
+    var TD = window.KazmaTurnDocument;
+    var text = _answerFromDoc(TD, doc);
+    if (!text) return;
+    tokenAccum = text;
+    tryIngestPlanFromText(text);
+    var display = _scrubDsml(stripPlanFenceForDisplay(text));
+    // A slot is never hidden by its own painter. (_rescueTurnDom used to
+    // sweep the whole bubble for a text node left display:none by an
+    // interrupted typing animation.)
     try {
-      hitlLive = !!(el.querySelector('.message-content > .hitl-approval-card button:not([disabled])'));
-    } catch (eHitl) { hitlLive = false; }
-    var holdOpen = hitlLive || _awaitingApproval;
-    var terminal = !holdOpen && (status === 'done' || status === 'paused'
-      || meta.source === 'hydrate' || meta.source === 'resync');
+      if (textEl.style && textEl.style.display === 'none') textEl.style.display = '';
+      textEl.classList.remove('typing-visible');
+    } catch (eS) { /* ignore */ }
+    try {
+      if (doc.status === 'streaming') _scheduleLiveTextPaint(textEl);
+      else _paintHTML(textEl, _renderReplyHTML(text));
+    } catch (mdErr) {
+      if (textEl.textContent !== display) textEl.textContent = display;
+    }
+    try { textEl.setAttribute('data-md', text); } catch (eMd) { /* ignore */ }
+    try { textEl.setAttribute('data-final-len', String(display.length)); } catch (eLen) { /* ignore */ }
+    if (String(doc.turnId || '') === _liveTurnId) _turnPainted = true;
+  }
+
+  function _paintWorkbenchSlot(panel, doc) {
+    var activity = _activityOfDoc(doc);
+    if (!activity.length) return;
     var html = _activityRowsHtml(activity);
     if (!html) return;
-    var tools = (html.match(/data-kind="tool"/g) || []).length;
-    var steps = (html.match(/<li /g) || []).length;
-    _progressToolCount = tools;
-    _progressStepCount = steps;
-    _rescueTurnDom(el);
-    if (terminal) {
-      var contentHost = _bubbleContent(el) || el;
-      var existingCot = _directChildByClass(contentHost, 'agent-progress');
-      var liveActive = existingCot && existingCot.classList.contains('is-active')
-        && !existingCot.classList.contains('kazma-cot-restored');
-      if (liveActive) return;
-      var cot = _buildRestoredWorkbench(activity);
-      if (!cot) return;
-      // The turn you are reading stays OPEN: inherit the live panel's
-      // expansion. finalizeProgress deliberately never collapses at the
-      // terminal frame (layout-shift flash) — the restore-swap must not
-      // smuggle the collapse back in. History restores (no live panel) keep
-      // the collapsed one-line summary.
-      if (existingCot && !existingCot.classList.contains('is-collapsed')) {
-        cot.classList.remove('is-collapsed');
-        var cotChev = cot.querySelector('.agent-progress-chevron');
-        if (cotChev) cotChev.textContent = '▾';
-        var cotHead = cot.querySelector('.agent-progress-header');
-        if (cotHead) cotHead.setAttribute('aria-expanded', 'true');
-      }
-      if (existingCot) {
-        var nestedMsgs = existingCot.querySelectorAll('.message');
-        for (var ni = 0; ni < nestedMsgs.length; ni++) {
-          contentHost.insertBefore(nestedMsgs[ni], existingCot);
-        }
-        var cotHitl = existingCot.querySelectorAll('.hitl-approval-card');
-        var hitlAnchor = existingCot.nextSibling;
-        for (var chi = 0; chi < cotHitl.length; chi++) {
-          if (hitlAnchor) contentHost.insertBefore(cotHitl[chi], hitlAnchor);
-          else contentHost.appendChild(cotHitl[chi]);
-        }
-        existingCot.replaceWith(cot);
-      } else {
-        var tw = _directChildByClass(contentHost, 'message-text');
-        if (tw) contentHost.insertBefore(cot, tw);
-        else contentHost.appendChild(cot);
-      }
-      _rescueTurnDom(el);
-      return;
-    }
-    var prev = currentMsgEl;
-    currentMsgEl = el;
-    // LIVE turn: the docked Live Task Card owns the live view (header +
-    // expandable compact steps). No in-bubble live panel is created — the
-    // terminal branch above swaps in the durable one-line summary when the
-    // turn ends. A live panel that already exists (hydrate-hold, legacy
-    // paint) is left untouched; the terminal swap replaces it.
-    _progressToolCount = tools;
-    _progressStepCount = steps;
+    _progressToolCount = (html.match(/data-kind="tool"/g) || []).length;
+    _progressStepCount = (html.match(/<li /g) || []).length;
     _taskCardEvent({ t: 'doc' });
-    var existingLive = _directChildByClass(_bubbleContent(el) || el, 'agent-progress');
-    if (!(existingLive && existingLive.classList.contains('is-active')
-          && !existingLive.classList.contains('kazma-cot-restored'))) {
-      currentMsgEl = prev || el;
-      return;
-    }
-    var panel = ensureProgressPanel();
-    currentMsgEl = prev || el;
-    if (!panel) return;
-    if (holdOpen) {
-      // Re-activate but never auto-expand: an approval pause must not
-      // spring a collapsed panel open under the reader (2026-09-03).
-      panel.classList.remove('is-done');
-      panel.classList.add('is-active');
-    }
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
-    if (list._kzCotHTML === html) return;
+    if (list._kzCotHTML === html) return;   // nothing changed — no churn
     list._kzCotHTML = html;
     list.innerHTML = html;
     _wireStepToggles(list);
     var countEl = panel.querySelector('.agent-progress-count');
     if (countEl) {
-      countEl.textContent = steps + ' ' + (steps === 1 ? ti('step', 'step') : ti('steps', 'steps'));
+      countEl.textContent = _progressStepCount + ' ' +
+        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps'));
     }
   }
 
-  function _paintHitlFromDoc(el, doc) {
-    var parts = (doc && doc.parts) || [];
-    var hitl = null;
-    for (var i = parts.length - 1; i >= 0; i--) {
-      if (parts[i] && parts[i].type === 'hitl') { hitl = parts[i]; break; }
+  /**
+   * Renderers handed to TurnView. build() creates a slot's node, paint()
+   * updates it, discard() decides removal — and it always answers false.
+   *
+   * Contract 4 (turn_view.js): ambiguity never deletes. A decision, an
+   * answer and a workbench are transcript. A truncated resync or a partial
+   * hydrate that stops mentioning one of them must leave it on screen —
+   * a stale node is visible and reportable, a removed one is silence.
+   */
+  var _turnRenderers = {
+    has: function(kind, doc) {
+      if (kind === 'text') return !!_answerFromDoc(window.KazmaTurnDocument, doc);
+      if (kind === 'workbench') return _activityOfDoc(doc).length > 0;
+      return true;
+    },
+    build: function(entry, ctx) {
+      if (entry.kind === 'text') {
+        var t = document.createElement('div');
+        t.className = 'message-text';
+        try { t.setAttribute('dir', 'auto'); } catch (e) { /* ignore */ }
+        return t;
+      }
+      if (entry.kind === 'workbench') {
+        return _buildRestoredWorkbench(_activityOfDoc(ctx.doc)) || null;
+      }
+      if (entry.kind === 'hitl') return _buildHitlSlotCard(entry.part, ctx);
+      return null;
+    },
+    paint: function(entry, el, ctx) {
+      if (entry.kind === 'text') return _paintTextSlot(el, ctx.doc, ctx.meta);
+      if (entry.kind === 'workbench') return _paintWorkbenchSlot(el, ctx.doc);
+      if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx);
+    },
+    discard: function() { return false; },
+  };
+
+  /**
+   * Which bubble does this turn own?
+   *
+   * The registry answers, not the DOM. The old resolver ran a querySelector
+   * on the turn id, fell back to currentMsgEl, fell back to "last assistant
+   * bubble after the last user row", then walked nextElementSibling to
+   * decide whether that bubble was historical — four guesses, each of which
+   * broke on a different markup change. A map lookup cannot be wrong about
+   * which node it was handed.
+   */
+  function _bubbleForTurn(turnId, paintable) {
+    var TV = _turnView();
+    if (!TV) return null;
+    var id = String(turnId || '');
+    var el = null;
+    if (id && id !== 'live') {
+      el = TV.elFor(id);
+      // Frames arrive unstamped until the server names the turn, so the
+      // bubble opened under the 'live' placeholder. Promotion is a rename
+      // in the map — never a DOM search, and never leaves a bubble sitting
+      // in the transcript advertising data-turn-id="live" for the NEXT
+      // turn's tokens to find (2026-09-03 crossed bubbles).
+      if (!el) el = TV.promote('live', id);
+    } else {
+      el = TV.elFor('live');
     }
-    if (!hitl) return;
-    var state = String(hitl.state || 'pending');
-    var iid = _hitlInterruptIdOf(hitl);
-    // ── Gate registry (P2): a live gate row is DECISION TRUTH and overrides
-    // any stale part stamp. `pending` means nobody has clicked — the card
-    // renders live buttons no matter what an old part claims (kills the
-    // pre-approved stamp). `claimed`/`resuming` means the decision is made.
-    var gateRow = null;
-    if (iid && _serverGates && _serverGates.length) {
-      for (var gi = 0; gi < _serverGates.length; gi++) {
-        if (String(_serverGates[gi].gate_id || '') === String(iid)) {
-          gateRow = _serverGates[gi];
-          break;
-        }
-      }
+    if (el) return el;
+    if (!paintable) return null;
+    el = createAssistantMessage();
+    TV.bind(id || 'live', el);
+    return el;
+  }
+
+
+  /**
+   * What state should this gate's card SHOW?
+   *
+   * Ported wholesale from _paintHitlFromDoc, because this part was never
+   * the bug — it is the safety rule that a card must never claim
+   * "Approved" without evidence. The gate registry (P2) is decision truth
+   * and overrides a stale part stamp in either direction.
+   *
+   * Returns one of:
+   *   pending   — live buttons, the operator can answer
+   *   awaiting  — a gate we know of but cannot confirm is live: shown,
+   *               disabled, honest. (Hydration lands here: a historical
+   *               part can carry a stale `pending` stamp long after the
+   *               gate settled, and minting live buttons for it was the
+   *               2026-09-03 ghost card. Painting NOTHING is not the
+   *               alternative any more — the slot would go missing and
+   *               the render invariant would fire.)
+   *   inflight / approved / denied / timeout / error / settled
+   */
+  function _hitlDisplayState(part) {
+    var state = String((part && part.state) || 'pending');
+    var iid = _hitlInterruptIdOf(part);
+    var gateRow = _hitlGateRow(iid);
+    if (gateRow && String(gateRow.state || '') === 'pending') return 'pending';
+    if (gateRow && (gateRow.state === 'claimed' || gateRow.state === 'resuming')) {
+      return state === 'pending' ? 'inflight' : state;
     }
-    var prev = currentMsgEl;
-    if (el) currentMsgEl = el;
-    try {
-      if (gateRow && gateRow.state === 'pending' && hitl.payload) {
-        renderHitlCard(hitl.payload, { lock: true });
-        return;
-      }
-      if (gateRow && (gateRow.state === 'claimed' || gateRow.state === 'resuming')) {
-        if (state === 'pending') state = 'inflight';
-      }
-      // A finished turn must not revive a live Approve card on refresh.
-      // Inflight ONLY when this interrupt was actually claimed (this tab
-      // clicked, or the server gate/persist says so).
-      // The HITL-wait flag is set when the pending card first appears —
-      // using it here stamped "Approved — running…" with no click
-      // (dashboard still had live buttons, 2026-09-01).
-      // A live turn is generating before the interrupt is marked paused;
-      // that pair is also not a claim.
-      if (state === 'pending' && hitl.payload) {
-        // Hydration NEVER paints a pending card (2026-09-03 ghost flash):
-        // historical parts can carry a stale 'pending' stamp long after the
-        // gate settled, and painting them minted a ghost card (bubble +
-        // store fallback) for the sub-second before reconciliation. The
-        // load-time resync paints from REGISTRY truth only — a genuinely
-        // paused turn still gets its card via _paintLiveGates /
-        // recoverMissedApproval.
-        if (_hydratingSession) return;
-        // Registry-authoritative fail posture: the server answered with the
-        // live-gates list and NO row covers this interrupt. Without registry
-        // evidence of a claim, chat must never invent "Approved" from
-        // leftover status or old parts — render live buttons. A stale click
-        // is recoverable (the server re-verifies and answers "no longer
-        // pending"); a fabricated Approved stamp is the incident.
-        if (_serverGatesAuth && !gateRow) {
-          // Live buttons (never invent Approved) but do NOT lock the
-          // composer — an empty authoritative list means no live gate,
-          // so the next prompt is a new turn, not /steer.
-          renderHitlCard(hitl.payload, { lock: false });
-          return;
-        }
-        // Registry did not answer: thin fallback. Never invent Approved
-        // from leftover status. Paint idempotency (_hitlAlreadyClaimed)
-        // still blocks cloning the SAME interrupt's live card. Hydrate
-        // without a pending gate row must not steal the next send as /steer.
-        if (_hitlAlreadyClaimed(hitl)) {
-          state = 'inflight';
-        } else {
-          renderHitlCard(hitl.payload, { lock: false });
-          return;
-        }
-      }
-      var host = el || currentMsgEl;
-      var card = _findHitlCard(iid, host);
-      if (!card && hitl.payload && (state === 'timeout' || state === 'denied' || state === 'approved' || state === 'inflight' || state === 'settled')) {
-        // store:false — a historical decision must not arm the Alpine
-        // fallback (the <1s ghost card at the top of the page, 2026-09-03).
-        renderHitlCard(hitl.payload, { lock: false, store: false });
-        host = el || currentMsgEl;
-        card = _findHitlCard(iid, host);
-      }
-      if (!card) return;
-      card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-      // A settled card must stop counting down. This projector disabled the
-      // buttons but left the ticker running, so an approved card kept
-      // advertising "auto-denies if unanswered in 3:59" under an "Approved"
-      // stamp (only the click path and the timeout path stopped it).
-      _stopHitlCountdown(card);
-      var cdRow = card.querySelector('.hitl-countdown');
-      if (cdRow && cdRow.parentNode) cdRow.parentNode.removeChild(cdRow);
-      if (state === 'timeout' || state === 'denied' || state === 'error') {
-        card.className = 'hitl-approval-card hitl-' + (state === 'error' ? 'error' : 'denied');
-        var deniedActions = card.querySelector('.hitl-approval-actions');
-        if (deniedActions) {
-          var errLabel = state === 'timeout'
-            ? 'Approval timed out — continuing without this tool.'
-            : (state === 'error' ? 'No longer pending' : 'Denied');
-          deniedActions.innerHTML = '<span class="hitl-status hitl-' +
-            (state === 'error' ? 'error' : 'denied') + '">' +
-            escapeHtml(errLabel) + '</span>';
-        }
-        // This projector runs on the journal's claim frame — right AFTER
-        // the click path already parked+collapsed the card. The wholesale
-        // className assignment above used to strip `hitl-collapsed`, so
-        // the card sprang back open mid-reply with a stranded chip in the
-        // header (2026-09-03). Re-assert the claim treatment.
-        _parkClaimedHitlCard(card);
-        _collapseClaimedHitlCard(card);
-      } else if (state === 'approved' || state === 'inflight' || state === 'settled') {
-        card.className = 'hitl-approval-card hitl-approved';
-        var okActions = card.querySelector('.hitl-approval-actions');
-        if (okActions) {
-          var okLabel = state === 'inflight' ? 'Approved — running\u2026' : 'Approved';
-          okActions.innerHTML = '<span class="hitl-status hitl-approved">' + okLabel + '</span>';
-        }
-        _parkClaimedHitlCard(card);
-        _collapseClaimedHitlCard(card);
-      }
-    } finally {
-      currentMsgEl = prev || el;
+    if (state !== 'pending') return state;
+    // Pending part, no registry claim. Order below is the fail posture and
+    // must not be reshuffled.
+    //
+    // 1. Hydration first: a persisted part says `pending` long after its
+    //    gate settled, so a restored transcript shows the gate without
+    //    claiming it is answerable.
+    if (_hydratingSession) return 'awaiting';
+    // 2. Registry answered authoritatively and NO row covers this
+    //    interrupt. Show live buttons and do NOT infer a claim from
+    //    leftover status — this deliberately runs BEFORE the claim
+    //    inference below. A stale click is recoverable (the server
+    //    re-verifies and answers "no longer pending"); a fabricated
+    //    Approved stamp is the incident. _hitlShouldLock still returns
+    //    false here, so the composer stays free: an empty authoritative
+    //    list means no live gate, and the next prompt is a new turn.
+    if (_serverGatesAuth && !gateRow) return 'pending';
+    // 3. Registry did not answer: thin fallback. This tab's own click (or
+    //    a persisted claim) is the only evidence accepted for "running".
+    if (_hitlAlreadyClaimed(part)) return 'inflight';
+    return 'pending';
+  }
+
+  function _hitlGateRow(iid) {
+    if (!iid || !_serverGates || !_serverGates.length) return null;
+    for (var i = 0; i < _serverGates.length; i++) {
+      if (String(_serverGates[i].gate_id || '') === String(iid)) return _serverGates[i];
     }
+    return null;
+  }
+
+  /** Lock the composer only on registry-confirmed live gates. */
+  function _hitlShouldLock(part) {
+    var row = _hitlGateRow(_hitlInterruptIdOf(part));
+    return !!(row && String(row.state || '') === 'pending');
+  }
+
+  /**
+   * Build the card for one gate. Called by TurnView ONLY when the slot is
+   * empty, so this never needs to ask whether a card already exists — the
+   * slot table is the dedupe. That is what retired _hitlAlreadyClaimed's
+   * paint guard, _findHitlCard's rescan, and the sweep that deleted
+   * "other unclaimed pending cards" before minting a new one.
+   */
+  function _buildHitlSlotCard(part, ctx) {
+    var payload = (part && part.payload) || part;
+    if (!payload || typeof payload !== 'object') return null;
+    var show = _hitlDisplayState(part);
+    var card = renderHitlCard(payload, {
+      lock: show === 'pending' && _hitlShouldLock(part),
+      store: show === 'pending',
+      host: (ctx && ctx.content) || null,
+    });
+    return card || null;
+  }
+
+  /**
+   * Bring an existing card in line with the document.
+   *
+   * A live gate is left alone — its buttons are wired and the operator may
+   * be reading it. Everything else is frozen and stamped.
+   */
+  function _paintHitlSlotCard(card, part, ctx) {
+    if (!card) return;
+    var show = _hitlDisplayState(part);
+    if (show === 'pending') {
+      _attachHitlCountdown(card, (part && part.payload) || part);
+      return;
+    }
+    var already = String(card.getAttribute('data-hitl-shown') || '');
+    if (already === show) return;          // idempotent: no churn per frame
+    try { card.setAttribute('data-hitl-shown', show); } catch (e) { /* ignore */ }
+
+    card.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
+    // A settled card must stop counting down. The old projector disabled
+    // the buttons but left the ticker running, so an approved card kept
+    // advertising "auto-denies if unanswered in 3:59" under an "Approved"
+    // stamp (2026-09-03).
+    _stopHitlCountdown(card);
+    var cdRow = card.querySelector('.hitl-countdown');
+    if (cdRow && cdRow.parentNode) cdRow.parentNode.removeChild(cdRow);
+
+    var actions = card.querySelector('.hitl-approval-actions');
+    if (show === 'awaiting') {
+      if (actions) {
+        actions.innerHTML = '<span class="hitl-status">' +
+          escapeHtml(ti('waiting_approval', 'Waiting for approval…')) + '</span>';
+      }
+      return;
+    }
+    if (show === 'timeout' || show === 'denied' || show === 'error') {
+      var kind = (show === 'error') ? 'error' : 'denied';
+      // Preserve hitl-collapsed: a wholesale className assignment used to
+      // strip it, springing the card back open mid-reply with a stranded
+      // chip in the header (2026-09-03).
+      var wasCollapsed = card.classList.contains('hitl-collapsed');
+      card.className = 'hitl-approval-card hitl-' + kind + (wasCollapsed ? ' hitl-collapsed' : '');
+      if (actions) {
+        var errLabel = show === 'timeout'
+          ? 'Approval timed out — continuing without this tool.'
+          : (show === 'error' ? 'No longer pending' : 'Denied');
+        actions.innerHTML = '<span class="hitl-status hitl-' + kind + '">' +
+          escapeHtml(errLabel) + '</span>';
+      }
+      _collapseClaimedHitlCard(card);
+      return;
+    }
+    if (show === 'approved' || show === 'inflight' || show === 'settled') {
+      var wasCol = card.classList.contains('hitl-collapsed');
+      card.className = 'hitl-approval-card hitl-approved' + (wasCol ? ' hitl-collapsed' : '');
+      if (actions) {
+        var okLabel = show === 'inflight' ? 'Approved — running…' : 'Approved';
+        actions.innerHTML = '<span class="hitl-status hitl-approved">' + okLabel + '</span>';
+      }
+      _collapseClaimedHitlCard(card);
+    }
+  }
+
+  /**
+   * Record a decision this tab just made, in the document, immediately.
+   *
+   * The click path used to move the card by hand (_parkClaimedHitlCard)
+   * and leave the document saying `pending` until a server frame arrived.
+   * So the client's own model disagreed with the click for as long as the
+   * round trip took — and if the frame never came, forever. HITL_RANK
+   * makes the transition monotonic, so a replayed `pending` cannot walk it
+   * back, and TurnView re-orders the card above the reply on the next pass.
+   */
+  /**
+   * A gate arrived on the WebSocket. Route it into the DOCUMENT.
+   *
+   * The Alpine store used to call the card BUILDER directly, so WS and SSE
+   * deliveries of the same approval raced to paint, and renderHitlCard grew
+   * a guard family to sort out the collision after the fact. Both feed the
+   * projector now; the projector dedupes by interrupt id; the renderer
+   * builds exactly one card per gate. That is the whole single-writer rule
+   * in three lines.
+   */
+  function ingestHitlApproval(data) {
+    if (!data) return;
+    applyTurnEvent({
+      type: 'hitl',
+      state: 'pending',
+      tool: _hitlToolOf(data),
+      interrupt_id: _hitlInterruptIdOf(data),
+      payload: data,
+      turn_id: _liveTurnId,
+      source: 'ws',
+    });
+  }
+
+  function _noteGateDecided(data, state) {
+    var iid = _hitlInterruptIdOf(data);
+    applyTurnEvent({
+      type: 'hitl',
+      state: state,
+      tool: _hitlToolOf(data),
+      interrupt_id: iid,
+      payload: data,
+      turn_id: _liveTurnId,
+      source: 'decision',
+    });
   }
 
   function _isWatchdogNotice(text) {
@@ -7639,113 +7766,65 @@
    * Law 3: the only DOM writer for the live assistant bubble + restored CoT.
    * Transports mutate the in-memory TurnDocument; this paints it.
    */
+  /**
+   * Paint one turn. The DOM is a pure function of `doc` (V2 plan KD-4).
+   *
+   * What used to live here is gone, not moved: the turn-id querySelector,
+   * the currentMsgEl fallback chain, _assistantBubbleForOpenTurn, the
+   * nextElementSibling walk that GUESSED whether a bubble was historical,
+   * two _rescueTurnDom calls, and the interior painters that saved and
+   * restored currentMsgEl around themselves because they moved nodes out
+   * from under each other.
+   *
+   * Two questions replaced all of it, and neither is asked of the DOM:
+   *   "which bubble is this turn?"  → the TurnView registry.
+   *   "is this the open turn?"      → turnId === _liveTurnId.
+   */
   function renderTurn(doc, meta) {
     if (!doc || !messagesEl) return;
     meta = meta || {};
     var TD = window.KazmaTurnDocument;
-    if (!TD) return;
+    var TV = _turnView();
+    if (!TD || !TV) return;
     var turnId = String(doc.turnId || '');
-    var el = null;
-    // 'live' is a PLACEHOLDER, not an identity — applyTurnEvent falls back to
-    // it for every frame the server has not yet stamped with a real turn id,
-    // which is most of them at the start of a turn. Matching on it made any
-    // bubble left carrying data-turn-id="live" a permanent magnet: the NEXT
-    // turn's first tokens painted into that old bubble, above the new user
-    // message, and when a frame finally arrived with the real id the stale
-    // bubble was 'historical' (a user row now follows it) so a second bubble
-    // was minted at the end — the same reply above AND below (2026-09-03).
-    // The open turn is anchored by currentMsgEl, which is what the fallback
-    // below already uses.
-    if (turnId && turnId !== 'live') {
-      try {
-        el = messagesEl.querySelector('.message-assistant[data-turn-id="' + _cssEscapeAttr(turnId) + '"]');
-      } catch (eSel) { el = null; }
-    }
-    // A doc with nothing to SHOW in a bubble (progress rows only — the Live
-    // Task Card's territory) must never mint one. beginTurn seeds a
-    // "Thinking…" progress row, which used to land here with currentMsgEl
-    // freshly nulled and open every turn with an empty bubble.
-    var _paintable = !!_answerFromDoc(TD, doc) || _docHasBubbleContent(doc);
-    if (!el) el = currentMsgEl || _assistantBubbleForOpenTurn(_paintable);
-    if (_isUserBubble(el) || _isUserBubble(currentMsgEl)) {
-      currentMsgEl = null;
-      el = _assistantBubbleForOpenTurn(_paintable);
-    }
-    if (!el) el = _assistantBubbleForOpenTurn(_paintable);
+
+    // A doc with nothing to SHOW must not mint a bubble: the running step
+    // list is the Live Task Card's territory, and beginTurn seeds a
+    // "Thinking…" row that used to open every turn with an empty bubble.
+    var paintable = !!_answerFromDoc(TD, doc) || _docHasBubbleContent(doc);
+    var el = _bubbleForTurn(turnId, paintable);
     if (!el) {
-      // Progress-only frame with no bubble yet: the card is the surface.
       _taskCardEvent({ t: 'doc' });
       return;
     }
-    // A bubble FOLLOWED by a user message belongs to a closed historical
-    // turn: paint it, but never let it capture the open-turn pointer. A late
-    // hydrate/resync for the previous turn used to re-pin its bubble as
-    // currentMsgEl; the next turn's first token then painted INTO that old
-    // bubble and re-stamped its turn id — the two replies crossed bubbles,
-    // seen as "my new message's answer appeared above the previous reply"
-    // (2026-09-02).
-    var _prevOpenEl = currentMsgEl;
-    var _historical = false;
-    for (var _sib = el.nextElementSibling; _sib; _sib = _sib.nextElementSibling) {
-      if (_sib.classList && _sib.classList.contains('message-user')) { _historical = true; break; }
-    }
-    if (!_historical) currentMsgEl = el;
-    // Never stamp the placeholder (see the lookup above): a real server turn
-    // id identifies a bubble, 'live' identifies nothing.
-    if (turnId && turnId !== 'live') {
-      try { el.setAttribute('data-turn-id', turnId); } catch (eAttr) { /* ignore */ }
-    }
-    _rescueTurnDom(el);
-    var text = _answerFromDoc(TD, doc);
-    if (text) tokenAccum = text;
-    var host = _bubbleContent(el) || el;
-    var textEl = _directChildByClass(host, 'message-text');
-    if (!textEl) {
-      var fallback = el.querySelector('.message-text');
-      if (fallback && !(fallback.closest && fallback.closest('.message-user'))) textEl = fallback;
-    }
-    if (textEl && text) {
-      tryIngestPlanFromText(text);
-      var display = _scrubDsml(stripPlanFenceForDisplay(text));
-      try {
-        if (doc.status === 'streaming') {
-          _scheduleLiveTextPaint(textEl);
-        } else {
-          _paintHTML(textEl, _renderReplyHTML(text));
-        }
-      } catch (mdErr) {
-        if (textEl.textContent !== display) textEl.textContent = display;
-      }
-      try { textEl.setAttribute('data-md', text); } catch (eMd) { /* ignore */ }
-      try { textEl.setAttribute('data-final-len', String(display.length)); } catch (eLen) { /* ignore */ }
-      // A historical paint must not mark the CURRENT turn as painted — the
-      // "No response received." fallback keys off this for the live turn.
-      if (!_historical) _turnPainted = true;
-    }
+    if (turnId && turnId !== 'live') TV.bind(turnId, el);
+
+    var open = !turnId || turnId === 'live' || turnId === _liveTurnId;
+    if (open) currentMsgEl = el;
+
+    // One writer, one pass. Child order, creation and removal all happen
+    // inside here; nothing else may insert into this bubble.
+    TV.render(el, doc, _turnRenderers, meta);
+
     if (doc.model) {
       var metaEl = el.querySelector('.message-meta');
       if (metaEl && String(metaEl.textContent || '').indexOf(doc.model) < 0) {
-        metaEl.textContent = (metaEl.textContent ? metaEl.textContent + ' · ' : '') + doc.model;
+        metaEl.textContent =
+          (metaEl.textContent ? metaEl.textContent + ' · ' : '') + doc.model;
       }
     }
-    var activity = TD.activityOf(doc.parts);
-    _syncCotPanel(el, activity, doc.status, meta);
-    _paintHitlFromDoc(el, doc);
-    _rescueTurnDom(el);
+
     // A closed turn's render must not release the OPEN turn's wait state
     // (a late turn-N hydrate mid-turn-N+1 used to clear _awaitingReply,
     // disabling the cursor-resume if the live stream then died).
-    if (!_historical && (doc.status === 'done' || meta.source === 'resync' || meta.source === 'hydrate' || meta.source === 'capacity' || meta.source === 'done')) {
+    if (open && (doc.status === 'done' || meta.source === 'resync'
+        || meta.source === 'hydrate' || meta.source === 'capacity'
+        || meta.source === 'done')) {
       _awaitingReply = false;
     }
     if ((meta.source === 'resync' || meta.source === 'hydrate') && !_streamIsLive()) {
       currentMsgEl = null;
     }
-    // Interior painters (_syncCotPanel/_paintHitlFromDoc) save/restore
-    // currentMsgEl as `prev || el` — for a historical render that restore
-    // re-pins the old bubble when prev was null. Force the pointer back to
-    // whatever the open turn owned on entry.
-    if (_historical) currentMsgEl = _prevOpenEl;
     scrollToBottom();
   }
 
@@ -7822,7 +7901,12 @@
     toggleArchivedView: toggleArchivedView,
     /** Live Task Card single-writer dispatch (WS store + SSE both feed it). */
     taskCard: _taskCardEvent,
-    _hitlApproval: renderHitlCard,
+    // The document is the entry point, never the card builder: every HITL
+    // source (SSE frame, WS frame, gate registry, pending-approvals
+    // recovery, hydration) feeds applyTurnEvent, and TurnView is the only
+    // thing that builds a card.
+    _hitlApproval: ingestHitlApproval,
+    hasLiveGate: hasLiveGate,
     markApprovalTimedOut: markApprovalTimedOut,
     hasInlineApprovalCard: hasInlineApprovalCard,
     hitlCardExistsFor: hitlCardExistsFor,

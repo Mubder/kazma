@@ -99,7 +99,13 @@
         String(part.result || part.detail || '').slice(0, 80);
     }
     if (kind === 'status') return 'status:' + String(part.title || '');
-    if (kind === 'hitl') return 'hitl';
+    // One slot PER GATE, keyed by interrupt id — NOT one slot per turn.
+    // A turn can pause more than once (sequential "Allow this tool" clicks).
+    // Collapsing every gate into a single 'hitl' slot meant the second gate
+    // overwrote the first, so the document held one decision while the
+    // transcript showed two cards — and the renderer had no authority left
+    // to reconcile against. Mirrors turn_document.py::_part_key.
+    if (kind === 'hitl') return 'hitl:' + interruptIdOf(part);
     return kind + ':' + JSON.stringify(part).slice(0, 80);
   }
 
@@ -136,6 +142,33 @@
     return '';
   }
 
+  /** Every gate in this turn, in the order they were asked. */
+  function hitlPartsOf(parts) {
+    var out = [];
+    if (!Array.isArray(parts)) return out;
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i] && parts[i].type === 'hitl') out.push(parts[i]);
+    }
+    return out;
+  }
+
+  /** The gate still waiting on the operator, else the most recent one.
+   *  Gates normally settle in order, but a replayed stamp must not let a
+   *  resolved gate mask one that is still holding the graph. */
+  function hitlPartOf(parts) {
+    var all = hitlPartsOf(parts);
+    var found = null;
+    for (var i = 0; i < all.length; i++) {
+      if (String(all[i].state || 'pending') === 'pending') return all[i];
+      found = all[i];
+    }
+    return found;
+  }
+
+  /** Merge one gate's part with a newer stamp of the SAME gate.
+   *  Gates with ids never reach each other here — partKey gives each its own
+   *  slot. The id/tool mismatch branches are the fallback for id-less legacy
+   *  frames, which all share the empty-id slot. */
   function mergeHitlPart(existing, incoming) {
     if (!incoming || typeof incoming !== 'object') {
       return existing && typeof existing === 'object' ? existing : {};
@@ -400,14 +433,10 @@
       if (Array.isArray(ev.activity) && ev.activity.length) {
         next.parts = mergeParts(next.parts, activityToParts(ev.activity));
       }
-      var hydratedHitl = null;
-      var hi;
-      for (hi = next.parts.length - 1; hi >= 0; hi--) {
-        if (next.parts[hi] && next.parts[hi].type === 'hitl') {
-          hydratedHitl = next.parts[hi];
-          break;
-        }
-      }
+      // The gate that matters is the one still waiting, not the newest one:
+      // a turn that paused twice ends with the SECOND gate's part even while
+      // the first is what the graph is blocked on.
+      var hydratedHitl = hitlPartOf(next.parts);
       var hState = hydratedHitl ? String(hydratedHitl.state || 'pending') : '';
       if (hState === 'pending' && (ev.open || ev.pending)) next.status = 'paused';
       else if ((hState === 'approved' || hState === 'denied' || hState === 'inflight')
@@ -451,14 +480,11 @@
         interrupt_id: iid,
         payload: hitlPayload,
       }]);
-      var mergedHitl = null;
-      var mi;
-      for (mi = next.parts.length - 1; mi >= 0; mi--) {
-        if (next.parts[mi] && next.parts[mi].type === 'hitl') {
-          mergedHitl = next.parts[mi];
-          break;
-        }
-      }
+      // Any pending gate pauses the turn — not just the newest one. With one
+      // part per gate, "the last hitl part" is the gate asked most recently,
+      // which after a sequential approve is the SETTLED one; reading status
+      // off it reported "streaming" while the graph sat blocked.
+      var mergedHitl = hitlPartOf(next.parts);
       var resolved = String((mergedHitl && mergedHitl.state) || hitlState);
       if (resolved === 'pending') next.status = 'paused';
       else if (resolved === 'approved' || resolved === 'denied' || resolved === 'inflight') {
@@ -533,7 +559,14 @@
     activityForMessage: activityForMessage,
     mergeParts: mergeParts,
     mergeHitlPart: mergeHitlPart,
+    hitlPartsOf: hitlPartsOf,
+    hitlPartOf: hitlPartOf,
     hitlRank: hitlRank,
+    // partKey / interruptIdOf are the document's identity functions. The
+    // renderer keys its DOM slots off the SAME functions, so "which node is
+    // this part" can never drift from "which part is this".
+    partKey: partKey,
+    interruptIdOf: interruptIdOf,
     partsFromStream: partsFromStream,
     splitStreamAndFinal: splitStreamAndFinal,
     empty: empty,

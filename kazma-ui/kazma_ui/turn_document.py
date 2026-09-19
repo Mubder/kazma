@@ -20,6 +20,7 @@ __all__ = [
     "activity_of",
     "assign_interrupt_id",
     "hitl_part_of",
+    "hitl_parts_of",
     "hitl_rank",
     "hydrate_message",
     "legacy_turn_id",
@@ -51,12 +52,32 @@ def hitl_rank(state: str | None) -> int:
     return HITL_RANK.get(str(state or "pending").strip().lower(), 0)
 
 
+def hitl_parts_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Every gate in this turn, in the order they were asked.
+
+    A turn holds one part per ``interrupt_id`` (see :func:`_part_key`), so a
+    turn that paused twice returns two parts. Callers that render the
+    transcript must walk all of them; callers that want "what is being asked
+    right now" want :func:`hitl_part_of`.
+    """
+    return [
+        p for p in (parts or [])
+        if isinstance(p, dict) and p.get("type") == "hitl"
+    ]
+
+
 def hitl_part_of(parts: list[dict[str, Any]] | None) -> dict[str, Any] | None:
-    """Last HITL part, if any."""
+    """The gate that still needs an answer, else the most recent one.
+
+    Prefers a ``pending`` gate over a newer settled one: gates normally
+    settle in order, but a replayed or out-of-order stamp must not let a
+    resolved gate mask one that is still holding the graph.
+    """
     found: dict[str, Any] | None = None
-    for p in parts or []:
-        if isinstance(p, dict) and p.get("type") == "hitl":
-            found = p
+    for p in hitl_parts_of(parts):
+        if str(p.get("state") or "pending") == "pending":
+            return p
+        found = p
     return found
 
 
@@ -149,13 +170,16 @@ def merge_hitl_part(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """One HITL slot: newer rank wins; pending never overwrites a claim.
+    """Merge one gate's part with a newer stamp of the SAME gate.
 
-    A *different* ``interrupt_id`` is a new gate (second danger tool) and
-    replaces the slot. A *different tool name* is also a new gate — after
-    Approve of ``file_write`` the same turn can interrupt on ``file_delete``.
-    Missing ids on the *same* tool still compare as one slot so a stamp
-    without an id advances pending → approved.
+    Newer rank wins; pending never overwrites a claim (``HITL_RANK``).
+
+    Since :func:`_part_key` keys HITL parts by ``interrupt_id``, gates with
+    ids never reach each other here — each one owns its own slot and its own
+    card. The id/tool mismatch branches below are the fallback for *id-less*
+    legacy frames, which all share the empty-id slot: there, a different
+    interrupt id or tool name still means "this is a different gate, take the
+    incoming one" rather than advancing the old gate's state.
     """
     if not isinstance(incoming, dict):
         return dict(existing) if isinstance(existing, dict) else {}
@@ -301,8 +325,21 @@ def _part_key(part: dict[str, Any]) -> tuple[Any, ...]:
     if kind == "status":
         return ("status", str(part.get("title") or ""))
     if kind == "hitl":
-        # One HITL slot per turn — pending → approved/denied/timeout replaces.
-        return ("hitl",)
+        # One slot PER GATE, keyed by interrupt id — NOT one slot per turn.
+        #
+        # A turn can pause more than once (sequential "Allow this tool"
+        # clicks, or file_write then file_delete). Collapsing every gate
+        # into a single ("hitl",) slot meant the second gate OVERWROTE the
+        # first: the document could represent one decision while the
+        # transcript showed two cards. The renderer then had no authority
+        # to reconcile against and compensated with DOM archaeology
+        # (_findHitlCard / _hitlCardIsClaimed / _hitlAlreadyClaimed), which
+        # is why "the reply never replaces the approval placeholder" kept
+        # coming back through a new path every week (2026-09-19).
+        #
+        # Gates with no id still share one slot, which preserves the
+        # pending → approved advance for legacy id-less frames.
+        return ("hitl", _interrupt_id_of(part))
     return (kind, repr(part)[:80])
 
 

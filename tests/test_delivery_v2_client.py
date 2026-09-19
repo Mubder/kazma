@@ -11,6 +11,7 @@ unit-test gap/dupe semantics without a browser.
 
 from __future__ import annotations
 
+from tests._js_source import js_function_body
 from tests._module_source import module_source
 
 import json
@@ -25,6 +26,7 @@ _CHAT_JS = _UI / "static" / "js" / "chat.js"
 _STORE_JS = _UI / "static" / "js" / "stores" / "agentStore.js"
 _STREAM_JS = _UI / "static" / "js" / "streaming.js"
 _CURSOR_JS = _UI / "static" / "js" / "modules" / "delivery_cursor.js"
+_TURN_VIEW_JS = _UI / "static" / "js" / "modules" / "turn_view.js"
 _VIS_JS = _UI / "static" / "js" / "modules" / "turn_visibility.js"
 _CHAT_HTML = _UI / "templates" / "chat.html"
 
@@ -122,8 +124,17 @@ class TestV2ArchitecturePresent:
         assert "case 'capacity'" in store_src
         assert "_plainFromMarkdown" in chat_src
         assert "function _isInstantCapacitySlash" in chat_src
-        # card dedupe is at the render site, not the transport
-        assert "if (hasInlineApprovalCard()) return;" in chat_src
+        # Card dedupe is at the render site, not the transport — and it is
+        # no longer a guard at all. A gate owns a DOM slot keyed by its
+        # interrupt id, so a second delivery of the same approval updates
+        # that slot instead of minting a second card, and a DIFFERENT gate
+        # gets its own slot instead of being suppressed.
+        assert "gateSlotKey" in _TURN_VIEW_JS.read_text(encoding="utf-8")
+        assert "_buildHitlSlotCard" in chat_src
+        assert "if (hasInlineApprovalCard()) return;" not in chat_src, (
+            "a DOM scan is gating a code path again — that is how the "
+            "recovery paths disarmed themselves (2026-09-19)"
+        )
         # idle/stream_end must not finalize a still-streaming document
         assert "stIdle !== 'streaming'" in store_src
         assert "stEnd !== 'streaming'" in store_src
@@ -712,17 +723,25 @@ class TestUIAuditPhase3Fixes:
     def test_turn_document_module_loaded_before_chat(self):
         html = _CHAT_HTML.read_text(encoding="utf-8")
         doc_idx = html.find('src="/static/js/modules/turn_document.js')
+        view_idx = html.find('src="/static/js/modules/turn_view.js')
         chat_idx = html.find('src="/static/js/chat.js')
         assert doc_idx != -1, "turn_document.js not included in chat.html"
+        assert view_idx != -1, "turn_view.js not included in chat.html"
         assert chat_idx != -1
         assert doc_idx < chat_idx, "turn_document must load before chat.js"
+        # The renderer reads the document's identity functions (partKey /
+        # interruptIdOf) and chat.js renders on its first frame.
+        assert doc_idx < view_idx, "turn_view needs turn_document's identity fns"
+        assert view_idx < chat_idx, "turn_view must load before chat.js"
 
     def test_apply_final_paints_unconditionally(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "applyFinalAssistantText" not in src
-        render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
-        assert "_paintHTML(textEl, _renderReplyHTML(text))" in render_fn
-        assert "_turnPainted = true" in render_fn
+        # The answer is painted by the text SLOT's painter now (TurnView
+        # owns the bubble's children; renderTurn just hands it the doc).
+        paint = js_function_body(src, "function _paintTextSlot(textEl, doc, meta)")
+        assert "_paintHTML(textEl, _renderReplyHTML(text))" in paint
+        assert "_turnPainted = true" in paint
 
 
 class TestHiddenTabUX:
@@ -1028,10 +1047,10 @@ class TestPlanFencePresentation:
         ), "raw unconditional paint reintroduced — this is the end-of-reply flash"
 
         # Server truth still always wins when it actually differs.
-        render_fn = src.split("function renderTurn(doc, meta)", 1)[1]
-        assert "_paintHTML(textEl, _renderReplyHTML(text));" in render_fn
+        paint = js_function_body(src, "function _paintTextSlot(textEl, doc, meta)")
+        assert "_paintHTML(textEl, _renderReplyHTML(text));" in paint
         # textContent fallback still uses the raw stripped text.
-        assert "textEl.textContent = display;" in render_fn
+        assert "textEl.textContent = display;" in paint
 
     def test_fence_splitter_tolerates_space_variant(self):
         """'``` plan' (space between fence and tag) defeated BOTH the text
@@ -1214,14 +1233,19 @@ class TestGateAuthoritativeFailPosture:
 
     def test_no_row_under_authority_renders_live_buttons(self):
         src = _CHAT_JS.read_text(encoding="utf-8")
-        body = src.split("function _paintHitlFromDoc", 1)[1]
-        gate_block = body.split("if (_serverGatesAuth && !gateRow)", 1)
-        assert len(gate_block) == 2, "authoritative fail-posture block missing"
-        head = gate_block[1].split("return;", 1)[0]
-        assert "renderHitlCard(hitl.payload, { lock: false })" in head
-        assert "lock: false" in head
-        # Negative control: the block must run BEFORE leftover-claim inference.
-        legacy_at = body.find("_hitlAlreadyClaimed(hitl)")
+        body = js_function_body(src, "function _hitlDisplayState(part)")
+        assert "if (_serverGatesAuth && !gateRow) return 'pending';" in body, (
+            "authoritative fail-posture branch missing"
+        )
+        # Negative control: it must run BEFORE leftover-claim inference, or
+        # a stale local claim fabricates "Approved — running…" under a
+        # registry that says no such gate is live.
         auth_at = body.find("if (_serverGatesAuth && !gateRow)")
+        legacy_at = body.find("_hitlAlreadyClaimed(part)")
         assert 0 <= auth_at < legacy_at
-        assert "statusInflight" not in body.split("function renderTurn", 1)[0]
+        # Live buttons, but never a composer lock: an empty authoritative
+        # list means no live gate, so the next prompt is a new turn.
+        lock = js_function_body(src, "function _hitlShouldLock(part)")
+        assert "_hitlGateRow" in lock
+        assert "_serverGatesAuth" not in lock
+        assert "statusInflight" not in src

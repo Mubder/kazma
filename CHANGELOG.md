@@ -1,5 +1,47 @@
 # CHANGELOG
 
+## Fix — the chat bubble no longer has to "replace" the approval placeholder (2026-09-19)
+
+The silence-after-a-HITL-card class, fixed ~15 times since 2026-09-01 and
+back every time through a different path. It had three causes, all of them
+structural, and all three are gone.
+
+**The document could not hold two gates.** `_part_key` returned a bare
+`("hitl",)` — one approval slot per *turn*. A turn that paused twice
+(sequential *Allow this tool*) overwrote the first gate with the second,
+while the transcript kept both cards. The document said one decision, the
+screen said two, and every reconciliation between them was a guess. A gate
+is now keyed by its interrupt id: N gates, N parts, in ask order, each with
+its own state. A turn is paused while *any* gate is pending.
+
+**The renderer asked the DOM where to paint.** It looked a bubble up by
+turn id, fell back to a pointer, fell back to "last assistant bubble after
+the last user row", then walked siblings to guess whether that bubble was
+historical, then lifted nodes back out of the progress panel, then worked
+out whether a card had swallowed the answer. New `modules/turn_view.js`
+owns the bubble's children and derives them from the document: slots keyed
+by the same function the document dedupes with, in a declared order —
+workbench, settled decisions, answer, live questions. Rendering the same
+turn twice now moves nothing.
+
+**And the placeholder itself is gone.** *"Action required: the agent paused
+to ask permission"* used to be written into the answer element, so the
+reply had to overwrite it and every incident was a path where that did not
+happen. The answer slot holds the answer or nothing; the pause is the card
+next to it. There is nothing left to replace.
+
+Two things follow. A recovery path can no longer disarm itself — the
+"is an approval waiting?" check reads the document and the gate registry
+instead of scanning for a clickable button, which used to answer *yes* for
+a dead card and switch off the one unconditional route back to server
+truth. And a silent turn now reports itself: every render compares what
+should be on screen against what is, and a document with an answer over a
+blank bubble raises a console error and forces a resync instead of waiting
+for someone to notice.
+
+`tests/js/test_turn_view.js` replays each shipped incident as a frame
+sequence against a real DOM. Details: `docs/plans/TURN_RENDER_V2_KEYED_SLOTS.md`.
+
 ## Fix — skill install went silent after two approvals; KB crawl of a docs host ingested 1 page (2026-09-19)
 
 Asking Kazma to install https://docs.typesafe.ai/agent-skill approved

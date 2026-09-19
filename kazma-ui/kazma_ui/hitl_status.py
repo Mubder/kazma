@@ -69,10 +69,14 @@ def persisted_hitl_for_thread(thread_id: str) -> dict[str, Any] | None:
         if str(m.get("role") or "").lower() != "assistant":
             continue
         parts = m.get("parts") if isinstance(m.get("parts"), list) else []
-        for p in reversed(parts):
-            if isinstance(p, dict) and p.get("type") == "hitl":
-                return p
-        return None
+        # A turn holds one part per gate now (turn_document._part_key), so
+        # "the last hitl part" is no longer "the gate being asked": a turn
+        # that paused twice ends with the SECOND gate's part even while the
+        # first is what the graph is blocked on. hitl_part_of prefers a
+        # pending gate and falls back to the most recent one.
+        from kazma_ui.turn_document import hitl_part_of
+
+        return hitl_part_of(parts)
     return None
 
 
