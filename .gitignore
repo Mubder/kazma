@@ -128,3 +128,21 @@ research/reports/
 .venv-agentdojo/
 .agentdojo-runs/
 .agentdojo-*/
+
+# Runtime output of a live install. A `git add -A` in an operator's clone
+# staged 558 of these on 2026-09-19, including kazma-backups/*/dbs/vault.db
+# (the live encrypted vault), settings.db, chat_sessions.db and patient
+# PDFs. None of it is source; none of it may enter history.
+kazma-backups/
+extracted_images/
+out/
+
+# Vendored tree carrying its own .git -- `git add -A` turns it into a
+# broken gitlink rather than files (the vendor report's R5 `core/`).
+core/
+
+# pytest scratch. The second pattern catches a tmp root whose path
+# separators were stripped, so it lands in the repo root as one name.
+pytest-of-*/
+*pytest-tmp-hook/
+*.pre_reembed
