@@ -30,8 +30,24 @@ _ATTACH_MAX_IDLE_TICKS = 30
 
 #: Journal frame types that terminate an attached stream.
 #: HITL pause is NOT terminal — the attach stays on the journal until a
-#: real ``done``/``turn_complete`` (or a fatal ``error``).
+#: real ``done``/``turn_complete`` (or a fatal ``error``). An *interrupted*
+#: done is the pause marker (``_drive_graph_to_journal`` uses
+#: wait_for_resume=False, so HITL still journals done); treating that as
+#: terminal closed the tail between sequential gates and the operator saw
+#: the placeholder until refresh (2026-09-19).
 _SSE_ATTACH_TERMINAL = frozenset({"done", "turn_complete", "stream_end", "error"})
+
+
+def _attach_frame_is_terminal(frame: dict[str, Any]) -> bool:
+    """True when an attach subscriber should close after yielding *frame*."""
+    ftype = str((frame or {}).get("type") or "")
+    if ftype not in _SSE_ATTACH_TERMINAL:
+        return False
+    if ftype in ("done", "turn_complete"):
+        data = (frame or {}).get("data") or {}
+        if data.get("interrupted"):
+            return False
+    return True
 
 #: Threads sitting on a graph interrupt. Attach must not close just because
 #: the pump task finished — the graph is paused, not over.
@@ -1315,7 +1331,7 @@ async def _sse_attach_stream(
                 continue  # emitted during the replay window — already served
             last_yielded = seq
             yield _frame_from_journaled(frame)
-            if str(frame.get("type")) in _SSE_ATTACH_TERMINAL:
+            if _attach_frame_is_terminal(frame):
                 return
     finally:
         broker.unsubscribe(thread_id, queue)

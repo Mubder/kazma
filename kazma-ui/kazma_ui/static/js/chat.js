@@ -780,12 +780,13 @@
 
       // Server idle with a durable assistant answer → paint server truth,
       // unconditionally (applyFinal replaces the open-turn bubble).
-      // EXCEPT while an approval is pending: the graph is paused on HITL,
-      // so "idle + last durable reply" is the PREVIOUS turn's answer —
-      // painting it over the live bubble swapped the visible interim text
-      // for a completely different (older) message on every app-switch
-      // (2026-08-27). The paused bubble + approval card are already correct.
-      if (hasInlineApprovalCard() || _awaitingApproval) return;
+      // EXCEPT while an approval is still clickable: the graph is paused
+      // on HITL, so "idle + last durable reply" can be the PREVIOUS turn.
+      // A fossil `_awaitingApproval` after sequential Allow-tool clicks
+      // must NOT block the durable answer (placeholder-until-refresh,
+      // 2026-09-19). Live buttons are the only honest pause signal here;
+      // `liveHitl` already returned above when the server is still paused.
+      if (hasInlineApprovalCard()) return;
 
       // Idle: paint durable assistant text even if the row still carries a
       // leftover `pending` flag (detached persist wrote the answer, then
@@ -3358,7 +3359,10 @@
         // acks AND real replies (2026-09-08 calendar turn: 1155 chars
         // persisted, UI stamped "_No response received._", refresh
         // replayed the stamp).
-        if (data && data.content && !_awaitingApproval) {
+        // A finished turn (interrupted=false) is the answer even if a HITL
+        // wait flag is still stuck — sequential approvals left the bubble
+        // on the "Action required" placeholder until refresh (2026-09-19).
+        if (data && data.content && !interrupted) {
           _forcePaintDoneContent(data.content);
         }
         // Never leave a blank turn after "Thinking…" (empty stream / missed HITL).
@@ -7592,7 +7596,14 @@
   }
 
   function _isWatchdogNotice(text) {
-    return /No response received/i.test(String(text || ''));
+    var s = String(text || '');
+    if (/No response received/i.test(s)) return true;
+    // HITL card fills an empty bubble with this italic line. Treating it
+    // as real content blocked the terminal/resync paint, so the operator
+    // saw silence until a refresh replayed the persisted reply (2026-09-19).
+    if (/Action required:\s*The agent paused/i.test(s)) return true;
+    if (/The agent paused to ask for permission/i.test(s)) return true;
+    return false;
   }
 
   /**
@@ -7606,7 +7617,7 @@
    */
   function _forcePaintDoneContent(raw) {
     var text = String(raw || '');
-    if (!text.trim() || _awaitingApproval) return false;
+    if (!text.trim() || _isWatchdogNotice(text)) return false;
     try { _pinLiveAssistantBubble(); } catch (ePin) { /* ignore */ }
     var el = currentMsgEl && currentMsgEl.querySelector('.message-text');
     var visible = String((el && el.textContent) || '').trim();

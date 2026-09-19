@@ -183,6 +183,79 @@ class TestAttachStream:
         assert '"status": "resync"' in joined
         assert not any("event: llm_delta" in f for f in frames)
 
+    @pytest.mark.asyncio
+    async def test_interrupted_done_does_not_close_attach(self):
+        """HITL pause journals done(interrupted=True). Closing the attach
+        there dropped the post-approve answer; the bubble kept the
+        placeholder until refresh (2026-09-19 sequential Allow-tool)."""
+        from kazma_ui.active_turns import register_turn, unregister_turn
+        from kazma_ui.sse_chat._streaming import (
+            _attach_frame_is_terminal,
+            mark_thread_paused,
+            mark_thread_unpaused,
+        )
+
+        assert _attach_frame_is_terminal(
+            {"type": "done", "data": {"interrupted": False, "content": "hi"}}
+        )
+        assert not _attach_frame_is_terminal(
+            {"type": "done", "data": {"interrupted": True, "content": "paused"}}
+        )
+        assert not _attach_frame_is_terminal(
+            {"type": "approval_required", "data": {"tool": "python_exec"}}
+        )
+
+        broker = get_turn_broker()
+        fake = asyncio.create_task(asyncio.sleep(3600))
+        register_turn("tHitl", fake)
+        mark_thread_paused("tHitl")
+        try:
+            gen = _sse_attach_stream("tHitl", "sess-H", 0)
+            collector = asyncio.create_task(_collect(gen, timeout=6.0))
+            await asyncio.sleep(0.08)
+            await broker.emit(
+                "tHitl",
+                {"type": "approval_required", "data": {"tool": "python_exec"}},
+            )
+            await broker.emit(
+                "tHitl",
+                {"type": "done", "data": {"content": "paused", "interrupted": True}},
+            )
+            await asyncio.sleep(0.08)
+            unregister_turn("tHitl", fake)
+            fake.cancel()
+            resume = asyncio.create_task(asyncio.sleep(3600))
+            register_turn("tHitl", resume)
+            mark_thread_unpaused("tHitl")
+            try:
+                await broker.emit(
+                    "tHitl",
+                    {"type": "done", "data": {"content": "installed", "interrupted": False}},
+                )
+                frames = await collector
+            finally:
+                resume.cancel()
+                try:
+                    await resume
+                except asyncio.CancelledError:
+                    pass
+                unregister_turn("tHitl", resume)
+        finally:
+            mark_thread_unpaused("tHitl")
+            if not fake.done():
+                fake.cancel()
+                try:
+                    await fake
+                except asyncio.CancelledError:
+                    pass
+                unregister_turn("tHitl", fake)
+
+        joined = "\n".join(frames)
+        assert "python_exec" in joined
+        assert "paused" in joined
+        assert "installed" in joined
+        assert any(f.startswith("event: done") or "event: done" in f for f in frames)
+
 
 # ── Endpoint integration (POST /api/chat/stream with cursor) ─────────────
 
