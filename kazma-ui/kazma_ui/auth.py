@@ -1010,7 +1010,14 @@ def _mint_auth_cookie(response: Response, request: Request, expected: str) -> No
 
                 if validate_session(existing):
                     return
-            sid = create_session(actor="auto-cookie")
+            # Admin, stated rather than inherited. _should_auto_issue_cookie
+            # only reaches here for loopback or a request carrying the secret
+            # header — the operator has already proven access, so this is the
+            # single-operator session and nothing is being widened. It is
+            # written out because create_session no longer guesses: when
+            # sessions become per-user, this line is the one that has to be
+            # revisited, and it should be visible when that happens.
+            sid = create_session(actor="auto-cookie", role="admin")
             response.set_cookie(
                 key=_SC,
                 value=sid,

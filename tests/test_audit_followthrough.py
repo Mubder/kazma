@@ -102,7 +102,7 @@ def test_create_session_stores_tenant_id(tmp_path, monkeypatch):
     )
     set_config_store(store)
     try:
-        sid = create_session(actor="test", username="u", tenant_id="tenant-x")
+        sid = create_session(actor="test", role="admin", username="u", tenant_id="tenant-x")
         assert sid
         import hashlib
 
@@ -111,6 +111,85 @@ def test_create_session_stores_tenant_id(tmp_path, monkeypatch):
         assert payload["tenant_id"] == "tenant-x"
     finally:
         reset_config_store()
+
+
+def test_create_session_will_not_guess_authority():
+    """``role`` is required, so a caller cannot silently mint an admin.
+
+    It used to be ``role: str | None = None`` stored as ``role or "admin"``.
+    That was defensible while the payload described one operator — but it
+    already carries ``user_id`` and ``tenant_id``, so once sessions are
+    per-user, "forgot to pass a role" would have meant "issued an admin
+    session", failing open at the one function whose job is to decide
+    authority. (TypeSafe audit follow-up, 2026-09-19.)
+    """
+    import inspect
+
+    import pytest
+
+    sig = inspect.signature(create_session)
+    role = sig.parameters["role"]
+    assert role.default is inspect.Parameter.empty, (
+        "create_session grew a default role again — a caller that does not "
+        "think about authority must not get one"
+    )
+    assert role.kind is inspect.Parameter.KEYWORD_ONLY
+
+    with pytest.raises(TypeError):
+        create_session(actor="no-role-given")  # type: ignore[call-arg]
+
+    # And the stored payload is whatever the caller said, never a fallback.
+    # Checked on the parsed source, not the text: the docstring above quotes
+    # the old expression, so a substring search matches its own explanation.
+    import ast
+
+    web_sessions = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-core" / "kazma_core" / "security" / "web_sessions.py"
+    )
+    tree = ast.parse(web_sessions.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        for key, value in zip(node.keys, node.values):
+            if isinstance(key, ast.Constant) and key.value == "role":
+                assert isinstance(value, ast.Name) and value.id == "role", (
+                    "the session payload computes a role instead of storing "
+                    f"the caller's: {ast.unparse(value)}"
+                )
+
+
+def test_every_session_mint_states_its_authority():
+    """Each call site names a role, rather than inheriting one.
+
+    The auto-cookie path is the interesting one: it is reached only for
+    loopback or a request carrying the secret header, so admin is correct —
+    but it has to be written down, because that is the line to revisit when
+    sessions become per-user.
+    """
+    ui = Path(__file__).resolve().parent.parent / "kazma-ui" / "kazma_ui"
+    auth_src = (ui / "auth.py").read_text(encoding="utf-8")
+    assert 'create_session(actor="auto-cookie", role="admin")' in auth_src
+
+    # Parsed, not split on ")" — the argument lists contain nested calls
+    # like result.get("username"), which ends a naive slice early.
+    import ast
+
+    routes = ui / "routes_direct" / "auth.py"
+    tree = ast.parse(routes.read_text(encoding="utf-8"))
+    mints = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "create_session"
+    ]
+    assert mints, "no create_session calls found — did the import move?"
+    for call in mints:
+        kwargs = {kw.arg for kw in call.keywords}
+        assert "role" in kwargs, (
+            f"a session mint without a stated role at line {call.lineno}: "
+            f"{ast.unparse(call)}"
+        )
 
 
 def test_discord_sender_includes_user():

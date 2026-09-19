@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## Security — minting a web session must state its authority (2026-09-19)
+
+`create_session` took `role: str | None = None` and stored `role or "admin"`,
+so a caller that did not think about authority silently minted a full admin
+session. That was defensible while the payload described one operator — but
+it already carries `user_id` and `tenant_id`. The moment sessions are
+per-user, "forgot to pass a role" becomes "issued an admin session", failing
+open at the one function whose job is to decide authority.
+
+`role` is now required. Every existing caller kept exactly the authority it
+already had, so **no behaviour changed**: login and OIDC always passed a
+role, and the auto-cookie path — reached only for loopback or a request
+carrying the secret header — now says `role="admin"` out loud instead of
+inheriting it. What is gone is the inheritance: a caller that says nothing
+does not run, and the auto-cookie line is visible as the one to revisit when
+sessions become per-user.
+
+Found while hand-reading the 27 TypeSafe flags the audit's own verification
+section never covered. It was the only thing in those 27 worth changing; the
+other 26 were four documented-by-design behaviours and 22 false positives,
+including four cases where the flagged code *was* the mitigation.
+
 ## Security — a kill switch plus a public bind no longer starts silently (2026-09-19)
 
 Two guards existed and did not compose. `serve.py` / `kazma serve` refuse a

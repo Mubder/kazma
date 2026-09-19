@@ -62,13 +62,29 @@ def _ttl() -> int:
 
 def create_session(
     *,
+    role: str,
     actor: str = "web",
     username: str | None = None,
-    role: str | None = None,
     user_id: str | None = None,
     tenant_id: str | None = None,
 ) -> str:
-    """Mint a new opaque session id and persist its hash. Returns raw id for cookie."""
+    """Mint a new opaque session id and persist its hash. Returns raw id for cookie.
+
+    ``role`` is REQUIRED and has no default.
+
+    It used to be ``role: str | None = None`` stored as ``role or "admin"`` —
+    a caller that did not think about authority silently minted a full admin
+    session. That was defensible while the payload described one operator,
+    but it already carries ``user_id`` and ``tenant_id``: the moment sessions
+    are per-user, "forgot to pass a role" becomes "issued an admin session",
+    and it fails open, quietly, at the one place that is supposed to decide
+    authority.
+
+    Every existing caller kept exactly the authority it already had — this
+    changes no behaviour today. What it removes is the inheritance: the next
+    caller has to say what it means, and a caller that says nothing does not
+    compile (TypeSafe audit follow-up, 2026-09-19).
+    """
     from kazma_core.config_store import get_config_store
 
     sid = secrets.token_urlsafe(32)
@@ -80,7 +96,7 @@ def create_session(
         "expires_at": now + ttl,
         "actor": actor,
         "username": username,
-        "role": role or "admin",  # legacy single-operator = full admin
+        "role": role,
         "user_id": user_id,
         "tenant_id": tenant,
     }
