@@ -112,6 +112,21 @@ def test_a_good_subject_passes():
     ) == []
 
 
+def test_settings_kb_grounding_is_a_library_picker():
+    from pathlib import Path
+
+    html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui"
+        / "kazma_ui"
+        / "templates"
+        / "settings.html"
+    ).read_text(encoding="utf-8")
+    assert '<select id="xr-kblib"' in html
+    assert "xReplyLibraries" in html
+    assert 'placeholder="leave blank to search all libraries"' not in html
+
+
 # ── The body shape the panel posts ────────────────────────────────────────
 
 def test_body_defaults_are_the_safe_ones():
@@ -138,6 +153,31 @@ async def test_preview_publishes_nothing(monkeypatch, _no_llm):
 
     res = await preview_reply(parent_text="VAR ruined that match", cfg=_cfg())
     assert res.action == "preview" and res.draft == "a draft"
+    assert res.knowledge is None
+
+
+@pytest.mark.asyncio
+async def test_preview_reports_knowledge_hits(monkeypatch, _no_llm):
+    from kazma_core.x_api.reply import KnowledgeGrounding
+
+    async def _draft(*, subject, parent_text, parent_handle="", mood="", knowledge_notes="", **_k):
+        assert "untrusted" in knowledge_notes
+        return "a draft"
+
+    async def _notes(query, *, library=""):
+        return KnowledgeGrounding(
+            notes='<kazma:data source="knowledge" untrusted="true">\n- f\n',
+            hit_count=1,
+            library_ids=("kw",),
+        )
+
+    monkeypatch.setattr(reply_mod, "draft_reply", _draft)
+    monkeypatch.setattr(reply_mod, "_knowledge_notes", _notes)
+    res = await preview_reply(
+        parent_text="VAR ruined that match", cfg=_cfg(use_knowledge=True)
+    )
+    assert res.action == "preview"
+    assert res.knowledge == {"used": True, "hits": 1, "libraries": ["kw"]}
 
 
 @pytest.mark.asyncio

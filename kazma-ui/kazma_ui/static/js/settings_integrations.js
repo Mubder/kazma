@@ -874,6 +874,21 @@
             } finally {
                 this.xReplyLoading = false;
             }
+            this._loadXReplyLibraries();
+        },
+
+        async _loadXReplyLibraries() {
+            try {
+                const data = await this._fetch('/api/kb/libraries');
+                const libs = (data && data.libraries) || [];
+                const saved = (this.xReply.knowledge_library || '').trim();
+                if (saved && !libs.some(function (l) { return l.id === saved; })) {
+                    libs.unshift({ id: saved, name: saved, chunk_count: 0 });
+                }
+                this.xReplyLibraries = libs;
+            } catch (_e) {
+                this.xReplyLibraries = [];
+            }
         },
 
         xReplyAddSubject() {

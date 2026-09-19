@@ -1877,6 +1877,119 @@ def test_knowledge_notes_are_fenced_and_cannot_override_the_view():
     assert "position wins" in sysmsg.lower()
 
 
+def test_kb_query_skips_synthetic_subject_ids():
+    from kazma_core.x_api.reply import _kb_query
+    from kazma_core.x_api.stance import implicit_summon_subject, implicit_voice_subject
+
+    post = "NVIDIA Dynamo is interesting"
+    q = _kb_query(VAR, post)
+    assert q.lower().startswith("var ")
+    assert "NVIDIA" in q
+    ask = _kb_query(implicit_summon_subject(side=SIDE_AGAINST), post)
+    assert not ask.lower().startswith("post ")
+    assert "NVIDIA" in ask
+    voice = _kb_query(implicit_voice_subject(), post)
+    assert not voice.lower().startswith("voice ")
+    assert _kb_query(None, "  hello   world ") == "hello world"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_notes_fence_hits_and_stay_empty_on_miss(monkeypatch):
+    from types import SimpleNamespace
+
+    from kazma_core.x_api.reply import _knowledge_notes_sync
+
+    class _Idx:
+        def __init__(self, hits):
+            self.hits = hits
+
+        def search_all_sync(self, q, ids, top_k=3):
+            assert ids == ["kw"]
+            return self.hits
+
+    class _Store:
+        def get_library_for_tenant(self, lib, tenant):
+            return {"id": lib, "chunk_count": 4}
+
+        def get_library(self, lib):
+            return {"id": lib, "chunk_count": 4}
+
+    hits = [
+        SimpleNamespace(
+            content="The Kuwaiti dinar is KWD.",
+            library_id="kw",
+            document_title="Currency",
+        )
+    ]
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge_index.get_knowledge_index", lambda: _Idx(hits)
+    )
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge.get_knowledge_store", lambda: _Store()
+    )
+    g = _knowledge_notes_sync("Kuwait dinar", "kw")
+    assert g.hit_count == 1
+    assert g.library_ids == ("kw",)
+    assert "untrusted" in g.notes
+    assert "source=\"knowledge\"" in g.notes
+    assert "KWD" in g.notes
+    assert "THE OPERATOR'S POSITION" not in g.notes
+
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge_index.get_knowledge_index", lambda: _Idx([])
+    )
+    empty = _knowledge_notes_sync("nothing-matches-this", "kw")
+    assert empty.hit_count == 0 and empty.notes == ""
+
+
+def test_knowledge_notes_missing_library_does_not_search(monkeypatch):
+    from kazma_core.x_api.reply import _knowledge_notes_sync
+
+    class _Boom:
+        def search_all_sync(self, *a, **k):
+            raise AssertionError("must not search a missing library")
+
+    class _Store:
+        def get_library_for_tenant(self, lib, tenant):
+            return None
+
+        def get_library(self, lib):
+            return None
+
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge_index.get_knowledge_index", lambda: _Boom()
+    )
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge.get_knowledge_store", lambda: _Store()
+    )
+    g = _knowledge_notes_sync("Kuwait", "no-such-lib")
+    assert g.hit_count == 0 and g.notes == ""
+
+
+def test_knowledge_notes_failure_is_empty_not_raise(monkeypatch):
+    from kazma_core.x_api.reply import _knowledge_notes_sync
+
+    class _Boom:
+        def search_all_sync(self, *a, **k):
+            raise RuntimeError("chroma down")
+
+    class _Store:
+        def get_library_for_tenant(self, lib, tenant):
+            return {"id": lib, "chunk_count": 2}
+
+        def get_library(self, lib):
+            return {"id": lib, "chunk_count": 2}
+
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge_index.get_knowledge_index", lambda: _Boom()
+    )
+    monkeypatch.setattr(
+        "kazma_core.stores.knowledge.get_knowledge_store", lambda: _Store()
+    )
+    g = _knowledge_notes_sync("Kuwait", "kw")
+    assert g.notes == "" and g.hit_count == 0
+
+
 def test_voice_prompt_does_not_claim_a_position():
     from kazma_core.x_api.reply import _build_prompt
     from kazma_core.x_api.stance import implicit_voice_subject
