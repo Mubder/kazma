@@ -383,64 +383,16 @@ test("empty status text clears a stale override", () => {
   eq(c.label(), "Thinking", "empty msg did not clear the override");
 });
 
-// ── Steps body ──────────────────────────────────────────────────────────
-test("a new turn does not show the previous turn's steps", () => {
+// ── Bar only: the step list moved to the bubble workbench ───────────────
+test("the live task card does not own a step list", () => {
   const c = makeCardWithActivity([
     { kind: "tool", title: "old_tool", detail: "from last turn", state: "done" },
+    { kind: "thought", title: "Thoughts", detail: "secret notes", state: "done" },
   ], OPEN);
   c.ev({ t: "begin" });
   c.ev({ t: "doc" });
-  assert(c.q("live-task-steps").innerHTML.includes("old_tool"), "setup");
-  c.env.activity = [];
-  c.ev({ t: "begin" });
-  eq(c.q("live-task-steps").innerHTML, "", "stale steps survived a new turn");
-});
-
-test("identical step markup is not re-assigned", () => {
-  const c = makeCardWithActivity([
-    { kind: "tool", title: "grep", detail: "x", state: "done" },
-  ], OPEN);
-  c.ev({ t: "begin" });
-  c.ev({ t: "doc" });
-  const el = c.q("live-task-steps");
-  let writes = 0;
-  let html = el.innerHTML;
-  Object.defineProperty(el, "innerHTML", {
-    get() { return html; },
-    set(v) { writes += 1; html = v; },
-  });
-  c.ev({ t: "doc" });
-  c.ev({ t: "doc" });
-  eq(writes, 0, "rebuilt identical markup " + writes + " times");
-});
-
-test("the steps list stays pinned to the tail", () => {
-  const rows = (n) => Array.from({ length: n }, (_, i) => (
-    { kind: "status", title: "row" + i, state: "done" }));
-  const c = makeCardWithActivity(rows(10), OPEN);
-  c.ev({ t: "begin" });
-  c.ev({ t: "doc" });
-  const el = c.q("live-task-steps");
-  eq(el.scrollHeight, 300, "fake list did not grow");
-  el.clientHeight = 220;
-  el.scrollTop = 80;                    // sitting at the bottom
-  c.env.activity = rows(20);
-  c.ev({ t: "doc" });
-  eq(el.scrollTop, 600, "tail scroll not followed");
-});
-
-test("a reader who scrolled up keeps their place", () => {
-  const rows = (n) => Array.from({ length: n }, (_, i) => (
-    { kind: "status", title: "row" + i, state: "done" }));
-  const c = makeCardWithActivity(rows(10), OPEN);
-  c.ev({ t: "begin" });
-  c.ev({ t: "doc" });
-  const el = c.q("live-task-steps");
-  el.clientHeight = 220;
-  el.scrollTop = 0;                     // scrolled up on purpose
-  c.env.activity = rows(20);
-  c.ev({ t: "doc" });
-  eq(el.scrollTop, 0, "yanked the reader to the bottom");
+  eq(c.q("live-task-steps").innerHTML, "", "bar still paints a second CoT");
+  eq(c.q("live-task-body").hidden, true, "bar body should stay closed");
 });
 
 test("the open/closed choice survives the next mount", () => {
@@ -452,22 +404,18 @@ test("the open/closed choice survives the next mount", () => {
   const c2 = makeCardWithActivity(null, { "kazma.taskcard.open": "1" });
   c2.ev({ t: "begin" });
   eq(c2.tc.open, true, "choice not restored on the next load");
-  eq(c2.q("live-task-body").hidden, false, "body still collapsed");
+  eq(c2.q("live-task-body").hidden, true, "bar body must stay closed");
 });
 
-test("finishing a turn does not wipe the steps you are reading", () => {
+test("finishing a turn does not invent a step list on the bar", () => {
   const rows = [{ kind: "tool", title: "web_search", detail: "notes", state: "done" }];
   const c = makeCardWithActivity(rows, OPEN);
   c.ev({ t: "begin" });
   c.ev({ t: "doc" });
-  assert(c.q("live-task-steps").innerHTML.includes("web_search"), "setup");
-  // The turn ends: _liveTurnId is retired and _docs is dropped, so the next
-  // read comes back empty. That is an empty READ, not an empty turn.
   c.env.activity = [];
   c.ev({ t: "done", ok: true, summary: "1 step" });
-  c.ev({ t: "text", msg: "" });          // endTurn's _clearStatusStrip
-  assert(c.q("live-task-steps").innerHTML.includes("web_search"),
-    "steps vanished the moment the turn finished");
+  c.ev({ t: "text", msg: "" });
+  eq(c.q("live-task-steps").innerHTML, "", "bar grew a CoT on done");
 });
 
 test("a session change unmounts the card with no Done flash", () => {

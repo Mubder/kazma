@@ -74,6 +74,7 @@ TUI / CLI              active_thread.*          agent_runner             MCP + n
 | MCP resource text **obeyed as instructions** | Resource body must be fenced | `mcp_read_resource` → `format_untrusted_block(source=mcp_resource:…)` | §12 Injection |
 | MCP server asked Kazma to **sample** (call our LLM) | `sampling/createMessage` must not auto-run | Denied without HITL; `KAZMA_MCP_SAMPLING` default off | §4 HITL |
 | Plan drawn, **no reply** (memory save / tools) | `plan_fence.py` split/normalize; supervisor plan-only continue | SSE/WS `done.content` SoT; chat.js strip + always applyFinal | §2 Chat transports |
+| Thoughts visible live, **gone after the turn** | Live Task Card was a second CoT that unmounted; `_answerFromDoc` stole reasoning as the answer | One workbench fold in the bubble; task card is a bar; thoughts are `reasoning` parts | `docs/plans/COT_AND_THOUGHTS.md` |
 
 ---
 

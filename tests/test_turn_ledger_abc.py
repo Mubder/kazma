@@ -304,9 +304,11 @@ def test_duplicate_terminal_flush_never_wipes_the_reply() -> None:
     refresh re-painted it)."""
     chat = _src(_CHAT_JS)
     live = chat.split("function _paintLiveTextNow(textEl, final)", 1)[1].split("\n  function ", 1)[0]
-    # Guard: an empty accumulator at paint time is always a stale duplicate
-    # terminal — never truth to paint over a finished bubble.
-    assert "if (!String(tokenAccum || '').trim()) return;" in live
+    # Guard: an empty live string at paint time is always a stale duplicate
+    # terminal — never truth to paint over a finished bubble. Source is the
+    # document, then the cache.
+    assert "_answerFromDoc" in live
+    assert "if (!String(liveText || '').trim()) return;" in live
     flush = chat.split("function _flushLiveTextPaint()", 1)[1].split("\n  function ", 1)[0]
     assert "_liveRenderEl = null" in flush, "flush must release its target before painting"
     end = chat.split("function endTurn()", 1)[1].split("\n  function ", 1)[0]
