@@ -424,7 +424,23 @@
     var type = String(ev.type || '');
     if (type === 'hydrate') {
       if (Array.isArray(ev.parts) && ev.parts.length) {
-        next.parts = ev.parts.slice();
+        // Strip `decided_locally` off anything read back from the server.
+        // It means "this tab watched the operator decide and the server
+        // confirm", which a persisted part cannot vouch for — and it lets a
+        // part outrank a pending gate row, so inheriting it across a refresh
+        // would re-open exactly the invent-an-approval hole the registry
+        // rule exists to close.
+        next.parts = ev.parts.map(function (p) {
+          if (!p || p.type !== 'hitl' || !p.decided_locally) return p;
+          var clean = {};
+          var ck;
+          for (ck in p) {
+            if (Object.prototype.hasOwnProperty.call(p, ck) && ck !== 'decided_locally') {
+              clean[ck] = p[ck];
+            }
+          }
+          return clean;
+        });
       }
       if (ev.content) {
         next.parts = mergeParts(next.parts, [{ type: 'text', text: String(ev.content) }]);
@@ -473,13 +489,19 @@
       var hitlState = String(ev.state || 'pending');
       var hitlPayload = ev.payload || ev;
       var iid = String(ev.interrupt_id || (hitlPayload && hitlPayload.interrupt_id) || '');
-      next.parts = mergeParts(next.parts, [{
+      var hitlPart = {
         type: 'hitl',
         tool: String(ev.tool || (ev.step && ev.step.title) || ''),
         state: hitlState,
         interrupt_id: iid,
         payload: hitlPayload,
-      }]);
+      };
+      // Carried only when THIS client watched the decision happen. The
+      // renderer lets it outrank a stale gate-registry row; see the hydrate
+      // branch, which strips it, because a part read back from the server is
+      // never this tab's live decision.
+      if (ev.decided_locally) hitlPart.decided_locally = true;
+      next.parts = mergeParts(next.parts, [hitlPart]);
       // Any pending gate pauses the turn — not just the newest one. With one
       // part per gate, "the last hitl part" is the gate asked most recently,
       // which after a sequential approve is the SETTLED one; reading status

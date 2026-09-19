@@ -1046,9 +1046,12 @@ class TestPlanFencePresentation:
             not in src
         ), "raw unconditional paint reintroduced — this is the end-of-reply flash"
 
-        # Server truth still always wins when it actually differs.
+        # Server truth still always wins when it actually differs. The call
+        # is inside an `else if` now — _paintHTML returns whether it actually
+        # wrote, and the bidi pass runs only when it did — so assert the
+        # canonical pipeline rather than one statement's punctuation.
         paint = js_function_body(src, "function _paintTextSlot(textEl, doc, meta)")
-        assert "_paintHTML(textEl, _renderReplyHTML(text));" in paint
+        assert "_paintHTML(textEl, _renderReplyHTML(text))" in paint
         # textContent fallback still uses the raw stripped text.
         assert "textEl.textContent = display;" in paint
 
