@@ -13,7 +13,7 @@ from kazma_core.constants import GRAPH_HITL_DANGER_TOOLS, SWARM_BUS_DANGER_TOOLS
 from kazma_core.sessions.directory import format_session_list, SessionEntry
 from kazma_core.ide.workspace_scope import current_workspace_id, pin_workspace, reset_workspace
 from kazma_core.security.web_sessions import create_session
-from kazma_gateway.routers.github import save_github_token_to_env
+from kazma_gateway.routers.github import bind_github_token_to_process
 from kazma_tui.theme import KAZMA_THEME
 
 
@@ -37,7 +37,7 @@ def test_github_token_not_written_to_dotenv(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     env = tmp_path / ".env"
     env.write_text("FOO=1\n", encoding="utf-8")
-    save_github_token_to_env("ghp_should_not_land_on_disk")
+    bind_github_token_to_process("ghp_should_not_land_on_disk")
     text = env.read_text(encoding="utf-8")
     assert "ghp_should_not_land_on_disk" not in text
     assert os.environ.get("GITHUB_TOKEN") == "ghp_should_not_land_on_disk"

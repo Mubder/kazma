@@ -130,7 +130,9 @@ class IncomingMessage:
     correlation_id: str = field(default_factory=lambda: f"cid-{uuid.uuid4().hex[:12]}")
 
     def reply_target(self) -> str:
-        """Build a platform-prefixed reply target from context_metadata."""
+        """Return the reply target: ``sender_id``, which is already
+        platform-prefixed (e.g. ``telegram:12345``).
+        """
         return self.sender_id
 
 
