@@ -734,6 +734,13 @@
       // Registry answered authoritatively and the thread is idle → stamp
       // fossil live-button cards resolved (see _reconcileHitlCardsWithGates).
       if (!generating && !liveHitl) _reconcileHitlCardsWithGates();
+      // Hydration painted pending parts as 'awaiting' (disabled, sorted as
+      // settled) because the registry had not answered yet. Now it has:
+      // re-render so a live gate rebuilds with buttons, and a claimed one
+      // keeps its settled label. Without this pass the awaiting paint is
+      // permanent — hasLiveGate() becomes true from the registry while the
+      // card still has no buttons (2026-09-19, refresh on a live pause).
+      _rerenderHitlDocs();
 
       // Server idle (no live gate) after /abort or restart: do not keep the
       // composer locked on a fossil pending part. The next prompt is a turn.
@@ -5435,6 +5442,47 @@
   }
 
   /**
+   * Re-paint every turn that holds a gate the registry currently lists as
+   * pending.
+   *
+   * Hydration resolves those parts to 'awaiting' (no buttons, sorted as
+   * settled) because `_serverGates` is empty until /status returns. Once
+   * the snapshot is in, `_hitlDisplayState` would return 'pending' — but
+   * nothing re-renders, `hasLiveGate()` goes true from the registry, and
+   * the frozen card is left on screen with no way to answer it.
+   *
+   * Only covering pending rows are touched. Historical awaiting cards
+   * with no registry row stay frozen: that is the ghost-card defence, and
+   * re-rendering them would mint live buttons for gates that have already
+   * settled (the 2026-09-03 flash, on every old turn, while a current
+   * pause is live).
+   */
+  function _rerenderHitlDocs() {
+    var TD = window.KazmaTurnDocument;
+    if (!TD || typeof TD.hitlPartsOf !== 'function') return;
+    var pendingIds = {};
+    var list = _serverGates || [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      if (String((list[i] || {}).state || '') !== 'pending') continue;
+      var gid = String(list[i].gate_id || '');
+      if (gid) pendingIds[gid] = true;
+    }
+    var id, doc, gates, g, iid, touch;
+    for (id in _docs) {
+      if (!Object.prototype.hasOwnProperty.call(_docs, id)) continue;
+      doc = _docs[id];
+      gates = TD.hitlPartsOf((doc && doc.parts) || []);
+      touch = false;
+      for (g = 0; g < gates.length; g++) {
+        iid = _hitlInterruptIdOf(gates[g]);
+        if (iid && pendingIds[iid]) { touch = true; break; }
+      }
+      if (touch) renderTurn(doc, { source: 'gates' });
+    }
+  }
+
+  /**
    * Feed EVERY pending gate into the document.
    *
    * The two "stop as soon as a card exists" guards that used to bracket
@@ -7534,13 +7582,24 @@
       if (entry.kind === 'workbench') {
         return _buildRestoredWorkbench(_activityOfDoc(ctx.doc)) || null;
       }
-      if (entry.kind === 'hitl') return _buildHitlSlotCard(entry.part, ctx);
+      if (entry.kind === 'hitl') return _buildHitlSlotCard(entry.part, ctx, entry.state);
       return null;
     },
     paint: function(entry, el, ctx) {
       if (entry.kind === 'text') return _paintTextSlot(el, ctx.doc, ctx.meta);
       if (entry.kind === 'workbench') return _paintWorkbenchSlot(el, ctx.doc);
       if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx, entry.state);
+    },
+    // Hydration paints a pending part as 'awaiting': the card is shown,
+    // buttons replaced with "Waiting for approval…". Paint-in-place cannot
+    // put those buttons back. When the registry later says the gate is
+    // live, tear the frozen node out and let build() mint a real one.
+    rebuild: function(entry, el) {
+      if (!entry || entry.kind !== 'hitl') return false;
+      if (String(entry.state || '') !== 'pending') return false;
+      var shown = '';
+      try { shown = String(el.getAttribute('data-hitl-shown') || ''); } catch (e) { shown = ''; }
+      return !!(shown && shown !== 'pending');
     },
     discard: function() { return false; },
   };
@@ -7655,10 +7714,14 @@
    * paint guard, _findHitlCard's rescan, and the sweep that deleted
    * "other unclaimed pending cards" before minting a new one.
    */
-  function _buildHitlSlotCard(part, ctx) {
+  function _buildHitlSlotCard(part, ctx, resolvedState) {
     var payload = (part && part.payload) || part;
     if (!payload || typeof payload !== 'object') return null;
-    var show = _hitlDisplayState(part);
+    // Same value TurnView ordered by. Re-resolving here was the fourth
+    // independent answer to "what state is this gate in" — lock/store
+    // (whether the card has live buttons) could disagree with position
+    // and label even though all three are the same fact.
+    var show = resolvedState || _hitlDisplayState(part);
     var card = renderHitlCard(payload, {
       lock: show === 'pending' && _hitlShouldLock(part),
       store: show === 'pending',
@@ -7772,7 +7835,7 @@
 
   function _noteGateDecided(data, state) {
     var iid = _hitlInterruptIdOf(data);
-    applyTurnEvent({
+    var ev = {
       type: 'hitl',
       state: state,
       tool: _hitlToolOf(data),
@@ -7780,15 +7843,22 @@
       payload: data,
       turn_id: _liveTurnId,
       source: 'decision',
-      // Evidence, not a stamp. The gate registry is decision truth against a
-      // part we merely HYDRATED — that rule exists so a stale 'approved'
-      // cannot invent an approval nobody gave. It must not also outrank a
-      // decision this tab watched the operator make and the server confirm:
-      // /status is a snapshot, and between the approve and the next resync it
-      // still lists the gate as pending, which sorted the settled card back
-      // underneath the answer until a refresh (2026-09-19, live install).
-      decided_locally: true,
-    });
+    };
+    // Evidence, not a stamp. The gate registry is decision truth against a
+    // part we merely HYDRATED — that rule exists so a stale 'approved'
+    // cannot invent an approval nobody gave. It must not also outrank a
+    // decision this tab watched the operator make and the server confirm:
+    // /status is a snapshot, and between the approve and the next resync it
+    // still lists the gate as pending, which sorted the settled card back
+    // underneath the answer until a refresh (2026-09-19, live install).
+    //
+    // Only an operator click earns this. A client timeout/error is a
+    // display guess — the ticker must not outrank a still-pending
+    // registry row, for the same reason a card must not invent Approved.
+    if (state === 'approved' || state === 'denied') {
+      ev.decided_locally = true;
+    }
+    applyTurnEvent(ev);
   }
 
   function _isWatchdogNotice(text) {

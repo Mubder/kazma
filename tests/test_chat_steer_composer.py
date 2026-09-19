@@ -359,7 +359,7 @@ def test_hydrate_pending_without_gate_does_not_lock_composer() -> None:
     assert "_hitlAlreadyClaimed(part)" in state
     lock = js_function_body(js, "function _hitlShouldLock(part)")
     assert "_hitlGateRow" in lock and "'pending'" in lock
-    build = js_function_body(js, "function _buildHitlSlotCard(part, ctx)")
+    build = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
     assert "_hitlShouldLock(part)" in build, (
         "the builder locks the composer without consulting the registry"
     )
@@ -479,10 +479,16 @@ def test_a_gate_has_exactly_one_state_for_ordering_and_labelling() -> None:
     assert "shown === 'pending' ? pending : settled" in plan, (
         "ordering is reading the raw part stamp again"
     )
-    assert "isPendingGate(p)" not in plan, (
-        "ordering bypassed the resolver — a gate can be sorted one way and "
-        "painted another again"
+    # The helper that answered this from the raw part stamp is deleted, not
+    # merely unused — an exported second opinion is an invitation to ask it.
+    # Assert on the DECLARATION and the export, never the bare name: the
+    # comment explaining why it is gone contains the name, and a substring
+    # check would match its own explanation.
+    assert "function isPendingGate(" not in view, (
+        "the raw-part-stamp helper is back; ordering can bypass the resolver "
+        "again and a gate can be sorted one way and painted another"
     )
+    assert "isPendingGate: isPendingGate" not in view, "it is exported again"
 
     js = _js()
     assert "gateState: _hitlDisplayState," in js, "chat.js no longer supplies the resolver"
@@ -490,6 +496,51 @@ def test_a_gate_has_exactly_one_state_for_ordering_and_labelling() -> None:
     assert "resolvedState || _hitlDisplayState(part)" in painter
     # The painter is handed entry.state at the call site.
     assert "_paintHitlSlotCard(el, entry.part, ctx, entry.state)" in js
+    # And the builder — lock/store (live buttons vs frozen) is the same fact
+    # as position and label. Re-resolving in build was the fourth answer.
+    assert "_buildHitlSlotCard(entry.part, ctx, entry.state)" in js
+    builder = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
+    assert "resolvedState || _hitlDisplayState(part)" in builder
+
+
+def test_awaiting_card_rebuilds_when_registry_says_pending() -> None:
+    """Refresh on a live pause used to freeze the card forever.
+
+    Hydration resolves a pending part to ``awaiting`` (no buttons, sorted
+    as settled) because ``_serverGates`` is empty until /status returns.
+    After the snapshot lands, ``_hitlDisplayState`` would return
+    ``pending`` — but nothing re-rendered, ``hasLiveGate()`` went true
+    from the registry, and the frozen card kept "Waiting for approval…"
+    with no buttons.
+
+    Two halves, both required: TurnView must rebuild a node whose frozen
+    chrome cannot represent ``pending``, and resync must re-render the
+    covering turns once the registry has answered. Historical awaiting
+    cards with no covering row must NOT be re-rendered — that is the
+    ghost-card defence.
+    """
+    js = _js()
+    view = _view_js()
+    assert "renderers.rebuild" in view, "TurnView no longer asks whether to rebuild"
+    assert "function _rerenderHitlDocs()" in js
+    resync = js_function_body(js, "function _resyncDelivery(reason)")
+    assert "_rerenderHitlDocs()" in resync
+    # After gates are applied, not before — otherwise the rebuild would
+    # still see an empty registry and leave the card frozen.
+    gates_at = resync.index("_serverGates = Array.isArray(status.gates)")
+    rerender_at = resync.index("_rerenderHitlDocs()")
+    assert gates_at < rerender_at, "re-render ran before the registry snapshot landed"
+
+    rebuild = js_function_body(js, "rebuild: function(entry, el)")
+    assert "entry.kind !== 'hitl'" in rebuild or "entry.kind !== \"hitl\"" in rebuild
+    assert "!== 'pending'" in rebuild
+    assert "data-hitl-shown" in rebuild
+
+    rerender = js_function_body(js, "function _rerenderHitlDocs()")
+    assert "pendingIds" in rerender
+    assert "renderTurn(doc, { source: 'gates' })" in rerender
+    # Only covering pending rows — not every hydrated HITL part.
+    assert "pendingIds[iid]" in rerender
 
 
 def test_a_countdown_never_delivers_a_verdict_about_the_past() -> None:
@@ -566,7 +617,13 @@ def test_a_confirmed_local_decision_outranks_a_stale_registry_row() -> None:
         "decision again"
     )
     note = js_function_body(js, "function _noteGateDecided(data, state)")
-    assert "decided_locally: true" in note
+    assert "ev.decided_locally = true" in note
+    guard_at = note.index("state === 'approved' || state === 'denied'")
+    flag_at = note.index("ev.decided_locally = true")
+    assert guard_at < flag_at, (
+        "timeout/error still set decided_locally — a client ticker can "
+        "invent a denial that outranks a still-pending registry row"
+    )
     turndoc = _turndoc_js()
     assert "if (ev.decided_locally) hitlPart.decided_locally = true;" in turndoc
     assert "ck !== 'decided_locally'" in turndoc, "hydrate no longer strips the flag"
@@ -1070,7 +1127,7 @@ def test_claimed_card_parks_above_reply_and_collapses() -> None:
     # the card to its one-line bar.
     assert "function _noteGateDecided(data, state)" in js
     decide = js_function_body(js, "function _noteGateDecided(data, state)")
-    assert "applyTurnEvent({" in decide and "type: 'hitl'" in decide
+    assert "applyTurnEvent(ev)" in decide and "type: 'hitl'" in decide
     # All four claim paths: security approve/deny, semantic option,
     # watchdog timeout, registry reconcile.
     set_state = js.split("function setCardState(state, label)", 1)[1].split(
@@ -1220,7 +1277,7 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
     # CLAIMED historical card (renderHitlCard lit pendingApproval whenever
     # the painted card had no enabled buttons). Only a live card arms the
     # fallback — the builder passes store:false for everything else.
-    build = js_function_body(js, "function _buildHitlSlotCard(part, ctx)")
+    build = js_function_body(js, "function _buildHitlSlotCard(part, ctx, resolvedState)")
     assert "store: show === 'pending'," in build
     rhc = js_function_body(js, "function renderHitlCard(data, opts)")
     assert "opts && opts.store === false" in rhc
