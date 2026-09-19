@@ -1,5 +1,30 @@
 # CHANGELOG
 
+## Tests — the danger sweep asserted a mechanism, not the safety property (2026-09-19)
+
+`test_every_shipped_danger_tool_interrupts` failed for `x_post` and
+`x_schedule_post` with *"shipped as danger but did not interrupt for HITL"* —
+which reads exactly like an open hole. It was not one. **Neither tool can be
+invoked as an ordinary tool call at all**, in any argument shape: the
+commitment engine's proposal gate strips them from `pending` before the
+safe/danger split, so they never reach `interrupt()`. That is stricter than
+an interrupt, because with an interrupt there is an answer the operator can
+give that runs the call, and here there is not. The real publish path puts
+the *stored* drafts on an approval card, so the human check happens on text
+that was persisted rather than text the model re-typed.
+
+The sweep now asserts the property — `executed == []` — and accepts either
+mechanism, naming why the publish tools are exempt from the usual one. Two
+new locks pin the stricter path: every argument shape is refused (including
+a well-formed `proposal_id`), and the filter fails **closed** when it
+breaks. That last one has teeth for a reason — per the gate's own docstring,
+the tool worker imported the module inside `except Exception: pass` from
+2026-09-04, so the filter silently never ran until 2026-09-17.
+
+No behaviour changed; the gate was already correct. What changed is that a
+green suite now means what it says, and a red one will point at the real
+thing.
+
 ## Fix — the chat bubble no longer has to "replace" the approval placeholder (2026-09-19)
 
 The silence-after-a-HITL-card class, fixed ~15 times since 2026-09-01 and
