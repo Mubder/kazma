@@ -30,7 +30,7 @@ __all__ = [
     "TokenSaveRequest",
     "create_github_router",
     "parse_github_slug",
-    "save_github_token_to_env",
+    "bind_github_token_to_process",
 ]
 
 router = APIRouter(prefix="/api/github", tags=["github"])
@@ -106,7 +106,7 @@ def _redact_token(text: str | None, secret: str | None) -> str:
     return body
 
 
-def save_github_token_to_env(token: str) -> None:
+def bind_github_token_to_process(token: str) -> None:
     """Bind GITHUB_TOKEN for this process only.
 
     Persistence is ConfigStore (vault-encrypts sensitive keys). Writing the
@@ -126,7 +126,12 @@ class AppConfigSaveRequest(BaseModel):
 
 @router.post("/token")
 async def save_token(body: TokenSaveRequest) -> JSONResponse:
-    """Save the GitHub PAT token to SQLite (settings.db) and .env file."""
+    """Save the GitHub PAT to the vault-backed ConfigStore and bind it for this process.
+
+    Nothing is written to ``.env``: a raw PAT on disk was audit B8. The binding
+    is process-local and does not survive a restart; ConfigStore is the store
+    of record.
+    """
     token = body.token.strip()
     if not token:
         raise HTTPException(status_code=422, detail="Token must not be empty.")
@@ -139,7 +144,7 @@ async def save_token(body: TokenSaveRequest) -> JSONResponse:
         logger.error("[github/token] Failed to write to ConfigStore: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to save token to database.") from exc
 
-    save_github_token_to_env(token)
+    bind_github_token_to_process(token)
 
     return JSONResponse({"status": "ok", "message": "GitHub token saved to the vault-backed ConfigStore."})
 
