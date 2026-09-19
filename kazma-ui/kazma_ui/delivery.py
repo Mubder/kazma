@@ -276,6 +276,13 @@ class TurnBroker:
         if not thread_id:
             raise ValueError("thread_id is required")
         frame = event.to_dict() if hasattr(event, "to_dict") else dict(event)
+        if str(frame.get("type") or "") == "hitl":
+            try:
+                from kazma_ui.gate_view import attach_view_to_hitl_frame
+
+                frame = attach_view_to_hitl_frame(frame, thread_id)
+            except Exception:
+                logger.debug("[Delivery] hitl view stamp skipped", exc_info=True)
         lock = self._emit_lock_for(thread_id)
         async with lock:
             stamped = self._journal.append(thread_id, frame)

@@ -1,7 +1,7 @@
 # Plan: HITL view model — join before paint, one resolver
 
 **Date:** 2026-09-19
-**Status:** BINDING (not started)
+**Status:** BINDING (F0 + A0 landing)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.
 **Does not replace:** [`HITL_GATE_REGISTRY_PLAN.md`](HITL_GATE_REGISTRY_PLAN.md) (P6 — decision SoT) or [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble renderer). Those layers stay. This plan is the missing **join** between them, plus every other mouth that still derives “what should I show?” on its own.
 
@@ -54,6 +54,8 @@ Numbered incidents (the live install, 2026-09-19 and the two weeks before):
 | **1** | Sequential allow-tool: `file_write` → Approve → `file_delete` → Approve → reply in the **same** bubble, settled cards **above** the reply | Same harness as 4, plus a second interrupt after resume |
 
 **F0 answers the harness question before any behavioral PR claims 1 or 4.** Tests that cannot pause the app graph must not skip and call that coverage. If the spike fails, the plan says so in F0’s report; 1 and 4 stay pytest/graph-integration + TurnView fixtures until the harness exists. The word ban still holds.
+
+**F0 spike verdict (2026-09-19): `no`.** `create_app()` + TestClient + `ainvoke({tool_calls_pending: file_write})` ran the supervisor LLM path (HTTP 401, `turn_failed`) and never `interrupt()`’d. Entry is `NodeName.SUPERVISOR`, not `tool_worker`. The mini graph in `tests/test_hitl_graph_integration.py` still pauses. **Playwright 1 and 4 stay unclaimed.** Re-measure with `KAZMA_F0_SPIKE_LIVE=1`.
 
 Two more, same series, not the word-ban:
 
@@ -235,7 +237,7 @@ Each PR is mergeable the same day. Do not skip to C. Do not wait for four Playwr
 **Hands:** none behavioral. Chat unchanged.
 
 - `tests/e2e/test_hitl_view_model.py`: tests **2** and **3** against **current** `main` (seeded persist + `register_gate`, real Chromium, in-process uvicorn — same fixture family as `test_delivery_v2_e2e.py` / `test_smoke.py`). They may fail. That is the point.
-- Spike in the same file or a sibling, marked so it cannot silently skip: can `create_app()`’s graph pause like `test_hitl_graph_integration.py` (feed a danger tool call, `aget_state` shows interrupt, `/api/approve` 200s)? Write the answer in the PR body. If no, tests 1 and 4 are **not** claimed.
+- Spike: **no** (see §3). `tests/test_f0_hitl_app_graph_spike.py` records the verdict and must not skip. Playwright 1/4 stay unclaimed.
 - CI: do **not** gate the main suite on red 2/3 yet. Land the file. The gate turns on when A1 (or whichever PR is supposed to go green) lands.
 
 **Files:** `tests/e2e/test_hitl_view_model.py`, maybe a fixture helper. No product code unless the spike needs a test-only seam — prefer none.
