@@ -119,10 +119,31 @@
    * caller veto a slot it has nothing to put in (a turn with no activity
    * rows must not mint an empty panel).
    */
-  function slotPlan(doc, has, TD) {
+  /**
+   * ...`gateState` resolves a gate part to the state the UI should treat it
+   * as. It is REQUIRED to be the same function the painter labels with.
+   *
+   * Sorting and painting used to answer "what state is this gate in"
+   * separately: the plan read `part.state`, the painter called the host's
+   * display resolver. When those disagreed — a part still stamped `pending`
+   * while the registry said the decision was claimed — the card was sorted
+   * as pending (below the answer) and painted as approved. The operator saw
+   * "Approved — running…" sitting underneath the finished reply, and after a
+   * refresh "Waiting for approval" under a delete that had already run
+   * (2026-09-19, live install).
+   *
+   * That is the same defect this module was written to remove, one level in:
+   * two sources of truth for one fact. So the resolver is threaded through,
+   * and the resolved state rides on the entry — the painter is handed the
+   * answer rather than invited to compute its own.
+   */
+  function slotPlan(doc, has, TD, gateState) {
     has = has || {};
     var parts = (doc && doc.parts) || [];
     var i, p, key;
+    var resolve = typeof gateState === 'function'
+      ? gateState
+      : function (part) { return String((part && part.state) || 'pending'); };
 
     // Collapse to one entry per gate, in ask order. The document already
     // guarantees this (partKey), so a duplicate here means a malformed doc —
@@ -142,7 +163,11 @@
     for (i = 0; i < order.length; i++) {
       key = order[i];
       p = byKey[key];
-      (isPendingGate(p) ? pending : settled).push({ key: key, kind: 'hitl', part: p });
+      var shown = String(resolve(p) || 'pending');
+      // `state` is the resolved answer, carried so the painter uses THIS
+      // value rather than resolving again and possibly differently.
+      var entry = { key: key, kind: 'hitl', part: p, state: shown };
+      (shown === 'pending' ? pending : settled).push(entry);
     }
 
     var plan = [];
@@ -291,6 +316,13 @@
      *   paint(entry, el, ctx)                     (update in place)
      *   discard(key, el, ctx)  → bool             (default false — KEEP)
      *   has(kind, doc, ctx)    → bool             (veto an empty slot)
+     *   gateState(part)        → string           (ONE answer for a gate's
+     *                                              state, used for BOTH
+     *                                              ordering and labelling —
+     *                                              see slotPlan)
+     *
+     * A hitl entry carries `state`: the resolved value. paint() must label
+     * from `entry.state`, never re-resolve — that is the whole point.
      */
     function render(el, doc, renderers, meta) {
       renderers = renderers || {};
@@ -316,7 +348,9 @@
         try { return !!renderers.has(kind, doc, ctx); } catch (e) { return false; }
       }
 
-      var plan = slotPlan(doc, { workbench: can('workbench'), text: can('text') }, TD);
+      var plan = slotPlan(
+        doc, { workbench: can('workbench'), text: can('text') }, TD, renderers.gateState
+      );
 
       // 1. Materialise every planned slot.
       var ordered = [];

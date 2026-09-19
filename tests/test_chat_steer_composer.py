@@ -172,7 +172,7 @@ def test_chained_hitl_card_appends_below_previous() -> None:
     the frame sequences instead of grepping for a mover.
     """
     view = _view_js()
-    plan = js_function_body(view, "function slotPlan(doc, has, TD)")
+    plan = js_function_body(view, "function slotPlan(doc, has, TD, gateState)")
     # Ask order in, ask order out.
     assert "order.push(key)" in plan
     assert "settled" in plan and "pending" in plan
@@ -456,6 +456,42 @@ def test_a_silent_turn_reports_itself() -> None:
     assert "_invariantResyncs = 0;" in reset
 
 
+def test_a_gate_has_exactly_one_state_for_ordering_and_labelling() -> None:
+    """Reported from the live install, 2026-09-19, with screenshots.
+
+    "Approved — running…" sat BELOW the finished reply; after a refresh
+    "Waiting for approval" sat below a delete that had already run.
+
+    ``slotPlan`` ordered by ``part.state``; ``_paintHitlSlotCard`` labelled
+    from ``_hitlDisplayState(part)``. A part still stamped ``pending`` whose
+    decision the registry had claimed was therefore SORTED as pending (after
+    the answer) and PAINTED as approved — both screens exactly.
+
+    That is the same defect turn_view.js was written to remove, one level
+    in: two sources of truth for one fact. The resolver is threaded through
+    ``slotPlan`` and the resolved value rides on the entry, so the painter is
+    handed the answer rather than invited to compute its own.
+    """
+    view = _view_js()
+    plan = js_function_body(view, "function slotPlan(doc, has, TD, gateState)")
+    assert "typeof gateState === 'function'" in plan
+    assert "state: shown" in plan, "the entry no longer carries the resolved state"
+    assert "shown === 'pending' ? pending : settled" in plan, (
+        "ordering is reading the raw part stamp again"
+    )
+    assert "isPendingGate(p)" not in plan, (
+        "ordering bypassed the resolver — a gate can be sorted one way and "
+        "painted another again"
+    )
+
+    js = _js()
+    assert "gateState: _hitlDisplayState," in js, "chat.js no longer supplies the resolver"
+    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
+    assert "resolvedState || _hitlDisplayState(part)" in painter
+    # The painter is handed entry.state at the call site.
+    assert "_paintHitlSlotCard(el, entry.part, ctx, entry.state)" in js
+
+
 def test_a_countdown_never_delivers_a_verdict_about_the_past() -> None:
     """Reported from the live install, 2026-09-19.
 
@@ -479,7 +515,7 @@ def test_a_countdown_never_delivers_a_verdict_about_the_past() -> None:
         "stamp a gate the operator approved as timed out"
     )
     # …and it is only armed for a gate the registry confirms is live.
-    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx)")
+    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
     assert "if (_hitlShouldLock(part))" in painter
     assert "_attachHitlCountdown" in painter
 
@@ -1067,7 +1103,7 @@ def test_claim_frame_does_not_unglue_the_collapsed_bar() -> None:
     claim site must re-assert park+collapse, and the chip/chevron must
     never render outside the collapsed bar."""
     js = _js()
-    paint = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx)")
+    paint = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
     assert paint.count("_collapseClaimedHitlCard(card);") >= 2, (
         "both claimed branches of the slot painter must re-assert the collapse"
     )
@@ -1177,7 +1213,7 @@ def test_replayed_frames_never_paint_pending_approval() -> None:
     # without going silent.
     state = js_function_body(js, "function _hitlDisplayState(part)")
     assert "if (_hydratingSession) return 'awaiting';" in state
-    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx)")
+    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx, resolvedState)")
     assert "if (show === 'awaiting')" in painter
     assert "b.disabled = true" in painter
     # Round 3: the FLASH itself was the Alpine fallback being armed by a
@@ -1526,6 +1562,6 @@ def test_post_approve_attach_and_card_below_text() -> None:
         "card placement is computing anchors again instead of declaring order"
     )
     view = _TURN_VIEW_JS.read_text(encoding="utf-8")
-    plan = js_function_body(view, "function slotPlan(doc, has, TD)")
+    plan = js_function_body(view, "function slotPlan(doc, has, TD, gateState)")
     tail = plan.split("var plan = [];", 1)[1]
     assert tail.index("has.text") < tail.index("pending[i]")
