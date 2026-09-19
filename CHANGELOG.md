@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## docs: FAQ / recent-features catch the walk-up and TTS opt-in (2026-09-19)
+
+Operator FAQ and recent-features now match the guides: trusted X follow-ups
+walk up the thread; typed web chat does not auto-play TTS (🔊 only).
+
 ## Fix — web chat no longer auto-plays TTS after every reply (2026-09-19)
 
 Typed replies stay silent. Click 🔊 on the message to hear it. Settings →

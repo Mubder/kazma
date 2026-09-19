@@ -11,8 +11,11 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 account and Kazma drafts a reply. Settings cards lock **against / support**;
 emoji is tone on a match and **side** when nothing matches (`شرايك` or 👍
 and 👎 together = opinion on *this* post). Quotes and status links are the
-text it reads, even under Kazma’s own tweet. X Studio → Conversations is
-the log (Refresh polls X). Kill-switch `KAZMA_X_REPLY=0`.
+text it reads, even under Kazma’s own tweet. A **trusted** follow-up under
+Kazma walks up to the original post; strangers need `#Open` (`#Close` stops
+them). X Studio → Conversations is the log (Refresh polls X). Kill-switch
+`KAZMA_X_REPLY=0`. Typed web chat does **not** auto-play TTS — click **🔊**
+([Voice](./voice-and-media)).
 
 This page is the **operator-facing tour** of the features landed in the
 research → KB → memory polish tranche (including the **/memory** admin
