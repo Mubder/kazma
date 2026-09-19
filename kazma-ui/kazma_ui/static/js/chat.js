@@ -5664,6 +5664,18 @@
     if (!card) return;
     var dl = _hitlDeadlineOf(data);
     if (!dl) return;
+    // A deadline already in the past is NOT a countdown — it is a stale
+    // stamp on a part nobody has cleared, and attaching a ticker to it makes
+    // the very first tick stamp the card red "Approval timed out" and write
+    // `timeout` into the document. `timeout` outranks every other HITL
+    // state, so that verdict is permanent: a gate the operator actually
+    // approved (YOLO included) came back from a refresh looking auto-denied
+    // (2026-09-19, reported from the live install).
+    //
+    // The server decides whether a gate timed out. This ticker is a courtesy
+    // display for a gate that is live RIGHT NOW, and it must never invent a
+    // denial for the same reason a card must never invent an approval.
+    if (dl - Date.now() / 1000 <= 0) return;
     // Idempotent: the slot painter re-asserts the countdown on every render
     // of a live gate, and a fresh row per frame would stack a new ticker
     // under the card several times a second.
@@ -6034,7 +6046,23 @@
       // leaving the model still saying "pending" until a server frame
       // happened to arrive.
       try { card.setAttribute('data-hitl-shown', state); } catch (eS) { /* ignore */ }
-      _noteGateDecided(data, state === 'approved' ? 'approved' : 'denied');
+      // Record the DECISION, and only a decision.
+      //
+      // Two bugs lived in the one-line ternary this replaces. It mapped
+      // everything that was not 'approved' to 'denied', so the in-flight
+      // paint — which this function makes first, before the server has
+      // accepted anything — wrote `denied` into the document for a gate the
+      // operator had just approved. And had it written 'inflight' instead,
+      // that would have been worse: inflight outranks approved in
+      // HITL_RANK, so the confirmed 'approved' arriving afterwards would
+      // have been rejected as a regression and the gate pinned mid-flight.
+      //
+      // "Sending decision…" is not a decision. The card already says so on
+      // screen; the document waits for the server's answer.
+      if (state === 'approved' || state === 'denied'
+          || state === 'timeout' || state === 'error') {
+        _noteGateDecided(data, state);
+      }
       _collapseClaimedHitlCard(card);
     }
 
@@ -7430,8 +7458,22 @@
       textEl.classList.remove('typing-visible');
     } catch (eS) { /* ignore */ }
     try {
-      if (doc.status === 'streaming') _scheduleLiveTextPaint(textEl);
-      else _paintHTML(textEl, _renderReplyHTML(text));
+      if (doc.status === 'streaming') {
+        _scheduleLiveTextPaint(textEl);
+      } else if (_paintHTML(textEl, _renderReplyHTML(text))) {
+        // Same finish as every other paint path. _paintLiveTextNow and
+        // appendMessage both re-run the bidi pass and re-assert dir="auto"
+        // after writing innerHTML; this branch did not, so the terminal
+        // paint and the paint you get after a refresh (which goes through
+        // appendMessage) styled the same reply differently — visible
+        // immediately in Arabic, and as a subtle shift in mixed text
+        // (2026-09-19, live install: "the contents almost the same but how
+        // the text looks").
+        if (window.KazmaBidi) {
+          try { KazmaBidi.apply(textEl, text); } catch (eB) { /* never break the paint */ }
+        }
+        try { textEl.setAttribute('dir', 'auto'); } catch (eD) { /* ignore */ }
+      }
     } catch (mdErr) {
       if (textEl.textContent !== display) textEl.textContent = display;
     }
@@ -7554,6 +7596,11 @@
     var state = String((part && part.state) || 'pending');
     var iid = _hitlInterruptIdOf(part);
     var gateRow = _hitlGateRow(iid);
+    // A decision this tab made and the server confirmed outranks a registry
+    // snapshot taken before it. Only a LOCAL decision earns this — a merely
+    // hydrated 'approved' still loses to a pending row, which is what keeps
+    // "never invent Approved" intact.
+    if (part && part.decided_locally && state !== 'pending') return state;
     if (gateRow && String(gateRow.state || '') === 'pending') return 'pending';
     if (gateRow && (gateRow.state === 'claimed' || gateRow.state === 'resuming')) {
       return state === 'pending' ? 'inflight' : state;
@@ -7624,7 +7671,12 @@
     if (!card) return;
     var show = _hitlDisplayState(part);
     if (show === 'pending') {
-      _attachHitlCountdown(card, (part && part.payload) || part);
+      // Only a gate the registry confirms is live gets a ticker. Re-arming
+      // it on every render of anything that merely *looks* pending is what
+      // let a stale part resurrect a countdown after the fact.
+      if (_hitlShouldLock(part)) {
+        _attachHitlCountdown(card, (part && part.payload) || part);
+      }
       return;
     }
     var already = String(card.getAttribute('data-hitl-shown') || '');
@@ -7719,6 +7771,14 @@
       payload: data,
       turn_id: _liveTurnId,
       source: 'decision',
+      // Evidence, not a stamp. The gate registry is decision truth against a
+      // part we merely HYDRATED — that rule exists so a stale 'approved'
+      // cannot invent an approval nobody gave. It must not also outrank a
+      // decision this tab watched the operator make and the server confirm:
+      // /status is a snapshot, and between the approve and the next resync it
+      // still lists the gate as pending, which sorted the settled card back
+      // underneath the answer until a refresh (2026-09-19, live install).
+      decided_locally: true,
     });
   }
 

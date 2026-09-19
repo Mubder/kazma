@@ -176,6 +176,37 @@ assert("partKey separates gates",
 assert("partKey is stable across a state change",
   TD.partKey(gates[1]) === TD.partKey({ type: "hitl", interrupt_id: "def", state: "approved" }));
 
+// ── decided_locally: evidence this tab watched the decision ─────────
+// The renderer lets it outrank a stale gate-registry row, so where it comes
+// from matters. 2026-09-19: between an approve and the next /status resync,
+// the registry still listed the gate as pending and sorted the settled card
+// back underneath the answer until a refresh.
+var localDecision = TD.applyEvent(TD.empty("t9"), {
+  type: "hitl", state: "approved", interrupt_id: "L1", tool: "shell_exec",
+  decided_locally: true,
+});
+var lp = localDecision.parts.filter(function (p) { return p.type === "hitl"; })[0];
+assert("a local decision is marked on the part", lp && lp.decided_locally === true);
+
+var serverStamp = TD.applyEvent(TD.empty("t9"), {
+  type: "hitl", state: "approved", interrupt_id: "L1", tool: "shell_exec",
+});
+var sp = serverStamp.parts.filter(function (p) { return p.type === "hitl"; })[0];
+assert("a server frame is NOT marked local", sp && sp.decided_locally === undefined);
+
+// It must not survive a round trip through the server. A persisted part
+// cannot vouch for "this tab watched the operator decide", and inheriting
+// the flag across a refresh would let a stale part beat a pending gate row —
+// re-opening the invent-an-approval hole the registry rule exists to close.
+var rehydrated = TD.applyEvent(TD.empty("t9"), {
+  type: "hydrate",
+  parts: [{ type: "hitl", state: "approved", interrupt_id: "L1", decided_locally: true }],
+  content: "done",
+});
+var rp = rehydrated.parts.filter(function (p) { return p.type === "hitl"; })[0];
+assert("hydrate strips decided_locally", rp && rp.decided_locally === undefined);
+assert("hydrate keeps the rest of the gate", rp && rp.interrupt_id === "L1" && rp.state === "approved");
+
 // ── Capacity fast-path: content-key dedupe + reset semantics ────────
 // chat.js paintCapacityReply forwards reply+turn_id but NOT seq, so the
 // eventKey for capacity events is content-derived. This locks the

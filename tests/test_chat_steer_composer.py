@@ -456,6 +456,105 @@ def test_a_silent_turn_reports_itself() -> None:
     assert "_invariantResyncs = 0;" in reset
 
 
+def test_a_countdown_never_delivers_a_verdict_about_the_past() -> None:
+    """Reported from the live install, 2026-09-19.
+
+    The operator approved two gates (YOLO), refreshed, and both cards came
+    back red: "Approval timed out — continuing without this tool."
+
+    The slot painter re-attached the countdown on every render of anything
+    that looked pending. On a stale part whose ``approval_deadline`` had long
+    passed, the ticker's first tick stamped the card red AND wrote ``timeout``
+    into the document — which outranks every other HITL state, so the verdict
+    was permanent and survived the next refresh too.
+
+    The server decides whether a gate timed out. This ticker is a courtesy
+    display for a gate that is live right now, and it must not invent a denial
+    for the same reason a card must not invent an approval.
+    """
+    js = _js()
+    cd = js_function_body(js, "function _attachHitlCountdown(card, data)")
+    assert "if (dl - Date.now() / 1000 <= 0) return;" in cd, (
+        "an expired deadline can arm a ticker again — the first tick will "
+        "stamp a gate the operator approved as timed out"
+    )
+    # …and it is only armed for a gate the registry confirms is live.
+    painter = js_function_body(js, "function _paintHitlSlotCard(card, part, ctx)")
+    assert "if (_hitlShouldLock(part))" in painter
+    assert "_attachHitlCountdown" in painter
+
+
+def test_sending_a_decision_is_not_making_one() -> None:
+    """``setCardState('inflight')`` must not write a decision.
+
+    It ran a ternary that mapped everything not 'approved' to 'denied', so
+    the in-flight paint — made before the server has accepted anything —
+    recorded ``denied`` for a gate the operator had just approved. Writing
+    'inflight' instead would have been worse: it outranks 'approved' in
+    HITL_RANK, so the confirmed approval arriving afterwards would have been
+    rejected as a regression and the gate pinned mid-flight.
+    """
+    js = _js()
+    set_state = js.split("function setCardState(state, label)", 1)[1].split(
+        "function appendAssistantText", 1
+    )[0]
+    assert "state === 'approved' ? 'approved' : 'denied'" not in set_state
+    assert "_noteGateDecided(data, state)" in set_state
+    for terminal in ("'approved'", "'denied'", "'timeout'", "'error'"):
+        assert terminal in set_state, f"{terminal} is no longer recorded"
+    # The guard must exclude the in-flight paint.
+    guard = set_state.split("if (state ===", 1)[1].split(")", 1)[0]
+    assert "inflight" not in guard, "the in-flight paint records a decision again"
+
+
+def test_a_confirmed_local_decision_outranks_a_stale_registry_row() -> None:
+    """Why the approved card sat under the answer until a refresh.
+
+    ``/status`` is a snapshot. Between the approve and the next resync it
+    still lists the gate as pending, and the registry rule let that outrank
+    the decision this tab had just watched the operator make — so the settled
+    card kept sorting into the pending group, below the answer.
+
+    Only a LOCAL decision earns this. A merely hydrated 'approved' still
+    loses to a pending row, which is what keeps "never invent Approved"
+    intact — and turn_document strips the flag on hydrate so it cannot be
+    inherited across a refresh.
+    """
+    js = _js()
+    state = js_function_body(js, "function _hitlDisplayState(part)")
+    assert "part.decided_locally" in state
+    local_at = state.index("decided_locally")
+    row_at = state.index("gateRow.state || '') === 'pending'")
+    assert local_at < row_at, (
+        "a stale pending registry row is overriding a confirmed local "
+        "decision again"
+    )
+    note = js_function_body(js, "function _noteGateDecided(data, state)")
+    assert "decided_locally: true" in note
+    turndoc = _turndoc_js()
+    assert "if (ev.decided_locally) hitlPart.decided_locally = true;" in turndoc
+    assert "ck !== 'decided_locally'" in turndoc, "hydrate no longer strips the flag"
+
+
+def test_the_answer_is_painted_the_same_way_everywhere() -> None:
+    """"The contents almost the same but how the text looks" — live install.
+
+    ``_paintLiveTextNow`` and ``appendMessage`` both re-run the bidi pass and
+    re-assert dir="auto" after writing innerHTML. The slot painter did not,
+    so the terminal paint and the paint you get after a refresh (which goes
+    through appendMessage) styled the same reply differently.
+    """
+    js = _js()
+    paint = js_function_body(js, "function _paintTextSlot(textEl, doc, meta)")
+    assert "KazmaBidi.apply(textEl, text)" in paint
+    assert "setAttribute('dir', 'auto')" in paint
+    # The other two paint paths still do it, so all three agree.
+    live = js_function_body(js, "function _paintLiveTextNow(textEl, final)")
+    assert "KazmaBidi.apply" in live
+    append = js_function_body(js, "function appendMessage(role, content, attachmentName, ts, opts)")
+    assert "KazmaBidi.apply" in append
+
+
 def test_recovery_paths_never_disarm_on_a_dom_scan() -> None:
     """A recovery path that can decline is not a recovery path.
 
