@@ -1,5 +1,35 @@
 # CHANGELOG
 
+## Security — a kill switch plus a public bind no longer starts silently (2026-09-19)
+
+Two guards existed and did not compose. `serve.py` / `kazma serve` refuse a
+non-loopback bind without a `KAZMA_SECRET` — they ask *"is there a secret?"*.
+`kazma_ui.auth` refuses `KAZMA_AUTH_DISABLED` / `KAZMA_DEMO_MODE` when
+`KAZMA_PRODUCTION` is set — it asks *"is this labelled production?"*. Neither
+asked **"are you exposed?"**, so this started cleanly and served every
+`/api/*` endpoint to the network:
+
+    KAZMA_HOST=0.0.0.0  KAZMA_SECRET=<strong>  KAZMA_AUTH_DISABLED=1
+
+The secret satisfies the boot check and the kill switch then makes the secret
+irrelevant. `KAZMA_PRODUCTION` is opt-in, so a VPS, a LAN box or a tunnel
+without that label inherited nothing from the auth-side guard either.
+
+New `kazma_core.security.boot_guard` is the single posture check both entry
+points call — one module, because the bind/secret logic was already
+copy-pasted into `serve.py` and the CLI, and a check that lives in each
+caller is one that goes missing from a caller.
+
+The two switches are not the same risk and are not treated the same.
+`KAZMA_AUTH_DISABLED` is a local-development convenience with no documented
+remote use: paired with a public bind it now **refuses to start**, naming the
+three ways out. `KAZMA_DEMO_MODE` exists precisely to serve a public demo
+without login (`fly.toml` carries it ready to uncomment), so it still starts
+and prints a loud banner instead. Loopback is never refused.
+
+Found by the TypeSafe audit (R2) — the one item in that sweep that survived
+being read against the real code.
+
 ## Tests — the danger sweep asserted a mechanism, not the safety property (2026-09-19)
 
 `test_every_shipped_danger_tool_interrupts` failed for `x_post` and

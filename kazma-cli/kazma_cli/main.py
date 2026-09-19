@@ -236,6 +236,18 @@ def _run_serve(port: int) -> None:
             "(override: KAZMA_ALLOW_YOLO=1).\n"
         )
 
+    # Same shared posture check serve.py runs: a secret does not protect an
+    # endpoint whose gate has been switched off. Imported rather than
+    # re-implemented — the bind/secret logic above is already a copy of
+    # serve.py's, and a check that lives in each caller goes missing from one.
+    from kazma_core.security.boot_guard import check_exposure_posture
+
+    _posture_ok, _posture_msg = check_exposure_posture(host)
+    if _posture_msg:
+        print(_posture_msg)
+    if not _posture_ok:
+        sys.exit(1)
+
     # Print the browseable URL — 0.0.0.0 is a bind address, not browsable.
     browse_url = f"http://127.0.0.1:{port}"
     if host == "0.0.0.0":
