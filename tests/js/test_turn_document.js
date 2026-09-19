@@ -47,6 +47,16 @@ assert("activityForMessage falls back to parts", TD.activityForMessage({
   parts,
 }).some((r) => r.kind === "thought"));
 assert("empty parts", TD.activityOf([]).length === 0);
+const grown = TD.mergeParts(
+  [{ type: "reasoning", text: "First notes." }],
+  [{ type: "reasoning", text: "Second hop." }],
+);
+const rparts = grown.filter((p) => p.type === "reasoning");
+assert("one thoughts fold", rparts.length === 1);
+assert("fold keeps both hops", rparts[0].text.indexOf("First notes.") >= 0
+  && rparts[0].text.indexOf("Second hop.") >= 0);
+assert("partKey is stable for reasoning",
+  TD.partKey({ type: "reasoning", text: "a" }) === TD.partKey({ type: "reasoning", text: "bbb" }));
 assert("idempotent activityOf", JSON.stringify(TD.activityOf(parts)) === JSON.stringify(TD.activityOf(parts)));
 
 assert("exports reducer", TD && typeof TD.applyEvent === "function" && typeof TD.empty === "function");

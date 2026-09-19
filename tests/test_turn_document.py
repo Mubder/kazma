@@ -150,6 +150,23 @@ def test_merge_hitl_pending_replaces_with_approved() -> None:
     assert hitl[0]["state"] == "approved"
 
 
+def test_reasoning_merges_into_one_fold() -> None:
+    from kazma_ui.turn_document import merge_parts, merge_reasoning_part
+
+    a = [{"type": "reasoning", "text": "First notes."}]
+    b = [{"type": "reasoning", "text": "Second hop."}]
+    merged = merge_parts(a, b)
+    thoughts = [p for p in merged if p.get("type") == "reasoning"]
+    assert len(thoughts) == 1
+    assert "First notes." in thoughts[0]["text"]
+    assert "Second hop." in thoughts[0]["text"]
+    grown = merge_reasoning_part(
+        {"type": "reasoning", "text": "Let me look."},
+        {"type": "reasoning", "text": "Let me look. Found it."},
+    )
+    assert grown["text"] == "Let me look. Found it."
+
+
 def test_merge_displaced_text_becomes_reasoning() -> None:
     existing = [{"type": "text", "text": "let me pull the texts…"}]
     incoming = [{"type": "text", "text": "Posted all 4 Arabic tweets."}]

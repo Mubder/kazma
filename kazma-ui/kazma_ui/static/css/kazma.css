@@ -2350,6 +2350,11 @@ tbody tr:last-child td {
   color: var(--warning, #facc15);
   border-color: color-mix(in srgb, var(--warning, #facc15) 55%, transparent);
 }
+.agent-progress-step.step-thought .step-detail {
+  white-space: pre-wrap;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
 .live-task-body {
   border-top: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.18));
   /* No hardcoded dark fallback: an unset --bg used to paint this near-black

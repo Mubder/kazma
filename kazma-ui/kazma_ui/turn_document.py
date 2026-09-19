@@ -23,6 +23,7 @@ __all__ = [
     "hitl_parts_of",
     "hitl_rank",
     "hydrate_message",
+    "merge_reasoning_part",
     "legacy_turn_id",
     "make_interrupt_id",
     "merge_hitl_part",
@@ -166,6 +167,33 @@ def assign_interrupt_id(
     return iid
 
 
+def merge_reasoning_part(
+    existing: dict[str, Any] | None,
+    incoming: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Grow one thoughts fold. Never drop the longer text."""
+    if not isinstance(incoming, dict):
+        return dict(existing) if isinstance(existing, dict) else {}
+    if not isinstance(existing, dict) or existing.get("type") != "reasoning":
+        out = dict(incoming)
+        out["type"] = "reasoning"
+        return out
+    old = str(existing.get("text") or "")
+    new = str(incoming.get("text") or "")
+    out = dict(existing)
+    out.update(incoming)
+    out["type"] = "reasoning"
+    if not new:
+        out["text"] = old
+    elif not old or new == old or old in new:
+        out["text"] = new
+    elif new in old:
+        out["text"] = old
+    else:
+        out["text"] = old.rstrip() + "\n\n" + new
+    return out
+
+
 def merge_hitl_part(
     existing: dict[str, Any] | None,
     incoming: dict[str, Any] | None,
@@ -248,7 +276,7 @@ def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
                 continue
             rows.append({
                 "kind": "thought",
-                "title": "Working notes",
+                "title": "Thoughts",
                 "detail": detail,
                 "state": "done",
             })
@@ -314,7 +342,9 @@ def _part_key(part: dict[str, Any]) -> tuple[Any, ...]:
     if kind == "text":
         return ("text",)
     if kind == "reasoning":
-        return ("reasoning", str(part.get("text") or "")[:240])
+        # One thoughts fold per turn. Keying on text[:240] minted a new
+        # part per hop and the live fold could not re-open the same notes.
+        return ("reasoning",)
     if kind == "tool":
         return (
             "tool",
@@ -396,6 +426,11 @@ def merge_parts(
                     if _part_key(x) == key:
                         out[i] = merge_hitl_part(x, part)
                         return
+            if replace and part.get("type") == "reasoning":
+                for i, x in enumerate(out):
+                    if _part_key(x) == key:
+                        out[i] = merge_reasoning_part(x, part)
+                        return
             return
         seen.add(key)
         out.append(dict(part))
@@ -411,9 +446,15 @@ def merge_parts(
         and old_text.strip() != new_text.strip()
         and not new_text.startswith(old_text[:80] if len(old_text) > 80 else old_text)
     ):
-        key = _part_key({"type": "reasoning", "text": old_text})
-        if key not in seen:
-            out.insert(0, {"type": "reasoning", "text": old_text})
+        incoming_r = {"type": "reasoning", "text": old_text}
+        key = _part_key(incoming_r)
+        if key in seen:
+            for i, x in enumerate(out):
+                if _part_key(x) == key:
+                    out[i] = merge_reasoning_part(x, incoming_r)
+                    break
+        else:
+            out.insert(0, incoming_r)
             seen.add(key)
 
     chosen = new_text or old_text

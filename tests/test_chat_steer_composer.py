@@ -859,17 +859,12 @@ def test_live_task_card_single_writer_and_liveness() -> None:
     assert "_TC_STALL_RETRY_MS" in tc
     assert "_TC_STALL_MAX_TRIES" in tc
     assert "_tc.dead = true" in tc
-    # Compact body: doc-fed steps, capped, tail-pinned, 2-line clamp is CSS.
+    # The bar has no step list. Thoughts live in the bubble workbench.
     steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
         "The single writer", 1
     )[0]
-    assert "rows.slice(-_TC_STEP_CAP)" in steps
-    assert "_TC_STEP_CAP = 50" in js
-    assert "if (html === _tc.stepsHtml) return;" in steps, (
-        "identical markup re-assigned - tears the subtree down and throws "
-        "away the reader's scroll position"
-    )
-    assert "el.scrollTop = el.scrollHeight;" in steps
+    assert "rows.slice(-_TC_STEP_CAP)" not in steps
+    assert "_tc.stepsEl.innerHTML = ''" in steps or '_tc.stepsEl.innerHTML = "";' in steps
     # Live turns no longer build an in-bubble workbench: the bubble's
     # workbench is ONE slot, painted from the document's activity rows, and
     # it feeds the card rather than competing with it.
@@ -1027,9 +1022,8 @@ def test_an_empty_read_never_wipes_the_steps_you_are_reading() -> None:
     steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
         "The single writer", 1
     )[0]
-    assert "if (!rows.length) return;" in steps, (
-        "an empty read blanks the body again"
-    )
+    assert "activityOf" not in steps
+    assert "_docs[_liveTurnId]" not in steps
     for owner in ("if (ev.t === 'reset') {", "if (ev.t === 'begin') {"):
         branch = js.split(owner, 1)[1][:2000]
         assert "_tc.stepsEl.innerHTML = '';" in branch, owner
@@ -1113,6 +1107,10 @@ def test_progress_only_frames_never_mint_an_empty_bubble() -> None:
         "function _answerFromDoc", 1
     )[0]
     assert "'done'" in host and "'paused'" in host and "'hitl'" in host
+    answer = js_function_body(js, "function _answerFromDoc(TD, doc)")
+    assert "type === 'reasoning'" not in answer, (
+        "thoughts are being painted as the answer again"
+    )
     # A tool step has nothing to put in the bubble either.
     assert "_pinLiveAssistantBubble(false);" in js
     # ...and the "no response" diagnosis must not be gated on the bubble

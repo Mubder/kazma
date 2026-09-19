@@ -306,6 +306,33 @@ function feed(events, turnId) {
 }
 
 // ══════════════════════════════════════════════════════════
+// 6b. Thoughts survive done — they are a workbench fold, not the answer
+// ══════════════════════════════════════════════════════════
+
+{
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+  let doc = TD.empty("t1");
+  doc = TD.applyEvent(doc, {
+    type: "progress",
+    step: { kind: "thought", title: "Thoughts", detail: "secret working notes" },
+  });
+  doc = TD.applyEvent(doc, { type: "done", content: "The public answer." });
+  env.view.render(bubble, doc, makeRenderers(env));
+  const s = shape(bubble);
+  assert("workbench still there after done", s.indexOf("workbench") >= 0, s);
+  assert("answer is not the thought",
+    bubble.querySelector(".message-text").getAttribute("data-md") === "The public answer.",
+    bubble.querySelector(".message-text") &&
+      bubble.querySelector(".message-text").getAttribute("data-md"));
+  const thoughts = TD.activityOf(doc.parts).filter((r) => r.kind === "thought");
+  assert("thoughts still in the document",
+    thoughts.length === 1 && thoughts[0].detail.indexOf("secret working notes") >= 0,
+    JSON.stringify(thoughts));
+}
+
+// ══════════════════════════════════════════════════════════
 // 7. Silence is LOUD — the invariant that replaces the operator
 // ══════════════════════════════════════════════════════════
 

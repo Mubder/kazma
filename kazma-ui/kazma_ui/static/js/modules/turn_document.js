@@ -43,7 +43,7 @@
       if (kind === 'reasoning' && String(p.text || '').trim()) {
         rows.push({
           kind: 'thought',
-          title: 'Working notes',
+          title: 'Thoughts',
           detail: String(p.text),
           state: 'done',
         });
@@ -107,7 +107,7 @@
   function partKey(part) {
     var kind = String((part && part.type) || '');
     if (kind === 'text') return 'text';
-    if (kind === 'reasoning') return 'reasoning:' + String(part.text || '').slice(0, 240);
+    if (kind === 'reasoning') return 'reasoning';
     if (kind === 'tool') {
       return 'tool:' + String(part.name || part.title || '') + ':' +
         String(part.state || '') + ':' +
@@ -178,6 +178,37 @@
       found = all[i];
     }
     return found;
+  }
+
+  function mergeReasoningPart(existing, incoming) {
+    if (!incoming || typeof incoming !== 'object') {
+      return existing && typeof existing === 'object' ? existing : {};
+    }
+    if (!existing || typeof existing !== 'object' || existing.type !== 'reasoning') {
+      var fresh = {};
+      var fk;
+      for (fk in incoming) {
+        if (Object.prototype.hasOwnProperty.call(incoming, fk)) fresh[fk] = incoming[fk];
+      }
+      fresh.type = 'reasoning';
+      return fresh;
+    }
+    var oldT = String(existing.text || '');
+    var newT = String(incoming.text || '');
+    var out = {};
+    var ek, ik;
+    for (ek in existing) {
+      if (Object.prototype.hasOwnProperty.call(existing, ek)) out[ek] = existing[ek];
+    }
+    for (ik in incoming) {
+      if (Object.prototype.hasOwnProperty.call(incoming, ik)) out[ik] = incoming[ik];
+    }
+    out.type = 'reasoning';
+    if (!newT) out.text = oldT;
+    else if (!oldT || newT === oldT || newT.indexOf(oldT) !== -1) out.text = newT;
+    else if (oldT.indexOf(newT) !== -1) out.text = oldT;
+    else out.text = oldT.replace(/\s+$/, '') + '\n\n' + newT;
+    return out;
   }
 
   /** Merge one gate's part with a newer stamp of the SAME gate.
@@ -301,6 +332,11 @@
             if (partKey(out[ri]) === key) { out[ri] = mergeHitlPart(out[ri], part); return; }
           }
         }
+        if (replace && part.type === 'reasoning') {
+          for (var rj = 0; rj < out.length; rj++) {
+            if (partKey(out[rj]) === key) { out[rj] = mergeReasoningPart(out[rj], part); return; }
+          }
+        }
         return;
       }
       seen[key] = 1;
@@ -313,9 +349,17 @@
       oldText && newText && oldText.trim() !== newText.trim() &&
       newText.indexOf(oldText.length > 80 ? oldText.slice(0, 80) : oldText) !== 0
     ) {
-      var rkey = partKey({ type: 'reasoning', text: oldText });
-      if (!seen[rkey]) {
-        out.unshift({ type: 'reasoning', text: oldText });
+      var displaced = { type: 'reasoning', text: oldText };
+      var rkey = partKey(displaced);
+      if (seen[rkey]) {
+        for (var di = 0; di < out.length; di++) {
+          if (partKey(out[di]) === rkey) {
+            out[di] = mergeReasoningPart(out[di], displaced);
+            break;
+          }
+        }
+      } else {
+        out.unshift(displaced);
         seen[rkey] = 1;
       }
     }
@@ -584,6 +628,7 @@
     activityForMessage: activityForMessage,
     mergeParts: mergeParts,
     mergeHitlPart: mergeHitlPart,
+    mergeReasoningPart: mergeReasoningPart,
     hitlPartsOf: hitlPartsOf,
     hitlPartOf: hitlPartOf,
     hitlRank: hitlRank,

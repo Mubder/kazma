@@ -1760,9 +1760,12 @@
     if (_tc.jumpBtn) _tc.jumpBtn.hidden = _tc.phase !== 'awaiting';
     if (_tc.retryBtn) _tc.retryBtn.hidden = !_tc.dead;
 
-    if (_tc.chevron) _tc.chevron.textContent = _tc.open ? '▾' : '▸';
-    if (_tc.toggle) _tc.toggle.setAttribute('aria-expanded', _tc.open ? 'true' : 'false');
-    if (_tc.body) _tc.body.hidden = !_tc.open;
+    if (_tc.chevron) {
+      _tc.chevron.hidden = true;
+      _tc.chevron.textContent = _tc.open ? '▾' : '▸';
+    }
+    if (_tc.toggle) _tc.toggle.setAttribute('aria-expanded', 'false');
+    if (_tc.body) _tc.body.hidden = true;
     _tc.el.className = 'live-task-card' +
       (_tc.phase === 'awaiting' ? ' is-awaiting' : '') +
       (_tc.stalled ? ' is-stalled' : '') +
@@ -1840,39 +1843,9 @@
   }
 
   function _tcStepsFromDoc() {
-    if (!_tc.stepsEl) return;
-    var doc = _docs[_liveTurnId] || null;
-    var rows = (window.KazmaTurnDocument && doc && KazmaTurnDocument.activityOf)
-      ? KazmaTurnDocument.activityOf(doc.parts || [])
-      : [];
-    // An empty READ is not an empty turn. _liveTurnId is retired and _docs is
-    // dropped around the end of a turn, so blanking the body here wiped the
-    // steps out from under anyone reading them the moment the turn finished.
-    // Clearing belongs to the events that know a turn STARTED or a session
-    // CHANGED — 'begin' and 'reset' both empty the list explicitly.
-    if (!rows.length) return;
-    // Newest last (chronological); cap _TC_STEP_CAP live rows.
-    rows = rows.slice(-_TC_STEP_CAP);
-    var html = '';
-    for (var i = 0; i < rows.length; i++) {
-      var r = rows[i] || {};
-      var cls = 'live-task-step kind-' + (r.kind || 'status') +
-        ' state-' + (r.state || 'done');
-      html += '<li class="' + cls + '" title="' + escapeHtml(truncateStr(String(r.detail || ''), 300)) + '">' +
-        '<span class="live-task-step-title">' + escapeHtml(truncateStr(String(r.title || ''), 120)) + '</span>' +
-        '<span class="live-task-step-detail">' + escapeHtml(truncateStr(String(r.detail || ''), 400)) + '</span>' +
-        '</li>';
-    }
-    // Re-assigning identical markup still tears the subtree down and costs a
-    // reflow (same lesson as the live-token paint throttle) AND throws away
-    // the reader's scroll position.
-    if (html === _tc.stepsHtml) return;
-    _tc.stepsHtml = html;
-    var el = _tc.stepsEl;
-    var pinned = (el.scrollHeight - el.scrollTop - el.clientHeight) < 24;
-    el.innerHTML = html;
-    // Tail-pinned by default; a reader who scrolled up keeps their place.
-    if (pinned) el.scrollTop = el.scrollHeight;
+    // Thoughts and tools live in the bubble workbench. This card is a bar.
+    if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
+    _tc.stepsHtml = '';
   }
 
   /**
@@ -5213,13 +5186,16 @@
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
     if (textEl.closest && textEl.closest('.message-user')) return;
+    var liveText = _answerFromDoc(window.KazmaTurnDocument, _docs[_liveTurnId])
+      || String(tokenAccum || '');
+    tokenAccum = liveText;
     // An EMPTY accumulator at paint time is always a stale duplicate
     // terminal: the first done's endTurn zeroed tokenAccum, then the SECOND
     // transport's terminal frame (SSE + WS both deliver done) flushed after
     // it and painted "" over the finished reply — the answer vanished at the
     // end of the stream until a refresh re-painted it (2026-09-02). A final
     // flush may only ever render real accumulated text.
-    if (!String(tokenAccum || '').trim()) return;
+    if (!String(liveText || '').trim()) return;
     if (final) {
       if (_paintHTML(textEl, _renderReplyHTML(tokenAccum))) {
         if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
@@ -7513,6 +7489,8 @@
     if (!doc) return false;
     var st = String(doc.status || '');
     if (st === 'done' || st === 'error' || st === 'paused') return true;
+    if (_answerFromDoc(window.KazmaTurnDocument, doc)) return true;
+    if (_activityOfDoc(doc).length) return true;
     var parts = doc.parts || [];
     for (var i = 0; i < parts.length; i++) {
       if (parts[i] && parts[i].type === 'hitl') return true;
@@ -7521,17 +7499,9 @@
   }
 
   function _answerFromDoc(TD, doc) {
-    var text = (TD && TD.textOf) ? TD.textOf(doc.parts) : '';
-    if (!text) text = doc.stream || '';
-    if (String(text || '').trim()) return String(text).trim();
-    var parts = doc.parts || [];
-    for (var i = parts.length - 1; i >= 0; i--) {
-      var p = parts[i];
-      if (p && p.type === 'reasoning' && String(p.text || '').trim()) {
-        return String(p.text).trim();
-      }
-    }
-    return '';
+    var text = (TD && TD.textOf) ? TD.textOf((doc && doc.parts) || []) : '';
+    if (!text && doc) text = doc.stream || '';
+    return String(text || '').trim();
   }
 
 
@@ -7654,7 +7624,22 @@
     if (!html) return;
     _progressToolCount = (html.match(/data-kind="tool"/g) || []).length;
     _progressStepCount = (html.match(/<li /g) || []).length;
+    var thoughtN = (html.match(/data-kind="thought"/g) || []).length;
     _taskCardEvent({ t: 'doc' });
+    var done = !!(doc && (doc.status === 'done' || doc.status === 'error'));
+    panel.classList.toggle('is-done', done);
+    panel.classList.toggle('is-active', !done);
+    // Expansion is the reader's. The next turn's begin folds previous
+    // panels. Touching it here yanked the answer up the screen.
+    panel.classList.remove('kazma-cot-restored');
+    var titleEl = panel.querySelector('.agent-progress-title');
+    if (titleEl) {
+      titleEl.textContent = done
+        ? (thoughtN
+          ? ti('cot_title', 'Thinking & Activity')
+          : ti('working', 'Working\u2026'))
+        : ti('thinking', 'Kazma is thinking\u2026');
+    }
     var list = panel.querySelector('.agent-progress-steps');
     if (!list) return;
     if (list._kzCotHTML === html) return;   // nothing changed — no churn
@@ -7663,8 +7648,15 @@
     _wireStepToggles(list);
     var countEl = panel.querySelector('.agent-progress-count');
     if (countEl) {
-      countEl.textContent = _progressStepCount + ' ' +
-        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps'));
+      var bits = [];
+      if (thoughtN) bits.push(ti('thoughts', 'Thoughts'));
+      if (_progressToolCount) {
+        bits.push(_progressToolCount + ' ' +
+          (_progressToolCount === 1 ? ti('step', 'tool') : ti('summary_tools', 'tools').replace('{n} ', '')));
+      }
+      bits.push(_progressStepCount + ' ' +
+        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps')));
+      countEl.textContent = bits.join(' \u00B7 ');
     }
   }
 

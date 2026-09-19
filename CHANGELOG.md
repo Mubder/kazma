@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## Fix — CoT workbench and thoughts stay in the bubble (2026-09-20)
+
+Thinking used to live on the Live Task Card (2-line clamp, 50-row cap),
+then the card unmounted on done and a different collapsed workbench was
+supposed to restore it. Thoughts vanished. The answer painter also fell
+back to the last reasoning part, so notes painted as the reply.
+
+One fold now: `reasoning` is a single growing part on the turn document,
+the bubble workbench is the only CoT painter, and the Live Task Card is
+a status bar (phase, elapsed, Stop). Expand the workbench after the turn
+to read the full thoughts. Live answer text paints from the document.
+
+Plan: `docs/plans/COT_AND_THOUGHTS.md`.
+
 ## Fix — HITL view: join before paint, one resolver, one submit (2026-09-20)
 
 The last weeks of live HITL failures were the **view**: the client painted,
