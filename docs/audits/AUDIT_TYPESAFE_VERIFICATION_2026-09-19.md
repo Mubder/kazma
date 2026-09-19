@@ -4,8 +4,11 @@
 **Subject:** `KAZMA_TYPESAFE_FULL_AUDIT.md` (TypeSafe System One, `jev-1.13.0`, 1338 windows)
 **Method:** every flagged window read against the real code; claims tested by running them, not by reading alone.
 
-The audit report itself is not in this repository. This file records what its
-flags turned out to be, so the next person does not re-derive it.
+The audit report is `KAZMA_TYPESAFE_FULL_AUDIT.md`, alongside this file. It
+lived only in an operator's clone until 2026-09-19, which is why earlier
+revisions of this paragraph said it was not in the repository. This file
+records what its flags turned out to be, so the next person does not
+re-derive it.
 
 ---
 
