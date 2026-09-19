@@ -26,10 +26,11 @@ Arabic, RTL (`agent.language: ar`, `agent.rtl: true`). Set to `en` for English. 
 
 The Live button runs live voice on `/ws/voice`: same LangGraph brain, same
 chat thread/journal as typed messages, and you can interrupt while it talks.
-TTS speaks only the final reply, one sentence clip at a time. With LiveKit
+TTS speaks only the final reply, one sentence clip at a time. **Typed** web
+chat does **not** auto-play TTS — click **🔊** on the message. With LiveKit
 configured (`LIVEKIT_URL` + API key/secret) the browser also gets WebRTC
 echo cancellation and TTS is published into the room. Telegram/Discord/Slack
-stay voice notes. See [Voice & media](voice-and-media). OpenAI Realtime /
+stay voice notes (`tts_reply` only after a voice inbound). See [Voice & media](voice-and-media). OpenAI Realtime /
 Gemini Live are **not** used as the brain (and are skipped as codecs).
 API keys stay on Settings → Providers; Whisper is picked on Settings → Voice,
 not as the active chat model.
@@ -67,7 +68,7 @@ Mutating tools (`email_send`, `email_delete`, `email_categorize`) need HITL appr
 
 Official X API only — [X publisher](x-publisher). Create a Read + Write app at developer.x.com, put the **four OAuth 1.0a keys** in **Settings → X** (not chat). Compose on **X Studio** (`/x`): Post now, Schedule, reschedule, thread hops, delete. Your click on that page is the approval. Chat tools (`x_post`, `x_schedule_post`, `x_delete_post`) still need a HITL card (YOLO cannot skip). **All clocks** on Studio opens `/scheduled` (cron + X together); the Studio planner is X-only. Kill-switch: `KAZMA_X_POST=0`.
 
-**Mentions / auto-reply** is separate: [X auto-reply](x-auto-reply). Settings → X → Auto-reply, mode `draft`. A mention with a keyword hits that card’s against/support side. No card: 😂/👎 criticise *this* post, ❤️/👍 defend it, `شرايك` / both thumbs = opinion on this post. Quotes and status links are the text it reads. The public reply sits under your mention (X rule). Kill-switch: `KAZMA_X_REPLY=0`.
+**Mentions / auto-reply** is separate: [X auto-reply](x-auto-reply). Settings → X → Auto-reply, mode `draft`. A mention with a keyword hits that card’s against/support side. No card: 😂/👎 criticise *this* post, ❤️/👍 defend it, `شرايك` / both thumbs = opinion on this post. Quotes and status links are the text it reads. A **trusted** follow-up under Kazma’s own tweet walks up to the original; strangers need `#Open`. `#Close` stops strangers on that conversation. The public reply sits under your mention (X rule). Kill-switch: `KAZMA_X_REPLY=0`.
 
 ### How do I make the agent research the web?
 
