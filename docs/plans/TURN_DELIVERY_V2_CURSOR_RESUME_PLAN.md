@@ -8,7 +8,9 @@
 > applies state→DOM idempotently") did not. `renderTurn` kept resolving its
 > paint target from DOM shape, which is the root of the "reply never replaces
 > the HITL placeholder" class that recurred through September. See
-> **`docs/plans/TURN_RENDER_V2_KEYED_SLOTS.md`**.
+> **`docs/plans/TURN_RENDER_V2_KEYED_SLOTS.md`**. Display-state (join
+> transcript + registry before paint; one Python resolver) is
+> **`docs/plans/HITL_VIEW_MODEL.md`**.
 **Supersedes (delivery portions of):** `docs/plans/RELIABILITY_MODEL_AND_TURN_DELIVERY.md` (2026-08-03) — that plan shipped `turn_complete` contracts + pollers + watchdogs as incident responses. They worked individually; collectively they form six overlapping recovery heuristics whose interactions are themselves the remaining bug class ("reply invisible until F5 after tab switch").
 
 ---

@@ -217,6 +217,12 @@ behavioural in `test_turn_view.js`.
 
 ## Follow-ups (not blocking)
 
+- **Display state is a later plan.** Keyed slots made order a function of
+  whatever resolver the host supplied. That host (`_hitlDisplayState`) is
+  still impure. The join (transcript + registry **before** paint) and the
+  single Python `resolve_gate_views` live in
+  [`HITL_VIEW_MODEL.md`](HITL_VIEW_MODEL.md). Do not add another hydrate
+  flag or `decided_locally` here.
 - `tests/js/test_markdown_render.js` fails at `main` and still fails here —
   its own harness never defines `window`, which `renderTable` reaches for via
   `KazmaBidi`. Pre-existing, unrelated to this plan, and **not driven by
