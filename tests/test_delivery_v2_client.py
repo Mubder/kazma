@@ -1253,8 +1253,8 @@ class TestGateAuthoritativeFailPosture:
         assert "_gateViewOf" in body
         assert "if (!v) return null;" in body
         lookup = js_function_body(src, "function _gateViewOf(part)")
-        assert "_serverGatesAuth" in lookup
-        assert "stamped.interactive" in lookup
+        assert "part.view" in lookup
+        assert "stamped.interactive" not in lookup
         lock = js_function_body(src, "function _hitlShouldLock(part)")
         assert "v.interactive" in lock
         assert "_serverGatesAuth" not in lock

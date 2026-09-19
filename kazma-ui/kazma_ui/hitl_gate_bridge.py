@@ -99,6 +99,11 @@ async def gate_pending_from_payload(
             message=str(payload.get("message") or "")[:2000],
             payload_json=json.dumps(payload, default=str)[:40000],
         )
+        # A new pause means prior claimed/resuming gates on this thread
+        # finished their tool. Settle them so live_gates (and the view
+        # stamped on this frame) is only the new ask — not inflight leftovers.
+        if thread_id:
+            await settle_thread_gates(thread_id)
         created = await register_gate_async(row)
         record_hitl_gate(created.state, mechanism)
     except Exception:

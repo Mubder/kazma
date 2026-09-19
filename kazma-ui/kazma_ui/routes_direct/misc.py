@@ -928,6 +928,27 @@ def register_misc_routes(self: Any) -> None:
                     payload=_stamp_payload,
                     interrupt_id=str(_stamp_payload.get("interrupt_id") or ""),
                 )
+                # Gate registry CAS BEFORE the journal emit so attach_view
+                # sees claimed/resuming (inflight), not the leftover pending
+                # row. Emit-before-CAS stamped a pending view on an approved
+                # frame — live "No longer pending" (2026-09-20).
+                try:
+                    from kazma_ui.hitl_gate_bridge import (
+                        gate_claimed as _gate_claimed,
+                        gate_resuming as _gate_resuming,
+                    )
+
+                    await _gate_claimed(
+                        thread_id,
+                        _live_iid,
+                        "approve" if approved else "deny",
+                        actor,
+                        tool=pending_tool_name,
+                        payload=_stamp_payload,
+                    )
+                    await _gate_resuming(_live_iid)
+                except Exception:
+                    logger.debug("[HITL] gate claim skipped", exc_info=True)
                 try:
                     from kazma_ui.delivery import get_turn_broker
 
@@ -948,26 +969,6 @@ def register_misc_routes(self: Any) -> None:
                     )
                 except Exception:
                     logger.debug("[HITL] hitl journal frame skipped", exc_info=True)
-                # Gate registry: record the decision (CAS) and the resume
-                # start. Best-effort — a registry failure never blocks the
-                # approve; drift is recorded by the parity counter.
-                try:
-                    from kazma_ui.hitl_gate_bridge import (
-                        gate_claimed as _gate_claimed,
-                        gate_resuming as _gate_resuming,
-                    )
-
-                    await _gate_claimed(
-                        thread_id,
-                        _live_iid,
-                        "approve" if approved else "deny",
-                        actor,
-                        tool=pending_tool_name,
-                        payload=_stamp_payload,
-                    )
-                    await _gate_resuming(_live_iid)
-                except Exception:
-                    logger.debug("[HITL] gate claim skipped", exc_info=True)
                 _resume_inflight.add(thread_id)
                 _resume_task = asyncio.create_task(
                     _drive_graph_to_journal(

@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "GateView",
     "apply_views_to_parts",
+    "attach_gate_views_to_done_frame",
     "attach_view_to_hitl_frame",
     "interrupt_id_of",
+    "is_hitl_frame_type",
     "resolve_gate_views",
     "stamp_parts_for_read",
     "view_for_interrupt",
@@ -354,39 +356,137 @@ def view_for_interrupt(
     }
 
 
-def attach_view_to_hitl_frame(frame: dict[str, Any], thread_id: str) -> dict[str, Any]:
-    """Best-effort: stamp ``view`` on a journaled HITL frame. Never raises."""
+_DECISION_FRAME_STATES = frozenset({
+    "approved",
+    "denied",
+    "timeout",
+    "error",
+    "settled",
+    "done",
+})
+
+_HITL_FRAME_TYPES = frozenset({
+    "hitl",
+    "approval_required",
+    "approval_needed",
+    "paused_for_approval",
+})
+
+
+def is_hitl_frame_type(frame_type: str) -> bool:
+    return str(frame_type or "") in _HITL_FRAME_TYPES
+
+
+def _hitl_parts_for_thread(thread_id: str) -> list[dict[str, Any]]:
+    """HITL parts on the open assistant row. Never raises."""
+    if not thread_id:
+        return []
     try:
-        from kazma_ui.hitl_gate_bridge import registry_on
+        from kazma_ui.session_manager import get_session_manager
+
+        sess = get_session_manager().get_by_thread_id(thread_id)
+        if sess is None:
+            return []
+        messages = getattr(sess, "messages", None) or []
+        for m in reversed(list(messages)):
+            if not isinstance(m, dict):
+                continue
+            if str(m.get("role") or "").lower() != "assistant":
+                continue
+            parts = m.get("parts") if isinstance(m.get("parts"), list) else []
+            return [dict(p) for p in hitl_parts_of(parts)]
+    except Exception:
+        logger.debug("[gate_view] open-turn HITL parts skipped", exc_info=True)
+    return []
+
+
+def attach_view_to_hitl_frame(frame: dict[str, Any], thread_id: str) -> dict[str, Any]:
+    """Stamp ``view`` + ``gate_views`` on a journaled HITL frame. Never raises.
+
+    A covering *pending* row must not win when the frame itself is a
+    decision (emit-before-CAS). Resolve that part from the frame state so
+    live and refresh agree without a second JS table.
+    """
+    try:
         from kazma_core.safety.hitl_gates import live_gates
+        from kazma_ui.hitl_gate_bridge import registry_on
 
         if not thread_id or not registry_on():
             return frame
         data = frame.get("data") if isinstance(frame.get("data"), dict) else None
         src = data if data is not None else frame
+        iid = str(src.get("interrupt_id") or src.get("gate_id") or "")
+        part_state = str(src.get("state") or src.get("hitl_state") or "pending")
         part = {
             "type": "hitl",
-            "state": str(src.get("state") or src.get("hitl_state") or "pending"),
-            "interrupt_id": str(
-                src.get("interrupt_id") or src.get("gate_id") or ""
-            ),
+            "state": part_state,
+            "interrupt_id": iid,
             "tool": str(src.get("tool") or ""),
             "payload": src,
         }
-        rows = live_gates(thread_id)
-        views = resolve_gate_views([part], rows, authoritative=True)
+        rows = list(live_gates(thread_id) or [])
+        rows_for_this = rows
+        if str(part_state).lower() in _DECISION_FRAME_STATES and iid:
+            rows_for_this = [
+                r for r in rows
+                if not (
+                    _row_state(r) == "pending"
+                    and (_row_id(r) == iid or _row_alias(r) == iid)
+                )
+            ]
+        views = resolve_gate_views([part], rows_for_this, authoritative=True)
         if not views:
             return frame
         view = dict(views[0])
+        all_parts = _hitl_parts_for_thread(thread_id)
+        if iid and not any(interrupt_id_of(p) == iid for p in all_parts):
+            all_parts = list(all_parts) + [part]
+        elif not all_parts:
+            all_parts = [part]
+        all_views = [
+            dict(v) for v in resolve_gate_views(
+                all_parts, rows_for_this, authoritative=True
+            )
+        ]
         out = dict(frame)
         out["view"] = view
         if data is not None:
             payload = dict(data)
             payload["view"] = view
+            payload["gate_views"] = all_views
             out["data"] = payload
+        else:
+            out["gate_views"] = all_views
         return out
     except Exception:
         logger.debug("[gate_view] hitl frame stamp skipped", exc_info=True)
+        return frame
+
+
+def attach_gate_views_to_done_frame(
+    frame: dict[str, Any], thread_id: str
+) -> dict[str, Any]:
+    """Stamp ``gate_views`` on done/turn_complete. Never raises."""
+    try:
+        from kazma_ui.hitl_gate_bridge import registry_on
+
+        if not thread_id or not registry_on():
+            return frame
+        rows, auth = live_snapshot(thread_id)
+        parts = _hitl_parts_for_thread(thread_id)
+        views = [
+            dict(v) for v in resolve_gate_views(
+                parts, rows, authoritative=bool(auth)
+            )
+        ]
+        out = dict(frame)
+        data = dict(out.get("data") or {}) if isinstance(out.get("data"), dict) else {}
+        data["gate_views"] = views
+        out["data"] = data
+        return out
+    except Exception:
+        logger.debug("[gate_view] done gate_views stamp skipped", exc_info=True)
+        return frame
         return frame
 
 

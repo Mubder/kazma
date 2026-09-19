@@ -235,6 +235,22 @@ def test_open_turn_pin_skips_bubbles_nested_in_cot() -> None:
     assert "closest('.agent-progress')" in pin
 
 
+def test_hitl_frames_ingest_gate_views() -> None:
+    """Settle/done frames carry view + gate_views; the client must consume them."""
+    js = _js()
+    assert "function _ingestFrameGateViews(data)" in js
+    default = js.split("function _defaultAttachCallbacks(epoch)", 1)[1]
+    ar = default.split("onApprovalRequired: function(data)", 1)[1]
+    assert "_ingestFrameGateViews(data)" in ar
+    assert "view: (data && data.view) || undefined" in ar
+    ingest = js_function_body(js, "function _ingestFrameGateViews(data)")
+    assert "_serverGateViews = data.gate_views" in ingest
+    click = js.split("function submitApproval(action, scope)", 1)[1]
+    # Decision is approved/denied; inflight is the overlay, not part.state
+    # (HITL_RANK would then reject the settle frame).
+    assert "state: hitlState," in click
+
+
 def test_sequential_hitl_does_not_mint_a_second_bubble() -> None:
     """Live 4-card run (2026-09-20): a resume/heal turn_id painted a second
     assistant row above the replay. One user row, one assistant bubble."""
