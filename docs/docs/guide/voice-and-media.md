@@ -90,6 +90,10 @@ inbound audio is transcribed to text before reaching the agent. Optional
 **auto voice-note replies** (`tts_reply`) synthesize the agent's reply back to
 audio **only when that inbound turn was voice** (not for plain text chats).
 
+Typed Web chat does **not** auto-play TTS. Click **🔊** on a message to hear
+it. Live voice (`/ws/voice`) still speaks the reply while that mode is on.
+Settings → Voice no longer re-arms browser speech on refresh.
+
 ### Enable voice
 
 In `kazma.yaml` under `gateway`, or at runtime via the **Web UI → Settings →

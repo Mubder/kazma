@@ -190,6 +190,26 @@ def test_no_second_hidden_autospeak_switch():
         "a localStorage auto-speak gate is a second source of truth that no "
         "settings screen shows"
     )
+    # Settings → Voice must not overwrite the browser `/voice on|off` pref.
+    # That copy is what re-armed web speech after every refresh.
+    assert "TTS_ENABLED_KEY, settings.enabled" not in js
+    assert "setItem(TTS_ENABLED_KEY, settings.enabled" not in js
+
+
+def test_web_typed_chat_does_not_autospeak():
+    """SSE completion must not call playTTS. Speak is the 🔊 on the message."""
+    js = _read("kazma-ui/kazma_ui/static/js/chat.js")
+    assert js.count("playTTS(") == 1
+    assert "toggleSpeakMessage(" in js
+    assert "window.KazmaVoice.playTTS(tokenAccum)" not in js
+    assert "KazmaVoice.playTTS(tokenAccum)" not in js
+
+
+def test_explicit_speak_is_not_blocked_by_stale_tts_pref():
+    """A leftover kazma.ttsEnabled=false must not brick the 🔊 button."""
+    js = _read("kazma-ui/kazma_ui/static/js/voice.js")
+    assert "if (!owner && !isTtsEnabled()) return;" in js
+    assert "if (!isTtsEnabled() || _ttsUnavailable) return;" not in js
 
 
 # ── the settings page must cover every voice key ───────────────────────────
