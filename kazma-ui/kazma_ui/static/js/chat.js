@@ -7438,7 +7438,9 @@
   function _activityOfDoc(doc) {
     var TD = window.KazmaTurnDocument;
     if (!TD || typeof TD.activityOf !== 'function') return [];
-    return TD.activityOf((doc && doc.parts) || []);
+    // Same resolver the cards are ordered and labelled with, so the
+    // workbench row for a gate cannot contradict the card next to it.
+    return TD.activityOf((doc && doc.parts) || [], _hitlDisplayState);
   }
 
   // ── Slot painters ──────────────────────────────────────────────────
@@ -7513,6 +7515,10 @@
    * a stale node is visible and reportable, a removed one is silence.
    */
   var _turnRenderers = {
+    // The ONE answer to "what state is this gate in". TurnView orders by it
+    // and hands it back on the entry for the painter to label with, so a
+    // card can never be sorted as one thing and painted as another.
+    gateState: _hitlDisplayState,
     has: function(kind, doc) {
       if (kind === 'text') return !!_answerFromDoc(window.KazmaTurnDocument, doc);
       if (kind === 'workbench') return _activityOfDoc(doc).length > 0;
@@ -7534,7 +7540,7 @@
     paint: function(entry, el, ctx) {
       if (entry.kind === 'text') return _paintTextSlot(el, ctx.doc, ctx.meta);
       if (entry.kind === 'workbench') return _paintWorkbenchSlot(el, ctx.doc);
-      if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx);
+      if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx, entry.state);
     },
     discard: function() { return false; },
   };
@@ -7667,9 +7673,12 @@
    * A live gate is left alone — its buttons are wired and the operator may
    * be reading it. Everything else is frozen and stamped.
    */
-  function _paintHitlSlotCard(card, part, ctx) {
+  function _paintHitlSlotCard(card, part, ctx, resolvedState) {
     if (!card) return;
-    var show = _hitlDisplayState(part);
+    // Label from the state TurnView ORDERED by. Re-resolving here is what
+    // let a card sort as pending (below the answer) while painting
+    // "Approved — running…" on top of it.
+    var show = resolvedState || _hitlDisplayState(part);
     if (show === 'pending') {
       // Only a gate the registry confirms is live gets a ticker. Re-arming
       // it on every render of anything that merely *looks* pending is what

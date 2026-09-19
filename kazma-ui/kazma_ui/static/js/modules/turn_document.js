@@ -19,9 +19,23 @@
     return text;
   }
 
-  function activityOf(parts) {
+  /**
+   * Activity rows for the workbench.
+   *
+   * `gateState` is the SAME resolver the renderer orders and labels gates
+   * with. Without it this function was a third independent answer to "what
+   * state is this gate in" — it read the raw part stamp, so the workbench
+   * could print "Waiting for approval" next to a card reading "Approved".
+   * Callers that have no resolver (hydration, legacy messages) get the
+   * part's own stamp, which is the right answer when there is nothing
+   * better to consult.
+   */
+  function activityOf(parts, gateState) {
     var rows = [];
     if (!Array.isArray(parts)) return rows;
+    var resolveGate = typeof gateState === 'function'
+      ? gateState
+      : function (part) { return String((part && part.state) || 'pending'); };
     for (var i = 0; i < parts.length; i++) {
       var p = parts[i];
       if (!p || typeof p !== 'object') continue;
@@ -49,9 +63,10 @@
           ts: p.ts || null,
         });
       } else if (kind === 'hitl') {
-        var hs = String(p.state || 'pending');
+        var hs = String(resolveGate(p) || 'pending');
         var htitle = 'Waiting for approval';
-        if (hs === 'approved' || hs === 'inflight') htitle = 'Approved';
+        if (hs === 'awaiting') htitle = 'Waiting for approval';
+        else if (hs === 'approved' || hs === 'inflight') htitle = 'Approved';
         else if (hs === 'denied') htitle = 'Denied';
         else if (hs === 'timeout' || hs === 'error' || hs === 'settled' || hs === 'done') {
           htitle = 'Approval resolved';

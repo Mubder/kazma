@@ -207,6 +207,21 @@ var rp = rehydrated.parts.filter(function (p) { return p.type === "hitl"; })[0];
 assert("hydrate strips decided_locally", rp && rp.decided_locally === undefined);
 assert("hydrate keeps the rest of the gate", rp && rp.interrupt_id === "L1" && rp.state === "approved");
 
+// ── activityOf is not a third opinion about a gate ──────────────────
+// The workbench row could print "Waiting for approval" beside a card
+// reading "Approved", because it labelled from the raw part stamp while the
+// renderer labelled from the host's resolver. Same fact, two answers.
+var gateParts = [{ type: "hitl", interrupt_id: "w1", state: "pending", tool: "file_delete" }];
+var rawRow = TD.activityOf(gateParts)[0];
+assert("without a resolver it reads the part stamp", rawRow.title === "Waiting for approval");
+var resolvedRow = TD.activityOf(gateParts, function () { return "inflight"; })[0];
+assert("with a resolver the row follows it", resolvedRow.title === "Approved",
+  resolvedRow.title);
+var awaitingRow = TD.activityOf(gateParts, function () { return "awaiting"; })[0];
+assert("'awaiting' reads as waiting, not as resolved",
+  awaitingRow.title === "Waiting for approval", awaitingRow.title);
+assert("the row still names the tool", resolvedRow.detail === "file_delete");
+
 // ── Capacity fast-path: content-key dedupe + reset semantics ────────
 // chat.js paintCapacityReply forwards reply+turn_id but NOT seq, so the
 // eventKey for capacity events is content-derived. This locks the

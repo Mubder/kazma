@@ -90,7 +90,9 @@ function makeRenderers(env, opts) {
         el.setAttribute("data-md", t);
         el.textContent = t;
       } else if (entry.kind === "hitl") {
-        el.setAttribute("data-state", String(entry.part.state || "pending"));
+        // From entry.state — the value TurnView ORDERED by. Reading
+        // entry.part.state here is the bug this contract exists to stop.
+        el.setAttribute("data-state", String(entry.state || entry.part.state || "pending"));
       } else if (entry.kind === "workbench") {
         el.textContent = TD.activityOf(ctx.doc.parts).length + " steps";
       }
@@ -544,7 +546,95 @@ function feed(events, turnId) {
 }
 
 // ══════════════════════════════════════════════════════════
-// 12. INCIDENT 2026-09-01 — the You bubble is never a paint target
+// 12. INCIDENT 2026-09-19 (live install) — ONE answer per gate
+//
+//     "Approved — running…" sitting BELOW the finished reply, and after a
+//     refresh "Waiting for approval" below a delete that had already run.
+//
+//     Ordering read part.state; the painter read the host's display
+//     resolver. A part still stamped `pending` whose decision the registry
+//     had claimed was therefore sorted as pending (after the answer) and
+//     painted as approved. Two sources of truth for one fact — the same
+//     defect this module exists to remove, one level in.
+// ══════════════════════════════════════════════════════════
+
+{
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+
+  // The document still says pending; the host resolves it to inflight
+  // (the registry says the decision was claimed).
+  const rend = makeRenderers(env);
+  rend.gateState = (p) => (p.interrupt_id === "g1" ? "inflight" : String(p.state || "pending"));
+  rend.paint = (entry, el, ctx) => {
+    if (entry.kind === "text") {
+      const t = TD.textOf(ctx.doc.parts);
+      el.setAttribute("data-md", t); el.textContent = t;
+    } else if (entry.kind === "hitl") {
+      // Label from the entry, never from the part.
+      el.setAttribute("data-state", entry.state);
+    }
+  };
+
+  const doc = feed([
+    { type: "hitl", state: "pending", interrupt_id: "g1", tool: "file_delete",
+      payload: { interrupt_id: "g1" } },
+    { type: "done", content: "Longer run complete." },
+  ]);
+  env.view.render(bubble, doc, rend);
+
+  const s = shape(bubble);
+  assert("a claimed gate sorts ABOVE the answer, not below it",
+    s.indexOf("card(g1:inflight)") < s.indexOf("text"), s);
+  assert("the label matches the ordering",
+    s.indexOf("card(g1:inflight)") >= 0, s);
+  assert("nothing is sorted as pending while painted as approved",
+    !s.some(x => x.includes(":pending")), s);
+}
+
+{
+  // And the resolver is honoured for the pending direction too: a part the
+  // host says is still live sorts below the text even if its own stamp
+  // claims otherwise. Ordering follows the resolver, always.
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+  const rend = makeRenderers(env);
+  rend.gateState = () => "pending";
+  const doc = feed([
+    { type: "hitl", state: "approved", interrupt_id: "g1", tool: "t" },
+    { type: "done", content: "answer" },
+  ]);
+  env.view.render(bubble, doc, rend);
+  const s = shape(bubble);
+  assert("the resolver decides ordering, not the raw part stamp",
+    s.indexOf("text") < s.indexOf("card(g1:pending)"), s);
+}
+
+{
+  // slotPlan carries the resolved state on the entry, so a painter cannot
+  // disagree with the ordering even by accident.
+  const plan = TV.slotPlan(
+    { parts: [{ type: "hitl", interrupt_id: "a", state: "pending" }] },
+    { text: true }, TD,
+    () => "approved",
+  );
+  const gate = plan.find(e => e.kind === "hitl");
+  assert("the entry carries the resolved state", gate && gate.state === "approved");
+  assert("and it sorted by that state", plan.map(e => e.key).join(",") === "hitl:a,text",
+    plan.map(e => e.key));
+  // No resolver → falls back to the part's own stamp.
+  const bare = TV.slotPlan(
+    { parts: [{ type: "hitl", interrupt_id: "a", state: "pending" }] },
+    { text: true }, TD,
+  );
+  assert("without a resolver it falls back to part.state",
+    bare.map(e => e.key).join(",") === "text,hitl:a", bare.map(e => e.key));
+}
+
+// ══════════════════════════════════════════════════════════
+// 13. INCIDENT 2026-09-01 — the You bubble is never a paint target
 // ══════════════════════════════════════════════════════════
 
 {
