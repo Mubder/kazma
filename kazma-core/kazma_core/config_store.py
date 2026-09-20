@@ -1976,11 +1976,37 @@ class ConfigStore:
                 raise
 
     def close(self) -> None:
-        """Close the database connection."""
-        if self._conn is not None:
-            self._conn.close()
-            self._conn = None
-        self._pg = None
+        """Close the database connection.
+
+        Takes ``self._lock`` — the same reentrant lock every read and write in
+        this class already holds across ``_get_conn()`` *and* the statement
+        that follows it. Without it, closing was a use-after-free rather than
+        an error: a reader parked inside ``conn.execute()`` has released the
+        GIL and is down in ``sqlite3_step`` on a native handle this method
+        frees, so the process faults instead of raising. On Windows that is a
+        bare ``access violation`` with no Python traceback — the crash cannot
+        be caught, logged, or retried, and it takes the whole interpreter.
+
+        Observed 2026-09-20: a full pytest run died at 19% inside
+        ``get_category`` on a pool thread, called from
+        ``web_sessions.purge_expired_sessions`` (the 6h scheduler started by
+        the memory worker), while the per-test ``_isolated_config_store``
+        fixture closed that same store. ``purge_expired_sessions`` wraps its
+        read in ``try/except`` and logs "purge skipped"; an access violation
+        is not an exception, so the guard was never reached.
+
+        :func:`reset_config_store` already defends the *other* half of this —
+        it drops the singleton reference without closing, so the GC cannot
+        finalize a store a background reader still holds. That left the
+        explicit ``close()`` as the remaining way to free the handle out from
+        under a reader. Now a close waits for the in-flight statement, and a
+        read that arrives after it simply reopens via ``_get_conn()``.
+        """
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+            self._pg = None
 
 
 # ══════════════════════════════════════════════════════════════════════════
