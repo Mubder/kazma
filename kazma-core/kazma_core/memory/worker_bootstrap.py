@@ -17,7 +17,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 import sqlite3
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -27,6 +29,7 @@ __all__ = [
     "register_v2_handlers",
     "start_memory_worker",
     "register_backup_export_handlers",
+    "background_schedulers_enabled",
 ]
 
 _registered = False
@@ -39,6 +42,33 @@ _backup_export_registered = False
 # task mid-loop and silently halt a cadence — the exact "scheduler existed but
 # nothing ran it" failure mode (audit finding).
 _scheduler_tasks: set = set()
+
+
+def background_schedulers_enabled() -> bool:
+    """False under pytest — the cadences below must not outlive their test.
+
+    Every scheduler started by :func:`start_memory_worker` is a long-cadence
+    loop (15 min to weekly) that reads process-wide stores from a thread the
+    test that booted it does not know about. A test suite is exactly the
+    environment those loops are unsafe in: the per-test fixtures tear the
+    stores down underneath them, and no cadence measured in hours has anything
+    to do in a run measured in minutes.
+
+    This is one switch for all eight, not a patch over the one that was caught.
+    The one that was caught was the session purge: it sleeps 120s after boot
+    and then reads the ConfigStore on a pool thread, which on 2026-09-20 hit
+    ``ConfigStore.close()`` from the per-test fixture and crashed the
+    interpreter (a Windows access violation at 19% of a full run — see that
+    method's docstring). The store is now safe to close under a reader, so
+    this gate is the second of two independent fixes, not the only one: the
+    same shape via any other scheduler would have crashed the same way.
+
+    Set ``KAZMA_TEST_BACKGROUND_SCHEDULERS=1`` to start them anyway, for a
+    test that genuinely wants to observe a cadence.
+    """
+    if os.environ.get("KAZMA_TEST_BACKGROUND_SCHEDULERS") == "1":
+        return True
+    return not ("pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"))
 
 
 def _offload(fn: Callable[[dict[str, Any]], bool]) -> Callable[[dict[str, Any]], Any]:
@@ -343,12 +373,25 @@ def start_memory_worker() -> None:
         ``sqlite3.backup()`` copies of both memory DBs + JSONL/GraphML
         long-term exports), so recovery artefacts exist without manual
         intervention.
+
+    Handler registration and the durable queue worker always start. The
+    wall-clock schedulers are gated by :func:`background_schedulers_enabled`,
+    which is False under pytest.
     """
     try:
         register_v2_handlers()
         from kazma_core.memory.task_queue import start_worker
 
         start_worker()
+        if not background_schedulers_enabled():
+            # Handlers are registered and the durable queue still drains —
+            # only the wall-clock cadences are held back. See
+            # background_schedulers_enabled().
+            logger.info(
+                "[memory_worker] background schedulers not started (pytest); "
+                "set KAZMA_TEST_BACKGROUND_SCHEDULERS=1 to override"
+            )
+            return
         _start_macro_sleep_scheduler()
         _start_backup_export_scheduler()
         _start_reconsolidation_scheduler()

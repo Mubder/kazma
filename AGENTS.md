@@ -189,6 +189,21 @@ truth = LangGraph checkpoint. Surfaces render; they never infer Approved.
 - Process-wide singleton: `get_config_store()` — all components MUST use this, not `ConfigStore()` directly
 - Multi-key writes MUST use `batch_set()` or `transaction()` for atomicity
 - Never construct `ConfigStore()` in gateway/core code — use `get_config_store()`
+- **`self._lock` covers the live statement, and `close()` must take it too.**
+  Every read/write holds the lock across `_get_conn()` *and* the statement
+  that follows. `close()` did not, so it freed sqlite's native handle under a
+  thread already inside `sqlite3_step` — a use-after-free, which on Windows
+  is a bare `access violation` with no traceback that no `try/except` can
+  catch. It killed a full pytest run at 19% on 2026-09-20: the memory
+  worker's session-purge cadence read the `auth` category on a pool thread
+  while the per-test fixture closed the same store. **Any new method that
+  touches `_conn` holds `_lock` for as long as the statement is live.**
+  A read after a close is fine — `_get_conn()` reopens lazily.
+  Repro: `tests/test_config_store_close_race.py`.
+- Background cadences do not run under pytest:
+  `worker_bootstrap.background_schedulers_enabled()` is False there (override
+  with `KAZMA_TEST_BACKGROUND_SCHEDULERS=1`). One switch for all eight
+  schedulers — the purge was simply the one that got caught.
 - **GET nested vault walk is resolve-only.** `_resolve_vault_value` decrypts
   `vault://` pointers inside dicts/lists. Lazy-migrate of plaintext secrets
   is **only** for the exact string key `get()` was called with. Nested
@@ -1291,6 +1306,9 @@ default-OPEN; they are now default-CLOSED, and CI keeps them that way.
   The recorder reads `read_memory_cfg()` on the caller thread so the worker
   never touches ConfigStore. **A default every caller must override to be
   safe is the wrong default.**
+- The *explicit* `ConfigStore.close()` was the remaining way to free that
+  handle under a reader, and it did — see §8. Repro:
+  `tests/test_config_store_close_race.py`.
 
 
 
