@@ -147,6 +147,64 @@ def test_approved_tools_actually_execute(harness: Harness) -> None:
     )
 
 
+def test_persisted_row_carries_the_protocol_contract(harness: Harness) -> None:
+    """What ``/messages`` returns is what a refresh has to rebuild from.
+
+    ``UNIFIED_TURN_BLOCK.md`` §6 lists what a turn record must carry. Unit
+    tests assert each field in isolation; this asserts they all survive a
+    real turn through the real routes, which is where a field gets dropped
+    by a serializer nobody thought about.
+    """
+    from tests.e2e._unified_turn_harness import api_client
+
+    run = drive_turn(
+        harness,
+        "Set up the project scaffold.",
+        [True, True, True, True],
+        leg_timeout=120.0,
+    )
+    assert run.finished
+
+    with api_client(harness.base) as client:
+        resp = client.get(
+            f"{harness.base}/api/chat/sessions/{run.session_id}/messages",
+            timeout=30.0,
+        )
+        assert resp.status_code == 200, resp.status_code
+        messages = resp.json()
+
+    assistant = [m for m in messages if m.get("role") == "assistant"]
+    assert assistant, "the finished turn is not in the transcript"
+    row = assistant[-1]
+
+    assert str(row.get("turn_id") or "").strip(), "no stable turn id"
+    assert int(row.get("rev") or 0) > 0, (
+        "the durable row carries no revision, so a late snapshot cannot be "
+        "told from a current one (invariant U05)"
+    )
+    assert int(row.get("schema") or 0) >= 2, (
+        f"row written at schema {row.get('schema')!r}"
+    )
+
+    gates = [p for p in (row.get("parts") or []) if p.get("type") == "hitl"]
+    assert len(gates) == 4, (
+        f"four pauses persisted as {len(gates)} gate parts"
+    )
+    assert len({p.get("interrupt_id") for p in gates}) == 4, (
+        "gate identities collapsed in storage"
+    )
+
+    rows = row.get("activity") or []
+    assert rows, "the turn persisted no activity at all"
+    assert all(str(r.get("id") or "").strip() for r in rows), (
+        "an activity row has no stable id, so the renderer cannot keep it "
+        "expanded across an update (plan §3)"
+    )
+    assert len({r["id"] for r in rows}) == len(rows), (
+        "two activity rows share an id"
+    )
+
+
 def test_gates_are_registered_and_settled(harness: Harness) -> None:
     """Every pause left a registry row, and none is still pending.
 

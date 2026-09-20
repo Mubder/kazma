@@ -279,9 +279,27 @@ Legacy normalization already exists in one place:
 `legacy_turn_id`. That is the adapter §6.7 requires; it must not be
 duplicated.
 
+### 6.0 What Phase 1 closed
+
+The table above is the Phase 0 baseline and is left as written. For current
+state, these gaps are closed:
+
+| Gap | Closed by |
+|---|---|
+| Authoritative document revision | `rev` on the durable row, bumped by `reply_sink.upsert_reply`, refused when stale by `turn_document.js:applyEvent` (U05) |
+| Schema version | `turn_document.TURN_SCHEMA_VERSION`; unversioned rows read as schema 1 |
+| Reasoning / activity IDs | every `activity_of` row carries `id`, the part's own key |
+| Tool-call IDs | `_streaming.py` stamps the graph's `run_id` on `tool_call`/`tool_result`; the part key is `tool#<id>` |
+| Snapshot replaces vs merges | a hydrate now merges; it covers only what was durable when taken |
+
+Still open at the end of Phase 1a/1b: explicit snapshot **coverage
+declaration** (a partial snapshot cannot yet say what it covers), an
+explicit event-kind discriminator, and everything in §5 (durable
+publication).
+
 ### 6.1 Measured cross-language divergences
 
-Found by running both implementations over the same fixtures
+Found in Phase 0 by running both implementations over the same fixtures (all three are closed as of Phase 1a)
 (`tests/fixtures/unified_turn/messages/`, driven by
 `tests/test_unified_turn_fixtures.py`). Both suites were green before this;
 neither had an example that made the other disagree.

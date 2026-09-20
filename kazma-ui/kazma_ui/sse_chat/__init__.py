@@ -1662,6 +1662,15 @@ def create_sse_chat_router(
                     merged["activity"] = prev_act
                 if not row.get("turn_id") and prev.get("turn_id"):
                     merged["turn_id"] = prev.get("turn_id")
+                # Coalescing two rows must not hand back the older
+                # revision: a client would then refuse the newer state it
+                # is holding as "stale".
+                try:
+                    merged["rev"] = max(
+                        int(prev.get("rev") or 0), int(row.get("rev") or 0)
+                    )
+                except (TypeError, ValueError):
+                    merged["rev"] = row.get("rev") or prev.get("rev") or 0
                 out[-1] = merged
             return out
 
@@ -1697,6 +1706,15 @@ def create_sse_chat_router(
                 item["model"] = msg["model"]
             if msg.get("turn_id"):
                 item["turn_id"] = msg["turn_id"]
+            # The durable revision and schema of this row. This serializer
+            # is a WHITELIST, so a field the store holds is invisible to
+            # the client until it is named here — which is exactly how the
+            # revision went out as 0 on its first run
+            # (docs/plans/UNIFIED_TURN_BLOCK.md §6, invariant U05).
+            if msg.get("rev") is not None:
+                item["rev"] = msg["rev"]
+            if msg.get("schema") is not None:
+                item["schema"] = msg["schema"]
             parts = msg.get("parts") if isinstance(msg.get("parts"), list) else None
             if parts:
                 item["parts"] = parts

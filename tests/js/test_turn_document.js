@@ -361,5 +361,87 @@ assert("legacyTurnId walks UTF-8, not UTF-16",
   TD.legacyTurnId({ ts: "2026-09-20T11:30:00Z", content: "تم الحفظ 😀" })
     === "legacy-4373231117a879b5");
 
+// ── Document revision (UNIFIED_TURN_BLOCK.md Phase 1, invariant U05) ───
+// _resyncDelivery fetches /status and /messages in PARALLEL and either can
+// land late. Before revisions the only defence was that mergeParts happens
+// to be additive — which says nothing about `status`, so a stale row could
+// stamp the turn done, or paused, over the truth.
+
+function hydrateEv(rev, extra) {
+  var ev = { type: "hydrate", turn_id: "t-rev", rev: rev, schema: 2 };
+  for (var k in (extra || {})) {
+    if (Object.prototype.hasOwnProperty.call(extra, k)) ev[k] = extra[k];
+  }
+  return ev;
+}
+
+var revDoc = TD.applyEvent(TD.empty("t-rev"), hydrateEv(7, {
+  content: "the newer answer", parts: [{ type: "text", text: "the newer answer" }],
+}));
+assert("a hydrate carries its revision", revDoc.rev === 7);
+assert("...and its schema", revDoc.schema === 2);
+
+var stale = TD.applyEvent(revDoc, hydrateEv(3, {
+  content: "an older answer",
+  parts: [{ type: "text", text: "an older answer" }],
+  open: true,
+}));
+assert("a stale snapshot is refused outright", stale === revDoc);
+assert("...so it cannot regress the answer",
+  TD.textOf(stale.parts) === "the newer answer");
+assert("...and cannot regress the status", stale.status === "done");
+
+var newer = TD.applyEvent(revDoc, hydrateEv(9, {
+  content: "the newest answer",
+  parts: [{ type: "text", text: "the newest answer" }],
+}));
+assert("a newer snapshot applies", TD.textOf(newer.parts) === "the newest answer");
+assert("...and advances the revision", newer.rev === 9);
+
+// Equal revisions are NOT stale. The comparison is `<`, not `<=`: two
+// hydrates at one revision can still differ (a /messages read and a
+// /status-driven repaint of the same row reach applyEvent by different
+// routes), and refusing the second would be a lost repaint, not a
+// protected one. An IDENTICAL hydrate is still deduped, but by eventKey —
+// that is the content dedupe, a separate rule from the revision rule, and
+// conflating them is how a refresh mid-pause loses its own paint.
+var sameRev = TD.applyEvent(revDoc, hydrateEv(7, {
+  content: "the newer answer, corrected",
+  parts: [{ type: "text", text: "the newer answer, corrected" }],
+  open: true, pending: true,
+}));
+assert("an equal revision is not refused", sameRev !== revDoc
+  && sameRev.status === "paused"
+  && TD.textOf(sameRev.parts) === "the newer answer, corrected");
+var identical = TD.applyEvent(revDoc, hydrateEv(7, {
+  content: "the newer answer",
+  parts: [{ type: "text", text: "the newer answer" }],
+}));
+assert("an identical hydrate is deduped by content, not by revision",
+  identical === revDoc);
+
+// A row written before revisions existed reads as 0 and must still paint
+// into a fresh document, or every legacy transcript would go blank.
+var legacyRev = TD.applyEvent(TD.empty("t-rev"), {
+  type: "hydrate", turn_id: "t-rev", content: "old row",
+  parts: [{ type: "text", text: "old row" }],
+});
+assert("an unversioned row still hydrates", TD.textOf(legacyRev.parts) === "old row");
+
+// A snapshot MERGES, it does not replace. It covers what was durable when
+// it was taken; tokens streamed since are not in it, and an omitted part
+// is ambiguity rather than an authoritative removal.
+var live = TD.applyEvent(TD.empty("t-rev"), {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "live-1", seq: 1,
+});
+var afterSnap = TD.applyEvent(live, hydrateEv(2, {
+  content: "persisted answer",
+  parts: [{ type: "text", text: "persisted answer" }],
+}));
+assert("a snapshot does not drop live parts not in it",
+  afterSnap.parts.filter(function (p) { return p.type === "tool"; }).length === 1);
+assert("...while still delivering its own",
+  TD.textOf(afterSnap.parts) === "persisted answer");
+
 if (fail) process.exit(1);
 console.log("all ok");

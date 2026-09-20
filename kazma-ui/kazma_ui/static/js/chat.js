@@ -770,6 +770,12 @@
             model: lastMsg.model || '',
             open: lastMsg.open,
             pending: lastMsg.pending,
+            // The durable revision this snapshot covers. /status and
+            // /messages are fetched in parallel and either can land late;
+            // the document refuses a snapshot older than what it already
+            // has (invariant U05).
+            rev: lastMsg.rev,
+            schema: lastMsg.schema,
           });
           if (!generating && !liveHitl && (lastMsg.content || '').trim()) {
             _forcePaintDoneContent(lastMsg.content);
@@ -849,6 +855,8 @@
           model: lastMsg.model || '',
           open: lastMsg.open,
           pending: lastMsg.pending,
+          rev: lastMsg.rev,
+          schema: lastMsg.schema,
         });
         // Refresh/pageshow must replace a leftover watchdog stamp with the
         // persisted reply (2026-09-08: replay showed "_No response received._"

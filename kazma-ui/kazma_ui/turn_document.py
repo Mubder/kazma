@@ -17,6 +17,7 @@ from typing import Any
 
 __all__ = [
     "HITL_RANK",
+    "TURN_SCHEMA_VERSION",
     "activity_of",
     "assign_interrupt_id",
     "fnv1a32",
@@ -37,6 +38,17 @@ __all__ = [
     "tool_call_id_of",
     "tool_rank",
 ]
+
+#: Wire/storage schema for a turn row. Bumped when the SHAPE of ``parts``,
+#: ``activity`` or the row's own metadata changes in a way an older client
+#: could misread. ``docs/plans/UNIFIED_TURN_BLOCK.md`` §6 requires it to
+#: exist before such a change, not after: a reader with no version has no
+#: way to tell "field absent" from "field not yet invented".
+#:
+#: 1 — pre-versioned rows (no ``schema`` key at all).
+#: 2 — activity rows carry ``id``; tool parts carry ``call_id``; rows carry
+#:     ``rev``.
+TURN_SCHEMA_VERSION = 2
 
 # Monotonic HITL part states. Replay of approval_required after Approve
 # must not walk this backwards for the same interrupt_id.
@@ -650,4 +662,12 @@ def hydrate_message(msg: dict[str, Any] | None) -> dict[str, Any]:
                 out["activity"] = derived
     if not str(out.get("turn_id") or "").strip():
         out["turn_id"] = legacy_turn_id(out)
+    # A row written before revisions existed reads as rev 0 / schema 1.
+    # Absent is NOT the same as zero to a client that has to decide whether
+    # a snapshot is stale, so say it explicitly rather than leaving the
+    # reader to infer it.
+    if "rev" not in out:
+        out["rev"] = 0
+    if "schema" not in out:
+        out["schema"] = 1
     return out

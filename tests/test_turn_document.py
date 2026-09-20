@@ -396,3 +396,113 @@ def test_sse_producer_stamps_a_tool_call_id() -> None:
         assert 'event.get("run_id")' in block, (
             f"{name} invents an id instead of using the graph's run id"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Document revision and schema version — UNIFIED_TURN_BLOCK.md Phase 1
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def test_hydrate_message_states_revision_and_schema() -> None:
+    """A reader must not have to infer "absent" from "zero".
+
+    A row written before revisions existed is rev 0 / schema 1, said out
+    loud, so a client deciding whether a snapshot is stale has an answer
+    for every row rather than only for new ones.
+    """
+    from kazma_ui.turn_document import TURN_SCHEMA_VERSION, hydrate_message
+
+    old = hydrate_message({"role": "assistant", "content": "hi", "ts": "t"})
+    assert old["rev"] == 0
+    assert old["schema"] == 1
+
+    new = hydrate_message(
+        {"role": "assistant", "content": "hi", "ts": "t", "rev": 4,
+         "schema": TURN_SCHEMA_VERSION}
+    )
+    assert new["rev"] == 4
+    assert new["schema"] == TURN_SCHEMA_VERSION
+
+
+def test_upsert_bumps_the_revision_on_every_write(tmp_path) -> None:
+    """The revision orders WRITES to one turn, not frames on a thread.
+
+    Invariant U05 depends on it being monotone: a client that applied rev N
+    refuses a snapshot stamped rev < N, which is what stops a slow
+    /messages response repainting an older answer over a newer one.
+    """
+    import os
+
+    os.environ["KAZMA_DATA_DIR"] = str(tmp_path)
+    from kazma_ui.session_manager import get_session_manager, reset_session_manager
+    from kazma_ui.reply_sink import open_reply_turn, upsert_reply
+    from kazma_ui.turn_document import TURN_SCHEMA_VERSION
+
+    reset_session_manager()
+    sm = get_session_manager()
+    sid = "rev-test-session"
+    sess = sm.get_or_create(sid)
+    sess.thread_id = sid
+    sess.messages = [{"role": "user", "content": "go"}]
+    sm.put(sess)
+
+    turn = open_reply_turn(sid)
+
+    def _row() -> dict:
+        rows = get_session_manager().get_or_create(sid).messages
+        return next(m for m in rows if m.get("turn_id") == turn)
+
+    assert upsert_reply(sid, turn, "first")
+    first = _row()
+    assert first["rev"] == 1
+    assert first["schema"] == TURN_SCHEMA_VERSION
+
+    assert upsert_reply(sid, turn, "first and then some more")
+    assert _row()["rev"] == 2
+
+    # A straggler that changes nothing visible still advanced the row, so
+    # it still advances the revision. The alternative — only bumping on a
+    # content change — would let two different states share a revision.
+    assert upsert_reply(sid, turn, "", open_turn=True)
+    assert _row()["rev"] == 3
+
+    reset_session_manager()
+
+
+def test_client_refuses_a_stale_snapshot() -> None:
+    """The browser half of U05, asserted against the shipped module.
+
+    Behavioral coverage lives in tests/js/test_turn_document.js; this is
+    the boundary check that the rule is in the file the page loads, which a
+    Node-only test cannot claim.
+    """
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "modules"
+        / "turn_document.js"
+    ).read_text(encoding="utf-8")
+    hydrate = src.split("if (type === 'hydrate')", 1)[1].split("if (type === 'token'", 1)[0]
+    assert "evRev < Number(doc.rev || 0)" in hydrate, (
+        "the hydrate branch no longer refuses an older revision"
+    )
+    assert "next.parts = mergeParts(next.parts, ev.parts)" in hydrate, (
+        "a snapshot assigns over the document again — it covers only what "
+        "was durable when taken, so live parts would be dropped"
+    )
+
+
+def test_chat_js_forwards_the_revision() -> None:
+    """A revision the page never sends is a revision that protects nothing."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    hydrates = src.count("type: 'hydrate',")
+    assert hydrates >= 2, "hydrate construction moved; re-point this check"
+    assert src.count("rev: lastMsg.rev,") == hydrates, (
+        "a hydrate event is built without forwarding the stored revision"
+    )

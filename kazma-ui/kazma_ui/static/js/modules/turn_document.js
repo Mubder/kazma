@@ -511,7 +511,14 @@
   function empty(turnId) {
     return {
       turnId: String(turnId || ''),
+      // Delivery order of FRAMES on this thread.
       seq: 0,
+      // Authoritative revision of this TURN's durable state, as the server
+      // stamped it. A different counter from `seq`, deliberately: one
+      // orders frames, the other orders writes, and
+      // UNIFIED_TURN_BLOCK.md §6 forbids comparing them.
+      rev: 0,
+      schema: 0,
       seen: {},
       status: 'streaming',
       model: '',
@@ -608,6 +615,8 @@
     var next = {
       turnId: doc.turnId || String(ev.turn_id || ev.turnId || ''),
       seq: doc.seq || 0,
+      rev: Number(doc.rev || 0),
+      schema: Number(doc.schema || 0),
       seen: {},
       status: doc.status || 'streaming',
       model: doc.model || '',
@@ -626,8 +635,26 @@
 
     var type = String(ev.type || '');
     if (type === 'hydrate') {
+      // ── U05: an old snapshot cannot regress an authoritative revision ──
+      // /messages and /status are fetched in parallel on every resync, and
+      // a slow response can land after newer state is already applied.
+      // Without a revision the only defence was that mergeParts happens to
+      // be additive, which says nothing about `status`: a stale row could
+      // still stamp the turn done, or paused, over the truth.
+      var evRev = Number(ev.rev);
+      if (!isFinite(evRev) || evRev < 0) evRev = 0;
+      if (evRev > 0 && evRev < Number(doc.rev || 0)) return doc;
+      if (evRev > next.rev) next.rev = evRev;
+      var evSchema = Number(ev.schema);
+      if (isFinite(evSchema) && evSchema > next.schema) next.schema = evSchema;
       if (Array.isArray(ev.parts) && ev.parts.length) {
-        next.parts = ev.parts;
+        // MERGE, never replace. A snapshot covers what was DURABLE when it
+        // was taken; tokens streamed since are not in it, so assigning it
+        // over the document dropped live content, and an omitted part is
+        // ambiguity, not an authoritative removal (plan §5, §6.6).
+        // Replacement needs explicit removal semantics, which no producer
+        // sends today.
+        next.parts = mergeParts(next.parts, ev.parts);
       }
       if (ev.content) {
         next.parts = mergeParts(next.parts, [{ type: 'text', text: String(ev.content) }]);
@@ -775,6 +802,10 @@
       model: msg.model || '',
       open: msg.open,
       pending: msg.pending,
+      // Carried so a later resync can tell this snapshot's age. A row from
+      // before revisions existed reads as 0, which is older than anything.
+      rev: msg.rev,
+      schema: msg.schema,
     });
   }
 
