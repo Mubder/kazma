@@ -1,26 +1,23 @@
 # Enforce Unix LF line endings for shell scripts
 *.sh text eol=lf
 
-# Line endings: DELIBERATELY not normalized here.
+# Line endings: normalized 2026-09-21.
 #
-# The repo stores a mix (measured 2026-09-20: 52 CRLF blobs against 146 LF in
-# a 200-file sample of *.py). That is why a tool which rewrites a whole file
-# on Windows can turn a 50-line fix into a 669-line diff — the blob flips and
-# every line reads as changed.
+# The repo used to store a MIX (measured: 52 CRLF blobs against 146 LF in a
+# 200-file sample of *.py), with only *.sh pinned. That is not cosmetic — a
+# tool that rewrites a whole file on Windows flips its endings, and the commit
+# then shows every line as changed. A 50-line fix arrived as a 669-line diff
+# more than once, and a 67-line CHANGELOG entry as 15,987 insertions.
 #
-# `* text=auto` is the correct long-term fix and was tried. It was reverted:
-# attributes OVERRIDE core.autocrlf, so the first `git add` of each legacy
-# CRLF-blob file normalizes it and produces one whole-file diff apiece. A
-# 67-line CHANGELOG entry came out as 15,987 insertions. Landing that ahead of
-# a code freeze pays the entire cost up front and collects the benefit — clean
-# diffs on future edits — only if there are future edits.
+# `text=auto` stores LF in the blob and checks out the platform's native
+# ending, so Windows working copies stay CRLF and no editor behaviour changes.
+# Deliberately NO `eol=lf`: that forces LF into the WORKING TREE and marked 246
+# files dirty when tried.
 #
-# When active development resumes, do it properly and in ONE commit:
-#     echo '* text=auto' >> .gitattributes
-#     git add --renormalize .      # ~257 files, ~70k lines, endings only
-#     git commit -m 'chore: normalize line endings'
-# Doing it as a single deliberate commit is reviewable ("endings only");
-# doing it incidentally, a file at a time, is not.
+# Landed as ONE `git add --renormalize .` commit, endings only, verified with
+# `git diff --cached --ignore-cr-at-eol` returning empty. Doing it incidentally,
+# a file at a time, is what produced the phantom diffs above.
+* text=auto
 
 # Binary — never convert. No churn: these were never being converted.
 *.png binary

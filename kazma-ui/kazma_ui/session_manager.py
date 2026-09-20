@@ -31,6 +31,13 @@ from kazma_core.tenant_context import get_current_tenant_id
 
 logger = logging.getLogger(__name__)
 
+def _paths_data_dir():
+    """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
+    from kazma_core.paths import data_dir
+
+    return data_dir()
+
+
 __all__ = [
     "ChatSession",
     "MAX_SESSIONS",
@@ -1052,9 +1059,9 @@ def get_session_manager() -> SessionManager:
             from kazma_core.paths import data_dir
             db_path = str(data_dir() / "chat_sessions.db")
         except Exception:
-            db_path = "kazma-data/chat_sessions.db"
+            db_path = str(_paths_data_dir() / "chat_sessions.db")
         if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
-            db_path = "kazma-data/chat_sessions_test.db"
+            db_path = str(_paths_data_dir() / "chat_sessions_test.db")
         _session_manager = SessionManager(db_path=db_path)
     return _session_manager
 
@@ -1095,7 +1102,7 @@ def reset_session_manager() -> SessionManager:
         from kazma_core.paths import data_dir
         db_path = str(data_dir() / "chat_sessions.db")
     except Exception:
-        db_path = "kazma-data/chat_sessions.db"
+        db_path = str(_paths_data_dir() / "chat_sessions.db")
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):
         # Per-PROCESS, not one shared file (2026-09-16).
         #

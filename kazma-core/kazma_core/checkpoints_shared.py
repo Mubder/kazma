@@ -65,17 +65,29 @@ def _lock_for(loop: Any) -> asyncio.Lock:
     return lock
 
 
-def _key(db_path: str) -> str:
+def _key(db_path: str | None) -> str:
+    """Canonical cache key for a checkpoint DB path.
+
+    ``None`` means "the default", resolved through ``paths.checkpoints_db()``
+    so it honours ``KAZMA_DATA_DIR``. The three public functions here all
+    funnel through this, so the default lives in exactly one place rather than
+    in three signatures — where it was previously the CWD-relative literal
+    ``"kazma-data/checkpoints.db"`` and therefore frozen at import.
+    """
+    if db_path is None:
+        from kazma_core.paths import checkpoints_db
+
+        db_path = checkpoints_db()
     return str(Path(db_path).expanduser().resolve())
 
 
-def retain_shared_checkpoints(db_path: str = "kazma-data/checkpoints.db") -> None:
+def retain_shared_checkpoints(db_path: str | None = None) -> None:
     """Add one retention on the shared saver for *db_path* (sync, cheap)."""
     _refcounts[_key(db_path)] = _refcounts.get(_key(db_path), 0) + 1
 
 
 async def get_shared_sqlite_saver(
-    db_path: str = "kazma-data/checkpoints.db",
+    db_path: str | None = None,
     *,
     serde: Any = None,
 ) -> Any:
@@ -111,7 +123,7 @@ async def get_shared_sqlite_saver(
         return saver
 
 
-async def release_shared_checkpoints(db_path: str = "kazma-data/checkpoints.db") -> None:
+async def release_shared_checkpoints(db_path: str | None = None) -> None:
     """Release one retention on the shared saver; close at zero."""
     loop = asyncio.get_running_loop()
     cache = _by_loop.get(loop)

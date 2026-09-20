@@ -751,36 +751,13 @@ def test_no_unbounded_store_scan_on_the_event_loop():
 #: correctness fix into a data-loss incident. They should be migrated in small
 #: batches, each with a check that the old location is empty or the file is
 #: moved. **Delete entries from this list as they are fixed; never add one.**
-CWD_RELATIVE_DATA_PATH_DEBT: frozenset[str] = frozenset({
-    "kazma-core/kazma_core/agent/pipelines/document.py",
-    "kazma-core/kazma_core/agent/turn_input.py",
-    "kazma-core/kazma_core/agent_runner.py",
-    "kazma-core/kazma_core/checkpoint_retention.py",
-    "kazma-core/kazma_core/checkpoints_shared.py",
-    "kazma-core/kazma_core/observability/llm_ledger.py",
-    "kazma-core/kazma_core/security/audit_trail.py",
-    "kazma-core/kazma_core/security/certification.py",
-    "kazma-core/kazma_core/security/dependency_scanner.py",
-    "kazma-core/kazma_core/security/disclosure.py",
-    "kazma-core/kazma_core/settings_manager.py",
-    "kazma-core/kazma_core/swarm/memory/pipeline_logger.py",
-    "kazma-core/kazma_core/swarm/semantic_cache.py",
-    "kazma-core/kazma_core/swarm/task_store.py",
-    "kazma-core/kazma_core/time_travel.py",
-    "kazma-core/kazma_core/tools/image_gen.py",
-    "kazma-core/kazma_core/workspace/mcp_rebind.py",
-    "kazma-gateway/kazma_gateway/agent_handler/attachments.py",
-    "kazma-gateway/kazma_gateway/stores/checkpoint.py",
-    "kazma-gateway/kazma_gateway/stores/sqlite.py",
-    "kazma-skills/kazma_skills/native/browser_automation/tools.py",
-    "kazma-skills/kazma_skills/native/document_generator/tools.py",
-    "kazma-skills/kazma_skills/native/document_processor/tools.py",
-    "kazma-ui/kazma_ui/app.py",
-    "kazma-ui/kazma_ui/chat_attachments.py",
-    "kazma-ui/kazma_ui/research_panel/routes.py",
-    "kazma-ui/kazma_ui/routes_direct/system.py",
-    "kazma-ui/kazma_ui/session_manager.py",
-})
+CWD_RELATIVE_DATA_PATH_DEBT: frozenset[str] = frozenset()
+#: **Empty as of 2026-09-21 — all 40 literals across 20 files migrated.**
+#: Verified by resolving each migrated constant and comparing against the
+#: path the old literal produced: 14/14 identical. The migration is a
+#: no-op wherever KAZMA_DATA_DIR is unset and the CWD is the repo root
+#: (the reference install), and a correctness fix everywhere else.
+#: Keep this empty. If an entry is ever needed, it needs a reason.
 
 
 def _docstring_node_ids(tree: ast.AST) -> set[int]:

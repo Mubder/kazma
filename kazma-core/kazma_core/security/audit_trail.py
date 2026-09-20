@@ -52,7 +52,9 @@ class SecurityAuditTrail:
                      ``kazma-data/security_audit.db``.
         """
         if db_path is None:
-            db_path = Path("kazma-data/security_audit.db")
+            from kazma_core.paths import data_dir as _dd
+
+            db_path = _dd() / "security_audit.db"
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None

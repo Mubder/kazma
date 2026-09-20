@@ -167,12 +167,30 @@ class TestBug08_DBPathAligned:
     """kazma.yaml storage.path must match CHECKPOINT_DB in agent.py."""
 
     def test_paths_aligned(self):
+        """kazma.yaml and the code default must name the SAME database.
+
+        Compared as RESOLVED paths, not as raw strings. ``CHECKPOINT_DB`` used
+        to be the literal ``"kazma-data/checkpoints.db"`` so a string compare
+        worked by accident; it now resolves through ``paths.checkpoints_db()``
+        and is absolute, because a CWD-relative default meant a cron job and
+        the server could open different checkpoint databases.
+
+        The invariant this test exists for is unchanged and is the one that
+        matters: config and code must not drift onto two different files. A
+        string compare would now be asserting how the path is *spelled*.
+        """
+        from pathlib import Path
+
         from kazma_core.agent import CHECKPOINT_DB
 
         with open("kazma.yaml") as f:
             cfg = yaml.safe_load(f)
-        yaml_path = cfg["storage"]["path"]
-        assert yaml_path == CHECKPOINT_DB, f"YAML path '{yaml_path}' != code path '{CHECKPOINT_DB}'"
+        yaml_path = Path(cfg["storage"]["path"]).resolve()
+        code_path = Path(CHECKPOINT_DB).resolve()
+        assert yaml_path == code_path, (
+            f"YAML path '{yaml_path}' != code path '{code_path}' — kazma.yaml "
+            "and the code default resolve to different checkpoint databases"
+        )
 
 
 # ── Bug 9: MSA score biased to 0 ──────────────────────────────────────────

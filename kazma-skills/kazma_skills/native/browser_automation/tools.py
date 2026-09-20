@@ -39,7 +39,10 @@ _state: dict[str, Any] = {"playwright": None, "browser": None, "page": None}
 _state_lock = threading.Lock()
 
 MAX_TEXT_CHARS = 8000
-SCREENSHOT_DIR = Path("kazma-data/images")
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+SCREENSHOT_DIR = _data_dir() / "images"
 
 _IS_WINDOWS = sys.platform.startswith("win")
 

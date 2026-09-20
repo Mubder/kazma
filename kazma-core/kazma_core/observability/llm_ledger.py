@@ -23,7 +23,10 @@ __all__ = ["close_llm_ledger", "query_recent", "record_llm_call"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/llm_calls.db"
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+_DEFAULT_DB = str(_data_dir() / "llm_calls.db")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS llm_calls (

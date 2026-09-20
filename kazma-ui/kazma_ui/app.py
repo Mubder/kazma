@@ -394,7 +394,9 @@ class KazmaAppBuilder:
 
                     _workspace_path = str(default_sandbox_root())
                 except Exception:
-                    _workspace_path = "kazma-data/workspace"
+                    from kazma_core.paths import data_dir as _dd
+
+                    _workspace_path = str(_dd() / "workspace")
             configure_workspace(workspace=_workspace_path)
             # Fire binding bus so MCP (if already connected later) shares the root
             try:
@@ -1116,10 +1118,12 @@ class KazmaAppBuilder:
                 logger.info("[Gateway] No SLACK_BOT_TOKEN — Slack adapter skipped")
 
             # Session Store
-            self.session_store = SQLiteSessionStore("kazma-data/sessions.db")
+            from kazma_core.paths import data_dir as _dd_sess
+
+            self.session_store = SQLiteSessionStore(str(_dd_sess() / "sessions.db"))
             self.gateway.set_persistence(
                 session_store=self.session_store,
-                session_store_path="kazma-data/sessions.db",
+                session_store_path=str(_dd_sess() / "sessions.db"),
             )
 
             # Wire legacy dashboard context
@@ -1790,7 +1794,9 @@ class KazmaAppBuilder:
             except Exception:
                 logger.debug("[eventloop] loop identity probe skipped", exc_info=True)
 
-            self._checkpointer = await create_checkpointer("kazma-data/checkpoints.db")
+            from kazma_core.paths import checkpoints_db as _cpdb
+
+            self._checkpointer = await create_checkpointer(str(_cpdb()))
             _saver = getattr(self._checkpointer, "_saver", self._checkpointer)
             logger.info(
                 "[Checkpoint] checkpointer initialized: %s",

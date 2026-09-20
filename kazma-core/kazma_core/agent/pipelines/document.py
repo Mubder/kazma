@@ -153,13 +153,14 @@ async def document_pipeline(intent: TaskIntent, state: dict[str, Any], **ctx: An
             p = Path(source_path)
             if not p.is_absolute():
                 # Try workspace-relative, then attachments dir, then as-is
+                from kazma_core.paths import data_dir as _data_dir
                 from kazma_core.workspace.binding import resolve_active_root
 
                 root = await _aio.to_thread(resolve_active_root)
                 candidates = [
                     root / p,
-                    Path("kazma-data/attachments") / p.name,
-                    Path("kazma-data/documents") / p.name,
+                    _data_dir() / "attachments" / p.name,
+                    _data_dir() / "documents" / p.name,
                     p,
                 ]
                 p = next((c for c in candidates if c.is_file()), candidates[0])

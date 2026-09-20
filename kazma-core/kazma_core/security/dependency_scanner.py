@@ -62,7 +62,9 @@ class DependencyScanner:
                         Defaults to ``kazma-data/vuln_cache.json``.
         """
         if cache_path is None:
-            cache_path = Path("kazma-data/vuln_cache.json")
+            from kazma_core.paths import data_dir as _dd
+
+            cache_path = _dd() / "vuln_cache.json"
         self._cache_path = Path(cache_path)
         self._cache: dict[str, list[dict]] = {}
         self._load_cache()
@@ -350,7 +352,11 @@ class DependabotStyleScanner:
     GITHUB_ADVISORIES_URL = "https://api.github.com/advisories"
     NVD_API_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
-    def __init__(self, db_path: str = "kazma-data/security_scan.db") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        if db_path is None:
+            from kazma_core.paths import data_dir
+
+            db_path = str(data_dir() / "security_scan.db")
         self.db_path = db_path
         self.scan_interval_hours = 24
         self._db_path = Path(db_path)

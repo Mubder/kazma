@@ -69,6 +69,18 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+def _paths_data_dir():
+    """``paths.data_dir()``, imported lazily.
+
+    Lazy because ``data_dir()`` reads ``KAZMA_DATA_DIR`` from the
+    environment; binding it at module import would freeze whatever was
+    set when the first importer happened to load this module.
+    """
+    from kazma_core.paths import data_dir
+
+    return data_dir()
+
+
 # Short follow-ups that inherit the prior task (same-session continuity).
 _CONTINUATION_PHRASES = frozenset(
     {
@@ -1112,7 +1124,7 @@ def filter_file_search_path(path: str) -> str | None:
             return None
     # Quarantine bulk document store / gold corpora
     banned_fragments = (
-        "kazma-data/documents",
+        str(_paths_data_dir() / "documents"),
         "kazma-data\\documents",
         "/documents/",
         "\\documents\\",

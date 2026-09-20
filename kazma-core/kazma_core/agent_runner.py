@@ -40,7 +40,15 @@ __all__ = ["AgentConfig", "CHECKPOINT_DB", "CONFIG_FILE", "KazmaAgent", "MAX_ITE
 logger = logging.getLogger(__name__)
 
 CONFIG_FILE = "kazma.yaml"
-CHECKPOINT_DB = "kazma-data/checkpoints.db"
+from kazma_core.paths import checkpoints_db as _checkpoints_db
+
+#: Default LangGraph checkpointer DB.
+#:
+#: Was the literal "kazma-data/checkpoints.db" — relative to the process
+#: CWD and blind to KAZMA_DATA_DIR, so a cron job or a service with a
+#: different WorkingDirectory silently opened (or created) a different
+#: database. Resolved through paths.checkpoints_db() instead.
+CHECKPOINT_DB = str(_checkpoints_db())
 
 # Maximum ReAct iterations before forced stop
 MAX_ITERATIONS = 10

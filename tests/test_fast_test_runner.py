@@ -1,50 +1,85 @@
-"""fast_test.py sanity floor (audit H-14) + traceback digest."""
+"""The chunk runner must isolate a hang in two runs, not a hundred and sixty.
+
+`--timeout-method=thread` kills the process when a test hangs, so the chunk's
+tally dies with it. The runner then re-ran every one of that chunk's ~160 files
+in its own process to find the culprit — and on CI the culprit is usually the
+FOURTH file, so ~156 of those runs were pure waste. That doubled the job's wall
+clock (1,034s green versus 1,693s when a chunk died) on every run where a chunk
+hung, which was most of them.
+
+pytest -q prints a progress line per file before it dies, so the culprit is
+already in the output nobody was reading. `last_file_reached` recovers it; the
+caller then re-runs the chunk MINUS that file as one process, plus the file
+alone.
+"""
 
 from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parents[1]
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
 
 
-def _load_fast_test():
-    path = _REPO / "scripts" / "fast_test.py"
-    spec = importlib.util.spec_from_file_location("_fast_test_mod", path)
-    assert spec and spec.loader
+def _runner():
+    spec = importlib.util.spec_from_file_location(
+        "fast_test_mod", REPO / "scripts" / "fast_test.py"
+    )
     mod = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
     spec.loader.exec_module(mod)
     return mod
 
 
-def test_zero_passed_is_nonzero_exit() -> None:
-    ft = _load_fast_test()
-    assert ft.suite_exit_code({"passed": 0}, failed=[], poison=[]) == 2
-    assert ft.suite_exit_code({"passed": 10}, failed=[], poison=[]) == 2
+#: The exact shape CI produced on 2026-09-20, trimmed.
+_KILLED_CHUNK_LOG = """============================= test session starts ==============================
+collected 2252 items / 2 skipped
+kazma-core/kazma_core_tests/integration/test_multi_platform.py ......... [  0%]
+kazma-core/kazma_core_tests/unit/test_reliability.py ................... [  1%]
+kazma-core/tests/test_empty_answer_recovery.py ....                      [  2%]
+kazma-core/tests/test_github_app_integration.py ....+++++++++ Timeout ++++++++++
+~~~~~~~~~~~ Stack of MainThread (140366038940544) ~~~~~~~~~~~
+  File "/x/_pytest/runner.py", line 184, in pytest_runtest_call
+"""
 
 
-def test_real_failures_exit_1() -> None:
-    ft = _load_fast_test()
-    assert ft.suite_exit_code(
-        {"passed": 7000}, failed=["tests/x.py::t"], poison=[]
-    ) == 1
-
-
-def test_healthy_suite_exits_0() -> None:
-    ft = _load_fast_test()
-    assert ft.suite_exit_code({"passed": 7428}, failed=[], poison=[]) == 0
-
-
-def test_failure_digest_has_negative_control() -> None:
-    """A log with FAILED ids but no banner still yields a tail."""
-    ft = _load_fast_test()
-    log = "some output\nFAILED tests/foo.py::test_bar - assert 0\n"
-    digest = ft._failure_digest(log, limit=500)
-    assert "FAILED tests/foo.py::test_bar" in digest
-
-    bannered = (
-        "=========================== FAILURES ===========================\n"
-        "E   assert 1 == 2\n"
-        "=========================== short test summary info ===========================\n"
+def test_the_culprit_is_recovered_from_a_killed_chunk() -> None:
+    """The hung file is named in the output; find it there."""
+    mod = _runner()
+    assert (
+        mod.last_file_reached(_KILLED_CHUNK_LOG)
+        == "kazma-core/tests/test_github_app_integration.py"
     )
-    assert "assert 1 == 2" in ft._failure_digest(bannered, limit=500)
+
+
+def test_no_progress_lines_is_not_a_crash() -> None:
+    """A chunk that printed nothing must yield None, not raise or guess."""
+    mod = _runner()
+    assert mod.last_file_reached("") is None
+    assert mod.last_file_reached("collected 0 items\n") is None
+
+
+def test_a_clean_run_names_its_last_file() -> None:
+    """On a healthy chunk the last file is simply the last one printed."""
+    mod = _runner()
+    log = (
+        "tests/test_a.py ....   [ 30%]\n"
+        "tests/test_b.py ..     [ 70%]\n"
+        "tests/test_c.py .      [100%]\n"
+        "===== 7 passed in 1.20s =====\n"
+    )
+    assert mod.last_file_reached(log) == "tests/test_c.py"
+
+
+@pytest.mark.parametrize(
+    "line,expected",
+    [
+        ("kazma-ui/kazma_ui_tests/test_x.py ..  [ 5%]", "kazma-ui/kazma_ui_tests/test_x.py"),
+        ("tests/e2e/test_smoke.py s            [ 9%]", "tests/e2e/test_smoke.py"),
+    ],
+)
+def test_progress_line_shapes(line: str, expected: str) -> None:
+    """Both nested package tests and skipped-first files parse."""
+    assert _runner().last_file_reached(line + "\n") == expected

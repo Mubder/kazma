@@ -145,6 +145,27 @@ def run_pytest(args: list[str], timeout: float) -> tuple[int, str]:
         return -1, f"RUNNER error: {exc}"
 
 
+#: Match a pytest -q progress line, e.g. "path/to/test_x.py ....   [ 12%]".
+_PROGRESS_FILE_RE = re.compile(r"^(\S+?\.py)\s", re.M)
+
+
+def last_file_reached(log: str) -> str | None:
+    """The last test FILE pytest printed progress for before it died.
+
+    `--timeout-method=thread` kills the process, so a hung test takes the whole
+    chunk's tally with it and the runner then re-runs every one of the chunk's
+    ~160 files, one process each. That is the doubling seen on CI: one hung
+    test, 160 serial reruns, and the hang is usually in the FOURTH file.
+
+    pytest -q still prints a progress line per file before it dies, so the
+    culprit is already in the output. Returning it lets the caller re-run the
+    chunk MINUS that file as a single process, and the file on its own — two
+    runs instead of a hundred and sixty.
+    """
+    names = _PROGRESS_FILE_RE.findall(log or "")
+    return names[-1].replace("\\", "/") if names else None
+
+
 def run_chunk(idx: int, files: list[Path], timeout: float) -> dict:
     args = [
         *[str(f.relative_to(REPO)) for f in files],
@@ -209,6 +230,26 @@ def suite_exit_code(
 #: that had been discarded. A few hundred lines in a log nobody reads until
 #: something breaks is a much better trade than a diagnosis nobody can make.
 _HANG_DUMP_LINES = 400
+
+
+def _safe_print(text: str) -> None:
+    """Print a captured line without ever killing the runner on encoding.
+
+    The dump is pytest's own output, which routinely carries characters the
+    Windows console codepage (cp1252) cannot encode — a replacement char from a
+    mangled traceback is enough. `print` then raises UnicodeEncodeError, and
+    because this runs while REPORTING a failure it took the whole run down with
+    it: exit 1, no totals, no diagnosis, after the suite had already finished.
+
+    Found immediately after widening the dump from 25 lines to 400 — more lines
+    is more chances to hit one. A diagnostic that can crash the thing it is
+    diagnosing is worse than no diagnostic.
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(text.encode(enc, "replace").decode(enc, "replace"))
 
 
 def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
@@ -337,10 +378,48 @@ def main() -> int:
         if _tail:
             print(f"[fast-test] --- chunk {r['idx']:02d}: last {_HANG_DUMP_LINES} lines ---")
             for _ln in _tail:
-                print(f"  | {_ln}")
+                _safe_print(f"  | {_ln}")
         else:
             print(f"[fast-test] --- chunk {r['idx']:02d} produced NO output at all ---")
-        for f in r["files"]:
+        # Re-run the chunk MINUS the file it died in, as ONE process, then
+        # that file alone. Falling straight to per-file reruns costs ~160
+        # processes to isolate a single hang.
+        _suspect = last_file_reached(r["log"] or "")
+        _retry_files = list(r["files"])
+        if _suspect:
+            _match = [
+                f for f in _retry_files
+                if f.relative_to(REPO).as_posix().endswith(_suspect.split("/")[-1])
+            ]
+            if _match and len(_retry_files) > 1:
+                _culprit = _match[0]
+                _rest = [f for f in _retry_files if f is not _culprit]
+                print(
+                    f"[fast-test] chunk {r['idx']:02d} died in "
+                    f"{_culprit.relative_to(REPO).as_posix()} — re-running the "
+                    f"other {len(_rest)} file(s) as one process"
+                )
+                _code, _log = run_pytest(
+                    [*[str(f.relative_to(REPO)) for f in _rest], "-m", "not slow",
+                     "--timeout=120", "--continue-on-collection-errors"],
+                    timeout=args.chunk_timeout,
+                )
+                if _code in _BENIGN_EXIT_CODES and _parse_summary(_log):
+                    for k, v in _parse_summary(_log).items():
+                        totals[k] = totals.get(k, 0) + v
+                    _fh = [m.group(2) for m in _FAILED_RE.finditer(_log)]
+                    all_failed.extend(_fh)
+                    if _fh:
+                        failure_logs.append(_log)
+                    # Only the suspect still needs the slow per-file path.
+                    _retry_files = [_culprit]
+                else:
+                    print(
+                        f"[fast-test] chunk {r['idx']:02d} minus the suspect "
+                        "ALSO failed to report — falling back to per-file"
+                    )
+
+        for f in _retry_files:
             code, log = run_pytest(
                 [str(f.relative_to(REPO)), "-m", "not slow", "--timeout=120",
                  "--continue-on-collection-errors"],
@@ -443,7 +522,7 @@ def main() -> int:
                 continue
             print(f"\n[fast-test] --- {rel}: last 40 lines of the diagnostic rerun ---")
             for ln in tail:
-                print(f"  | {ln}")
+                _safe_print(f"  | {ln}")
     code = suite_exit_code(totals, failed=all_failed, poison=poison)
     passed = int(totals.get("passed", 0) or 0)
     if code == 2:

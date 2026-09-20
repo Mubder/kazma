@@ -13,7 +13,15 @@ from kazma_core.documents.service import DocumentService
 
 logger = logging.getLogger(__name__)
 
-DOC_DIR = Path("kazma-data/documents")
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+#:
+#: Was the literal ``Path("kazma-data/documents")`` — relative to the process
+#: CWD, so a service with a different WorkingDirectory exported documents
+#: somewhere the operator's backup (which goes through ``data_dir()``) never
+#: looked.
+DOC_DIR = _data_dir() / "documents"
 _MAX_OUTPUT_CHARS = 20_000
 
 

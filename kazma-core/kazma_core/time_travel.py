@@ -63,7 +63,10 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Default paths / limits
-DEFAULT_DB_PATH = "kazma-data/snapshots.db"
+from kazma_core.paths import snapshots_db as _snapshots_db
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+DEFAULT_DB_PATH = str(_snapshots_db())
 DEFAULT_MAX_SNAPSHOTS = 50
 DEFAULT_MAX_GLOBAL_SNAPSHOTS = 2000
 
@@ -189,7 +192,7 @@ class SnapshotStore:
     by an in-process lock.
     """
 
-    def __init__(self, db_path: str | Path | None = DEFAULT_DB_PATH) -> None:
+    def __init__(self, db_path: str | Path | None = None) -> None:
         # H19: resolve through the data dir so the path is cwd-independent.
         self._db_path = _resolve_db_path(db_path)
         # Serializes ALL connection use: capture runs inside asyncio.to_thread
@@ -321,7 +324,7 @@ class SnapshotRecorder:
         enabled: bool = True,
         max_snapshots: int = DEFAULT_MAX_SNAPSHOTS,
         max_global_snapshots: int = DEFAULT_MAX_GLOBAL_SNAPSHOTS,
-        db_path: str | Path | None = DEFAULT_DB_PATH,
+        db_path: str | Path | None = None,
         store: SnapshotStore | None = None,
     ) -> None:
         self._enabled = enabled
@@ -640,7 +643,7 @@ def create_recorder(
     enabled = tt_cfg.get("enabled", True)
     _max = max_snapshots if max_snapshots is not None else tt_cfg.get("max_snapshots", DEFAULT_MAX_SNAPSHOTS)
     _max_global = max_global_snapshots if max_global_snapshots is not None else tt_cfg.get("max_global_snapshots", DEFAULT_MAX_GLOBAL_SNAPSHOTS)
-    _db = db_path or tt_cfg.get("db_path", DEFAULT_DB_PATH)
+    _db = db_path or tt_cfg.get("db_path") or None
 
     # Effective resolution mirrors the embedder: ConfigStore override >
     # kazama.yaml > default. The Settings UI writes time_travel.max_snapshots
