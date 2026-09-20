@@ -1,18 +1,34 @@
-"""F0 spike: can ``create_app()``'s graph pause like the mini HITL graph?
+"""F0 spike: can ``create_app()``'s graph pause from a PRELOADED tool call?
 
 Verdict (measured 2026-09-19, isolated TestClient + ainvoke with
-``tool_calls_pending=file_write``): **no**.
+``tool_calls_pending=file_write``): **no**, and that is still true.
 
 The supervisor entry (``NodeName.SUPERVISOR``) ran an LLM call (HTTP 401),
 set ``turn_failed``, and never ``interrupt()``'d. The mini graph in
 ``tests/test_hitl_graph_integration.py`` still pauses because it *enters
-at tool_worker*. Playwright incidents 1 and 4 stay unclaimed.
+at tool_worker*.
+
+**Superseded conclusion (2026-09-20).** The verdict above was read as "the
+app graph cannot be made to pause in a test", and Playwright incidents 1
+and 4 were left unclaimed on that basis. That inference was wrong: the app
+graph pauses perfectly well when the *supervisor produces* the tool call
+instead of being handed one. ``tests/e2e/_unified_turn_harness.py`` scripts
+the provider boundary and gets four real ``interrupt()`` pauses and four
+real ``POST /api/approve`` resumes
+(``tests/e2e/test_unified_turn_app_graph.py``, green).
+
+So this spike keeps its narrow, still-accurate finding — a preloaded
+``tool_calls_pending`` does not survive the supervisor entry — and stops
+being the reason anything is unclaimed. Do not delete it: it is the lock
+on that entry-point behavior, and if preloading ever starts working, the
+assertion below says so.
 
 This file must not skip. The default path is a cheap structural check of
 that measured fact. Set ``KAZMA_F0_SPIKE_LIVE=1`` to re-run the full
 ``create_app()`` experiment (slow; boots embedder + MCP).
 
-Plan: docs/plans/HITL_VIEW_MODEL.md §10 F0.
+Plans: docs/plans/HITL_VIEW_MODEL.md §10 F0;
+docs/plans/UNIFIED_TURN_BLOCK_PHASE0.md §8.
 """
 
 from __future__ import annotations
@@ -30,10 +46,12 @@ def test_f0_spike_app_graph_pause_verdict() -> None:
         verdict, reason = _structural_verdict()
     print(f"F0_SPIKE_APP_GRAPH_PAUSE={verdict} reason={reason}")
     assert verdict in ("yes", "no")
-    # Binding until a live experiment prints yes: 1 and 4 are unclaimed.
+    # Still "no" for THIS question (preloaded tool_calls_pending). Sequential
+    # approval is claimed elsewhere, through the supervisor producing the
+    # call: tests/e2e/test_unified_turn_app_graph.py.
     assert verdict == "no", (
-        "app graph pause became possible — update HITL_VIEW_MODEL.md and "
-        "claim Playwright 1/4"
+        "a preloaded tool_calls_pending now survives the supervisor entry — "
+        "update this docstring and HITL_VIEW_MODEL.md §10 F0"
     )
 
 

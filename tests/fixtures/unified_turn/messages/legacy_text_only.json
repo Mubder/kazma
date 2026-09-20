@@ -1,0 +1,25 @@
+{
+  "name": "legacy_text_only",
+  "why": "A row written before parts existed: content and a timestamp, nothing else. Both languages must mint the SAME synthetic turn id, or one stored message can occupy two entries in the client's turn registry (invariant U01).",
+  "message": {
+    "role": "assistant",
+    "content": "Hello there.",
+    "ts": "2026-09-20T10:00:00Z"
+  },
+  "expect": {
+    "text": "Hello there.",
+    "part_keys": ["text"],
+    "gates": [],
+    "activity": []
+  },
+  "known_divergences": [
+    {
+      "field": "turn_id",
+      "python": "legacy-879abd24dca7291f",
+      "javascript": "legacy-9587b3b6",
+      "cause": "turn_document.py:legacy_turn_id uses sha256[:16]; turn_document.js:legacyTurnId uses a 32-bit string hash. Two implementations of one identity function.",
+      "impact": "Only reachable on a path where the server did not hydrate the row first (sse_chat/__init__.py:1711 does hydrate the /messages route). Where it is reachable, one stored message can be bound under two turn ids.",
+      "owner": "UNIFIED_TURN_BLOCK.md Phase 1 (stable identities)"
+    }
+  ]
+}

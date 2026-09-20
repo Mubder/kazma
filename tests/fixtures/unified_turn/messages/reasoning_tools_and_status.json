@@ -1,0 +1,37 @@
+{
+  "name": "reasoning_tools_and_status",
+  "why": "Activity content of every modelled kind. Locks the row shapes both languages derive, and the part keys that keep a tool row stable across updates.",
+  "message": {
+    "role": "assistant",
+    "turn_id": "utb-fixture-turn-2",
+    "content": "Found three matches.",
+    "parts": [
+      {"type": "reasoning", "text": "Search the index first, then read the two most likely files."},
+      {"type": "status", "title": "Planning", "state": "done"},
+      {"type": "tool", "name": "code_search", "result": "3 hits", "state": "done"},
+      {"type": "tool", "name": "file_read", "result": "ok", "state": "done"},
+      {"type": "text", "text": "Found three matches."}
+    ]
+  },
+  "expect": {
+    "turn_id": "utb-fixture-turn-2",
+    "text": "Found three matches.",
+    "part_keys": [
+      "reasoning",
+      "status:Planning",
+      "tool:code_search:done:3 hits",
+      "tool:file_read:done:ok",
+      "text"
+    ],
+    "gates": [],
+    "activity": [
+      {"kind": "thought", "title": "Thoughts", "detail": "Search the index first, then read the two most likely files.", "state": "done"},
+      {"kind": "status", "title": "Planning", "state": "done"},
+      {"kind": "tool", "title": "code_search", "detail": "3 hits", "state": "done"},
+      {"kind": "tool", "title": "file_read", "detail": "ok", "state": "done"}
+    ]
+  },
+  "notes": [
+    "A tool part key embeds name + state + result[:80]. A result that changes re-keys the row, which is the missing stable activity ID recorded in UNIFIED_TURN_BLOCK_PHASE0.md section 6."
+  ]
+}

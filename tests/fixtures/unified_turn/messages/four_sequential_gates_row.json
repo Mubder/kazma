@@ -1,0 +1,60 @@
+{
+  "name": "four_sequential_gates_row",
+  "why": "The stored form of layout/four_sequential_gates.json. Four gates, four distinct interrupt ids, two of them the SAME tool. Locks that neither language collapses them and that both order them by ask order.",
+  "message": {
+    "role": "assistant",
+    "turn_id": "utb-fixture-turn-1",
+    "content": "Scaffold ready. I wrote README.md and src/index.js and removed src/old.js. I did not run npm init because you denied it.",
+    "parts": [
+      {
+        "type": "hitl",
+        "tool": "file_write",
+        "state": "approved",
+        "interrupt_id": "gate-1",
+        "payload": {"tool": "file_write", "interrupt_id": "gate-1", "args": {"path": "README.md"}}
+      },
+      {
+        "type": "hitl",
+        "tool": "shell_exec",
+        "state": "denied",
+        "interrupt_id": "gate-2",
+        "payload": {"tool": "shell_exec", "interrupt_id": "gate-2", "args": {"command": "npm init -y"}}
+      },
+      {
+        "type": "hitl",
+        "tool": "file_write",
+        "state": "approved",
+        "interrupt_id": "gate-3",
+        "payload": {"tool": "file_write", "interrupt_id": "gate-3", "args": {"path": "src/index.js"}}
+      },
+      {
+        "type": "hitl",
+        "tool": "file_delete",
+        "state": "approved",
+        "interrupt_id": "gate-4",
+        "payload": {"tool": "file_delete", "interrupt_id": "gate-4", "args": {"path": "src/old.js"}}
+      },
+      {
+        "type": "text",
+        "text": "Scaffold ready. I wrote README.md and src/index.js and removed src/old.js. I did not run npm init because you denied it."
+      }
+    ]
+  },
+  "expect": {
+    "turn_id": "utb-fixture-turn-1",
+    "text": "Scaffold ready. I wrote README.md and src/index.js and removed src/old.js. I did not run npm init because you denied it.",
+    "part_keys": ["hitl:gate-1", "hitl:gate-2", "hitl:gate-3", "hitl:gate-4", "text"],
+    "gates": [
+      {"interrupt_id": "gate-1", "tool": "file_write", "state": "approved"},
+      {"interrupt_id": "gate-2", "tool": "shell_exec", "state": "denied"},
+      {"interrupt_id": "gate-3", "tool": "file_write", "state": "approved"},
+      {"interrupt_id": "gate-4", "tool": "file_delete", "state": "approved"}
+    ],
+    "activity": [
+      {"kind": "status", "title": "Approved", "detail": "file_write", "state": "info"},
+      {"kind": "status", "title": "Denied", "detail": "shell_exec", "state": "info"},
+      {"kind": "status", "title": "Approved", "detail": "file_write", "state": "info"},
+      {"kind": "status", "title": "Approved", "detail": "file_delete", "state": "info"}
+    ]
+  }
+}

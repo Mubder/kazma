@@ -1,0 +1,33 @@
+{
+  "name": "pending_gate_row",
+  "why": "A turn stored mid-pause. Refresh-mid-pause hydration reads exactly this shape, so both languages must agree on the gate identity and the 'Waiting for approval' activity row before the registry view is joined on top.",
+  "message": {
+    "role": "assistant",
+    "turn_id": "utb-fixture-turn-3",
+    "content": "I need to write README.md.",
+    "open": true,
+    "pending": true,
+    "parts": [
+      {
+        "type": "hitl",
+        "tool": "file_write",
+        "state": "pending",
+        "interrupt_id": "gate-p1",
+        "payload": {"tool": "file_write", "interrupt_id": "gate-p1", "args": {"path": "README.md"}}
+      },
+      {"type": "text", "text": "I need to write README.md."}
+    ]
+  },
+  "expect": {
+    "turn_id": "utb-fixture-turn-3",
+    "text": "I need to write README.md.",
+    "part_keys": ["hitl:gate-p1", "text"],
+    "gates": [{"interrupt_id": "gate-p1", "tool": "file_write", "state": "pending"}],
+    "activity": [
+      {"kind": "status", "title": "Waiting for approval", "detail": "file_write", "state": "info"}
+    ]
+  },
+  "notes": [
+    "The stored part stamp is NOT the display state. gate_view.py is the authority; this fixture locks the pre-join normalization only (invariant U10)."
+  ]
+}

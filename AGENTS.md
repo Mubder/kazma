@@ -1531,6 +1531,26 @@ appended.
 graph (`agent_handler/graph.py`) all close through the same completion
 contract. A new mouth that invents its own “Done” is a delivery bug.
 
+**E. Presentation is governed by one plan.**
+`docs/plans/UNIFIED_TURN_BLOCK.md` is the binding contract for how a Web
+chat turn is presented: one persistent block per turn, an integrated status
+header, one collapsed thoughts disclosure whose expansion events never
+touch, ONE approval group with a keyed row per gate, and one answer region.
+It supersedes in part `COT_AND_THOUGHTS.md` (separate live bar, auto-open
+thoughts), `TURN_RENDER_V2_KEYED_SLOTS.md` (flat per-gate top-level slots)
+and `HITL_VIEW_MODEL.md` (layouts that require separate cards). Delivery
+ordering (§31) and gate authority (§30) are preserved unchanged — any
+protocol extension must update those contracts explicitly.
+
+Baseline, evidence and known gaps: `docs/plans/UNIFIED_TURN_BLOCK_PHASE0.md`.
+Sequential approval is proven at the lifecycle level by
+`tests/e2e/test_unified_turn_app_graph.py` (four real pauses, four real
+`POST /api/approve`), which runs in the `unified-turn-lifecycle` CI job.
+Cross-language turn projection is locked by shared fixtures under
+`tests/fixtures/unified_turn/` — do NOT add a Python example and a
+JavaScript example for the same rule; that is how `legacy_turn_id` came to
+mint a different id in each language with both suites green.
+
 
 ### 32. SSRF pin-IP (Wave 8 H-7)
 

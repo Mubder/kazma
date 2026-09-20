@@ -178,6 +178,45 @@ jobs:
           # DSN, and this job would silently prove nothing (audit F-7).
           KAZMA_TEST_ALLOW_REAL_DB: "1"
 
+  unified-turn-lifecycle:
+    name: Unified turn lifecycle (GATE)
+    runs-on: ubuntu-latest
+    # docs/plans/UNIFIED_TURN_BLOCK.md section 13. The suite this job runs is
+    # the one thing that proves sequential approval end to end: the real
+    # graph pauses four times and each resume comes from POST /api/approve.
+    # scripts/fast_test.py excludes tests/e2e, so without a job of its own
+    # the harness would run nowhere -- which is how tests/e2e/test_hitl_view_model.py
+    # came to leave incidents 1 and 4 unclaimed for a month.
+    #
+    # It does NOT need Playwright: it drives the HTTP routes. Keeping it out
+    # of the browser job means a missing Chromium cannot hide a lifecycle
+    # regression behind a skip.
+    #
+    # Phase 5 still owns making this job REQUIRED in branch protection. A
+    # workflow file is not merge enforcement (section 13, last bullet).
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install app
+        run: pip install -e ".[test,web]"
+      - name: Four sequential gates through the real app graph
+        run: python -m pytest tests/e2e/test_unified_turn_app_graph.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Shared Python/JavaScript turn fixtures
+        run: python -m pytest tests/test_unified_turn_fixtures.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Unified turn block reproductions (xfail-strict)
+        # Red on purpose until Phases 2 and 3 land. strict=True means an
+        # unexpected pass FAILS, so a behavior cannot ship without the
+        # marker coming off with it.
+        run: python -m pytest tests/test_unified_turn_block_phase0.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+
   playwright-smoke:
     name: Playwright smoke
     runs-on: ubuntu-latest
