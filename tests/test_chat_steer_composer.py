@@ -909,14 +909,25 @@ def test_the_header_cannot_vanish_from_a_live_turn() -> None:
     restarted the tick timer: frozen elapsed, dead stall detection
     (2026-09-03).
 
-    There is no hide timer now. The header is a keyed slot, the renderer's
-    ``discard`` answers false for everything (turn_view.js contract 4:
-    ambiguity never deletes), and the only timer is a repaint that stops
-    itself. A frame cannot remove the header because nothing removes it.
+    There is no hide timer now. The header is a keyed slot and the only
+    timer is a repaint that stops itself.
+
+    ``discard`` used to answer false for everything (turn_view.js
+    contract 4: ambiguity never deletes) and this asserted that literal.
+    It is now conditional — it removes the ANSWER region when the
+    document has no answer, which is what a paused turn looks like once
+    narration folds into the thoughts region. So the rule is asserted
+    directly: discard refuses every key but ``text``.
     """
     js = _js()
-    assert "discard: function() { return false; }" in js, (
-        "the renderer can delete slots again; a header could vanish"
+    body = js_function_body(js, "discard: function(key, node, ctx)")
+    assert "if (key !== 'text') return false;" in body, (
+        "the renderer can delete slots other than the answer again; a "
+        "header could vanish mid-approve (2026-09-03)"
+    )
+    assert "_answerFromDoc" in body, (
+        "discard drops the answer region on something other than the "
+        "document actually having no answer"
     )
     # The header's timer repaints and nothing else.
     tick = js_function_body(js, "function _tickLiveHeader()")

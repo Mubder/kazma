@@ -319,9 +319,20 @@ def test_hitl_card_is_not_torn_down_after_approve() -> None:
     # answers false for every slot, because a decision is transcript.
     assert "old.remove()" not in render
     assert "_hitlCardIsClaimed(old)" not in render
-    discard = js_function_body(chat, "var _turnRenderers = {")
-    assert "discard: function() { return false; }," in discard, (
-        "a render pass can take a decision or an answer off screen again"
+    # A DECISION is transcript and can never be removed. `discard` used to
+    # answer false for every slot and this asserted that literal; it is now
+    # conditional on one key only, so the rule is asserted as the rule:
+    # everything except the answer region is refused outright.
+    discard = js_function_body(chat, "discard: function(key, node, ctx)")
+    assert "if (key !== 'text') return false;" in discard, (
+        "a render pass can take a decision off screen again"
+    )
+    # ...and the answer goes only when the document genuinely has none,
+    # which is a paused turn whose narration folded into the thoughts
+    # region — not a truncated resync (see test_narration_is_not_the_answer).
+    assert "_answerFromDoc" in discard, (
+        "the answer region is dropped on something other than the document "
+        "actually having no answer"
     )
     approve = chat.split("function submitApproval(action, scope)", 1)[1].split(
         "var onceBtn", 1

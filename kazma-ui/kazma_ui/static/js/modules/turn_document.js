@@ -594,6 +594,46 @@
     return mergeParts(next, [incoming]);
   }
 
+  /**
+   * Move streamed narration into the thoughts region.
+   *
+   * Called the moment a turn produces a tool call or a gate: whatever the
+   * model said BEFORE asking to act was thinking out loud, not the reply.
+   *
+   * Without this the narration sits in the answer region until something
+   * displaces it. Mid-turn there is no final text to compare against, so
+   * `splitStreamAndFinal(stream, stream)` classifies everything streamed
+   * as `text`; the separation only happens retroactively when a differing
+   * final arrives — which on a resume leg is the backfill frame. The
+   * reader sees the text swap the instant they click Approve.
+   *
+   * `stream` is cleared as well, because the next leg's tokens append to
+   * it: leaving it would let `partsFromStream` rebuild a text part
+   * containing the narration we just folded away.
+   *
+   * Idempotent (invariant U04): with no text part left there is nothing
+   * to move, so a replayed or duplicated frame is a no-op.
+   */
+  function foldNarration(doc) {
+    if (!doc || doc.status === 'done') return doc;
+    var parts = doc.parts || [];
+    var narration = '';
+    var kept = [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (p && p.type === 'text') {
+        var t = String(p.text || '').trim();
+        if (t) narration = t;
+        continue;
+      }
+      kept.push(p);
+    }
+    if (!narration) return doc;
+    doc.parts = mergeParts(kept, [{ type: 'reasoning', text: narration }]);
+    doc.stream = '';
+    return doc;
+  }
+
   function eventToParts(ev) {
     var type = String((ev && ev.type) || '');
     var step = (ev && ev.step) || {};
@@ -677,11 +717,65 @@
         // ambiguity, not an authoritative removal (plan §5, §6.6).
         // Replacement needs explicit removal semantics, which no producer
         // sends today.
-        next.parts = mergeParts(next.parts, ev.parts);
+        // One sentence cannot be both the thinking and the reply.
+        //
+        // A paused row carries BOTH: `_hitl_persist_parts` writes the
+        // narration as `reasoning`, while the text checkpoints written
+        // during streaming (`DurablePresentation`) already left a `text`
+        // part with the same string, and upsert merges rather than
+        // replaces. Merging the snapshot verbatim therefore put the
+        // narration back in the answer region (measured in the live
+        // page, 2026-09-20).
+        //
+        // When a snapshot contradicts itself this way the CLASSIFICATION
+        // wins: something deliberately said "this is a thought", and
+        // nothing deliberately said "this is the answer".
+        var thoughts = {};
+        var ti2;
+        for (ti2 = 0; ti2 < ev.parts.length; ti2++) {
+          var tp = ev.parts[ti2];
+          if (tp && tp.type === 'reasoning' && String(tp.text || '').trim()) {
+            thoughts[String(tp.text).trim()] = 1;
+          }
+        }
+        var incoming = [];
+        for (ti2 = 0; ti2 < ev.parts.length; ti2++) {
+          var ip = ev.parts[ti2];
+          if (ip && ip.type === 'text' && thoughts[String(ip.text || '').trim()]) {
+            continue;
+          }
+          incoming.push(ip);
+        }
+        next.parts = mergeParts(next.parts, incoming);
       }
+      // The `content` column is the row's text WITHOUT a classification:
+      // at a pause the server stores the narration there and records in
+      // `parts` that it is a thought (`_hitl_persist_parts`). Re-adding it
+      // as a text part here put it straight back under the CoT block one
+      // event after the gate folded it away — measured in the live page,
+      // 2026-09-20.
+      //
+      // So: if this snapshot's own parts already call this exact text a
+      // thought, believe them. Legacy rows, which carry content and no
+      // parts, are unaffected.
       if (ev.content) {
-        next.parts = mergeParts(next.parts, [{ type: 'text', text: String(ev.content) }]);
-        next.stream = String(ev.content);
+        var evText = String(ev.content);
+        var asThought = evText.trim();
+        var classified = false;
+        if (asThought && Array.isArray(ev.parts)) {
+          for (var ci = 0; ci < ev.parts.length; ci++) {
+            var cp = ev.parts[ci];
+            if (cp && cp.type === 'reasoning'
+                && String(cp.text || '').trim() === asThought) {
+              classified = true;
+              break;
+            }
+          }
+        }
+        if (!classified) {
+          next.parts = mergeParts(next.parts, [{ type: 'text', text: evText }]);
+          next.stream = evText;
+        }
       }
       // Activity is DERIVED from parts, so folding both in double-counts.
       // A stored row carries both (the /messages serializer sends
@@ -735,6 +829,14 @@
       next.parts = mergeParts(next.parts, partsFromStream(next.stream, finalText));
       next.stream = finalText || next.stream;
       next.status = ev.interrupted ? 'paused' : 'done';
+      // A PAUSED turn has not answered yet.
+      //
+      // The pause frame carries `content: content_acc` — the narration so
+      // far — and without this it lands as a `text` part, putting back
+      // under the CoT block exactly what the gate just folded away. The
+      // server agrees at the other end (`_hitl_persist_parts`), so live
+      // and hydrated say the same thing about a paused turn.
+      if (ev.interrupted) next = foldNarration(next);
       return next;
     }
     if (type === 'capacity') {
@@ -767,6 +869,8 @@
           && typeof hitlPayload.view === 'object') {
         hitlPart.view = hitlPayload.view;
       }
+      // The model asked before it acted; what it said was thinking.
+      next = foldNarration(next);
       next.parts = mergeParts(next.parts, [hitlPart]);
       // Any pending gate pauses the turn — not just the newest one. With one
       // part per gate, "the last hitl part" is the gate asked most recently,
@@ -785,6 +889,13 @@
     var extra = eventToParts(ev);
     if (extra.length) {
       var toolish = extra.length === 1 && extra[0].type === 'tool';
+      // A tool STARTING is the same signal a gate is: the model said
+      // something and then asked to act, so what it said was thinking.
+      // Only on start -- a tool_result arriving must not fold whatever
+      // the next leg has already begun streaming.
+      if (toolish && String(extra[0].state || '') === 'running') {
+        next = foldNarration(next);
+      }
       next.parts = toolish
         ? replaceToolPart(next.parts, extra[0])
         : mergeParts(next.parts, extra);

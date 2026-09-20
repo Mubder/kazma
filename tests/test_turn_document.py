@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from kazma_ui.turn_document import (
     activity_of,
     merge_hitl_part,
@@ -505,9 +507,17 @@ def test_client_refuses_a_stale_snapshot() -> None:
     assert "evRev < Number(doc.rev || 0)" in hydrate, (
         "the hydrate branch no longer refuses an older revision"
     )
-    assert "next.parts = mergeParts(next.parts, ev.parts)" in hydrate, (
+    # A snapshot MERGES onto the document; it never assigns over it. The
+    # merged list is filtered first (a paused row stores the same sentence
+    # as both a thought and a text part, and the classification wins —
+    # see test_narration_is_not_the_answer.py), so the assertion is on the
+    # merge ONTO next.parts rather than on the exact argument expression.
+    assert re.search(r"next\.parts = mergeParts\(next\.parts,", hydrate), (
         "a snapshot assigns over the document again — it covers only what "
         "was durable when taken, so live parts would be dropped"
+    )
+    assert "next.parts = ev.parts" not in hydrate, (
+        "a snapshot is being assigned straight over the document's parts"
     )
 
 

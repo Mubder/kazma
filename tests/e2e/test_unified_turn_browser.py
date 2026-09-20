@@ -330,7 +330,13 @@ def test_the_row_settles_before_any_poll(page) -> None:
     _wait_for_pending_row(pg)
 
     before = _shape(pg)
-    answer_index_before = before["shape"].index("message-text")
+    # A PAUSED turn has no answer region: narration folds into the
+    # thoughts region when the model asks to act, so there is nothing to
+    # index yet. What must hold is that settling a gate does not move
+    # the reply RELATIVE to the group — captured as the shape before and
+    # compared after, rather than as an absolute index into a list one
+    # of whose entries may not exist.
+    shape_before = [k for k in before["shape"] if k != "message-text"]
     gate = [r for r in before["rows"] if r["live"]][0]["gate"]
 
     # Silence every poller: whatever the row says next came from the
@@ -357,10 +363,16 @@ def test_the_row_settles_before_any_poll(page) -> None:
     )
 
     after = _shape(pg)
-    assert after["shape"].index("message-text") == answer_index_before, (
-        "the answer moved when the gate settled — deciding a gate must "
-        "not relocate the reply"
+    assert [k for k in after["shape"] if k != "message-text"] == shape_before, (
+        "the regions were reordered when the gate settled — deciding a "
+        f"gate must not relocate anything: {shape_before} -> "
+        f"{[k for k in after['shape'] if k != 'message-text']}"
     )
+    if "message-text" in after["shape"]:
+        assert (after["shape"].index("turn-approvals")
+                < after["shape"].index("message-text")), (
+            "the approval group fell below the reply when the gate settled"
+        )
     assert after["groups"] == 1
     assert after["looseCards"] == 0
 
@@ -397,7 +409,13 @@ def test_refresh_mid_pause_rebuilds_the_group(harness: Harness, page) -> None:
         "refresh mid-pause left the row with no live control"
     )
     assert not after["bottomBar"]
-    assert after["shape"].index("turn-approvals") < after["shape"].index("message-text")
+    # Only once there IS a reply: a turn still paused for approval has no
+    # answer region, which is the point of the fold.
+    if "message-text" in after["shape"]:
+        assert (after["shape"].index("turn-approvals")
+                < after["shape"].index("message-text")), (
+            "the approval group is below the reply after a refresh"
+        )
 
 
 def test_the_fold_starts_collapsed_and_stays_where_the_reader_puts_it(
@@ -618,4 +636,89 @@ def test_a_completed_four_gate_turn_keeps_its_answer_out_of_the_fold(
     if facts["expanded"] is not None:
         assert facts["expanded"] == "false", (
             f"the activity fold defaulted open after four gates: {facts}"
+        )
+
+# ══════════════════════════════════════════════════════════════════════
+# Narration belongs in the fold
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_the_answer_region_is_empty_while_the_turn_is_asking(
+    harness: Harness, page
+) -> None:
+    """Reported from the installed build, 2026-09-20.
+
+    Text appeared under the CoT block while the model worked, and was
+    replaced the moment Approve was clicked. It was the model's
+    narration, classified as the ANSWER because mid-turn there is
+    nothing to compare the stream against — the separation only happened
+    retroactively, when the resume leg's backfill arrived.
+
+    At a pause the turn has not answered. The answer region must be
+    empty, and what the model said must be in the thoughts fold —
+    which is collapsed, which is where it was wanted.
+    """
+    _send(page, PROMPT)
+    _wait_for_pending_row(page)
+
+    facts = page.evaluate("""() => {
+  var bs = document.querySelectorAll('.message-assistant');
+  var c = bs.length ? bs[bs.length - 1].querySelector('.message-content') : null;
+  if (!c) return { missing: true };
+  var answer = c.querySelector('.message-text');
+  var fold = c.querySelector('.agent-progress');
+  var thoughts = fold
+    ? Array.from(fold.querySelectorAll('.step-thought')).map(
+        (r) => (r.textContent || '').trim())
+    : [];
+  return {
+    missing: false,
+    answer: ((answer && answer.textContent) || '').trim(),
+    thoughts: thoughts,
+    foldCollapsed: !!(fold && fold.classList.contains('is-collapsed')),
+  };
+}""")
+    assert not facts.get("missing"), "no assistant block rendered"
+    assert facts["answer"] == "", (
+        "the turn is paused for approval and the answer region already "
+        f"has text in it: {facts['answer'][:120]!r}"
+    )
+    assert facts["foldCollapsed"], (
+        "the thoughts fold is open at a pause; it is collapsed by default"
+    )
+
+
+def test_approving_does_not_swap_the_text_under_the_reader(
+    harness: Harness, page
+) -> None:
+    """The symptom itself: "the text replaced after I click approve".
+
+    Whatever the answer region holds before Approve must not be
+    *replaced* by different text after it. Empty→answer is growth;
+    narration→other-narration is the swap that was reported.
+    """
+    _send(page, PROMPT)
+    _wait_for_pending_row(page)
+
+    def answer_text() -> str:
+        return page.evaluate("""() => {
+  var bs = document.querySelectorAll('.message-assistant');
+  var c = bs.length ? bs[bs.length - 1].querySelector('.message-content') : null;
+  var a = c && c.querySelector('.message-text');
+  return ((a && a.textContent) || '').trim();
+}""")
+
+    before = answer_text()
+    page.evaluate(
+        "() => { var b = document.querySelector("
+        "'.turn-approvals-rows .hitl-approval-card "
+        "button:not([disabled])'); if (b) b.click(); }"
+    )
+    page.wait_for_timeout(4000)
+    after = answer_text()
+
+    if before:
+        assert after.startswith(before), (
+            "the answer region was REPLACED across an approval rather than "
+            f"grown: {before[:60]!r} -> {after[:60]!r}"
         )
