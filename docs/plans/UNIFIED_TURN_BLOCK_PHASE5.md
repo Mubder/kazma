@@ -12,7 +12,7 @@ Builds on [Phase 0](UNIFIED_TURN_BLOCK_PHASE0.md),
 Plan §17 asks for an acceptance report in a specific shape:
 "invariant/scenario, test or evidence link, tested build, result, and any
 limitation. A green unit suite or an 'industrial' commit title is not
-completion evidence." That is §6 below. Everything before it is what
+completion evidence." That is §7 below. Everything before it is what
 Phase 5 changed to make that report possible.
 
 ---
@@ -181,7 +181,7 @@ code.
 **Not testable, therefore stated as procedure.** §14.7: *a rollback
 restores a build, never approval databases or checkpoints from an older
 copy that could replay completed work.* No test can enforce an operator's
-procedure. It belongs in the runbook, and it is repeated in §7 below.
+procedure. It belongs in the runbook, and it is repeated in §8 below.
 
 ---
 
@@ -332,12 +332,77 @@ race looks like, not evidence that it is harmless.
 
 ---
 
-## 6. Acceptance report (§17)
+## 6. The CI gate had been red since Phase 3
+
+Checked only at the very end of Phase 5, which is three phases too late.
+
+| Phase | `Unified turn lifecycle (GATE)` |
+|---|---|
+| 0 – 2d | success |
+| **3** | **failure** — the browser step |
+| **4** | **failure** — the app-graph step |
+| **5** | **failure** — the app-graph step |
+
+Both failures are Linux-only. Every one of them ran green on Windows, by
+hand, which is what the phase reports were written from.
+
+**Phase 3's** red step was "What the operator sees (HITL_VIEW_MODEL
+Playwright 1 and 4)" — the provider-configuration bug Phase 4 §2
+describes, where a pinned model resolved to the shipped OpenAI profile.
+Phase 4 fixed it, and Phase 4's own report explains the mechanism
+without mentioning that CI had been reporting it for a week.
+
+**Phase 4's and 5's** red step is "Four sequential gates through the real
+app graph", running `.FFFFF` — the first test passes and the other five
+die with `sqlite3.OperationalError: unable to open database file` out of
+`SessionManager._upsert_db`.
+
+That one was introduced by Phase 4's move to a per-test app.
+`reset_session_manager()` does not merely drop the singleton: it
+**creates a replacement**, at `data_dir()/chat_sessions_test_<pid>.db`.
+The harness teardown called it while `KAZMA_DATA_DIR` still pointed at
+the harness's own temporary directory, so the process-wide singleton
+ended up rooted inside a directory the enclosing `with` block then
+deleted. Every later test in the file inherited it — hence one pass and
+five failures rather than six failures.
+
+Windows never showed it, and the reason is worth stating because it will
+recur: `TemporaryDirectory` cannot delete a directory whose SQLite
+handles are still open, `ignore_cleanup_errors=True` swallows that
+failure, and the stale path therefore still exists when the next test
+looks for it. Linux deletes it and the next test dies.
+
+The fix is an ordering one — restore the environment *before* resetting
+the singletons, both before the directory goes. It is two lines. The fix
+was never the expensive part.
+
+### What this says about the evidence
+
+Every "proven end to end" claim in Phases 3–5 rests on runs performed on
+one operating system, by hand. The lifecycle job exists precisely so
+that is not the only check, and it was failing the whole time.
+
+Plan §13 anticipated the shape of this: "Required E2E tests must fail if
+dependencies/harness are absent. Do not treat `importorskip`, xfail, or
+retries that conceal deterministic failure as acceptance." The job did
+fail, correctly and loudly, every time. Nothing concealed it. It simply
+was not read — which is the same outcome, and is why checklist item 12
+(§8) matters more than it looks: a gate nobody is required to pass is a
+gate nobody notices.
+
+---
+
+## 7. Acceptance report (§17)
 
 **Tested build:** `104823e2` plus this phase's working tree, Windows 11,
 Python 3.12.9, Node v24.20.0, Chromium via Playwright.
 **Method:** every figure below is from a run on that tree; none is
 carried over from an earlier phase's report.
+
+**Platform:** all of it Windows. §6 is about what that cost, and four
+rows below are marked "CI pending" because their evidence has never been
+observed green on Linux. Nothing here should be read as a
+platform-independent claim until the lifecycle job passes.
 
 Re-run after the 310-line removal, on that tree:
 
@@ -352,23 +417,23 @@ Re-run after the 310-line removal, on that tree:
 |---|---|---|---|---|
 | 1 | One turn block with integrated header; bottom bar and controller removed | `test_turn_render_boundary.py`, `…browser.py`, `tests/js/test_turn_view.js` | **pass** | — |
 | 2 | Thoughts collapsed by default; choice preserved during updates | `…browser.py::test_the_fold_starts_collapsed_and_stays_where_the_reader_puts_it`, `tests/js/test_turn_preferences.js` | **pass** | — |
-| 3 | Thoughts survive final answer, refresh, session switch, restart | `…browser.py`, `…recovery.py`, `…restart.py` | **pass** | Restart recovery is single-process; §15 excludes multi-replica |
-| 4 | Exactly one approval group, four identified requests | `…app_graph.py`, `…browser.py::test_sequential_allow_tool_in_one_bubble` | **pass** | — |
-| 5 | Real approval/resume through the app graph; no endpoint-only substitute | `…app_graph.py` (6 tests, real `interrupt()`/`POST /api/approve`) | **pass** | — |
+| 3 | Thoughts survive final answer, refresh, session switch, restart | `…browser.py`, `…recovery.py`, `…restart.py` | **pass on Windows; CI pending** | Restart recovery is single-process (§15 excludes multi-replica); CI green not yet observed — §6 |
+| 4 | Exactly one approval group, four identified requests | `…app_graph.py`, `…browser.py::test_sequential_allow_tool_in_one_bubble` | **pass on Windows; CI pending** | The lifecycle job was red on Linux for three phases — §6 |
+| 5 | Real approval/resume through the app graph; no endpoint-only substitute | `…app_graph.py` (6 tests, real `interrupt()`/`POST /api/approve`) | **pass on Windows; CI pending** | Same: green by hand, `.FFFFF` in CI until the teardown fix — §6 |
 | 6 | Single answer region throughout | `tests/js/test_turn_view.js`, `test_unified_turn_a11y.py` | **pass** | — |
 | 7 | One projection, one rendering owner; removal inventory complete | §1, `test_turn_render_boundary.py` | **pass** | — |
-| 8 | Server-authoritative decision/execution/completion/timeout semantics | `test_approve_decides_one_gate.py`, `test_hitl_gates.py`, `…concurrency.py` | **pass** | WS approve path unfixed — §7 |
-| 9 | Live / reconnect / history / restart convergence | `tests/js/test_turn_convergence.js`, `…recovery.py`, `…restart.py` | **pass** | "Mid-token" is staged with a scripted stream, not a split packet |
+| 8 | Server-authoritative decision/execution/completion/timeout semantics | `test_approve_decides_one_gate.py`, `test_hitl_gates.py`, `…concurrency.py` | **pass** | WS approve path unfixed — §8 |
+| 9 | Live / reconnect / history / restart convergence | `tests/js/test_turn_convergence.js`, `…recovery.py`, `…restart.py` | **pass**; e2e half CI-pending | "Mid-token" is staged with a scripted stream, not a split packet; the node half is platform-independent, the e2e half is §6 |
 | 10 | Existing HITL paths and cross-surface decisions still correct | 373 compatibility tests (Phase 4 §7) | **pass** | — |
 | 11 | Performance, focus, keyboard, mobile, RTL, scroll | `tests/js/test_turn_performance.js`, `test_unified_turn_a11y.py`, `…browser.py::test_the_answer_survives_a_phone_in_rtl` | **pass** | — |
-| 12 | Required CI tests run without skips; branch enforcement verified **or reported** | §5, §7 | **reported, not met** | `main` has no branch protection at all — §7 |
+| 12 | Required CI tests run without skips; branch enforcement verified **or reported** | §5, §6, §8 | **reported, not met** | `main` has no branch protection at all — §8 |
 | 13 | Packaged-build smoke, build identity, browser evidence | §3, §4, `test_turn_assets_ship.py` | **partial** | Build identity and browser evidence are done; the "smoke" is static + served-tree + cache-bust checks, and never boots a built wheel |
 | 14 | Migration/rollback tested without reverting execution or approval history | §4, `test_turn_rollback_rehearsal.py` | **pass** | The "never restore an older database" half is procedure, not test |
 | 15 | Conflicting documentation superseded; no dual-renderer path left | §1 | **pass** | — |
 
 ---
 
-## 7. Limitations, stated rather than buried
+## 8. Limitations, stated rather than buried
 
 **Branch protection does not exist on this repository.** Plan §13:
 "Ensure the required job is actually required by repository branch
@@ -442,7 +507,7 @@ downgrade (§14.6).
 
 ---
 
-## 8. What this plan delivered
+## 9. What this plan delivered
 
 Three defects in shipped code, each found by writing the test the plan
 asked for rather than by reading:

@@ -448,12 +448,30 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
                 server.should_exit = True
                 thread.join(timeout=10.0)
                 cs.close()
-                _reset_process_singletons()
+                # Restore the environment BEFORE resetting the singletons,
+                # and both before this `with` block deletes `tmp_dir`.
+                #
+                # `reset_session_manager()` does not just drop the
+                # singleton — it CREATES a replacement, at
+                # `data_dir()/chat_sessions_test_<pid>.db`. Run while
+                # KAZMA_DATA_DIR still points here, that replacement is
+                # rooted inside `tmp_dir`, and the process-wide singleton
+                # then outlives the directory: every later test gets
+                # "sqlite3.OperationalError: unable to open database
+                # file" from `SessionManager._upsert_db`.
+                #
+                # Windows never showed it. `TemporaryDirectory` cannot
+                # delete a directory whose SQLite handles are still open,
+                # `ignore_cleanup_errors=True` swallows the failure, and
+                # the stale path therefore still exists. Linux deletes it
+                # and the next test dies — which is why this suite ran
+                # green locally and `.FFFFF` in CI.
                 for key, val in orig_env.items():
                     if val is None:
                         os.environ.pop(key, None)
                     else:
                         os.environ[key] = val
+                _reset_process_singletons()
 
 
 def _reset_process_singletons() -> None:
