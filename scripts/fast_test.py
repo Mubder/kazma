@@ -290,7 +290,23 @@ def main() -> int:
     # on. A tail of it is printed with the POISON list now.
     poison_diag: dict[str, str] = {}
     for r in crashed_chunks:
-        print(f"[fast-test] chunk {r['idx']:02d} crashed/timed out "
+        # Name the actual reason. These three arrive here for different
+        # causes and need different first hypotheses, and calling all of them
+        # "crashed/timed out" sent a 2026-09-20 audit to the wrong diagnosis:
+        # it read the label and reported that ORDINARY test failures were
+        # being mislabelled as crashes. They are not — an exit-1 chunk whose
+        # tally parsed is reported as `exit=1` and is never retried. It only
+        # lands here when the tally did NOT parse, which is a different and
+        # much more confusing problem: the chunk ran, something is wrong with
+        # our reading of its output, and re-running 155 files one at a time
+        # will not tell you what.
+        if r["code"] == 124:
+            why = "timed out"
+        elif is_crash(r["code"]):
+            why = "crashed"
+        else:
+            why = "produced no parseable test tally"
+        print(f"[fast-test] chunk {r['idx']:02d} {why} "
               f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
         # Show WHY. The chunk's own log was captured and then dropped on the
         # floor, so "crashed/timed out (exit=1)" arrived with no evidence

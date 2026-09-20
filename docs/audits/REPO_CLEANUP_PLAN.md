@@ -1,5 +1,17 @@
 # Kazma Monorepo Cleanup Plan
 
+> [!WARNING]
+> **HISTORICAL — do not action this document.** It is kept for the reasoning,
+> not as a task list. Verified against the tree on 2026-09-20: `delegation/`
+> and `tool_sandbox.py` no longer exist; `kazma-data/`, `docs/node_modules/`,
+> `docs/build/` and `dist/` are all gitignored and untracked; the permissions,
+> certification, linter, disclosure, hardening, Majlis and division APIs it
+> lists as unwired are wired.
+>
+> The living list is **`docs/KNOWN_GAPS.md`**. A superseded plan left in the
+> present tense is not inert: a 2026-09-20 audit re-filed several of these as
+> open findings, and an operator following it would "fix" working code.
+
 **Date:** 2026-07-21  
 **Scope:** Full workspace hygiene (dead code, redundancy, security residue, unwired packages)  
 **Method:** Import/wire analysis + prior `UNWIRED_INVENTORY.md` + live path scan of agent/UI/gateway/CLI  

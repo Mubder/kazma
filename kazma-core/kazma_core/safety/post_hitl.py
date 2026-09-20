@@ -62,6 +62,41 @@ def shell_strict_mode() -> bool:
     return is_production()
 
 
+def interpreter_script_dirs() -> list[str]:
+    """Directories holding console scripts for the running interpreter.
+
+    Without these the shell allowlist promises tools the PATH cannot deliver.
+    ``pytest``, ``ruff``, ``mypy`` and ``uv`` are all allowlisted build tools,
+    and in any venv-based install they live in ``<venv>/Scripts`` (Windows) or
+    ``<venv>/bin`` — which is NOT on the process PATH, because Kazma is
+    normally launched as ``.venv/Scripts/python.exe -m ...`` rather than
+    through an activated venv. So an approved ``pytest`` came back "Command
+    not found" *after* the human had already said yes: the worst shape of
+    refusal, because the operator has been told the thing was allowed.
+    Measured on the reference install — ``pytest.exe``, ``ruff.exe`` and
+    ``mypy.exe`` all present in ``.venv/Scripts``, all three unreachable.
+
+    This does not widen the trust boundary. Anyone who can plant a binary in
+    the interpreter's own script directory already controls the interpreter
+    running Kazma. Nor does it un-block interpreters: ``python`` is rejected
+    by NAME in the ``shell_exec`` allowlist, before PATH resolution is ever
+    consulted. PATH decides where an already-permitted name resolves — never
+    which names are permitted.
+    """
+    out: list[str] = []
+    try:
+        import sys
+
+        exe_dir = Path(sys.executable).resolve().parent
+        for cand in (exe_dir, exe_dir / "Scripts", exe_dir / "bin"):
+            d = str(cand)
+            if cand.is_dir() and d not in out:
+                out.append(d)
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return out
+
+
 def system_path_dirs() -> list[str]:
     """Minimal PATH entries — no user home, no project node_modules, no secrets dir."""
     if os.name == "nt":
@@ -84,6 +119,11 @@ def system_path_dirs() -> list[str]:
     for d in candidates:
         if d and os.path.isdir(d) and d not in out:
             out.append(d)
+
+    for d in interpreter_script_dirs():
+        if d not in out:
+            out.append(d)
+
     # Also include directories of known allowlisted tools if present on PATH
     for tool in ("git", "uv", "pytest", "ruff", "mypy"):
         found = shutil.which(tool)
@@ -95,10 +135,22 @@ def system_path_dirs() -> list[str]:
 
 
 def restricted_child_env(*, cwd: str) -> dict[str, str]:
-    """Build scrubbed child env; in strict mode PATH is system-only."""
-    path = os.pathsep.join(system_path_dirs()) if shell_strict_mode() else (
-        os.environ.get("PATH") or ""
-    )
+    """Build scrubbed child env; in strict mode PATH is system-only.
+
+    Both modes get :func:`interpreter_script_dirs` appended. Strict mode picks
+    them up through ``system_path_dirs``; non-strict mode inherits the process
+    PATH, which does not contain the venv's script directory either — so an
+    allowlisted ``pytest`` was unreachable in BOTH modes, for the same reason,
+    and fixing only the strict path would have left the default broken.
+    """
+    if shell_strict_mode():
+        path = os.pathsep.join(system_path_dirs())
+    else:
+        parts = [p for p in (os.environ.get("PATH") or "").split(os.pathsep) if p]
+        for d in interpreter_script_dirs():
+            if d not in parts:
+                parts.append(d)
+        path = os.pathsep.join(parts)
     env: dict[str, str] = {
         "PATH": path,
         "LANG": os.environ.get("LANG") or "C.UTF-8",

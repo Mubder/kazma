@@ -1,5 +1,13 @@
 # Unwired / Library-Only Inventory
 
+> [!WARNING]
+> **Partly superseded — verify before acting.** Re-checked 2026-09-20: the
+> Majlis, permissions, certification, linter, disclosure, hardening and
+> division APIs listed here as unwired are now wired. Entries below are
+> accurate only where this file's own review date says so.
+>
+> The living list is **`docs/KNOWN_GAPS.md`**.
+
 **Date:** 2026-07-13 (reviewed 2026-09-17)  
 **Purpose:** Track modules that are fully implemented and tested but **not
 wired into the production runtime** (agent runner, swarm engine, gateway

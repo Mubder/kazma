@@ -369,7 +369,6 @@ class TestWriteFileTool:
 class TestRunTestsTool:
     """Test the run_tests tool."""
 
-    @pytest.mark.xfail(reason="MCPServer(root=) confinement is bypassed by IdeService active-workspace routing (AGENTS.md §10) and danger tools now require KAZMA_SECRET + safety-bus gates; these tests need redesign with proper workspace pinning", strict=False)
     def test_run_tests_executes_pytest(self, tmp_path: Path, danger_ok):
         # Create a trivial test file
         (tmp_path / "test_trivial.py").write_text("def test_one():\n    assert 1 == 1\n")
@@ -384,9 +383,13 @@ class TestRunTestsTool:
         resp = json.loads(server.handle_request(line))
         text = resp["result"]["content"][0]["text"]
         assert resp["result"]["isError"] is False
-        assert "exit code:" in text
+        # pytest's own summary is the proof it ran. The old assertion looked
+        # for "exit code:", which shell_exec only appends when the return code
+        # is NON-zero — so this test could only ever have passed on a FAILING
+        # pytest run. It was marked xfail (for an unrelated stated reason) and
+        # the wrong assertion rode along unnoticed.
+        assert "1 passed" in text, text
 
-    @pytest.mark.xfail(reason="MCPServer(root=) confinement is bypassed by IdeService active-workspace routing (AGENTS.md §10) and danger tools now require KAZMA_SECRET + safety-bus gates; these tests need redesign with proper workspace pinning", strict=False)
     def test_run_tests_with_keyword(self, tmp_path: Path, danger_ok):
         (tmp_path / "test_stuff.py").write_text(
             "def test_alpha():\n    assert True\n"
@@ -405,7 +408,65 @@ class TestRunTestsTool:
         })
         resp = json.loads(server.handle_request(line))
         text = resp["result"]["content"][0]["text"]
-        assert "exit code:" in text
+        # -k alpha must actually filter: one selected, one deselected.
+        assert "1 passed" in text, text
+        assert "1 deselected" in text, text
+
+
+def test_run_tests_is_confined_to_the_server_root(tmp_path: Path, danger_ok):
+    """``MCPServer(root=)`` confines, and is not merely documented to.
+
+    This is the invariant the two tests above were xfail'd over: "MCPServer
+    (root=) confinement is bypassed by IdeService active-workspace routing".
+    It was true. Every tool dispatched through ``IdeService``, whose ``root``
+    is a property that re-resolves from the process-wide active workspace on
+    every access, and four tools called ``refresh_root()`` to adopt it
+    outright — so ``list_files``, ``run_command`` and ``git_status`` never
+    read the ``root`` argument at all.
+
+    The server now pins its root via ``pin_workspace_path`` for the duration
+    of each call, which sits at precedence 1 of ``resolve_active_root`` — the
+    same rung the swarm's per-task ``workspace_scope`` uses. Asserting on
+    ``list_files`` is the sharpest probe available here: it takes no path
+    argument, so its answer comes from the resolved root and nothing else.
+    """
+    (tmp_path / "only_here.txt").write_text("marker")
+
+    server = MCPServer(root=tmp_path)
+    line = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "list_files", "arguments": {}},
+    })
+    resp = json.loads(server.handle_request(line))
+    text = resp["result"]["content"][0]["text"]
+    assert "only_here.txt" in text, (
+        f"list_files ignored MCPServer(root=) and listed somewhere else: {text}"
+    )
+
+
+def test_workspace_path_pin_is_released_after_the_call(tmp_path: Path, danger_ok):
+    """The root pin must not leak past the tool call that set it.
+
+    A ContextVar pinned and not reset is how one caller's workspace silently
+    becomes everyone's — the exact failure the tenant ContextVar guard in
+    conftest exists for, one variable over.
+    """
+    from kazma_core.ide.workspace_scope import current_workspace_path
+
+    assert current_workspace_path() is None
+    server = MCPServer(root=tmp_path)
+    line = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "list_files", "arguments": {}},
+    })
+    server.handle_request(line)
+    assert current_workspace_path() is None, (
+        "MCP server leaked its root pin past the call"
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════

@@ -275,9 +275,42 @@ def register_system_tools(registry: Any) -> None:
             "[SECURITY] shell_exec called: %s",
             command[:200] if len(command) > 200 else command,
         )
-        # Parse command into args — NO shell interpretation
+        # Parse command into args — NO shell interpretation.
+        #
+        # `shlex.split` defaults to posix=True, which treats "\" as an ESCAPE
+        # character. On Windows that silently destroys every absolute path:
+        #
+        #     shlex.split(r"git -C C:\repo status")
+        #       -> ['git', '-C', 'C:repo', 'status']
+        #
+        # The command is not rejected — it is mangled and then run, so `git`
+        # executes against the wrong directory and the operator gets a
+        # confusing failure from git rather than an error from us. The IDE MCP
+        # server's `run_tests` could never work on Windows for this reason,
+        # and the two tests that would have caught it were marked xfail for an
+        # unrelated stated reason.
+        #
+        # posix=False keeps backslashes intact but leaves surrounding quotes
+        # attached to the token, which would break the allowlist check below
+        # (it reads Path(args[0]).name). So: split non-posix on Windows, then
+        # strip ONE matched pair of surrounding quotes per token. Both halves
+        # are required; either alone is wrong.
+        #
+        # NOTE: use a distinct alias — this function does a local `import os`
+        # further down, which makes a bare `os` here an UnboundLocalError.
+        import os as _os_plat
+
         try:
-            args = shlex.split(command)
+            if _os_plat.name == "nt":
+                args = shlex.split(command, posix=False)
+                args = [
+                    a[1:-1]
+                    if len(a) >= 2 and a[0] == a[-1] and a[0] in ("'", '"')
+                    else a
+                    for a in args
+                ]
+            else:
+                args = shlex.split(command)
         except ValueError as exc:
             return f"Error: Invalid command syntax: {exc}"
 
@@ -381,18 +414,40 @@ def register_system_tools(registry: Any) -> None:
             cwd = _get_workspace()
             cwd_s = str(cwd)
 
-            # Resolve binary under restricted PATH (post-HITL hardening)
+            # Resolve binary under restricted PATH (post-HITL hardening).
+            #
+            # Resolution now happens in BOTH modes, because on Windows the
+            # child's PATH does not decide anything. `CreateProcess` locates
+            # the executable using the PARENT process environment, so
+            # `subprocess.run(["pytest"], env={"PATH": <venv>/Scripts})` raises
+            # FileNotFoundError even with pytest.exe sitting in that exact
+            # directory — verified directly. Two consequences, both live:
+            #
+            #  * Non-strict mode (the DEFAULT outside production) never called
+            #    resolve_shell_binary, so an allowlisted `pytest`/`ruff`/`mypy`
+            #    was unreachable in any venv install: approved by the human,
+            #    then "Command not found".
+            #  * The `restricted_child_env` PATH was decorative for lookup on
+            #    Windows. Strict mode escaped that only because it resolved to
+            #    an absolute path first — which is precisely the fix, so it now
+            #    applies to both.
+            #
+            # Strict mode still REFUSES an unresolvable binary. Non-strict
+            # keeps today's lenient behaviour and falls back to the bare name
+            # rather than turning a lab convenience into a hard failure.
             child_env = restricted_child_env(cwd=cwd_s)
+            resolved = resolve_shell_binary(
+                args[0], restricted_path=child_env.get("PATH", "")
+            )
             if shell_strict_mode():
-                resolved = resolve_shell_binary(
-                    args[0], restricted_path=child_env.get("PATH", "")
-                )
                 if not resolved:
                     return (
                         f"Error: could not resolve '{args[0]}' under restricted PATH. "
                         "Post-HITL shell only runs system/build tools on the "
                         "allowlist (set KAZMA_SHELL_STRICT=0 to relax in lab)."
                     )
+                args = [resolved, *args[1:]]
+            elif resolved:
                 args = [resolved, *args[1:]]
 
             # Reject absolute paths outside workspace (audit H4).
@@ -584,7 +639,35 @@ def register_system_tools(registry: Any) -> None:
                 output += f"\n[exit code: {returncode}]"
             return output[:10_000]  # cap output
         except FileNotFoundError:
-            return f"Error: Command not found: {args[0]}"
+            # Say WHY, not just "not found". The operator has already approved
+            # this command, so a bare "not found" reads as a Kazma fault on a
+            # name that is sitting right there in the allowlist.
+            _name = Path(args[0]).name
+            if os.name == "nt" and _name.lower().endswith(".exe"):
+                _name = _name[:-4]
+            # Shell builtins have no executable to find. They are on the
+            # allowlist because it is shared with POSIX, where `echo` and
+            # `printf` are real binaries in /usr/bin; on Windows they exist
+            # only inside cmd.exe, and running a shell is the thing this tool
+            # exists to avoid.
+            if _name in ("echo", "printf", "pwd", "cd", "set", "type", "dir"):
+                return (
+                    f"Error: '{_name}' is a shell builtin, not an executable, "
+                    "so it cannot be run without a shell — and shell_exec "
+                    "deliberately does not start one. It is on the allowlist "
+                    "because that list is shared with POSIX, where it is a "
+                    "real binary.\n"
+                    "Use a native tool instead (file_read / file_list), or "
+                    "python_exec for a one-line computation."
+                )
+            return (
+                f"Error: Command not found: {args[0]}\n"
+                "The name is allowlisted but no executable for it exists on "
+                "the restricted PATH. If it is a Python console script, it "
+                "should be resolvable from the interpreter's own script "
+                "directory — check that the tool is actually installed in "
+                "this environment."
+            )
         except Exception as exc:
             return "Error: Shell command execution failed."
 
