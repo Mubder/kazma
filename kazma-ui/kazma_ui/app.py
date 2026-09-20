@@ -2282,7 +2282,27 @@ class KazmaAppBuilder:
                     pass
                 self._documents_maintenance = None
             if documents is not None:
-                await documents.stop_workers()
+                # Bounded. The comment above says "never blocks shutdown" and
+                # this await was the one that could: DocumentWorker.stop now
+                # bounds its own waits, but a second ceiling here means a
+                # future unbounded wait anywhere beneath it cannot re-open the
+                # hang that has been failing CI on every commit. A timeout is
+                # a contract; a comment is not.
+                #
+                # ``asyncio.wait`` on a task, never ``asyncio.wait_for``:
+                # wait_for CANCELS its inner awaitable on timeout and then
+                # AWAITS that cancellation, so against an uncancellable
+                # callee it reproduces the hang it is supposed to bound. That
+                # mistake was made here first and caught by
+                # tests/test_document_worker.py::
+                # test_stop_is_bounded_even_when_a_task_ignores_cancellation.
+                _stop_t = asyncio.ensure_future(documents.stop_workers())
+                _, _pending = await asyncio.wait([_stop_t], timeout=45.0)
+                if _pending:
+                    logger.warning(
+                        "[Documents] stop_workers exceeded 45s — abandoning. "
+                        "In-flight jobs resume on next boot via lease recovery."
+                    )
                 documents.close()
                 try:
                     from kazma_core.documents.ingestion import set_ingestion_service
@@ -2297,7 +2317,15 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.memory.worker_bootstrap import stop_memory_worker
 
-                await stop_memory_worker()
+                # Bounded, same reasoning as stop_workers above. This drains
+                # in-flight belief extraction / entity merges, which are
+                # genuinely worth awaiting — but not worth hanging for.
+                _mem_t = asyncio.ensure_future(stop_memory_worker())
+                _, _mem_pending = await asyncio.wait([_mem_t], timeout=30.0)
+                if _mem_pending:
+                    logger.warning(
+                        "[Memory] stop_memory_worker exceeded 30s — abandoning."
+                    )
             except Exception:  # noqa: BLE001
                 pass
             logger.info("[Documents] ingestion coordinator stopped")

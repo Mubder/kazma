@@ -147,10 +147,41 @@ tree. Assume the same class exists elsewhere.
 
   It turned CI red for four commits. `tests/test_documents_api_phase8.py`
   began hanging in app SHUTDOWN (`TestClient.__exit__` -> `wait_shutdown` ->
-  `Future.result()`), reproducibly on Linux, never on Windows. Attribution is
-  not in doubt: ten prior runs clean, POISON on exactly the two commits that
-  carried the tripwire, and the counts line up (9048 - 17 poisoned + 10 added
-  = 9041).
+  `Future.result()`), reproducibly on Linux, never on Windows. Attribution was
+  recorded here as "not in doubt": ten prior runs clean, POISON on exactly the
+  two commits that carried the tripwire, and the counts lining up (9048 - 17
+  poisoned + 10 added = 9041).
+
+  > **THE ATTRIBUTION WAS WRONG (found 2026-09-20).** The tripwire has been
+  > reverted for days and the hang is still here, on every CI run: 12
+  > consecutive commits red, each one `test_documents_api_phase8` timing out
+  > in `wait_shutdown`, each one reporting **"0 failed"** in its own totals —
+  > the job exits 1 on a teardown timeout, not an assertion, which is why
+  > "9,585 tests, 0 failures" and "CI is red" were both true at once and
+  > nobody reconciled them.
+  >
+  > The real cause is in `DocumentWorker.stop()`. It bounded its first wait
+  > and not the second: after the grace period it calls `task.cancel()` and
+  > then `await asyncio.gather(*tasks)` with no timeout. Cancellation cannot
+  > reach those tasks — `_worker_loop` parks in
+  > `asyncio.to_thread(claim_next)`, and a thread is not cancellable, so the
+  > exception is only delivered once the thread returns. If `claim_next` is
+  > stuck on a lock, the gather waits forever. Both waits are bounded now, and
+  > the app-level `stop_workers()` / `stop_memory_worker()` awaits carry
+  > ceilings so the "never blocks shutdown" comment above them is true rather
+  > than aspirational.
+  >
+  > Why the evidence looked so conclusive: the correlation was real, the
+  > causation was not. The tripwire added a per-`retrieve` probe, which shifts
+  > timing, and this hang is a *race* on whether a worker thread is mid-claim
+  > when shutdown fires. Ten clean runs before it and red on both tripwire
+  > commits is exactly what a latent race looks like when something nudges the
+  > schedule. The three published hypotheses all failed for the same reason:
+  > they were looking for a cost in the tripwire, and the tripwire was not the
+  > defect.
+  >
+  > **The tripwire can be re-landed.** Reproduce this hang first — it is
+  > reproducible now, on main, without it.
 
   The cause was never found. Three hypotheses were published and all three
   were wrong — the probe's query cost (A/B: 415.4s vs 413.9s, no difference),
