@@ -5487,7 +5487,17 @@
       '</div>' +
       '<div class="hitl-approval-actions" style="flex-wrap:wrap;gap:6px;">' +
         '<button class="btn btn-sm btn-success hitl-approve" data-scope="once" title="This call only">Approve once</button>' +
-        '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="Allow this tool for ~30m in this session">Allow tool (session)</button>' +
+        // "Allow tool" is singular, but on a GROUPED card this grants every
+        // tool in the batch — `_extract_pending_tools_from_snapshot` returns
+        // all of their names and each gets `grant_tool()`. A button that says
+        // "tool" and grants four is the same class of defect as a card that
+        // hides which tools one approval covers (2026-09-21). Say the number.
+        (tools.length > 1
+          ? '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="' +
+            escapeHtml('Allow these ' + tools.length + ' tools for ~30m in this session: ' +
+              tools.map(function (t) { return t.name || ''; }).join(', ')) +
+            '">' + escapeHtml('Allow these ' + tools.length + ' tools (session)') + '</button>'
+          : '<button class="btn btn-sm btn-primary hitl-approve-tool" data-scope="tool" title="Allow this tool for ~30m in this session">Allow tool (session)</button>') +
         (yoloOk
           ? '<button class="btn btn-sm btn-warning hitl-approve-yolo" data-scope="yolo" title="Skip all danger tools for this session">YOLO session</button>'
           : '') +
