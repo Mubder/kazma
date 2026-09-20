@@ -77,7 +77,10 @@ assert("KazmaChat is exported", typeof window.KazmaChat === "object");
 
 // The surface other modules (agentStore, nav, voice, inline handlers) call.
 for (const fn of [
-  "sendMessage", "newSession", "retry", "destroy", "taskCard", "beginTurn",
+  // `taskCard` was the Live Task Card's event sink, removed with the
+  // bar itself (UNIFIED_TURN_BLOCK.md §3 — one status surface, inside
+  // the turn).
+  "sendMessage", "newSession", "retry", "destroy", "beginTurn",
   "beginVoiceTurn", "_hitlApproval", "hasLiveGate", "hasInlineApprovalCard",
   "hitlCardExistsFor", "markApprovalTimedOut",
 ]) {

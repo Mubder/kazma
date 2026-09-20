@@ -29,7 +29,6 @@
   var _docs = {};
   var activeStream = null;
   /** Live typing-indicator element for the current turn (cleared on abort). */
-  var activeTypingEl = null;
   // Track the last successfully-sent user message so the empty-turn
   // recovery can offer a one-click Retry instead of leaving the user
   // staring at "_No response received._" with no recourse. Reset on
@@ -50,7 +49,7 @@
   var _progressToolCount = 0;
 
   // DOM refs
-  var messagesEl, inputEl, sendBtn, typingEl, sessionListEl, searchInputEl;
+  var messagesEl, inputEl, sendBtn, sessionListEl, searchInputEl;
   var costBadge, tokensBadge, contextBadge, charBadge;
   var modelSelectorEl;
 
@@ -110,7 +109,6 @@
     _installScrollPinTracker();
     inputEl = $('chat-input');
     sendBtn = $('send-btn');
-    typingEl = $('thinking-indicator');
     sessionListEl = $('session-list');
     searchInputEl = $('session-search');
     costBadge = $('session-cost');
@@ -417,7 +415,6 @@
       onToken: function(data) {
         if (!_mine()) return;
         _noteSeq();
-        _taskCardEvent({ t: 'token' });
         applyTurnEvent({
           type: 'token',
           content: data.content,
@@ -428,11 +425,6 @@
       },
       onToolCall: function(data) {
         if (!_mine()) return;
-        _taskCardEvent({
-          t: 'tool',
-          name: data.tool_name || 'tool',
-          detail: _tcArgSummary(data.inputs),
-        });
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
           try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
@@ -440,7 +432,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
+          detail: _toolDetailWithGist(_toolArgSummary(data.inputs), inputs),
           state: 'running',
           // The graph's own run id, so the LIVE row and the row the
           // server persisted are one row rather than two after a
@@ -451,11 +443,10 @@
       },
       onToolResult: function(data) {
         if (!_mine()) return;
-        _taskCardEvent({ t: 'tool_end', name: data.tool_name || 'tool' });
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
+          detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
           state: 'done',
           // The graph's own run id, so the LIVE row and the row the
           // server persisted are one row rather than two after a
@@ -476,13 +467,6 @@
         // Journaled liveness frame — not epoch-gated (same rule as HITL):
         // a superseded stream's graph is the live graph.
         _noteSeq();
-        _taskCardEvent({
-          t: 'hb',
-          phase: (data && data.phase) || '',
-          current: (data && data.current) || '',
-          step: (data && data.step) || 0,
-          elapsed_s: (data && data.elapsed_s) || 0,
-        });
         // The heartbeat is the only frame carrying a SERVER-measured
         // elapsed. Without this the header would have to time the turn
         // itself, which is the client clock that printed "Done 0s" while
@@ -1373,7 +1357,6 @@
     // one. forceEndTurn's 'done' frame left the card on screen for its
     // 1.6s retire animation, so a brand-new empty session flashed a
     // "Done" task card for a turn that never happened (2026-09-03).
-    _taskCardEvent({ t: 'reset' });
   }
 
   /** Apply a /status payload. Join-before-paint: call this BEFORE TurnView
@@ -1573,617 +1556,80 @@
     }, TURN_IDLE_WATCHDOG_MS);
   }
 
-  /**
-   * ── Live Task Card ──────────────────────────────────────────────────
-   * The ONE turn-state surface, merged from the retired status strip and
-   * the live in-bubble CoT panel. Single writer: _taskCardEvent — every
-   * other helper (_setStatusStrip, SSE/WS callbacks, pauseForApproval,
-   * endTurn) dispatches through it, so two surfaces can never disagree
-   * again (the frozen-thinking / blank-while-paused bug class).
-   *
-   * Header — phase icon + WHAT it is doing + elapsed + step:
-   *   ⚙ Running file_search "auth middleware" · 42s · 1:12 in this tool · step 23
-   *   🧠 Thinking · 12s
-   *   ⏳ Awaiting your approval · auto-denies in 3:12          [Review ↑]
-   *   ⚠ no signal 24s — checking…            (journal gap → resync w/ backoff)
-   *   ⚠ not responding                       (backoff exhausted)  [Retry]
-   *   ✓ Done · 12 steps · 3 tools · 18.4s · 4.2k tokens
-   * The turn's own actions live here too: Stop while running, Review to
-   * jump to the approval card, Retry once liveness recovery gives up.
-   *
-   * Body (remembers open/closed across turns and reloads): compact step
-   * list from the TurnDocument, reasoning clamped to 2 lines, 50-row cap,
-   * tail-pinned unless the reader scrolled up.
-   *
-   * Lifecycle: docked here while the turn runs; on done the summary
-   * finalizes into the transcript bubble (existing restored-workbench
-   * path) and the card unmounts.
-   *
-   * a11y: the toggle's accessible name is STATIC ("Task details") — its
-   * live text is aria-hidden, because a per-second header rewrite made
-   * screen readers re-announce the whole control every tick. Phase,
-   * countdown and liveness go to the role="status" region at coarse
-   * thresholds instead.
-   */
-  // >>> LIVE_TASK_CARD_BEGIN — self-contained state machine. tests/js/
-  // test_live_task_card.js extracts this block verbatim and drives it on a
-  // fake clock + fake DOM; only the stubs it declares may be referenced
-  // from outside these markers.
-  var _TC_OPEN_KEY = 'kazma.taskcard.open';
-  var _TC_STALL_MS = 20000;        // heartbeats land every ~8-10s
-  var _TC_STALL_RETRY_MS = 30000;  // backoff between resync attempts
-  var _TC_STALL_MAX_TRIES = 3;     // then stop retrying and say so
-  var _TC_STEP_CAP = 50;
-  var _TC_TOOL_PHASE_MIN_S = 15;   // below this, "in this tool" is noise
-
-  var _tc = {
-    el: null, header: null, toggle: null, phaseEl: null, label: null,
-    meta: null, stallEl: null, chevron: null, body: null, stepsEl: null,
-    liveEl: null, stopBtn: null, jumpBtn: null, retryBtn: null,
-    visible: false, phase: 'idle', current: '', detail: '', step: 0,
-    turnStart: 0, elapsedS: 0, elapsedFloor: 0,
-    srvElapsed: 0, srvElapsedAt: 0,
-    phaseStart: 0, lastSignal: 0, deadline: 0,
-    planTotal: 0, planDone: 0,
-    stalled: false, stallTries: 0, nextResyncAt: 0, dead: false,
-    open: false, tickTimer: null, doneTimer: null,
-    textOverride: '', summary: '', emptyTurn: false,
-    announced: '', stepsHtml: '',
-    // Label hysteresis (2026-09-03): tool→think→tool flips made the header
-    // churn on every event of a multi-step turn. A non-escalating label
-    // change is only accepted after this long; escalations always apply.
-    labelShown: '', labelShownAt: 0, phaseShown: '',
-  };
-  var _TC_LABEL_MIN_MS = 1200;
-
-  function _tcMount() {
-    if (_tc.el) return _tc.el;
-    _tc.el = document.getElementById('live-task-card');
-    if (!_tc.el) return null;
-    function q(sel) { return _tc.el.querySelector(sel); }
-    _tc.header = q('.live-task-header');
-    _tc.toggle = q('.live-task-toggle');
-    _tc.phaseEl = q('.live-task-phase');
-    _tc.label = q('.live-task-label');
-    _tc.meta = q('.live-task-meta');
-    _tc.stallEl = q('.live-task-stall');
-    _tc.chevron = q('.live-task-chevron');
-    _tc.body = q('.live-task-body');
-    _tc.stepsEl = q('.live-task-steps');
-    _tc.liveEl = q('.live-task-live');
-    _tc.stopBtn = q('.live-task-stop');
-    _tc.jumpBtn = q('.live-task-jump');
-    _tc.retryBtn = q('.live-task-retry');
-    // Readers who want the steps open want them open on the NEXT turn too.
-    try {
-      _tc.open = window.localStorage.getItem(_TC_OPEN_KEY) === '1';
-    } catch (eLs) { /* private mode / storage disabled */ }
-    if (_tc.toggle) {
-      _tc.toggle.addEventListener('click', function () {
-        _tc.open = !_tc.open;
-        try {
-          window.localStorage.setItem(_TC_OPEN_KEY, _tc.open ? '1' : '0');
-        } catch (eSet) { /* ignore */ }
-        if (_tc.open) _tcStepsFromDoc();
-        _tcRender();
-      });
+  // ── Turn timing format ──────────────────────────────────────────────
+  //
+  // What stood here was the Live Task Card: a docked status bar above the
+  // composer with its own phase machine, its own clock, its own stall
+  // detector and its own step list. docs/plans/UNIFIED_TURN_BLOCK.md §3
+  // removes it — one turn gets ONE status surface, and it lives in the
+  // turn block (see _buildTurnHeader / modules/turn_presentation.js).
+  //
+  // Where each of its jobs went:
+  //   phase, elapsed, counts, Stop  -> the turn header
+  //   open/closed body              -> the activity disclosure, whose
+  //                                    state is now a reader preference
+  //                                    (modules/turn_preferences.js)
+  //   step list                     -> the workbench, which already had one
+  //   stall detection + resync      -> _reconcileTick, which was ALREADY
+  //                                    polling every 6s while a turn might
+  //                                    be undelivered. The bar ran a second
+  //                                    recovery loop beside it with its own
+  //                                    retry budget; all that added was a
+  //                                    label, and that label is now the
+  //                                    header's connection indicator.
+  //
+  /** Seconds as m:ss / h:mm:ss. Pure formatting, no clock of its own. */
+  function _fmtMMSS(total) {
+    var s = Math.max(0, Math.floor(Number(total) || 0));
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    if (h) {
+      return h + ':' + (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
     }
-    if (_tc.stopBtn) {
-      _tc.stopBtn.addEventListener('click', function () {
-        try { abortGeneration(); } catch (eAb) { /* ignore */ }
-      });
-    }
-    if (_tc.jumpBtn) _tc.jumpBtn.addEventListener('click', _tcJumpToApproval);
-    if (_tc.retryBtn) {
-      _tc.retryBtn.addEventListener('click', function () {
-        _tc.stallTries = 0;
-        _tc.nextResyncAt = 0;
-        _tc.dead = false;
-        try { _resyncDelivery('stall-retry'); } catch (eR) { /* ignore */ }
-        _tcRender();
-      });
-    }
-    return _tc.el;
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
   }
 
-  /** The countdown says "auto-denies in 3:12" — the buttons are hundreds of
-   *  pixels up the transcript. Put them one click away. */
-  function _tcJumpToApproval() {
-    if (!messagesEl) return;
-    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
-    for (var i = cards.length - 1; i >= 0; i--) {
-      if (!cards[i].querySelector('button:not([disabled])')) continue;
-      var card = cards[i];
-      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-      catch (eSc) { try { card.scrollIntoView(); } catch (eS2) { /* ignore */ } }
-      card.classList.add('is-flash');
-      setTimeout(function () { card.classList.remove('is-flash'); }, 1400);
-      return;
-    }
-  }
 
-  function _tcPhaseIcon(phase) {
-    if (phase === 'tool') return '⚙';
-    if (phase === 'awaiting') return '⏳';
-    if (phase === 'resuming') return '↻';
-    // A turn that delivered nothing must not wear a checkmark.
-    if (phase === 'done') return _tc.emptyTurn ? '⚠' : '✓';
-    if (phase === 'error') return '✕';
-    return '🧠'; // llm / supervisor / thinking
-  }
-
-  /**
-   * Structural phases outrank the free-text override. The override used to
-   * win unconditionally, so beginTurn's "Kazma is thinking…" painted itself
-   * over "Resuming after approval" one line after the resume set it — the
-   * card read "↻ Kazma is thinking…" through every approve.
-   */
-  function _tcPhaseLabel() {
-    switch (_tc.phase) {
-      case 'tool': {
-        var t = ti('task_running_tool', 'Running') + ' ' + (_tc.current || 'tool');
-        return _tc.detail ? t + ' ' + _tc.detail : t;
-      }
-      case 'awaiting': return ti('task_awaiting', 'Awaiting your approval');
-      case 'resuming': return ti('task_resuming', 'Resuming after approval');
-      case 'error': return _tc.textOverride || ti('task_error', 'Turn failed');
-      case 'done':
-        if (_tc.textOverride) return _tc.textOverride;
-        return _tc.emptyTurn
-          ? ti('task_no_reply', 'No reply received')
-          : ti('task_done', 'Done');
-      default:
-        if (_tc.textOverride) return _tc.textOverride;
-        return _tc.phase === 'llm'
-          ? ti('task_thinking', 'Thinking')
-          : ti('thinking', 'Kazma is thinking…');
-    }
-  }
-
-  function _tcFmtMMSS(s) {
-    s = Math.max(0, Math.floor(s));
-    var m = Math.floor(s / 60);
-    var r = s % 60;
-    return m + ':' + (r < 10 ? '0' : '') + r;
-  }
-
-  /**
-   * Server heartbeats are authoritative; the local clock fills the gaps.
-   * The first version had this backwards — it only recomputed while signals
-   * were FRESH, so the timer froze at exactly the moment you are staring at
-   * it wondering whether the turn hung. A resumed run restarts the server's
-   * own clock at zero, so take the max: the displayed turn time never goes
-   * backwards.
-   */
-  function _tcElapsed(now) {
-    var local = _tc.turnStart ? (now - _tc.turnStart) / 1000 : 0;
-    var srv = _tc.srvElapsedAt
-      ? _tc.srvElapsed + (now - _tc.srvElapsedAt) / 1000
-      : 0;
-    // Monotonic within a turn: whichever clock is further ahead wins, and
-    // the reading never moves backwards. Both can regress on their own — the
-    // server's restarts at zero on a resumed run, the local one starts late
-    // when this tab attached to a turn already in flight.
-    _tc.elapsedFloor = Math.max(local, srv, _tc.elapsedFloor || 0);
-    return _tc.elapsedFloor;
-  }
-
-  function _tcRender() {
-    if (!_tcMount() || !_tc.visible) return;
-    var now = Date.now();
-    var terminal = _tc.phase === 'done' || _tc.phase === 'error';
-    if (!terminal) _tc.elapsedS = _tcElapsed(now);
-    // Label hysteresis: show label + icon as ONE accepted snapshot so a
-    // fast tool batch cannot strobe the header (Thinking ↔ Running X ↔
-    // Thinking ↔ Running Y …). Escalations cut through immediately.
-    var escalated = _tc.phase === 'awaiting' || _tc.stalled || _tc.dead || terminal;
-    var lbl = _tcPhaseLabel();
-    if (lbl !== _tc.labelShown) {
-      if (escalated || !_tc.labelShownAt || now - _tc.labelShownAt >= _TC_LABEL_MIN_MS) {
-        _tc.labelShown = lbl;
-        _tc.phaseShown = _tc.phase;
-        _tc.labelShownAt = now;
-      }
-    } else {
-      _tc.phaseShown = escalated ? _tc.phase : (_tc.phaseShown || _tc.phase);
-    }
-    if (_tc.phaseEl) _tc.phaseEl.textContent = _tcPhaseIcon(_tc.phaseShown || _tc.phase);
-    if (_tc.label) _tc.label.textContent = _tc.labelShown || lbl;
-
-    var bits = [];
-    if (terminal) {
-      if (_tc.summary) bits.push(_tc.summary);
-    } else if (_tc.phase === 'awaiting' && _tc.deadline) {
-      var left = Math.floor(_tc.deadline - now / 1000);
-      bits.push('⏳ ' + (left > 0
-        ? ti('task_auto_deny_in', 'auto-denies in') + ' ' + _tcFmtMMSS(left)
-        : ti('approval_expired_short', 'expired')));
-    } else {
-      if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
-      // A tool that has been running three minutes is the thing worth
-      // seeing; total turn time hides it behind everything that came before.
-      var inPhase = _tc.phaseStart ? (now - _tc.phaseStart) / 1000 : 0;
-      if (_tc.phase === 'tool' && inPhase > _TC_TOOL_PHASE_MIN_S) {
-        bits.push(tiFmt('task_in_tool', '{d} in this tool', { d: _tcFmtMMSS(inPhase) }));
-      }
-      if (_tc.step > 0) bits.push(ti('task_step', 'step') + ' ' + _tc.step);
-      if (_tc.planTotal > 0) {
-        bits.push(ti('task_plan', 'plan') + ' ' + _tc.planDone + '/' + _tc.planTotal);
-      }
-    }
-    if (_tc.meta) _tc.meta.textContent = bits.join(' · ');
-
-    if (_tc.stallEl) {
-      _tc.stallEl.hidden = !_tc.stalled;
-      if (_tc.stalled) {
-        _tc.stallEl.textContent = '⚠ ' + (_tc.dead
-          ? ti('task_not_responding', 'not responding')
-          : ti('task_no_signal', 'no signal') + ' ' +
-            Math.floor((now - _tc.lastSignal) / 1000) + 's — ' +
-            ti('task_checking', 'checking…'));
-      }
-    }
-    if (_tc.stopBtn) _tc.stopBtn.hidden = terminal || _tc.phase === 'awaiting';
-    if (_tc.jumpBtn) _tc.jumpBtn.hidden = _tc.phase !== 'awaiting';
-    if (_tc.retryBtn) _tc.retryBtn.hidden = !_tc.dead;
-
-    if (_tc.chevron) {
-      _tc.chevron.hidden = true;
-      _tc.chevron.textContent = _tc.open ? '▾' : '▸';
-    }
-    if (_tc.toggle) _tc.toggle.setAttribute('aria-expanded', 'false');
-    if (_tc.body) _tc.body.hidden = true;
-    _tc.el.className = 'live-task-card' +
-      (_tc.phase === 'awaiting' ? ' is-awaiting' : '') +
-      (_tc.stalled ? ' is-stalled' : '') +
-      (_tc.dead ? ' is-dead' : '') +
-      (_tc.phase === 'done' ? ' is-done' : '') +
-      (_tc.phase === 'error' ? ' is-error' : '') +
-      (terminal && _tc.emptyTurn ? ' is-empty' : '') +
-      (_tc.open ? ' is-open' : '');
-    _tc.el.hidden = false;
-    _tcAnnounce(now, terminal);
-  }
-
-  /**
-   * Screen-reader channel. The header's visible text is aria-hidden and the
-   * toggle's name is fixed, so nothing here fires on the 1s tick — only on
-   * a phase change, a coarse countdown threshold, a liveness change, or the
-   * terminal summary.
-   */
-  function _tcAnnounce(now, terminal) {
-    if (!_tc.liveEl) return;
-    var say = _tcPhaseLabel();
-    if (_tc.phase === 'awaiting' && _tc.deadline) {
-      var left = Math.floor(_tc.deadline - now / 1000);
-      var bucket = left <= 0 ? 0
-        : (left <= 10 ? 10 : (left <= 30 ? 30 : (left <= 60 ? 60 : -1)));
-      if (bucket === 0) say += ' — ' + ti('approval_expired_short', 'expired');
-      else if (bucket > 0) {
-        say += ' — ' + tiFmt('auto_deny_seconds', 'auto-denies in {n} seconds',
-          { n: bucket });
-      }
-    }
-    if (_tc.stalled) {
-      say += ' — ' + (_tc.dead
-        ? ti('task_not_responding', 'not responding')
-        : ti('task_no_signal', 'no signal'));
-    }
-    if (terminal && _tc.summary) say += ' — ' + _tc.summary;
-    if (say === _tc.announced) return;
-    _tc.announced = say;
-    _tc.liveEl.textContent = say;
-  }
-
-  function _tcTick() {
-    if (!_tc.visible) return;
-    var now = Date.now();
-    // Stalled honesty: heartbeats arrive every ~8-10s during silence, so a
-    // _TC_STALL_MS gap means the JOURNAL went quiet — surface it and try to
-    // reconcile. Recovery is a BACKOFF, not a one-shot: the first version
-    // latched after a single resync, so a genuinely dead stream sat amber
-    // forever with nothing else attempted and no way to say so.
-    var watched = _tc.phase !== 'awaiting' && !_tcIsTerminal();
-    if (watched && _tc.lastSignal && now - _tc.lastSignal > _TC_STALL_MS) {
-      if (!_tc.stalled) {
-        _tc.stalled = true;
-        _tc.stallTries = 0;
-        _tc.nextResyncAt = 0;
-      }
-      if (!_tc.dead && now >= _tc.nextResyncAt) {
-        _tc.stallTries += 1;
-        _tc.nextResyncAt = now + _TC_STALL_RETRY_MS;
-        if (_tc.stallTries > _TC_STALL_MAX_TRIES) _tc.dead = true;
-        else { try { _resyncDelivery('heartbeat-gap'); } catch (eR) { /* ignore */ } }
-      }
-    } else if (_tc.stalled) {
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-    }
-    _tcRender();
-  }
-
-  function _tcIsTerminal() {
-    return _tc.phase === 'done' || _tc.phase === 'error';
-  }
-
-  function _tcStepsFromDoc() {
-    // Thoughts and tools live in the bubble workbench. This card is a bar.
-    if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
-    _tc.stepsHtml = '';
-  }
-
-  /**
-   * The single writer. Events:
-   *  begin | token | tool{name,detail} | tool_end{name}
-   *  hb{phase,current,detail,step,elapsed_s} | status{status,message}
-   *  text{msg} | plan{total,done} | approval{deadline} | resuming
-   *  done{ok,summary,msg} | error{msg} | doc
-   */
-  function _taskCardEvent(ev) {
-    ev = ev || {};
-    if (!_tcMount()) return;
-    var now = Date.now();
-
-    // A session change is the ABSENCE of a turn, not the end of one: unmount
-    // now, with no terminal frame and no retire animation.
-    if (ev.t === 'reset') {
-      if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
-      if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
-      _tc.visible = false;
-      _tc.phase = 'idle';
-      _tc.current = '';
-      _tc.detail = '';
-      _tc.step = 0;
-      _tc.elapsedS = 0;
-      _tc.elapsedFloor = 0;
-      _tc.turnStart = 0;
-      _tc.phaseStart = 0;
-      _tc.srvElapsed = 0;
-      _tc.srvElapsedAt = 0;
-      _tc.lastSignal = 0;
-      _tc.deadline = 0;
-      _tc.planTotal = 0;
-      _tc.planDone = 0;
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-      _tc.textOverride = '';
-      _tc.summary = '';
-      _tc.emptyTurn = false;
-      _tc.announced = '';
-      _tc.stepsHtml = '';
-      if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
-      if (_tc.liveEl) _tc.liveEl.textContent = '';
-      if (_tc.el) _tc.el.hidden = true;
-      return;
-    }
-
-    if (ev.t === 'begin') {
-      _tc.phase = 'idle';
-      _tc.current = '';
-      _tc.detail = '';
-      _tc.step = 0;
-      _tc.elapsedS = 0;
-      _tc.elapsedFloor = 0;
-      _tc.turnStart = now;
-      _tc.phaseStart = now;
-      _tc.srvElapsed = 0;
-      _tc.srvElapsedAt = 0;
-      _tc.deadline = 0;
-      _tc.planTotal = 0;
-      _tc.planDone = 0;
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-      _tc.textOverride = '';
-      _tc.summary = '';
-      _tc.emptyTurn = false;
-      _tc.announced = '';
-      _tc.stepsHtml = '';
-      _tc.labelShown = '';
-      _tc.phaseShown = '';
-      _tc.labelShownAt = 0;
-      if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
-      _tcWake(now);
-      _tcSetPhase('llm', '', '', now);
-    } else if (ev.t === 'token' || ev.t === 'tool' || ev.t === 'tool_end' ||
-               ev.t === 'status' || ev.t === 'hb' || ev.t === 'approval' ||
-               ev.t === 'resuming') {
-      // Every liveness event restores the card. `approval` and `resuming`
-      // used to skip this: a pending hide from the previous terminal frame
-      // stayed armed and blanked the card mid-approve, and a resume never
-      // restarted the tick timer (frozen elapsed, dead stall detection).
-      _tcWake(now);
-    }
-
-    switch (ev.t) {
-      case 'tool':
-        _tcSetPhase('tool', ev.name || 'tool', ev.detail, now);
-        _tc.step += 1;
-        _tc.textOverride = '';
-        break;
-      case 'tool_end':
-        if (_tc.phase === 'tool') _tcSetPhase('supervisor', '', '', now);
-        break;
-      case 'token':
-        if (_tc.phase !== 'awaiting') _tcSetPhase('llm', '', '', now);
-        break;
-      case 'hb':
-        if (ev.phase) _tcSetPhase(String(ev.phase), ev.current, ev.detail, now);
-        if (ev.step) _tc.step = Math.max(_tc.step, parseInt(ev.step, 10) || 0);
-        if (ev.elapsed_s) {
-          _tc.srvElapsed = Number(ev.elapsed_s) || 0;
-          _tc.srvElapsedAt = now;
-        }
-        if (_tc.phase !== 'awaiting') _tc.textOverride = '';
-        break;
-      case 'status': {
-        var st = String(ev.status || '');
-        if (st === 'synthesizing') {
-          _tcSetPhase('llm', '', '', now);
-          _tc.textOverride = ti('task_writing', 'Writing the reply…');
-        } else if (st === 'routing_node') {
-          _tc.textOverride = String(ev.message || '');
-        } else if (st === 'paused_for_approval') {
-          /* the approval event owns this */
-        } else if (ev.message) {
-          _tc.textOverride = String(ev.message);
-        }
-        break;
-      }
-      case 'text':
-        // An empty msg CLEARS. `if (ev.msg)` let _clearStatusStrip leave a
-        // stale override ("Writing the reply…") alive under a later phase.
-        _tc.textOverride = String(ev.msg || '');
-        break;
-      case 'plan':
-        _tc.planTotal = parseInt(ev.total, 10) || 0;
-        _tc.planDone = parseInt(ev.done, 10) || 0;
-        break;
-      case 'approval':
-        _tcSetPhase('awaiting', '', '', now);
-        _tc.deadline = Number(ev.deadline || 0);
-        _tc.textOverride = '';
-        break;
-      case 'resuming':
-        _tcSetPhase('resuming', '', '', now);
-        _tc.deadline = 0;
-        _tc.textOverride = '';
-        break;
-      case 'doc':
-        // Cheap when collapsed: the body is not on screen, so skip the
-        // rebuild entirely — the toggle builds it on open.
-        if (_tc.visible && _tc.open) _tcStepsFromDoc();
-        return;
-      case 'done':
-      case 'error':
-        _tc.phase = ev.t === 'error' ? 'error' : 'done';
-        _tc.phaseStart = now;
-        _tc.deadline = 0;
-        _tc.stalled = false;
-        _tc.dead = false;
-        _tc.textOverride = ev.msg ? String(ev.msg) : '';
-        _tc.summary = String(ev.summary || '');
-        // `ok: false` is an explicit "the turn delivered nothing" from
-        // endTurn — undefined (abort / forceEndTurn) is not a failure.
-        _tc.emptyTurn = ev.ok === false;
-        if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
-        if (!_tc.visible) return;
-        _tcRender();
-        // Bubble carries the durable summary now — card retires shortly.
-        if (_tc.doneTimer) clearTimeout(_tc.doneTimer);
-        _tc.doneTimer = setTimeout(function () {
-          _tc.visible = false;
-          if (_tc.el) _tc.el.hidden = true;
-          _tc.doneTimer = null;
-        }, ev.t === 'error' ? 4000 : (_tc.summary ? 3200 : 1600));
-        return;
-      default:
-        break;
-    }
-    _tcRender();
-    if (_tc.open) _tcStepsFromDoc();
-  }
-
-  /** Liveness restore, shared by every event that proves the turn is alive. */
-  function _tcWake(now) {
-    _tc.visible = true;
-    _tc.lastSignal = now;
-    if (!_tc.turnStart) _tc.turnStart = now;
-    if (!_tc.phaseStart) _tc.phaseStart = now;
-    // A frame IS the signal — clear the warning here, not a tick later, or
-    // the same render that shows the new phase also shows "no signal 0s".
-    if (_tc.stalled) {
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-    }
-    // A hide armed by a previous terminal frame must never fire onto a live
-    // card — this is what blanked the card the instant you hit Approve.
-    if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
-    if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
-  }
-
-  /** Phase changes restart the phase-scoped clock ("1:12 in this tool"). */
-  function _tcSetPhase(phase, current, detail, now) {
-    if (phase && phase !== _tc.phase) {
-      _tc.phase = phase;
-      _tc.phaseStart = now;
-    }
-    if (current !== undefined) _tc.current = String(current || '');
-    if (detail !== undefined) _tc.detail = String(detail || '');
-  }
-  // <<< LIVE_TASK_CARD_END
-
-  /**
-   * "12 steps · 3 tools · 18.4s · 4.2k tokens" for the card's terminal
-   * frame. The shape of what just happened used to be thrown away — the
-   * card flashed a bare "Done" and the counts died with the live panel.
-   */
-  function _tcTurnSummary() {
-    var bits = [];
-    if (_progressStepCount > 0) {
-      bits.push(_progressStepCount + ' ' +
-        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps')));
-    }
-    if (_progressToolCount > 0) {
-      bits.push(_progressToolCount + ' ' +
-        (_progressToolCount === 1 ? ti('task_tool', 'tool') : ti('task_tools', 'tools')));
-    }
-    var s = _lastTurnStats || null;
-    if (s && s.durationMs > 0 && KS.formatDuration) bits.push(KS.formatDuration(s.durationMs));
-    else if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
-    if (s && s.tokens > 0 && KS.formatTokens) {
-      bits.push(KS.formatTokens(s.tokens) + ' ' + ti('tokens', 'tokens'));
-    }
-    if (s && s.cost > 0 && KS.formatCost) bits.push(KS.formatCost(s.cost));
-    return bits.join(' · ');
-  }
 
   /**
    * A compact "what is it doing this to" for the card header: the first
    * meaningful scalar out of a tool's arguments. "Running file_search" tells
    * you far less than 'Running file_search "auth middleware"'.
    */
-  var _TC_ARG_SKIP = { session_id: 1, thread_id: 1, workspace_id: 1, turn_id: 1, id: 1 };
-  var _TC_ARG_PREFER = ['query', 'q', 'path', 'file', 'file_path', 'url', 'name',
+  var _TOOL_ARG_SKIP = { session_id: 1, thread_id: 1, workspace_id: 1, turn_id: 1, id: 1 };
+  var _TOOL_ARG_PREFER = ['query', 'q', 'path', 'file', 'file_path', 'url', 'name',
     'command', 'cmd', 'pattern', 'text', 'prompt', 'title', 'to'];
-  function _tcArgSummary(inputs) {
+  function _toolArgSummary(inputs) {
     var obj = inputs;
     if (typeof obj === 'string') {
       var s = obj.trim();
       if (!s) return '';
       if (s.charAt(0) === '{' || s.charAt(0) === '[') {
-        try { obj = JSON.parse(s); } catch (eP) { return _tcQuote(s); }
+        try { obj = JSON.parse(s); } catch (eP) { return _toolQuote(s); }
       } else {
-        return _tcQuote(s);
+        return _toolQuote(s);
       }
     }
     if (!obj || typeof obj !== 'object') return '';
-    if (Array.isArray(obj)) return obj.length ? _tcArgSummary(obj[0]) : '';
+    if (Array.isArray(obj)) return obj.length ? _toolArgSummary(obj[0]) : '';
     var k, i;
-    for (i = 0; i < _TC_ARG_PREFER.length; i++) {
-      k = _TC_ARG_PREFER[i];
-      if (typeof obj[k] === 'string' && obj[k].trim()) return _tcQuote(obj[k]);
-      if (typeof obj[k] === 'number') return _tcQuote(String(obj[k]));
+    for (i = 0; i < _TOOL_ARG_PREFER.length; i++) {
+      k = _TOOL_ARG_PREFER[i];
+      if (typeof obj[k] === 'string' && obj[k].trim()) return _toolQuote(obj[k]);
+      if (typeof obj[k] === 'number') return _toolQuote(String(obj[k]));
     }
     var keys = Object.keys(obj);
     for (i = 0; i < keys.length; i++) {
       k = keys[i];
-      if (_TC_ARG_SKIP[k]) continue;
+      if (_TOOL_ARG_SKIP[k]) continue;
       var v = obj[k];
-      if (typeof v === 'string' && v.trim()) return _tcQuote(v);
-      if (typeof v === 'number' || typeof v === 'boolean') return _tcQuote(String(v));
+      if (typeof v === 'string' && v.trim()) return _toolQuote(v);
+      if (typeof v === 'number' || typeof v === 'boolean') return _toolQuote(String(v));
     }
     return '';
   }
-  function _tcQuote(s) {
+  function _toolQuote(s) {
     s = String(s).replace(/\s+/g, ' ').trim();
     if (!s) return '';
     return '“' + truncateStr(s, 48) + '”';
@@ -2198,11 +1644,11 @@
    * The wrappers degrade to the raw value if that file fails to load: a
    * missing gist is a cosmetic loss, and a step row that throws is not.
    */
-  function _tcResultSummary(result) {
+  function _toolResultSummary(result) {
     var M = window.KazmaTurnDetail;
     return M ? M.resultSummary(result) : '';
   }
-  function _tcDetailWithGist(gist, raw) {
+  function _toolDetailWithGist(gist, raw) {
     var M = window.KazmaTurnDetail;
     return M ? M.withGist(gist, raw) : String(raw == null ? '' : raw);
   }
@@ -2221,12 +1667,10 @@
 
   /** Legacy strip call sites route here — one surface, one writer. */
   function _setStatusStrip(msg) {
-    _taskCardEvent({ t: 'text', msg: msg });
     // Store flag kept for WS liveness logic; it no longer owns any DOM.
     _setStoreThinking(true, msg);
   }
   function _clearStatusStrip() {
-    _taskCardEvent({ t: 'text', msg: '' });
     _setStoreThinking(false);
   }
 
@@ -2323,6 +1767,7 @@
    */
   function beginTurn(opts) {
     _stopRequested = false;
+    _startHeaderTicker();
     var resume = !!(opts && opts.resume);
     _isGenerating = true;
     _awaitingApproval = false;
@@ -2335,7 +1780,6 @@
     // Status strip shows the instant ANY turn starts (SSE, WS, or
     // approve-resume) — no longer dependent on WS frames arriving.
     // A resume is not a new card epoch (keeps elapsed/step).
-    _taskCardEvent(resume ? { t: 'resuming' } : { t: 'begin' });
     // Store flag only. Stamping a text override here painted "Kazma is
     // thinking\u2026" over the phase the line above just set \u2014 every approve
     // rendered as "\u21bb Kazma is thinking\u2026" instead of "Resuming after
@@ -2419,11 +1863,6 @@
     // The card's last frame carries the SHAPE of what just happened
     // ("12 steps · 3 tools · 18.4s · 4.2k tokens") instead of a bare "Done"
     // that threw the counts away with the live panel.
-    _taskCardEvent({ t: 'done', ok: !!_turnPainted, summary: _tcTurnSummary() });
-    if (activeTypingEl && KS.hideTyping) {
-      KS.hideTyping(activeTypingEl);
-    }
-    activeTypingEl = null;
     // Approve-resume used a local typing row that endTurn never saw, so
     // "Thinking…" stayed under a finished answer (2026-09-01).
     if (currentMsgEl) {
@@ -2470,7 +1909,6 @@
    * Always clears Stop + Alpine thinking even if the server never sent idle.
    */
   function forceEndTurn() {
-    _taskCardEvent({ t: 'done' });
     try {
       if (window.Alpine && Alpine.store && Alpine.store('agent')) {
         var store = Alpine.store('agent');
@@ -2503,13 +1941,10 @@
     // — _paintHitlFromDoc used to stamp "Approved — running…" on first paint
     // because pauseForApproval runs before the pending card is created.
     _serverPaused = true;
-    if (activeTypingEl && KS.hideTyping) KS.hideTyping(activeTypingEl);
-    activeTypingEl = null;
     _clearStatusStrip();
     // The card is the ONE surface while paused: it shows the awaiting
     // phase + the watchdog countdown (pause used to blank the strip and
     // leave dead air when the inline card was late — 2026-09-03).
-    _taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) });
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
@@ -3330,8 +2765,6 @@
       _resetTurnState();
     }
 
-    // Status strip is store-owned now; beginTurn arms it below.
-    activeTypingEl = typingEl;
 
     // Ensure we have a stable session id
     if (!chatSessionId) {
@@ -3392,7 +2825,6 @@
         if (!_mine()) return;
         noteTurnActivity();
         _noteSeq();
-        _taskCardEvent({ t: 'token' });
         _outboxClear();  // first streamed token = the server received the send
         // NOTE: do NOT clear the status strip per token. The strip sits
         // IN-FLOW between transcript and composer — every hide/show shifts
@@ -3400,7 +2832,6 @@
         // streaming text bounce (the flicker). While tokens flow the strip
         // stays steady ("Writing reply…"); terminal paths (done/error/
         // endTurn) are the only ones allowed to hide it.
-        activeTypingEl = null;
         if (!tokenAccum) {
           logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
         }
@@ -3417,11 +2848,6 @@
       onToolCall: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        _taskCardEvent({
-          t: 'tool',
-          name: data.tool_name || 'tool',
-          detail: _tcArgSummary(data.inputs),
-        });
         // Look-only: a tool step has nothing to put IN the bubble, and
         // minting one here opened every tool-first turn with a blank bubble.
         _pinLiveAssistantBubble(false);
@@ -3432,7 +2858,7 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
+          detail: _toolDetailWithGist(_toolArgSummary(data.inputs), inputs),
           state: 'running',
           // The graph's own run id, so the LIVE row and the row the
           // server persisted are one row rather than two after a
@@ -3445,13 +2871,12 @@
       onToolResult: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        _taskCardEvent({ t: 'tool_end', name: data.tool_name || 'tool' });
         if (!currentMsgEl) return;
         var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
+          detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
           state: isSwarm ? 'running' : 'done',
           // The graph's own run id, so the LIVE row and the row the
           // server persisted are one row rather than two after a
@@ -3498,11 +2923,6 @@
             : (status === 'routing_node'
               ? tiFmt('routing', 'Routing: {node}', { node: (data && data.active_node) || 'Supervisor' })
               : (data.message || ti('thinking', 'Kazma is thinking\u2026')));
-          _taskCardEvent({
-            t: 'status',
-            status: status,
-            message: (data && data.message) || title,
-          });
           logProgress({
             kind: 'status',
             title: title,
@@ -3512,7 +2932,6 @@
         } else if (status === 'paused_for_approval' || status === 'idle') {
           // HITL / idle handled by other callbacks
         } else {
-          _taskCardEvent({ t: 'status', status: status, message: String(data.message || status) });
           logProgress({
             kind: 'status',
             title: String(data.message || status),
@@ -3527,13 +2946,6 @@
         // superseded stream's graph is the live graph (same rule as HITL).
         noteTurnActivity();
         _noteSeq();
-        _taskCardEvent({
-          t: 'hb',
-          phase: (data && data.phase) || '',
-          current: (data && data.current) || '',
-          step: (data && data.step) || 0,
-          elapsed_s: (data && data.elapsed_s) || 0,
-        });
         // The heartbeat is the only frame carrying a SERVER-measured
         // elapsed. Without this the header would have to time the turn
         // itself, which is the client clock that printed "Done 0s" while
@@ -3551,7 +2963,6 @@
         if (!_mine()) return;
         activeStream = null;
         _clearStatusStrip();
-        activeTypingEl = null;
         diag('done', {
           interrupted: !!(data && data.interrupted),
           truncated: !data,
@@ -3692,7 +3103,6 @@
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
-        activeTypingEl = null;
         pauseForApproval(data);
         _ingestFrameGateViews(data);
         applyTurnEvent({
@@ -3716,7 +3126,6 @@
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         if (st === 'pending') {
           _clearStatusStrip();
-          activeTypingEl = null;
           pauseForApproval(data);
         } else {
           _awaitingApproval = false;
@@ -3775,8 +3184,6 @@
         // Final failure: surface it, then reconcile with server truth (the
         // turn may have completed server-side and be durable already).
         _clearStatusStrip();
-        _taskCardEvent({ t: 'error', msg: String(msg || '') });
-        activeTypingEl = null;
         _pinLiveAssistantBubble();
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
@@ -4234,11 +3641,6 @@
     // Live Task Card: plan progress rides the card header meta. setPlan
     // must NEVER create an in-bubble workbench — on hydration it painted a
     // phantom "Working…" panel over finished history (2026-09-03).
-    _taskCardEvent({
-      t: 'plan',
-      total: _planItems.length,
-      done: _planItems.filter(function(p) { return p.done; }).length,
-    });
     var panel = messagesEl
       ? messagesEl.querySelector('.agent-progress.is-active')
       : null;
@@ -4269,11 +3671,6 @@
       }
     }
     if (_progressEl) _renderPlanList(_progressEl);
-    _taskCardEvent({
-      t: 'plan',
-      total: _planItems.length,
-      done: _planItems.filter(function(p) { return p.done; }).length,
-    });
   }
 
   /**
@@ -5905,19 +5302,6 @@
     return dl > 0 ? dl : 0;
   }
 
-  /** Deadline of the newest card that still has live buttons, 0 if none.
-   *  Lets the Live Task Card keep counting down for a SIBLING gate after the
-   *  first one is decided. */
-  function _liveHitlDeadline() {
-    if (!messagesEl) return 0;
-    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
-    for (var i = cards.length - 1; i >= 0; i--) {
-      if (!cards[i].querySelector('button:not([disabled])')) continue;
-      return Number(cards[i].getAttribute('data-approval-deadline') || 0) || 0;
-    }
-    return 0;
-  }
-
   function _attachHitlCountdown(card, data) {
     if (!card) return;
     var dl = _hitlDeadlineOf(data);
@@ -5945,8 +5329,11 @@
     _stopHitlCountdown(card);
     var oldRow = card.querySelector('.hitl-countdown');
     if (oldRow && oldRow.parentNode) oldRow.parentNode.removeChild(oldRow);
-    // Published on the node so _liveHitlDeadline can find it — the value
-    // used to live only in this closure.
+    // Published on the node rather than kept in this closure: the card's
+    // own deadline is readable by anything reconciling it, and a reload
+    // that re-adopts the card can restart the ticker from the same value.
+    // (It also fed the retired Live Task Card's page-level countdown; per
+    // card is the level that survived, because two gates can be waiting.)
     try { card.setAttribute('data-approval-deadline', String(dl)); }
     catch (eDl) { /* ignore */ }
     var row = document.createElement('div');
@@ -6481,9 +5868,6 @@
         // the turn stopped waiting on gate B.
         _awaitingApproval = hasLiveGate();
         _awaitingReply = true;
-        if (_awaitingApproval) {
-          _taskCardEvent({ t: 'approval', deadline: _liveHitlDeadline() });
-        }
         _notifyHitlResolved({
           thread_id: data.thread_id || targetThreadId,
           tool: data.tool || '',
@@ -7793,6 +7177,13 @@
       serverGenerating: !!_serverGenerating || !!_isGenerating,
       stopRequested: !!_stopRequested,
       gateViews: _serverGatesAuth ? _serverGateViews : null,
+      // How long the journal has been quiet. noteTurnActivity() already
+      // stamps every live frame; the retired bar kept a SECOND clock and a
+      // SECOND retry budget for the same question, next to the reconciler
+      // that was already polling every 6s. Recovery stays the
+      // reconciler's; this is only the report.
+      lastSignalAgoMs: _lastTurnActivityTs
+        ? (Date.now() - _lastTurnActivityTs) : 0,
       retrySupported: true,
     };
   }
@@ -7818,7 +7209,7 @@
       if (drift > 0 && drift < 3600) secs += drift;
     }
     if (secs <= 0) return '';
-    return _tcFmtMMSS(secs);
+    return _fmtMMSS(secs);
   }
 
   function _headerCountsText(model) {
@@ -7837,6 +7228,46 @@
       bits.push(c.gates + ' ' + ti('approvals', 'approvals'));
     }
     return bits.join(' \u00B7 ');
+  }
+
+  /**
+   * Repaint the live turn's header once a second.
+   *
+   * Display only: the clock ticks forward from the server's stamp and the
+   * silence counter grows. It changes no state, decides nothing, and stops
+   * the moment the turn is terminal — plan §3, "A local timer may update
+   * elapsed display. It cannot mark a gate expired or a turn complete."
+   * The retired bar's tick did both, which is how a client wall clock came
+   * to print "Done 0s" over a turn the graph was still running.
+   */
+  var _headerTicker = null;
+
+  function _tickLiveHeader() {
+    var TV = _turnView();
+    var id = _liveTurnId || 'live';
+    var el = TV && TV.elFor(id);
+    var node = el && TV.slot(el, 'header');
+    if (!node) return false;
+    var doc = _docs[id];
+    if (!doc) return false;
+    _paintTurnHeader(node, doc);
+    var model = _headerModel(doc);
+    return !!(model && !model.terminal);
+  }
+
+  function _startHeaderTicker() {
+    if (_headerTicker) return;
+    _headerTicker = setInterval(function () {
+      var keepGoing = false;
+      try { keepGoing = _tickLiveHeader(); } catch (e) { keepGoing = false; }
+      if (!keepGoing) _stopHeaderTicker();
+    }, 1000);
+  }
+
+  function _stopHeaderTicker() {
+    if (!_headerTicker) return;
+    clearInterval(_headerTicker);
+    _headerTicker = null;
   }
 
   function _buildTurnHeader(turnId) {
@@ -7914,9 +7345,19 @@
     // Plan §3: "Disconnection is not completion or failure."
     var conn = el.querySelector('.turn-header-conn');
     if (conn) {
-      var reconnecting = model.connection === 'reconnecting';
-      if (conn.hidden !== !reconnecting) conn.hidden = !reconnecting;
-      var connText = reconnecting ? ti('reconnecting', 'Reconnecting\u2026') : '';
+      var connText = '';
+      if (model.connection === 'stalled') {
+        // Silence, with its duration. The bar said "not responding" after
+        // exhausting a retry budget it owned; the reconciler never stops
+        // trying, so the honest thing to report is how long it has been
+        // quiet rather than a verdict this surface cannot reach.
+        connText = tiFmt('no_signal_for', 'No signal for {t}',
+          { t: _fmtMMSS(model.silentMs / 1000) });
+      } else if (model.connection === 'reconnecting') {
+        connText = ti('reconnecting', 'Reconnecting\u2026');
+      }
+      var show = !!connText;
+      if (conn.hidden !== !show) conn.hidden = !show;
       if (conn.textContent !== connText) conn.textContent = connText;
     }
 
@@ -7987,7 +7428,6 @@
     _progressToolCount = (html.match(/data-kind="tool"/g) || []).length;
     _progressStepCount = (html.match(/<li /g) || []).length;
     var thoughtN = (html.match(/data-kind="thought"/g) || []).length;
-    _taskCardEvent({ t: 'doc' });
     var done = !!(doc && (doc.status === 'done' || doc.status === 'error'));
     panel.classList.toggle('is-done', done);
     panel.classList.toggle('is-active', !done);
@@ -8424,7 +7864,6 @@
     var paintable = !!_answerFromDoc(TD, doc) || _docHasBubbleContent(doc);
     var el = _bubbleForTurn(turnId, paintable);
     if (!el) {
-      _taskCardEvent({ t: 'doc' });
       return;
     }
     if (turnId && turnId !== 'live') TV.bind(turnId, el);
@@ -8530,7 +7969,6 @@
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
     /** Live Task Card single-writer dispatch (WS store + SSE both feed it). */
-    taskCard: _taskCardEvent,
     // The document is the entry point, never the card builder: every HITL
     // source (SSE frame, WS frame, gate registry, pending-approvals
     // recovery, hydration) feeds applyTurnEvent, and TurnView is the only
@@ -8646,7 +8084,6 @@
     appendLiveToken: function(content, opts) {
       noteTurnActivity();
       _clearStatusStrip();
-      activeTypingEl = null;
       if (!content) return;
       applyTurnEvent({
         type: 'token',
@@ -8661,7 +8098,6 @@
     setPlan: setPlan,
     appendErrorMessage: function(errMsg) {
       _clearStatusStrip();
-      activeTypingEl = null;
       logProgress({ kind: 'error', title: ti('error', 'Error'), detail: String(errMsg || ''), state: 'failed' });
       _pinLiveAssistantBubble();
       var textEl = currentMsgEl.querySelector('.message-text');

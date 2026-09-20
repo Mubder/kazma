@@ -179,14 +179,6 @@ function registerAgentStore() {
       const chat = this._chat();
       if (chat && typeof chat.logProgress === 'function') chat.logProgress(step);
     },
-    /** Live Task Card (2026-09-03): WS frames feed the SAME single-writer
-     *  card the SSE path uses — one indicator surface, one owner. */
-    _taskCard(ev) {
-      try {
-        const chat = window.KazmaChat;
-        if (chat && typeof chat.taskCard === 'function') chat.taskCard(ev);
-      } catch (e) { /* never break a frame on the indicator */ }
-    },
     _beginTurn() {
       this._turnActive = true;
       this.isThinking = true;
@@ -246,18 +238,6 @@ function registerAgentStore() {
       this.statusMessage = _ti('thinking', 'Kazma is thinking…');
     },
 
-    /** Keep the bottom thinking banner in sync with live status text. */
-    _syncThinkingBanner() {
-      try {
-        const el = document.getElementById('thinking-indicator');
-        if (!el) return;
-        // Note: the strip's visibility is x-show-owned; this only syncs text.
-        const text = el.querySelector('.thinking-text');
-        if (text && this.statusMessage) {
-          text.textContent = this.statusMessage;
-        }
-      } catch (e) { /* ignore */ }
-    },
 
     // ── Connection Lifecycle ─────────────────────────────────
     /**
@@ -860,7 +840,6 @@ function registerAgentStore() {
           this.isThinking = true;
           this._turnActive = true;
           this.statusMessage = _ti('thinking', 'Kazma is thinking…');
-          this._syncThinkingBanner();
           try {
             if (window.KazmaChat && typeof window.KazmaChat.noteTurnActivity === 'function') {
               window.KazmaChat.noteTurnActivity();
@@ -909,14 +888,12 @@ function registerAgentStore() {
               ? String(data.message)
               : _ti('thinking', 'Kazma is thinking…');
             this.statusMessage += _budgetSuffix(data, frame);
-            this._taskCard({ t: 'status', status: 'thinking', message: this.statusMessage });
             if (frame.active_node || data.active_node) this.activeNode = frame.active_node || data.active_node;
             this._progress({
               kind: 'status',
               title: this.statusMessage,
               state: 'running',
             });
-            this._syncThinkingBanner();
             // (V2) Reconnect delivery is owned by the structured 'resumed'
             // handshake + journal replay — no prose matching here.
           } else if (statusVal === 'routing_node') {
@@ -925,14 +902,12 @@ function registerAgentStore() {
             this.activeNode = frame.active_node || data.active_node || 'Supervisor';
             this.statusMessage = _tiFmt('routing', 'Routing: {node}', { node: this.activeNode })
               + _budgetSuffix(data, frame);
-            this._taskCard({ t: 'status', status: 'routing_node', message: this.statusMessage });
             this._progress({
               kind: 'plan',
               title: _tiFmt('routing_arrow', 'Routing → {node}', { node: this.activeNode })
                 + _budgetSuffix(data, frame),
               state: 'running',
             });
-            this._syncThinkingBanner();
           } else if (statusVal === 'synthesizing') {
             // The graph finished tool execution and is now composing the
             // final answer. Keep the thinking indicator alive so the user
@@ -941,13 +916,11 @@ function registerAgentStore() {
             this.isThinking = true;
             this._turnActive = true;
             this.statusMessage = _ti('synthesizing', 'Composing response…');
-            this._taskCard({ t: 'status', status: 'synthesizing', message: this.statusMessage });
             this._progress({
               kind: 'status',
               title: _ti('synthesizing', 'Composing response…'),
               state: 'running',
             });
-            this._syncThinkingBanner();
           } else if (statusVal === 'paused_for_approval') {
             // Replayed frames are history — a settled approval's retained
             // status frame must not flash the fallback card on refresh
@@ -993,9 +966,6 @@ function registerAgentStore() {
           this._turnActive = true;
           const toolStatus = frame.status || data.status || 'tool_running';
           const tName = frame.tool_name || data.tool_name || 'tool';
-          this._taskCard(toolStatus === 'tool_running' || toolStatus === 'running'
-            ? { t: 'tool', name: tName }
-            : { t: 'tool_end', name: tName });
           if (type === 'tool_start' || toolStatus === 'tool_running') {
             this.activeTool = {
               name: tName,
@@ -1018,7 +988,6 @@ function registerAgentStore() {
               state: 'running',
             });
             this.statusMessage = _tiFmt('running_tool', 'Running {tool}…', { tool: tName });
-            this._syncThinkingBanner();
           } else if (toolStatus === 'tool_completed') {
             if (this.activeTool) {
               this.activeTool.status = 'completed';
@@ -1131,7 +1100,6 @@ function registerAgentStore() {
             title: this.statusMessage,
             state: 'running',
           });
-          this._syncThinkingBanner();
           break;
 
         case 'approval_complete':
@@ -1188,7 +1156,6 @@ function registerAgentStore() {
           this._turnActive = true;
           const text = frame.content || data.content;
           if (!text) break;
-          this._taskCard({ t: 'token' });
           const isFull = !!(data && data.full) || !!(frame && frame.full);
           this._applyTurnEvent({
             type: type === 'llm_delta' ? 'llm_delta' : 'token',

@@ -60,7 +60,6 @@ def _chat_html() -> str:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-@XFAIL_PHASE2
 def test_no_separate_live_task_card_markup() -> None:
     """Plan §3: "No second fixed or floating status bar."
 
@@ -77,7 +76,6 @@ def test_no_separate_live_task_card_markup() -> None:
     )
 
 
-@XFAIL_PHASE2
 def test_no_independent_task_card_controller() -> None:
     """Plan §9: the task-card controller loses independent phase/content
     ownership; its commands move onto the turn header."""
@@ -91,7 +89,6 @@ def test_no_independent_task_card_controller() -> None:
         )
 
 
-@XFAIL_PHASE2
 def test_no_live_task_card_styles() -> None:
     """Plan §9: "Old CSS/selectors/imports/localization/tests — remove or
     update alongside the owning change." """

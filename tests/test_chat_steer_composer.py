@@ -842,100 +842,104 @@ def test_supervisor_steer_tid_falls_back_to_context() -> None:
     assert "get_current_thread_id" in gb[idx : idx + 400]
 
 
-def test_live_task_card_single_writer_and_liveness() -> None:
-    """The merged Live Task Card is the ONE turn-state surface.
+def test_one_status_surface_and_it_is_the_turn_header() -> None:
+    """What the Live Task Card locked, relocated.
 
-    Single-writer (_taskCardEvent), heartbeat-fed, stalled-honest, and the
-    retired strip delegates to it instead of fighting it. These are
-    STRUCTURAL assertions - that the wiring exists. What the card actually
-    DOES on each event sequence is tested for real in
-    tests/js/test_live_task_card.js (driven below).
+    The bar was "the ONE turn-state surface" — a page-level strip with a
+    single writer (``_taskCardEvent``), heartbeat-fed and stall-honest.
+    ``docs/plans/UNIFIED_TURN_BLOCK.md`` §3 moves that job INSIDE the turn,
+    because one surface per PAGE is what forced it to own a phase machine,
+    a clock and a retry budget of its own — and to guess when a turn it
+    could not see had ended.
+
+    These are structural assertions that the wiring exists. What the model
+    actually decides on each state is tested in
+    tests/js/test_turn_presentation.js; what the reader's fold does across
+    repaints is tests/js/test_turn_preferences.js.
     """
     js = _js()
-    assert "function _taskCardEvent(ev)" in js
-    assert 'id="live-task-card"' in (
+    html = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
     ).read_text(encoding="utf-8")
-    # Legacy strip delegates to the card - one surface, one writer.
-    strip = js.split("function _setStatusStrip(msg)", 1)[1].split(
-        "function _clearStatusStrip()", 1
-    )[0]
-    assert "_taskCardEvent({ t: 'text', msg: msg })" in strip
-    # Heartbeats feed the card from BOTH SSE callback builders and the
-    # WS store; pause shows awaiting + the watchdog countdown.
-    assert js.count("t: 'hb'") >= 2
-    assert "taskCard: _taskCardEvent" in js
-    assert "_taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) })" in js
-    # Stalled honesty: a signal gap warns, then resyncs with BACKOFF. The
-    # first version fired one resync and latched, so a dead stream sat amber
-    # forever with nothing else attempted and no way to say so.
-    tc = js.split("function _tcTick()", 1)[1].split("function _tcIsTerminal()", 1)[0]
-    assert "_TC_STALL_MS" in tc
-    assert "_resyncDelivery('heartbeat-gap')" in tc
-    assert "_TC_STALL_RETRY_MS" in tc
-    assert "_TC_STALL_MAX_TRIES" in tc
-    assert "_tc.dead = true" in tc
-    # The bar has no step list. Thoughts live in the bubble workbench.
-    steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
-        "The single writer", 1
-    )[0]
-    assert "rows.slice(-_TC_STEP_CAP)" not in steps
-    assert "_tc.stepsEl.innerHTML = ''" in steps or '_tc.stepsEl.innerHTML = "";' in steps
-    # Live turns no longer build an in-bubble workbench: the bubble's
-    # workbench is ONE slot, painted from the document's activity rows, and
-    # it feeds the card rather than competing with it.
-    cot = js_function_body(js, "function _paintWorkbenchSlot(panel, doc)")
-    assert "_taskCardEvent({ t: 'doc' })" in cot
-    assert "if (list._kzCotHTML === html) return;" in cot, (
-        "identical markup re-assigned — tears the subtree down every frame"
+
+    # Gone, with its controller and its markup.
+    assert "_taskCardEvent" not in js
+    assert "LIVE_TASK_CARD_BEGIN" not in js
+    assert 'id="live-task-card"' not in html
+    assert 'id="thinking-indicator"' not in html, (
+        "the strip the bar itself replaced is still in the page"
     )
 
-
-def test_live_task_card_behaviors_under_node() -> None:
-    """Drive the real state machine on a fake clock; see the JS file.
-
-    Substring assertions pass happily while the branch they name leaks a
-    hide timer - which is exactly how "approve -> the card vanished and no
-    response" shipped. These are the tests with teeth.
-    """
-    script = Path(__file__).resolve().parent / "js" / "test_live_task_card.js"
-    assert script.is_file()
-    node = shutil.which("node")
-    if not node:  # pragma: no cover - CI always has node
-        pytest.skip("node not available")
-    proc = subprocess.run(
-        [node, str(script)], capture_output=True, text=True, timeout=120
-    )
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    # Replaced by a slot in the turn block, derived not told.
+    assert "function _buildTurnHeader(" in js
+    assert "function _paintTurnHeader(" in js
+    assert "modules/turn_presentation.js" in html
+    assert "modules/turn_preferences.js" in html
 
 
-def test_live_task_card_never_hides_a_live_turn() -> None:
-    """Structural guard for the vanishing card.
+def test_the_header_cannot_vanish_from_a_live_turn() -> None:
+    """The vanishing card, made structurally impossible.
 
-    Every liveness event - approval and resuming included - must go through
-    _tcWake, which cancels a hide armed by the previous terminal frame.
-    'approval' and 'resuming' used to skip it: a done frame less than 1.6s
-    earlier blanked the card mid-approve, and a resume never restarted the
-    tick timer (frozen elapsed, dead stall detection).
+    Every liveness event — approval and resuming included — had to pass
+    through ``_tcWake`` to cancel a hide armed by the previous terminal
+    frame. ``approval`` and ``resuming`` skipped it, so a done frame less
+    than 1.6s earlier blanked the card mid-approve and a resume never
+    restarted the tick timer: frozen elapsed, dead stall detection
+    (2026-09-03).
+
+    There is no hide timer now. The header is a keyed slot, the renderer's
+    ``discard`` answers false for everything (turn_view.js contract 4:
+    ambiguity never deletes), and the only timer is a repaint that stops
+    itself. A frame cannot remove the header because nothing removes it.
     """
     js = _js()
-    wake = js.split("function _tcWake(now)", 1)[1].split(
-        "/** Phase changes restart", 1
-    )[0]
-    assert "clearTimeout(_tc.doneTimer)" in wake
-    assert "_tc.visible = true" in wake
-    assert "setInterval(_tcTick, 1000)" in wake
-    dispatch = js.split("function _taskCardEvent(ev)", 1)[1].split(
-        "function _tcWake(now)", 1
-    )[0]
-    # The liveness arm: every event on it wakes the card. Read the `else if`
-    # condition itself, not the `begin` branch that precedes it.
-    live = dispatch.split("} else if (", 1)[1].split(") {", 1)[0]
-    for ev in ("'token'", "'tool'", "'tool_end'", "'status'", "'hb'",
-               "'approval'", "'resuming'"):
-        assert ev in live, ev + " does not restore the card through _tcWake"
-    assert "_tcWake(now);" in dispatch.split("} else if (", 1)[1]
+    assert "discard: function() { return false; }" in js, (
+        "the renderer can delete slots again; a header could vanish"
+    )
+    # The header's timer repaints and nothing else.
+    tick = js_function_body(js, "function _tickLiveHeader()")
+    for forbidden in ("hidden", "remove(", "innerHTML"):
+        assert forbidden not in tick, (
+            f"the header ticker does more than repaint ({forbidden})"
+        )
+    # Liveness is a FACT the model reads, not an event the header is told.
+    facts = js_function_body(js, "function _headerFacts()")
+    assert "lastSignalAgoMs" in facts
+    assert "_lastTurnActivityTs" in facts
+    # ...and silence is reported as silence rather than as an outcome.
+    pres = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "static" / "js" / "modules"
+        / "turn_presentation.js"
+    ).read_text(encoding="utf-8")
+    assert "'stalled'" in pres
+    assert "STALL_MS" in pres
+
+
+def test_recovery_has_one_loop_not_two() -> None:
+    """The bar ran a second recovery loop beside the reconciler.
+
+    ``_tcTick`` watched for a 20s heartbeat gap and drove its own
+    ``_resyncDelivery`` retries on a 30s backoff with a 3-try budget —
+    while ``_reconcileTick`` was already resyncing every 6s for the whole
+    time a turn might be undelivered. Two loops asking the same question;
+    all the second one added was the words "not responding".
+
+    Deleting the bar must not have deleted recovery, so this asserts the
+    surviving loop is intact and that no second one came back with it.
+    """
+    js = _js()
+    assert "function _reconcileTick()" in js
+    tick = js_function_body(js, "function _reconcileTick()")
+    assert "_resyncDelivery('reconcile')" in tick
+    assert "_scheduleReconcile()" in tick
+    assert "_turnMayBeUndelivered()" in tick
+    # One scheduler, one budget.
+    assert js.count("function _scheduleReconcile()") == 1
+    assert "_TC_STALL_RETRY_MS" not in js
+    assert "_TC_STALL_MAX_TRIES" not in js
+    assert "nextResyncAt" not in js, "a second retry budget is back"
 
 
 def test_approval_freeze_is_scoped_to_the_card_decided() -> None:
@@ -959,9 +963,15 @@ def test_approval_freeze_is_scoped_to_the_card_decided() -> None:
     # Deciding gate A does not mean the turn stopped waiting on gate B.
     submit = js.split("function submitApproval(action, scope)", 1)[1]
     assert "_awaitingApproval = hasLiveGate();" in submit
-    assert "_liveHitlDeadline()" in submit
-    # The deadline has to be readable off the node for that to work.
+    # The sibling's countdown is PER CARD, read off the node. It used to be
+    # re-read into a page-level clock for the Live Task Card as well; that
+    # surface is gone (UNIFIED_TURN_BLOCK.md §3) and per card is the level
+    # that was always right, because two gates can be waiting at once.
     assert "card.setAttribute('data-approval-deadline'" in js
+    assert "function _attachHitlCountdown(card, data)" in js
+    assert "_liveHitlDeadline" not in js, (
+        "a page-level approval clock is back; deadlines belong to the card"
+    )
 
 
 def test_store_approval_fallback_never_outlives_the_inline_card() -> None:
@@ -1003,27 +1013,40 @@ def test_store_approval_fallback_never_outlives_the_inline_card() -> None:
     assert "_clearStoreApproval()" in rec
 
 
-def test_session_change_unmounts_the_task_card_without_a_done_flash() -> None:
+def test_a_session_change_leaves_no_status_surface_behind() -> None:
     """A brand-new empty session flashed a "Done" card for 1-2 seconds.
 
-    ``newSession`` calls ``forceEndTurn``, whose terminal frame leaves the
-    card on screen for its 1.6s retire animation. But a session change is
-    the ABSENCE of a turn, not the end of one — there is nothing to
-    animate away. ``_resetSessionTurnState`` now unmounts it outright.
+    ``newSession`` calls ``forceEndTurn``, whose terminal frame left the
+    Live Task Card on screen for its 1.6s retire animation. A session
+    change is the ABSENCE of a turn, not the end of one, so there was
+    nothing to animate away — but the bar outlived the transcript because
+    it was a PAGE-level surface.
+
+    The status line now lives inside the assistant bubble
+    (UNIFIED_TURN_BLOCK.md §3), so changing session removes it with the
+    transcript and the whole class is structural. What is left to check is
+    that nothing page-level came back, and that the one timer the header
+    owns is a display ticker that stops itself.
     """
     js = _js()
-    reset = js.split("function _resetSessionTurnState()", 1)[1].split(
-        "/** Progress-idle failsafe", 1
-    )[0]
-    assert "_taskCardEvent({ t: 'reset' })" in reset
-    # The reset branch must cancel BOTH timers, or a leftover one reveals or
-    # re-hides the card after the session has already changed.
-    branch = js.split("if (ev.t === 'reset') {", 1)[1].split("if (ev.t === 'begin')", 1)[0]
-    assert "clearTimeout(_tc.doneTimer)" in branch
-    assert "clearInterval(_tc.tickTimer)" in branch
-    assert "_tc.visible = false;" in branch
-    assert "_tc.el.hidden = true;" in branch
-    assert "_tc.stepsEl.innerHTML = '';" in branch
+    # The element, not the word: the comments that explain why it is gone
+    # mention it by name on purpose.
+    assert "getElementById('live-task-card')" not in js, (
+        "a page-level status surface is back"
+    )
+    assert "LIVE_TASK_CARD_BEGIN" not in js
+    html = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "templates" / "chat.html"
+    ).read_text(encoding="utf-8")
+    assert 'id="live-task-card"' not in html
+    # The header's only timer is a repaint. It reads the document, writes
+    # nothing, and stops as soon as the turn is terminal.
+    tick = js_function_body(js, "function _tickLiveHeader()")
+    assert "_paintTurnHeader(" in tick
+    assert "return !!(model && !model.terminal);" in tick
+    stop = js_function_body(js, "function _stopHeaderTicker()")
+    assert "clearInterval(_headerTicker)" in stop
 
 
 def test_an_empty_read_never_wipes_the_steps_you_are_reading() -> None:
@@ -1036,14 +1059,19 @@ def test_an_empty_read_never_wipes_the_steps_you_are_reading() -> None:
     changed; both do it explicitly.
     """
     js = _js()
-    steps = js.split("function _tcStepsFromDoc()", 1)[1].split(
-        "The single writer", 1
-    )[0]
-    assert "activityOf" not in steps
-    assert "_docs[_liveTurnId]" not in steps
-    for owner in ("if (ev.t === 'reset') {", "if (ev.t === 'begin') {"):
-        branch = js.split(owner, 1)[1][:2000]
-        assert "_tc.stepsEl.innerHTML = '';" in branch, owner
+    # The Live Task Card kept its own step list, re-read it from _docs on
+    # every tick, and blanked it when the read came back empty — which is
+    # exactly what happens around the end of a turn. That second list is
+    # gone; the workbench is the only one, and its painter refuses an empty
+    # read outright rather than treating it as "no steps".
+    assert "_tcStepsFromDoc" not in js, "a second step list is back"
+    paint = js_function_body(js, "function _paintWorkbenchSlot(panel, doc)")
+    assert "if (!activity.length) return;" in paint, (
+        "the workbench painter no longer refuses an empty read — this is "
+        "the line that stops a finished turn blanking the panel the reader "
+        "has open"
+    )
+    assert "if (!html) return;" in paint
 
 
 def test_live_placeholder_is_never_a_bubble_identity() -> None:
@@ -1136,21 +1164,31 @@ def test_progress_only_frames_never_mint_an_empty_bubble() -> None:
     assert "!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted" in done
 
 
-def test_ws_store_feeds_task_card() -> None:
+def test_ws_store_owns_no_status_surface_of_its_own() -> None:
+    """One surface, one owner — the point the task-card bridge was making.
+
+    The WS store used to push every frame into the Live Task Card so the
+    WS path and the SSE path drove the SAME indicator instead of two. With
+    the bar gone (docs/plans/UNIFIED_TURN_BLOCK.md §3) the requirement is
+    unchanged and simpler to state: the store feeds CONTENT to chat.js and
+    paints no status of its own. It must not acquire a new bridge to a new
+    surface, which is how the last one started.
+    """
     store = (
         Path(__file__).resolve().parent.parent
         / "kazma-ui" / "kazma_ui" / "static" / "js" / "stores" / "agentStore.js"
     ).read_text(encoding="utf-8")
-    assert "_taskCard(ev)" in store
-    assert "chat.taskCard(ev)" in store
-    for needle in (
-        "{ t: 'status', status: 'thinking'",
-        "{ t: 'status', status: 'routing_node'",
-        "{ t: 'status', status: 'synthesizing'",
-        "{ t: 'token' }",
-        "{ t: 'tool', name: tName }",
-    ):
-        assert needle in store, needle
+    assert "taskCard" not in store
+    assert "thinking-indicator" not in store
+    # Content still goes to the one painter.
+    assert "chat.logProgress(step)" in store
+    assert "typeof chat.beginTurn === 'function'" in store
+    # ...and the store touches no transcript DOM itself.
+    for forbidden in (".message-content", ".message-text", "agent-progress",
+                      "turn-header"):
+        assert forbidden not in store, (
+            f"the WS store is writing turn content directly ({forbidden})"
+        )
 
 
 def test_setplan_and_memory_explain_never_create_panels() -> None:
@@ -1163,16 +1201,13 @@ def test_setplan_and_memory_explain_never_create_panels() -> None:
         "function markPlanProgress(toolName)", 1
     )[0]
     assert "ensureProgressPanel()" not in plan
-    assert "_taskCardEvent({" in plan
     mem = js.split("function applyMemoryExplain(data)", 1)[1].split(
         "\n  function ", 1
     )[0]
     assert "ensureProgressPanel()" not in mem
-    # Card renders plan progress in the header meta.
-    tc_render = js.split("function _tcRender()", 1)[1].split(
-        "function _tcTick()", 1
-    )[0]
-    assert "_tc.planTotal" in tc_render
+    # Plan progress used to ride the Live Task Card's header meta. With the
+    # bar gone the header derives its meta from the document instead, so
+    # what matters is that neither of these functions mints a panel.
 
 
 def test_claimed_card_parks_above_reply_and_collapses() -> None:
@@ -1255,12 +1290,20 @@ def test_card_label_hysteresis_no_cot_autoexpand_card_reveal() -> None:
     approval cards below the fold); (3) a PENDING approval card bounces the
     chat so it is visible; claimed cards never bounce."""
     js = _js()
-    # (1) hysteresis — one accepted label+icon snapshot, escalations cut
-    # through, reset on begin.
-    render = js.split("function _tcRender()", 1)[1].split("\n  function ", 1)[0]
-    assert "_TC_LABEL_MIN_MS" in render
-    assert js.count("_TC_LABEL_MIN_MS") >= 2  # constant + use
-    assert "_tc.labelShownAt = 0;" in js.split("case 'begin'", 1)[0] + js.split("if (ev.t === 'begin')", 1)[1][:800]
+    # (1) The header used to strobe because it was TOLD a phase on every
+    # frame and needed hysteresis to damp the telling. It now DERIVES the
+    # phase from the document (modules/turn_presentation.js), which is a
+    # pure function of state and cannot flicker between two readings of
+    # the same state. The damping constant went with the bar.
+    assert "_TC_LABEL_MIN_MS" not in js
+    assert "_HEADER_PHASE_LABELS" in js
+    paint_header = js_function_body(js, "function _paintTurnHeader(el, doc)")
+    assert "_headerModel(doc)" in paint_header, (
+        "the header is being told a phase again instead of deriving one"
+    )
+    # ...and it writes only what changed, so a repaint per token costs no
+    # DOM mutation and cannot strobe.
+    assert "if (node && node.textContent !== text)" in paint_header
     # (2) auto-expand removed. There is no placement sweep left to do class
     # surgery on panels, and the renderer must not touch a workbench's
     # expansion state either — locked behaviourally in

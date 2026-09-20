@@ -86,39 +86,13 @@
       </div>
     </div>
 
-    <!-- Live Task Card — the ONE turn-state surface: merged live indicator
-         (phase · target · elapsed · step · liveness · approval countdown) +
-         compact expandable step list, plus the turn's own actions (Stop /
-         Review / Retry). Owned by chat.js _taskCardEvent; Alpine never
-         writes here. Finalizes into the turn's transcript bubble on done.
-
-         a11y: the toggle keeps a STATIC accessible name ("Task details") so
-         a per-second header rewrite does not spam screen readers; the phase,
-         countdown and stall warning are announced through .live-task-live
-         at coarse thresholds instead. -->
-    <div id="live-task-card" class="live-task-card" hidden>
-      <div class="live-task-header">
-        <button type="button" class="live-task-toggle" aria-expanded="false" aria-controls="live-task-body">
-          <span class="live-task-phase" aria-hidden="true">●</span>
-          <span class="live-task-label" aria-hidden="true">{{ t('chat.thinking') }}</span>
-          <span class="live-task-meta" aria-hidden="true"></span>
-          <span class="live-task-chevron" aria-hidden="true">▸</span>
-          <span class="sr-only">{{ t('chat.task_details') }}</span>
-        </button>
-        <span class="live-task-stall" aria-hidden="true" hidden></span>
-        <button type="button" class="live-task-act live-task-jump" hidden>{{ t('chat.task_review') }}</button>
-        <button type="button" class="live-task-act live-task-retry" hidden>{{ t('chat.task_retry') }}</button>
-        <button type="button" class="live-task-act live-task-stop" hidden>{{ t('chat.stop_generation') }}</button>
-      </div>
-      <p class="live-task-live sr-only" role="status" aria-live="polite"></p>
-      <div id="live-task-body" class="live-task-body" hidden>
-        <ul class="live-task-steps" role="log"></ul>
-      </div>
-    </div>
-
-    <!-- Retired strip (2026-09-03): the Live Task Card replaced it. Kept as
-         an inert hidden element for legacy references (typingEl cache). -->
-    <div id="thinking-indicator" class="thinking-indicator" hidden></div>
+    <!-- The Live Task Card stood here: a docked status bar with its own
+         phase machine, clock, stall detector and step list. Removed by
+         docs/plans/UNIFIED_TURN_BLOCK.md §3 — one turn gets ONE status
+         surface and it lives INSIDE the turn block (.turn-header, built
+         by chat.js:_buildTurnHeader from modules/turn_presentation.js).
+         The hidden #thinking-indicator it had already replaced went with
+         it; nothing referenced it but a null variable. -->
 
     <!-- Chat Input Area -->
     <div class="chat-input-area" id="chat-input-area">

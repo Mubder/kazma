@@ -216,7 +216,7 @@ jobs:
           KAZMA_DB_BACKEND: sqlite
       - name: Turn identity, revision and durable presentation
         run: |
-          python -m pytest -q --timeout=180             tests/test_turn_document.py             tests/test_turn_durable_presentation.py
+          python -m pytest -q --timeout=240 tests/test_turn_document.py tests/test_turn_durable_presentation.py tests/test_chat_as_product.py tests/test_chat_steer_composer.py tests/test_delivery_v2_client.py
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: Projector agreement under bare node

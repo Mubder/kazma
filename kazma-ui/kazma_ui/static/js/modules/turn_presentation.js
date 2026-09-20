@@ -161,11 +161,26 @@
    * used to be one field, which is how a dropped socket read as a finished
    * turn.
    */
+  /** No frame for this long during a live turn is worth saying out loud.
+   *  Server heartbeats land every ~8-10s, so silence past this is the
+   *  journal having gone quiet rather than the model thinking. */
+  var STALL_MS = 20000;
+
   function connectionOf(facts) {
     facts = facts || {};
+    var running = !!(facts.serverGenerating || facts.stopRequested);
+    var silentMs = Number(facts.lastSignalAgoMs);
+    // Silence is reported as silence, with its duration, and recovery is
+    // the reconciler's job (plan §11: "Recovery is bounded with backoff").
+    // The old bar ran its OWN retry budget and latched on "not responding"
+    // — a second recovery loop next to the one that was already running,
+    // and the only thing it added was a label.
+    if (running && isFinite(silentMs) && silentMs >= STALL_MS) {
+      return 'stalled';
+    }
     if (facts.streamLive) return 'live';
     if (facts.reconnecting) return 'reconnecting';
-    if (facts.serverGenerating || facts.stopRequested) return 'reconnecting';
+    if (running) return 'reconnecting';
     return 'idle';
   }
 
@@ -203,6 +218,12 @@
       phase: phase,
       terminal: terminal,
       connection: connectionOf(facts),
+      // How long the journal has been quiet, so the header can SAY it
+      // rather than just colour itself amber.
+      silentMs: (function () {
+        var ms = Number(facts.lastSignalAgoMs);
+        return (isFinite(ms) && ms > 0) ? ms : 0;
+      })(),
       elapsed: elapsedOf(doc),
       counts: counts,
       model: String((doc && doc.model) || ''),
@@ -227,6 +248,7 @@
     header: header,
     phaseOf: phaseOf,
     connectionOf: connectionOf,
+    STALL_MS: STALL_MS,
     elapsedOf: elapsedOf,
     countParts: countParts,
     pendingGates: pendingGates,
