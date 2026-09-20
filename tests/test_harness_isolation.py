@@ -45,8 +45,12 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("httpx")
-pytest.importorskip("uvicorn")
+# No importorskip here. `_unified_turn_harness` needs nothing beyond the
+# standard library at import time, and the two helpers used below touch
+# neither httpx nor uvicorn — so a skip could only ever hide a real
+# failure, which plan §13 forbids in as many words: "Do not treat
+# importorskip, xfail, or retries that conceal deterministic failure as
+# acceptance."
 
 
 @pytest.fixture
@@ -61,8 +65,15 @@ def isolated(tmp_path, monkeypatch):
         yield tmp_path
     finally:
         import kazma_core.stores.workspaces as ws
+        from kazma_core.workspace.binding import configure_workspace
 
         ws.reset_workspace_store()
+        # The store and the PIN are two different things. Every test
+        # below calls `resolve_active_root()`, which memoises the active
+        # row into `binding._WORKSPACE_ROOT` — so without this, the next
+        # test in the session resolves its workspace to a temp directory
+        # pytest has already deleted.
+        configure_workspace(None)
 
 
 def test_the_active_workspace_is_the_isolated_directory(isolated) -> None:
@@ -133,4 +144,44 @@ def test_the_store_singleton_is_restored_afterwards(tmp_path) -> None:
     assert os.environ.get("KAZMA_WORKSPACE") == before, (
         "_isolate_workspace_store is writing environment variables; the "
         "server context manager owns those and restores them"
+    )
+
+
+def test_the_harness_teardown_clears_the_workspace_pin(tmp_path) -> None:
+    """Dropping the store is not enough — the PIN is a separate thing.
+
+    ``resolve_active_root()`` does not only read the ladder, it memoises
+    it: rung 2 assigns the active row into ``binding._WORKSPACE_ROOT``.
+    So merely ASKING where the workspace is installs a process pin at
+    rung 3, and dropping the isolated store afterwards leaves rung 2
+    empty with rung 3 still answering — with a temp directory that has
+    since been deleted.
+
+    Measured 2026-09-20:
+    ``test_ui004_ui008_gateway_misc.py::…::test_file_write_workspace_not_drive_root``
+    failed in the full suite and passed alone, which is what that always
+    looks like.
+    """
+    import kazma_core.workspace.binding as binding
+    from tests.e2e._unified_turn_harness import (
+        _isolate_workspace_store,
+        _reset_process_singletons,
+    )
+
+    _isolate_workspace_store(str(tmp_path))
+    pinned = binding.resolve_active_root()
+    assert Path(pinned).resolve() == tmp_path.resolve(), (
+        "the isolation helper did not take effect, so this test is not "
+        "exercising the leak it names"
+    )
+    assert binding._WORKSPACE_ROOT is not None, (
+        "resolve_active_root no longer memoises; if that is deliberate, "
+        "this test and the teardown it guards can both go"
+    )
+
+    _reset_process_singletons()
+
+    assert binding._WORKSPACE_ROOT is None, (
+        "the harness teardown leaves a workspace pin behind; every test "
+        "after it in the session resolves to a deleted temp directory"
     )

@@ -1219,16 +1219,36 @@ def test_setplan_and_memory_explain_never_create_panels() -> None:
     """2026-09-03 live bug: setPlan/applyMemoryExplain called
     ensureProgressPanel() directly — on hydration a plan-only historical
     message minted a phantom in-bubble 'Working…' workbench over finished
-    history. Both are attach-only now; plan progress rides the card."""
+    history. Both are attach-only now.
+
+    UNIFIED_TURN_BLOCK.md Phase 5 deleted ensureProgressPanel outright as
+    the last pre-V2 DOM writer, so the rule is now unrepresentable rather
+    than merely obeyed. The assertions follow it there: neither function
+    may mint a panel by ANY route, and the painter itself must stay gone.
+    Comment lines are excluded — the comment explaining the removal names
+    the function, and a check that forbids saying what you deleted makes
+    the deletion impossible to document."""
     js = _js()
-    plan = js.split("function setPlan(items)", 1)[1].split(
-        "function markPlanProgress(toolName)", 1
-    )[0]
-    assert "ensureProgressPanel()" not in plan
-    mem = js.split("function applyMemoryExplain(data)", 1)[1].split(
+    code = "\n".join(
+        line for line in js.splitlines()
+        if not line.lstrip().startswith(("//", "*", "/*"))
+    )
+    assert "function ensureProgressPanel(" not in code, (
+        "the pre-V2 progress painter is back; it is a second DOM writer "
+        "(plan §14.4) and these two functions could reach it again"
+    )
+    plan = code.split("function setPlan(items)", 1)[1].split(
         "\n  function ", 1
     )[0]
-    assert "ensureProgressPanel()" not in mem
+    assert "ensureProgressPanel" not in plan
+    assert "createElement" not in plan, (
+        "setPlan builds DOM again; on hydration that is a phantom "
+        "'Working…' panel over finished history (2026-09-03)"
+    )
+    mem = code.split("function applyMemoryExplain(data)", 1)[1].split(
+        "\n  function ", 1
+    )[0]
+    assert "ensureProgressPanel" not in mem
     # Plan progress used to ride the Live Task Card's header meta. With the
     # bar gone the header derives its meta from the document instead, so
     # what matters is that neither of these functions mints a panel.

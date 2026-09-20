@@ -475,6 +475,22 @@ def _reset_process_singletons() -> None:
         except Exception:  # noqa: BLE001 - teardown is best-effort
             pass
 
+    # ...and the PIN, which is a separate thing from the store.
+    #
+    # `resolve_active_root()` memoises: rung 2 assigns the active
+    # WorkspaceStore row into `binding._WORKSPACE_ROOT` (~line 123), so
+    # merely ASKING where the workspace is installs a process pin at
+    # rung 3. Dropping the isolated store above then leaves rung 2 empty
+    # and rung 3 answering with a temp directory that no longer exists.
+    # Observed as test_file_write_workspace_not_drive_root failing in a
+    # full run and passing alone.
+    try:
+        from kazma_core.workspace.binding import configure_workspace
+
+        configure_workspace(None)  # None clears the pin
+    except Exception:  # noqa: BLE001 - teardown is best-effort
+        pass
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # Driving a turn

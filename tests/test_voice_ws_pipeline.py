@@ -777,14 +777,37 @@ def test_live_voice_mints_the_user_row_not_the_assistant() -> None:
     voice = (_REPO / "kazma-ui/kazma_ui/static/js/voice.js").read_text(encoding="utf-8")
 
     # chat.js exports beginVoiceTurn, defined with the user-row contract:
-    # user bubble → fresh assistant latch (currentMsgEl/tokenAccum reset)
-    # → beginTurn (a new turn, not resume).
+    # user bubble → fresh assistant latch → a NEW turn, not a resume.
     assert "function beginVoiceTurn(text)" in chat
     assert "beginVoiceTurn: beginVoiceTurn," in chat
     fn = chat[chat.find("function beginVoiceTurn(text)"):chat.find("window.KazmaChat = {")]
     assert "appendMessage('user'" in fn
-    assert "currentMsgEl = null" in fn and "tokenAccum = ''" in fn
-    assert "beginTurn" in fn
+    # The latch reset. `tokenAccum = ''` used to be half of it;
+    # UNIFIED_TURN_BLOCK.md Phase 2 deleted that accumulator and made the
+    # turn document the single answer authority (invariant U06), so the
+    # text is reset by minting a new turn rather than by blanking a
+    # string. What survives is the DOM half plus the paint latch.
+    chat_code = "\n".join(
+        line for line in chat.splitlines()
+        if not line.lstrip().startswith(("//", "*", "/*"))
+    )
+    assert "tokenAccum" not in chat_code, (
+        "the token accumulator is back; the document is supposed to be "
+        "the only answer authority (plan §5, invariant U06). Comments are "
+        "excluded — the note explaining the removal names it."
+    )
+    assert "currentMsgEl = null" in fn, (
+        "beginVoiceTurn no longer drops the previous assistant bubble; "
+        "voice tokens latch onto the last reply"
+    )
+    assert "_turnPainted = false" in fn, (
+        "beginVoiceTurn no longer clears the paint latch, so the new "
+        "turn is treated as already painted"
+    )
+    # A new utterance is a new turn, never a resume. disableInput() is
+    # beginTurn() (chat.js ~1977) — asserted by name so a refactor that
+    # inlines it still has to say what it does.
+    assert "beginTurn" in fn or "disableInput()" in fn
     # It must not submit a second graph turn — the server already did.
     assert "sendMessage" not in fn
     assert "/api/chat/stream" not in fn

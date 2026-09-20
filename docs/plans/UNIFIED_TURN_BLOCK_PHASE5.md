@@ -12,7 +12,7 @@ Builds on [Phase 0](UNIFIED_TURN_BLOCK_PHASE0.md),
 Plan §17 asks for an acceptance report in a specific shape:
 "invariant/scenario, test or evidence link, tested build, result, and any
 limitation. A green unit suite or an 'industrial' commit title is not
-completion evidence." That is §5 below. Everything before it is what
+completion evidence." That is §6 below. Everything before it is what
 Phase 5 changed to make that report possible.
 
 ---
@@ -181,11 +181,158 @@ code.
 **Not testable, therefore stated as procedure.** §14.7: *a rollback
 restores a build, never approval databases or checkpoints from an older
 copy that could replay completed work.* No test can enforce an operator's
-procedure. It belongs in the runbook, and it is repeated in §6 below.
+procedure. It belongs in the runbook, and it is repeated in §7 below.
 
 ---
 
-## 5. Acceptance report (§17)
+## 5. The full suite, and four locks this plan invalidated
+
+9,596 tests (`-m "not e2e"`; the browser suites run under their own job
+and are reported above). It took four runs to get a clean one:
+
+| Run | Result |
+|---|---|
+| 1 | 4 failed, 9,558 passed, 36:49 |
+| 2 | **crashed at 19%** — native access violation, see below |
+| 3 | 1 failed, 9,568 passed, 37:00 |
+| 4 | **9,569 passed, 24 skipped, 3 xfailed, 0 failed, 36:26** |
+
+None of the failures was a behaviour regression, and none was deleted.
+Plan §13: "Update obsolete layout assertions rather than disabling the
+suites."
+
+
+| Test | Cause | Phase |
+|---|---|---|
+| `test_setplan_and_memory_explain_never_create_panels` | stale source-grep lock | 5 |
+| `test_file_write_workspace_not_drive_root` | leaked `KAZMA_DATA_DIR` | 1 |
+| `test_stream_silence_journals_turn_heartbeats` | stale source-grep lock | 1 |
+| `test_live_voice_mints_the_user_row_not_the_assistant` | stale source-grep lock | 2 |
+
+Three of the four had been red since earlier phases of this plan shipped
+without a full-suite run. All four are this plan's to fix regardless of
+which phase broke them.
+
+**The attribution above is a correction.** The first pass compared
+against a worktree at the Phase 4 tip and ran the four tests *in
+isolation* there. Two passed, so I recorded them as Phase 5 regressions.
+An isolated run cannot show an ordering bug, so that evidence never
+supported the conclusion — and one of the two, the workspace test, was
+not a Phase 5 regression at all. What follows is what the third full run
+actually measured.
+
+**One was leaked global state, from Phase 1.**
+`test_file_write_workspace_not_drive_root` failed in the full run and
+passed in isolation — the signature of state left behind by something
+earlier. The third run's assertion named it:
+
+```
+assert ws.parent.name == "kazma-data"
+E  AssertionError: assert 'test_upsert_...the_revision0' == 'kazma-data'
+```
+
+`tests/test_turn_document.py::test_upsert_bumps_the_revision_on_every_write`
+set `os.environ["KAZMA_DATA_DIR"] = str(tmp_path)` **raw**, with no
+restore, so every test after it in the session inherited a data
+directory pointing inside that test's `tmp_path`. Now `monkeypatch`.
+
+*A wrong diagnosis, recorded because it was acted on.* I first blamed a
+workspace **pin**: `resolve_active_root()` does not only read the ladder,
+it memoises it — rung 2 assigns the active WorkspaceStore row into
+`binding._WORKSPACE_ROOT`, so merely *asking* where the workspace is
+installs a process pin at rung 3, and Phase 4's isolation dropped the
+store on teardown while leaving the pin. That memoisation is real and
+the teardown now clears it
+(`test_the_harness_teardown_clears_the_workspace_pin` fails if it stops).
+But it cannot have caused **this** failure: the failing test's first
+statement is `configure_workspace(workspace=None, …)`, which clears any
+pin before it reads anything. The fix was hygiene, not the cure, and the
+test went on failing with it in place.
+
+**Three were source-grep locks pointing at code this plan moved**, each
+re-pointed to where the rule lives now — plan §13: "Update obsolete
+layout assertions rather than disabling the suites.":
+
+* *setPlan must never mint a panel* — `ensureProgressPanel` no longer
+  exists, so the rule is now unrepresentable rather than obeyed. The
+  assertion says that, and adds "no `createElement` in `setPlan`" so it
+  still guards the 2026-09-03 phantom-workbench incident by any route.
+* *voice mints the user row, not the assistant* — `tokenAccum` was
+  deleted in Phase 2 when the document became the single answer
+  authority. Re-pointed to the surviving latch (`currentMsgEl = null`,
+  `_turnPainted = false`) plus a check that the accumulator has not come
+  back.
+* *the resumed graph heartbeats* — the assertion read a fixed 900
+  characters after an anchor comment, and Phase 1's delta-queue work grew
+  that comment past the window. The behaviour never changed. Re-sliced to
+  the next `emit_j("turn_heartbeat"` rather than a character count.
+
+A theme worth naming, because it cost four separate diagnoses in this
+session: **source-grep assertions and comments interact badly**, in two
+different ways.
+
+*Matching the comment that explains the removal.* You delete a function,
+you write a comment saying why, and the assertion `"foo()" not in js`
+now matches your own explanation. That is what broke
+`test_setplan_and_memory_explain_never_create_panels`, and it caught two
+of the tests written in this phase before they were committed.
+
+*A comment growing past a fixed window.* `test_stream_silence_journals_turn_heartbeats`
+read 900 characters after an anchor comment; Phase 1's delta-queue work
+made that comment longer and the window stopped reaching the code.
+
+The fixes are different. For the first, strip comment lines before
+searching — which `test_turn_render_boundary.py`,
+`test_chat_steer_composer.py` and `test_voice_ws_pipeline.py` now do. For
+the second, slice to a structural landmark instead of a character count.
+Neither is served by making the assertion vaguer.
+
+Re-run after the fixes: **9,569 passed, 24 skipped, 3 xfailed, 0 failed, 36:26** — the fourth full run of this session and the first clean one.
+
+### A native crash, found on the way
+
+The first re-run did not finish. At 19% it died with
+
+```
+Windows fatal exception: access violation
+
+Current thread (most recent call first):
+  kazma_core/config_store.py line 1694 in get_category
+  kazma_core/security/web_sessions.py line 160 in purge_expired_sessions
+  concurrent/futures/thread.py line 59 in run
+```
+
+Not a test failure — a hard interpreter crash, in a **background
+thread**, with no test on the stack.
+
+`worker_bootstrap._start_session_purge_scheduler` sleeps 120 seconds
+after the memory worker boots and then runs `purge_expired_sessions` via
+`asyncio.to_thread`. In a long run, some test boots that worker and two
+minutes later the purge reads the ConfigStore on a pool thread — while a
+per-test fixture is closing that store's SQLite connection. Use after
+close, at the C level. `purge_expired_sessions` wraps its read in
+`try/except` and logs "purge skipped", but an access violation is not an
+exception and nothing catches it.
+
+This is not this plan's code and not this plan's to fix — nothing in
+Phases 0–5 touches `web_sessions`, `worker_bootstrap` or the ConfigStore
+connection lifecycle. It is recorded because:
+
+* a full suite that can die at 19% makes "the suite is green" a
+  statement about luck, and this plan's exit criteria depend on that
+  statement;
+* the same shape is reachable outside tests. Any runtime path that
+  closes or swaps the ConfigStore while the 6-hourly purge is in flight
+  has the same race, and it would take the process down rather than log
+  a warning.
+
+The run before it completed all 9,588 tests, and the one after is
+reported above, so the crash is intermittent — which is what a timing
+race looks like, not evidence that it is harmless.
+
+---
+
+## 6. Acceptance report (§17)
 
 **Tested build:** `104823e2` plus this phase's working tree, Windows 11,
 Python 3.12.9, Node v24.20.0, Chromium via Playwright.
@@ -210,18 +357,18 @@ Re-run after the 310-line removal, on that tree:
 | 5 | Real approval/resume through the app graph; no endpoint-only substitute | `…app_graph.py` (6 tests, real `interrupt()`/`POST /api/approve`) | **pass** | — |
 | 6 | Single answer region throughout | `tests/js/test_turn_view.js`, `test_unified_turn_a11y.py` | **pass** | — |
 | 7 | One projection, one rendering owner; removal inventory complete | §1, `test_turn_render_boundary.py` | **pass** | — |
-| 8 | Server-authoritative decision/execution/completion/timeout semantics | `test_approve_decides_one_gate.py`, `test_hitl_gates.py`, `…concurrency.py` | **pass** | WS approve path unfixed — §6 |
+| 8 | Server-authoritative decision/execution/completion/timeout semantics | `test_approve_decides_one_gate.py`, `test_hitl_gates.py`, `…concurrency.py` | **pass** | WS approve path unfixed — §7 |
 | 9 | Live / reconnect / history / restart convergence | `tests/js/test_turn_convergence.js`, `…recovery.py`, `…restart.py` | **pass** | "Mid-token" is staged with a scripted stream, not a split packet |
 | 10 | Existing HITL paths and cross-surface decisions still correct | 373 compatibility tests (Phase 4 §7) | **pass** | — |
 | 11 | Performance, focus, keyboard, mobile, RTL, scroll | `tests/js/test_turn_performance.js`, `test_unified_turn_a11y.py`, `…browser.py::test_the_answer_survives_a_phone_in_rtl` | **pass** | — |
-| 12 | Required CI tests run without skips; branch enforcement verified **or reported** | §6 | **reported, not met** | `main` has no branch protection at all — §6 |
+| 12 | Required CI tests run without skips; branch enforcement verified **or reported** | §5, §7 | **reported, not met** | `main` has no branch protection at all — §7 |
 | 13 | Packaged-build smoke, build identity, browser evidence | §3, §4, `test_turn_assets_ship.py` | **partial** | Build identity and browser evidence are done; the "smoke" is static + served-tree + cache-bust checks, and never boots a built wheel |
 | 14 | Migration/rollback tested without reverting execution or approval history | §4, `test_turn_rollback_rehearsal.py` | **pass** | The "never restore an older database" half is procedure, not test |
 | 15 | Conflicting documentation superseded; no dual-renderer path left | §1 | **pass** | — |
 
 ---
 
-## 6. Limitations, stated rather than buried
+## 7. Limitations, stated rather than buried
 
 **Branch protection does not exist on this repository.** Plan §13:
 "Ensure the required job is actually required by repository branch
@@ -262,10 +409,29 @@ narrates ~450 characters so the first leg really streams and the
 disconnect lands between deltas. It is not a disconnect inside a single
 network packet.
 
+**A background thread can crash the process, and it is not fixed here.**
+See §5: `purge_expired_sessions` reads the ConfigStore from a pool
+thread on a 6-hourly cadence, and a concurrent close of that store's
+SQLite connection is a native access violation rather than a catchable
+exception. Out of scope for this plan — it predates it and touches none
+of its code — but it is the kind of thing that turns "the suite is
+green" into a statement about timing.
+
 **The plain-string failure convention was not audited exhaustively.**
 Phase 4 added `Safety:` to the two prefixes `tool_registry` already
 recognised. A tool reporting failure in a fourth shape would still be
 recorded as a success.
+
+**The manual lifecycle smoke on the installed build has not been done,
+and is not this session's to do.** §14.9: "Conduct a controlled manual
+lifecycle smoke on the installed build after automated verification.
+Observation after rollout supplements tests; it is not a substitute for
+them." Everything above ran against the repository working tree. The
+installed build is the operator's, with its own data directory and its
+own vault, and nothing here has touched it. The smoke is one turn with
+four approvals on that build, watched: one block, one header, the fold
+closed, four rows in ask order, the answer below them, and the same
+after a refresh.
 
 **Rollback procedure (not enforceable by test).** Restore the build.
 Do **not** restore `hitl_gates.db`, `checkpoints.db` or the session store
@@ -276,7 +442,7 @@ downgrade (§14.6).
 
 ---
 
-## 7. What this plan delivered
+## 8. What this plan delivered
 
 Three defects in shipped code, each found by writing the test the plan
 asked for rather than by reading:

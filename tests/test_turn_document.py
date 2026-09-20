@@ -435,16 +435,23 @@ def test_hydrate_message_states_revision_and_schema() -> None:
     assert new["schema"] == TURN_SCHEMA_VERSION
 
 
-def test_upsert_bumps_the_revision_on_every_write(tmp_path) -> None:
+def test_upsert_bumps_the_revision_on_every_write(tmp_path, monkeypatch) -> None:
     """The revision orders WRITES to one turn, not frames on a thread.
 
     Invariant U05 depends on it being monotone: a client that applied rev N
     refuses a snapshot stamped rev < N, which is what stops a slow
     /messages response repainting an older answer over a newer one.
-    """
-    import os
 
-    os.environ["KAZMA_DATA_DIR"] = str(tmp_path)
+    ``monkeypatch``, not ``os.environ[...] =``. A raw assignment here
+    outlived the test and every later one in the session inherited a
+    ``KAZMA_DATA_DIR`` pointing at this ``tmp_path`` — which is how
+    ``test_ui004_ui008_gateway_misc.py::…::test_file_write_workspace_not_drive_root``
+    came to assert ``ws.parent.name == "kazma-data"`` and read
+    ``'test_upsert_..._the_revision0'`` instead. It failed only in a full
+    run, and passed alone, for two full-suite runs before anyone looked
+    at the ordering.
+    """
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(tmp_path))
     from kazma_ui.session_manager import get_session_manager, reset_session_manager
     from kazma_ui.reply_sink import open_reply_turn, upsert_reply
     from kazma_ui.turn_document import TURN_SCHEMA_VERSION
