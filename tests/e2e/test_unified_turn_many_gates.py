@@ -172,16 +172,6 @@ def _wait_for_next_card(pg, timeout: int = 90000) -> bool:
         return False
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "The turn ID changes mid-turn, so the client mints a NEW document "
-        "and every gate decided before that point is orphaned. Measured "
-        "2026-09-20; see the module docstring. Fixing it means changing "
-        "when close_turn fires, which plan §15 preserves rather than "
-        "redesigns — remove this marker with the fix."
-    ),
-)
 def test_nine_gates_keep_ask_order_as_they_settle(harness: Harness, page) -> None:
     """The reported symptom: a later card jumps up beside the first.
 
@@ -213,6 +203,23 @@ def test_nine_gates_keep_ask_order_as_they_settle(harness: Harness, page) -> Non
     This is why nine gates alone reproduced nothing: with every leg
     gated the turn never closes. The read-tier calls interleaved in the
     script above are the ingredient.
+
+    **Fixed 2026-09-20**, and not where it was expected. The turn's
+    *close* semantics are untouched. The identity was being thrown away
+    one step earlier: ``routes_direct/misc.py`` called
+    ``resolve_reply_turn(thread_id, "")`` with an EMPTY session id, and
+    that function guards its stored-row recovery on ``if session_id:``.
+    So the approve path skipped the recovery entirely and minted a fresh
+    turn id every time the in-memory one was gone — exactly the case the
+    recovery exists for. Every other call site in the tree passed a real
+    session id.
+
+    Two supporting changes: ``resolve_reply_turn`` now also rejoins on
+    gate-registry authority (a live gate means the turn is not over,
+    whatever a stored row's ``open`` flag says), and the renderer reports
+    ``orphaned-gate:`` when a card on screen is absent from the document
+    — the DOM→document direction that nothing checked, which is why
+    every other invariant passed while this was live.
     """
     page.fill("#chat-input", PROMPT)
     page.evaluate("() => window.KazmaChat.sendMessage()")

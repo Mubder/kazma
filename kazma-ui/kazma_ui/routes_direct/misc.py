@@ -872,7 +872,22 @@ def register_misc_routes(self: Any) -> None:
                 if is_turn_running(thread_id) or thread_id in _resume_inflight:
                     _claimed_turn = ""
                     try:
-                        _claimed_turn = resolve_reply_turn(thread_id, "") or ""
+                        # WITH the session id. `resolve_reply_turn` guards
+                        # its stored-row recovery on `if session_id:`, so
+                        # passing "" skipped it and minted a fresh turn id
+                        # every time the in-memory one was gone — which is
+                        # precisely the case the recovery exists for. The
+                        # gate was then claimed under a turn that is not
+                        # the reply's, the client saw the identity change,
+                        # and every gate decided under the old id was
+                        # orphaned on screen (2026-09-20).
+                        _claimed_sid = ensure_session_for_thread(thread_id)
+                    except Exception:
+                        _claimed_sid = ""
+                    try:
+                        _claimed_turn = resolve_reply_turn(
+                            thread_id, _claimed_sid
+                        ) or ""
                     except Exception:
                         _claimed_turn = ""
                     _claimed_iid = _body_interrupt_id(body)

@@ -959,6 +959,67 @@ function feed(events, turnId) {
     twice.filter((p) => p.kind === "header").length === 1);
 }
 
+// ── orphaned-gate: a card the document has stopped tracking ──
+//
+// The 2026-09-20 report. The turn id changed mid-turn, the client
+// minted a NEW document, and gates decided under the old id vanished
+// from doc.parts. Their cards stayed on screen: not repositioned (not
+// in the plan), not repainted (paint runs for planned slots only), not
+// removed (contract 4). The painter pushed them below the tracked rows
+// and the reader saw an early approval sitting under later ones.
+//
+// Every other invariant passed throughout, because each was true of
+// the gates the document still knew about. Nothing walked DOM -> doc.
+{
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+  const rend = makeRenderers(env);
+
+  const both = feed([
+    { type: "hitl", state: "approved", interrupt_id: "g1", tool: "a",
+      payload: { interrupt_id: "g1" } },
+    { type: "hitl", state: "pending", interrupt_id: "g2", tool: "b",
+      payload: { interrupt_id: "g2" } },
+  ]);
+  env.view.render(bubble, both, rend);
+  env.invariants.length = 0;
+
+  // ...then a document that has LOST g1 — a new turn id, in the field.
+  const lost = feed([
+    { type: "hitl", state: "pending", interrupt_id: "g2", tool: "b",
+      payload: { interrupt_id: "g2" } },
+  ]);
+  env.view.render(bubble, lost, rend);
+
+  const codes = env.invariants.map((r) => r.code);
+  assert("a card the document dropped is reported",
+    codes.indexOf("orphaned-gate") >= 0, JSON.stringify(env.invariants));
+  const rep = env.invariants.filter((r) => r.code === "orphaned-gate")[0];
+  assert("...and it names the gate",
+    !!rep && String(rep.issues.join(",")).indexOf("g1") >= 0,
+    JSON.stringify(rep));
+}
+
+{
+  // ...but a document that tracks NO gates is ambiguity, not an orphan:
+  // a fresh doc before hydration, or a truncated snapshot. Contract 4
+  // protects it, and an invariant that fires there gets muted.
+  const env = newEnv();
+  const bubble = env.assistantBubble({ turnId: "t1" });
+  env.ROOT.appendChild(bubble);
+  const rend = makeRenderers(env);
+  env.view.render(bubble, feed([
+    { type: "hitl", state: "pending", interrupt_id: "g9", tool: "t",
+      payload: { interrupt_id: "g9" } },
+  ]), rend);
+  env.invariants.length = 0;
+  env.view.render(bubble, TD.empty("t1"), rend);
+  assert("an empty document does not orphan-flag an existing card",
+    env.invariants.filter((r) => r.code === "orphaned-gate").length === 0,
+    JSON.stringify(env.invariants));
+}
+
 if (fail) {
   console.error("\n" + fail + " assertion(s) failed");
   process.exit(1);
