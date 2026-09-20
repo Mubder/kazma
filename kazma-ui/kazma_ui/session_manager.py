@@ -319,8 +319,24 @@ class SessionManager:
             pinned=bool(pinned),
         )
 
-    def _load_all_from_db(self, limit: int | None = None) -> None:
-        """Load sessions into the OrderedDict cache (SQLite or Postgres)."""
+    def _load_all_from_db(
+        self, limit: int | None = None, target: dict[str, ChatSession] | None = None
+    ) -> None:
+        """Load sessions into *target* (default: the live cache).
+
+        ``target`` exists so ``_merge_missing_from_db`` can read into a scratch
+        dict WITHOUT swapping ``self._sessions``. It used to swap the shared
+        attribute out and back around this call, which is a data race on a
+        process-wide singleton: any other thread calling ``put()`` during the
+        window got the plain scratch ``dict`` and died on ``move_to_end``,
+        which only exists on ``OrderedDict``.
+
+        That is not hypothetical — it lost a Telegram reply on 2026-09-21:
+        the Web UI polled ``list_all`` (which calls the merge OUTSIDE the lock)
+        while a gateway turn was persisting its answer, and the operator got
+        "A reply was produced but NOT saved to the transcript."
+        """
+        dest = self._sessions if target is None else target
         if self._pg:
             from kazma_core.db.pg_helpers import get_pool
 
@@ -342,7 +358,7 @@ class SessionManager:
                     row["thread_id"], row["updated_at"], row["title"], row["archived"],
                     row["pinned"] if "pinned" in row else None,
                 )
-                self._sessions[f"{session.tenant_id}:{session.session_id}"] = session
+                dest[f"{session.tenant_id}:{session.session_id}"] = session
             return
 
         assert self._conn is not None
@@ -362,7 +378,7 @@ class SessionManager:
                 tenant_id, session_id, messages_str, created_at, total_cost,
                 total_tokens, thread_id, updated_at, title, archived, pinned,
             )
-            self._sessions[f"{session.tenant_id}:{session_id}"] = session
+            dest[f"{session.tenant_id}:{session_id}"] = session
 
     def _merge_missing_from_db(self, limit: int | None = None) -> None:
         """Pull newest DB rows that are not already in the process cache.
@@ -370,17 +386,22 @@ class SessionManager:
         Must not clobber dirty in-memory sessions (a WS path may append
         messages before ``put()``).
         """
-        before = set(self._sessions.keys())
+        with self._lock:
+            before = set(self._sessions.keys())
         scratch: dict[str, ChatSession] = {}
-        saved = self._sessions
-        try:
-            self._sessions = scratch  # type: ignore[assignment]
-            self._load_all_from_db(limit=limit)
-        finally:
-            self._sessions = saved
-        for key, sess in scratch.items():
-            if key not in before:
-                self._sessions[key] = sess
+        # Read into `scratch` directly. This used to assign `self._sessions =
+        # scratch` and restore it in a `finally`, which races every other
+        # thread: SessionManager is a process-wide singleton, `put()` takes
+        # `self._lock` but this function did NOT, and a `put()` landing inside
+        # the swap window saw a plain `dict` and raised
+        # `AttributeError: 'dict' object has no attribute 'move_to_end'`.
+        # The reply was then not persisted. The DB read stays OUTSIDE the lock
+        # so a slow query cannot stall writers.
+        self._load_all_from_db(limit=limit, target=scratch)
+        with self._lock:
+            for key, sess in scratch.items():
+                if key not in before and key not in self._sessions:
+                    self._sessions[key] = sess
 
     def _evict_if_needed(self, tenant_id: str) -> None:
         """Evict the oldest session for this tenant if we exceed max_sessions."""
