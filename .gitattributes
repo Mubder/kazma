@@ -1,20 +1,28 @@
 # Enforce Unix LF line endings for shell scripts
 *.sh text eol=lf
 
-# Normalize line endings in the REPOSITORY, not in your working copy.
+# Line endings: DELIBERATELY not normalized here.
 #
-# Without a policy the repo stores a mix (measured 2026-09-20: 52 CRLF blobs
-# against 146 LF in a 200-file sample of *.py). That is not cosmetic. A tool
-# that rewrites a whole file on Windows flips its endings, and the commit then
-# shows every line as changed: a 50-line fix arriving as a 669-line diff,
-# unreviewable, with the real change buried. It has happened more than once.
+# The repo stores a mix (measured 2026-09-20: 52 CRLF blobs against 146 LF in
+# a 200-file sample of *.py). That is why a tool which rewrites a whole file
+# on Windows can turn a 50-line fix into a 669-line diff — the blob flips and
+# every line reads as changed.
 #
-# `text=auto` stores LF in the blob and checks out your platform's native
-# ending, so Windows working copies stay CRLF and no editor behaviour changes.
-# Deliberately NO `eol=lf` here — that would force LF into the working tree.
-* text=auto
+# `* text=auto` is the correct long-term fix and was tried. It was reverted:
+# attributes OVERRIDE core.autocrlf, so the first `git add` of each legacy
+# CRLF-blob file normalizes it and produces one whole-file diff apiece. A
+# 67-line CHANGELOG entry came out as 15,987 insertions. Landing that ahead of
+# a code freeze pays the entire cost up front and collects the benefit — clean
+# diffs on future edits — only if there are future edits.
+#
+# When active development resumes, do it properly and in ONE commit:
+#     echo '* text=auto' >> .gitattributes
+#     git add --renormalize .      # ~257 files, ~70k lines, endings only
+#     git commit -m 'chore: normalize line endings'
+# Doing it as a single deliberate commit is reviewable ("endings only");
+# doing it incidentally, a file at a time, is not.
 
-# Binary — never convert.
+# Binary — never convert. No churn: these were never being converted.
 *.png binary
 *.jpg binary
 *.jpeg binary
