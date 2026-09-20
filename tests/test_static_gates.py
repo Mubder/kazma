@@ -722,3 +722,123 @@ def test_no_unbounded_store_scan_on_the_event_loop():
         "threaded function -- splitting it puts the writes back on the loop.\n  "
         + "\n  ".join(offenders)
     )
+
+
+# ── 12. CWD-relative data paths that ignore KAZMA_DATA_DIR ───────────────
+
+#: Files that still hardcode a ``kazma-data/...`` string instead of going
+#: through ``kazma_core.paths``. This is a DEBT REGISTER, not an exemption.
+#:
+#: ``paths.py`` is the single source of truth and offers 32 helpers
+#: (``settings_db()``, ``checkpoints_db()``, ``swarm_tasks_db()``, …), each
+#: resolving under ``data_dir()`` and therefore honouring ``KAZMA_DATA_DIR``.
+#: A literal ``"kazma-data/x.db"`` resolves against the process CWD instead,
+#: so the same logical store lands in different files depending on who opened
+#: it and from where — a cron job, a systemd unit and the server can each get
+#: their own copy, and the backup routine (which uses ``data_dir()``) copies
+#: only one of them.
+#:
+#: This was not theoretical. ``KnowledgeStore`` and ``BookmarkStore`` both
+#: hardcoded ``"kazma-data/settings.db"`` while ``ConfigStore`` resolved the
+#: SAME filename through ``paths.settings_db()``. On any install with
+#: ``KAZMA_DATA_DIR`` set they were different files. Fixed 2026-09-20; the
+#: reference install had escaped it only because that variable is unset there
+#: and the server's CWD happens to be the install root.
+#:
+#: The remaining entries are deliberately NOT migrated in the same change.
+#: Repointing a default path moves where an existing install looks for its
+#: data, and doing 28 of those at once, unverified, is how you turn a
+#: correctness fix into a data-loss incident. They should be migrated in small
+#: batches, each with a check that the old location is empty or the file is
+#: moved. **Delete entries from this list as they are fixed; never add one.**
+CWD_RELATIVE_DATA_PATH_DEBT: frozenset[str] = frozenset({
+    "kazma-core/kazma_core/agent/pipelines/document.py",
+    "kazma-core/kazma_core/agent/turn_input.py",
+    "kazma-core/kazma_core/agent_runner.py",
+    "kazma-core/kazma_core/checkpoint_retention.py",
+    "kazma-core/kazma_core/checkpoints_shared.py",
+    "kazma-core/kazma_core/observability/llm_ledger.py",
+    "kazma-core/kazma_core/security/audit_trail.py",
+    "kazma-core/kazma_core/security/certification.py",
+    "kazma-core/kazma_core/security/dependency_scanner.py",
+    "kazma-core/kazma_core/security/disclosure.py",
+    "kazma-core/kazma_core/settings_manager.py",
+    "kazma-core/kazma_core/swarm/memory/pipeline_logger.py",
+    "kazma-core/kazma_core/swarm/semantic_cache.py",
+    "kazma-core/kazma_core/swarm/task_store.py",
+    "kazma-core/kazma_core/time_travel.py",
+    "kazma-core/kazma_core/tools/image_gen.py",
+    "kazma-core/kazma_core/workspace/mcp_rebind.py",
+    "kazma-gateway/kazma_gateway/agent_handler/attachments.py",
+    "kazma-gateway/kazma_gateway/stores/checkpoint.py",
+    "kazma-gateway/kazma_gateway/stores/sqlite.py",
+    "kazma-skills/kazma_skills/native/browser_automation/tools.py",
+    "kazma-skills/kazma_skills/native/document_generator/tools.py",
+    "kazma-skills/kazma_skills/native/document_processor/tools.py",
+    "kazma-ui/kazma_ui/app.py",
+    "kazma-ui/kazma_ui/chat_attachments.py",
+    "kazma-ui/kazma_ui/research_panel/routes.py",
+    "kazma-ui/kazma_ui/routes_direct/system.py",
+    "kazma-ui/kazma_ui/session_manager.py",
+})
+
+
+def _docstring_node_ids(tree: ast.AST) -> set[int]:
+    """Ids of Constant nodes that are module/class/function docstrings."""
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
+            body = getattr(node, "body", None)
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                out.add(id(body[0].value))
+    return out
+
+
+def test_no_new_cwd_relative_data_paths():
+    """New code must resolve data paths through ``kazma_core.paths``.
+
+    A ``"kazma-data/x.db"`` literal is relative to the process CWD and blind
+    to ``KAZMA_DATA_DIR``, so the store it names is a different file depending
+    on who opened it and from where.
+
+    Docstrings are excluded deliberately — the fixed modules quote the old
+    literal in their own explanation of why it was wrong, and a gate that
+    fires on its own tombstone teaches people to delete the explanation.
+    """
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        if rel in CWD_RELATIVE_DATA_PATH_DEBT:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        docs = _docstring_node_ids(tree)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value.startswith("kazma-data/")
+                and id(node) not in docs
+            ):
+                offenders.append(f"{rel}:{node.lineno} -> {node.value!r}")
+
+    assert not offenders, (
+        "CWD-relative data path in new code. This resolves against the "
+        "process working directory and ignores KAZMA_DATA_DIR, so a cron "
+        "job, a systemd unit and the server can each open a DIFFERENT file "
+        "for the same logical store — and the backup routine, which uses "
+        "data_dir(), copies only one of them.\n"
+        "Fix: use the matching helper in kazma_core.paths (settings_db(), "
+        "checkpoints_db(), swarm_tasks_db(), exports_dir(), ...), resolved "
+        "lazily inside a function rather than bound at import.\n  "
+        + "\n  ".join(offenders)
+    )
