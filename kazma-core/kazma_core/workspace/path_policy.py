@@ -2,7 +2,8 @@
 
 ``check_path_access`` is the SoT for "may this resolved path be used?":
 
-1. Under active workspace → allow  
+0. Write to one of Kazma's own databases → deny, unconditionally
+1. Under active workspace → allow
 2. Under durable ``workspace.extra_roots`` with sufficient mode → allow  
 3. Under session path grant for current thread → allow  
 4. Global ``allow_absolute_paths()`` (dev escape hatch) → allow  
@@ -33,6 +34,62 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+#: SQLite family suffixes, plus the sidecars. The sidecars matter as much as
+#: the main file: a writer that can append to ``hitl_gates.db-wal`` decides
+#: what the next reader sees without ever opening ``hitl_gates.db``.
+_DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
+_DB_SIDECARS = ("-wal", "-shm", "-journal")
+
+
+def _is_control_plane_store(resolved: Path) -> bool:
+    """True if *resolved* is one of Kazma's own databases.
+
+    The ladder below is an allowlist, so until 2026-09-21 the gate registry
+    was safe only by POSITION: the default coding sandbox is
+    ``data_dir()/workspace``, which makes ``data_dir()/hitl_gates.db`` a
+    sibling and therefore outside it. That is a coincidence of layout, not a
+    guarantee. It stops holding the moment ``allow_absolute_paths()`` is on
+    (the dev escape hatch — measured: write allowed), a workspace is bound at
+    or above the data dir, or a session grant covers it.
+
+    What is behind these files is not ordinary data. ``hitl_gates.db`` is the
+    decision-truth store: flip a row from pending to approved and the resume
+    chokepoint believes a human authorised a danger-tier action, which
+    bypasses the strongest safety control in the system. ``rbac.db`` decides
+    who may do what, ``audit.db`` is the evidence trail, and ``vault.db``
+    holds secrets. None of them has any business being written by a file
+    tool, under any workspace.
+
+    Matched by suffix rather than by an enumerated list of filenames so a
+    store added later is covered on the day it is added. Scoped to
+    ``data_dir()`` and excluding the sandbox, so a user's own ``.db`` in
+    their project or scratch area is untouched.
+    """
+    try:
+        from kazma_core.paths import data_dir
+
+        root = data_dir().resolve()
+    except Exception:
+        # Cannot classify. Fall through to the normal ladder rather than
+        # denying: this is defence in depth on top of an already restrictive
+        # allowlist, and failing closed here would block a user's own project
+        # database because of an unrelated resolution error.
+        return False
+
+    if not path_under_root(resolved, root):
+        return False
+    # data_dir()/workspace is the default coding sandbox — the user's scratch
+    # area, not control plane. A database they create there is theirs.
+    if path_under_root(resolved, root / "workspace"):
+        return False
+
+    name = resolved.name.lower()
+    for sidecar in _DB_SIDECARS:
+        if name.endswith(sidecar):
+            name = name[: -len(sidecar)]
+            break
+    return name.endswith(_DB_SUFFIXES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +152,19 @@ def check_path_access(
             mode=need,
             via="denied",
             resolved=str(path),
+            workspace=str(workspace),
+        )
+
+    # 0) Kazma's own databases are never writable by file tools. Checked
+    #    BEFORE the allow ladder so no workspace, grant or escape hatch can
+    #    reach them — see _is_control_plane_store.
+    if need == "write" and _is_control_plane_store(resolved):
+        return PathAccessResult(
+            allowed=False,
+            reason="Kazma control-plane store — never writable by file tools",
+            mode=need,
+            via="denied",
+            resolved=str(resolved),
             workspace=str(workspace),
         )
 
