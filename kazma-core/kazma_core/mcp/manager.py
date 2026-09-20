@@ -66,6 +66,26 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+#: How long a stdio MCP server may take to exit after ``terminate()`` before
+#: it is killed.
+#:
+#: Was 5.0s, and it was paid in full on every single app shutdown. The shipped
+#: ``filesystem`` server runs under ``npx``, and terminating the npx shim does
+#: not reliably reach the node child, so the wait always ran out and the
+#: ``kill()`` below did the actual work. Measured: 5.03s of a 15.05s teardown
+#: on the reference install.
+#:
+#: That matters because teardown runs once per test that builds an app. A
+#: per-lifespan tax is what pushed ``test_documents_api_phase8.py`` past its
+#: 180s file cap and got it reported as a hang for twelve consecutive CI runs.
+#:
+#: A stdio MCP server has no durable state to flush on the way out — the
+#: protocol is request/response over pipes and anything in flight is already
+#: lost the moment we stop reading. So this is politeness, not safety, and two
+#: seconds of politeness is enough. The ``kill()`` path is unchanged and still
+#: guarantees the process goes away.
+_TERMINATE_GRACE_SECONDS = 2.0
+
 _active_mcp_manager: AsyncMCPManager | None = None
 
 
@@ -571,14 +591,42 @@ class AsyncMCPManager:
         return total_tools
 
     async def shutdown(self) -> None:
-        """Disconnect all servers and clean up processes."""
-        for name in list(self._servers):
-            await self.disconnect_server(name)
-        for key, handle in list(self._scoped.items()):
-            try:
-                await self._close_handle(handle)
-            except Exception:
-                logger.debug("[MCP] scoped shutdown %s failed", key, exc_info=True)
+        """Disconnect all servers and clean up processes, concurrently.
+
+        Each handle gets its own ``terminate()`` + 5s grace in
+        :meth:`_close_handle`. Doing that in a sequential ``for`` loop made
+        the grace multiply: N servers cost N x 5s of shutdown, every time,
+        because a process that ignores SIGTERM costs the full five seconds
+        before the ``kill()``.
+
+        Measured on the reference install, this was 5.03s of a 15.05s app
+        teardown — and teardown runs once per test that builds an app, which
+        is how a per-lifespan tax turns into a test file that exceeds its cap
+        and gets reported as a hang.
+
+        Concurrent, so the grace is paid once rather than once per server.
+        ``return_exceptions=True``: one server that fails to close must not
+        abandon the rest, and the per-handle paths already log their own
+        failures.
+        """
+        names = list(self._servers)
+        if names:
+            await asyncio.gather(
+                *(self.disconnect_server(n) for n in names),
+                return_exceptions=True,
+            )
+
+        scoped = list(self._scoped.items())
+        if scoped:
+            results = await asyncio.gather(
+                *(self._close_handle(h) for _k, h in scoped),
+                return_exceptions=True,
+            )
+            for (key, _h), res in zip(scoped, results, strict=False):
+                if isinstance(res, BaseException):
+                    logger.debug(
+                        "[MCP] scoped shutdown %s failed: %s", key, res, exc_info=res
+                    )
         self._scoped.clear()
 
     async def disconnect_server(self, name: str) -> bool:
@@ -597,7 +645,9 @@ class AsyncMCPManager:
                 if process.returncode is None:
                     process.terminate()
                     try:
-                        await asyncio.wait_for(process.wait(), timeout=5.0)
+                        await asyncio.wait_for(
+                            process.wait(), timeout=_TERMINATE_GRACE_SECONDS
+                        )
                     except TimeoutError:
                         process.kill()
                         await process.wait()

@@ -673,7 +673,7 @@ class SwarmEngine:
         from kazma_core.background import spawn_background
 
         self._maintenance_task = spawn_background(
-            _loop(), name="swarm-maintenance"
+            _loop(), name="swarm-maintenance", never_completes=True
         )
 
     def stop_maintenance_loop(self) -> None:

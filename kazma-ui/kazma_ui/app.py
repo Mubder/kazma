@@ -897,7 +897,9 @@ class KazmaAppBuilder:
                         await asyncio.sleep(60)
 
                 KazmaAppBuilder._heartbeat_task = spawn_background(
-                    _heartbeat_loop(), name="liveness-heartbeat"
+                    _heartbeat_loop(),
+                    name="liveness-heartbeat",
+                    never_completes=True,
                 )
                 # Set only AFTER the spawn succeeds: setting it first meant a
                 # failed start latched the flag and permanently suppressed
