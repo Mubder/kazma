@@ -1,2 +1,26 @@
 # Enforce Unix LF line endings for shell scripts
 *.sh text eol=lf
+
+# Normalize line endings in the REPOSITORY, not in your working copy.
+#
+# Without a policy the repo stores a mix (measured 2026-09-20: 52 CRLF blobs
+# against 146 LF in a 200-file sample of *.py). That is not cosmetic. A tool
+# that rewrites a whole file on Windows flips its endings, and the commit then
+# shows every line as changed: a 50-line fix arriving as a 669-line diff,
+# unreviewable, with the real change buried. It has happened more than once.
+#
+# `text=auto` stores LF in the blob and checks out your platform's native
+# ending, so Windows working copies stay CRLF and no editor behaviour changes.
+# Deliberately NO `eol=lf` here — that would force LF into the working tree.
+* text=auto
+
+# Binary — never convert.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary
+*.woff binary
+*.woff2 binary
