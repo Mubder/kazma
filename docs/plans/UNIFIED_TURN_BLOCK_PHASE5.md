@@ -332,7 +332,7 @@ race looks like, not evidence that it is harmless.
 
 ---
 
-## 6. The CI gate had been red since Phase 3
+## 6. The CI gate had been red since Phase 3 — now green
 
 Checked only at the very end of Phase 5, which is three phases too late.
 
@@ -372,9 +372,57 @@ handles are still open, `ignore_cleanup_errors=True` swallows that
 failure, and the stale path therefore still exists when the next test
 looks for it. Linux deletes it and the next test dies.
 
-The fix is an ordering one — restore the environment *before* resetting
-the singletons, both before the directory goes. It is two lines. The fix
-was never the expensive part.
+### Two wrong diagnoses before the right one
+
+Worth recording, because the pattern is the point.
+
+**First**, I blamed teardown ordering: `reset_session_manager()` creates
+a replacement rooted at `data_dir()`, and the harness called it while
+`KAZMA_DATA_DIR` still pointed inside a temporary directory that was
+then deleted. That is a real latent bug and the fix stayed — but it was
+not this failure, and CI said so by failing again in exactly the same
+place.
+
+**Then** the log, which had been saying it all along:
+
+```
+assert self._conn is not None
+```
+
+`_conn is None` means **closed**, not missing. The only code that closes
+it is `app.py`'s shutdown handler (~line 2437), which calls `sm.close()`
+on the *process-wide* singleton. The harness teardown was:
+
+```python
+server.should_exit = True
+thread.join(timeout=10.0)   # ...and carried on regardless
+```
+
+These tests deliberately abandon SSE streams mid-flight, so a graceful
+uvicorn exit waits on connections that never close. On Linux the join
+times out, the test ends, the next test's fixtures build a fresh
+SessionManager — and *then* the previous server shuts down and closes
+it. One pass, five failures, deterministically.
+
+Teardown now escalates to `force_exit` and asserts the thread actually
+died. Windows corroborated after the fact: the suite went from 100s to
+132s, so the graceful join had been timing out there too. It never
+mattered, because Windows cannot delete the temp directory out from
+under the next test either — the same asymmetry, hiding a second bug.
+
+**Result** (`e46d3c11`, `Unified turn lifecycle (GATE)`: success):
+
+```
+tests/e2e/test_unified_turn_app_graph.py    ......   [100%]
+tests/e2e/test_unified_turn_restart.py      ...      [100%]
+tests/e2e/test_unified_turn_browser.py      .......  [100%]
+tests/e2e/test_unified_turn_concurrency.py  ...      [100%]
+tests/e2e/test_unified_turn_recovery.py     ....     [100%]
+```
+
+Both diagnoses were published before the measurement supported them.
+The first was a mechanism that *could* have produced the symptom; the
+evidence distinguishing it from the real one was already in the log.
 
 ### What this says about the evidence
 
@@ -399,10 +447,10 @@ Python 3.12.9, Node v24.20.0, Chromium via Playwright.
 **Method:** every figure below is from a run on that tree; none is
 carried over from an earlier phase's report.
 
-**Platform:** all of it Windows. §6 is about what that cost, and four
-rows below are marked "CI pending" because their evidence has never been
-observed green on Linux. Nothing here should be read as a
-platform-independent claim until the lifecycle job passes.
+**Platform:** the figures above are Windows. The same suites are now
+also green on Linux in the lifecycle job (`e46d3c11`) — which took two
+wrong diagnoses and three pushes to achieve, and §6 is the account of
+why that was not noticed for three phases.
 
 Re-run after the 310-line removal, on that tree:
 
@@ -417,13 +465,13 @@ Re-run after the 310-line removal, on that tree:
 |---|---|---|---|---|
 | 1 | One turn block with integrated header; bottom bar and controller removed | `test_turn_render_boundary.py`, `…browser.py`, `tests/js/test_turn_view.js` | **pass** | — |
 | 2 | Thoughts collapsed by default; choice preserved during updates | `…browser.py::test_the_fold_starts_collapsed_and_stays_where_the_reader_puts_it`, `tests/js/test_turn_preferences.js` | **pass** | — |
-| 3 | Thoughts survive final answer, refresh, session switch, restart | `…browser.py`, `…recovery.py`, `…restart.py` | **pass on Windows; CI pending** | Restart recovery is single-process (§15 excludes multi-replica); CI green not yet observed — §6 |
-| 4 | Exactly one approval group, four identified requests | `…app_graph.py`, `…browser.py::test_sequential_allow_tool_in_one_bubble` | **pass on Windows; CI pending** | The lifecycle job was red on Linux for three phases — §6 |
-| 5 | Real approval/resume through the app graph; no endpoint-only substitute | `…app_graph.py` (6 tests, real `interrupt()`/`POST /api/approve`) | **pass on Windows; CI pending** | Same: green by hand, `.FFFFF` in CI until the teardown fix — §6 |
+| 3 | Thoughts survive final answer, refresh, session switch, restart | `…browser.py`, `…recovery.py`, `…restart.py` | **pass** (Windows + Linux CI) | Restart recovery is single-process; §15 excludes multi-replica |
+| 4 | Exactly one approval group, four identified requests | `…app_graph.py`, `…browser.py::test_sequential_allow_tool_in_one_bubble` | **pass** (Windows + Linux CI) | Was red on Linux for three phases before anyone looked — §6 |
+| 5 | Real approval/resume through the app graph; no endpoint-only substitute | `…app_graph.py` (6 tests, real `interrupt()`/`POST /api/approve`) | **pass** (Windows + Linux CI) | Green by hand but `.FFFFF` in CI until the shutdown fix — §6 |
 | 6 | Single answer region throughout | `tests/js/test_turn_view.js`, `test_unified_turn_a11y.py` | **pass** | — |
 | 7 | One projection, one rendering owner; removal inventory complete | §1, `test_turn_render_boundary.py` | **pass** | — |
 | 8 | Server-authoritative decision/execution/completion/timeout semantics | `test_approve_decides_one_gate.py`, `test_hitl_gates.py`, `…concurrency.py` | **pass** | WS approve path unfixed — §8 |
-| 9 | Live / reconnect / history / restart convergence | `tests/js/test_turn_convergence.js`, `…recovery.py`, `…restart.py` | **pass**; e2e half CI-pending | "Mid-token" is staged with a scripted stream, not a split packet; the node half is platform-independent, the e2e half is §6 |
+| 9 | Live / reconnect / history / restart convergence | `tests/js/test_turn_convergence.js`, `…recovery.py`, `…restart.py` | **pass** (Windows + Linux CI) | "Mid-token" is staged with a scripted stream, not a split packet |
 | 10 | Existing HITL paths and cross-surface decisions still correct | 373 compatibility tests (Phase 4 §7) | **pass** | — |
 | 11 | Performance, focus, keyboard, mobile, RTL, scroll | `tests/js/test_turn_performance.js`, `test_unified_turn_a11y.py`, `…browser.py::test_the_answer_survives_a_phone_in_rtl` | **pass** | — |
 | 12 | Required CI tests run without skips; branch enforcement verified **or reported** | §5, §6, §8 | **reported, not met** | `main` has no branch protection at all — §8 |

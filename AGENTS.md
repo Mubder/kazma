@@ -1571,8 +1571,10 @@ approval group with keyed rows (P3), gate-identity enforcement on the
 approval route and the full acceptance matrix (P4), the removal of the
 last second DOM writer plus release evidence (P5).
 
-**Not met, and it is not a detail.** The lifecycle job runs on every push
-and blocks no merge: `main` has no branch protection at all
+**The lifecycle job is green on Linux and blocks nothing.** It was RED
+from Phase 3 to Phase 5 and nobody noticed, because every phase report
+was written from Windows runs by hand (`_PHASE5.md` §6). It is green now
+— but `main` has no branch protection at all
 (`gh api repos/Mubder/kazma/branches/main/protection` → 404). Enabling it
 would reject the direct pushes this repository works by, so the trade is
 the owner's to make. Do not describe this job as a required check.
