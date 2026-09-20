@@ -2222,6 +2222,8 @@ tbody tr:last-child td {
    already emits <p>/<pre>, so keeping it doubles every blank line. */
 .agent-progress-step.step-thought .step-detail.step-detail-md {
   white-space: normal;
+  /* Prose, not a payload. The monospace above is for tool output. */
+  font-family: var(--font-sans, inherit);
 }
 /* A row in a collapsed fold, not an article: no outer margins, code
    scrolls rather than widening the panel, headings do not shout. */
