@@ -196,6 +196,13 @@ jobs:
     # workflow file is not merge enforcement (section 13, last bullet).
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The rollback rehearsal reads a pinned pre-schema commit out of
+          # git. A depth-1 checkout does not have it, and the test would
+          # skip itself rather than fail — which is the worst outcome for
+          # a release gate (plan section 13: no skips standing in for a
+          # missing dependency).
+          fetch-depth: 0
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
@@ -206,11 +213,52 @@ jobs:
           node-version: "20"
       - name: Install app
         run: pip install -e ".[test,web]"
+      - name: Record the build under test
+        # Written before anything runs, so a failed job still says which
+        # build failed. Lands in the uploaded directory (plan §13).
+        run: |
+          mkdir -p test-artifacts/unified-turn
+          {
+            echo "commit:      ${{ github.sha }}"
+            echo "ref:         ${{ github.ref }}"
+            echo "run:         ${{ github.run_id }} attempt ${{ github.run_attempt }}"
+            echo "runner:      $RUNNER_OS $RUNNER_ARCH"
+            echo "python:      $(python -V 2>&1)"
+            echo "node:        $(node -v)"
+            echo "playwright:  $(python -m playwright --version 2>&1 || echo 'not installed yet')"
+            echo "utc:         $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "--- installed kazma packages ---"
+            python -m pip list 2>/dev/null | grep -i kazma || true
+          } > test-artifacts/unified-turn/build-identity.txt
+          cat test-artifacts/unified-turn/build-identity.txt
       - name: The harness does not borrow the operator's workspace
         # Sub-second, and it guards a safety property rather than a
         # behavior: an agent whose workspace is the checkout will edit
         # the checkout the first time a fixture uses a relative path.
         run: python -m pytest tests/test_harness_isolation.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Render boundary (no retired bar, one turn writer)
+        # Plan §13's narrow architecture check. Static, so it runs with
+        # the other fast locks rather than behind twenty minutes of
+        # servers.
+        run: python -m pytest tests/test_turn_render_boundary.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Assets ship and bust their cache
+        # A module missing from the template, missing from the wheel, or
+        # served stale is invisible to every other test here: the unit
+        # tests run under bare node and the browser suite loads a page it
+        # just built (plan section 14.3).
+        run: python -m pytest tests/test_turn_assets_ship.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Rollback rehearsal (the previous build reads this build's rows)
+        # Checks out the pre-schema turn_document from git and feeds it a
+        # row this build wrote (plan section 14.6). Needs real history, so
+        # the checkout above must not be shallow.
+        run: python -m pytest tests/test_turn_rollback_rehearsal.py -q --timeout=120
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: One decision settles one gate (fast lock)
@@ -251,6 +299,17 @@ jobs:
         run: python -m pytest tests/e2e/test_unified_turn_recovery.py -q --timeout=900
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Upload browser evidence
+        # always(): the run that FAILED is the run whose trace is worth
+        # having. On a green run this carries the four-gate recording,
+        # which is the release evidence plan §13 asks for.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-turn-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-artifacts/unified-turn
+          if-no-files-found: warn
+          retention-days: 14
       - name: Shared Python/JavaScript turn fixtures
         run: python -m pytest tests/test_unified_turn_fixtures.py -q --timeout=120
         env:

@@ -27,6 +27,13 @@ real button that POSTs ``/api/approve/{thread_id}``.
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
+#: Written into console.log; a module constant so the escape does not
+#: have to survive another layer of quoting.
+LINE_SEP = chr(10)
+
 from collections.abc import Iterator
 
 import pytest
@@ -81,19 +88,105 @@ def harness() -> Iterator[Harness]:
         yield h
 
 
+#: Where a failing run leaves its trace, screenshot and console log.
+#: Under the repo so a CI step can upload one directory, and gitignored
+#: so a local run does not offer them up as changes.
+EVIDENCE_DIR = Path(__file__).resolve().parents[2] / "test-artifacts" / "unified-turn"
+
+#: Tests whose recording IS the release evidence rather than a failure
+#: diagnostic, so they record whether or not they pass (plan §13).
+ALWAYS_RECORD = ("test_sequential_allow_tool_in_one_bubble",)
+
+
 @pytest.fixture
-def page(harness: Harness):
+def evidence(request) -> Iterator[dict]:
+    """Collect artifacts for THIS test, and keep them only if they matter.
+
+    Playwright writes a video for the whole context or none of it, and
+    names the file only once the context closes — so the decision to keep
+    is made here, after the test result is known, not at launch.
+    """
+    name = request.node.name.split("[")[0]
+    out = EVIDENCE_DIR / name
+    state = {"dir": out, "record": name in ALWAYS_RECORD, "page": None}
+    yield state
+
+    failed = getattr(request.node, "_utb_failed", False)
+    keep = failed or state["record"]
+    pg = state.get("page")
+    if pg is not None and failed:
+        # Best-effort: a page that crashed cannot be screenshotted, and a
+        # missing screenshot must not replace the real failure.
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+            pg.screenshot(path=str(out / "failure.png"), full_page=True)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            (out / "console.log").write_text(
+                LINE_SEP.join(state.get("console") or []), encoding="utf-8"
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    if not keep:
+        shutil.rmtree(out, ignore_errors=True)
+    elif not failed:
+        # A kept-but-passing test is release evidence, and the evidence is
+        # the recording. The trace is the failure diagnostic — 14 MB of it
+        # per green run, for a file nobody opens when nothing broke.
+        # Tracing still ran, because it cannot be started retroactively.
+        try:
+            (out / "trace.zip").unlink()
+        except OSError:
+            pass
+
+
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Tell the fixture whether the test body failed.
+
+    The fixture's own teardown cannot see the outcome, and "did this
+    test pass" is the only input the keep-or-delete decision has.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    if report.when == "call" and report.failed:
+        item._utb_failed = True
+
+
+@pytest.fixture
+def page(harness: Harness, evidence: dict):
     from playwright.sync_api import sync_playwright
+
+    out = evidence["dir"]
+    out.mkdir(parents=True, exist_ok=True)
+    console: list[str] = []
+    evidence["console"] = console
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            record_video_dir=str(out / "video"),
+            record_video_size={"width": 1280, "height": 900},
+        )
+        # A trace is only worth its size when something went wrong, but it
+        # has to be started before the thing goes wrong.
+        context.tracing.start(screenshots=True, snapshots=True, sources=False)
         try:
-            pg = browser.new_page()
+            pg = context.new_page()
+            evidence["page"] = pg
+            pg.on("console", lambda m: console.append(m.type + ": " + m.text))
+            pg.on("pageerror", lambda e: console.append("pageerror: " + str(e)))
             pg.goto(f"{harness.base}/chat", wait_until="domcontentloaded",
                     timeout=30000)
             pg.locator("#chat-input").wait_for(state="visible", timeout=20000)
             yield pg
         finally:
+            try:
+                context.tracing.stop(path=str(out / "trace.zip"))
+            except Exception:  # noqa: BLE001 - never mask the real failure
+                pass
+            context.close()  # flushes the video
             browser.close()
 
 

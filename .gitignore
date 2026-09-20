@@ -146,3 +146,9 @@ core/
 pytest-of-*/
 *pytest-tmp-hook/
 *.pre_reembed
+
+# Playwright evidence from the unified-turn browser suite: traces and
+# screenshots on failure, plus the four-gate recording that is the
+# release evidence (docs/plans/UNIFIED_TURN_BLOCK.md §13). Uploaded by
+# CI, never committed.
+test-artifacts/

@@ -290,15 +290,26 @@ def test_live_assistant_bubble_is_pinned_not_minted() -> None:
     assert "function _pinLiveAssistantBubble(create)" in js
     assert "function _assistantBubbleForOpenTurn(create)" in js
     assert "if (!currentMsgEl) currentMsgEl = createAssistantMessage()" not in js
-    # `create: false` looks only. Since the Live Task Card took the live view
-    # out of the bubble, a progress-only frame that minted one left a bare
-    # avatar + timestamp + reaction buttons with nothing in it — the empty
-    # bubble every turn opened with.
+    # `create: false` looks only. A progress-only frame that minted a bubble
+    # left a bare avatar + timestamp + reaction buttons with nothing in it —
+    # the empty bubble every turn opened with.
     assert "return mayCreate ? createAssistantMessage() : null;" in js
-    # ensureProgressPanel is the live CoT mint site
-    body = js.split("function ensureProgressPanel()", 1)[1].split("\n  function ", 1)[0]
-    assert "_pinLiveAssistantBubble()" in body
-    assert "createAssistantMessage()" not in body
+    # The mint site moved. It was `ensureProgressPanel`, the pre-V2 progress
+    # painter, removed in Phase 5 of UNIFIED_TURN_BLOCK.md as the last second
+    # DOM writer. `renderTurn` owns the rule now and states it the same way:
+    # a document with nothing to show does not get a bubble.
+    assert "function ensureProgressPanel()" not in js, (
+        "the legacy progress painter is back; it is a second DOM writer "
+        "(plan §14.4) and this incident's rule would then live in two places"
+    )
+    body = js.split("function renderTurn(doc, meta)", 1)[1].split("\n  function ", 1)[0]
+    assert "_bubbleForTurn(turnId, paintable)" in body, (
+        "renderTurn no longer gates bubble creation on there being "
+        "something to paint"
+    )
+    assert "createAssistantMessage()" not in body, (
+        "renderTurn mints a bubble directly, bypassing the one mint site"
+    )
     # Semantic HITL must send interrupt_id (registry claim) and not stick
     # on Resolving… after a 409.
     sem = js.split("Clarification Needed", 1)[1].split("function setCardState", 1)[0]

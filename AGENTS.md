@@ -1561,12 +1561,21 @@ ordering (§31) and gate authority (§30) are preserved unchanged — any
 protocol extension must update those contracts explicitly.
 
 Baseline, evidence and known gaps: `UNIFIED_TURN_BLOCK_PHASE0.md` through
-`_PHASE3.md` in the same directory. Each phase report states what it does
-NOT claim; read those before claiming any of it.
+`_PHASE5.md` in the same directory. Each phase report states what it does
+NOT claim, and `_PHASE5.md` §6 lists what the release does not have; read
+those before claiming any of it.
 
-Shipped so far: durable tool activity and a document revision (P1), the
-in-block header, reader-owned thoughts fold and one answer authority (P2),
-one approval group with keyed rows (P3).
+Shipped: durable tool activity and a document revision (P1), the in-block
+header, reader-owned thoughts fold and one answer authority (P2), one
+approval group with keyed rows (P3), gate-identity enforcement on the
+approval route and the full acceptance matrix (P4), the removal of the
+last second DOM writer plus release evidence (P5).
+
+**Not met, and it is not a detail.** The lifecycle job runs on every push
+and blocks no merge: `main` has no branch protection at all
+(`gh api repos/Mubder/kazma/branches/main/protection` → 404). Enabling it
+would reject the direct pushes this repository works by, so the trade is
+the owner's to make. Do not describe this job as a required check.
 
 Load-bearing rules:
 
@@ -1584,6 +1593,18 @@ Load-bearing rules:
   order gates by state: that is what moved the answer when one settled.
 - **One count.** `turn_presentation.gateRows()` is what both the header
   and the group count, so the two cannot contradict each other.
+- **One writer, and it is enforced.** `turn_view.js` performs the single
+  ordering pass; `chat.js` builds regions and hands them over, it never
+  inserts them. The pre-V2 fallback painter (`ensureProgressPanel`) is
+  deleted — it could only run when the projector module was missing, and
+  in that state there is no answer text to render at all, so it could
+  only ever produce a half-rendered turn.
+  `tests/test_turn_render_boundary.py` fails if either the retired bar
+  markup or a second turn-content writer comes back.
+- **A decision names its gate.** See §30 B2: `/api/approve` verifies the
+  body's `interrupt_id` against the registry before resuming. A retried
+  Approve used to decide whichever question the graph had reached by
+  then.
 
 Sequential approval is proven at the lifecycle level by
 `tests/e2e/test_unified_turn_app_graph.py` and in a browser by
@@ -1595,6 +1616,11 @@ Cross-language turn projection is locked by shared fixtures under
 `tests/fixtures/unified_turn/` — do NOT add a Python example and a
 JavaScript example for the same rule; that is how `legacy_turn_id` came to
 mint a different id in each language with both suites green.
+
+The same job carries the release evidence: Playwright traces and
+screenshots on failure, a recording of the four-gate turn either way, and
+a build-identity file written before anything runs so a failed job still
+says which build failed. It uploads `test-artifacts/unified-turn`.
 
 
 ### 32. SSRF pin-IP (Wave 8 H-7)

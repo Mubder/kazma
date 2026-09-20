@@ -996,9 +996,8 @@
    * NEVER create a second assistant without a new user row (duplicate root cause).
    *
    * @param {boolean} [create=true] Pass false to LOOK ONLY — returns null
-   *   instead of minting a bubble. Since the Live Task Card took the live
-   *   view out of the bubble, a progress-only frame that minted one left a
-   *   bare avatar + timestamp + reaction buttons with nothing inside it
+   *   instead of minting a bubble. A progress-only frame that minted one
+   *   left a bare avatar + timestamp + reaction buttons with nothing in it
    *   sitting above the composer until the first token: the "empty plain
    *   bubble before streaming" every turn opened with.
    */
@@ -1703,10 +1702,6 @@
       }
     }
     return null;
-  }
-
-  function _isUserBubble(el) {
-    return !!(el && el.classList && el.classList.contains('message-user'));
   }
 
   function _bubbleContent(el) {
@@ -3351,19 +3346,6 @@
     return '<svg class="step-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
   }
 
-  function _cotPhasesHtml(active) {
-    function chip(id, label) {
-      var on = active === id ? ' is-on' : '';
-      return '<span class="cot-phase' + on + '" data-phase="' + id + '">' +
-        escapeHtml(label) + '</span>';
-    }
-    return '<div class="cot-phases" aria-hidden="true">' +
-      chip('think', ti('phase_think', 'Think')) +
-      chip('act', ti('phase_act', 'Act')) +
-      chip('write', ti('phase_write', 'Write')) +
-      '</div>';
-  }
-
   function _setCotPhase(phase) {
     var panel = _progressEl;
     if (!panel || !phase) return;
@@ -3476,13 +3458,6 @@
     el.textContent = _formatElapsed(Date.now() - _progressStartedAt);
   }
 
-  function _startProgressTimer() {
-    _progressStartedAt = Date.now();
-    if (_progressTimerId) clearInterval(_progressTimerId);
-    _progressTimerId = setInterval(_tickProgressElapsed, 1000);
-    _tickProgressElapsed();
-  }
-
   function _stopProgressTimer() {
     if (_progressTimerId) {
       clearInterval(_progressTimerId);
@@ -3507,101 +3482,6 @@
     m = s.match(/(?:^|[\s"'])([A-Za-z]:\\[^\s"']+|\/[\w.\-\/]+|[\w.\-]+\/[\w.\-\/]+)/);
     if (m) return m[1];
     return '';
-  }
-
-  function ensureProgressPanel() {
-    if (_isUserBubble(currentMsgEl)) currentMsgEl = null;
-    _pinLiveAssistantBubble();
-    // No rescue pass: TurnView keeps every doc-derived node a flat sibling
-    // of .message-content, so a panel can no longer swallow the answer.
-    var content = _bubbleContent(currentMsgEl);
-    if (!content) return null;
-    var panel = _directChildByClass(content, 'agent-progress');
-    if (panel) {
-      _progressEl = panel;
-      return panel;
-    }
-    panel = document.createElement('div');
-    panel.className = 'agent-progress is-active';
-    var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
-    if (pageRtl) {
-      panel.setAttribute('dir', 'rtl');
-      panel.classList.add('is-rtl');
-    }
-    _panelSeq += 1;
-    var bodyId = 'agent-progress-body-' + _panelSeq;
-    panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench"' +
-        ' aria-expanded="true" aria-controls="' + bodyId + '">' +
-        '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
-        '<div class="agent-progress-heading">' +
-          '<span class="agent-progress-kicker">' + escapeHtml(ti('reasoning', 'Reasoning')) + '</span>' +
-          '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
-        '</div>' +
-        _cotPhasesHtml('think') +
-        '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
-        '<span class="agent-progress-count">0 ' + escapeHtml(ti('steps', 'steps')) + '</span>' +
-        '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
-      '</div>' +
-      '<div class="agent-progress-body" id="' + bodyId + '">' +
-        '<div class="agent-plan' + (pageRtl ? ' is-rtl' : '') + '"' +
-          (pageRtl ? ' dir="rtl"' : '') + ' hidden>' +
-          '<div class="agent-plan-head">' +
-            '<div class="agent-plan-label">' + escapeHtml(ti('plan', 'Plan')) + '</div>' +
-            '<div class="agent-plan-meta"></div>' +
-          '</div>' +
-          '<div class="agent-plan-bar" aria-hidden="true"><div class="agent-plan-bar-fill"></div></div>' +
-          '<ol class="agent-plan-list"></ol>' +
-        '</div>' +
-        '<div class="agent-memory-explain is-collapsed" hidden>' +
-          '<div class="agent-memory-explain-head" role="button" tabindex="0" title="Collapse/expand memory">' +
-            '<div class="agent-memory-explain-label">' + escapeHtml(ti('memory_context', 'Memory context')) + '</div>' +
-            '<div class="agent-memory-explain-meta"></div>' +
-            '<span class="agent-memory-chevron" aria-hidden="true">\u25B8</span>' +
-          '</div>' +
-          '<div class="agent-memory-explain-body"></div>' +
-        '</div>' +
-        '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
-        '<ul class="agent-progress-steps" role="log" aria-live="polite"></ul>' +
-      '</div>';
-    var textEl = _directChildByClass(content, 'message-text');
-    if (textEl) content.insertBefore(panel, textEl);
-    else content.appendChild(panel);
-    var header = panel.querySelector('.agent-progress-header');
-    function toggle() {
-      panel.classList.toggle('is-collapsed');
-      var collapsed = panel.classList.contains('is-collapsed');
-      var chev = panel.querySelector('.agent-progress-chevron');
-      if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
-      if (header) header.setAttribute('aria-expanded', String(!collapsed));
-    }
-    if (header) {
-      header.addEventListener('click', toggle);
-      header.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-      });
-    }
-    // Memory sub-panel: independently collapsible (starts collapsed to save space).
-    var memHead = panel.querySelector('.agent-memory-explain-head');
-    if (memHead) {
-      function toggleMem() {
-        var mem = panel.querySelector('.agent-memory-explain');
-        if (!mem) return;
-        mem.classList.toggle('is-collapsed');
-        var chev = mem.querySelector('.agent-memory-chevron');
-        if (chev) chev.textContent = mem.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
-      }
-      memHead.addEventListener('click', toggleMem);
-      memHead.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMem(); }
-      });
-    }
-    _progressEl = panel;
-    _progressStepCount = 0;
-    _planItems = [];
-    _planParsedFromText = false;
-    _startProgressTimer();
-    return panel;
   }
 
   function _renderPlanList(panel) {
@@ -3655,9 +3535,10 @@
       });
       if (!exists) _planItems.push({ text: text, done: false });
     });
-    // Live Task Card: plan progress rides the card header meta. setPlan
-    // must NEVER create an in-bubble workbench — on hydration it painted a
-    // phantom "Working…" panel over finished history (2026-09-03).
+    // setPlan must NEVER create an in-bubble workbench — on hydration it
+    // painted a phantom "Working…" panel over finished history
+    // (2026-09-03). It only updates a panel that is already open, which is
+    // why the query below is a look, not an ensure.
     var panel = messagesEl
       ? messagesEl.querySelector('.agent-progress.is-active')
       : null;
@@ -3665,29 +3546,6 @@
       _renderPlanList(panel);
       scrollToBottom();
     }
-  }
-
-  function markPlanProgress(toolName) {
-    // Soft match: mark first incomplete plan item that mentions the tool or shares a word
-    if (!_planItems.length || !toolName) return;
-    var t = String(toolName).toLowerCase().replace(/_/g, ' ');
-    var marked = false;
-    for (var i = 0; i < _planItems.length; i++) {
-      if (_planItems[i].done) continue;
-      var pt = _planItems[i].text.toLowerCase();
-      if (pt.indexOf(t) >= 0 || t.split(' ').some(function(w) { return w.length > 3 && pt.indexOf(w) >= 0; })) {
-        _planItems[i].done = true;
-        marked = true;
-        break;
-      }
-    }
-    // If no lexical match, advance the next open plan step on tool completion
-    if (!marked) {
-      for (var j = 0; j < _planItems.length; j++) {
-        if (!_planItems[j].done) { _planItems[j].done = true; break; }
-      }
-    }
-    if (_progressEl) _renderPlanList(_progressEl);
   }
 
   /**
@@ -4109,6 +3967,22 @@
     });
   }
 
+  /**
+   * The ONE entry point for a progress step. Feeds the projector and
+   * stops.
+   *
+   * It used to fall through to `ensureProgressPanel()` and paint a
+   * panel itself whenever `window.KazmaTurnDocument` was missing. That
+   * fallback was the last pre-V2 DOM writer, and it could never do the
+   * job it looked like it was doing: with no projector module
+   * `_docs.live` is never created, so `_answerFromDoc` returns "" and
+   * the turn has no answer text. It would have painted progress over a
+   * chat that cannot show replies.
+   *
+   * Plan §14.4 — "never run two DOM writers"; invariant U03 — only the
+   * renderer mutates. Removed in Phase 5, together with
+   * `ensureProgressPanel`, whose only caller it was.
+   */
   function logProgress(step) {
     if (!step) return;
     var kind = step.kind || 'status';
@@ -4122,175 +3996,12 @@
     if (kind === 'tool') _setCotPhase('act');
     else if (/synth|compos|writing reply/i.test(String(step.title || ''))) _setCotPhase('write');
     else _setCotPhase('think');
-    if (window.KazmaTurnDocument && typeof window.KazmaTurnDocument.applyEvent === 'function') {
-      applyTurnEvent({
-        type: 'progress',
-        step: step,
-        source: 'progress',
-        turn_id: _liveTurnId,
-      });
-      return;
-    }
-
-    var panel = ensureProgressPanel();
-    if (!panel) return;
-
-    var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
-
-    // Reactivate panel if a new active step arrives (prevents premature "Done" title during background execution)
-    if (panel.classList.contains('is-done') && (state === 'running' || kind === 'status' || kind === 'tool')) {
-      panel.classList.remove('is-done');
-      panel.classList.add('is-active');
-      var headerTitle = panel.querySelector('.agent-progress-title');
-      if (headerTitle) {
-        headerTitle.textContent = ti('thinking', 'Kazma is thinking\u2026');
-      }
-      var pulse = panel.querySelector('.agent-progress-pulse');
-      if (pulse) pulse.classList.remove('is-off');
-      _startProgressTimer();
-    }
-    var rawTitle = String(step.title || '').trim() || '\u2026';
-    var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
-    // Canonical display for thinking heartbeats (localized)
-    if (kind === 'status' && _isThinkingStatus(title)) {
-      title = ti('thinking', 'Kazma is thinking\u2026');
-    }
-    // Localize leftover English HITL / CoT lines if server sent raw EN
-    if (kind !== 'tool') {
-      title = _localizeCotTitle(title);
-    }
-    var detail = step.detail != null ? String(step.detail) : '';
-
-    var list = panel.querySelector('.agent-progress-steps');
-    if (!list) return;
-
-    // Coalesce rapid identical status lines (heartbeats update last row).
-    // Also merge thinking variants from beginTurn + WS status frames.
-    var last = list.lastElementChild;
-    var sameStatus =
-      last &&
-      kind === 'status' &&
-      last.dataset.kind === 'status' &&
-      (
-        last.dataset.title === title ||
-        _normalizeStatusTitle(last.dataset.title) === _normalizeStatusTitle(title) ||
-        (_isThinkingStatus(last.dataset.title) && _isThinkingStatus(title))
-      ) &&
-      (!detail || detail === (last.dataset.detail || ''));
-    if (sameStatus) {
-      var tEl = last.querySelector('.step-time');
-      if (tEl) tEl.textContent = formatMsgTime();
-      last.className = 'agent-progress-step step-' + kind + ' state-' + state;
-      last.dataset.title = title;
-      last.dataset.detail = detail || '';
-      var titleNode = last.querySelector('.step-title');
-      if (titleNode) titleNode.textContent = title;
-      if (detail) {
-        var det0 = last.querySelector('.step-detail');
-        if (det0) det0.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
-      }
-      list.scrollTop = list.scrollHeight;
-      scrollToBottom();
-      return;
-    }
-    // Update in-place when the same tool is completing — keep result expanded
-    // Match either friendly label or raw tool name on the row.
-    if (last && kind === 'tool' && state !== 'running' && last.dataset.kind === 'tool' &&
-        (last.dataset.title === title || last.dataset.rawTitle === rawTitle || last.dataset.title === rawTitle)) {
-      last.className = 'agent-progress-step step-tool state-' + state + ' is-expanded';
-      last.dataset.state = state;
-      last.dataset.title = title;
-      var st = last.querySelector('.step-state');
-      if (st) st.textContent = state === 'done'
-        ? ti('step_done', 'Done')
-        : (state === 'failed' ? ti('step_failed', 'Failed') : state);
-      var titleNode = last.querySelector('.step-title');
-      if (titleNode) titleNode.textContent = title;
-      if (detail) {
-        // Rebuild the detail block through the shared template so long
-        // results clamp with a "show more" toggle like freshly-appended rows.
-        var oldDet = last.querySelector('.step-detail');
-        if (oldDet) oldDet.remove();
-        var oldBtn = last.querySelector('.step-show-more');
-        if (oldBtn) oldBtn.remove();
-        var bodyEl = last.querySelector('.step-body');
-        if (bodyEl) bodyEl.insertAdjacentHTML('beforeend', _detailHtml(detail));
-        // Surface search backend / recovery source when present
-        _maybeAddSourceChip(last, detail);
-      }
-      var t2 = last.querySelector('.step-time');
-      if (t2) t2.textContent = formatMsgTime();
-      if (state === 'done') markPlanProgress(rawTitle);
-      list.scrollTop = list.scrollHeight;
-      scrollToBottom();
-      return;
-    }
-
-    _progressStepCount += 1;
-    if (kind === 'tool') _progressToolCount += 1;
-    var li = document.createElement('li');
-    li.className = 'agent-progress-step step-' + kind + ' state-' + state +
-      (kind === 'tool' ? ' is-expanded' : '');
-    li.dataset.kind = kind;
-    li.dataset.title = title;
-    li.dataset.rawTitle = rawTitle;
-    li.dataset.state = state;
-
-    li.innerHTML = _stepRowHtml({
-      kind: kind,
-      state: state,
-      title: title,
-      rawTitle: rawTitle,
-      detail: detail,
+    applyTurnEvent({
+      type: 'progress',
+      step: step,
+      source: 'progress',
+      turn_id: _liveTurnId,
     });
-    _wireStepToggles(list);
-
-    list.appendChild(li);
-    if (detail) _maybeAddSourceChip(li, detail);
-    while (list.children.length > 100) list.removeChild(list.firstChild);
-
-    var countEl = panel.querySelector('.agent-progress-count');
-    if (countEl) {
-      var planN = _planItems.length;
-      var donePlan = _planItems.filter(function(p) { return p.done; }).length;
-      var stepWord = _progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
-      var planBit = planN
-        ? ' \u00B7 ' + tiFmt('plan_progress', 'plan {done}/{total}', { done: donePlan, total: planN })
-        : '';
-      countEl.textContent = _progressStepCount + ' ' + stepWord + planBit;
-    }
-    var titleEl = panel.querySelector('.agent-progress-title');
-    if (titleEl && state === 'running') {
-      titleEl.textContent = kind === 'tool' ? title : ti('working', 'Working\u2026');
-    }
-    if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
-
-    panel.classList.add('is-active');
-    // Never auto-expand (2026-09-03): un-done yes, un-collapse no — the
-    // user's chevron click is the only thing that opens a CoT panel.
-    panel.classList.remove('is-done');
-    list.scrollTop = list.scrollHeight;
-    scrollToBottom();
-  }
-
-  function _maybeAddSourceChip(li, detail) {
-    if (!li || !detail) return;
-    var body = li.querySelector('.step-body');
-    if (!body) return;
-    if (body.querySelector('.source-chip')) return;
-    var m = String(detail).match(/Source:\s*([a-z0-9_.@\/:\-]+)/i) ||
-      String(detail).match(/searxng:ok@([^\s,]+)/i) ||
-      String(detail).match(/\b(jina|firecrawl|playwright|duckduckgo|bing|wikipedia)\b/i);
-    if (!m) return;
-    var label = m[1] || m[0];
-    var chip = document.createElement('div');
-    chip.className = 'source-chip';
-    chip.title = 'Backend / source';
-    chip.innerHTML = '<span class="source-chip-label">via</span> ' +
-      '<code>' + escapeHtml(String(label).slice(0, 48)) + '</code>';
-    var detailEl = body.querySelector('.step-detail');
-    if (detailEl) body.insertBefore(chip, detailEl);
-    else body.appendChild(chip);
   }
 
   function finalizeProgress(ok) {
@@ -7044,8 +6755,9 @@
    * Text and reasoning are covered by _answerFromDoc. Beyond those, only two
    * things belong in the bubble: an approval card, and the durable one-line
    * workbench summary a FINISHED turn leaves behind (which needs a host even
-   * when the turn produced no prose). Everything else — the running step
-   * list — is the Live Task Card's job now.
+   * when the turn produced no prose). A running step list is not content:
+   * it is the activity fold, and a turn that has only that has nothing to
+   * show yet.
    */
   function _docHasBubbleContent(doc) {
     if (!doc) return false;
@@ -8041,9 +7753,10 @@
     if (!TD || !TV) return;
     var turnId = String(doc.turnId || '');
 
-    // A doc with nothing to SHOW must not mint a bubble: the running step
-    // list is the Live Task Card's territory, and beginTurn seeds a
-    // "Thinking…" row that used to open every turn with an empty bubble.
+    // A doc with nothing to SHOW must not mint a bubble. beginTurn seeds a
+    // "Thinking…" row, and a row is not content — counting it opened every
+    // turn with an empty bubble. This is the one mint gate: see
+    // tests/test_chat_as_product.py::test_live_assistant_bubble_is_pinned_not_minted.
     var paintable = !!_answerFromDoc(TD, doc) || _docHasBubbleContent(doc);
     var el = _bubbleForTurn(turnId, paintable);
     if (!el) {
@@ -8150,7 +7863,7 @@
     retry: retry,
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
-    /** Live Task Card single-writer dispatch (WS store + SSE both feed it). */
+    /** HITL single-writer dispatch (WS store + SSE both feed it). */
     // The document is the entry point, never the card builder: every HITL
     // source (SSE frame, WS frame, gate registry, pending-approvals
     // recovery, hydration) feeds applyTurnEvent, and TurnView is the only
