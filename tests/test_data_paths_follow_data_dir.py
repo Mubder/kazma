@@ -21,6 +21,34 @@ Subprocess, not monkeypatch: several of these are module-level constants
 evaluated at import, so the environment has to be set *before* the module is
 first imported. A monkeypatch inside an already-loaded process would pass
 while the shipped code stayed broken.
+
+Import-time versus use-time — know which you have
+-------------------------------------------------
+Measured 2026-09-21, importing everything first and *then* changing
+``KAZMA_DATA_DIR``:
+
+* **Resolved at USE** (follows a late change): ``stores.knowledge._default_db``,
+  ``stores.bookmarks._default_db`` — these are functions.
+* **Frozen at IMPORT** (cannot): ``agent_runner.CHECKPOINT_DB``,
+  ``checkpoint_retention.DEFAULT_DB``, ``time_travel.DEFAULT_DB_PATH``,
+  ``swarm.task_store._DEFAULT_DB``, ``observability.llm_ledger._DEFAULT_DB``,
+  ``swarm.semantic_cache._DEFAULT_DB``, ``tools.image_gen.IMAGE_DIR``,
+  ``chat_attachments.ATTACHMENT_DIR``.
+
+The frozen set is **fine for the bug this file is about**: a real deployment
+has ``KAZMA_DATA_DIR`` in the environment before the process starts, so
+reading it at import is correct, and that is what these tests verify. What
+they cannot do is follow a change made afterwards.
+
+That distinction is not academic. ``time_travel`` had to be fixed a second
+time because a test monkeypatches the variable AFTER import and then builds a
+SnapshotRecorder — its frozen default was also absolute, so it took the
+``is_absolute() -> return unchanged`` branch in ``_resolve_db_path`` and
+skipped the anchoring that function exists to do. The fix was to make the
+DEFAULT ARGUMENTS ``None`` so resolution happens when the object is
+constructed. If you add a test that sets ``KAZMA_DATA_DIR`` late and it fails
+against one of the frozen names above, that is the same problem, and the same
+shape of fix: resolve where it is used, not where it is declared.
 """
 
 from __future__ import annotations
