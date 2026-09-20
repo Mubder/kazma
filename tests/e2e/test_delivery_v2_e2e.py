@@ -17,6 +17,7 @@ blind spots.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import socket
 import threading
@@ -239,6 +240,64 @@ def _wait_delivery_ready(page, timeout: float = 20.0) -> str:
     )
 
 
+def _emit_until_painted(
+    page,
+    frames: list[tuple[str, dict]],
+    thread_id: str,
+    needle: str,
+    total_timeout: float = 30.0,
+    attempt_timeout: int = 2500,
+) -> int:
+    """Emit *frames* until *needle* paints, and fail loudly if it never does.
+
+    ``_wait_delivery_ready`` proves the socket is open on BOTH ends before
+    the first emit. That is necessary and not sufficient: the client drops a
+    frame that arrives before its render pipeline is mounted — not queued,
+    not replayed, dropped, the same loss the post-reload path documents. On
+    a loaded CI runner the page can still be mounting when the frames land,
+    and then no amount of waiting paints them.
+
+    That is how this test failed: roughly one CI run in three (measured over
+    six runs on three different commits, passing on the commit that contains
+    both of the others), always as a 10s ``wait_for_function`` timeout on the
+    first assertion, which reads as a delivery regression rather than as a
+    startup race. It never reproduced locally — a developer machine mounts
+    the page before the frames arrive.
+
+    Re-emitting removes the timing bet rather than re-pricing it. A longer
+    sleep or a bigger timeout is the same guess at better odds, and neither
+    helps at all when the frame was dropped instead of merely late. The
+    assertion is unchanged: if delivery is genuinely broken the needle never
+    appears and this still fails — with a message that distinguishes the two.
+
+    Returns the number of attempts, so a caller can tell a first-try paint
+    from one that needed the retry.
+    """
+    from playwright.sync_api import TimeoutError as PWTimeout
+
+    deadline = time.monotonic() + total_timeout
+    attempts = 0
+    while True:
+        attempts += 1
+        for event_type, data in frames:
+            _emit(event_type, data, thread_id)
+        try:
+            page.wait_for_function(
+                f"() => document.body.innerText.includes({json.dumps(needle)})",
+                timeout=attempt_timeout,
+            )
+            return attempts
+        except PWTimeout:
+            if time.monotonic() >= deadline:
+                raise AssertionError(
+                    f"{needle!r} never painted after {attempts} emit attempts "
+                    f"over {total_timeout:.0f}s. The socket was registered on "
+                    "both the browser and the server before the first emit, so "
+                    "this is a delivery failure, not the mount race the retry "
+                    "exists to absorb."
+                ) from None
+
+
 def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
     """The plan's core promise, end-to-end at the browser level."""
     from playwright.sync_api import sync_playwright
@@ -272,13 +331,18 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
             live_thread = _wait_delivery_ready(page)
 
             # ── 1. Live journaled frames paint without any refresh ──
-            _emit("status_update", {"status": "thinking"}, live_thread)
-            _emit("llm_delta", {"content": "Hello "}, live_thread)
-            _emit("llm_delta", {"content": "journaled world"}, live_thread)
-            _emit("turn_complete", {"content": "Hello journaled world", "empty": False}, live_thread)
-            page.wait_for_function(
-                "() => document.body.innerText.includes('Hello journaled world')",
-                timeout=10000,
+            # Retried rather than emitted once: see _emit_until_painted. This
+            # is the assertion that failed intermittently in CI.
+            _emit_until_painted(
+                page,
+                [
+                    ("status_update", {"status": "thinking"}),
+                    ("llm_delta", {"content": "Hello "}),
+                    ("llm_delta", {"content": "journaled world"}),
+                    ("turn_complete", {"content": "Hello journaled world", "empty": False}),
+                ],
+                live_thread,
+                "Hello journaled world",
             )
 
             # ── 2. Reload: the persisted cursor drives the resume handshake,
@@ -299,14 +363,19 @@ def test_journaled_frames_paint_live_and_resume_handshake(server: str) -> None:
                 page.wait_for_timeout(100)
             # The `resumed` frame says the cursor is reconciled; the page still
             # has to finish re-rendering the restored transcript before a new
-            # live frame has somewhere to paint. Without this the emit races
-            # the re-render and the delta is dropped.
-            page.wait_for_timeout(1500)
-            _emit("llm_delta", {"content": "post-reload continuation"}, live_thread)
-            _emit("turn_complete", {"content": "post-reload continuation"}, live_thread)
-            page.wait_for_function(
-                "() => document.body.innerText.includes('post-reload continuation')",
-                timeout=10000,
+            # live frame has somewhere to paint, and the client exposes no
+            # signal for "re-render done". This used to be a flat 1500ms sleep
+            # with a comment admitting the emit could race the re-render and be
+            # dropped — the same bet as the one that actually broke phase 1, and
+            # it is retired the same way.
+            _emit_until_painted(
+                page,
+                [
+                    ("llm_delta", {"content": "post-reload continuation"}),
+                    ("turn_complete", {"content": "post-reload continuation"}),
+                ],
+                live_thread,
+                "post-reload continuation",
             )
         finally:
             browser.close()
