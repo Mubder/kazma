@@ -2384,10 +2384,24 @@ def create_ws_chat_router(
                     _intr_payload = await read_pending_interrupt(
                         graph_inst, approve_config, snapshot=pre_snap,
                     )
+                    # Same arguments HTTP passes. `approved_ids` and `reason`
+                    # were missing here, so a client that selectively approved
+                    # 2 of 4 grouped danger tools over WS got ALL FOUR executed
+                    # — `approved_ids=None` means "the whole batch" in
+                    # graph_tool_worker. Silently widening an approval is the
+                    # worst direction for this gap to fail in, and it is the
+                    # same one-mouth-only defect as the gate-identity check
+                    # that was fixed on this handler earlier today.
                     resume_command = build_resume_command(
                         _intr_payload, approved=approved,
                         choices=payload.get("choices") if isinstance(payload.get("choices"), dict) else None,
                         scope=scope,
+                        reason=str(payload.get("reason") or ""),
+                        approved_ids=(
+                            payload.get("approved_ids")
+                            if isinstance(payload.get("approved_ids"), list)
+                            else None
+                        ),
                     )
                     if resume_command is None:
                         # Stale card — fall back to a security resume so the
