@@ -1258,8 +1258,11 @@ class TestGateAuthoritativeFailPosture:
         lookup = js_function_body(src, "function _gateViewOf(part)")
         assert "part.view" in lookup
         assert "slot: 'settled'" in lookup
-        ingest = js_function_body(src, "function _ingestFrameGateViews(data)")
-        assert "v.interactive" in ingest
+        # The interactive guard moved into the shared merge (_mergeGateViews)
+        # when /status was made to merge instead of replace — see
+        # test_hitl_frames_ingest_gate_views for why. Same rule, one home.
+        merge = js_function_body(src, "function _mergeGateViews(incoming)")
+        assert "v.interactive" in merge
         lock = js_function_body(src, "function _hitlShouldLock(part)")
         assert "v.interactive" in lock
         assert "_serverGatesAuth" not in lock

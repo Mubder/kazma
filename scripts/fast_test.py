@@ -199,6 +199,18 @@ def suite_exit_code(
     return 0
 
 
+#: Lines of a hang/crash dump to keep in the CI log.
+#:
+#: `--timeout-method=thread` dumps EVERY thread's stack before killing the
+#: process. For a hang that dump IS the diagnosis — the blocked thread is
+#: rarely the last one printed. This was 25 (chunk) and 40 (per-file), which
+#: kept exactly one stack, and twelve consecutive CI failures were investigated
+#: against that single frame while the informative threads sat in the part
+#: that had been discarded. A few hundred lines in a log nobody reads until
+#: something breaks is a much better trade than a diagnosis nobody can make.
+_HANG_DUMP_LINES = 400
+
+
 def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
     """Extract the FAILURES/ERRORS sections (tracebacks) from pytest -q output.
 
@@ -290,7 +302,23 @@ def main() -> int:
     # on. A tail of it is printed with the POISON list now.
     poison_diag: dict[str, str] = {}
     for r in crashed_chunks:
-        print(f"[fast-test] chunk {r['idx']:02d} crashed/timed out "
+        # Name the actual reason. These three arrive here for different
+        # causes and need different first hypotheses, and calling all of them
+        # "crashed/timed out" sent a 2026-09-20 audit to the wrong diagnosis:
+        # it read the label and reported that ORDINARY test failures were
+        # being mislabelled as crashes. They are not — an exit-1 chunk whose
+        # tally parsed is reported as `exit=1` and is never retried. It only
+        # lands here when the tally did NOT parse, which is a different and
+        # much more confusing problem: the chunk ran, something is wrong with
+        # our reading of its output, and re-running 155 files one at a time
+        # will not tell you what.
+        if r["code"] == 124:
+            why = "timed out"
+        elif is_crash(r["code"]):
+            why = "crashed"
+        else:
+            why = "produced no parseable test tally"
+        print(f"[fast-test] chunk {r['idx']:02d} {why} "
               f"(exit={r['code']}) — retrying {len(r['files'])} files individually")
         # Show WHY. The chunk's own log was captured and then dropped on the
         # floor, so "crashed/timed out (exit=1)" arrived with no evidence
@@ -300,9 +328,14 @@ def main() -> int:
         # because this is the only place that ever held the answer
         # (2026-09-16). Same lesson as the POISON diagnostics below: the
         # runner already has the evidence; print it.
-        _tail = [ln for ln in (r["log"] or "").splitlines() if ln.strip()][-25:]
+        # 25 lines was not enough to diagnose anything. `--timeout-method=thread`
+        # (pyproject addopts) dumps EVERY thread's stack before killing the
+        # process — that dump is the whole diagnosis for a hang, and the tail
+        # kept only the last thread of it. Twelve CI failures were investigated
+        # against one stack because the other threads had been thrown away here.
+        _tail = [ln for ln in (r["log"] or "").splitlines() if ln.strip()][-_HANG_DUMP_LINES:]
         if _tail:
-            print(f"[fast-test] --- chunk {r['idx']:02d}: last 25 lines ---")
+            print(f"[fast-test] --- chunk {r['idx']:02d}: last {_HANG_DUMP_LINES} lines ---")
             for _ln in _tail:
                 print(f"  | {_ln}")
         else:
@@ -405,7 +438,7 @@ def main() -> int:
         # actionable from a CI log (2026-09-16). Bounded so a chatty hang
         # cannot flood the run log.
         for rel, diag in poison_diag.items():
-            tail = [ln for ln in diag.splitlines() if ln.strip()][-40:]
+            tail = [ln for ln in diag.splitlines() if ln.strip()][-_HANG_DUMP_LINES:]
             if not tail:
                 continue
             print(f"\n[fast-test] --- {rel}: last 40 lines of the diagnostic rerun ---")

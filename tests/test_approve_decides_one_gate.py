@@ -186,6 +186,62 @@ def test_the_route_consults_the_guard_before_resuming() -> None:
         "tell a stale decision from a real failure"
     )
 
+def test_the_websocket_resume_consults_the_same_guard() -> None:
+    """HTTP is not the only mouth, and the rule must reach both.
+
+    ``POST /api/approve`` closed this on 2026-09-20. The WebSocket
+    ``approve_tool`` handler did not, because the check lived inside the HTTP
+    ROUTE MODULE rather than in the bridge both callers share — so the
+    identical defect survived one transport over, dormant only because
+    ``KAZMA_WS_GRAPH`` is off by default. "Dormant behind an escape hatch" is
+    not "closed": the hatch exists to be used, and the diagnosis map tells
+    operators how to turn it on.
+
+    Same ordering requirement as the HTTP twin above: the guard must run
+    BEFORE ``read_pending_interrupt``, which picks up whichever question the
+    graph happens to be parked on right now.
+    """
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parent.parent
+        / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py"
+    ).read_text(encoding="utf-8")
+
+    guard_at = src.index("_already = await gate_not_pending(")
+    read_at = src.index("_intr_payload = await read_pending_interrupt(")
+    assert guard_at < read_at, (
+        "the WS gate-identity check now runs AFTER the pending interrupt is "
+        "read; a retry or a sequential second pause can reach the resume again"
+    )
+    between = src[guard_at:read_at]
+    assert '"code": "GATE_NOT_PENDING"' in between, (
+        "the WS refusal carries no machine-readable code, so the client "
+        "cannot tell a stale decision from a real failure"
+    )
+    assert '"hitl_state": _client_state' in between, (
+        "the WS refusal must report the server's view so the client can "
+        "reconcile, the same way the HTTP 409 does"
+    )
+
+
+def test_both_mouths_share_one_gate_identity_implementation() -> None:
+    """One function, not two copies that can drift.
+
+    A gate-identity check that only one caller performs is not a check. This
+    is the object-identity assertion, so a future "small tidy-up" that
+    re-inlines a private copy into either route fails here rather than in an
+    incident.
+    """
+    from kazma_ui.hitl_gate_bridge import gate_not_pending
+    from kazma_ui.routes_direct.misc import _gate_not_pending
+
+    assert gate_not_pending is _gate_not_pending, (
+        "routes_direct/misc.py no longer shares the bridge's gate-identity "
+        "check — the WS and HTTP resume paths can now disagree"
+    )
+
+
 # ══════════════════════════════════════════════════════════════════════
 # The refusal has to be readable
 # ══════════════════════════════════════════════════════════════════════

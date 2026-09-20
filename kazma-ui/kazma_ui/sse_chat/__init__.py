@@ -1765,13 +1765,38 @@ def create_sse_chat_router(
         """
         if registry is not None:
             return registry.get_active_profile()
-        # Fallback to local profile
+
+        # No registry was passed at mount. Resolve the PROCESS registry live
+        # before considering the snapshot below.
+        #
+        # This applies the rule this factory already states a few lines up for
+        # llm_provider — "never freeze at mount time (model switch replaces the
+        # client instance; mount snapshots become orphans)" — to the registry,
+        # which was still frozen. It matters because `_active_profile` is
+        # assigned exactly once, from the constructor argument, and never
+        # written again: `/api/provider/switch` routes entirely through
+        # `switch_active_provider(..., registry=registry)` and touches it not
+        # at all. So the fallback served the BOOT-TIME profile forever, and was
+        # guaranteed wrong after the first switch — a read that disagrees with
+        # its own write, reported with the confidence of a live value.
+        try:
+            from kazma_core.model_registry import get_model_registry
+
+            live = get_model_registry()
+            if live is not None:
+                return live.get_active_profile()
+        except Exception:  # noqa: BLE001 — fall through to the snapshot
+            logger.debug("[provider] live registry lookup failed", exc_info=True)
+
+        # Boot-time snapshot, last resort. Marked, because a stale profile that
+        # looks live is worse than an obviously empty one.
         if not _active_profile:
             return {"provider": "none", "base_url": "", "model": "", "api_key": ""}
         # Don't expose real API keys — always mask
         safe = {**_active_profile}
         if safe.get("api_key"):
             safe["api_key"] = "***"
+        safe["stale"] = True
         return safe
 
     # NOTE: there is intentionally NO `GET /api/providers` here — the

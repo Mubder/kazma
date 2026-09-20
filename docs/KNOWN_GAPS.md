@@ -113,12 +113,31 @@ tree. Assume the same class exists elsewhere.
 
   The vault's fallback direction is right and should not be widened.
 
-  **Call sites patched 2026-09-17 (the class is not gone):** swarm
-  dispatch installs tenant before `get_client`; HITL and
-  `tenant_context` setters mirror each other; connector-health, cloud
-  backup and X config share `retrieve_with_tenant_ladder`. The tripwire
-  inside `retrieve` is still reverted. New background readers must use
-  the ladder or `tenant_scope("default")`.
+  **CLOSED at the variable, 2026-09-20.** There is now exactly ONE tenant
+  ContextVar: `kazma_core.safety.hitl` re-exports
+  `kazma_core.tenant_context._current_tenant_id` instead of defining its own,
+  and the mirror functions are gone. Mirroring was never an invariant — it was
+  two writes that happened to agree, and a direct `.set` on either module
+  desynced them in silence. One object cannot drift from itself. The
+  None-vs-`"default"` contract both sides need is preserved by flooring on
+  READ, in `hitl.get_current_tenant_id`, never on store: `retrieve_scoped`
+  needs `None` to tell an absent tenant from an explicit one. Locked by
+  `tests/test_tenant_context_isolation.py::test_the_tenant_context_var_is_one_object`,
+  the old "these must be distinct" assertion turned around — it had itself
+  predicted this change ("if these ever become the same object this test is
+  obsolete").
+
+  The last two ambient readers are fixed too: `secret_vault.vault_retrieve`
+  and the Settings "is this configured?" probe both called
+  `vault.retrieve(name)`, which sees only global rows without a bound tenant.
+  The Settings one was the worse of the pair — it rendered a stored provider
+  as NOT configured, the single most confusing way this product can lie to
+  its operator.
+
+  **Still true:** new background readers must use `retrieve_scoped` or
+  `tenant_scope("default")`. The tripwire inside `retrieve` remains reverted;
+  unifying the variable removes the desync half of the class, not the
+  forgot-to-bind-a-tenant half.
 
   **Attempted and REVERTED, 2026-09-17.** The fix tried was a runtime
   tripwire: have `retrieve` log, once per name, when it returns `None` for a
@@ -128,10 +147,41 @@ tree. Assume the same class exists elsewhere.
 
   It turned CI red for four commits. `tests/test_documents_api_phase8.py`
   began hanging in app SHUTDOWN (`TestClient.__exit__` -> `wait_shutdown` ->
-  `Future.result()`), reproducibly on Linux, never on Windows. Attribution is
-  not in doubt: ten prior runs clean, POISON on exactly the two commits that
-  carried the tripwire, and the counts line up (9048 - 17 poisoned + 10 added
-  = 9041).
+  `Future.result()`), reproducibly on Linux, never on Windows. Attribution was
+  recorded here as "not in doubt": ten prior runs clean, POISON on exactly the
+  two commits that carried the tripwire, and the counts lining up (9048 - 17
+  poisoned + 10 added = 9041).
+
+  > **THE ATTRIBUTION WAS WRONG (found 2026-09-20).** The tripwire has been
+  > reverted for days and the hang is still here, on every CI run: 12
+  > consecutive commits red, each one `test_documents_api_phase8` timing out
+  > in `wait_shutdown`, each one reporting **"0 failed"** in its own totals —
+  > the job exits 1 on a teardown timeout, not an assertion, which is why
+  > "9,585 tests, 0 failures" and "CI is red" were both true at once and
+  > nobody reconciled them.
+  >
+  > The real cause is in `DocumentWorker.stop()`. It bounded its first wait
+  > and not the second: after the grace period it calls `task.cancel()` and
+  > then `await asyncio.gather(*tasks)` with no timeout. Cancellation cannot
+  > reach those tasks — `_worker_loop` parks in
+  > `asyncio.to_thread(claim_next)`, and a thread is not cancellable, so the
+  > exception is only delivered once the thread returns. If `claim_next` is
+  > stuck on a lock, the gather waits forever. Both waits are bounded now, and
+  > the app-level `stop_workers()` / `stop_memory_worker()` awaits carry
+  > ceilings so the "never blocks shutdown" comment above them is true rather
+  > than aspirational.
+  >
+  > Why the evidence looked so conclusive: the correlation was real, the
+  > causation was not. The tripwire added a per-`retrieve` probe, which shifts
+  > timing, and this hang is a *race* on whether a worker thread is mid-claim
+  > when shutdown fires. Ten clean runs before it and red on both tripwire
+  > commits is exactly what a latent race looks like when something nudges the
+  > schedule. The three published hypotheses all failed for the same reason:
+  > they were looking for a cost in the tripwire, and the tripwire was not the
+  > defect.
+  >
+  > **The tripwire can be re-landed.** Reproduce this hang first — it is
+  > reproducible now, on main, without it.
 
   The cause was never found. Three hypotheses were published and all three
   were wrong — the probe's query cost (A/B: 415.4s vs 413.9s, no difference),
@@ -149,6 +199,16 @@ tree. Assume the same class exists elsewhere.
   so whatever the trigger is, it is not in that file alone.
 
   → `tests/test_cron_tenant_context.py`, `tests/test_vault_tenant_scope_read.py`.
+- **~~`/api/telemetry` open with no route behind it~~ (closed 2026-09-20).**
+  A fossil in `ALWAYS_OPEN_PATHS` from a mock endpoint removed years ago. It
+  never opened the two real telemetry routes: `is_always_open` matches that
+  set EXACTLY and only `ALWAYS_OPEN_PREFIXES` by prefix, so `/stream` and
+  `/snapshot` were always caught by the default-deny on `/api/`. That subtlety
+  is why it survived — it looked dangerous and was inert, so a 2026-09-20
+  audit filed it as an unauthenticated host-inventory leak and a reviewer had
+  to read the matcher to disprove it. An entry that opens a path with no route
+  is a pre-opened door for whoever adds that route next.
+  → `tests/test_auth_middleware.py::test_telemetry_subpaths_are_gated`.
 - **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
   function named `read_url`, so `import kazma_core.tools.read_url as ru` binds
   the *function*, not the module (Python resolves `import a.b as c` by
@@ -359,6 +419,43 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
+**A chunk hangs on CI and is rescued by the per-file retry (open, pre-existing).**
+
+`fast_test.py` splits the suite into 4 chunks. One or two of them regularly
+report `OK 0p/0f` and then `produced no parseable test tally (exit=1)`. That is
+pytest-timeout firing: `--timeout-method=thread` dumps every thread and kills
+the process, so pytest exits non-zero with no summary line to parse. The runner
+then retries that chunk's ~160 files one at a time, they all pass, and the job
+is green — at roughly double the wall clock (1,600-1,700s).
+
+This is **not** the `test_documents_api_phase8` teardown tax fixed on
+2026-09-20, and it is **not** new: `chunk 00: OK 0p/0f` appears on
+`2847e260`, `ff559d74` and `7c4834de`, all predating that work.
+
+Evidence, from the first run with a usable dump (400 lines instead of 25 —
+see the `_HANG_DUMP_LINES` change):
+
+* chunk 00 stopped at `kazma-core/tests/test_github_app_integration.py`, on
+  the 5th test — the first `async` one, `test_git_push_pull_upstream`.
+* MainThread was inside `pytest_asyncio` -> `run_until_complete` ->
+  `selector.poll(timeout)`: the event loop idle, waiting for I/O that never
+  arrives. Not a busy loop, not a deadlock on a lock we hold.
+* The test fully mocks `subprocess.run` with a 4-item `side_effect`, so it is
+  not making a real network call. It passes locally in 0.84s (14/14).
+
+Two things worth checking first, in this order, by someone who can reproduce
+on Linux: whether `_git_sync` makes a FIFTH subprocess call on CI (exhausting
+that `side_effect` list) because some git config present on a dev box is
+absent on the runner; and whether the hang is actually in this test or merely
+after it, since the chunk file order shifts as test files are added and the
+specific victim has moved between runs.
+
+**Do not "fix" this by raising the chunk timeout.** The retry already makes
+the build green; the cost is wall clock, and the value of finding it is that
+it is the same shape — an unbounded wait on Linux only — as the teardown tax
+that cost twelve red runs and a wrongly reverted vault tripwire.
+
+
 **On CI (Linux), 2026-09-17: 9,019 passed, 0 failed, 67 skipped, 3 xfailed —
 job green** (run `35152707624`, commit `a1cb6650`). Local Windows runs give
 9,0xx passed with three extra failures in
@@ -550,10 +647,28 @@ restart. Until it does, recoverability is again a property asserted rather
 than measured — which is the precise failure this work was written to end.
 Do not describe backups as verified until a drill result exists in the log.
 
-**`snapshots.db` will prune but not shrink.** The retention fix commits its
-deletes now, so rows past retention do go. The 864 MB file only returns space
-when a `VACUUM` succeeds against a store that is written every few seconds,
-and that has not been demonstrated.
+**~~`snapshots.db` will prune but not shrink~~ — measured 2026-09-20, there is
+nothing to shrink.** The retention fix commits its deletes, and the worry was
+that space would not return without a `VACUUM` succeeding against a store
+written every few seconds.
+
+Measured on the live install, read-only, while the server was running
+(`PRAGMA page_count` x `page_size` against `freelist_count`):
+
+| store | size | free pages | reclaimable |
+|---|---:|---:|---:|
+| `snapshots.db` | 288.1 MB | 0 | **0.0%** |
+| `checkpoints.db` | 232.6 MB | 0 | **0.0%** |
+| `settings.db` | 29.4 MB | ~0 | 0.1% |
+| `memory_state.db` | 12.9 MB | 4.3 MB | 33.1% |
+
+`VACUUM` on `snapshots.db` would return zero bytes: every page is live data.
+The file is also 288 MB, not the 864 MB this entry claimed — that figure was
+stale and got repeated into a 2026-09-20 audit as a live concern.
+
+The only store with meaningful slack is `memory_state.db`, and 4.3 MB is not
+worth a maintenance window. Re-measure before acting; do not `VACUUM` on the
+assumption that a big file implies waste.
 
 **The injection A/B on OpenRouter's free tier cannot fit in a day.** The limit
 is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two

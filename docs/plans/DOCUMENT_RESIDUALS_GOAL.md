@@ -20,7 +20,7 @@
 
 - Commissioning a paid third-party pen-test (cannot fake) — CLI gate stays NOT RUN  
 - Installing LibreOffice/Tesseract/ClamAV **system** packages on every host  
-- Full GC SQL port for Postgres metadata (CRUD multi-replica shipped; GC skips honestly)  
+- ~~Full GC SQL port for Postgres metadata~~ **DONE** — `repository_pg.py` implements `gc_mark`, `gc_is_live_reference` and `gc_old_unreferenced_blob_ids`, so GC is backend-agnostic via `retention._mark` -> `repository.gc_mark` (AGENTS.md, Document Intelligence). It no longer skips on PG.  
 - Changing HITL product policy for API redaction  
 
 ## Success gates
@@ -29,7 +29,7 @@
 |---|------|--------|
 | 1 | Malware scan wired | **DONE** — `malware.py` + intake + tests |
 | 2 | Settings Documents tab | **DONE** — `/api/settings/documents` + UI |
-| 3 | Postgres metadata | **DONE** — `repository_pg.py` + resolve + readiness; GC skip on PG |
+| 3 | Postgres metadata | **DONE** — `repository_pg.py` + resolve + readiness; GC implemented on PG too (no longer a skip) |
 | 4 | document-platform extra | **DONE** — pyproject + docs |
 | 5 | Soak report | **DONE** — `session-artifacts/document-cert-soak-residual.json` (20 iter PASS perf) |
 | 6 | Docusaurus build | **DONE** — `docs/build` generated (fixed audit links) |
@@ -39,5 +39,5 @@
 
 - External security review still **NOT RUN** (needs independent firm)  
 - Optional engines may still be CONDITIONAL without `pip install -e ".[document-platform]"` + system deps  
-- GC on Postgres metadata: fail-closed skip until SQL port  
+- ~~GC on Postgres metadata: fail-closed skip until SQL port~~ — shipped; both backends implement `gc_mark`.  
 

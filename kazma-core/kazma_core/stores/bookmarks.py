@@ -37,7 +37,21 @@ __all__ = ["BookmarkStore", "get_bookmark_store", "reset_bookmark_store"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/settings.db"
+def _default_db() -> str:
+    """The same file ``ConfigStore`` and ``KnowledgeStore`` use, resolved the
+    same way.
+
+    Was the literal ``"kazma-data/settings.db"``, relative to the process CWD
+    and blind to ``KAZMA_DATA_DIR``. Three stores share this one file; two of
+    them now resolve it through ``paths.settings_db()``, and leaving the third
+    on a different rule is worse than the original bug — the file each one
+    opens would depend on which module you asked.
+
+    Lazy, not import-time: ``data_dir()`` reads the environment.
+    """
+    from kazma_core.paths import settings_db
+
+    return settings_db()
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS bookmarks (
@@ -58,7 +72,7 @@ class BookmarkStore:
     """
 
     def __init__(self, db_path: str | None = None) -> None:
-        self._db_path = Path(db_path or _DEFAULT_DB)
+        self._db_path = Path(db_path or _default_db())
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()

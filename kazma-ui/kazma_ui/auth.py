@@ -542,7 +542,15 @@ ALWAYS_OPEN_PATHS: frozenset[str] = frozenset({
     "/health/deep",  # ops canary — bounded work, TTL-cached 30s
     # /health/details is NOT open — it leaks active model/provider (audit L-1)
     "/api/status",
-    "/api/telemetry",
+    # NOTE: "/api/telemetry" is deliberately NOT here any more. It was a
+    # fossil: the route it opened was a mock removed years ago, and the two
+    # real endpoints (/api/telemetry/stream, /api/telemetry/snapshot) never
+    # matched it — is_always_open does EXACT matching on this set and prefix
+    # matching only on ALWAYS_OPEN_PREFIXES, so both were already gated by
+    # the default-deny on /api/. An entry that opens a path with no route is
+    # not harmless: it is a pre-opened door for whoever adds that route next,
+    # and it made a 2026-09-20 audit report telemetry as an unauthenticated
+    # host-inventory leak, which cost a reviewer a day to disprove.
     "/favicon.ico",
     # RFC 9116 security contact file — must be reachable without auth.
     "/.well-known/security.txt",

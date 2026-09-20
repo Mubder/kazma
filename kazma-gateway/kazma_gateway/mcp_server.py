@@ -41,6 +41,7 @@ import asyncio
 import json
 import logging
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -296,7 +297,6 @@ def _tool_write_file(root: Path, args: dict[str, Any]) -> str:
 
     async def _run() -> str:
         svc = get_ide_service()
-        svc.refresh_root()
         res = await svc.write_file(str(target), args["content"])
         if not res["ok"]:
             return res.get("error", "Write failed (approval may be required)")
@@ -315,10 +315,21 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
 
     async def _run() -> str:
         svc = get_ide_service()
-        svc.refresh_root()
-        cmd = f"{sys.executable} -m pytest {test_path}"
+        # `pytest`, not `{sys.executable} -m pytest`.
+        #
+        # shell_exec blocks interpreters outright ("NO interpreters
+        # (python/node/bash/sh) — those are RCE vectors even after a single
+        # HITL approval"), so the `-m` form was refused by policy on every
+        # platform and could never have worked. `pytest` is in the allowlist
+        # precisely so this call has a legal spelling.
+        #
+        # Every interpolated value is quoted. These are filesystem paths and
+        # a user-supplied -k expression going into a string that is then
+        # tokenised; unquoted, a path with a space split into two arguments
+        # and a keyword could introduce its own.
+        cmd = f"pytest {shlex.quote(test_path)}"
         if args.get("keyword"):
-            cmd += f" -k {args['keyword']}"
+            cmd += f" -k {shlex.quote(str(args['keyword']))}"
         if args.get("verbose"):
             cmd += " -v"
         cmd += " --tb=short -q"
@@ -331,14 +342,13 @@ def _tool_run_tests(root: Path, args: dict[str, Any]) -> str:
 
 
 def _tool_list_files(root: Path, args: dict[str, Any]) -> str:
-    """List files/directories in the workspace via the IdeService."""
+    """List files/directories under this server's root via the IdeService."""
     import asyncio
 
     from kazma_core.ide import get_ide_service
 
     async def _run() -> str:
         svc = get_ide_service()
-        svc.refresh_root()
         res = await svc.list_path(args.get("path", ""))
         if not res["ok"]:
             return res.get("error", "List failed")
@@ -360,7 +370,6 @@ def _tool_run_command(root: Path, args: dict[str, Any]) -> str:
 
     async def _run() -> str:
         svc = get_ide_service()
-        svc.refresh_root()
         res = await svc.run(args["command"])
         if not res["ok"]:
             return res.get("error", "Command failed")
@@ -377,7 +386,6 @@ def _tool_git_status(root: Path, args: dict[str, Any]) -> str:
 
     async def _run() -> str:
         svc = get_ide_service()
-        svc.refresh_root()
         res = await svc.git("status --short")
         if not res["ok"]:
             return res.get("error", "git status failed")
@@ -531,7 +539,36 @@ class MCPServer:
                 return make_error(req_id, -32603, "Safety gate unavailable for privileged MCP tool")
 
         try:
-            result = DISPATCH[tool_name](self.root, arguments)
+            # Pin THIS server's root for the whole tool call.
+            #
+            # `MCPServer(root=...)` is documented as confinement, and until now
+            # it was not. Every tool here dispatches through `IdeService`,
+            # whose `root` is a property that re-resolves from the process-wide
+            # active workspace on every access — and four of these tools called
+            # `svc.refresh_root()` to adopt it explicitly. So `list_files`,
+            # `run_command` and `git_status` ignored the `root` parameter
+            # entirely (it was an unused argument), while `read_file`,
+            # `write_file` and `run_tests` resolved the path against `root` and
+            # then handed it to a service rooted somewhere else. Two
+            # confinement tests were marked xfail over this and shipped that
+            # way — a broken isolation contract with a green test next to it.
+            #
+            # `pin_workspace_path` puts the root at precedence 1 of
+            # `resolve_active_root`, the same rung the swarm's per-task
+            # `workspace_scope` uses, so IdeService resolves to it by its own
+            # normal rules. A parallel check inside this module would have been
+            # the second precedence ladder that `_resolve_workspace_root`
+            # exists to prevent.
+            from kazma_core.ide.workspace_scope import (
+                pin_workspace_path,
+                reset_workspace_path,
+            )
+
+            _ws_token = pin_workspace_path(self.root)
+            try:
+                result = DISPATCH[tool_name](self.root, arguments)
+            finally:
+                reset_workspace_path(_ws_token)
             return make_response(
                 req_id,
                 {"content": [{"type": "text", "text": result}], "isError": False},

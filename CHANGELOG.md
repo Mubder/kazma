@@ -1,5 +1,72 @@
 # CHANGELOG
 
+## Security — one tenant variable, two closed exposure defaults, real MCP confinement (2026-09-20)
+
+Audit follow-through. Four of the incoming report's claims did not survive
+checking and are corrected in the code comments where a future reader would
+otherwise re-file them; the rest are closed.
+
+**One tenant ContextVar.** `safety.hitl` now re-exports
+`tenant_context._current_tenant_id` instead of defining its own, and the pair
+of mirror functions is gone. Mirroring was never an invariant — it was two
+writes that happened to agree, and a direct `.set` on either module desynced
+them in silence. A desync shows up as a stored secret reading back absent,
+which is exactly what a never-stored key looks like; it shipped three times.
+The `None` vs `"default"` contract both sides need is preserved by flooring on
+**read**, never on store: `retrieve_scoped` needs `None` to tell an absent
+tenant from an explicit one. The last two ambient vault readers are scoped
+too — including the Settings "is this configured?" probe, which rendered a
+stored provider as NOT configured.
+
+**Exposure defaults.** CORS no longer bakes in `kazma.ai`/`www.kazma.ai` with
+`allow_credentials=True`; the public origin is derived from
+`KAZMA_PUBLIC_URL`. On this install that is strictly better — the operator's
+actual host was never in the old list while two they do not use were.
+`KAZMA_DEV_WS_BYPASS` is refused on a non-loopback bind by `boot_guard`, the
+same treatment `KAZMA_AUTH_DISABLED` already had; it was gated only on
+`KAZMA_PRODUCTION`, the opt-in label a VPS does not set. `/api/telemetry` is
+out of `ALWAYS_OPEN_PATHS` — a fossil of a mock endpoint, inert because
+`is_always_open` matches that set exactly, but a pre-opened door for whoever
+adds that route next.
+
+**One gate-identity check, reachable from both mouths.** `gate_not_pending`
+moved into `hitl_gate_bridge` and the WebSocket `approve_tool` handler calls
+it. HTTP closed this in September; WS kept resuming whatever interrupt was
+live, because the check lived in the caller rather than the shared bridge.
+
+**`MCPServer(root=)` actually confines.** It did not: every tool dispatched
+through `IdeService`, whose `root` re-resolves from the process-wide active
+workspace, and three tools never read the `root` argument at all. The server
+now pins its root at precedence 1 of `resolve_active_root`, the rung the
+swarm's per-task scope already uses. Removing the `xfail` that covered this
+exposed four more defects behind it: `shlex.split` silently ate every Windows
+path in `shell_exec` (`git -C C:epo` became `C:repo`, mangled and then
+run); `run_tests` invoked an interpreter the policy forbids, so it could never
+have worked; `pytest`/`ruff`/`mypy` were allowlisted but unreachable in any
+venv install, failing *after* the human approved; and on Windows the child
+`env` PATH never decided executable lookup at all, so the restricted PATH was
+decorative in non-strict mode.
+
+**MCP failures stop looking like successes.** `spec_tools` dropped the
+manager's `is_error`, so a transport failure reached the model as a successful
+fetch and the supervisor had nothing to retry. The flag is restored via the
+`Error:` prefix the registry already reads, and the failure body is still
+fenced — an MCP error body can wrap server-authored text.
+
+**`/status` stops deleting settled HITL cards.** It assigned `gate_views`
+wholesale while `live_gates()` returns only pending/claimed/resuming, so every
+settled card vanished on the next poll. The merge now lives in one function
+both paths call.
+
+Also: whole-store scans off the event loop (measured — `get()` is 1&micro;s and
+was deliberately *not* gated; `export_yaml()` is 130ms and was), every
+security-weakening env switch documented on the operator page with what it
+turns **off**, `KAZMA_REMOTE_PARSE` corrected from "default on" to "default
+off, veto only", and a repo line-ending policy so a whole-file rewrite stops
+faking a 600-line diff.
+
+Gaps: `docs/KNOWN_GAPS.md`.
+
 ## Fix — streaming text survives action updates (2026-09-20)
 
 Approval updates for an existing gate and repeated tool-start notifications

@@ -18,13 +18,21 @@ tunnel without that label inherits nothing from the second guard either.
 (TypeSafe audit R2, 2026-09-19 — the one residual risk in that sweep that
 survived being read against the real code.)
 
-The two kill switches are NOT the same risk and are not treated the same:
+The kill switches are NOT the same risk and are not treated the same:
 
 * ``KAZMA_AUTH_DISABLED`` is a local-development convenience. It has no
   documented remote use, so pairing it with a non-loopback bind is refused.
+* ``KAZMA_DEV_WS_BYPASS`` is the same shape one layer down: it skips auth on
+  every WebSocket handshake. It was gated only on ``KAZMA_PRODUCTION``, which
+  is exactly the opt-in label the paragraph above explains nobody sets on a
+  VPS — so the original composition survived here after being closed for its
+  sibling. WS is not a lesser surface: the chat socket carries the turn
+  stream. Refused on a non-loopback bind, same as ``KAZMA_AUTH_DISABLED``.
 * ``KAZMA_DEMO_MODE`` exists precisely to serve a public throwaway demo
   without login (``fly.toml``). Refusing it would break the thing it is for,
-  so it is allowed and announced loudly instead.
+  so it is allowed and announced loudly instead. It is checked LAST, so the
+  two refusals above still apply inside a demo — demo mode means "no login",
+  not "every switch is fair game".
 
 This lives in one module because the bind/secret checks were already
 copy-pasted into both entry points, and a check that lives in each caller is
@@ -84,6 +92,22 @@ def check_exposure_posture(host: str) -> tuple[bool, str]:
             "    KAZMA_HOST=127.0.0.1              (keep it local)\n"
             "    KAZMA_DEMO_MODE=1                 (a PUBLIC throwaway demo, "
             "no real data)\n"
+        )
+
+    if env_flag("KAZMA_DEV_WS_BYPASS"):
+        return False, (
+            "\n  [SECURITY] KAZMA_DEV_WS_BYPASS with a non-loopback bind "
+            f"({host}) — refusing to start.\n"
+            "  Every WebSocket handshake would skip authentication, including "
+            "the chat socket\n"
+            "  that carries the turn stream. KAZMA_PRODUCTION blocks this "
+            "switch, but that label\n"
+            "  is opt-in and a VPS or tunnel does not set it — which is the "
+            "same gap that let\n"
+            "  KAZMA_AUTH_DISABLED through before this guard existed.\n\n"
+            "  Fix one of:\n"
+            "    unset KAZMA_DEV_WS_BYPASS         (use the secret you set)\n"
+            "    KAZMA_HOST=127.0.0.1              (keep it local)\n"
         )
 
     if env_flag("KAZMA_DEMO_MODE"):

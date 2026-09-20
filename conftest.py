@@ -166,12 +166,14 @@ def _isolated_tenant_context():
     Fixing the three files would work until the fourth. This makes the leak
     structurally impossible instead.
     """
-    # BOTH modules define a ContextVar named _current_tenant_id with an
-    # identically-named getter, and they are NOT the same variable:
-    # kazma_core.tenant_context (default None) is what SessionManager reads;
-    # kazma_core.safety.hitl (default "default") is what the memory tools read.
-    # Guarding only one leaves the other leaking, which is exactly the trap
-    # this fixture was first written into.
+    # Both modules expose a ContextVar named _current_tenant_id, and they are
+    # now THE SAME OBJECT: kazma_core.safety.hitl re-exports
+    # kazma_core.tenant_context's var rather than defining its own (the two
+    # used to be distinct, held in step by mirror functions, and guarding only
+    # one left the other leaking — the trap this fixture was first written
+    # into). Both names are still walked here on purpose: it costs nothing,
+    # it is correct whether they are one object or two, and it keeps the
+    # source assertion in tests/test_tenant_context_isolation.py honest.
     tokens = []
     for module in ("kazma_core.tenant_context", "kazma_core.safety.hitl"):
         try:

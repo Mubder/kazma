@@ -22,6 +22,16 @@ from .models import DocumentJobState
 
 logger = logging.getLogger(__name__)
 
+#: Seconds to wait for worker tasks to honour ``cancel()`` during shutdown.
+#:
+#: Deliberately short and deliberately BOUNDED. These tasks park in
+#: ``asyncio.to_thread(claim_next)``, and cancelling a task on a thread only
+#: marks it — the exception lands when the thread returns. An unbounded wait
+#: here therefore hangs the whole process on a stuck claim instead of shutting
+#: it down, which is what CI's ``TestClient.__exit__ -> wait_shutdown``
+#: timeout has been every run since 2026-09-19.
+_CANCEL_GRACE_SECONDS = 2.0
+
 __all__ = [
     "DocumentProcessingError",
     "DocumentWorker",
@@ -173,21 +183,68 @@ class DocumentWorker:
         ]
 
     async def stop(self) -> None:
-        """Stop new claims, await active work, then cancel and await stragglers."""
+        """Stop new claims, await active work, then cancel and await stragglers.
+
+        **Both waits are bounded.** The second one was not, and that is a hang
+        rather than a slow shutdown, because ``cancel()`` cannot reach these
+        tasks: ``_worker_loop`` blocks in ``asyncio.to_thread(claim_next)``,
+        and a thread is not cancellable. Cancelling a task parked on
+        ``to_thread`` only marks it — the exception is delivered when the
+        thread returns, so if ``claim_next`` is itself stuck (a held SQLite
+        write lock, a slow Postgres round trip) the follow-up
+        ``gather(*tasks)`` waits forever.
+
+        Forever, in ``TestClient.__exit__`` -> ``wait_shutdown`` ->
+        ``Future.result()``, is what CI has been failing on since 2026-09-19:
+        every run red, "0 failed" in the totals, the job exiting 1 on a
+        teardown timeout rather than an assertion. ``docs/KNOWN_GAPS.md``
+        attributes that hang to a vault tripwire and the tripwire was reverted
+        to stop it; the tripwire has been gone for days and the hang is still
+        here on every commit, so the attribution was wrong and a safety
+        feature was removed for a cause it did not have.
+
+        A stuck thread cannot be forced, so after the grace period the honest
+        thing is to stop WAITING on it, say so, and let the process exit. The
+        jobs are durable: pending rows resume on the next boot via lease
+        recovery, which is the whole reason this is allowed to be
+        best-effort.
+        """
         self._stop_event.set()
         tasks = list(self._tasks)
         if not tasks:
             return
         try:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=self._shutdown_grace_seconds,
+            # ``asyncio.wait``, NOT ``asyncio.wait_for``, in BOTH phases.
+            #
+            # This is the whole fix and it is easy to get wrong — the first
+            # attempt here used ``wait_for`` and still hung. ``wait_for``
+            # CANCELS its inner awaitable when the timeout fires and then
+            # AWAITS that cancellation to complete, so wrapping an
+            # uncancellable task in ``wait_for`` reproduces exactly the hang
+            # it was meant to bound. ``asyncio.wait`` returns the pending set
+            # and leaves it alone, which is what "abandon it" requires.
+            _done, pending = await asyncio.wait(
+                tasks, timeout=self._shutdown_grace_seconds
             )
-        except TimeoutError:
-            for task in tasks:
-                if not task.done():
+            if pending:
+                for task in pending:
                     task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
+                # A brief second chance: enough for a task sitting on a real
+                # await point to process its cancellation, not enough to hang
+                # the process on one that is parked in a thread.
+                _done2, still_pending = await asyncio.wait(
+                    pending, timeout=_CANCEL_GRACE_SECONDS
+                )
+                if still_pending:
+                    logger.warning(
+                        "[documents.worker] %d worker task(s) did not stop "
+                        "within %.1fs of cancellation and are abandoned; they "
+                        "are parked in asyncio.to_thread(claim_next), which "
+                        "cancellation cannot interrupt. In-flight jobs resume "
+                        "on next boot via lease recovery.",
+                        len(still_pending),
+                        _CANCEL_GRACE_SECONDS,
+                    )
         finally:
             self._tasks.clear()
 

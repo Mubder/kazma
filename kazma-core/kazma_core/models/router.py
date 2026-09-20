@@ -24,6 +24,22 @@ logger = logging.getLogger(__name__)
 _TOKEN_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
 
+#: Technical nouns that turn a generic "write a …" into a coding request.
+#:
+#: Deliberately nouns-of-software, not verbs: the verb is already known (the
+#: user wants something built) and it is the OBJECT that decides which model
+#: should build it. Kept separate from ``coding_keywords`` so the two can be
+#: read for what they are — "this IS code work" versus "this MIGHT be".
+_CODING_CONTEXT = [
+    "script", "parser", "api", "endpoint", "cli", "module", "package",
+    "library", "server", "client", "database", "schema", "query",
+    "regex", "algorithm", "unit test", "wrapper", "hook", "daemon",
+    "sql", "json", "yaml", "html", "css", "javascript", "typescript",
+    "rust", "golang", "java", "bash", "shell", "dockerfile", "makefile",
+    "repo", "repository", "branch", "patch", "migration",
+]
+
+
 def _has_signal(text: str, keywords: list[str]) -> bool:
     """True when any keyword hits as a word (or a multi-word phrase).
 
@@ -126,14 +142,35 @@ class ModelRouter:
         if _has_signal(msg_lower, vision_keywords):
             return TaskProfile.VISION
 
-        # Coding signals
+        # Coding signals.
+        #
+        # Split in two. The first list names things that only come up in
+        # software work. The second is generic construction verbs, which say
+        # something is being MADE but nothing about what — "write a welcome
+        # email" and "create a agenda for Thursday" match "write a" / "create
+        # a" exactly as readily as "write a parser" does.
+        #
+        # They used to sit in one list, so any of them alone returned CODING
+        # and a swarm auto-spawn picked the coding model to draft an email.
+        # A generic verb now needs a real technical signal beside it; alone it
+        # falls through to REASONING/GENERAL, which is the honest answer when
+        # the only thing we know is that the user wants something produced.
+        #
+        # This is the HINT path, not the lock: an explicit user default or
+        # KAZMA_MODEL still wins in models/selection.py. Being wrong here
+        # costs a worker the wrong default model, not the user their choice.
         coding_keywords = [
             "code", "function", "bug", "fix", "refactor",
             "python", "class", "import", "def", "test",
             "error", "traceback", "debug", "commit", "git",
-            "implement", "write a", "create a", "build a",
+            "implement",
         ]
+        generic_build_verbs = ["write a", "create a", "build a"]
         if _has_signal(msg_lower, coding_keywords):
+            return TaskProfile.CODING
+        if _has_signal(msg_lower, generic_build_verbs) and _has_signal(
+            msg_lower, _CODING_CONTEXT
+        ):
             return TaskProfile.CODING
 
         # Reasoning signals

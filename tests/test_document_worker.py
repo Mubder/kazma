@@ -200,3 +200,52 @@ async def test_worker_cooperatively_observes_durable_cancellation(tmp_path) -> N
     finally:
         await worker.stop()
         metadata.close()
+
+
+async def test_stop_is_bounded_even_when_a_task_ignores_cancellation(tmp_path):
+    """``stop()`` must return. It could previously hang the whole process.
+
+    The worker loop parks in ``asyncio.to_thread(claim_next)``, and a thread
+    is not cancellable: ``task.cancel()`` only marks the task, and the
+    exception is delivered when the thread returns. ``stop()`` bounded its
+    first wait and then did an UNBOUNDED ``gather(*tasks)`` after cancelling,
+    so a claim stuck on a lock meant shutdown never finished.
+
+    That is what CI had been failing on since 2026-09-19 — every run red,
+    ``test_documents_api_phase8`` timing out in ``TestClient.__exit__`` ->
+    ``wait_shutdown``, and **"0 failed"** in the totals every time, because
+    the job exits 1 on a teardown timeout rather than an assertion.
+
+    This test does not need a real stuck SQLite lock. It needs a task that
+    does not honour cancellation, which is the property that mattered.
+    """
+    metadata = DocumentRepository(tmp_path / "bounded.db", tenant_quota_bytes=100_000)
+    jobs = DocumentJobRepository(metadata, jitter=lambda _base: 0)
+    worker = DocumentWorker(
+        jobs, {}, concurrency=1, poll_interval=0.05, shutdown_grace_seconds=0.2
+    )
+
+    async def _uncancellable() -> None:
+        # Shields itself the way a thread effectively does: the cancellation
+        # is delivered but the coroutine does not finish promptly.
+        while True:
+            try:
+                await asyncio.sleep(3600)
+            except asyncio.CancelledError:
+                await asyncio.sleep(30)  # "thread still running"
+                raise
+
+    worker._tasks = [asyncio.create_task(_uncancellable())]
+
+    started = time.monotonic()
+    await asyncio.wait_for(worker.stop(), timeout=20.0)
+    elapsed = time.monotonic() - started
+
+    # grace (0.2s) + cancel grace (2s) + slack. The point is that it RETURNS;
+    # the bound is what makes the difference between a slow shutdown and a
+    # process that never exits.
+    assert elapsed < 10.0, f"stop() took {elapsed:.1f}s — the bound is gone"
+    assert worker._tasks == [], "stop() must clear its task list even on timeout"
+
+    for task in asyncio.all_tasks() - {asyncio.current_task()}:
+        task.cancel()

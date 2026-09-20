@@ -193,7 +193,9 @@ def start_checkpoint_retention_loop(db_path: str = DEFAULT_DB) -> None:
 
     from kazma_core.background import spawn_background
 
-    _loop_task = spawn_background(_loop(), name="checkpoint-retention")
+    _loop_task = spawn_background(
+        _loop(), name="checkpoint-retention", never_completes=True
+    )
 
 
 def stop_checkpoint_retention_loop() -> None:

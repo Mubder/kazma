@@ -4,11 +4,11 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.10.x  | :white_check_mark: |
+| 0.11.x  | :white_check_mark: |
 | 0.9.x   | :white_check_mark: (critical security fixes only) |
 | < 0.9   | :x:                |
 
-Only the latest **0.10.x** release receives feature work and routine security
+Only the latest **0.11.x** release receives feature work and routine security
 patches. **0.9.x** may receive critical fixes for a limited window. Upgrade to
 the latest supported version when possible.
 
@@ -227,4 +227,4 @@ See also: [Security & Safety](docs/docs/guide/security-and-safety.md),
 
 ---
 
-*Policy reviewed August 2026. No paid bounty. Re-review when program posture changes.*
+*Policy reviewed September 2026. No paid bounty. Re-review when program posture changes.*

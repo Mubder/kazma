@@ -1,6 +1,6 @@
 # GOAL: Guard / ops alerting — cause quality + flap control
 
-**Status:** P0 (503 body) and P1 (flap collapse + recovery card) shipped 2026-09-04. P2 backup summary / `native_pg_backup` ops wiring remains deferred.  
+**Status:** COMPLETE. P0 (503 body) and P1 (flap collapse + recovery card) shipped 2026-09-04; `native_pg_backup` ops wiring shipped since — `worker_bootstrap._handle_native_pg_backup` calls `ops_alerts.alert("backup.pg_dump", ..., severity="critical")` on both the no-dump and the handler-exception path. Only the per-run backup **summary** (goal 4, the one-line success digest) is still deferred.  
 **Created:** 2026-09-02  
 **Trigger:** live Telegram `[guard] Kazma stopped: unhealthy (unreachable: Service Unavailable). Restarting in 15s (attempt 1).` after a Docker Desktop update took Postgres down.  
 **Rule:** Do **not** start/restart the Kazma server. After Python lands: operator reload via `kazma_guard.py --reload`.
@@ -71,7 +71,7 @@ Load-bearing constraints already in `ops_alerts.py`:
 
 **Deliberately silent today:** successful backups (INFO + Settings + digest); scheduler ticks (6h macro_sleep, 15-min commitment GC, cron poll); degraded-but-serving MCP (readiness stays HTTP 200 so the guard does not kill a working agent); guard healthy start (lifecycle already says started).
 
-**Real gap besides the 503 body:** `native_pg_backup` does not call `ops_alerts` on dump failure.
+**Historical (2026-09-02):** `native_pg_backup` did not call `ops_alerts` on dump failure. It does now — see the Status line. A 2026-09-20 audit re-filed this sentence as a live gap because the plan still asserted it in the present tense; a plan kept as source-of-truth after the code moved sends the next reader to "fix" working code.
 
 ---
 

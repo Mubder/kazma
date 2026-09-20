@@ -96,7 +96,7 @@ uv run ruff check .
 uv run ruff format .
 
 # Type check
-uv run mypy kazma-core/kazma_memory/
+uv run mypy kazma-core/kazma_core/
 
 # Tests with coverage
 uv run pytest tests/ -v --cov=kazma_core --cov-report=term-missing
@@ -192,7 +192,7 @@ def get_arabic_prompt(self, tool_name: str) -> str:
 Run type checking with:
 
 ```bash
-uv run mypy kazma-core/kazma_memory/
+uv run mypy kazma-core/kazma_core/
 ```
 
 ### Docstrings
@@ -248,17 +248,15 @@ uv run pytest tests/ --cov=kazma_core --cov-report=html
 ```
 tests/
 ├── conftest.py                 Shared fixtures
-├── test_agent_discovery.py     Agent discovery tests
 ├── test_hub_manifest.py        Manifest schema validation
 ├── test_hub_validator.py       Skill validator tests
 ├── test_permissions.py         Permission manager tests
 ├── test_rbac.py                RBAC tests
-├── test_delegation_*.py        Multi-agent delegation
-├── test_sandbox.py             Tool sandbox tests
-├── unit/
-│   └── test_agent.py           Unit tests
-└── integration/
-    └── __init__.py             Integration tests
+├── …                           ~640 flat test modules (unit, integration, security, CLI)
+├── unit/                       Unit tests
+├── integration/                Integration tests
+└── e2e/                        End-to-end graph/turn tests (run in CI)
+loadtests/                      Load tests (repo root, separate from tests/)
 ```
 
 ### Testing Requirements
@@ -384,7 +382,7 @@ homepage: "https://example.com/my-skill"
 repository: "https://github.com/example/my-skill"
 ```
 
-For the full manifest specification, see [docs/skill-manifest-spec.md](docs/skill-manifest-spec.md).
+For the full manifest specification, see [docs/docs/skill-development/skill-manifest.md](docs/docs/skill-development/skill-manifest.md).
 
 ### Validating Your Skill
 
@@ -472,7 +470,7 @@ git checkout -b feature/my-new-feature
 # 3. Run the full check suite
 uv run ruff check .
 uv run ruff format --check .
-uv run mypy kazma-core/kazma_memory/
+uv run mypy kazma-core/kazma_core/
 uv run pytest tests/ -v --cov=kazma_core
 
 # 4. Commit with a clear message
@@ -517,7 +515,7 @@ Use [Conventional Commits](https://www.conventionalcommits.org/):
 
 - Delete your feature branch
 - Update local `main`: `git pull origin main`
-- If you created a skill, verify it installs: `kazma skill install my-skill`
+- If you created a skill, verify it installs: `kazma hub install my-skill`
 
 ---
 

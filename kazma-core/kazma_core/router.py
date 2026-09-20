@@ -66,14 +66,20 @@ class KuwaitiPipeline(BasePipeline):
 
     name = "kuwaiti"
 
-    def __init__(self) -> None:
-        # Kuwaiti-specific system prompt that acknowledges dialect
-        self.system_prompt = (
-            "You are a helpful assistant that understands Kuwaiti/Gulf Arabic dialect. "
-            "Respond in the same dialect the user uses. "
-            "Understand colloquial expressions, code-switching between Arabic and English, "
-            "and Gulf-specific cultural references."
-        )
+    #: Dialect guidance emitted as ROUTING METADATA, not as a system prompt.
+    #:
+    #: This was ``self.system_prompt`` and nothing read it. That is worse than
+    #: unused: a dead prompt sitting next to an ``execute()`` that echoes reads
+    #: as an unfinished wiring job, and the obvious "fix" is to feed it to a
+    #: provider here — which is exactly the parallel mouth removed on
+    #: 2026-09-17, outside the supervisor, HITL, turn_failed and tenant bind.
+    #: As metadata it reaches the caller, who owns the LLM call and already has
+    #: a fenced, gated path for it.
+    DIALECT_GUIDANCE = (
+        "Understands Kuwaiti/Gulf Arabic dialect. Respond in the same dialect "
+        "the user uses. Understand colloquial expressions, code-switching "
+        "between Arabic and English, and Gulf-specific cultural references."
+    )
 
     async def execute(
         self,
@@ -90,6 +96,7 @@ class KuwaitiPipeline(BasePipeline):
             "dialect_markers_found": len(dialect_tokens),
             "code_switch_words": len(code_switch),
             "dialect_meanings": {t.text: t.dialect_meaning for t in dialect_tokens if t.dialect_meaning},
+            "dialect_guidance": self.DIALECT_GUIDANCE,
         }
 
         # Do NOT call the LLM here. Live routing only uses the tokenizer
@@ -116,11 +123,11 @@ class MSAPipeline(BasePipeline):
 
     name = "msa"
 
-    def __init__(self) -> None:
-        self.system_prompt = (
-            "You are a helpful assistant. Respond in Modern Standard Arabic (MSA) "
-            "unless the user uses a dialect, in which case match their register."
-        )
+    #: Routing metadata, not a system prompt — see KuwaitiPipeline.
+    DIALECT_GUIDANCE = (
+        "Respond in Modern Standard Arabic (MSA) unless the user uses a "
+        "dialect, in which case match their register."
+    )
 
     async def execute(
         self,
@@ -132,6 +139,7 @@ class MSAPipeline(BasePipeline):
             "pipeline": self.name,
             "total_tokens": len(token_result.tokens),
             "normalized_words": sum(1 for t in token_result.tokens if t.dialect_meaning is not None),
+            "dialect_guidance": self.DIALECT_GUIDANCE,
         }
 
         # Classifier only — see KuwaitiPipeline.execute.
@@ -150,11 +158,19 @@ class MSAPipeline(BasePipeline):
 
 
 class DialectRouter:
-    """Routes requests to appropriate processing pipeline.
+    """Classifies requests into a dialect-specific pipeline.
 
     1. Tokenize with dialect detection
     2. Route to dialect-specific pipeline
-    3. Execute with dialect-aware prompts
+    3. Return the dialect, its confidence, and ``dialect_guidance`` metadata
+
+    **This is a classifier, not a brain.** It makes no LLM call. Step 3 used
+    to read "Execute with dialect-aware prompts", which described behaviour
+    that was removed on 2026-09-17 — a ``provider.chat()`` inside
+    ``Pipeline.execute`` was a second mouth outside the supervisor, HITL,
+    ``turn_failed`` and the tenant bind. The guidance strings survive as
+    metadata for whoever owns the real call; a docstring that still promised
+    execution was an invitation to put the second mouth back.
     """
 
     def __init__(self) -> None:

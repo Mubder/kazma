@@ -2207,6 +2207,59 @@ def create_ws_chat_router(
                         )
                         continue
 
+                    # ── Gate identity ────────────────────────────────────
+                    # Which gate is this answering? Establishing that the
+                    # THREAD is paused is a different question, and the
+                    # difference is the whole defect: after a resume the
+                    # graph pauses again, so a retry, a double click, or a
+                    # sequential second pause resumes whatever interrupt is
+                    # live NOW rather than the one the human was shown.
+                    #
+                    # HTTP POST /api/approve closed this on 2026-09-20. This
+                    # path did not, because the check lived inside the HTTP
+                    # route module instead of in the bridge both mouths
+                    # share. It is now one function, called from both.
+                    #
+                    # Transport loss is not authorization: a client that
+                    # never saw its ack is told the server's actual view and
+                    # left to reconcile, never handed a fresh resume.
+                    from kazma_ui.hitl_gate_bridge import gate_not_pending
+
+                    _req_gate = str(payload.get("interrupt_id") or payload.get("gate_id") or "").strip()
+                    _already = await gate_not_pending(target_thread_id, _req_gate)
+                    if _already:
+                        logger.info(
+                            "[WS-Chat] Refusing approve for gate=%s on thread=%s: "
+                            "registry state=%s (not pending)",
+                            _req_gate, target_thread_id, _already,
+                        )
+                        # Same vocabulary mapping as HTTP: claimed/resuming
+                        # mean "decided, tool running" — chat.js converges and
+                        # reattaches instead of flashing an error on a row that
+                        # was approved correctly.
+                        _client_state = (
+                            "inflight" if _already in ("claimed", "resuming")
+                            else "settled" if _already != "foreign"
+                            else "foreign"
+                        )
+                        await websocket.send_json(
+                            {
+                                "type": "error",
+                                "code": "GATE_NOT_PENDING",
+                                "thread_id": target_thread_id,
+                                "interrupt_id": _req_gate,
+                                "hitl_state": _client_state,
+                                "registry_state": _already,
+                                "message": (
+                                    "This request was already decided "
+                                    f"({_already}); showing the current state."
+                                    if _already != "foreign"
+                                    else "This approval does not belong to this thread."
+                                ),
+                            }
+                        )
+                        continue
+
                     actor = f"ws:{(session_id or '')[:12] or 'anon'}"
                     approve_config: dict[str, Any] = {
                         "configurable": {

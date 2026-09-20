@@ -38,9 +38,13 @@ from typing import AsyncIterator
 
 __all__ = [
     "current_workspace_id",
+    "current_workspace_path",
     "pin_workspace",
+    "pin_workspace_path",
     "reset_workspace",
+    "reset_workspace_path",
     "resolve_workspace_root",
+    "workspace_path_scope",
     "workspace_scope",
 ]
 
@@ -49,6 +53,30 @@ logger = logging.getLogger(__name__)
 # The ContextVar carries the active workspace_id (or None for "use global").
 _current_workspace_id: ContextVar[str | None] = ContextVar(
     "kazma_workspace_id", default=None
+)
+
+#: A workspace root given as a PATH rather than a registered workspace id.
+#:
+#: The id-based scope above requires a row in ``WorkspaceStore``. Some callers
+#: declare their scope as a bare directory and have no row to point at — the
+#: IDE MCP server is the one that mattered: it is constructed as
+#: ``MCPServer(root=...)`` and documents that root as confinement, but every
+#: tool it dispatches went through ``IdeService``, whose ``root`` property
+#: re-resolves from the process-wide active workspace on every access. The
+#: server's own root was therefore advisory for three of its seven tools
+#: (``list_files``, ``run_command``, ``git_status`` did not even read the
+#: parameter) and fought IdeService's root for the rest. Two confinement
+#: tests were marked ``xfail`` over it and shipped that way.
+#:
+#: The fix is a rung on the SAME ladder, not a second mechanism: a path scope
+#: sits beside the id scope at precedence 1 in
+#: :func:`kazma_core.workspace.binding.resolve_active_root`, so a caller that
+#: declares a root gets it honoured by every tool that already consults the
+#: SoT — which is all of them. Inventing a parallel "MCP root" check in the
+#: MCP server would have been the second precedence ladder that
+#: ``_resolve_workspace_root`` explicitly warns against.
+_current_workspace_path: ContextVar[str | None] = ContextVar(
+    "kazma_workspace_path", default=None
 )
 
 
@@ -73,13 +101,60 @@ def reset_workspace(token) -> None:
     _current_workspace_id.reset(token)
 
 
+def current_workspace_path() -> str | None:
+    """Return the workspace PATH pinned in the current scope, or None."""
+    try:
+        return _current_workspace_path.get()
+    except LookupError:
+        return None
+
+
+def pin_workspace_path(path: str | Path | None):
+    """Sync pin for a path-declared workspace. Returns a token or None."""
+    if not path:
+        return None
+    return _current_workspace_path.set(str(Path(path).expanduser().resolve()))
+
+
+def reset_workspace_path(token) -> None:
+    if token is None:
+        return
+    _current_workspace_path.reset(token)
+
+
+@asynccontextmanager
+async def workspace_path_scope(path: str | Path | None) -> AsyncIterator[None]:
+    """Pin a workspace ROOT PATH for the duration of the block.
+
+    The path-flavoured twin of :func:`workspace_scope`, for callers whose
+    scope is a directory rather than a ``WorkspaceStore`` id. No-op when
+    *path* is falsy, so callers may wrap unconditionally.
+    """
+    token = pin_workspace_path(path)
+    if token is None:
+        yield
+        return
+    try:
+        yield
+    finally:
+        reset_workspace_path(token)
+
+
 def resolve_workspace_root() -> Path | None:
     """Resolve the workspace root for the current scope.
 
     When a ``workspace_scope`` is active, returns that workspace's root
     path. Returns None when no scope is active (caller falls back to the
     global active workspace via the usual resolution).
+
+    An explicit PATH scope wins over an id scope. A caller that names a
+    concrete directory has been more specific than one that names a row
+    whose ``root_path`` could be edited underneath it, and the path scope
+    is what a confinement claim is made of.
     """
+    ws_path = current_workspace_path()
+    if ws_path:
+        return Path(ws_path)
     ws_id = current_workspace_id()
     if not ws_id:
         return None

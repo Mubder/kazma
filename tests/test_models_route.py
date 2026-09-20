@@ -361,13 +361,18 @@ class TestProviderSwitch:
         assert data["provider"] == "custom"
         assert data["model"] == "gpt-4o"
 
-    @pytest.mark.xfail(
-        reason="/api/provider/active reflects the PROCESS model registry; "
-               "needs hermetic initialize_model_registry(tmp ConfigStore) "
-               "wiring — currently reads 'none' in an isolated test process",
-        strict=False,
-    )
     def test_get_active_provider(self):
+        """Switch then read back: the two must agree.
+
+        This was xfail(strict=False) on the reasoning that /api/provider/active
+        "reflects the PROCESS model registry" and reads 'none' in an isolated
+        test process. The hermetic fixture above already initialises that
+        registry, so the real cause was different: the route used the registry
+        CAPTURED at mount, and this client mounts without one — falling through
+        to `_active_profile`, a constructor-time snapshot that /switch never
+        writes. The endpoint now resolves the process registry live, which is
+        the rule the factory already applied to llm_provider.
+        """
         client = self._client()
 
         # Switch first
@@ -377,7 +382,18 @@ class TestProviderSwitch:
         assert resp.status_code == 200
         data = resp.json()
         assert data["provider"] == "ollama"
-        assert data["model"] == "ollama/llama3.2"
+        # Bare model name, provider carried separately. That is the registry's
+        # own convention -- set_active_provider("ollama", model="llama3.2")
+        # stores and returns "llama3.2" -- and ModelRegistry is the documented
+        # single source of truth for the active provider/model
+        # (runtime/model_switch.py). The old "ollama/llama3.2" expectation
+        # could never have been met by this endpoint; it went unnoticed behind
+        # the xfail. chat.js assigns `active.model` straight into the model
+        # picker, so a provider-prefixed value here would be the wrong thing.
+        assert data["model"] == "llama3.2"
+        assert data.get("stale") is not True, (
+            "served the boot-time snapshot instead of the live registry"
+        )
 
     def test_real_key_masked(self):
         client = self._client()

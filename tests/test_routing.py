@@ -27,6 +27,36 @@ class TestClassify:
         assert ModelRouter.classify("refactor this class") == TaskProfile.CODING
         assert ModelRouter.classify("git commit the changes") == TaskProfile.CODING
 
+    def test_a_generic_build_verb_alone_is_not_coding(self) -> None:
+        """"write a" / "create a" / "build a" say something is being MADE.
+
+        They say nothing about WHAT. These three used to sit in
+        ``coding_keywords``, so any of them alone returned CODING and a swarm
+        auto-spawn picked the coding model to draft an email. A generic verb
+        now needs a technical noun beside it.
+
+        This is the hint path, not the lock — an explicit user default or
+        KAZMA_MODEL still wins in models/selection.py — so being wrong here
+        costs a worker its default model, never the user their choice.
+        """
+        for text in (
+            "write a welcome email for new hires",
+            "create a agenda for Thursday's meeting",
+            "build a case for hiring another designer",
+            "write a short poem about the sea",
+        ):
+            assert ModelRouter.classify(text) != TaskProfile.CODING, text
+
+    def test_a_generic_build_verb_with_a_technical_noun_is_coding(self) -> None:
+        """The object decides. Verb + software noun is still CODING."""
+        for text in (
+            "write a parser for this format",
+            "build a CLI for the repo",
+            "create a migration for the schema",
+            "write a bash script to rotate logs",
+        ):
+            assert ModelRouter.classify(text) == TaskProfile.CODING, text
+
     def test_classify_reasoning(self) -> None:
         """Test 2: Reasoning keywords → REASONING."""
         assert ModelRouter.classify("explain the architecture") == TaskProfile.REASONING

@@ -68,7 +68,9 @@ async def start_mentions_loop(poll_interval: float | None = None) -> None:
         return
     from kazma_core.background import spawn_background
 
-    _loop_task = spawn_background(_loop(poll_interval), name="x-mentions-poll")
+    _loop_task = spawn_background(
+        _loop(poll_interval), name="x-mentions-poll", never_completes=True
+    )
     logger.info("[x-mentions] poller started")
 
 

@@ -29,6 +29,18 @@ from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
+#: Hard ceiling on application teardown, in seconds.
+#:
+#: `_on_shutdown` awaits many things that are not individually bounded. This
+#: is the single contract that says the process exits regardless: generous
+#: enough that a healthy shutdown (background drain 10s, document workers up
+#: to 45s, memory worker up to 30s) finishes well inside it, short enough that
+#: an operator is not left wondering whether to kill it.
+#:
+#: Raise this only with a measurement showing a legitimate teardown that needs
+#: longer — not to paper over something that hangs.
+_SHUTDOWN_CEILING_SECONDS = 120.0
+
 __all__ = ["KazmaAppBuilder", "create_app", "main"]
 
 # Package paths
@@ -442,6 +454,24 @@ class KazmaAppBuilder:
         # CORS
         from fastapi.middleware.cors import CORSMiddleware
 
+        # Loopback only. `allow_credentials=True` means an allowed origin can
+        # read authenticated responses, so this list is a list of sites
+        # trusted to read this operator's settings, session list and
+        # masked-key status — not a list of sites the project is friendly with.
+        #
+        # `https://kazma.ai` and `https://www.kazma.ai` used to be baked in
+        # here unconditionally. On a default install that grants the marketing
+        # site credentialed read access to a local Kazma for any operator who
+        # happens to have both open, forever, whether or not they have ever
+        # used the hosted product. CSRF Origin checks still blocked cross-site
+        # POST, so this was a read-only hole rather than a write one, which is
+        # precisely why nobody would have noticed it.
+        #
+        # The public host is now derived, not assumed: it is allowed only when
+        # the operator has declared it as this install's own public URL. That
+        # is the same variable OIDC already builds its redirect from, so an
+        # install that genuinely is kazma.ai keeps working and an install that
+        # is not stops advertising.
         _default_cors_origins = [
             "http://localhost:9090",
             "http://127.0.0.1:9090",
@@ -451,9 +481,22 @@ class KazmaAppBuilder:
             "http://127.0.0.1:8000",
             "http://localhost:4321",
             "http://localhost:4322",
-            "https://kazma.ai",
-            "https://www.kazma.ai",
         ]
+        _public_url = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
+        if _public_url:
+            try:
+                from urllib.parse import urlsplit
+
+                _pu = urlsplit(_public_url)
+                if _pu.scheme in ("http", "https") and _pu.netloc:
+                    _origin = f"{_pu.scheme}://{_pu.netloc}"
+                    if _origin not in _default_cors_origins:
+                        _default_cors_origins.append(_origin)
+            except Exception:  # noqa: BLE001 — a malformed URL must not fail boot
+                logger.warning(
+                    "[CORS] KAZMA_PUBLIC_URL=%r is not a parseable origin; ignoring",
+                    _public_url,
+                )
         _cors_env = os.environ.get("KAZMA_CORS_ORIGINS", "").strip()
         if _cors_env:
             _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
@@ -854,7 +897,9 @@ class KazmaAppBuilder:
                         await asyncio.sleep(60)
 
                 KazmaAppBuilder._heartbeat_task = spawn_background(
-                    _heartbeat_loop(), name="liveness-heartbeat"
+                    _heartbeat_loop(),
+                    name="liveness-heartbeat",
+                    never_completes=True,
                 )
                 # Set only AFTER the spawn succeeds: setting it first meant a
                 # failed start latched the flag and permanently suppressed
@@ -2251,7 +2296,27 @@ class KazmaAppBuilder:
                     pass
                 self._documents_maintenance = None
             if documents is not None:
-                await documents.stop_workers()
+                # Bounded. The comment above says "never blocks shutdown" and
+                # this await was the one that could: DocumentWorker.stop now
+                # bounds its own waits, but a second ceiling here means a
+                # future unbounded wait anywhere beneath it cannot re-open the
+                # hang that has been failing CI on every commit. A timeout is
+                # a contract; a comment is not.
+                #
+                # ``asyncio.wait`` on a task, never ``asyncio.wait_for``:
+                # wait_for CANCELS its inner awaitable on timeout and then
+                # AWAITS that cancellation, so against an uncancellable
+                # callee it reproduces the hang it is supposed to bound. That
+                # mistake was made here first and caught by
+                # tests/test_document_worker.py::
+                # test_stop_is_bounded_even_when_a_task_ignores_cancellation.
+                _stop_t = asyncio.ensure_future(documents.stop_workers())
+                _, _pending = await asyncio.wait([_stop_t], timeout=45.0)
+                if _pending:
+                    logger.warning(
+                        "[Documents] stop_workers exceeded 45s — abandoning. "
+                        "In-flight jobs resume on next boot via lease recovery."
+                    )
                 documents.close()
                 try:
                     from kazma_core.documents.ingestion import set_ingestion_service
@@ -2266,7 +2331,15 @@ class KazmaAppBuilder:
             try:
                 from kazma_core.memory.worker_bootstrap import stop_memory_worker
 
-                await stop_memory_worker()
+                # Bounded, same reasoning as stop_workers above. This drains
+                # in-flight belief extraction / entity merges, which are
+                # genuinely worth awaiting — but not worth hanging for.
+                _mem_t = asyncio.ensure_future(stop_memory_worker())
+                _, _mem_pending = await asyncio.wait([_mem_t], timeout=30.0)
+                if _mem_pending:
+                    logger.warning(
+                        "[Memory] stop_memory_worker exceeded 30s — abandoning."
+                    )
             except Exception:  # noqa: BLE001
                 pass
             logger.info("[Documents] ingestion coordinator stopped")
@@ -2479,8 +2552,40 @@ class KazmaAppBuilder:
                 # Postgres pool close) and leak an asyncio.CancelledError traceback. shield
                 # lets teardown finish; the except is a backstop if cancellation is already
                 # in flight when the awaited coroutine resumes.
+                # One ceiling over the whole teardown.
+                #
+                # `_on_shutdown` awaits sixteen things that are not
+                # individually bounded — watchdog stops, pool closes, adapter
+                # disconnects. Wrapping each is sixteen chances to miss one and
+                # a seventeenth arrives with the next feature. Whatever happens
+                # inside, the process must still exit: a server that cannot
+                # shut down is a server the operator has to kill, and under
+                # TestClient it is a suite that hangs instead of failing.
+                #
+                # `asyncio.wait` on a shielded task, never `wait_for`: wait_for
+                # cancels its inner awaitable on timeout and then awaits that
+                # cancellation, which against an uncancellable callee is the
+                # very hang this is bounding (see
+                # kazma_core/documents/worker.py::DocumentWorker.stop).
+                # Shield is kept so Ctrl+C does not interrupt teardown midway.
+                _sd = asyncio.ensure_future(asyncio.shield(builder._on_shutdown()))
                 try:
-                    await asyncio.shield(builder._on_shutdown())
+                    _sd_done, _sd_pending = await asyncio.wait(
+                        [_sd], timeout=_SHUTDOWN_CEILING_SECONDS
+                    )
+                    if _sd_pending:
+                        logger.error(
+                            "[app] Shutdown exceeded %.0fs and is being "
+                            "abandoned so the process can exit. Something in "
+                            "_on_shutdown is awaiting without a bound — check "
+                            "the most recent teardown log line for where it "
+                            "stopped.",
+                            _SHUTDOWN_CEILING_SECONDS,
+                        )
+                    else:
+                        exc = _sd.exception()
+                        if exc is not None:
+                            raise exc
                 except asyncio.CancelledError:
                     logger.info("[app] Shutdown completed (task was cancelled during teardown)")
                 except BaseException as e:  # pragma: no cover - last-resort

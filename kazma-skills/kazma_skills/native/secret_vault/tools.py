@@ -74,7 +74,19 @@ async def vault_retrieve(name: str) -> str:
     vault = get_vault()
     if vault is None:
         return "Error: Secret vault is disabled. Set KAZMA_VAULT_KEY to enable."
-    value = vault.retrieve(name)
+    # `retrieve_scoped`, not `vault.retrieve`. A bare retrieve resolves the
+    # tenant from the ContextVar and falls back tenant -> global, which is
+    # right when a tenant is installed and wrong when one is not: a
+    # context-less caller then sees ONLY global rows, and 34 of the 67 rows on
+    # the live install sit under tenant 'default'. This tool is reachable from
+    # paths that do not bind a tenant (swarm worker, headless run), and there
+    # the miss reports "No secret found with name 'x'" for a secret that is
+    # sitting in the vault — indistinguishable from never having stored it.
+    # That exact confusion shipped three times elsewhere before the shared
+    # resolver existed; this was the last tool still not using it.
+    from kazma_core.security.vault import retrieve_scoped
+
+    value = retrieve_scoped(name, vault)
     if value is None:
         return f"No secret found with name '{name}'."
     # Return the value with a warning that it's sensitive. The HITL gate

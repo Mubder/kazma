@@ -173,44 +173,15 @@ async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
     )
 
 
-async def _gate_not_pending(thread_id: str, gate_id: str) -> str:
-    """The gate's state when the registry says it is NOT awaiting an answer.
-
-    Returns "" to mean "no objection": the registry is off, has never
-    heard of this id, or still has it ``pending``. Only a definite,
-    on-the-record "this gate already has its decision" refuses a resume,
-    because the dashboard, the TUI and the gateway all reach this route
-    with ids the registry may not carry, and none of them should start
-    failing over a lookup miss.
-
-    ``LIVE_STATES`` is ("pending", "claimed", "resuming"): a claimed or
-    resuming gate has already been answered by someone. Only ``pending``
-    is an open question.
-    """
-    if not gate_id:
-        return ""
-    try:
-        from kazma_core.safety.hitl_gates import (
-            gate_for_async,
-            gate_registry_enabled,
-        )
-
-        if not gate_registry_enabled():
-            return ""
-        row = await gate_for_async(gate_id)
-    except Exception:
-        # Fail-open on plumbing, never on a recorded decision: a registry
-        # that cannot be read must not block a human who is waiting.
-        logger.debug("[HITL] gate-state probe failed", exc_info=True)
-        return ""
-    if row is None:
-        return ""
-    if str(getattr(row, "thread_id", "") or "") not in ("", thread_id):
-        # Someone else's gate id on this thread. Refusing by state would
-        # be an accident; refuse by ownership and say so.
-        return "foreign"
-    state = str(getattr(row, "state", "") or "")
-    return "" if state == "pending" else (state or "")
+#: Gate-identity check, shared with the WebSocket approve path.
+#:
+#: This function used to have its body here. It moved to
+#: ``kazma_ui.hitl_gate_bridge`` when the WS ``approve_tool`` handler was
+#: found resuming the live interrupt without one — the same hole this route
+#: closed, one transport over, because the check lived in the caller instead
+#: of in the bridge both callers share. The alias is kept so the (many)
+#: existing references in this module keep reading naturally.
+from kazma_ui.hitl_gate_bridge import gate_not_pending as _gate_not_pending
 
 
 def _approve_lock_for(thread_id: str) -> asyncio.Lock:

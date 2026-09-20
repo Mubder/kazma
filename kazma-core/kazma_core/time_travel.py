@@ -845,4 +845,6 @@ def start_snapshot_maintenance_loop(
 
     from kazma_core.background import spawn_background
 
-    return spawn_background(_loop(), name="snapshot-maintenance")
+    return spawn_background(
+        _loop(), name="snapshot-maintenance", never_completes=True
+    )

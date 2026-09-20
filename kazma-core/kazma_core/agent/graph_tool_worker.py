@@ -22,6 +22,45 @@ from kazma_core.summarizer import _normalize_msg
 
 logger = logging.getLogger(__name__)
 
+
+def _record_terminal(decision: str) -> None:
+    """Count one terminal commitment outcome. Never raises; never silent.
+
+    This replaces six copies of ``try: record_commitment_terminal(x) except
+    Exception: pass`` spread over two functions, each with its own local
+    import of the counter. The swallow was deliberate — a metrics failure must
+    not abort a deny path that has already decided — but a bare ``pass`` six
+    times over means the counter can stop moving with nothing anywhere saying
+    so, and these are the counters that tell an operator how often commitments
+    are cancelled, denied, or expire unresolved. A flat line then reads as
+    "this never happens" rather than "we stopped looking".
+
+    Module level, not nested, because the second copy lived in a different
+    function and drifted: it re-imported the counter and had no ``None``
+    guard of its own. A helper that only one of two callers can reach is the
+    same defect this fixes.
+
+    Note for anyone re-reading the 2026-09-20 audit, which filed this as a
+    store write that could leave a commitment row live: it is not a store
+    write. ``record_commitment_terminal`` increments a Prometheus counter and
+    is a no-op when prometheus-client is absent. The no-late-approve re-check
+    that actually guards the row is separate and is not wrapped.
+    """
+    try:
+        from kazma_core.metrics import record_commitment_terminal
+    except Exception:  # noqa: BLE001 — metrics are optional
+        return
+    try:
+        record_commitment_terminal(decision)
+    except Exception:  # noqa: BLE001 — never abort a decided deny path
+        logger.warning(
+            "[commitment] terminal metric '%s' not recorded; "
+            "COMMITMENT_TERMINAL_TOTAL is now under-counting",
+            decision,
+            exc_info=True,
+        )
+
+
 # Baked copy of ``PROPOSAL_TOOLS`` for the ImportError path. Parity-tested
 # against the module — a fourth publish tool added there must land here too.
 _PROPOSAL_PUBLISH_FALLBACK = frozenset(
@@ -72,11 +111,9 @@ def _commitment_resolve_gate(
             load_constraint_beliefs as _load_beliefs,
         )
         from kazma_core.safety.side_effects import requires_semantic_check as _needs_sem
-        from kazma_core.metrics import record_commitment_terminal
     except Exception:
         _cmt_on = None  # type: ignore[assignment]
         _authz = None; _load_beliefs = None; _needs_sem = None  # type: ignore[assignment]
-        record_commitment_terminal = None  # type: ignore[assignment]
 
     def _is_semantic(tool_name: str) -> bool:
         """Fail-closed semantic probe (deep-audit 2026-08-19, finding #9).
@@ -169,11 +206,7 @@ def _commitment_resolve_gate(
                             duration_ms=0,
                             outcome="terminal",
                         ))
-                        if record_commitment_terminal:
-                            try:
-                                record_commitment_terminal("denied")
-                            except Exception:
-                                pass
+                        _record_terminal("denied")
                     elif _dec.decision in ("clarify", "confirm"):
                         semantic_hold.append((_tc, _dec))
                     elif _dec.rewritten_args is not None:
@@ -269,11 +302,7 @@ def _commitment_resolve_gate(
                     duration_ms=0.0,
                     outcome="terminal",
                 ))
-                if record_commitment_terminal:
-                    try:
-                        record_commitment_terminal("auto_denied")
-                    except Exception:
-                        pass
+                _record_terminal("auto_denied")
         else:
             _items = [{
                 "tool_call_id": str(_tc.get("id") or ""),
@@ -304,9 +333,7 @@ def _commitment_resolve_gate(
                                  "scheduling attempt; confirm what the user wants instead."),
                         is_error=True, duration_ms=0, outcome="terminal",
                     ))
-                    if record_commitment_terminal:
-                        try: record_commitment_terminal("cancelled")
-                        except Exception: pass
+                    _record_terminal("cancelled")
                 elif _patch is not None:
                     # No-late-approve (AGENTS.md §20C): the LangGraph interrupt stays
                     # resumable in the checkpointer long after the commitment's TTL
@@ -334,11 +361,7 @@ def _commitment_resolve_gate(
                                      "exact date/time again before re-scheduling."),
                             is_error=True, duration_ms=0, outcome="terminal",
                         ))
-                        if record_commitment_terminal:
-                            try:
-                                record_commitment_terminal("clarify_expired")
-                            except Exception:
-                                pass
+                        _record_terminal("clarify_expired")
                     else:
                         _tc["arguments"] = {**(_tc.get("arguments") or {}), **_patch}
                         pending.append(_tc)
@@ -351,9 +374,7 @@ def _commitment_resolve_gate(
                                  "this tool until they answer."),
                         is_error=True, duration_ms=0, outcome="terminal",
                     ))
-                    if record_commitment_terminal:
-                        try: record_commitment_terminal("clarify_unresolved")
-                        except Exception: pass
+                    _record_terminal("clarify_unresolved")
     return pending, semantic_blocked
 
 
@@ -992,15 +1013,7 @@ async def tool_worker_node(
                     duration_ms=0.0,
                     outcome="hard",
                 ))
-            try:
-                from kazma_core.metrics import record_commitment_terminal
-            except Exception:
-                record_commitment_terminal = None  # type: ignore[assignment]
-            if record_commitment_terminal:
-                try:
-                    record_commitment_terminal("auto_denied")
-                except Exception:
-                    pass
+            _record_terminal("auto_denied")
             danger_tools = []
 
         # ALWAYS_HITL_TOOLS fail-closed (audit F9): with no ACTIVE gate
