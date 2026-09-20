@@ -442,6 +442,11 @@
           title: data.tool_name || 'tool',
           detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
           state: 'running',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
       },
       onToolResult: function(data) {
@@ -452,6 +457,11 @@
           title: data.tool_name || 'tool',
           detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
           state: 'done',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
       },
       onStatus: function(data) {
@@ -472,6 +482,17 @@
           current: (data && data.current) || '',
           step: (data && data.step) || 0,
           elapsed_s: (data && data.elapsed_s) || 0,
+        });
+        // The heartbeat is the only frame carrying a SERVER-measured
+        // elapsed. Without this the header would have to time the turn
+        // itself, which is the client clock that printed "Done 0s" while
+        // the graph was still working (plan §3).
+        applyTurnEvent({
+          type: 'turn_heartbeat',
+          elapsed_s: (data && data.elapsed_s) || 0,
+          seq: data && data.seq,
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
         });
       },
       onApprovalRequired: function(data) {
@@ -1287,6 +1308,10 @@
    * flag set. Both transports must end every turn.
    */
   var _isGenerating = false;
+  /** The operator asked to stop and the server has not answered yet.
+   *  Produces "Stopping…" and NOTHING else: only the server can say a
+   *  cancellation took (plan §7, "do not prematurely mark cancelled"). */
+  var _stopRequested = false;
   var _awaitingApproval = false;
   var _serverGenerating = false;
   var _serverPaused = false;
@@ -2297,6 +2322,7 @@
    *   leaving a lone "Thinking…" row above the answer.
    */
   function beginTurn(opts) {
+    _stopRequested = false;
     var resume = !!(opts && opts.resume);
     _isGenerating = true;
     _awaitingApproval = false;
@@ -2376,6 +2402,7 @@
   }
 
   function endTurn() {
+    _stopRequested = false;
     _clearTurnTimers();
     _isGenerating = false;
     _awaitingApproval = false;
@@ -2511,6 +2538,7 @@
 
   function abortGeneration(opts) {
     opts = opts || {};
+    _stopRequested = true;
     // Invalidate in-flight SSE immediately. abortThenSend used to wait up
     // to 1.5s for POST /stop with the old epoch still current, so tokens
     // kept painting the first bubble while the new CoT opened below
@@ -3406,6 +3434,11 @@
           title: data.tool_name || 'tool',
           detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
           state: 'running',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
       },
 
@@ -3420,6 +3453,11 @@
           title: data.tool_name || 'tool',
           detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
           state: isSwarm ? 'running' : 'done',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
         if (isSwarm) {
           var content = currentMsgEl.querySelector('.message-content');
@@ -3495,6 +3533,17 @@
           current: (data && data.current) || '',
           step: (data && data.step) || 0,
           elapsed_s: (data && data.elapsed_s) || 0,
+        });
+        // The heartbeat is the only frame carrying a SERVER-measured
+        // elapsed. Without this the header would have to time the turn
+        // itself, which is the client clock that printed "Done 0s" while
+        // the graph was still working (plan §3).
+        applyTurnEvent({
+          type: 'turn_heartbeat',
+          elapsed_s: (data && data.elapsed_s) || 0,
+          seq: data && data.seq,
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
         });
       },
 
@@ -7704,6 +7753,191 @@
     });
   }
 
+
+  // ══ Turn header ════════════════════════════════════════════════════
+  //
+  // docs/plans/UNIFIED_TURN_BLOCK.md §3: one header per turn, INSIDE the
+  // turn block, owning phase, elapsed, counts and Stop. Those four facts
+  // used to live in #live-task-card — a second status surface outside any
+  // turn, with its own state machine and its own clock, which is how the
+  // operator got "Done 0s" while the graph was still working.
+  //
+  // The model is derived by modules/turn_presentation.js, which is a pure
+  // function of the document plus the server facts this page already
+  // holds. Nothing here decides anything; it paints what it is given.
+
+  var _HEADER_PHASE_LABELS = {
+    queued: ['queued', 'Starting\u2026'],
+    working: ['thinking', 'Working'],
+    approval: ['approval_required', 'Approval required'],
+    resuming: ['resuming', 'Resuming'],
+    stopping: ['stopping', 'Stopping\u2026'],
+    completed: ['completed', 'Completed'],
+    failed: ['failed', 'Failed'],
+    cancelled: ['cancelled', 'Cancelled'],
+    recovering: ['recovering', 'Recovering\u2026'],
+    interrupted: ['interrupted', 'Interrupted'],
+  };
+
+  var _HEADER_PHASE_ICONS = {
+    queued: '\u25CB', working: '\u25CF', approval: '\u270B',
+    resuming: '\u25B6', stopping: '\u25A0', completed: '\u2713',
+    failed: '\u26A0', cancelled: '\u2298', recovering: '\u21BB',
+    interrupted: '\u26A0',
+  };
+
+  /** The server facts the presentation model maps. Read-only snapshot. */
+  function _headerFacts() {
+    return {
+      streamLive: _streamIsLive(),
+      serverGenerating: !!_serverGenerating || !!_isGenerating,
+      stopRequested: !!_stopRequested,
+      gateViews: _serverGatesAuth ? _serverGateViews : null,
+      retrySupported: true,
+    };
+  }
+
+  function _headerModel(doc) {
+    var TP = window.KazmaTurnPresentation;
+    if (!TP || typeof TP.header !== 'function') return null;
+    try { return TP.header(doc, _headerFacts()); } catch (e) { return null; }
+  }
+
+  /** mm:ss from a server stamp, ticked forward locally while live.
+   *
+   *  Plan §3: "A local timer may update elapsed display. It cannot mark a
+   *  gate expired or a turn complete." The tick is display only and is
+   *  frozen the moment the phase is terminal, so a finished turn shows the
+   *  duration the server measured rather than one this tab kept counting.
+   */
+  function _headerElapsedText(model) {
+    if (!model) return '';
+    var secs = model.elapsed.seconds;
+    if (!model.terminal && model.elapsed.stampedAtMs) {
+      var drift = (Date.now() - model.elapsed.stampedAtMs) / 1000;
+      if (drift > 0 && drift < 3600) secs += drift;
+    }
+    if (secs <= 0) return '';
+    return _tcFmtMMSS(secs);
+  }
+
+  function _headerCountsText(model) {
+    if (!model) return '';
+    var bits = [];
+    var c = model.counts;
+    if (c.tools) {
+      bits.push(c.tools + ' ' + (c.tools === 1
+        ? ti('step', 'tool')
+        : tiFmt('summary_tools', '{n} tools', { n: c.tools }).replace(/^\d+\s*/, '')));
+    }
+    if (c.pending) {
+      bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
+        { n: c.pending }));
+    } else if (c.gates) {
+      bits.push(c.gates + ' ' + ti('approvals', 'approvals'));
+    }
+    return bits.join(' \u00B7 ');
+  }
+
+  function _buildTurnHeader(turnId) {
+    var el = document.createElement('div');
+    el.className = 'turn-header';
+    el.setAttribute('data-turn-id', String(turnId || ''));
+    el.innerHTML =
+      '<span class="turn-header-phase" aria-hidden="true"></span>' +
+      '<span class="turn-header-label"></span>' +
+      '<span class="turn-header-meta"></span>' +
+      '<span class="turn-header-conn" hidden></span>' +
+      '<span class="turn-header-live sr-only" role="status" aria-live="polite"></span>' +
+      '<button type="button" class="turn-header-act turn-header-stop" hidden></button>' +
+      '<button type="button" class="turn-header-act turn-header-retry" hidden></button>';
+    var stop = el.querySelector('.turn-header-stop');
+    if (stop) {
+      stop.textContent = ti('stop_generation', 'Stop');
+      stop.addEventListener('click', function (e) {
+        e.preventDefault();
+        // The SAME command the composer Stop runs. A second surface with
+        // its own abort path is what the bottom bar was.
+        try { abortGeneration({ source: 'turn-header' }); } catch (e2) { /* ignore */ }
+      });
+    }
+    // Not named `retry`: that would shadow the retry() function this
+    // handler calls, and the call would silently become "invoke a DOM
+    // node" inside a try that swallows it — a button that does nothing.
+    var retryBtn = el.querySelector('.turn-header-retry');
+    if (retryBtn) {
+      retryBtn.textContent = ti('task_retry', 'Retry');
+      retryBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        try { retry(); } catch (e2) { /* ignore */ }
+      });
+    }
+    return el;
+  }
+
+  /**
+   * Paint the header. Writes only what changed, so a render pass that
+   * changes nothing performs no DOM mutation — the renderer's idempotence
+   * is a tested property and a header that rewrites itself every token
+   * would quietly cost it.
+   */
+  function _paintTurnHeader(el, doc) {
+    var model = _headerModel(doc);
+    if (!model) return;
+    var phase = model.phase;
+    var label = _HEADER_PHASE_LABELS[phase] || ['thinking', 'Working'];
+
+    function setText(sel, text) {
+      var node = el.querySelector(sel);
+      if (node && node.textContent !== text) node.textContent = text;
+    }
+    function setHidden(sel, hidden) {
+      var node = el.querySelector(sel);
+      if (node && node.hidden !== hidden) node.hidden = hidden;
+    }
+
+    var cls = 'turn-header is-' + phase;
+    if (model.connection === 'reconnecting') cls += ' is-reconnecting';
+    if (el.className !== cls) el.className = cls;
+
+    setText('.turn-header-phase', _HEADER_PHASE_ICONS[phase] || '\u25CF');
+    setText('.turn-header-label', ti(label[0], label[1]));
+
+    var meta = [];
+    var elapsed = _headerElapsedText(model);
+    if (elapsed) meta.push(elapsed);
+    var counts = _headerCountsText(model);
+    if (counts) meta.push(counts);
+    setText('.turn-header-meta', meta.join(' \u00B7 '));
+
+    // Connection is reported ALONGSIDE the phase, never instead of it.
+    // Plan §3: "Disconnection is not completion or failure."
+    var conn = el.querySelector('.turn-header-conn');
+    if (conn) {
+      var reconnecting = model.connection === 'reconnecting';
+      if (conn.hidden !== !reconnecting) conn.hidden = !reconnecting;
+      var connText = reconnecting ? ti('reconnecting', 'Reconnecting\u2026') : '';
+      if (conn.textContent !== connText) conn.textContent = connText;
+    }
+
+    setHidden('.turn-header-stop', !model.canStop);
+    setHidden('.turn-header-retry', !model.canRetry);
+
+    // Announce the coarse phase, not every token or timer tick (plan §11).
+    var live = el.querySelector('.turn-header-live');
+    if (live) {
+      var say = ti(label[0], label[1]);
+      if (model.awaiting) {
+        say = tiFmt('awaiting_decisions', '{n} awaiting your decision',
+          { n: model.awaiting });
+      }
+      if (live.getAttribute('data-said') !== say) {
+        live.setAttribute('data-said', say);
+        live.textContent = say;
+      }
+    }
+  }
+
   // ── Slot painters ──────────────────────────────────────────────────
 
   function _paintTextSlot(textEl, doc, meta) {
@@ -7809,9 +8043,16 @@
     has: function(kind, doc) {
       if (kind === 'text') return !!_answerFromDoc(window.KazmaTurnDocument, doc);
       if (kind === 'workbench') return _activityOfDoc(doc).length > 0;
+      // The header is unconditional once a turn exists — it is the thing
+      // that says "this turn is starting" before there is anything else
+      // to show (plan §3).
+      if (kind === 'header') return !!window.KazmaTurnPresentation;
       return true;
     },
     build: function(entry, ctx) {
+      if (entry.kind === 'header') {
+        return _buildTurnHeader(String((ctx.doc && ctx.doc.turnId) || ''));
+      }
       if (entry.kind === 'text') {
         var t = document.createElement('div');
         t.className = 'message-text';
@@ -7837,6 +8078,7 @@
       return null;
     },
     paint: function(entry, el, ctx) {
+      if (entry.kind === 'header') return _paintTurnHeader(el, ctx.doc);
       if (entry.kind === 'text') return _paintTextSlot(el, ctx.doc, ctx.meta);
       if (entry.kind === 'workbench') return _paintWorkbenchSlot(el, ctx.doc);
       if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx, entry.state);

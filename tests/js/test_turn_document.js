@@ -361,6 +361,25 @@ assert("legacyTurnId walks UTF-8, not UTF-16",
   TD.legacyTurnId({ ts: "2026-09-20T11:30:00Z", content: "تم الحفظ 😀" })
     === "legacy-4373231117a879b5");
 
+// A live progress row carries the same key the SERVER persisted, or a
+// refresh turns one call into two rows: one keyed tool#<id> from the
+// stored parts and one keyed by name+state+result from the live path.
+var progDoc = TD.applyEvent(TD.empty("live"), {
+  type: "progress", seq: 1,
+  step: { kind: "tool", title: "file_read", detail: "x", state: "running",
+          id: "tool#run-live" },
+});
+assert("a progress row keeps the call id",
+  progDoc.parts.filter(function (p) { return p.type === "tool"; })
+    .map(TD.partKey).join(",") === "tool#run-live");
+progDoc = TD.applyEvent(progDoc, {
+  type: "progress", seq: 2,
+  step: { kind: "tool", title: "file_read", detail: "done", state: "done",
+          id: "tool#run-live" },
+});
+assert("...and advances the SAME row",
+  progDoc.parts.filter(function (p) { return p.type === "tool"; }).length === 1);
+
 // ── Document revision (UNIFIED_TURN_BLOCK.md Phase 1, invariant U05) ───
 // _resyncDelivery fetches /status and /messages in PARALLEL and either can
 // land late. Before revisions the only defence was that mergeParts happens

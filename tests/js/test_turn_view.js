@@ -49,6 +49,7 @@ function shape(bubble) {
   return content.children.map((c) => {
     const cls = c.className.split(/\s+/);
     if (cls.indexOf("message-text") >= 0) return "text";
+    if (cls.indexOf("turn-header") >= 0) return "header";
     if (cls.indexOf("agent-progress") >= 0) return "workbench";
     if (cls.indexOf("hitl-approval-card") >= 0) {
       return "card(" + (c.getAttribute("data-interrupt-id") || "") + ":" +
@@ -76,6 +77,7 @@ function makeRenderers(env, opts) {
     build(entry) {
       const el = env.document.createElement("div");
       if (entry.kind === "text") el.className = "message-text";
+      else if (entry.kind === "header") el.className = "turn-header";
       else if (entry.kind === "workbench") el.className = "agent-progress";
       else if (entry.kind === "hitl") {
         el.className = "hitl-approval-card";
@@ -131,11 +133,14 @@ function feed(events, turnId) {
   env.ROOT.appendChild(bubble);
   const doc = feed([{ type: "token", content: "hello world" }]);
   const r = env.view.render(bubble, doc, makeRenderers(env));
-  assert("text paints", shape(bubble)[0] === "text", shape(bubble));
+  // The header is slot 0 of every turn now (UNIFIED_TURN_BLOCK.md §3),
+  // so "the answer is first" became "the answer follows the header".
+  assert("header paints first", shape(bubble)[0] === "header", shape(bubble));
+  assert("text paints", shape(bubble)[1] === "text", shape(bubble));
   assert("chrome stays last",
     shape(bubble).slice(-2).join(",") === "meta,actions", shape(bubble));
   assert("no invariant on a healthy paint", env.invariants.length === 0, env.invariants);
-  assert("report names the plan", r.plan.join(",") === "text", r.plan);
+  assert("report names the plan", r.plan.join(",") === "header,text", r.plan);
 }
 
 {
@@ -299,8 +304,12 @@ function feed(events, turnId) {
   assert("every slot is a direct child of .message-content",
     slotNodes.every((n) => n.parentNode === content),
     slotNodes.map((n) => n.getAttribute("data-slot-key") + "->" + n.parentNode.className));
-  assert("workbench renders first",
-    shape(bubble)[0] === "workbench", shape(bubble));
+  // "First" now means "first of the CONTENT slots": the header is slot 0
+  // of every turn (UNIFIED_TURN_BLOCK.md §3). What this line protects is
+  // that activity precedes the answer, which is unchanged.
+  assert("workbench renders before the answer",
+    shape(bubble).indexOf("workbench") < shape(bubble).indexOf("text")
+      && shape(bubble)[1] === "workbench", shape(bubble));
   assert("no text node is nested in the workbench",
     content.querySelector(".agent-progress").querySelectorAll(".message-text").length === 0);
 }
@@ -796,6 +805,36 @@ function feed(events, turnId) {
   assert("plan is a pure function of the doc",
     JSON.stringify(TV.slotPlan({ parts: [] }, { text: true }, TD).map((p) => p.key))
       === JSON.stringify(["text"]));
+
+  // ── The turn header (UNIFIED_TURN_BLOCK.md §3) ──────────────────────
+  // "Exists from the first acknowledged turn state, including before the
+  // first token." A header that only appears once there is content is
+  // precisely the gap #live-task-card was invented to fill, and filling it
+  // from outside the turn is what gave one turn two status surfaces.
+  assert("the header is first",
+    TV.slotPlan(
+      { parts: [
+        { type: "hitl", interrupt_id: "a", state: "approved" },
+        { type: "text", text: "x" },
+      ] },
+      { header: true, workbench: true, text: true }, TD,
+    ).map((p) => p.key).join(",") === "header,workbench,hitl:a,text");
+
+  assert("a turn with nothing in it still has a header",
+    TV.slotPlan({ parts: [] }, { header: true }, TD)
+      .map((p) => p.key).join(",") === "header");
+
+  assert("...and one with no header asked for has none",
+    TV.slotPlan({ parts: [{ type: "text", text: "x" }] }, { text: true }, TD)
+      .filter((p) => p.kind === "header").length === 0);
+
+  // Exactly one, no matter how many times it is planned (invariant U02).
+  const twice = TV.slotPlan(
+    { parts: [{ type: "text", text: "x" }] },
+    { header: true, text: true }, TD,
+  );
+  assert("exactly one header per turn",
+    twice.filter((p) => p.kind === "header").length === 1);
 }
 
 if (fail) {

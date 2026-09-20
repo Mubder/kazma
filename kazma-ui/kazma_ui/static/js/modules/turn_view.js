@@ -182,6 +182,11 @@
     }
 
     var plan = [];
+    // The header is FIRST and, once a turn exists, unconditional: plan §3,
+    // "Exists from the first acknowledged turn state, including before the
+    // first token." A header that only appears once there is content is
+    // the gap the separate bottom bar was invented to fill.
+    if (has.header) plan.push({ key: 'header', kind: 'header' });
     if (has.workbench) plan.push({ key: 'workbench', kind: 'workbench' });
     for (i = 0; i < settled.length; i++) plan.push(settled[i]);
     if (has.text) plan.push({ key: 'text', kind: 'text' });
@@ -297,6 +302,7 @@
         if (!n.classList) continue;
         var key = '';
         if (n.classList.contains('message-text')) key = 'text';
+        else if (n.classList.contains('turn-header')) key = 'header';
         else if (n.classList.contains('agent-progress')) key = 'workbench';
         else if (n.classList.contains('hitl-approval-card')) {
           var iid = '';
@@ -329,7 +335,11 @@
      *                                              represent entry.state;
      *                                              tear it out and build())
      *   discard(key, el, ctx)  → bool             (default false — KEEP)
-     *   has(kind, doc, ctx)    → bool             (veto an empty slot)
+     *   has(kind, doc, ctx)    → bool             (veto an empty slot;
+     *                                              'header' is asked too,
+     *                                              and answering false
+     *                                              leaves a turn with no
+     *                                              status line at all)
      *   gateState(part)        → string           (ONE answer for a gate's
      *                                              state, used for BOTH
      *                                              ordering and labelling —
@@ -372,7 +382,9 @@
       }
 
       var plan = slotPlan(
-        doc, { workbench: can('workbench'), text: can('text') }, TD, renderers.gateState
+        doc,
+        { header: can('header'), workbench: can('workbench'), text: can('text') },
+        TD, renderers.gateState
       );
 
       // 1. Materialise every planned slot.

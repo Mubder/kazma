@@ -6657,3 +6657,83 @@ html.kazma-soft-nav #main-content {
 .context-compacted-chip:focus-within .context-compacted-chip-detail {
   display: block;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Turn header — docs/plans/UNIFIED_TURN_BLOCK.md §3
+   ══════════════════════════════════════════════════════════════════════
+   One status line per assistant turn, INSIDE the turn block. It replaces
+   #live-task-card, which carried the same four facts (phase, elapsed,
+   counts, Stop) from outside any turn, on its own clock. Two surfaces for
+   one turn is the defect the plan removes; the styling is incidental.
+*/
+.turn-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 0 0 var(--sp-2, 8px);
+  padding: 2px 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  min-height: 20px;
+}
+.turn-header-phase {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+.turn-header-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.turn-header-meta {
+  color: var(--text-tertiary, var(--text-secondary));
+  font-variant-numeric: tabular-nums;   /* the clock must not jitter */
+}
+/* The connection is reported ALONGSIDE the phase, never instead of it:
+   a dropped socket is not a finished turn (plan §3). */
+.turn-header-conn {
+  color: var(--warn, #d08b2c);
+  font-size: 0.78rem;
+}
+.turn-header-conn[hidden] { display: none; }
+.turn-header-act {
+  margin-inline-start: auto;
+  padding: 1px 10px;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.turn-header-act:hover { border-color: var(--accent, #6c8cff); }
+.turn-header-act[hidden] { display: none; }
+/* Only the FIRST action floats right; a second sits beside it. */
+.turn-header-act ~ .turn-header-act { margin-inline-start: 6px; }
+
+.turn-header.is-completed .turn-header-phase { color: var(--ok, #4caf7d); }
+.turn-header.is-failed .turn-header-phase,
+.turn-header.is-interrupted .turn-header-phase { color: var(--err, #e0605e); }
+.turn-header.is-approval .turn-header-phase { color: var(--warn, #d08b2c); }
+.turn-header.is-cancelled { opacity: 0.75; }
+
+/* The pulse is the only motion, and only while the turn is actually
+   running. Reduced motion turns it off rather than merely slowing it. */
+.turn-header.is-working .turn-header-phase,
+.turn-header.is-resuming .turn-header-phase {
+  animation: kz-turn-pulse 1.6s ease-in-out infinite;
+}
+@keyframes kz-turn-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .turn-header.is-working .turn-header-phase,
+  .turn-header.is-resuming .turn-header-phase { animation: none; }
+}
+@media (max-width: 640px) {
+  .turn-header { font-size: 0.78rem; gap: 6px; }
+  .turn-header-meta { flex-basis: 100%; }
+}

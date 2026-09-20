@@ -224,6 +224,7 @@ jobs:
           node tests/js/test_turn_document.js
           node tests/js/test_turn_view.js
           node tests/js/test_turn_preferences.js
+          node tests/js/test_turn_presentation.js
           node tests/js/test_unified_turn_fixtures.js
       - name: Unified turn block reproductions (xfail-strict)
         # Red on purpose until Phases 2 and 3 land. strict=True means an

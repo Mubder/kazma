@@ -308,3 +308,59 @@ def test_disclosure_preference_behaviors_under_node() -> None:
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_header_model_behaviors_under_node() -> None:
+    """The derived header model, driven on real documents.
+
+    Plan §7 requires the header to be a MAPPING from server facts, not a
+    second execution state machine. The tests that matter are the refusals:
+    a stop request is not a cancellation, a dropped socket is not an
+    outcome, a stale pending stamp does not outrank the registry's view,
+    and elapsed comes from the server or not at all.
+    """
+    node = shutil.which("node")
+    if not node:  # pragma: no cover - CI always has node
+        pytest.skip("node not available")
+    script = ROOT / "tests" / "js" / "test_turn_presentation.js"
+    assert script.is_file()
+    proc = subprocess.run(
+        [node, str(script)],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_the_turn_header_is_inside_the_turn() -> None:
+    """Plan §3: the header lives in the assistant block, not beside it.
+
+    A header rendered outside the turn is what ``#live-task-card`` was —
+    one status surface per PAGE instead of one per turn, which is why it
+    needed its own state machine, its own clock and its own idea of when a
+    turn was over.
+    """
+    view = (
+        UI / "static" / "js" / "modules" / "turn_view.js"
+    ).read_text(encoding="utf-8")
+    plan = view.split("function slotPlan(", 1)[1].split("function create(", 1)[0]
+    assert "kind: 'header'" in plan, "the renderer plans no header slot"
+    assert plan.index("kind: 'header'") < plan.index("kind: 'workbench'"), (
+        "the header is not the first slot"
+    )
+    assert "'header'" in view.split("function adopt(", 1)[1][:1200], (
+        "the renderer cannot adopt a header it did not create, so history "
+        "hydration would mint a second one"
+    )
+
+    chat = _chat_js()
+    assert "function _buildTurnHeader(" in chat
+    assert "function _paintTurnHeader(" in chat
+    assert "KazmaTurnPresentation" in chat, (
+        "chat.js derives the header itself instead of asking the one model"
+    )
+    assert "modules/turn_presentation.js" in _chat_html(), (
+        "the presentation model is not loaded by the chat page"
+    )

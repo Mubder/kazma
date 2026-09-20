@@ -508,6 +508,12 @@
     return mergeParts([], incoming);
   }
 
+  /** Wall clock, in one place so a test can pin it. */
+  function nowMs() {
+    if (typeof root.__kazmaNowMs === 'function') return root.__kazmaNowMs();
+    return Date.now();
+  }
+
   function empty(turnId) {
     return {
       turnId: String(turnId || ''),
@@ -519,6 +525,14 @@
       // UNIFIED_TURN_BLOCK.md §6 forbids comparing them.
       rev: 0,
       schema: 0,
+      // Elapsed time as the SERVER last reported it, and the local instant
+      // that report arrived. The header may tick a display forward from
+      // `elapsedAtMs`; it may not treat the result as a fact about the
+      // turn, and it never restarts the clock on reconnect (plan §3).
+      // Deriving elapsed from a client clock is how the live task card
+      // printed "Done 0s" while the graph was still working.
+      elapsedS: 0,
+      elapsedAtMs: 0,
       seen: {},
       status: 'streaming',
       model: '',
@@ -617,6 +631,8 @@
       seq: doc.seq || 0,
       rev: Number(doc.rev || 0),
       schema: Number(doc.schema || 0),
+      elapsedS: Number(doc.elapsedS || 0),
+      elapsedAtMs: Number(doc.elapsedAtMs || 0),
       seen: {},
       status: doc.status || 'streaming',
       model: doc.model || '',
@@ -682,7 +698,23 @@
       next.status = 'streaming';
       return next;
     }
+    if (type === 'turn_heartbeat') {
+      // The one frame that carries a server-measured elapsed. Monotone:
+      // a replayed older heartbeat must not walk the clock backwards.
+      var hb = Number(ev.elapsed_s);
+      if (isFinite(hb) && hb >= next.elapsedS) {
+        next.elapsedS = hb;
+        next.elapsedAtMs = nowMs();
+      }
+      return next;
+    }
     if (type === 'done' || type === 'turn_complete') {
+      var doneMs = Number(ev.duration_ms);
+      if (isFinite(doneMs) && doneMs > 0) {
+        var doneS = doneMs / 1000;
+        if (doneS >= next.elapsedS) next.elapsedS = doneS;
+        next.elapsedAtMs = nowMs();
+      }
       var finalText = String(ev.content || next.stream || '');
       next.parts = mergeParts(next.parts, partsFromStream(next.stream, finalText));
       next.stream = finalText || next.stream;
@@ -833,6 +865,7 @@
     partsFromStream: partsFromStream,
     splitStreamAndFinal: splitStreamAndFinal,
     empty: empty,
+    nowMs: nowMs,
     applyEvent: applyEvent,
     fromMessage: fromMessage,
     hydrateMessage: hydrateMessage,
