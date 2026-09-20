@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -167,6 +168,151 @@ def _hitl_persist_parts(
             "payload": payload,
         })
     return parts
+
+
+#: Minimum wall seconds between two answer-text checkpoints.
+#: Text is the high-frequency stream; a write per token would be one SQLite
+#: transaction per token. Activity does NOT go through this throttle.
+DURABLE_TEXT_INTERVAL_S = float(
+    os.environ.get("KAZMA_TURN_DURABLE_INTERVAL_S", "2.0") or 2.0
+)
+
+#: ...or this many new characters, whichever comes first. A fast answer
+#: checkpoints on volume; a slow one checkpoints on time.
+DURABLE_TEXT_CHARS = int(
+    os.environ.get("KAZMA_TURN_DURABLE_CHARS", "600") or 600
+)
+
+
+class DurablePresentation:
+    """Incremental durable presentation state for one streaming turn.
+
+    ``docs/plans/UNIFIED_TURN_BLOCK.md`` §8 and the Phase 0 report §5.2: the
+    pump had **no write inside the token loop**. Between the first token and
+    the pause or terminal write, the only copy of the turn's presentation
+    state was the in-process journal (``delivery.py``: "process-local memory
+    only") and the LangGraph checkpoint, which holds messages — not emitted
+    reasoning, not tool activity, not partial answer text. A restart mid-turn
+    lost all three, and tool activity was never persisted at all: the
+    terminal write builds parts from text and the HITL payload only, so a
+    finished turn's transcript had gate rows and nothing else.
+
+    Two different guarantees, deliberately named apart:
+
+    **Activity is persist-then-publish.** A tool part is committed BEFORE its
+    frame is emitted, so anything the client was told about a tool is
+    recoverable. Tool events are a handful per turn, so the cost is one
+    SQLite transaction each.
+
+    **Answer text is checkpointed.** Committing before each token would be a
+    transaction per token. Text is written when
+    :data:`DURABLE_TEXT_CHARS` new characters or
+    :data:`DURABLE_TEXT_INTERVAL_S` seconds have passed, whichever first.
+    Tokens published since the last checkpoint are **not durable**, and the
+    plan is explicit that the strong guarantee must not be claimed where
+    persistence is only periodic. It is not claimed. The bound is the
+    checkpoint interval, it is configurable, and it is measured by
+    ``tests/test_turn_durable_presentation.py``.
+
+    Writes go through the same ``reply_sink`` upsert as every other turn
+    write — one durable owner, keyed by the same ``reply_turn_id`` — so a
+    checkpoint and the terminal write converge on one row rather than
+    racing. Never raises: a persistence failure is reported and the turn
+    continues, because dropping the answer to protect a checkpoint would
+    trade a recoverable gap for a certain loss.
+    """
+
+    def __init__(
+        self, session_id: str, reply_turn_id: str, thread_id: str = ""
+    ) -> None:
+        self.session_id = str(session_id or "")
+        self.reply_turn_id = str(reply_turn_id or "")
+        self.thread_id = str(thread_id or "")
+        self._parts: list[dict[str, Any]] = []
+        # Seeded with "now", not 0.0. Against a monotonic clock, 0.0 means
+        # "infinitely long ago", so the very first token of every turn
+        # tripped the time trigger and the interval bounded nothing.
+        self._last_at = time.monotonic()
+        self._last_len = 0
+        #: Diagnostics for the write-amplification measurement.
+        self.writes = 0
+        self.failures = 0
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.session_id and self.reply_turn_id)
+
+    def note(self, part: dict[str, Any]) -> None:
+        """Queue one presentation part for the next commit."""
+        if isinstance(part, dict) and part.get("type"):
+            self._parts.append(part)
+
+    def text_is_due(self, text: str, now: float) -> bool:
+        if not self.enabled:
+            return False
+        if len(text) - self._last_len >= DURABLE_TEXT_CHARS:
+            return True
+        return bool(text) and (now - self._last_at) >= DURABLE_TEXT_INTERVAL_S
+
+    async def commit(self, text: str = "", *, force: bool = False) -> bool:
+        """Write queued parts (and optionally *text*) durably.
+
+        Returns True when something was written. Off the event loop: the
+        sink is synchronous SQLite and a token stream must not stall on it.
+        """
+        if not self.enabled:
+            return False
+        now = time.monotonic()
+        wants_text = force or self.text_is_due(text, now)
+        if not self._parts and not wants_text:
+            return False
+        parts = list(self._parts)
+        self._parts = []
+        body = str(text or "")
+        if body and wants_text:
+            parts.append({"type": "text", "text": body})
+        if not parts:
+            return False
+        try:
+            text_out = body if wants_text else ""
+            await asyncio.to_thread(
+                persist_reply,
+                self.session_id,
+                self.reply_turn_id,
+                text_out,
+                # The turn is still running. `open_turn` is what marks the
+                # row recoverable-but-unfinished, and it is how
+                # `_checkpoint_backfill_unanswered` recognises a turn a
+                # restart interrupted.
+                interrupted=True,
+                # `upsert_reply` refuses to CREATE a row with no text and no
+                # `pending` — so the very first checkpoint of a turn, which
+                # is usually a tool row before any token has arrived, was
+                # silently dropped. `pending` says exactly what is true
+                # here (a bubble with activity and no answer yet) and is
+                # retired by the first text that lands.
+                pending=not text_out.strip(),
+                thread_id=self.thread_id,
+                parts=parts,
+            )
+            self.writes += 1
+            if wants_text:
+                self._last_at = now
+                self._last_len = len(body)
+            return True
+        except Exception:
+            self.failures += 1
+            logger.warning(
+                "[SSE] durable presentation checkpoint failed thread=%s turn=%s",
+                self.thread_id[:12],
+                self.reply_turn_id[:12],
+                exc_info=True,
+            )
+            # Put the parts back: the next checkpoint or the terminal write
+            # carries them. Dropping them here would lose exactly the
+            # activity this class exists to keep.
+            self._parts = parts + self._parts
+            return False
 
 
 def stamp_hitl_part_state(
@@ -373,6 +519,11 @@ async def _stream_langgraph_events(
     interrupted = False
     thread_id = tid or ""
     _snapshot_info: dict[str, Any] | None = None  # last snapshot_id/iteration from graph state
+    # Incremental durable presentation state (plan §8). Before this the pump
+    # had no write inside the token loop, so a restart mid-turn lost the
+    # partial answer, every tool row and every reasoning note — and tool
+    # rows were never persisted at all, at any point in the turn.
+    _durable = DurablePresentation(session_id, reply_turn_id, thread_id)
 
     # ── Turn Delivery V2: journaled emit ──────────────────────────────
     # Every client-visible frame of this turn is appended to the per-thread
@@ -484,21 +635,114 @@ async def _stream_langgraph_events(
                 # "is it hung?" blind spot after an approve (2026-09-03).
                 # Journaled heartbeats prove liveness to every attached
                 # surface (broker fan-out), not just this HTTP body.
-                while not _resume_task.done():
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.shield(_resume_task), timeout=8.0
-                        )
-                        break
-                    except TimeoutError:
-                        yield ": keepalive\n\n"
-                        yield await emit_j("turn_heartbeat", {
-                            "phase": "resuming",
-                            "current": "",
-                            "detail": "",
-                            "step": 0,
-                            "elapsed_s": round(time.monotonic() - turn_start, 1),
-                        })
+                #
+                # ── Live content on the resume leg ─────────────────────
+                # ainvoke produces no astream_events, so this branch never
+                # registered a delta queue — and EVERYTHING the approved
+                # work does happens here. Measured on the four-gate
+                # scenario: all four tools ran on resume legs, all eight
+                # activity events were emitted, and every one was dropped
+                # because no queue was bound to the thread. The operator
+                # saw one token frame per leg, backfilled at the end, and
+                # no tool rows at all.
+                #
+                # Binding the same queue the streaming branch uses makes
+                # the injected events (llm_stream.emit_token_delta /
+                # emit_tool_activity) reach the journal. Only the three
+                # kinds that can appear here are mapped; this is not a
+                # second copy of the astream event loop and must not grow
+                # into one.
+                from kazma_core.llm_stream import (
+                    register_delta_queue as _reg_q,
+                )
+                from kazma_core.llm_stream import (
+                    unregister_delta_queue as _unreg_q,
+                )
+
+                _resume_q: asyncio.Queue = asyncio.Queue(maxsize=2048)
+                _reg_q(thread_id, _resume_q)
+                _last_hb = time.monotonic()
+                try:
+                    while True:
+                        drained: list[Any] = []
+                        while True:
+                            try:
+                                drained.append(_resume_q.get_nowait())
+                            except asyncio.QueueEmpty:
+                                break
+                        for _ev in drained:
+                            if not isinstance(_ev, dict):
+                                continue
+                            _k = str(_ev.get("event") or "")
+                            _d = _ev.get("data") or {}
+                            if _k == "on_chat_model_stream":
+                                _chunk = _d.get("chunk") or {}
+                                _txt = (
+                                    _chunk.get("content")
+                                    if isinstance(_chunk, dict)
+                                    else getattr(_chunk, "content", "")
+                                )
+                                if _txt:
+                                    content_acc += str(_txt)
+                                    if _durable.text_is_due(
+                                        content_acc, time.monotonic()
+                                    ):
+                                        await _durable.commit(content_acc)
+                                    yield await emit_j(
+                                        "token", {"content": str(_txt)}
+                                    )
+                            elif _k == "on_tool_start":
+                                _durable.note({
+                                    "type": "tool",
+                                    "name": str(_ev.get("name") or "tool"),
+                                    "call_id": str(_ev.get("run_id") or ""),
+                                    "result": hb_arg_summary(_d.get("input")) or "",
+                                    "state": "running",
+                                })
+                                await _durable.commit(content_acc)
+                                yield await emit_j("tool_call", {
+                                    "tool_name": str(_ev.get("name") or "tool"),
+                                    "tool_call_id": str(_ev.get("run_id") or ""),
+                                    "inputs": json.dumps(
+                                        _d.get("input") or {}, ensure_ascii=False
+                                    )[:2000],
+                                })
+                            elif _k == "on_tool_end":
+                                _out = str(_d.get("output") or "")[:5000]
+                                _durable.note({
+                                    "type": "tool",
+                                    "name": str(_ev.get("name") or "tool"),
+                                    "call_id": str(_ev.get("run_id") or ""),
+                                    "result": _out,
+                                    "state": "failed" if _d.get("error") else "done",
+                                })
+                                await _durable.commit(content_acc)
+                                yield await emit_j("tool_result", {
+                                    "tool_name": str(_ev.get("name") or "tool"),
+                                    "tool_call_id": str(_ev.get("run_id") or ""),
+                                    "result": _out,
+                                })
+                        if _resume_task.done():
+                            break
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(_resume_task), timeout=0.25
+                            )
+                        except TimeoutError:
+                            pass
+                        _now = time.monotonic()
+                        if _now - _last_hb >= 8.0:
+                            _last_hb = _now
+                            yield ": keepalive\n\n"
+                            yield await emit_j("turn_heartbeat", {
+                                "phase": "resuming",
+                                "current": "",
+                                "detail": "",
+                                "step": 0,
+                                "elapsed_s": round(_now - turn_start, 1),
+                            })
+                finally:
+                    _unreg_q(thread_id)
                 await asyncio.shield(_resume_task)
             else:
                 # Wrap astream_events with a keepalive generator so long LLM
@@ -693,6 +937,16 @@ async def _stream_langgraph_events(
                                             content_acc += sep
                                             yield await emit_j("token", {"content": sep})
                                     content_acc += token_text
+                                    # Checkpointed, not persist-then-publish:
+                                    # a commit per token would be a
+                                    # transaction per token. Tokens published
+                                    # since the last checkpoint are NOT
+                                    # durable, and the plan forbids claiming
+                                    # otherwise where persistence is periodic.
+                                    if _durable.text_is_due(
+                                        content_acc, time.monotonic()
+                                    ):
+                                        await _durable.commit(content_acc)
                                     yield await emit_j("token", {"content": token_text})
 
                         # ── on_chat_model_start: a new LLM invocation ────────
@@ -726,6 +980,18 @@ async def _stream_langgraph_events(
                             if isinstance(inputs, dict) and "input" in inputs:
                                 inputs = inputs["input"]
                             _hb["detail"] = hb_arg_summary(inputs)
+                            # Persist BEFORE publishing. A tool row the
+                            # client was told about must be recoverable;
+                            # tool events are a handful per turn, so the
+                            # cost is one transaction each (plan §8).
+                            _durable.note({
+                                "type": "tool",
+                                "name": str(name),
+                                "call_id": str(event.get("run_id") or ""),
+                                "result": hb_arg_summary(inputs) or "",
+                                "state": "running",
+                            })
+                            await _durable.commit(content_acc)
                             yield await emit_j(
                                 "tool_call",
                                 {
@@ -756,6 +1022,14 @@ async def _stream_langgraph_events(
                                 output = output.content
                             elif isinstance(output, dict):
                                 output = output.get("content", json.dumps(output, ensure_ascii=False))
+                            _durable.note({
+                                "type": "tool",
+                                "name": str(name),
+                                "call_id": str(event.get("run_id") or ""),
+                                "result": str(output)[:5000],
+                                "state": "done",
+                            })
+                            await _durable.commit(content_acc)
                             yield await emit_j(
                                 "tool_result",
                                 {
@@ -1133,6 +1407,12 @@ async def _stream_langgraph_events(
                 "session_tokens": sess_tokens,
                 "session_cost": round(float(sess_cost or 0.0), 6),
             }
+            # Anything still queued from the last activity boundary goes
+            # first. The terminal write below builds parts from text and
+            # the HITL payload only, so a tool row that never made it to a
+            # checkpoint would be dropped on the last step of the turn it
+            # survived all of.
+            await _durable.commit(content_acc, force=True)
             # ── Durable write, BEFORE the client is told the turn is over ──
             # Ordering matters: a user who refreshes the instant the answer
             # paints must find it in the store. Emitting `done` first left a

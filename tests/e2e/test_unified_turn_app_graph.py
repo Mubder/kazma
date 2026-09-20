@@ -196,6 +196,17 @@ def test_persisted_row_carries_the_protocol_contract(harness: Harness) -> None:
 
     rows = row.get("activity") or []
     assert rows, "the turn persisted no activity at all"
+    tool_rows = [r for r in rows if r.get("kind") == "tool"]
+    assert tool_rows, (
+        "the turn ran tools and persisted none of them. Until Phase 1c the "
+        "terminal write built parts from text and the HITL payload only, so "
+        "'thoughts remain available after the final answer' (requirement 3) "
+        "had nothing behind it for tool activity."
+    )
+    assert all(str(r.get("id") or "").startswith("tool#") for r in tool_rows), (
+        "a persisted tool row is not keyed by its call id, so a reload "
+        "would re-key it and the renderer would rebuild the row"
+    )
     assert all(str(r.get("id") or "").strip() for r in rows), (
         "an activity row has no stable id, so the renderer cannot keep it "
         "expanded across an update (plan §3)"

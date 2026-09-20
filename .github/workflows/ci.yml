@@ -199,6 +199,11 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+      # The projector is one contract in two languages; this job runs both
+      # halves against the same fixtures, so it needs node as well.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
       - name: Install app
         run: pip install -e ".[test,web]"
       - name: Four sequential gates through the real app graph
@@ -209,6 +214,16 @@ jobs:
         run: python -m pytest tests/test_unified_turn_fixtures.py -q --timeout=120
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Turn identity, revision and durable presentation
+        run: |
+          python -m pytest -q --timeout=180             tests/test_turn_document.py             tests/test_turn_durable_presentation.py
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Projector agreement under bare node
+        run: |
+          node tests/js/test_turn_document.js
+          node tests/js/test_turn_view.js
+          node tests/js/test_unified_turn_fixtures.js
       - name: Unified turn block reproductions (xfail-strict)
         # Red on purpose until Phases 2 and 3 land. strict=True means an
         # unexpected pass FAILS, so a behavior cannot ship without the

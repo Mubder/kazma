@@ -389,13 +389,24 @@ def test_sse_producer_stamps_a_tool_call_id() -> None:
         Path(__file__).resolve().parents[1]
         / "kazma-ui" / "kazma_ui" / "sse_chat" / "_streaming.py"
     ).read_text(encoding="utf-8")
-    call = src.split('"tool_call",', 1)[1].split("yield await emit_j", 1)[0]
-    result = src.split('"tool_result",', 1)[1].split("yield await emit_j", 1)[0]
-    for name, block in (("tool_call", call), ("tool_result", result)):
-        assert '"tool_call_id"' in block, f"{name} frame carries no call id"
-        assert 'event.get("run_id")' in block, (
-            f"{name} invents an id instead of using the graph's run id"
+    # There are TWO producers: the astream_events branch and the resume
+    # leg, which binds its own delta queue because ainvoke emits no graph
+    # events. Both must stamp the id, or activity is keyed by the graph's
+    # run id on one path and by nothing on the other.
+    for frame in ('"tool_call"', '"tool_result"'):
+        blocks = [
+            chunk.split("})", 1)[0]
+            for chunk in src.split(frame + ",")[1:]
+        ]
+        assert len(blocks) >= 2, (
+            f"expected a {frame} producer on both the streaming and the "
+            f"resume path, found {len(blocks)}"
         )
+        for block in blocks:
+            assert '"tool_call_id"' in block, f"{frame} carries no call id"
+            assert 'get("run_id")' in block, (
+                f"{frame} invents an id instead of using the graph's run id"
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════

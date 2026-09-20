@@ -836,6 +836,26 @@ async def tool_worker_node(
                 "[ToolWorker] exec name=%s tier=%s args=%s",
                 tc["name"], _tier, _summarize_args_for_hitl(_args),
             )
+            # Workbench activity. LangGraph emits no on_tool_* for this
+            # worker (it calls the registry directly, not a LangChain tool
+            # runnable), so both transports had no producer for tool rows —
+            # a finished turn's stored activity carried gate rows and
+            # nothing else. emit_tool_activity injects the SAME event both
+            # mouths already consume; see llm_stream.emit_tool_activity.
+            # Never raises, and never gates execution.
+            _activity = None
+            try:
+                from kazma_core.llm_stream import emit_tool_activity as _activity
+
+                _activity(
+                    "start",
+                    tc["name"],
+                    call_id=str(tc.get("id") or ""),
+                    inputs=_args,
+                    thread_id=str(state.get("thread_id") or ""),
+                )
+            except Exception:
+                _activity = None
             try:
                 if _tool_timeout and _tool_timeout > 0:
                     result = await asyncio.wait_for(
@@ -858,6 +878,17 @@ async def tool_worker_node(
                     duration_ms=duration_ms,
                     success=False,
                 )
+                if _activity is not None:
+                    try:
+                        _activity(
+                            "end",
+                            tc["name"],
+                            call_id=str(tc.get("id") or ""),
+                            error=f"timed out after {_tool_timeout:.0f}s",
+                            thread_id=str(state.get("thread_id") or ""),
+                        )
+                    except Exception:
+                        pass
                 return ToolResult(
                     tool_call_id=tc["id"],
                     name=tc["name"],
@@ -886,6 +917,23 @@ async def tool_worker_node(
                 duration_ms,
                 result.get("is_error", False),
             )
+
+            if _activity is not None:
+                try:
+                    _activity(
+                        "end",
+                        tc["name"],
+                        call_id=str(tc.get("id") or ""),
+                        result=str(result.get("content") or "")[:2000],
+                        error=(
+                            str(result.get("content") or "error")[:500]
+                            if result.get("is_error")
+                            else ""
+                        ),
+                        thread_id=str(state.get("thread_id") or ""),
+                    )
+                except Exception:
+                    pass
 
             # ── Truncation middleware ──────────────────────────────────
             raw_content = result.get("content", "")
