@@ -819,3 +819,65 @@ def test_no_new_cwd_relative_data_paths():
         "lazily inside a function rather than bound at import.\n  "
         + "\n  ".join(offenders)
     )
+
+
+#: Extensions whose files are genuinely binary and must not be scanned.
+_BINARY_EXT = {
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".docx", ".xlsx",
+    ".ttf", ".otf", ".woff", ".woff2", ".zip", ".gz", ".db", ".sqlite",
+    ".sqlite3", ".pyc", ".so", ".dll", ".exe", ".webp", ".mp4", ".wasm",
+}
+
+
+def test_no_literal_nul_bytes_in_source():
+    """A source file must not contain a raw NUL byte.
+
+    ``turn_preferences.js`` used U+0000 as a composite-key separator — a
+    reasonable choice, since it cannot occur in a turn id — but wrote it as a
+    LITERAL NUL in the file rather than as an escape. Git classifies any file
+    with a NUL in its first 8000 bytes as binary, so that module shipped with
+    no diffs, no line-ending normalisation and no merge support, and nobody
+    noticed until a ``git ls-files --eol`` sweep on 2026-09-21 turned up one
+    ``i/-text`` entry that was not an image or a font.
+
+    The escape compiles to exactly the same string, so this costs nothing at
+    runtime and keeps the file reviewable.
+
+    Scans the whole file, not just the header: git's own detection stops at
+    8000 bytes, so a NUL deeper in a large module would be invisible to it
+    while still corrupting a copy/paste or an editor round-trip.
+    """
+    import subprocess
+
+    out = subprocess.run(
+        ["git", "ls-files", "-z"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=True,
+    ).stdout
+
+    offenders: list[str] = []
+    for raw in out.split(b"\x00"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8", "surrogateescape")
+        path = REPO_ROOT / rel
+        if path.suffix.lower() in _BINARY_EXT or not path.is_file():
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        count = data.count(b"\x00")
+        if count:
+            offenders.append(f"{rel} ({count} NUL byte(s))")
+
+    assert not offenders, (
+        "Literal NUL byte in a source file. Git treats the file as binary: "
+        "no diff, no line-ending normalisation, no merge — the change is "
+        "invisible in review.\n"
+        "Fix: write the character as an escape (JavaScript and Python both "
+        "accept a \\u0000 / \\x00 escape, which produces the identical "
+        "string at runtime, so stored data stays compatible).\n  "
+        + "\n  ".join(offenders)
+    )
