@@ -1,5 +1,69 @@
 # CHANGELOG
 
+## A cache that lied about disk, and a registry that took writes (2026-09-21)
+
+Both found by running Kazma against itself and checking the replay against the
+gate registry rather than against the transcript.
+
+**`file_read` served pre-write content.** The per-turn dedup cache keyed on
+`(path, offset, limit)` and lived until the turn ended, validating nothing, so
+*read → write → read* inside one turn returned the bytes from before the write
+— under a banner stating the content was identical to what you already had. A
+probe hit it exactly: `file_apply_patch` landed three lines and the verifying
+`file_read` showed the two-line original. Read-after-write is how an agent
+checks its own work, so the cache failed at the one moment it was load-bearing;
+`file_delete` was worse, serving the contents of a file that no longer existed.
+Entries now carry the file's `(mtime_ns, size)` and are revalidated on every
+hit. An invalidate hook on the five mutating tools was rejected: it is only as
+good as the next tool that remembers to call it, and it cannot see a
+`shell_exec` redirect, an MCP filesystem server, a sibling swarm worker or the
+operator's own editor. The stamp is a property of the bytes, so it covers
+writers that do not exist yet. It is taken *before* the read, deliberately —
+the other order pairs stale content with a fresh stamp and validates forever.
+
+**Kazma's own databases were writable by file tools.** `path_policy` is an
+allowlist with no concept of a control-plane store, so `hitl_gates.db` was safe
+only by position: the default sandbox is `data_dir()/workspace`, which leaves
+`data_dir()/hitl_gates.db` a sibling and therefore outside it. Measured with
+the data dir inside the active workspace, `hitl_gates.db`, `settings.db`,
+`llm_ledger.db` and `checkpoints.db` were all writable; with
+`allow_absolute_paths()` on, the real registry was writable with no workspace
+bound at all. This install was not in that state — the active workspace is
+`kazma-core` — but the `Default Workspace` row already in the database is the
+repo root, so it was one Switch Repo away.
+
+That matters because `hitl_gates.db` is the decision-truth store: flip a row
+from `pending` to `approved` and the resume chokepoint believes a human
+authorised a danger-tier action. `file_write` is itself danger-tier, so this
+was escalation rather than open access — but "Allow tool (session)" grants
+`file_write` for ~30 minutes, which is long enough to convert one scoped click
+into forged approvals for everything after it. `rbac.db` decides who may do
+what, `audit.db` is the evidence trail, `vault.db` holds secrets.
+
+Rule 0 in `check_path_access` now denies these writes *before* the allow
+ladder, so no workspace, durable root, session grant or escape hatch reaches
+them — anything checked after "under active workspace → allow" is decoration.
+One chokepoint was enough: `tool_scope._workspace_scope_error`, used by
+`file_append`, `file_delete`, `file_list`, `file_search` and `send_file`, is a
+fail-closed wrapper around the same function. Matching is by suffix under
+`data_dir()` rather than a list of filenames, so a store added later is covered
+the day it is added; WAL, SHM and journal sidecars are included, because
+appending to `hitl_gates.db-wal` decides what the next reader sees without
+opening the main file. `data_dir()/workspace` is excluded so the sandbox and
+the operator's own `.db` files are untouched, and reads stay allowed so
+self-audit keeps working.
+
+Limits are in `KNOWN_GAPS.md`: the guard does not cover `shell_exec`, and it is
+SQLite-only by construction.
+
+**Two claims from the same replay did not survive checking.** The report that
+`hitl_gates.db` "refuses inspection as an internal DB" described a guard that
+did not exist — it was `file_read` failing to decode a binary SQLite file, read
+as a security boundary. And the log file is exactly where `paths.log_file()`
+says (`.kazma/kazma.log`); it was unreachable only because `.kazma/` sits
+outside the active `kazma-core` workspace, which is the policy working. Neither
+is fixed, because neither is broken.
+
 ## Security — one tenant variable, two closed exposure defaults, real MCP confinement (2026-09-20)
 
 Audit follow-through. Four of the incoming report's claims did not survive
