@@ -113,12 +113,31 @@ tree. Assume the same class exists elsewhere.
 
   The vault's fallback direction is right and should not be widened.
 
-  **Call sites patched 2026-09-17 (the class is not gone):** swarm
-  dispatch installs tenant before `get_client`; HITL and
-  `tenant_context` setters mirror each other; connector-health, cloud
-  backup and X config share `retrieve_with_tenant_ladder`. The tripwire
-  inside `retrieve` is still reverted. New background readers must use
-  the ladder or `tenant_scope("default")`.
+  **CLOSED at the variable, 2026-09-20.** There is now exactly ONE tenant
+  ContextVar: `kazma_core.safety.hitl` re-exports
+  `kazma_core.tenant_context._current_tenant_id` instead of defining its own,
+  and the mirror functions are gone. Mirroring was never an invariant — it was
+  two writes that happened to agree, and a direct `.set` on either module
+  desynced them in silence. One object cannot drift from itself. The
+  None-vs-`"default"` contract both sides need is preserved by flooring on
+  READ, in `hitl.get_current_tenant_id`, never on store: `retrieve_scoped`
+  needs `None` to tell an absent tenant from an explicit one. Locked by
+  `tests/test_tenant_context_isolation.py::test_the_tenant_context_var_is_one_object`,
+  the old "these must be distinct" assertion turned around — it had itself
+  predicted this change ("if these ever become the same object this test is
+  obsolete").
+
+  The last two ambient readers are fixed too: `secret_vault.vault_retrieve`
+  and the Settings "is this configured?" probe both called
+  `vault.retrieve(name)`, which sees only global rows without a bound tenant.
+  The Settings one was the worse of the pair — it rendered a stored provider
+  as NOT configured, the single most confusing way this product can lie to
+  its operator.
+
+  **Still true:** new background readers must use `retrieve_scoped` or
+  `tenant_scope("default")`. The tripwire inside `retrieve` remains reverted;
+  unifying the variable removes the desync half of the class, not the
+  forgot-to-bind-a-tenant half.
 
   **Attempted and REVERTED, 2026-09-17.** The fix tried was a runtime
   tripwire: have `retrieve` log, once per name, when it returns `None` for a
@@ -149,6 +168,16 @@ tree. Assume the same class exists elsewhere.
   so whatever the trigger is, it is not in that file alone.
 
   → `tests/test_cron_tenant_context.py`, `tests/test_vault_tenant_scope_read.py`.
+- **~~`/api/telemetry` open with no route behind it~~ (closed 2026-09-20).**
+  A fossil in `ALWAYS_OPEN_PATHS` from a mock endpoint removed years ago. It
+  never opened the two real telemetry routes: `is_always_open` matches that
+  set EXACTLY and only `ALWAYS_OPEN_PREFIXES` by prefix, so `/stream` and
+  `/snapshot` were always caught by the default-deny on `/api/`. That subtlety
+  is why it survived — it looked dangerous and was inert, so a 2026-09-20
+  audit filed it as an unauthenticated host-inventory leak and a reviewer had
+  to read the matcher to disprove it. An entry that opens a path with no route
+  is a pre-opened door for whoever adds that route next.
+  → `tests/test_auth_middleware.py::test_telemetry_subpaths_are_gated`.
 - **`kazma_core/tools/__init__.py` shadows its own submodules.** It exports a
   function named `read_url`, so `import kazma_core.tools.read_url as ru` binds
   the *function*, not the module (Python resolves `import a.b as c` by

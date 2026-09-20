@@ -4,13 +4,26 @@ Plan: ``docs/plans/HITL_VIEW_MODEL.md``. Refresh mid-pause (live Approve,
 no Alpine twin) and refresh after settle (Approved, no buttons). These
 are a CI gate in the Playwright smoke job (HITL_VIEW_MODEL F).
 
-Incidents 1 and 4 were unclaimed here because F0 found that ``create_app()``
-does not pause from preloaded ``tool_calls_pending``. That finding stands,
-but the conclusion drawn from it does not: the app graph pauses when the
-supervisor *produces* the tool call. ``tests/e2e/test_unified_turn_app_graph.py``
-drives four real pauses and four real ``POST /api/approve`` resumes through
-it. The browser half of 1 and 4 is owned by
-``docs/plans/UNIFIED_TURN_BLOCK.md`` Phase 3 and is not claimed yet.
+Incidents 1 and 4 are **not** in this file, and are **not** unclaimed.
+
+They were unclaimed *here* because F0 found that ``create_app()`` does not
+pause from preloaded ``tool_calls_pending``. That finding stands, but the
+conclusion drawn from it does not: the app graph pauses when the supervisor
+*produces* the tool call. ``tests/e2e/test_unified_turn_app_graph.py`` drives
+four real pauses and four real ``POST /api/approve`` resumes through it, and
+the browser half is claimed in ``tests/e2e/test_unified_turn_browser.py``:
+
+    incident 1 -> test_sequential_allow_tool_in_one_bubble
+    incident 4 -> test_the_row_settles_before_any_poll
+
+Both are real clicks on real buttons that POST ``/api/approve/{thread_id}``;
+nothing is mocked but the model, at the provider boundary.
+
+This paragraph used to end "is not claimed yet" and was left that way after
+the browser tests landed. A 2026-09-20 audit read it, checked this file, found
+only incidents 2 and 3, and reported 1 and 4 as an open coverage gap — the
+cost of a stale cross-reference is somebody re-deriving a conclusion you
+already disproved. If the mapping above ever moves, move this with it.
 
 Does not start the operator's live server. In-process uvicorn, isolated
 ``KAZMA_DATA_DIR``. ``importorskip`` only when Playwright is absent,
