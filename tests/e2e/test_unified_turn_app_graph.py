@@ -45,8 +45,9 @@ from tests.e2e._unified_turn_harness import (  # noqa: E402
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def harness() -> Iterator[Harness]:
+    """One app per test, not per module — see ``tests/e2e/conftest.py``."""
     with unified_turn_server() as h:
         yield h
 
@@ -128,10 +129,26 @@ def test_denial_does_not_end_the_turn(harness: Harness) -> None:
 def test_approved_tools_actually_execute(harness: Harness) -> None:
     """Approval is not a UI state change.
 
-    ``file_write`` on the approved path really writes, inside the isolated
-    data directory. Without this the harness could pass while the resume
+    An approved ``file_write`` really writes, inside the isolated data
+    directory. Without this the harness could pass while the resume
     stopped short of execution, and "Approved" would mean nothing — which
     is the decision/execution conflation plan §3 separates.
+
+    This is also the only test that notices whether the harness has a
+    workspace at all. ``kazma_core/tools/file_write.py`` writes "within
+    the agent workspace" and reports a refusal by RETURNING
+    ``"Error: ..."`` rather than raising — so a refused write is logged
+    by the worker as ``error=False`` and the turn sails on having
+    written nothing.
+
+    (2026-09-20: it did exactly that for every approved write in this
+    harness. ``resolve_active_root()`` resolved to the operator's own
+    checkout, because the WorkspaceStore bootstraps the working
+    directory when it has no rows and that outranks ``KAZMA_WORKSPACE``.
+    The scripted paths were outside it and were all refused. This test
+    passed anyway, on a file an earlier test had left in the
+    module-scoped harness's shared directory. Not the approve guard —
+    it failed identically with ``KAZMA_GATE_REGISTRY=0``.)
     """
     script = four_gate_script(harness.data_dir)
     target = script.steps[0].args["path"]
@@ -142,8 +159,18 @@ def test_approved_tools_actually_execute(harness: Harness) -> None:
         leg_timeout=120.0,
     )
     assert run.finished
+
     assert os.path.isfile(target), (
-        f"the approved file_write never ran: {target} does not exist"
+        f"the approved file_write never ran: {target} does not exist. "
+        "What IS under the isolated tree: "
+        + repr(sorted(
+            os.path.relpath(os.path.join(r, f), harness.data_dir)
+            for r, _d, fs in os.walk(harness.data_dir) for f in fs
+        )[:40])
+    )
+    assert os.path.getsize(target) > 0, (
+        f"{target} was created empty; the write was announced but the "
+        "content never landed"
     )
 
 

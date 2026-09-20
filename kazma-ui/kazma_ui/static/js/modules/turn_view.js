@@ -600,6 +600,34 @@
           issues.push('gate-missing:' + gk);
         }
       }
+      // ── U02: one of each region, per turn ──────────────────────
+      //
+      // A duplicate is invisible to every other check: the answer is
+      // present, the gate has a row, nothing is missing. It just says
+      // everything twice. Counting is the only way to see it, and the
+      // count is cheap because these are direct children.
+      var UNIQUE = ['turn-header', 'turn-approvals', 'agent-progress', 'message-text'];
+      for (var u = 0; u < UNIQUE.length; u++) {
+        var seen = 0;
+        var kids2 = content.children;
+        for (var k2 = 0; k2 < kids2.length; k2++) {
+          if (kids2[k2].classList && kids2[k2].classList.contains(UNIQUE[u])) seen++;
+        }
+        if (seen > 1) issues.push('duplicate-region:' + UNIQUE[u] + ':' + seen);
+      }
+
+      // A gate row must not ALSO be loose beside the answer. One card in
+      // two places is the "approved twice" screenshot.
+      if (slots['approvals']) {
+        var loose = 0;
+        var kids3 = content.children;
+        for (var k3 = 0; k3 < kids3.length; k3++) {
+          if (kids3[k3].classList
+              && kids3[k3].classList.contains('hitl-approval-card')) loose++;
+        }
+        if (loose) issues.push('gate-outside-group:' + loose);
+      }
+
       if (!issues.length) return;
       report.issues = issues;
       try {

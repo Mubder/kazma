@@ -173,6 +173,46 @@ async def _decide_bridge_gate(thread_id: str, body: dict, approved: bool):
     )
 
 
+async def _gate_not_pending(thread_id: str, gate_id: str) -> str:
+    """The gate's state when the registry says it is NOT awaiting an answer.
+
+    Returns "" to mean "no objection": the registry is off, has never
+    heard of this id, or still has it ``pending``. Only a definite,
+    on-the-record "this gate already has its decision" refuses a resume,
+    because the dashboard, the TUI and the gateway all reach this route
+    with ids the registry may not carry, and none of them should start
+    failing over a lookup miss.
+
+    ``LIVE_STATES`` is ("pending", "claimed", "resuming"): a claimed or
+    resuming gate has already been answered by someone. Only ``pending``
+    is an open question.
+    """
+    if not gate_id:
+        return ""
+    try:
+        from kazma_core.safety.hitl_gates import (
+            gate_for_async,
+            gate_registry_enabled,
+        )
+
+        if not gate_registry_enabled():
+            return ""
+        row = await gate_for_async(gate_id)
+    except Exception:
+        # Fail-open on plumbing, never on a recorded decision: a registry
+        # that cannot be read must not block a human who is waiting.
+        logger.debug("[HITL] gate-state probe failed", exc_info=True)
+        return ""
+    if row is None:
+        return ""
+    if str(getattr(row, "thread_id", "") or "") not in ("", thread_id):
+        # Someone else's gate id on this thread. Refusing by state would
+        # be an accident; refuse by ownership and say so.
+        return "foreign"
+    state = str(getattr(row, "state", "") or "")
+    return "" if state == "pending" else (state or "")
+
+
 def _approve_lock_for(thread_id: str) -> asyncio.Lock:
     import time
     now = time.monotonic()
@@ -736,6 +776,64 @@ def register_misc_routes(self: Any) -> None:
             # (build_resume_command). Semantic interrupts need {tcid: option_id};
             # security needs {approved: bool}. Routed through one helper so a
             # transport cannot drift again (cf. WS bug, incident 2026-08-12).
+            # ── One decision, one gate (plan S7, invariant U11) ────────
+            #
+            # Everything above establishes that this THREAD is paused.
+            # That is not the same question as "is the gate the human
+            # answered still open", and the difference is the whole
+            # defect: after a resume the graph pauses again, so a retry
+            # arriving late finds a pause and decides the NEXT ask.
+            #
+            # Transport loss is not authorization. A client that never
+            # saw its 200 must be told the server's actual view and let
+            # to reconcile, which is what plan S7 asks for in those
+            # words -- not handed a fresh resume.
+            _req_gate = _body_interrupt_id(body)
+            _already = await _gate_not_pending(thread_id, _req_gate)
+            if _already:
+                logger.info(
+                    "[HITL] Refusing approve for gate=%s on thread=%s: "
+                    "registry state=%s (not pending)",
+                    _req_gate, thread_id, _already,
+                )
+                # Storage vocabulary out, client vocabulary in. "claimed"
+                # and "resuming" mean the decision is recorded and the
+                # tool is running -- which is "inflight", the state that
+                # sends chat.js down its converge-and-reattach arm
+                # instead of flashing an error on a row that was approved
+                # correctly. Terminal states keep the error arm, because
+                # an expired or failed gate really does need a resync.
+                _client_state = (
+                    "inflight" if _already in ("claimed", "resuming")
+                    else "settled" if _already != "foreign"
+                    else "foreign"
+                )
+                return _JSONResponse(
+                    _attach_hitl_view(
+                        {
+                            "ok": False,
+                            "status": "expired" if _already != "foreign" else "not_found",
+                            "thread_id": thread_id,
+                            "content": "",
+                            "error": (
+                                "This request was already decided "
+                                f"({_already}); showing the current state."
+                                if _already != "foreign"
+                                else "This approval does not belong to this thread."
+                            ),
+                            "reason": "not_pending",
+                            "running": False,
+                            "hitl_state": _client_state,
+                            "registry_state": _already,
+                            "interrupt_id": _req_gate,
+                        },
+                        thread_id,
+                        _req_gate,
+                        state_hint=_client_state,
+                    ),
+                    status_code=409,
+                )
+
             from kazma_core.safety.commitment.resume import (
                 build_resume_command,
                 read_pending_interrupt,

@@ -50,8 +50,9 @@ from tests.e2e._unified_turn_harness import (  # noqa: E402
 pytestmark = [pytest.mark.e2e, pytest.mark.slow]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def harness() -> Iterator[Harness]:
+    """One app per test, not per module — see ``tests/e2e/conftest.py``."""
     with unified_turn_server() as h:
         yield h
 

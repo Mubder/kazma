@@ -74,13 +74,14 @@ _SHAPE_JS = """() => {
 }"""
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def harness() -> Iterator[Harness]:
+    """One app per test, not per module — see ``tests/e2e/conftest.py``."""
     with unified_turn_server() as h:
         yield h
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def page(harness: Harness):
     from playwright.sync_api import sync_playwright
 
@@ -355,3 +356,173 @@ def test_the_fold_starts_collapsed_and_stays_where_the_reader_puts_it(
     assert _shape(pg)["foldCollapsed"] is True, (
         "repaints reopened a fold the reader closed (U08)"
     )
+
+# ══════════════════════════════════════════════════════════════════════
+# Session switch during updates
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_a_new_session_mid_pause_does_not_inherit_the_open_question(
+    harness: Harness, page
+) -> None:
+    """Acceptance matrix: "No content appears in the wrong session;
+    return restores state."
+
+    The dangerous direction is the approval group: an Approve button left
+    on screen after the switch is a control that answers a question the
+    reader is no longer looking at. The answer text leaking is bad; a
+    live gate leaking is a decision made by accident.
+    """
+    _send(page, PROMPT)
+    _wait_for_pending_row(page)
+    before = _shape(page)
+    assert before["rows"], before
+    first_gate = before["rows"][0]["gate"]
+    assert first_gate
+    # The id to come BACK to. The sidebar's first row is the NEWEST
+    # session, which after the switch is the empty one we left for.
+    origin = page.evaluate(
+        "() => { try { return localStorage.getItem('kazma.chatSessionId'); }"
+        " catch (e) { return null; } }"
+    )
+
+    # Switch away. newSession() is the product's own path, not a reload.
+    page.evaluate("() => window.KazmaChat.newSession()")
+    page.wait_for_function(
+        "() => !document.querySelector('.turn-approvals .hitl-approval-card')",
+        timeout=20000,
+    )
+    # _shape() is {} when there is no assistant bubble at all, which is
+    # the desired state here — so every read is a .get().
+    after = _shape(page)
+    assert not after.get("rows"), (
+        f"the new session inherited the old one's approval rows: {after}"
+    )
+    assert not after.get("looseCards"), (
+        f"an approval card survived the session switch: {after}"
+    )
+    assert first_gate not in page.content(), (
+        "the previous session's gate id is still in the document; a stale "
+        "control can still be clicked"
+    )
+
+    # ...and coming back restores it, from the server rather than memory.
+    if not origin:
+        pytest.skip("the page exposes no session id to return to")
+    item = page.locator('.session-item[data-session-id="' + origin + '"]')
+    if item.count() == 0:
+        pytest.skip("the paused session has no sidebar entry to return through")
+    item.first.click()
+    page.wait_for_function(
+        "() => !!document.querySelector('.turn-approvals .hitl-approval-card')",
+        timeout=60000,
+    )
+    back = _shape(page)
+    assert back["groups"] <= 1, f"returning built a second group: {back}"
+    assert back["rows"], f"returning restored no approval rows: {back}"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Long activity / RTL / mobile
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_the_answer_survives_a_phone_in_rtl(harness: Harness, page) -> None:
+    """Acceptance matrix: "Readable, accessible, responsive; no answer
+    trapped in folds."
+
+    375x812 with ``dir="rtl"`` is the combination that breaks layouts
+    built with left-anchored padding, and RTL is the case a source-level
+    CSS check cannot evaluate at all. Three things must hold: the answer
+    is on screen, the page does not scroll sideways, and the answer is
+    not inside the collapsible region.
+    """
+    page.set_viewport_size({"width": 375, "height": 812})
+    page.evaluate("() => { document.documentElement.setAttribute('dir', 'rtl'); }")
+    _send(page, PROMPT)
+    _wait_for_pending_row(page)
+
+    facts = page.evaluate("""() => {
+  var bs = document.querySelectorAll('.message-assistant');
+  var c = bs.length ? bs[bs.length - 1].querySelector('.message-content') : null;
+  if (!c) return { missing: true };
+  var answer = c.querySelector('.message-text');
+  var fold = c.querySelector('.agent-progress');
+  var r = answer ? answer.getBoundingClientRect() : null;
+  return {
+    missing: false,
+    hasAnswer: !!answer,
+    answerInFold: !!(answer && fold && fold.contains(answer)),
+    answerWidth: r ? r.width : 0,
+    answerRight: r ? r.right : 0,
+    overflow: document.documentElement.scrollWidth
+            - document.documentElement.clientWidth,
+    dir: getComputedStyle(document.documentElement).direction,
+    headerVisible: !!c.querySelector('.turn-header'),
+  };
+}""")
+    assert not facts.get("missing"), "no assistant block rendered at all"
+    assert facts["dir"] == "rtl", f"the RTL switch did not take: {facts}"
+    assert facts["headerVisible"], f"the turn header vanished on mobile: {facts}"
+    assert not facts["answerInFold"], (
+        "the answer is inside the collapsible activity region, so "
+        f"collapsing thoughts hides it: {facts}"
+    )
+    # 2px of tolerance for subpixel rounding; a real overflow is tens of px.
+    assert facts["overflow"] <= 2, (
+        f"the turn block scrolls the page sideways on a phone: {facts}"
+    )
+    if facts["hasAnswer"]:
+        assert facts["answerWidth"] <= 375, (
+            f"the answer is wider than the viewport: {facts}"
+        )
+
+
+def test_a_completed_four_gate_turn_keeps_its_answer_out_of_the_fold(
+    harness: Harness, page
+) -> None:
+    """The long-activity half of the same row.
+
+    Four gates means four tool rows plus their results — the longest
+    activity list this plan produces. The fold must still default closed
+    and the answer must still be outside it, because "readable" for a
+    long turn means the answer is not below a wall of tool output.
+    """
+    _send(page, PROMPT)
+    for _ in range(4):
+        try:
+            _wait_for_pending_row(page, timeout=90000)
+        except AssertionError:
+            break
+        page.evaluate(
+            "() => { var b = document.querySelector("
+            "'.turn-approvals-rows .hitl-approval-card "
+            "button:not([disabled])'); if (b) b.click(); }"
+        )
+        page.wait_for_timeout(1500)
+
+    facts = page.evaluate("""() => {
+  var bs = document.querySelectorAll('.message-assistant');
+  var c = bs.length ? bs[bs.length - 1].querySelector('.message-content') : null;
+  if (!c) return { missing: true };
+  var fold = c.querySelector('.agent-progress');
+  var answer = c.querySelector('.message-text');
+  var toggle = c.querySelector('[aria-expanded]');
+  return {
+    missing: false,
+    rows: fold ? fold.querySelectorAll('.agent-progress-row, .tool-row, li').length : 0,
+    collapsed: !!(fold && fold.classList.contains('is-collapsed')),
+    expanded: toggle ? toggle.getAttribute('aria-expanded') : null,
+    answerInFold: !!(answer && fold && fold.contains(answer)),
+    answerVisible: !!(answer && answer.getBoundingClientRect().height > 0),
+    bubbles: bs.length,
+  };
+}""")
+    assert not facts.get("missing"), "no assistant block rendered at all"
+    assert not facts["answerInFold"], (
+        f"a long turn put its answer inside the fold: {facts}"
+    )
+    if facts["expanded"] is not None:
+        assert facts["expanded"] == "false", (
+            f"the activity fold defaulted open after four gates: {facts}"
+        )

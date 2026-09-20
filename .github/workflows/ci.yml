@@ -206,6 +206,20 @@ jobs:
           node-version: "20"
       - name: Install app
         run: pip install -e ".[test,web]"
+      - name: The harness does not borrow the operator's workspace
+        # Sub-second, and it guards a safety property rather than a
+        # behavior: an agent whose workspace is the checkout will edit
+        # the checkout the first time a fixture uses a relative path.
+        run: python -m pytest tests/test_harness_isolation.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: One decision settles one gate (fast lock)
+        # Sub-second, and it is the check a refactor of the approve route
+        # is most likely to drop. Runs before anything boots a server so
+        # the cheapest failure is also the first one reported.
+        run: python -m pytest tests/test_approve_decides_one_gate.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Four sequential gates through the real app graph
         run: python -m pytest tests/e2e/test_unified_turn_app_graph.py -q --timeout=600
         env:
@@ -221,6 +235,20 @@ jobs:
         # No `|| true`: if this cannot run, the job is red, because a
         # skipped acceptance test is the thing that let them stay open.
         run: python -m pytest tests/e2e/test_unified_turn_browser.py -q --timeout=1200
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Two tabs, one gate (registry CAS through the real route)
+        # A CAS that holds while the turn resumes twice passes the unit
+        # test and loses the user's work. This races real HTTP clients
+        # against a real paused graph.
+        run: python -m pytest tests/e2e/test_unified_turn_concurrency.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Transport recovery (disconnect, retention gap, session switch)
+        # The projector's convergence is proven under node against
+        # synthetic frames. This proves the SERVER serves the frames that
+        # projector was tested on.
+        run: python -m pytest tests/e2e/test_unified_turn_recovery.py -q --timeout=900
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: Shared Python/JavaScript turn fixtures

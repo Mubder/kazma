@@ -194,6 +194,74 @@ def scripted_provider(script: Script) -> Iterator[Script]:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+#: The deterministic profile the harness runs on. A loopback base URL and
+#: a real-shaped key, so the chat route's pre-stream check is satisfied
+#: honestly; nothing dials it, because `scripted_provider` owns the
+#: provider boundary above it.
+HARNESS_BASE_URL = "http://127.0.0.1:1/v1"
+HARNESS_API_KEY = "sk-unified-turn-harness"
+HARNESS_MODEL = "harness-model"
+
+#: Set while a harness server is up, so tests/e2e/conftest.py knows to
+#: re-apply the seeds and no other e2e test has its provider rewritten.
+HARNESS_ENV_FLAG = "KAZMA_UTB_HARNESS"
+
+
+def seed_provider_config(config_store: Any = None) -> None:
+    """Write the harness profile into the CURRENT config store.
+
+    Called at boot and again before every test. The repeat is not
+    belt-and-braces: the root conftest gives each test its own
+    ConfigStore, and the app re-reads the store on every turn, so seeds
+    written at boot are in a store nobody reads by the time a test runs.
+
+    The HTTP harness never noticed, because it pins no model and the
+    chat route then uses the agent's own provider. A browser pins the
+    model on every send, which routes through ``get_client(model)`` ->
+    registry lookup -> miss -> the shipped OpenAI profile -> "No API key
+    configured". Same harness, same app, different branch.
+    """
+    if config_store is None:
+        from kazma_core.config_store import get_config_store
+
+        config_store = get_config_store()
+    config_store.batch_set([
+        ("llm.base_url", HARNESS_BASE_URL, "llm"),
+        ("llm.api_key", HARNESS_API_KEY, "llm"),
+        ("llm.model", HARNESS_MODEL, "llm"),
+    ])
+    # ...and as a real provider ENTRY, so a PINNED model resolves instead
+    # of falling back to the active provider's URL.
+    config_store.set(
+        "providers.list",
+        [{
+            "name": "custom",
+            "display_name": "Unified turn harness",
+            "base_url": HARNESS_BASE_URL,
+            "api_key": HARNESS_API_KEY,
+            "models": [HARNESS_MODEL],
+            "enabled": True,
+        }],
+        category="providers",
+    )
+    config_store.batch_set([
+        ("registry.active_provider", "custom", "registry"),
+        ("registry.active_model", HARNESS_MODEL, "registry"),
+        ("registry.discovered_models", {"custom": [HARNESS_MODEL]}, "registry"),
+    ])
+    # The registry caches the active profile and its clients; a reseed
+    # that leaves a stale client behind changes nothing.
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        reg = get_model_registry()
+        reg._active_provider = "custom"
+        reg._active_model = HARNESS_MODEL
+        reg._clients.clear()
+    except Exception:  # noqa: BLE001 - the registry may not exist yet
+        pass
+
+
 def free_port() -> int:
     s = socket.socket()
     s.bind(("", 0))
@@ -271,6 +339,50 @@ def isolated_config(tmp_dir: str) -> str:
     return str(out)
 
 
+def _isolate_workspace_store(tmp_dir: str) -> None:
+    """Point the WorkspaceStore singleton at the isolated tree.
+
+    ``KAZMA_DATA_DIR`` is not enough. ``stores/workspaces.py`` computes
+    its default database path at IMPORT time, so by the time a fixture
+    sets the variable the singleton is already aimed at the operator's
+    real ``kazma-data/workspaces.db`` -- and that store's active row is
+    rung 2 of ``resolve_active_root()``, which outranks the
+    ``KAZMA_WORKSPACE`` this harness sets at rung 4.
+
+    Measured consequence: the agent's workspace was ``G:/GitHubRepos/kazma``.
+    Every approved ``file_write`` was then refused for pointing outside
+    it -- silently, because the refusal comes back as an ordinary return
+    value (``path_policy.denied_message()``, which opens "Safety: ..."),
+    so the worker logged ``error=False`` and the turn carried on having
+    written nothing. The suite's one execution assertion survived on a
+    file an earlier test had left behind in a shared directory.
+
+    That silence was its own defect and is fixed separately, in
+    ``tool_registry``'s failure classifier -- see
+    ``tests/test_refused_tool_is_not_a_success.py``.
+
+    An EMPTY isolated store is not enough either: given no rows, the
+    store registers and activates the current working directory, so
+    rung 2 comes back populated with the repo anyway (measured: a new
+    row id, today's timestamp, ``root_path`` = the checkout). Hence the
+    explicit create-and-activate below -- the harness names its own
+    workspace rather than hoping the store stays quiet.
+    """
+    try:
+        import kazma_core.stores.workspaces as _ws
+
+        _ws.reset_workspace_store()
+        store = _ws.WorkspaceStore(
+            db_path=os.path.join(tmp_dir, "workspaces.db")
+        )
+        _ws._workspace_store = store
+        created = store.create_workspace("unified-turn-harness", tmp_dir)
+        store.set_active_workspace(str(created["id"]))
+    except Exception:  # noqa: BLE001 - an un-isolated store is caught by
+        # test_approved_tools_actually_execute, which is where it belongs.
+        pass
+
+
 @contextlib.contextmanager
 def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
     """Boot the real app with an isolated data directory and a scripted model.
@@ -285,13 +397,30 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
 
     orig_env = {
         k: os.environ.get(k)
-        for k in ("KAZMA_SECRET", "KAZMA_DATA_DIR", "KAZMA_DB_BACKEND")
+        for k in ("KAZMA_SECRET", "KAZMA_DATA_DIR", "KAZMA_DB_BACKEND",
+                  "KAZMA_WORKSPACE", HARNESS_ENV_FLAG)
     }
     os.environ.pop("KAZMA_SECRET", None)
     os.environ["KAZMA_DB_BACKEND"] = "sqlite"
+    os.environ[HARNESS_ENV_FLAG] = "1"
 
     with TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
         os.environ["KAZMA_DATA_DIR"] = tmp_dir
+        # The agent's workspace, not just its database. Without this the
+        # scripted paths sit OUTSIDE `resolve_active_root()`'s default
+        # sandbox, `check_path_access` refuses every approved write, and
+        # `file_write` reports the refusal by RETURNING "Error: ..." --
+        # a normal return, so the worker logs `error=False` and the turn
+        # sails on having written nothing. An approved danger tool that
+        # writes nowhere is not isolation (plan §14.1); it is a no-op
+        # wearing isolation's clothes, and it is what let
+        # `test_approved_tools_actually_execute` pass for a month on a
+        # file some earlier test had left in a shared directory.
+        #
+        # KAZMA_WORKSPACE is rung 4 of the ladder: per-task scope and the
+        # WorkspaceStore row both outrank it, so this can never win a
+        # fight with an operator's real "Switch Repo" choice.
+        os.environ["KAZMA_WORKSPACE"] = tmp_dir
         cs = ConfigStore(db_path=os.path.join(tmp_dir, "utb_settings.db"))
         set_config_store(cs)
         # The model registry resolves the active profile from ConfigStore,
@@ -299,36 +428,8 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
         # so the YAML alone left the profile on the shipped OpenAI default
         # and the chat route refused the turn. Write the same three keys
         # Settings > Models writes.
-        cs.batch_set([
-            ("llm.base_url", "http://127.0.0.1:1/v1", "llm"),
-            ("llm.api_key", "sk-unified-turn-harness", "llm"),
-            ("llm.model", "harness-model", "llm"),
-        ])
-        # ...and as a real provider ENTRY, because the browser pins a model
-        # on every send. A pinned model sends the chat route through
-        # `get_client(model)`, which looks the model up in the registry;
-        # with no entry it "falls back to the active provider" and
-        # resolves the shipped OpenAI base_url, and the pre-stream key
-        # check then refuses the turn. The HTTP harness never saw this:
-        # it pins nothing, so it took the other branch.
-        cs.set(
-            "providers.list",
-            [{
-                "name": "custom",
-                "display_name": "Unified turn harness",
-                "base_url": "http://127.0.0.1:1/v1",
-                "api_key": "sk-unified-turn-harness",
-                "models": ["harness-model"],
-                "enabled": True,
-            }],
-            category="providers",
-        )
-        cs.batch_set([
-            ("registry.active_provider", "custom", "registry"),
-            ("registry.active_model", "harness-model", "registry"),
-            ("registry.discovered_models", {"custom": ["harness-model"]},
-             "registry"),
-        ])
+        seed_provider_config(cs)
+        _isolate_workspace_store(tmp_dir)
         script = script or four_gate_script(tmp_dir)
         with scripted_provider(script):
             port = free_port()
@@ -364,6 +465,8 @@ def _reset_process_singletons() -> None:
         ("kazma_core.config_store", "reset_config_store"),
         ("kazma_core.model_registry", "reset_model_registry"),
         ("kazma_ui.delivery", "reset_turn_broker"),
+        # ...and hand the operator's own workspace store back.
+        ("kazma_core.stores.workspaces", "reset_workspace_store"),
     )
     for mod, fn in resets:
         try:
@@ -378,8 +481,26 @@ def _reset_process_singletons() -> None:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-def sse_frames(response: Any, limit_seconds: float = 120.0) -> Iterator[dict[str, Any]]:
-    """Yield ``{"event": str, "data": dict}`` from a live SSE response."""
+def sse_frames(
+    response: Any,
+    limit_seconds: float = 120.0,
+    *,
+    keepalives: bool = False,
+) -> Iterator[dict[str, Any]]:
+    """Yield ``{"event": str, "data": dict}`` from a live SSE response.
+
+    With ``keepalives=True`` a ``: keepalive`` comment is surfaced as
+    ``{"event": "keepalive", "data": {}}`` instead of being skipped.
+
+    That matters for one case only, and it is not cosmetic. An attach to
+    a PAUSED thread never closes -- ``_sse_attach_stream`` holds it open
+    on purpose, because approve will journal into the same tail -- so a
+    reader that waits for a terminal frame waits for a human. A
+    keepalive arriving after the replay, on a turn the handshake said is
+    not running, IS the end of transmission. Without this the only way
+    to observe it is to time out, which reports a stall where there is
+    none.
+    """
     deadline = time.monotonic() + limit_seconds
     event = ""
     for raw in response.iter_lines():
@@ -388,6 +509,10 @@ def sse_frames(response: Any, limit_seconds: float = 120.0) -> Iterator[dict[str
         line = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
         line = line.rstrip("\r")
         if not line:
+            continue
+        if line.startswith(":"):
+            if keepalives:
+                yield {"event": "keepalive", "data": {}}
             continue
         if line.startswith("event:"):
             event = line[6:].strip()

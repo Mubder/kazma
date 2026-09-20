@@ -789,7 +789,23 @@ class LocalToolRegistry:
                 # logic, tool-result accounting) see the failure. Prefix check
                 # only — "Error" as a substring in successful content (e.g. a
                 # file named document_error_handling.md) must NOT trip this.
-                _is_err = content.startswith("Error:") or content.startswith("⚠️")
+                #
+                # "Safety:" is the third prefix and the one that was
+                # missing. `workspace.path_policy.denied_message()` opens
+                # with "Safety: write/modify outside the active workspace
+                # is not allowed", and five tools return it — file_write,
+                # file_read, file_apply_patch, tool_scope, ide/service.
+                # Classified as success, an approved and then REFUSED
+                # danger-tool write was logged "[OK] error=False" and the
+                # turn recorded its execution as completed: a false
+                # success on the one row where the reader is relying on
+                # decision and execution being separate
+                # (UNIFIED_TURN_BLOCK.md §3 and §10, found 2026-09-20).
+                _is_err = (
+                    content.startswith("Error:")
+                    or content.startswith("⚠️")
+                    or content.startswith("Safety:")
+                )
                 _record_procedural_outcome(tool_name, arguments, success=not _is_err)
                 return await _with_post({"content": content, "is_error": _is_err})
 
