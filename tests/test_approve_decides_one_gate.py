@@ -225,6 +225,38 @@ def test_the_websocket_resume_consults_the_same_guard() -> None:
     )
 
 
+def test_both_mouths_pass_the_same_resume_arguments() -> None:
+    """WS and HTTP must build the resume Command with the SAME inputs.
+
+    `build_resume_command` is the single chokepoint, but a chokepoint only
+    helps if every caller hands it everything. The WS handler was omitting
+    `approved_ids` and `reason`, and the omission fails OPEN: in
+    graph_tool_worker, `approved_ids is None` means "approve the whole batch",
+    so a client that selectively approved 2 of 4 grouped danger tools over WS
+    would have had all four executed.
+
+    Silently widening an approval is the worst direction for a gap like this,
+    and it is the same shape as the gate-identity check that was present on
+    HTTP and absent on WS.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    http_src = (root / "kazma-ui" / "kazma_ui" / "routes_direct" / "misc.py").read_text(
+        encoding="utf-8"
+    )
+    ws_src = (root / "kazma-ui" / "kazma_ui" / "routes" / "ws_chat.py").read_text(
+        encoding="utf-8"
+    )
+
+    for arg in ("approved_ids", "reason", "scope", "choices"):
+        assert f"{arg}=" in http_src, f"HTTP approve no longer passes {arg}"
+        assert f"{arg}=" in ws_src, (
+            f"WS approve_tool does not pass {arg} to build_resume_command. "
+            "For approved_ids this fails OPEN — the whole danger batch runs."
+        )
+
+
 def test_both_mouths_share_one_gate_identity_implementation() -> None:
     """One function, not two copies that can drift.
 
