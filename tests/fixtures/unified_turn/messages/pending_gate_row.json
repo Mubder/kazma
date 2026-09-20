@@ -13,18 +13,42 @@
         "tool": "file_write",
         "state": "pending",
         "interrupt_id": "gate-p1",
-        "payload": {"tool": "file_write", "interrupt_id": "gate-p1", "args": {"path": "README.md"}}
+        "payload": {
+          "tool": "file_write",
+          "interrupt_id": "gate-p1",
+          "args": {
+            "path": "README.md"
+          }
+        }
       },
-      {"type": "text", "text": "I need to write README.md."}
+      {
+        "type": "text",
+        "text": "I need to write README.md."
+      }
     ]
   },
   "expect": {
     "turn_id": "utb-fixture-turn-3",
     "text": "I need to write README.md.",
-    "part_keys": ["hitl:gate-p1", "text"],
-    "gates": [{"interrupt_id": "gate-p1", "tool": "file_write", "state": "pending"}],
+    "part_keys": [
+      "hitl:gate-p1",
+      "text"
+    ],
+    "gates": [
+      {
+        "interrupt_id": "gate-p1",
+        "tool": "file_write",
+        "state": "pending"
+      }
+    ],
     "activity": [
-      {"kind": "status", "title": "Waiting for approval", "detail": "file_write", "state": "info"}
+      {
+        "id": "hitl:gate-p1",
+        "kind": "status",
+        "title": "Waiting for approval",
+        "detail": "file_write",
+        "state": "info"
+      }
     ]
   },
   "notes": [

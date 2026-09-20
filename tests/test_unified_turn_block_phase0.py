@@ -158,7 +158,9 @@ def _js_repro_results() -> dict[str, dict[str, object]]:
     proc = subprocess.run(
         [node, str(JS_REPRO), "--json"],
         capture_output=True,
-        text=True,
+        # Explicit UTF-8 — see tests/test_unified_turn_fixtures.py.
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr

@@ -1,0 +1,28 @@
+{
+  "name": "tool_calls_with_ids",
+  "why": "Two concurrent calls to ONE tool, plus a call whose result changed. Before Phase 1 a tool part was keyed by name + state + result[:80], so the same call changed identity the moment it finished, and two calls to the same tool collided on one key. Both are now keyed by the graph's run id.",
+  "message": {
+    "role": "assistant",
+    "turn_id": "utb-fixture-turn-4",
+    "content": "Both reads came back.",
+    "parts": [
+      {"type": "tool", "name": "file_read", "call_id": "run-a", "result": "alpha", "state": "done"},
+      {"type": "tool", "name": "file_read", "call_id": "run-b", "result": "beta", "state": "running"},
+      {"type": "text", "text": "Both reads came back."}
+    ]
+  },
+  "expect": {
+    "turn_id": "utb-fixture-turn-4",
+    "text": "Both reads came back.",
+    "part_keys": ["tool#run-a", "tool#run-b", "text"],
+    "gates": [],
+    "activity": [
+      {"id": "tool#run-a", "kind": "tool", "title": "file_read", "detail": "alpha", "state": "done"},
+      {"id": "tool#run-b", "kind": "tool", "title": "file_read", "detail": "beta", "state": "running"}
+    ]
+  },
+  "notes": [
+    "The two rows must stay two rows: same tool, same shape, different call. That is the activity-layer form of invariant U09.",
+    "A row's id is the part key, so the renderer's keyed row and the document's part cannot drift apart."
+  ]
+}

@@ -730,6 +730,16 @@ async def _stream_langgraph_events(
                                 "tool_call",
                                 {
                                     "tool_name": name,
+                                    # LangGraph's run id for THIS call. It is
+                                    # the same on the matching on_tool_end, so
+                                    # it is the stable identity the projector
+                                    # keys the activity row by. Without it the
+                                    # key was name + state + result[:80]: the
+                                    # row changed identity when the call
+                                    # finished, and two concurrent calls to
+                                    # one tool shared a row
+                                    # (UNIFIED_TURN_BLOCK.md §6).
+                                    "tool_call_id": str(event.get("run_id") or ""),
                                     "inputs": json.dumps(inputs, ensure_ascii=False)[:2000]
                                     if isinstance(inputs, dict)
                                     else str(inputs)[:2000],
@@ -750,6 +760,9 @@ async def _stream_langgraph_events(
                                 "tool_result",
                                 {
                                     "tool_name": name,
+                                    # Same run id as the on_tool_start above —
+                                    # this is what makes start and end ONE row.
+                                    "tool_call_id": str(event.get("run_id") or ""),
                                     "result": str(output)[:5000],
                                 },
                             )

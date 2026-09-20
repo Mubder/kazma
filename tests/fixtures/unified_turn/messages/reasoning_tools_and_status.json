@@ -6,11 +6,31 @@
     "turn_id": "utb-fixture-turn-2",
     "content": "Found three matches.",
     "parts": [
-      {"type": "reasoning", "text": "Search the index first, then read the two most likely files."},
-      {"type": "status", "title": "Planning", "state": "done"},
-      {"type": "tool", "name": "code_search", "result": "3 hits", "state": "done"},
-      {"type": "tool", "name": "file_read", "result": "ok", "state": "done"},
-      {"type": "text", "text": "Found three matches."}
+      {
+        "type": "reasoning",
+        "text": "Search the index first, then read the two most likely files."
+      },
+      {
+        "type": "status",
+        "title": "Planning",
+        "state": "done"
+      },
+      {
+        "type": "tool",
+        "name": "code_search",
+        "result": "3 hits",
+        "state": "done"
+      },
+      {
+        "type": "tool",
+        "name": "file_read",
+        "result": "ok",
+        "state": "done"
+      },
+      {
+        "type": "text",
+        "text": "Found three matches."
+      }
     ]
   },
   "expect": {
@@ -25,13 +45,37 @@
     ],
     "gates": [],
     "activity": [
-      {"kind": "thought", "title": "Thoughts", "detail": "Search the index first, then read the two most likely files.", "state": "done"},
-      {"kind": "status", "title": "Planning", "state": "done"},
-      {"kind": "tool", "title": "code_search", "detail": "3 hits", "state": "done"},
-      {"kind": "tool", "title": "file_read", "detail": "ok", "state": "done"}
+      {
+        "id": "reasoning",
+        "kind": "thought",
+        "title": "Thoughts",
+        "detail": "Search the index first, then read the two most likely files.",
+        "state": "done"
+      },
+      {
+        "id": "status:Planning",
+        "kind": "status",
+        "title": "Planning",
+        "state": "done"
+      },
+      {
+        "id": "tool:code_search:done:3 hits",
+        "kind": "tool",
+        "title": "code_search",
+        "detail": "3 hits",
+        "state": "done"
+      },
+      {
+        "id": "tool:file_read:done:ok",
+        "kind": "tool",
+        "title": "file_read",
+        "detail": "ok",
+        "state": "done"
+      }
     ]
   },
   "notes": [
-    "A tool part key embeds name + state + result[:80]. A result that changes re-keys the row, which is the missing stable activity ID recorded in UNIFIED_TURN_BLOCK_PHASE0.md section 6."
+    "These tool parts carry NO call_id, so they keep the legacy content-derived key (name + state + result[:80]). That key is unstable across a running->done update; tool_calls_with_ids.json is the same shape with the graph's run id, and is what new frames produce.",
+    "Locking both forms is deliberate: old transcripts must keep deduping the way they were written (plan section 6.7, one normalization adapter)."
   ]
 }

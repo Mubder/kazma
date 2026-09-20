@@ -12,12 +12,14 @@ both green while ``legacy_turn_id`` minted a different id in each language.
 This module reads the same JSON files as ``tests/js/test_unified_turn_fixtures.js``
 and then compares the two projections field by field.
 
-Recorded divergences are listed in each fixture's ``known_divergences`` and
-in ``docs/plans/UNIFIED_TURN_BLOCK_PHASE0.md`` §6. They are excluded from the
-agreement comparison and asserted separately by
-:func:`test_recorded_divergence_still_diverges`, which is ``xfail(strict=True)``:
-when Phase 1 aligns the two implementations that test passes unexpectedly, the
-suite goes red, and the stale record has to be deleted. A divergence cannot be
+Phase 0 found three divergences this way and Phase 1 closed them: the
+``legacy_turn_id`` algorithm, the ``ts`` key on activity rows, and the
+unknown-part-type fallback key. ``known_divergences`` remains as the only
+sanctioned escape hatch, and it is deliberately loud — a field listed there
+is excluded from the agreement check but immediately owned by
+:func:`test_recorded_divergence_still_diverges`, which is
+``xfail(strict=True)``. Align the two sides and that test XPASSes, the suite
+goes red, and the stale record has to be deleted. A divergence cannot be
 fixed quietly and it cannot be forgotten.
 """
 
@@ -95,7 +97,14 @@ def _js_projections() -> dict[str, Any]:
     proc = subprocess.run(
         [node, str(JS_DRIVER), "--emit"],
         capture_output=True,
-        text=True,
+        # Explicit UTF-8, not the locale. On Windows the default is cp1252,
+        # which cannot decode the Arabic fixture: subprocess swallowed the
+        # UnicodeDecodeError in its reader thread and handed back
+        # ``stdout=None``, so the comparison failed with a TypeError instead
+        # of a diff. A cross-language check for an Arabic-first product
+        # cannot be ASCII-only.
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -122,7 +131,11 @@ def test_javascript_driver_self_check() -> None:
     if not node:  # pragma: no cover - CI always has node
         pytest.skip("node not available")
     proc = subprocess.run(
-        [node, str(JS_DRIVER)], capture_output=True, text=True, timeout=120
+        [node, str(JS_DRIVER)],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -159,17 +172,32 @@ _DIVERGENCES = [
 ]
 
 
+@pytest.mark.skipif(
+    bool(_DIVERGENCES), reason="recorded divergences remain; see the test below"
+)
+def test_no_recorded_divergences_remain() -> None:
+    """Phase 1 aligned both implementations; nothing is excluded any more.
+
+    Kept rather than deleted: it is the assertion that the escape hatch is
+    empty. A future fixture that adds a ``known_divergences`` entry skips
+    this and lights up the strict-xfail below, so an exclusion cannot be
+    added quietly.
+    """
+    assert _DIVERGENCES == []
+
+
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Recorded Phase 0 divergence. UNIFIED_TURN_BLOCK.md Phase 1 aligns "
-        "these; when it does this xfail flips to XPASS and the record must "
-        "be deleted from the fixture. It is a removal obligation, never "
-        "acceptance evidence."
+        "A recorded cross-language divergence. When it is aligned this "
+        "xfail flips to XPASS and the record must be deleted from the "
+        "fixture. It is a removal obligation, never acceptance evidence."
     ),
 )
 @pytest.mark.parametrize(
-    ("name", "divergence"), _DIVERGENCES, ids=[n for n, _ in _DIVERGENCES]
+    ("name", "divergence"),
+    _DIVERGENCES or [pytest.param("", {}, marks=pytest.mark.skip(reason="none"))],
+    ids=[n for n, _ in _DIVERGENCES] or ["none"],
 )
 def test_recorded_divergence_still_diverges(
     name: str, divergence: dict[str, Any]

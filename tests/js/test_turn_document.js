@@ -264,5 +264,102 @@ var capRep = TD.applyEvent(capTok, {
 assert("capacity REPLACES streamed text (never appends)",
   TD.textOf(capRep.parts) === "MISSION ON" && capRep.stream === "MISSION ON");
 
+// ── Tool call identity (UNIFIED_TURN_BLOCK.md Phase 1) ─────────────────
+// The old key was name + state + result[:80]. Two things followed from it,
+// both wrong: the SAME call changed identity when it finished, so the
+// renderer tore its row down and rebuilt it (losing expansion and focus) on
+// every update; and two concurrent calls to one tool shared a key, so the
+// second overwrote the first. Both are now keyed by the graph's run id.
+
+var toolRunning = { type: "tool", name: "file_read", call_id: "run-1",
+  result: "", state: "running" };
+var toolDone = { type: "tool", name: "file_read", call_id: "run-1",
+  result: "alpha", state: "done" };
+
+assert("tool key is the call id",
+  TD.partKey(toolRunning) === "tool#run-1");
+assert("tool key is stable across running -> done",
+  TD.partKey(toolRunning) === TD.partKey(toolDone));
+assert("two calls to one tool are two keys",
+  TD.partKey(toolDone) !== TD.partKey({ type: "tool", name: "file_read",
+    call_id: "run-2", result: "alpha", state: "done" }));
+assert("a call-id-less part keeps the legacy content key",
+  TD.partKey({ type: "tool", name: "file_read", result: "x", state: "done" })
+    === "tool:file_read:done:x");
+
+// merge must ADVANCE the row, not drop the second stamp. The old
+// duplicate-key branch returned early, which with a stable key would have
+// frozen every tool row at "running".
+var merged = TD.mergeParts([toolRunning], [toolDone]);
+var mergedTools = merged.filter(function (p) { return p.type === "tool"; });
+assert("one call stays one part", mergedTools.length === 1);
+assert("the finished stamp wins", mergedTools[0].state === "done"
+  && mergedTools[0].result === "alpha");
+
+// ...and never backwards. A replayed start frame after the result landed
+// must not un-finish the call.
+var backwards = TD.mergeParts([toolDone], [toolRunning]);
+var backTools = backwards.filter(function (p) { return p.type === "tool"; });
+assert("a late running frame does not un-finish a call",
+  backTools.length === 1 && backTools[0].state === "done"
+  && backTools[0].result === "alpha");
+
+// A terminal frame with no result must not blank the one already delivered.
+var blanked = TD.mergeToolPart(toolDone,
+  { type: "tool", name: "file_read", call_id: "run-1", result: "", state: "done" });
+assert("an empty terminal result does not erase the delivered one",
+  blanked.result === "alpha");
+
+// Through applyEvent, which is the path the SSE frames actually take.
+var tDoc = TD.applyEvent(TD.empty("live"), {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "run-9",
+  inputs: "{}", seq: 1,
+});
+tDoc = TD.applyEvent(tDoc, {
+  type: "tool_result", tool_name: "file_read", tool_call_id: "run-9",
+  result: "done!", seq: 2,
+});
+var liveTools = tDoc.parts.filter(function (p) { return p.type === "tool"; });
+assert("start + result is ONE row through applyEvent", liveTools.length === 1);
+assert("the row carries the final result", liveTools[0].result === "done!");
+assert("the row keeps the call id", liveTools[0].call_id === "run-9");
+
+// Two concurrent calls to the same tool stay two rows.
+var twoDoc = TD.applyEvent(TD.empty("live"), {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "run-a", seq: 1,
+});
+twoDoc = TD.applyEvent(twoDoc, {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "run-b", seq: 2,
+});
+assert("concurrent calls to one tool are two rows",
+  twoDoc.parts.filter(function (p) { return p.type === "tool"; }).length === 2);
+
+// ── Activity rows carry the part key ──────────────────────────────────
+var actRows = TD.activityOf(twoDoc.parts);
+assert("activity rows carry an id", actRows.length === 2
+  && actRows[0].id === "tool#run-a" && actRows[1].id === "tool#run-b");
+assert("a row with no timestamp omits ts (Python omits it too)",
+  !Object.prototype.hasOwnProperty.call(actRows[0], "ts"));
+// ...and the id survives the round trip back into parts, or a history load
+// would split one call into two rows.
+var roundTrip = TD.mergeParts([], TD.activityToParts(actRows));
+assert("activity -> parts keeps the call id",
+  roundTrip.filter(function (p) { return p.type === "tool"; }).length === 2);
+
+// ── legacyTurnId agrees with turn_document.py ─────────────────────────
+// Pinned, not just prefix-checked. The whole point is that the SERVER
+// computes the same string; a "starts with legacy-" assertion is what let
+// sha256 on one side and a 32-bit string hash on the other both look
+// correct for months (UNIFIED_TURN_BLOCK_PHASE0.md §6.1).
+assert("legacyTurnId is the shared value",
+  TD.legacyTurnId({ ts: "2026-09-20T10:00:00Z", content: "Hello there." })
+    === "legacy-0cdee065e20a7d91");
+// The hash walks UTF-8 bytes. JavaScript strings are UTF-16, so a naive
+// port agrees on ASCII and diverges on the first Arabic character or emoji
+// (a surrogate pair) — in this product, the normal case.
+assert("legacyTurnId walks UTF-8, not UTF-16",
+  TD.legacyTurnId({ ts: "2026-09-20T11:30:00Z", content: "تم الحفظ 😀" })
+    === "legacy-4373231117a879b5");
+
 if (fail) process.exit(1);
 console.log("all ok");

@@ -20,6 +20,58 @@
   }
 
   /**
+   * FNV-1a, 32 bits, over UTF-8 bytes. `Math.imul` is an exact 32-bit
+   * multiply, so this is reproducible digit for digit in any language that
+   * can do the same — which is the whole point: turn_document.py computes
+   * the identical value. See `legacyTurnId`.
+   */
+  function fnv1a32(str, seed) {
+    var h = (seed >>> 0) || 0x811c9dc5;
+    var s = String(str == null ? '' : str);
+    for (var i = 0; i < s.length; i++) {
+      var c = s.charCodeAt(i);
+      // Inline UTF-8 so the byte stream matches Python's `.encode("utf-8")`
+      // without depending on TextEncoder (absent in some embedded views).
+      var bytes;
+      if (c < 0x80) bytes = [c];
+      else if (c < 0x800) bytes = [0xc0 | (c >> 6), 0x80 | (c & 0x3f)];
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < s.length) {
+        var lo = s.charCodeAt(i + 1);
+        if (lo >= 0xdc00 && lo <= 0xdfff) {
+          i++;
+          var cp = 0x10000 + ((c - 0xd800) << 10) + (lo - 0xdc00);
+          bytes = [
+            0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f),
+            0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f),
+          ];
+        } else {
+          bytes = [0xef, 0xbf, 0xbd];      // lone surrogate → U+FFFD
+        }
+      } else if (c >= 0xd800 && c <= 0xdfff) {
+        bytes = [0xef, 0xbf, 0xbd];
+      } else {
+        bytes = [0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f)];
+      }
+      for (var b = 0; b < bytes.length; b++) {
+        h = Math.imul(h ^ bytes[b], 0x01000193) >>> 0;
+      }
+    }
+    return h >>> 0;
+  }
+
+  function hex8(n) {
+    var s = (n >>> 0).toString(16);
+    while (s.length < 8) s = '0' + s;
+    return s;
+  }
+
+  /** The tool call this part belongs to, as the graph named it. */
+  function toolCallIdOf(part) {
+    if (!part || typeof part !== 'object') return '';
+    return String(part.call_id || part.tool_call_id || '');
+  }
+
+  /**
    * Activity rows for the workbench.
    *
    * `gateState` is the SAME resolver the renderer orders and labels gates
@@ -29,6 +81,11 @@
    * Callers that have no resolver (hydration, legacy messages) get the
    * part's own stamp, which is the right answer when there is nothing
    * better to consult.
+   *
+   * Every row carries `id`, the part's own key. The renderer needs a stable
+   * handle to keep an expanded row expanded and a focused control focused
+   * while the row's content changes (UNIFIED_TURN_BLOCK.md §3), and deriving
+   * it here means the row id and the part key cannot drift apart.
    */
   function activityOf(parts, gateState) {
     var rows = [];
@@ -40,28 +97,38 @@
       var p = parts[i];
       if (!p || typeof p !== 'object') continue;
       var kind = String(p.type || '');
+      // `ts: null` used to be written on every row that had no timestamp.
+      // Python omits the key, so the two normalizers produced different
+      // shapes for the same part — invisible to both suites because each
+      // had its own examples (UNIFIED_TURN_BLOCK_PHASE0.md §6.1).
+      var row;
       if (kind === 'reasoning' && String(p.text || '').trim()) {
         rows.push({
+          id: partKey(p),
           kind: 'thought',
           title: 'Thoughts',
           detail: String(p.text),
           state: 'done',
         });
       } else if (kind === 'tool') {
-        rows.push({
+        row = {
+          id: partKey(p),
           kind: 'tool',
           title: String(p.name || p.title || 'tool'),
           detail: String(p.result || p.detail || p.args || ''),
           state: String(p.state || 'done'),
-          ts: p.ts || null,
-        });
+        };
+        if (p.ts) row.ts = p.ts;
+        rows.push(row);
       } else if (kind === 'status' && String(p.title || '').trim()) {
-        rows.push({
+        row = {
+          id: partKey(p),
           kind: 'status',
           title: String(p.title),
           state: String(p.state || 'done'),
-          ts: p.ts || null,
-        });
+        };
+        if (p.ts) row.ts = p.ts;
+        rows.push(row);
       } else if (kind === 'hitl') {
         var hs = String(resolveGate(p) || 'pending');
         var htitle = 'Waiting for approval';
@@ -71,13 +138,15 @@
         else if (hs === 'timeout' || hs === 'error' || hs === 'settled' || hs === 'done') {
           htitle = 'Approval resolved';
         }
-        rows.push({
+        row = {
+          id: partKey(p),
           kind: 'status',
           title: htitle,
           detail: String(p.tool || p.detail || ''),
           state: 'info',
-          ts: p.ts || null,
-        });
+        };
+        if (p.ts) row.ts = p.ts;
+        rows.push(row);
       }
     }
     return rows;
@@ -109,6 +178,16 @@
     if (kind === 'text') return 'text';
     if (kind === 'reasoning') return 'reasoning';
     if (kind === 'tool') {
+      // One slot PER CALL, keyed by the graph's own run id when the
+      // producer sent one. The old key was name + state + result[:80], so
+      // the SAME call changed identity the moment its state went
+      // running→done or its result grew: a re-keyed row loses its expanded
+      // state and its focus on every update, and two concurrent calls to
+      // one tool collided into a single key. Mirrors turn_document.py.
+      var callId = toolCallIdOf(part);
+      if (callId) return 'tool#' + callId;
+      // Legacy frames carry no call id. Keep the content-derived key so
+      // old transcripts still dedupe the way they were written.
       return 'tool:' + String(part.name || part.title || '') + ':' +
         String(part.state || '') + ':' +
         String(part.result || part.detail || '').slice(0, 80);
@@ -138,6 +217,43 @@
   function hitlRank(state) {
     var s = String(state || 'pending').toLowerCase();
     return Object.prototype.hasOwnProperty.call(HITL_RANK, s) ? HITL_RANK[s] : 0;
+  }
+
+  /** A tool call only moves forward: running → anything terminal. */
+  function toolRank(state) {
+    var s = String(state || 'done').toLowerCase();
+    return (s === 'running' || s === 'pending' || s === '') ? 0 : 1;
+  }
+
+  /**
+   * Merge two stamps of the SAME tool call.
+   *
+   * Reached only when both share a key, which with a call id means they
+   * are genuinely the same call. A late `running` frame must not un-finish
+   * a call that already reported, and a terminal frame that carries no
+   * result must not blank the one the earlier frame delivered.
+   */
+  function mergeToolPart(existing, incoming) {
+    if (!incoming || typeof incoming !== 'object') {
+      return existing && typeof existing === 'object' ? existing : {};
+    }
+    if (!existing || typeof existing !== 'object' || existing.type !== 'tool') {
+      return incoming;
+    }
+    if (toolRank(incoming.state) < toolRank(existing.state)) return existing;
+    var out = {};
+    var k;
+    for (k in existing) {
+      if (Object.prototype.hasOwnProperty.call(existing, k)) out[k] = existing[k];
+    }
+    for (k in incoming) {
+      if (Object.prototype.hasOwnProperty.call(incoming, k)) out[k] = incoming[k];
+    }
+    out.type = 'tool';
+    if (!String(incoming.result || '').trim() && String(existing.result || '').trim()) {
+      out.result = existing.result;
+    }
+    return out;
   }
 
   function interruptIdOf(part) {
@@ -298,12 +414,18 @@
       if (!row || typeof row !== 'object') continue;
       var kind = String(row.kind || '');
       if (kind === 'tool') {
-        out.push({
+        var toolPart = {
           type: 'tool',
           name: String(row.title || 'tool'),
           result: String(row.detail || ''),
           state: String(row.state || 'done'),
-        });
+        };
+        // A stored row keyed by call id must come back as the same part,
+        // or a history load would split one call into two rows.
+        var rid = String(row.id || '');
+        if (rid.indexOf('tool#') === 0) toolPart.call_id = rid.slice(5);
+        else if (row.call_id) toolPart.call_id = String(row.call_id);
+        out.push(toolPart);
       } else if (kind === 'thought') {
         var detail = String(row.detail || '');
         if (detail.trim()) out.push({ type: 'reasoning', text: detail });
@@ -335,6 +457,15 @@
         if (replace && part.type === 'reasoning') {
           for (var rj = 0; rj < out.length; rj++) {
             if (partKey(out[rj]) === key) { out[rj] = mergeReasoningPart(out[rj], part); return; }
+          }
+        }
+        if (replace && part.type === 'tool') {
+          // With a call id the key is stable across running→done, so the
+          // second stamp of a call arrives HERE rather than as a new part.
+          // Dropping it (the old behavior for every duplicate key) would
+          // freeze every tool row at "running".
+          for (var rt = 0; rt < out.length; rt++) {
+            if (partKey(out[rt]) === key) { out[rt] = mergeToolPart(out[rt], part); return; }
           }
         }
         return;
@@ -410,17 +541,26 @@
 
   function replaceToolPart(parts, incoming) {
     var name = String((incoming && (incoming.name || incoming.title)) || '');
+    var callId = toolCallIdOf(incoming);
     var next = (parts || []).slice();
     var found = -1;
     for (var i = next.length - 1; i >= 0; i--) {
-      if (next[i] && next[i].type === 'tool'
-          && String(next[i].name || next[i].title || '') === name) {
+      if (!next[i] || next[i].type !== 'tool') continue;
+      if (callId) {
+        // Identity beats name. Two concurrent calls to one tool used to
+        // land on the same row because "last part with this name" was the
+        // only handle there was.
+        if (toolCallIdOf(next[i]) === callId) { found = i; break; }
+        continue;
+      }
+      if (String(next[i].name || next[i].title || '') === name
+          && !toolCallIdOf(next[i])) {
         found = i;
         break;
       }
     }
     if (found >= 0) {
-      next[found] = incoming;
+      next[found] = mergeToolPart(next[found], incoming);
       return next;
     }
     return mergeParts(next, [incoming]);
@@ -433,20 +573,24 @@
       return activityToParts([step]);
     }
     if (type === 'tool_start' || type === 'tool_call' || type === 'tool_lifecycle') {
-      return [{
+      var startPart = {
         type: 'tool',
         name: String(ev.tool_name || ev.name || step.title || 'tool'),
         result: String(ev.inputs || ev.args || ev.detail || step.detail || ''),
         state: 'running',
-      }];
+      };
+      if (ev.tool_call_id) startPart.call_id = String(ev.tool_call_id);
+      return [startPart];
     }
     if (type === 'tool_result') {
-      return [{
+      var endPart = {
         type: 'tool',
         name: String(ev.tool_name || ev.name || 'tool'),
         result: String(ev.result || ev.detail || ''),
         state: 'done',
-      }];
+      };
+      if (ev.tool_call_id) endPart.call_id = String(ev.tool_call_id);
+      return [endPart];
     }
     if (type === 'status' || type === 'status_update') {
       var title = String((ev.message || ev.title || ev.status || step.title || '')).trim();
@@ -573,14 +717,26 @@
     return next;
   }
 
+  /**
+   * Stable id for an assistant row that never got a turn_id.
+   *
+   * MUST equal turn_document.py:legacy_turn_id byte for byte. It did not:
+   * Python hashed with sha256[:16] and this used a 32-bit string hash, so
+   * the same stored row was "legacy-879abd24dca7291f" on the server and
+   * "legacy-9587b3b6" in the browser. Both suites were green because each
+   * had its own examples — the drift shared fixtures exist to catch
+   * (UNIFIED_TURN_BLOCK_PHASE0.md §6.1).
+   *
+   * Two FNV-1a-32 passes with different offset bases give 64 bits without
+   * 64-bit arithmetic, which JavaScript cannot do exactly. sha256 was the
+   * other option and would have meant shipping a hash implementation to
+   * the browser for an id nobody verifies.
+   */
   function legacyTurnId(msg) {
     msg = msg || {};
     var raw = String(msg.ts || '') + '|' + String(msg.content || '');
-    var h = 0;
-    for (var i = 0; i < raw.length; i++) {
-      h = ((h << 5) - h + raw.charCodeAt(i)) | 0;
-    }
-    return 'legacy-' + (h >>> 0).toString(16);
+    return 'legacy-' + hex8(fnv1a32(raw, 0x811c9dc5))
+      + hex8(fnv1a32(raw, 0x9e3779b1));
   }
 
   function hydrateMessage(msg) {
@@ -629,6 +785,12 @@
     mergeParts: mergeParts,
     mergeHitlPart: mergeHitlPart,
     mergeReasoningPart: mergeReasoningPart,
+    mergeToolPart: mergeToolPart,
+    activityToParts: activityToParts,
+    toolCallIdOf: toolCallIdOf,
+    toolRank: toolRank,
+    legacyTurnId: legacyTurnId,
+    fnv1a32: fnv1a32,
     hitlPartsOf: hitlPartsOf,
     hitlPartOf: hitlPartOf,
     hitlRank: hitlRank,
