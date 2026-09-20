@@ -29,6 +29,18 @@ from fastapi.templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
+#: Hard ceiling on application teardown, in seconds.
+#:
+#: `_on_shutdown` awaits many things that are not individually bounded. This
+#: is the single contract that says the process exits regardless: generous
+#: enough that a healthy shutdown (background drain 10s, document workers up
+#: to 45s, memory worker up to 30s) finishes well inside it, short enough that
+#: an operator is not left wondering whether to kill it.
+#:
+#: Raise this only with a measurement showing a legitimate teardown that needs
+#: longer — not to paper over something that hangs.
+_SHUTDOWN_CEILING_SECONDS = 120.0
+
 __all__ = ["KazmaAppBuilder", "create_app", "main"]
 
 # Package paths
@@ -2538,8 +2550,40 @@ class KazmaAppBuilder:
                 # Postgres pool close) and leak an asyncio.CancelledError traceback. shield
                 # lets teardown finish; the except is a backstop if cancellation is already
                 # in flight when the awaited coroutine resumes.
+                # One ceiling over the whole teardown.
+                #
+                # `_on_shutdown` awaits sixteen things that are not
+                # individually bounded — watchdog stops, pool closes, adapter
+                # disconnects. Wrapping each is sixteen chances to miss one and
+                # a seventeenth arrives with the next feature. Whatever happens
+                # inside, the process must still exit: a server that cannot
+                # shut down is a server the operator has to kill, and under
+                # TestClient it is a suite that hangs instead of failing.
+                #
+                # `asyncio.wait` on a shielded task, never `wait_for`: wait_for
+                # cancels its inner awaitable on timeout and then awaits that
+                # cancellation, which against an uncancellable callee is the
+                # very hang this is bounding (see
+                # kazma_core/documents/worker.py::DocumentWorker.stop).
+                # Shield is kept so Ctrl+C does not interrupt teardown midway.
+                _sd = asyncio.ensure_future(asyncio.shield(builder._on_shutdown()))
                 try:
-                    await asyncio.shield(builder._on_shutdown())
+                    _sd_done, _sd_pending = await asyncio.wait(
+                        [_sd], timeout=_SHUTDOWN_CEILING_SECONDS
+                    )
+                    if _sd_pending:
+                        logger.error(
+                            "[app] Shutdown exceeded %.0fs and is being "
+                            "abandoned so the process can exit. Something in "
+                            "_on_shutdown is awaiting without a bound — check "
+                            "the most recent teardown log line for where it "
+                            "stopped.",
+                            _SHUTDOWN_CEILING_SECONDS,
+                        )
+                    else:
+                        exc = _sd.exception()
+                        if exc is not None:
+                            raise exc
                 except asyncio.CancelledError:
                     logger.info("[app] Shutdown completed (task was cancelled during teardown)")
                 except BaseException as e:  # pragma: no cover - last-resort
