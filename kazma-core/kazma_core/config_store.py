@@ -775,6 +775,7 @@ class ConfigStore:
         One line at boot, best-effort, never fatal.
         """
         try:
+            import sys as _sys
             from pathlib import Path as _Path
 
             stale = _Path(self._db_path)
@@ -817,14 +818,35 @@ class ConfigStore:
                     stale, n,
                 )
                 if chunks:
-                    logger.warning(
-                        "[ConfigStore] ...but DO NOT DELETE %s: the same file "
-                        "holds %d live Knowledge Library chunk(s). "
+                    msg = (
+                        f"[ConfigStore] ...but DO NOT DELETE {stale}: the same "
+                        f"file holds {chunks} live Knowledge Library chunk(s). "
                         "KnowledgeStore is SQLite-only and shares this file "
                         "regardless of the config backend. Only the `settings` "
-                        "table in it is stale.",
-                        stale, chunks,
+                        "table in it is stale."
                     )
+                    logger.warning("%s", msg)
+                    # ALSO to stderr, deliberately.
+                    #
+                    # This runs during ConfigStore init, and on the reference
+                    # install that happens before the file log handler is
+                    # attached: `[ConfigStore] using Postgres backend` — the
+                    # INFO emitted two lines above this check — does not appear
+                    # in `.kazma/kazma.log` at all, while `[TaskStore] using
+                    # Postgres backend` from later in boot does. So the log
+                    # call alone is not delivery.
+                    #
+                    # Every other message here can afford to be lost. This one
+                    # is the only thing standing between an operator tidying up
+                    # after a Postgres cutover and the deletion of their entire
+                    # ingested corpus, so it goes somewhere that exists before
+                    # logging is configured and that the guard captures from
+                    # the child process.
+                    try:
+                        print(os.linesep + "  " + msg + os.linesep,
+                              file=_sys.stderr, flush=True)
+                    except Exception:  # noqa: BLE001 — never break boot
+                        pass
         except Exception:  # pragma: no cover - a hint must never break boot
             logger.debug("[ConfigStore] stale-shadow check skipped", exc_info=True)
 
