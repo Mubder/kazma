@@ -921,6 +921,36 @@ is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two
 conditions) needs 56. Either split it across two days and label each side an
 anecdote, or raise the limit. Parked, not blocked on code.
 
+**The control-plane write guard covers file tools, not the host.** Rule 0 in
+`check_path_access` makes Kazma's own databases unwritable by `file_write`,
+`file_append`, `file_apply_patch`, `file_delete` and the IDE service
+(2026-09-21). It does nothing about `shell_exec`, `python_exec` or
+`code_exec`, which do not go through path policy at all — an approved
+`sqlite3 kazma-data/hitl_gates.db "update ..."` still works. That is the
+existing "approval is consent, not containment" line below, and it is not a
+regression; it is recorded here because a guard named "never writable" invites
+the reader to assume more than it delivers. What the rule actually removes is
+the *quiet* route: `file_write` is danger-tier, but "Allow tool (session)"
+grants it for ~30 minutes, and inside that window one click the operator read
+as "let it write files" could forge approvals for every danger-tier action
+thereafter. A shell command that edits the registry is at least legible on the
+approval card.
+
+It is also **SQLite-only by construction**. The rule matches path suffixes
+under `data_dir()`; with a Postgres backend the gate registry is not a file
+and there is no path to deny. Nothing is worse than before — a file tool
+cannot write a Postgres table either — but do not read the passing tests as
+coverage of a Postgres deployment.
+
+**The file-read cache can still be fooled inside one filesystem tick.** Entries
+are stamped with `(mtime_ns, size)` and revalidated on every hit (2026-09-21),
+which closes read-after-write for every writer including ones outside Kazma.
+A second write landing in the same mtime tick *and* producing an identical
+size would not move the stamp and would serve stale bytes. Content hashing
+would close it and was rejected: it re-reads the whole file on every cache
+hit, which is the cost the cache exists to avoid. The tests here deliberately
+vary the size so the residual is never what a red test means.
+
 ## Scope
 
 **Single-operator trusted host.** Multi-user, network-exposed and multi-tenant
