@@ -787,15 +787,44 @@ class ConfigStore:
                 n = conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0]
             finally:
                 conn.close()
+            # Count the Knowledge Library too. The same FILE holds it, and it
+            # is NOT stale: KnowledgeStore is SQLite-only with no Postgres
+            # variant, so on a Postgres install the `settings` table in this
+            # file is dead while `knowledge_chunks` beside it is live data.
+            # Saying "that file is a leftover" without this distinction is how
+            # an operator tidying up after the cutover deletes their entire
+            # ingested corpus. On the reference install: 90 dead settings rows
+            # and 6,598 live knowledge chunks, in one file.
+            chunks = 0
+            try:
+                conn = _sq.connect(f"file:{stale.as_posix()}?mode=ro", uri=True)
+                try:
+                    chunks = conn.execute(
+                        "SELECT COUNT(*) FROM knowledge_chunks"
+                    ).fetchone()[0]
+                finally:
+                    conn.close()
+            except Exception:  # noqa: BLE001 — table may not exist
+                chunks = 0
+
             if n:
                 logger.warning(
-                    "[ConfigStore] %s holds %d row(s) but Postgres is the live "
-                    "backend -- that file is a leftover and is NOT read. Do not "
-                    "debug configuration or credentials against it; it can show "
-                    "providers as disabled with empty keys while the real store "
-                    "has them enabled.",
+                    "[ConfigStore] %s: its `settings` table holds %d row(s) "
+                    "that are NOT read -- Postgres is the live config backend. "
+                    "Do not debug configuration or credentials against this "
+                    "file; it can show providers as disabled with empty keys "
+                    "while the real store has them enabled.",
                     stale, n,
                 )
+                if chunks:
+                    logger.warning(
+                        "[ConfigStore] ...but DO NOT DELETE %s: the same file "
+                        "holds %d live Knowledge Library chunk(s). "
+                        "KnowledgeStore is SQLite-only and shares this file "
+                        "regardless of the config backend. Only the `settings` "
+                        "table in it is stale.",
+                        stale, chunks,
+                    )
         except Exception:  # pragma: no cover - a hint must never break boot
             logger.debug("[ConfigStore] stale-shadow check skipped", exc_info=True)
 

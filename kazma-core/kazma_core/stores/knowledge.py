@@ -72,7 +72,29 @@ def slugify_library_id(raw: str) -> str:
     s = re.sub(r"_+", "_", s).strip("_")
     return s or "library"
 
-_DEFAULT_DB = "kazma-data/settings.db"
+def _default_db() -> str:
+    """The same file ``ConfigStore`` uses, resolved the same way.
+
+    This was the literal ``"kazma-data/settings.db"`` — relative to the process
+    CWD, and blind to ``KAZMA_DATA_DIR``. ``ConfigStore`` resolves the very
+    same filename through ``paths.settings_db()`` (``data_dir()/settings.db``),
+    so on any install that sets ``KAZMA_DATA_DIR`` the two pointed at
+    DIFFERENT FILES: config in one, the Knowledge Library in another, and the
+    backup routine — which also goes through ``data_dir()`` — copying only the
+    first. A cron job or systemd unit with a different WorkingDirectory would
+    likewise open, or silently create, a second empty knowledge database.
+
+    The reference install escapes this only because ``KAZMA_DATA_DIR`` is
+    unset there and the server's CWD happens to be the install root. That is a
+    coincidence, not a design.
+
+    Resolved lazily, not at import: ``data_dir()`` reads the environment, and
+    binding it at module import would freeze whatever was set when the first
+    importer happened to load this module.
+    """
+    from kazma_core.paths import settings_db
+
+    return settings_db()
 
 _SCHEMA = """\
 CREATE TABLE IF NOT EXISTS knowledge_libraries (
@@ -153,7 +175,7 @@ class KnowledgeStore:
     """
 
     def __init__(self, db_path: str | None = None) -> None:
-        self._db_path = Path(db_path or _DEFAULT_DB)
+        self._db_path = Path(db_path or _default_db())
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None
         self._lock = threading.Lock()
