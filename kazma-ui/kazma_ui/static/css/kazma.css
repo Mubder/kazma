@@ -2218,6 +2218,42 @@ tbody tr:last-child td {
   font-size: 0.86rem;
   line-height: 1.45;
 }
+/* A RENDERED thought. `pre-wrap` above is for escaped source; markdown
+   already emits <p>/<pre>, so keeping it doubles every blank line. */
+.agent-progress-step.step-thought .step-detail.step-detail-md {
+  white-space: normal;
+}
+/* A row in a collapsed fold, not an article: no outer margins, code
+   scrolls rather than widening the panel, headings do not shout. */
+.step-detail-md > *:first-child { margin-top: 0; }
+.step-detail-md > *:last-child { margin-bottom: 0; }
+.step-detail-md p { margin: 0 0 0.4em; }
+.step-detail-md ul,
+.step-detail-md ol { margin: 0 0 0.4em; padding-inline-start: 1.25em; }
+.step-detail-md li { margin: 0.1em 0; }
+.step-detail-md h1,
+.step-detail-md h2,
+.step-detail-md h3,
+.step-detail-md h4 {
+  font-size: 0.92rem;
+  font-weight: 600;
+  margin: 0.5em 0 0.25em;
+}
+.step-detail-md pre {
+  margin: 0.35em 0;
+  padding: 0.5em 0.6em;
+  overflow-x: auto;
+  max-width: 100%;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+.step-detail-md code { font-size: 0.85em; }
+.step-detail-md :not(pre) > code {
+  padding: 0.08em 0.3em;
+  border-radius: 3px;
+}
+.step-detail-md table { display: block; overflow-x: auto; max-width: 100%; }
+.step-detail-md img { max-width: 100%; height: auto; }
 /* Approval card the Review button just scrolled to. */
 .hitl-approval-card.is-flash {
   animation: kz-hitl-flash 1.4s ease-out 1;

@@ -462,5 +462,114 @@ assert("a snapshot does not drop live parts not in it",
 assert("...while still delivering its own",
   TD.textOf(afterSnap.parts) === "persisted answer");
 
+// ── Narration folds into the thoughts region ────────────────────────
+//
+// Reported from the installed build (2026-09-20): text appeared under
+// the CoT block while the model worked, and was REPLACED on Approve.
+//
+// Mid-turn there is no final text to compare against, so
+// splitStreamAndFinal(stream, stream) classified everything streamed as
+// `text` — the ANSWER region. The separation only happened
+// retroactively, when a differing final arrived, which on a resume leg
+// is the backfill frame. Hence the swap the moment Approve was clicked.
+//
+// The rule now: when the model asks to ACT, whatever it said first was
+// thinking out loud.
+
+function narrated(turnId, text) {
+  return TD.applyEvent(TD.empty(turnId), { type: "token", content: text });
+}
+
+var narrating = narrated("t-fold", "Reading the layout first.");
+assert("narration is visible while it streams",
+  TD.textOf(narrating.parts) === "Reading the layout first.");
+
+var atGate = TD.applyEvent(narrating, {
+  type: "hitl", interrupt_id: "g1", tool: "file_write", state: "pending",
+});
+assert("a gate empties the answer region",
+  TD.textOf(atGate.parts) === "");
+assert("...and the narration is in the thoughts region",
+  atGate.parts.filter(function (p) {
+    return p.type === "reasoning" && p.text === "Reading the layout first.";
+  }).length === 1);
+
+// Idempotent (U04): a replayed gate frame must not fold anything twice
+// or resurrect what it folded.
+var gateAgain = TD.applyEvent(atGate, {
+  type: "hitl", interrupt_id: "g1", tool: "file_write", state: "pending",
+});
+assert("a replayed gate frame changes nothing",
+  TD.textOf(gateAgain.parts) === "" &&
+  gateAgain.parts.filter(function (p) { return p.type === "reasoning"; })
+    .length === 1);
+
+// The PAUSE FRAME carries the narration too.
+//
+// `turn_complete` at a gate ships `content: content_acc` (see
+// _streaming.py:_done_payload), so without a guard it lands as a text
+// part and puts back under the CoT block exactly what the gate just
+// folded away. The browser caught this after the node probe missed it:
+// the probe sent no content on the pause frame, and the real pump does.
+var paused = TD.applyEvent(atGate, {
+  type: "turn_complete", interrupted: true,
+  content: "Reading the layout first.",
+});
+assert("the pause frame does not put the narration back",
+  TD.textOf(paused.parts) === "");
+assert("...and the turn is marked paused", paused.status === "paused");
+
+// A turn that finishes normally still gets its answer from the frame.
+var finished = TD.applyEvent(narrated("t-fin", "thinking"), {
+  type: "turn_complete", content: "The answer.",
+});
+assert("a completed turn keeps its answer",
+  TD.textOf(finished.parts) === "The answer.");
+
+// A tool STARTING is the same signal as a gate.
+var atTool = TD.applyEvent(narrated("t-fold2", "Let me look that up."), {
+  type: "tool_call", tool_name: "web_search", tool_call_id: "c1",
+});
+assert("a tool start folds the narration too",
+  TD.textOf(atTool.parts) === "");
+
+// ...but a tool RESULT must not: by then the next leg may already be
+// streaming, and folding would hide text the reader is watching appear.
+var midNext = TD.applyEvent(atTool, { type: "token", content: "Found it." });
+var afterResult = TD.applyEvent(midNext, {
+  type: "tool_result", tool_name: "web_search", tool_call_id: "c1",
+  result: "ok",
+});
+assert("a tool result does not fold the next leg's text",
+  TD.textOf(afterResult.parts) === "Found it.");
+
+// Across legs the thoughts ACCUMULATE — leg one's narration is not lost
+// when leg two narrates something else.
+var leg2 = TD.applyEvent(afterResult, {
+  type: "hitl", interrupt_id: "g2", tool: "shell_exec", state: "pending",
+});
+var thoughts = leg2.parts.filter(function (p) { return p.type === "reasoning"; });
+assert("both legs' narration survives in one thoughts part",
+  thoughts.length === 1 &&
+  thoughts[0].text.indexOf("Let me look that up.") === 0 &&
+  thoughts[0].text.indexOf("Found it.") > 0);
+
+// And the real answer still lands in the answer region.
+var answered = TD.applyEvent(leg2, {
+  type: "turn_complete", content: "All done.",
+});
+assert("the final answer is the answer",
+  TD.textOf(answered.parts) === "All done.");
+assert("...and it did not eat the thoughts",
+  answered.parts.filter(function (p) { return p.type === "reasoning"; }).length === 1);
+
+// A finished turn is not re-folded: a late gate frame on a done turn
+// must not hide the answer that is already on screen.
+var lateGate = TD.applyEvent(answered, {
+  type: "hitl", interrupt_id: "g3", tool: "file_read", state: "pending",
+});
+assert("a gate after completion does not hide the answer",
+  TD.textOf(lateGate.parts) === "All done.");
+
 if (fail) process.exit(1);
 console.log("all ok");

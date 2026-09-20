@@ -152,10 +152,30 @@ def _hitl_persist_parts(
     *streamed* is the superseded narration (multi-hop text accumulation).
     When it differs from the terminal *content*, it lands in a ``reasoning``
     part — preserved for the CoT accordion instead of replacing the answer.
+
+    **A paused turn has not answered yet.** When *interrupted*, whatever
+    the model said is narration by definition: it stopped to ask
+    permission. ``parts_from_stream(X, X)`` cannot know that — with
+    nothing to compare against it classifies X as ``text`` — so the pause
+    is stated here instead.
+
+    Without this, a refresh mid-pause puts the narration back under the
+    CoT block as though it were the reply, while the live client (which
+    folds it at the gate, ``turn_document.js:foldNarration``) shows it in
+    the thoughts region. Live and hydrated must agree; that is what the
+    plan's convergence oracle checks.
     """
     from kazma_ui.turn_document import parts_from_stream
 
-    parts = parts_from_stream(streamed=streamed or content or "", final=content or "")
+    narration = (streamed or content or "").strip()
+    if interrupted:
+        parts = (
+            [{"type": "reasoning", "text": narration}] if narration else []
+        )
+    else:
+        parts = parts_from_stream(
+            streamed=streamed or content or "", final=content or ""
+        )
     if hitl_payload:
         payload = dict(hitl_payload)
         iid = str(payload.get("interrupt_id") or "")

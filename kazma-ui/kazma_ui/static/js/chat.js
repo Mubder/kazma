@@ -3870,9 +3870,31 @@
    * the (truncated) result is long, expanded otherwise. Shared by the live
    * logProgress path and the restored-CoT renderer so both clamp identically.
    */
-  function _detailHtml(detail, forceExpanded) {
+  /**
+   * A step row's detail.
+   *
+   * `kind === 'thought'` is the model's own prose and is rendered as
+   * markdown; everything else is escaped. A tool's detail is a payload —
+   * JSON, a shell transcript, a diff — and the reader wants it verbatim,
+   * not interpreted. A thought with a code fence in it wants the code
+   * block, not three literal backticks (reported from the installed
+   * build, 2026-09-20).
+   */
+  function _detailHtml(detail, forceExpanded, kind) {
     if (!detail) return '';
     var t = truncateStr(String(detail), TOOL_DETAIL_MAX);
+    if (kind === 'thought' && typeof KS !== 'undefined' && KS && KS.markdown) {
+      // Truncation can cut inside a fenced block, and an unclosed fence
+      // swallows everything after it. Balance before rendering.
+      var fences = (t.match(/^```/gm) || []).length;
+      if (fences % 2) t += '\n```';
+      var cls = forceExpanded ? ' is-expanded' : ' is-clamped';
+      return '<div class="step-detail step-detail-md' + cls + '">' +
+        KS.markdown(_scrubDsml(t)) + '</div>' +
+        (forceExpanded ? '' :
+          '<button type="button" class="step-show-more" data-open="0">' +
+          escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>');
+    }
     // A detail written by turn_detail.js leads with a one-line gist and keeps
     // the raw payload below it. Collapsed, show ONLY that line \u2014 the raw value
     // is for the moment you go looking, not for every row you scroll past.
@@ -3939,7 +3961,7 @@
           '<span class="step-time">' + escapeHtml(timeText) + '</span>' +
         '</div>' +
         fileChip +
-        _detailHtml(o.detail, o.forceExpanded) +
+        _detailHtml(o.detail, o.forceExpanded, kind) +
       '</div>'
     );
   }
@@ -7418,7 +7440,23 @@
       // life of the turn, which is the point of it.
       return false;
     },
-    discard: function() { return false; },
+    discard: function(key, node, ctx) {
+      // Contract 4 is "ambiguity never deletes", and it stands: a
+      // truncated resync or a partial hydrate that stops mentioning a
+      // region must leave it on screen.
+      //
+      // An EMPTY answer is not ambiguity. `mergeParts` never removes, so
+      // the only way the answer text disappears from a document is
+      // `foldNarration` deciding the text was narration after all — a
+      // deliberate reclassification, not a gap in a snapshot.
+      //
+      // Without this the region keeps whatever was last painted into it:
+      // `paint` only runs for PLANNED slots, so once the plan stops
+      // asking for `text` the stale sentence sits there for the rest of
+      // the turn. Measured in the live page at a pause, 2026-09-20.
+      if (key !== 'text') return false;
+      return !_answerFromDoc(window.KazmaTurnDocument, ctx && ctx.doc);
+    },
   };
 
   /**

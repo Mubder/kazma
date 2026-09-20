@@ -91,8 +91,26 @@ def test_hitl_part_still_appended_with_streamed() -> None:
     )
     assert parts is not None
     kinds = [p.get("type") for p in parts]
-    assert "hitl" in kinds
-    # Interrupted pause with NO synthesis: the narration IS the pending
-    # row text (close_turn's interrupted rule) — no reasoning displacement
-    # because there is no final to displace it.
-    assert text_of(parts) == NARRATION.strip()
+    assert "hitl" in kinds, (
+        "the gate must survive the pause — that is what this test is named "
+        "for, and a refresh mid-pause rebuilds the card from it"
+    )
+    # A PAUSED turn has not answered yet.
+    #
+    # This used to assert the opposite: that the narration IS the pending
+    # row's text, on the grounds that there was no final to displace it.
+    # Reported from the installed build (2026-09-20): that put the
+    # narration under the CoT block as though the model had replied, and
+    # it was visibly REPLACED the moment Approve was clicked.
+    #
+    # The turn stopped to ask permission, so what it said is thinking.
+    # The client folds it the same way at the gate
+    # (turn_document.js:foldNarration), which is what keeps live and
+    # hydrated converging. See tests/test_narration_is_not_the_answer.py.
+    assert text_of(parts) == "", (
+        "a paused turn persisted an answer; a refresh mid-pause will show "
+        "narration as though the model had replied"
+    )
+    assert [p["text"] for p in parts if p.get("type") == "reasoning"] == [
+        NARRATION.strip()
+    ]
