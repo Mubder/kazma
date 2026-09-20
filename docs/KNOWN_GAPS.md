@@ -419,6 +419,43 @@ date can still be refused after a bare confirmation.
 
 ## Test baseline
 
+**A chunk hangs on CI and is rescued by the per-file retry (open, pre-existing).**
+
+`fast_test.py` splits the suite into 4 chunks. One or two of them regularly
+report `OK 0p/0f` and then `produced no parseable test tally (exit=1)`. That is
+pytest-timeout firing: `--timeout-method=thread` dumps every thread and kills
+the process, so pytest exits non-zero with no summary line to parse. The runner
+then retries that chunk's ~160 files one at a time, they all pass, and the job
+is green — at roughly double the wall clock (1,600-1,700s).
+
+This is **not** the `test_documents_api_phase8` teardown tax fixed on
+2026-09-20, and it is **not** new: `chunk 00: OK 0p/0f` appears on
+`2847e260`, `ff559d74` and `7c4834de`, all predating that work.
+
+Evidence, from the first run with a usable dump (400 lines instead of 25 —
+see the `_HANG_DUMP_LINES` change):
+
+* chunk 00 stopped at `kazma-core/tests/test_github_app_integration.py`, on
+  the 5th test — the first `async` one, `test_git_push_pull_upstream`.
+* MainThread was inside `pytest_asyncio` -> `run_until_complete` ->
+  `selector.poll(timeout)`: the event loop idle, waiting for I/O that never
+  arrives. Not a busy loop, not a deadlock on a lock we hold.
+* The test fully mocks `subprocess.run` with a 4-item `side_effect`, so it is
+  not making a real network call. It passes locally in 0.84s (14/14).
+
+Two things worth checking first, in this order, by someone who can reproduce
+on Linux: whether `_git_sync` makes a FIFTH subprocess call on CI (exhausting
+that `side_effect` list) because some git config present on a dev box is
+absent on the runner; and whether the hang is actually in this test or merely
+after it, since the chunk file order shifts as test files are added and the
+specific victim has moved between runs.
+
+**Do not "fix" this by raising the chunk timeout.** The retry already makes
+the build green; the cost is wall clock, and the value of finding it is that
+it is the same shape — an unbounded wait on Linux only — as the teardown tax
+that cost twelve red runs and a wrongly reverted vault tripwire.
+
+
 **On CI (Linux), 2026-09-17: 9,019 passed, 0 failed, 67 skipped, 3 xfailed —
 job green** (run `35152707624`, commit `a1cb6650`). Local Windows runs give
 9,0xx passed with three extra failures in
