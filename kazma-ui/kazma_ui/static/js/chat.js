@@ -16,7 +16,29 @@
   var KS = window.KazmaStream;
   var chatSessionId = null;
   var currentMsgEl = null;
-  var tokenAccum = '';
+  /**
+   * The answer this turn has produced so far, read from the document.
+   *
+   * This replaces `tokenAccum`, a module-level string that every paint
+   * wrote and four decisions read. AGENTS.md §31B already forbade the
+   * dual-PAINT ("Do not restore tokenAccum dual-paint (T-4)"); what was
+   * left was subtler and is the same defect one level down — a second
+   * answer to "has this turn produced anything", kept in a variable whose
+   * lifetime nobody owned. It was zeroed in eleven places, and every
+   * zeroing was somebody defending against a stale read: the empty-string
+   * guard in _paintLiveTextNow exists because one transport's terminal
+   * frame flushed after the other's endTurn had blanked it, and painted ""
+   * over a finished reply (2026-09-02).
+   *
+   * The document cannot go stale that way. It is keyed by turn, a retired
+   * turn's document is simply no longer the live one, and "what has this
+   * turn said" has exactly one answer (invariant U06).
+   */
+  function _liveAnswerText() {
+    var TD = window.KazmaTurnDocument;
+    var doc = _docs[_liveTurnId] || _docs.live || null;
+    return _answerFromDoc(TD, doc) || '';
+  }
   var _liveTurnId = '';
   /** Turn ids retired by abortThenSend / Stop. Old SSE/WS tokens with these
    *  ids must not paint (or switch `_liveTurnId` back to the first bubble). */
@@ -1322,7 +1344,6 @@
     _liveTurnId = '';
     _liveRenderEl = null;
     currentMsgEl = null;
-    tokenAccum = '';
   }
 
   function _syncPrefsSession() {
@@ -1721,7 +1742,6 @@
 
   function _resetTurnState() {
     currentMsgEl = null;
-    tokenAccum = '';
     _liveTurnId = '';
     _turnPainted = false;
     _progressEl = null;
@@ -1894,7 +1914,6 @@
     }
     // Finalize open assistant bubble so the next token starts a new one.
     currentMsgEl = null;
-    tokenAccum = '';
     // The finished bubble is no longer a live-paint target — a duplicate
     // terminal frame (second transport's done) must not find it here.
     _liveRenderEl = null;
@@ -2033,7 +2052,7 @@
         // Reply already painted and the SSE fetch is gone — Stop was stuck
         // because WS still had isThinking from a leftover status frame.
         var sseDead = !_streamIsLive();
-        var replyPainted = !!(tokenAccum && String(tokenAccum).trim());
+        var replyPainted = !!_liveAnswerText().trim();
         if (sseDead && replyPainted) {
           console.warn('[KazmaChat] Desync recovery: SSE ended with a painted reply — releasing Stop');
           endTurn();
@@ -2715,7 +2734,6 @@
         '</div>';
       resetSessionStats();
       currentMsgEl = null;
-      tokenAccum = '';
       _turnPainted = false;
       if (activeStream) { activeStream.abort(); activeStream = null; }
       renderSessionList();
@@ -2748,7 +2766,6 @@
     // leaving the sent text in the box (and Stop on the button, so the
     // only way to "clear" was to send it again).
     currentMsgEl = null;
-    tokenAccum = '';
     _turnPainted = false;
     clearPendingAttachments();
     _clearComposer();
@@ -2832,7 +2849,7 @@
         // streaming text bounce (the flicker). While tokens flow the strip
         // stays steady ("Writing reply…"); terminal paths (done/error/
         // endTurn) are the only ones allowed to hide it.
-        if (!tokenAccum) {
+        if (!_liveAnswerText()) {
           logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
         }
         applyTurnEvent({
@@ -2979,7 +2996,7 @@
         try {
         // Terminal frame is SoT — ALWAYS replace-paint, even when plan
         // tokens already arrived (glued ```plan + answer used to be skipped
-        // because tokenAccum was nonempty).
+        // because the turn had already produced an answer).
         if (data && data.content) {
           applyTurnEvent({
             type: 'done',
@@ -3009,13 +3026,13 @@
         // received." under the posted-tweets answer, 2026-08-26).
         // Do not stamp the watchdog until resync has had a chance — the
         // server often already persisted the reply.
-        if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {
+        if (!_liveAnswerText() && !interrupted && !_awaitingApproval && !_turnPainted) {
           diag('empty-terminal');
           dumpDiagnostics();
           _resyncDelivery('empty-terminal');
           var emptyTurnEl = currentMsgEl;
           setTimeout(function() {
-            if (tokenAccum || _turnPainted || _awaitingApproval) return;
+            if (_liveAnswerText() || _turnPainted || _awaitingApproval) return;
             try { _pinLiveAssistantBubble(); } catch (ePin2) { /* ignore */ }
             var host = emptyTurnEl || currentMsgEl;
             var emptyEl = host && host.querySelector('.message-text');
@@ -4407,6 +4424,18 @@
     }
   }
 
+  /** Which turn owns this panel, right now. Reads the attribute the
+   *  renderer keeps current through bind/promote rather than a value
+   *  captured when the node was built. */
+  function _turnIdOfPanel(panel) {
+    try {
+      var bubble = panel && panel.closest && panel.closest('[data-turn-id]');
+      return bubble ? String(bubble.getAttribute('data-turn-id') || '') : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
   /** The ONE place a disclosure preference is written: a reader gesture. */
   function _toggleActivityFold(panel, turnId) {
     var prefs = _turnPrefs();
@@ -4460,13 +4489,20 @@
       '</div>';
     var header = panel.querySelector('.agent-progress-header');
     if (header) {
-      var foldTurn = String(turnId || '');
+      var builtUnder = String(turnId || '');
       function toggle() {
         // Routed through the preference store so the choice survives the
         // next token, the terminal frame, and a re-render from history.
         // Flipping the class here directly is what made the fold a
         // property of the last paint instead of of the reader.
-        _toggleActivityFold(panel, foldTurn);
+        //
+        // The id is resolved NOW, from the bubble the panel is in, rather
+        // than captured when the panel was built: a turn opens under the
+        // 'live' placeholder and is renamed on the first stamped frame,
+        // so a captured id goes stale within a second of the turn
+        // starting. TV.bind/promote keep data-turn-id current, which is
+        // why it is the honest source.
+        _toggleActivityFold(panel, _turnIdOfPanel(panel) || builtUnder);
       }
       header.addEventListener('click', toggle);
       header.addEventListener('keydown', function(e) {
@@ -4724,19 +4760,18 @@
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
     if (textEl.closest && textEl.closest('.message-user')) return;
-    var liveText = _answerFromDoc(window.KazmaTurnDocument, _docs[_liveTurnId])
-      || String(tokenAccum || '');
-    tokenAccum = liveText;
-    // An EMPTY accumulator at paint time is always a stale duplicate
-    // terminal: the first done's endTurn zeroed tokenAccum, then the SECOND
-    // transport's terminal frame (SSE + WS both deliver done) flushed after
-    // it and painted "" over the finished reply — the answer vanished at the
-    // end of the stream until a refresh re-painted it (2026-09-02). A final
-    // flush may only ever render real accumulated text.
+    var liveText = _liveAnswerText();
+    // Nothing to say means DO NOT PAINT, rather than paint nothing. Both
+    // transports deliver a terminal frame, so the second one used to flush
+    // after the first had cleared the accumulator and wrote "" over a
+    // finished reply — the answer vanished at the end of the stream until
+    // a refresh (2026-09-02). Reading the document instead removes the
+    // window rather than guarding it, and the guard stays anyway: an empty
+    // read is never an instruction to blank the answer.
     if (!String(liveText || '').trim()) return;
     if (final) {
-      if (_paintHTML(textEl, _renderReplyHTML(tokenAccum))) {
-        if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
+      if (_paintHTML(textEl, _renderReplyHTML(liveText))) {
+        if (window.KazmaBidi) KazmaBidi.apply(textEl, liveText);
       }
       // Re-apply dir="auto" after innerHTML (the attribute survives but the
       // bidi direction may need recalculating for the new content).
@@ -4750,7 +4785,7 @@
     // scrolling): the throttle bounds the rebuild churn, and nothing shifts
     // the layout around it. Plan fences stay stripped live; the plan-only
     // phase holds the bubble open with a blank line.
-    var liveParts = splitPlanAndProse(tokenAccum);
+    var liveParts = splitPlanAndProse(liveText);
     liveParts.prose = _scrubDsml(liveParts.prose);
     if (liveParts.prose) {
       if (_paintHTML(textEl, transformRenderedForPlan(KS.markdown(liveParts.prose)))) {
@@ -5537,7 +5572,6 @@
           // re-orders the settled card above the incoming reply.
           _noteGateDecided(data, optId === 'cancel' ? 'denied' : 'approved');
           _collapseClaimedHitlCard(_semCard);
-          tokenAccum = '';
           // Resolving a semantic choice resumes THIS turn \u2014 same rule as the
           // security card: keep the workbench and its steps.
           beginTurn({ resume: true });
@@ -5740,7 +5774,6 @@
           : (action === 'deny' ? ti('denied', 'Denied ✗') : ti('approved', 'Approved ✓')));
       _clearStoreApproval();
       // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
-      tokenAccum = '';
       // RESUME, not a new turn: keep this turn's workbench and its steps.
       beginTurn({ resume: true });
       // beginTurn clears the HITL wait; keep recover/replay from re-arming
@@ -6718,7 +6751,6 @@
       '</div>';
     resetSessionStats();
     currentMsgEl = null;
-    tokenAccum = '';
     lastSentUserText = '';
     _awaitingReply = false;
     _turnPainted = false;
@@ -7385,7 +7417,6 @@
     var TD = window.KazmaTurnDocument;
     var text = _answerFromDoc(TD, doc);
     if (!text) return;
-    tokenAccum = text;
     tryIngestPlanFromText(text);
     var display = _scrubDsml(stripPlanFenceForDisplay(text));
     // A slot is never hidden by its own painter. (_rescueTurnDom used to
@@ -7559,7 +7590,19 @@
       // in the map — never a DOM search, and never leaves a bubble sitting
       // in the transcript advertising data-turn-id="live" for the NEXT
       // turn's tokens to find (2026-09-03 crossed bubbles).
-      if (!el) el = TV.promote('live', id);
+      if (!el) {
+        el = TV.promote('live', id);
+        // Every map keyed by the turn id hears about the rename, not just
+        // the bubble registry. The disclosure preference did not, so a
+        // fold the reader opened before the server stamped the turn was
+        // written under 'live' and read back under the real id — it shut
+        // again on the next token. Caught in the browser; the unit tests
+        // drove one constant id and never promoted.
+        var prefsP = _turnPrefs();
+        if (prefsP && typeof prefsP.promote === 'function') {
+          try { prefsP.promote('live', id); } catch (ePr) { /* ignore */ }
+        }
+      }
     } else {
       el = TV.elFor('live');
     }
@@ -7827,7 +7870,6 @@
       }
       try { scrollToBottom(); } catch (eScroll) { /* ignore */ }
     }
-    tokenAccum = text;
     _turnPainted = true;
     return true;
   }
@@ -7952,7 +7994,6 @@
     appendMessage('user', said);
     scrollToBottomForce(); // a new turn starts; don't leave the reader scrolled up
     currentMsgEl = null;
-    tokenAccum = '';
     _turnPainted = false;
     try {
       disableInput(); // → beginTurn() — a new utterance is a new turn (barge-in included), never resume
@@ -8077,7 +8118,6 @@
      * Keeps the open bubble (HITL card stays visible on the same turn).
      */
     preparePostApprovalTurn: function() {
-      tokenAccum = '';
       noteTurnActivity();
       // Keep currentMsgEl so renderTurn paints into the same turn bubble.
     },
@@ -8106,7 +8146,6 @@
       // endTurn is invoked by agentStore after graph_error; keep bubble closed.
       finalizeProgress(false);
       currentMsgEl = null;
-      tokenAccum = '';
     },
 
     // No live-voice ASSISTANT paint hooks here. The voice socket authors

@@ -270,7 +270,9 @@ class TestV2ArchitecturePresent:
         assert "_forcePaintDoneContent(data.content)" in src
         # The visibility check must run BEFORE the empty-terminal watchdog.
         at_ack = src.index("if (data && data.content && !interrupted)")
-        at_watchdog = src.index("if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {")
+        at_watchdog = src.index(
+            "if (!_liveAnswerText() && !interrupted && !_awaitingApproval && !_turnPainted) {"
+        )
         assert at_ack < at_watchdog, (
             "done-content force-paint must precede the empty-terminal fallback"
         )

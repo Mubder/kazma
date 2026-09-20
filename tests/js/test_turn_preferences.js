@@ -73,6 +73,44 @@ prefs.setSession("s3");
 ok("...and an unseen session is empty again",
   prefs.isExpanded("t1", "activity", false) === false);
 
+// ── promote ─────────────────────────────────────────────────────────────
+// THE bug these tests missed, found by opening the real page: a turn opens
+// under the 'live' placeholder and is renamed on the first stamped frame.
+// The fold was written under 'live' and read back under the real id, so it
+// shut again on the next token. Everything above drove one constant id and
+// never promoted — a fixture that cannot express the defect.
+{
+  const promo = TP.create({ storage: new MemStorage(), sessionId: "promo" });
+  promo.setExpanded("live", "activity", true);
+  ok("a choice made under the placeholder is recorded",
+    promo.isExpanded("live", "activity", false) === true);
+  ok("promote moves it", promo.promote("live", "turn-7") === true);
+  ok("...to the real id", promo.isExpanded("turn-7", "activity", false) === true);
+  ok("...and leaves nothing behind",
+    promo.has("live", "activity") === false);
+  ok("promoting again is a no-op", promo.promote("live", "turn-7") === false);
+  ok("promote to itself is a no-op", promo.promote("turn-7", "turn-7") === false);
+
+  // A choice already recorded under the real id is newer and must win.
+  const clash = TP.create({ storage: new MemStorage(), sessionId: "clash" });
+  clash.setExpanded("live", "activity", true);
+  clash.setExpanded("turn-9", "activity", false);
+  clash.promote("live", "turn-9");
+  ok("promotion never clobbers a newer choice",
+    clash.isExpanded("turn-9", "activity", true) === false);
+  ok("...and still clears the placeholder",
+    clash.has("live", "activity") === false);
+
+  // It survives a reload, i.e. it was actually persisted under the new key.
+  const store2 = new MemStorage();
+  const a = TP.create({ storage: store2, sessionId: "persist" });
+  a.setExpanded("live", "activity", true);
+  a.promote("live", "turn-3");
+  ok("a promoted choice is persisted, not just in memory",
+    TP.create({ storage: store2, sessionId: "persist" })
+      .isExpanded("turn-3", "activity", false) === true);
+}
+
 // ── forget ──────────────────────────────────────────────────────────────
 prefs.setSession("s1");
 prefs.setExpanded("t9", "activity", true);

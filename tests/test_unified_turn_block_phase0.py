@@ -222,21 +222,30 @@ def test_empty_turn_mints_no_approval_group() -> None:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-@XFAIL_PHASE2
 def test_no_token_accum_content_decisions() -> None:
     """Plan §9: "``tokenAccum`` and related fallback reads — replace content
     decisions with document selectors."
 
-    AGENTS.md §31B already forbids restoring the ``tokenAccum`` dual-paint.
-    What remains is subtler: ``tokenAccum`` is still READ to decide whether
-    the turn produced visible content, which is a second answer to a
-    question the document already answers.
+    AGENTS.md §31B already forbade restoring the ``tokenAccum``
+    dual-PAINT. What remained was subtler and the same defect one level
+    down: it was still READ to decide whether the turn had produced
+    visible content — a second answer to a question the document already
+    answers (invariant U06). Retired in Phase 2d in favour of
+    ``_liveAnswerText()``.
     """
     src = _chat_js()
-    assert "tokenAccum" not in src, (
-        "chat.js still carries a second text authority; every read is a "
+    # Only the comment that explains its removal may still name it; a
+    # grep over comments would make that explanation unwritable.
+    code = "\n".join(
+        ln for ln in src.splitlines() if not ln.lstrip().startswith("*")
+    )
+    assert "tokenAccum" not in code, (
+        "chat.js carries a second text authority again; every read is a "
         "content decision the TurnDocument should be making"
     )
+    assert "function _liveAnswerText()" in src
+    # One reader of the document for the answer, used by every decision.
+    assert code.count("_liveAnswerText()") >= 4
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -360,4 +369,39 @@ def test_the_turn_header_is_inside_the_turn() -> None:
     )
     assert "modules/turn_presentation.js" in _chat_html(), (
         "the presentation model is not loaded by the chat page"
+    )
+
+
+def test_every_map_keyed_by_turn_id_hears_about_a_promotion() -> None:
+    """A turn opens under the ``'live'`` placeholder and is renamed.
+
+    Found by opening the real page, not by the unit tests: the reader
+    opened the thoughts fold before the server had stamped the turn, the
+    preference was written under ``'live'``, the renderer promoted the
+    bubble to the real id — and the next token read the fold's state under
+    the new key, found nothing, and applied the default. The fold shut
+    again about a second into every turn.
+
+    ``turn_view.js:promote`` already existed for exactly this event
+    (2026-09-03 crossed bubbles). The rule it encodes is the general one:
+    any map keyed by the turn id has to hear about the rename. This checks
+    that the preference store does, and that the toggle resolves the id at
+    click time rather than capturing one that goes stale.
+    """
+    prefs = (
+        UI / "static" / "js" / "modules" / "turn_preferences.js"
+    ).read_text(encoding="utf-8")
+    assert "promote: function (fromId, toId)" in prefs, (
+        "the preference store cannot follow a turn rename"
+    )
+
+    chat = _chat_js()
+    promote = chat.split("el = TV.promote('live', id);", 1)[1][:600]
+    assert "prefsP.promote('live', id)" in promote, (
+        "the bubble registry is promoted but the preference store is not"
+    )
+    # The toggle must not close over an id captured at build time.
+    assert "function _turnIdOfPanel(panel)" in chat
+    assert "_toggleActivityFold(panel, _turnIdOfPanel(panel)" in chat, (
+        "the fold toggle is writing under a captured turn id again"
     )

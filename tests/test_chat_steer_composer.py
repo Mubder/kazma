@@ -1161,7 +1161,10 @@ def test_progress_only_frames_never_mint_an_empty_bubble() -> None:
     # ...and the "no response" diagnosis must not be gated on the bubble
     # being ABSENT, which any mint suppressed.
     done = js.split("onDone: function(data) {", 1)[1]
-    assert "!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted" in done
+    # The guard reads the DOCUMENT now, not a module-level accumulator
+    # (UNIFIED_TURN_BLOCK.md, invariant U06). Same condition, one
+    # authority.
+    assert "!_liveAnswerText() && !interrupted && !_awaitingApproval && !_turnPainted" in done
 
 
 def test_ws_store_owns_no_status_surface_of_its_own() -> None:
