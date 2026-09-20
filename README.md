@@ -10,9 +10,9 @@
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
     <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-3776AB.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+"></a>
     <a href="https://github.com/Mubder/kazma/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/Mubder/kazma/ci.yml?branch=main&style=flat-square&label=CI&logo=githubactions&logoColor=white" alt="CI status"></a>
-    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-9%2C585-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
+    <a href="https://github.com/Mubder/kazma/actions"><img src="https://img.shields.io/badge/Tests-8%2C169-10B981.svg?style=flat-square&logo=pytest&logoColor=white" alt="Tests"></a>
     <a href="docs/INJECTION.md"><img src="https://img.shields.io/badge/Prompt_injection-measured-EF4444.svg?style=flat-square" alt="Prompt injection benchmark"></a>
-    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-3%2C628%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
+    <a href="https://github.com/Mubder/kazma/commits/main"><img src="https://img.shields.io/badge/Commits-3%2C663%2B-6366F1.svg?style=flat-square&logo=git&logoColor=white" alt="Commits"></a>
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
@@ -40,7 +40,7 @@ Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before dan
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
 |---|---|---|---|
-| **~492K LOC** (360K Python code + 39K JS) | **9,585 tests passing** (642 test files · 0 failures) | **3,628+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
+| **~455K LOC** (362K Python code + 39K JS) | **8,169 test functions** (644 test files) | **3,663+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
 
 <p align="center">
   <img src="docs/screenshots/dashboard.png" alt="Kazma Observability Dashboard & Control Plane" width="100%">
@@ -390,7 +390,7 @@ remain single-replica — see `docs/docs/guide/document-intelligence.md`.
 
 ## 🧪 Testing & Verification
 
-Kazma maintains rigorous test coverage with **9,585 automated tests** (24 skipped, 3 xfailed, 0 failures) across unit, integration, swarm reliability, and security layers:
+Kazma maintains rigorous test coverage with **~9,600 automated tests** across unit, integration, swarm reliability, and security layers. Whether they are currently passing is the [CI badge](https://github.com/Mubder/kazma/actions/workflows/ci.yml) at the top, not a number typed here:
 
 ```bash
 # Run complete test suite
