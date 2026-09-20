@@ -35,7 +35,11 @@ __all__ = [
     "stop_checkpoint_retention_loop",
 ]
 
-DEFAULT_DB = "kazma-data/checkpoints.db"
+from kazma_core.paths import checkpoints_db as _checkpoints_db
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured (was a CWD-relative
+#: literal).
+DEFAULT_DB = str(_checkpoints_db())
 _DEFAULT_KEEP_PER_THREAD = 200
 _DEFAULT_INACTIVE_DAYS = 30
 _DEFAULT_INACTIVE_KEEP = 10

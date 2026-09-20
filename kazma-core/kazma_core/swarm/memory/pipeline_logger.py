@@ -19,7 +19,10 @@ __all__ = ["PipelineLogger", "close_pipeline_logger", "get_pipeline_logger"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/pipeline_logs.db"
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+_DEFAULT_DB = str(_data_dir() / "pipeline_logs.db")
 
 # Singleton connection
 _conn: sqlite3.Connection | None = None

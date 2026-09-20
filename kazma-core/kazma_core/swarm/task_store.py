@@ -29,7 +29,10 @@ __all__ = ["TaskStore"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/swarm_tasks.db"
+from kazma_core.paths import swarm_tasks_db as _swarm_tasks_db
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+_DEFAULT_DB = str(_swarm_tasks_db())
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS swarm_tasks (

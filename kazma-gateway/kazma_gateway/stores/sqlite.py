@@ -58,7 +58,11 @@ class SQLiteSessionStore(SessionStore):
                  Use ":memory:" for testing.
     """
 
-    def __init__(self, db_path: str = "kazma-data/sessions.db") -> None:
+    def __init__(self, db_path: str | None = None) -> None:
+        if db_path is None:
+            from kazma_core.paths import data_dir
+
+            db_path = str(data_dir() / "sessions.db")
         super().__init__()
         self._db_path = db_path
         self._db: aiosqlite.Connection | None = None

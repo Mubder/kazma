@@ -23,7 +23,10 @@ from kazma_gateway.gateway import Attachment
 
 logger = logging.getLogger(__name__)
 
-ATTACHMENT_DIR = Path("kazma-data/attachments")
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+ATTACHMENT_DIR = _data_dir() / "attachments"
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 _UPLOAD_ID_RE = re.compile(r"^att_[0-9a-f]{32}$")
 

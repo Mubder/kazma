@@ -48,7 +48,10 @@ _INLINE_IMAGE_MIMES = frozenset(
 
 # Where over-cap / non-image attachments are persisted so the agent can
 # open them with file_read. Relative to CWD, matching tools/image_gen.py.
-ATTACHMENT_DIR = Path("kazma-data/attachments")
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+ATTACHMENT_DIR = _data_dir() / "attachments"
 
 # Model-emitted paths in chat text that we may auto-attach (telegram send).
 # Untrusted: the regex is not a permission check. Containment is.

@@ -17,6 +17,20 @@ from kazma_ui.rate_limit import rate_limit
 
 logger = logging.getLogger(__name__)
 
+def _paths_data_dir():
+    """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
+    from kazma_core.paths import data_dir
+
+    return data_dir()
+
+
+def _paths_snapshots_db():
+    """``paths.snapshots_db()``, imported lazily."""
+    from kazma_core.paths import snapshots_db
+
+    return snapshots_db()
+
+
 __all__ = ["register_system_routes"]
 
 
@@ -78,7 +92,7 @@ def register_system_routes(self: Any) -> None:
                     _fallback, "pending_evolution.json"
                 ),
                 "knowledge_graph": str(
-                    _os_sys.path.expanduser("kazma-data/knowledge_graph.json")
+                    str(_paths_data_dir() / "knowledge_graph.json")
                 ),
             }
         # Flush model registry cache
@@ -120,8 +134,8 @@ def register_system_routes(self: Any) -> None:
         except Exception:
             home = _osp.path.join(_osp.getcwd(), ".kazma")
             cfg = _osp.path.join(home, "config.db")
-            kg = _osp.path.expanduser("kazma-data/knowledge_graph.json")
-            snap = _osp.path.expanduser("kazma-data/snapshots.db")
+            kg = str(_paths_data_dir() / "knowledge_graph.json")
+            snap = str(_paths_snapshots_db())
             pending = _osp.path.join(home, "pending_evolution.json")
         return {
             "kazma_home": home,

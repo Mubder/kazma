@@ -792,7 +792,9 @@ def create_research_router() -> APIRouter:
         Accepts both absolute paths and bare filenames (looked up in
         kazma-data/documents/). Security: only serves files from that dir.
         """
-        safe_root = os.path.realpath("kazma-data/documents")
+        from kazma_core.paths import data_dir as _dd
+
+        safe_root = os.path.realpath(str(_dd() / "documents"))
         # Resolve under the safe root and enforce segment-aware containment
         # (relative_to semantics via relpath), not a byte-prefix startswith()
         # check: the latter let sibling dirs like "documents_secret" pass.

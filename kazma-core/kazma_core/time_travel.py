@@ -63,7 +63,10 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 # Default paths / limits
-DEFAULT_DB_PATH = "kazma-data/snapshots.db"
+from kazma_core.paths import snapshots_db as _snapshots_db
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+DEFAULT_DB_PATH = str(_snapshots_db())
 DEFAULT_MAX_SNAPSHOTS = 50
 DEFAULT_MAX_GLOBAL_SNAPSHOTS = 2000
 

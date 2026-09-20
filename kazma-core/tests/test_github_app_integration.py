@@ -74,6 +74,7 @@ async def test_git_push_pull_upstream():
 
     with patch("subprocess.run") as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
 
         # Subprocess call order in git_push_pull: branch → upstream check
@@ -107,6 +108,7 @@ async def test_git_push_delegates_to_push_path():
 
     with patch("subprocess.run") as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
 
         mock_b = MagicMock(returncode=0, stdout="main\n")
@@ -132,6 +134,7 @@ async def test_git_pull_delegates_to_pull_path():
 
     with patch("subprocess.run") as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghp_test_token"):
 
         # pull has no upstream/branch checks — single subprocess.run (remote-url
@@ -258,6 +261,7 @@ async def test_git_push_pull_up_to_date_when_truly_in_sync():
 
     with patch("subprocess.run") as mock_run, \
          patch("kazma_skills.native.git_github_manager.tools._get_workspace", return_value="/tmp/test"), \
+         patch("kazma_core.git_identity.get_app_installation_token", return_value=""), \
          patch("kazma_gateway.routers.github_client.get_github_token", return_value="ghs_good_token"):
 
         mock_b = MagicMock(returncode=0, stdout="main\n")

@@ -32,7 +32,10 @@ MAX_HEIGHT = 1024
 MIN_DIMENSION = 64
 DEFAULT_WIDTH = 1024
 DEFAULT_HEIGHT = 1024
-IMAGE_DIR = Path("kazma-data/images")
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+IMAGE_DIR = _data_dir() / "images"
 
 
 def _slugify(text: str, max_len: int = 60) -> str:

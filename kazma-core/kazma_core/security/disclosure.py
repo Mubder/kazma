@@ -94,7 +94,9 @@ class VulnerabilityDisclosure:
                      ``kazma-data/disclosure.db``.
         """
         if db_path is None:
-            db_path = Path("kazma-data/disclosure.db")
+            from kazma_core.paths import data_dir as _dd
+
+            db_path = _dd() / "disclosure.db"
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: sqlite3.Connection | None = None

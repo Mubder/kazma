@@ -19,7 +19,10 @@ __all__ = ["SemanticCache"]
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB = "kazma-data/semantic_cache.db"
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+_DEFAULT_DB = str(_data_dir() / "semantic_cache.db")
 
 
 class SemanticCache:

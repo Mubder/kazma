@@ -7,7 +7,10 @@ from typing import Any
 
 from kazma_core.documents.service import DocumentService
 
-DOC_DIR = Path("kazma-data/documents")
+from kazma_core.paths import data_dir as _data_dir
+
+#: Resolved via paths so KAZMA_DATA_DIR is honoured.
+DOC_DIR = _data_dir() / "documents"
 
 
 def _scope() -> dict[str, str]:

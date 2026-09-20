@@ -22,6 +22,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+def _paths_data_dir():
+    """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
+    from kazma_core.paths import data_dir
+
+    return data_dir()
+
+
 # ── Default shortcuts ─────────────────────────────────────────────────
 
 DEFAULT_SHORTCUTS: dict[str, str] = {
@@ -1206,7 +1213,7 @@ class SettingsManager:
         if env_log := os.environ.get("KAZMA_LOG_FILE"):
             log_paths.append(Path(env_log))
         log_paths.extend([
-            Path("kazma-data/kazma.log"),
+            _paths_data_dir() / "kazma.log",
             Path.cwd() / "kazma.log",
         ])
         for log_path in log_paths:

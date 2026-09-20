@@ -42,6 +42,13 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+def _paths_data_dir():
+    """``paths.data_dir()``, imported lazily (honours KAZMA_DATA_DIR)."""
+    from kazma_core.paths import data_dir
+
+    return data_dir()
+
+
 ACTIVE_WORKSPACE_PLACEHOLDER = "${KAZMA_ACTIVE_WORKSPACE}"
 
 # Debounce rebinds when multiple switch events fire quickly
@@ -89,7 +96,7 @@ def _looks_like_legacy_sandbox_arg(arg: str) -> bool:
     """True for relative default sandbox paths we used to hardcode in yaml."""
     norm = arg.replace("\\", "/").strip().lower()
     return norm in (
-        "kazma-data/workspace",
+        str(_paths_data_dir() / "workspace"),
         "./kazma-data/workspace",
         "data/workspace",
         "./data/workspace",

@@ -479,7 +479,7 @@ class CheckpointManager(BaseCheckpointSaver):
 
 
 async def create_checkpoint_manager(
-    path: str = "kazma-data/checkpoints.db",
+    path: str | None = None,
 ) -> CheckpointManager:
     """Create and initialize a CheckpointManager with per-thread locking.
 
@@ -551,6 +551,15 @@ async def create_checkpoint_manager(
         pass
 
     # ── SQLite checkpointer (default) ──────────────────────────────
+    # Resolve the default here, not in the signature. It was the literal
+    # "kazma-data/checkpoints.db", which is relative to the process CWD and
+    # blind to KAZMA_DATA_DIR — a service with a different WorkingDirectory
+    # silently opened, or created, a different checkpoints database.
+    if path is None:
+        from kazma_core.paths import checkpoints_db
+
+        path = str(checkpoints_db())
+
     # Route through the process-wide shared saver (audit M-G5) so the
     # server graphs and KazmaAgent.run() never hold two independent
     # writers on the same checkpoints.db; CheckpointManager adds the
@@ -575,7 +584,12 @@ async def create_checkpoint_manager(
 
 # Backward-compatible alias
 async def create_checkpointer(
-    path: str = "kazma-data/checkpoints.db",
+    path: str | None = None,
 ) -> CheckpointManager:
-    """Alias for create_checkpoint_manager (backward compatibility)."""
+    """Alias for create_checkpoint_manager (backward compatibility).
+
+    ``None`` passes through so the default is resolved in exactly one place —
+    ``create_checkpoint_manager`` — rather than duplicated into this signature,
+    where it was a CWD-relative literal.
+    """
     return await create_checkpoint_manager(path)
