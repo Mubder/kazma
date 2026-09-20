@@ -27,6 +27,7 @@ real button that POSTs ``/api/approve/{thread_id}``.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -95,7 +96,10 @@ EVIDENCE_DIR = Path(__file__).resolve().parents[2] / "test-artifacts" / "unified
 
 #: Tests whose recording IS the release evidence rather than a failure
 #: diagnostic, so they record whether or not they pass (plan §13).
-ALWAYS_RECORD = ("test_sequential_allow_tool_in_one_bubble",)
+ALWAYS_RECORD = (
+    "test_sequential_allow_tool_in_one_bubble",
+    "test_stream_stays_visible_during_action_updates",
+)
 
 
 @pytest.fixture
@@ -218,6 +222,74 @@ def _wait_for_pending_row(pg, timeout: int = 120000) -> None:
             "no actionable approval row appeared. Page state: "
             + repr(_shape(pg))
         ) from None
+
+
+def test_stream_stays_visible_during_action_updates(page, evidence: dict) -> None:
+    """Replay interleaved delivery through the real projector and DOM painter.
+
+    This is a renderer race test, not a substitute for the real graph/Approve
+    lifecycle below. Observe every animation frame and every DOM removal:
+    checking only the final answer missed the disappearing interval.
+    """
+    page.wait_for_function("() => !!window.KazmaChat")
+    result = page.evaluate("""async () => {
+      const chat = window.KazmaChat;
+      let seq = 1;
+      const emit = ev => chat.applyTurnEvent(Object.assign({
+        turn_id: 'stream-continuity-test', seq: seq++
+      }, ev));
+      const tick = () => new Promise(resolve => setTimeout(resolve, 180));
+      emit({type: 'hitl', interrupt_id: 'g-continuity', tool: 'file_write',
+            state: 'approved'});
+      emit({type: 'tool_start', tool_call_id: 'c-continuity', tool_name: 'file_write'});
+      emit({type: 'token', content: 'Visible response'});
+      await tick();
+      const answer = document.querySelector(
+        '[data-turn-id="stream-continuity-test"] .message-text');
+      if (!answer) return {error: 'initial answer missing'};
+      let running = true, frames = 0, blankFrames = 0, removals = 0;
+      const observer = new MutationObserver(records => {
+        for (const record of records) for (const node of record.removedNodes) {
+          if (node === answer || (node.contains && node.contains(answer))) removals++;
+        }
+      });
+      observer.observe(answer.parentNode, {childList: true, subtree: true});
+      const sample = () => {
+        if (!running) return;
+        frames++;
+        if (!answer.isConnected || !answer.getClientRects().length ||
+            !answer.innerText.trim() || getComputedStyle(answer).visibility === 'hidden') {
+          blankFrames++;
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+      for (const state of ['inflight', 'approved', 'settled', 'pending']) {
+        emit({type: 'hitl', interrupt_id: 'g-continuity', tool: 'file_write', state});
+        await tick();
+        emit({type: 'token', content: ' more text'});
+        await tick();
+      }
+      emit({type: 'tool_call', tool_call_id: 'c-continuity', tool_name: 'file_write'});
+      await tick();
+      emit({type: 'token', content: ' complete.'});
+      await tick();
+      const text = answer.innerText.trim();
+      const sameNode = document.querySelector(
+        '[data-turn-id="stream-continuity-test"] .message-text') === answer;
+      running = false;
+      observer.disconnect();
+      return {frames, blankFrames, removals, sameNode, text};
+    }""")
+    (evidence["dir"] / "continuity.json").write_text(
+        json.dumps(result, indent=2), encoding="utf-8"
+    )
+    assert not result.get("error"), result
+    assert result["frames"] > 5, result
+    assert result["blankFrames"] == 0, result
+    assert result["removals"] == 0, result
+    assert result["sameNode"], result
+    assert result["text"] == "Visible response" + " more text" * 4 + " complete.", result
 
 
 def test_sequential_allow_tool_in_one_bubble(page, harness: Harness) -> None:

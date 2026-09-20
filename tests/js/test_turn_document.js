@@ -571,5 +571,50 @@ var lateGate = TD.applyEvent(answered, {
 assert("a gate after completion does not hide the answer",
   TD.textOf(lateGate.parts) === "All done.");
 
+// Updates about an existing action are not boundaries of the current stream.
+// Each frame has a new sequence, as registry broadcasts and resyncs do: event
+// deduplication alone cannot protect the next leg from being folded away.
+for (const state of ['approved', 'inflight', 'settled', 'denied', 'pending']) {
+  let live = TD.applyEvent(atGate, {
+    type: 'hitl', interrupt_id: 'g1', tool: 'file_write', state: 'approved', seq: 100,
+  });
+  live = TD.applyEvent(live, { type: 'token', content: 'The next response', seq: 101 });
+  live = TD.applyEvent(live, {
+    type: 'hitl', interrupt_id: 'g1', tool: 'file_write', state, seq: 102,
+  });
+  assert('existing gate ' + state + ' preserves streaming text',
+    TD.textOf(live.parts) === 'The next response');
+  assert('existing gate ' + state + ' cannot complete the turn', live.status === 'streaming');
+  live = TD.applyEvent(live, { type: 'token', content: ' continues.', seq: 103 });
+  assert('existing gate ' + state + ' preserves the token prefix',
+    TD.textOf(live.parts) === 'The next response continues.');
+}
+for (const type of ['tool_start', 'tool_call', 'tool_lifecycle']) {
+  let live = TD.applyEvent(midNext, {
+    type, tool_name: 'web_search', tool_call_id: 'c1', seq: 104,
+  });
+  assert('repeated ' + type + ' does not fold the next leg',
+    TD.textOf(live.parts) === 'Found it.');
+}
+for (const status of ['tool_completed', 'tool_failed']) {
+  const live = TD.applyEvent(narrated('late-tool', 'Response in progress'), {
+    type: 'tool_lifecycle', status, tool_name: 'web_search', result: 'ok', seq: 105,
+  });
+  assert(status + ' is not a stream boundary, even without an earlier start',
+    TD.textOf(live.parts) === 'Response in progress');
+}
+const lateDecision = TD.applyEvent(answered, {
+  type: 'hitl', interrupt_id: 'g2', state: 'approved', seq: 106,
+});
+assert('late decision cannot reopen a completed turn', lateDecision.status === 'done');
+for (const event of [
+  {type: 'hitl', tool: 'file_write', state: 'pending'},
+  {type: 'tool_lifecycle', tool_name: 'file_write', inputs: 'updated payload'},
+]) {
+  const live = TD.applyEvent(narrated('legacy-action', 'Keep this visible'), event);
+  assert('unidentified ' + event.type + ' cannot establish a destructive boundary',
+    TD.textOf(live.parts) === 'Keep this visible');
+}
+
 if (fail) process.exit(1);
 console.log("all ok");

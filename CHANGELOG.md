@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## Fix — streaming text survives action updates (2026-09-20)
+
+Approval updates for an existing gate and repeated tool-start notifications
+could fold the next response into collapsed thoughts, clear its token prefix,
+and remove its answer region until the next token recreated it. The turn
+projector now reclassifies narration only at the first identified action
+boundary. Unidentified legacy telemetry cannot remove streamed text.
+
+Tool completion/failure telemetry retains its actual state, and gate
+settlement cannot complete the turn or reopen an already completed turn.
+Regression coverage checks both the projected token prefix and browser
+animation frames/DOM removal while action updates arrive between tokens.
+
 ## Fix — CoT workbench and thoughts stay in the bubble (2026-09-20)
 
 Thinking used to live on the Live Task Card (2-line clamp, 50-row cap),
