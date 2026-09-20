@@ -1,5 +1,13 @@
 # Plan: CoT workbench and streaming thoughts — one document, one fold
 
+> **SUPERSEDED IN PART — 2026-09-20.** [`UNIFIED_TURN_BLOCK.md`](UNIFIED_TURN_BLOCK.md)
+> supersedes this document's **separate live header bar** and **any automatic
+> opening of thoughts** on adoption of that plan. Thoughts/activity are one
+> disclosure inside the assistant turn block, collapsed by default, and event
+> processing never changes the user's expansion choice (invariant U08).
+> Everything else here — one document, one fold, no second CoT painter —
+> stays binding. Retained as history for the incidents it records.
+
 **Date:** 2026-09-20
 **Status:** BINDING (overhaul landing)
 **Does not replace:** [`TURN_RENDER_V2_KEYED_SLOTS.md`](TURN_RENDER_V2_KEYED_SLOTS.md) (keyed bubble) or [`HITL_VIEW_MODEL.md`](HITL_VIEW_MODEL.md) (gate `view`). Those stay. This is the leftover **live CoT / thoughts** half: the same disease HITL just closed, one layer down.

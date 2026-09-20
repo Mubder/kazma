@@ -178,6 +178,164 @@ jobs:
           # DSN, and this job would silently prove nothing (audit F-7).
           KAZMA_TEST_ALLOW_REAL_DB: "1"
 
+  unified-turn-lifecycle:
+    name: Unified turn lifecycle (GATE)
+    runs-on: ubuntu-latest
+    # docs/plans/UNIFIED_TURN_BLOCK.md section 13. The suite this job runs is
+    # the one thing that proves sequential approval end to end: the real
+    # graph pauses four times and each resume comes from POST /api/approve.
+    # scripts/fast_test.py excludes tests/e2e, so without a job of its own
+    # the harness would run nowhere -- which is how tests/e2e/test_hitl_view_model.py
+    # came to leave incidents 1 and 4 unclaimed for a month.
+    #
+    # It does NOT need Playwright: it drives the HTTP routes. Keeping it out
+    # of the browser job means a missing Chromium cannot hide a lifecycle
+    # regression behind a skip.
+    #
+    # Phase 5 still owns making this job REQUIRED in branch protection. A
+    # workflow file is not merge enforcement (section 13, last bullet).
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The rollback rehearsal reads a pinned pre-schema commit out of
+          # git. A depth-1 checkout does not have it, and the test would
+          # skip itself rather than fail — which is the worst outcome for
+          # a release gate (plan section 13: no skips standing in for a
+          # missing dependency).
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      # The projector is one contract in two languages; this job runs both
+      # halves against the same fixtures, so it needs node as well.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install app
+        run: pip install -e ".[test,web]"
+      - name: Record the build under test
+        # Written before anything runs, so a failed job still says which
+        # build failed. Lands in the uploaded directory (plan §13).
+        run: |
+          mkdir -p test-artifacts/unified-turn
+          {
+            echo "commit:      ${{ github.sha }}"
+            echo "ref:         ${{ github.ref }}"
+            echo "run:         ${{ github.run_id }} attempt ${{ github.run_attempt }}"
+            echo "runner:      $RUNNER_OS $RUNNER_ARCH"
+            echo "python:      $(python -V 2>&1)"
+            echo "node:        $(node -v)"
+            echo "playwright:  $(python -m playwright --version 2>&1 || echo 'not installed yet')"
+            echo "utc:         $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "--- installed kazma packages ---"
+            python -m pip list 2>/dev/null | grep -i kazma || true
+          } > test-artifacts/unified-turn/build-identity.txt
+          cat test-artifacts/unified-turn/build-identity.txt
+      - name: The harness does not borrow the operator's workspace
+        # Sub-second, and it guards a safety property rather than a
+        # behavior: an agent whose workspace is the checkout will edit
+        # the checkout the first time a fixture uses a relative path.
+        run: python -m pytest tests/test_harness_isolation.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Render boundary (no retired bar, one turn writer)
+        # Plan §13's narrow architecture check. Static, so it runs with
+        # the other fast locks rather than behind twenty minutes of
+        # servers.
+        run: python -m pytest tests/test_turn_render_boundary.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Assets ship and bust their cache
+        # A module missing from the template, missing from the wheel, or
+        # served stale is invisible to every other test here: the unit
+        # tests run under bare node and the browser suite loads a page it
+        # just built (plan section 14.3).
+        run: python -m pytest tests/test_turn_assets_ship.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Rollback rehearsal (the previous build reads this build's rows)
+        # Checks out the pre-schema turn_document from git and feeds it a
+        # row this build wrote (plan section 14.6). Needs real history, so
+        # the checkout above must not be shallow.
+        run: python -m pytest tests/test_turn_rollback_rehearsal.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: One decision settles one gate (fast lock)
+        # Sub-second, and it is the check a refactor of the approve route
+        # is most likely to drop. Runs before anything boots a server so
+        # the cheapest failure is also the first one reported.
+        run: python -m pytest tests/test_approve_decides_one_gate.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Four sequential gates through the real app graph
+        run: python -m pytest tests/e2e/test_unified_turn_app_graph.py -q --timeout=600
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Install Chromium for the browser acceptance suite
+        run: python -m playwright install chromium --with-deps
+      - name: Restart recovery (convergence oracle, source 4)
+        run: python -m pytest tests/e2e/test_unified_turn_restart.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: What the operator sees (HITL_VIEW_MODEL Playwright 1 and 4)
+        # The two incidents the 2026-09-19 F0 spike declared unharnessable.
+        # No `|| true`: if this cannot run, the job is red, because a
+        # skipped acceptance test is the thing that let them stay open.
+        run: python -m pytest tests/e2e/test_unified_turn_browser.py -q --timeout=1200
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Two tabs, one gate (registry CAS through the real route)
+        # A CAS that holds while the turn resumes twice passes the unit
+        # test and loses the user's work. This races real HTTP clients
+        # against a real paused graph.
+        run: python -m pytest tests/e2e/test_unified_turn_concurrency.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Transport recovery (disconnect, retention gap, session switch)
+        # The projector's convergence is proven under node against
+        # synthetic frames. This proves the SERVER serves the frames that
+        # projector was tested on.
+        run: python -m pytest tests/e2e/test_unified_turn_recovery.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Upload browser evidence
+        # always(): the run that FAILED is the run whose trace is worth
+        # having. On a green run this carries the four-gate recording,
+        # which is the release evidence plan §13 asks for.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unified-turn-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-artifacts/unified-turn
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Shared Python/JavaScript turn fixtures
+        run: python -m pytest tests/test_unified_turn_fixtures.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Turn identity, revision and durable presentation
+        run: |
+          python -m pytest -q --timeout=240 tests/test_turn_document.py tests/test_turn_durable_presentation.py tests/test_chat_as_product.py tests/test_chat_steer_composer.py tests/test_delivery_v2_client.py tests/test_unified_turn_a11y.py
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: Projector agreement under bare node
+        run: |
+          node tests/js/test_turn_document.js
+          node tests/js/test_turn_view.js
+          node tests/js/test_turn_preferences.js
+          node tests/js/test_turn_presentation.js
+          node tests/js/test_turn_convergence.js
+          node tests/js/test_turn_performance.js
+          node tests/js/test_unified_turn_fixtures.js
+      - name: Unified turn block reproductions (xfail-strict)
+        # Red on purpose until Phases 2 and 3 land. strict=True means an
+        # unexpected pass FAILS, so a behavior cannot ship without the
+        # marker coming off with it.
+        run: python -m pytest tests/test_unified_turn_block_phase0.py -q --timeout=120
+        env:
+          KAZMA_DB_BACKEND: sqlite
+
   playwright-smoke:
     name: Playwright smoke
     runs-on: ubuntu-latest

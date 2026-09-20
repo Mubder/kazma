@@ -270,7 +270,9 @@ class TestV2ArchitecturePresent:
         assert "_forcePaintDoneContent(data.content)" in src
         # The visibility check must run BEFORE the empty-terminal watchdog.
         at_ack = src.index("if (data && data.content && !interrupted)")
-        at_watchdog = src.index("if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {")
+        at_watchdog = src.index(
+            "if (!_liveAnswerText() && !interrupted && !_awaitingApproval && !_turnPainted) {"
+        )
         assert at_ack < at_watchdog, (
             "done-content force-paint must precede the empty-terminal fallback"
         )
@@ -449,25 +451,26 @@ class TestV2ArchitecturePresent:
         src = _CHAT_JS.read_text(encoding="utf-8")
         assert "function _setStatusStrip(" in src
         assert "function _clearStatusStrip(" in src
-        # beginTurn arms the indicator before anything else can. Since the
-        # Live Task Card merge the card event comes first, and the Alpine
-        # liveness flag follows through _setStoreThinking — NOT through
-        # _setStatusStrip, whose text override outranked the phase the card
-        # event had just set (every approve read "↻ Kazma is thinking…"
-        # instead of "Resuming after approval").
+        # beginTurn arms liveness before anything else can, and it must
+        # not stamp a TEXT override over the phase — every approve used to
+        # read "↻ Kazma is thinking…" instead of "Resuming after approval"
+        # because _setStatusStrip's text outranked the phase just set.
+        # The phase now comes from the turn header
+        # (modules/turn_presentation.js), which derives it rather than
+        # being told, so a text override cannot outrank it at all.
         at = src.index("function beginTurn(")
         seg = src[at:at + 1200]
-        assert "_taskCardEvent(" in seg
         assert "_setStoreThinking(" in seg
         assert "_setStatusStrip(" not in seg, (
             "beginTurn stamps a text override over its own phase again"
         )
-        # The legacy strip entry points still delegate into the one writer.
         strip = src.split("function _setStatusStrip(", 1)[1].split(
             "function _directChildByClass", 1
         )[0]
-        assert "_taskCardEvent({ t: 'text', msg: msg })" in strip
         assert "_setStoreThinking(" in strip
+        # One phase authority, and it is the derived model.
+        assert "_HEADER_PHASE_LABELS" in src
+        assert "KazmaTurnPresentation" in src
         # no imperative display writes on the Alpine-owned element remain
         assert "showTyping(typingEl" not in src
         assert "hideTyping(typingEl" not in src

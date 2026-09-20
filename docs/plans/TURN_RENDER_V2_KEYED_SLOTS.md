@@ -1,5 +1,14 @@
 # Plan: Turn Render V2 — Keyed Slots (the render half of Turn Delivery V2)
 
+> **SUPERSEDED IN PART — 2026-09-20.** [`UNIFIED_TURN_BLOCK.md`](UNIFIED_TURN_BLOCK.md)
+> supersedes the **flat individual HITL slots around the answer** described
+> here. Gates become keyed rows inside ONE approval region that sits above
+> the answer. Stable identity, keyed reconciliation, one render owner, and
+> "ambiguity never deletes" remain required and unchanged — the answer region
+> stays a sibling of the approval and activity regions, never their
+> descendant, which preserves this plan's protection against a collapsed
+> panel swallowing the answer.
+
 **Date:** 2026-09-19
 **Status:** IMPLEMENTED
 **Completes:** `docs/plans/TURN_DELIVERY_V2_CURSOR_RESUME_PLAN.md` — **KD-4**, which shipped only on the transport side.

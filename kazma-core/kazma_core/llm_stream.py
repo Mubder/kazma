@@ -33,6 +33,7 @@ __all__ = [
     "StreamDelta",
     "bridged_event_stream",
     "emit_token_delta",
+    "emit_tool_activity",
     "invoke_llm_chat",
     "register_delta_queue",
     "stream_enabled",
@@ -82,6 +83,88 @@ def unregister_delta_queue(thread_id: str) -> None:
     tid = (thread_id or "").strip()
     if tid:
         _delta_queues.pop(tid, None)
+
+
+def _resolve_stream_thread(thread_id: str | None) -> str:
+    """The delivery thread for an injected event, or ``""``."""
+    tid = (thread_id or "").strip()
+    if tid:
+        return tid
+    try:
+        from kazma_core.safety.hitl import get_current_thread_id
+
+        return (get_current_thread_id() or "").strip()
+    except Exception:
+        return ""
+
+
+def emit_tool_activity(
+    phase: str,
+    tool_name: str,
+    *,
+    call_id: str = "",
+    inputs: Any = None,
+    result: Any = None,
+    error: str = "",
+    thread_id: str | None = None,
+) -> None:
+    """Inject a synthetic ``on_tool_start`` / ``on_tool_end`` for the turn.
+
+    Kazma's tool worker calls ``tool_registry.execute()`` directly rather
+    than invoking a LangChain tool runnable, so ``astream_events`` emits no
+    ``on_tool_*`` events for it — measured: a turn that really writes a file
+    produces only ``on_chain_*``. Both transports derive their tool activity
+    from those events (``sse_chat/_streaming.py`` on_tool_start/end and
+    ``tracing/events.py`` -> ``tool_lifecycle``), so the workbench's tool
+    rows had no producer at all: a finished turn's stored activity carried
+    gate rows and nothing else, and "thoughts remain available after the
+    final answer" (``docs/plans/UNIFIED_TURN_BLOCK.md`` requirement 3) had
+    nothing behind it for tools.
+
+    This injects into the SAME per-thread queue :func:`emit_token_delta`
+    uses, in the SAME vocabulary the consumers already implement, so both
+    mouths light up without a new frame type, a new mapping or a second
+    broker (plan §9: no new broker is justified by this work). The model's
+    own ``tool_call_id`` rides along as ``run_id`` — the stable identity the
+    projector keys the activity row by.
+
+    Never raises: activity is observability, and losing a row must never
+    fail the tool that produced it.
+    """
+    tid = _resolve_stream_thread(thread_id)
+    if not tid:
+        return
+    queue = _delta_queues.get(tid)
+    if queue is None:
+        return
+    name = str(tool_name or "tool")
+    if phase == "start":
+        event: dict[str, Any] = {
+            "event": "on_tool_start",
+            "name": name,
+            "run_id": str(call_id or ""),
+            "data": {"input": inputs if isinstance(inputs, dict) else {"args": str(inputs or "")}},
+        }
+    else:
+        # A failed call still ends. The SSE pump maps on_tool_start and
+        # on_tool_end and nothing else, so emitting on_tool_error would
+        # leave a row stuck at "running" forever on the primary transport
+        # — the error text goes in the output instead, where every
+        # consumer already reads it.
+        event = {
+            "event": "on_tool_end",
+            "name": name,
+            "run_id": str(call_id or ""),
+            "data": {"output": str(error) if error else result},
+        }
+        if error:
+            event["data"]["error"] = str(error)
+    try:
+        queue.put_nowait(event)
+    except asyncio.QueueFull:
+        logger.debug("[llm_stream] delta queue full — dropping tool activity thread=%s", tid[:12])
+    except Exception:
+        logger.debug("[llm_stream] tool activity emit failed thread=%s", tid[:12], exc_info=True)
 
 
 def emit_token_delta(content: str, *, thread_id: str | None = None) -> None:

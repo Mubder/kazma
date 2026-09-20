@@ -392,11 +392,6 @@ html[data-theme="light"] { color-scheme: only light; }
   color: var(--accent-light);
 }
 
-/* Typing indicator — accent dots */
-.thinking-indicator .dot {
-  background: var(--accent);
-}
-
 /* ═══════════════════════════════════════════════════════════════════
    Phase 5 — SWARM / SETTINGS + PURPLE PURGE
    v4 hardcoded indigo/violet literals (94,106,210 · 139,92,246 ·
@@ -610,8 +605,7 @@ html[data-theme="light"] { color-scheme: only light; }
 .agent-progress.is-done .agent-progress-header { padding: 8px 12px; }
 @media (prefers-reduced-motion: reduce) {
   .agent-progress-pulse,
-  .pulse-dot,
-  .thinking-indicator .dot {
+  .pulse-dot {
     animation: none !important;
     box-shadow: none !important;
   }

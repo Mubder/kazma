@@ -459,6 +459,26 @@ def upsert_reply(
                 row["tokens"] = int(tokens or 0)
             if cost is not None:
                 row["cost"] = round(float(cost or 0.0), 6)
+
+            # ── Authoritative document revision ────────────────────────
+            # The delivery `seq` orders FRAMES on a thread; this orders
+            # WRITES to one turn's durable state. They are independent
+            # counters and `docs/plans/UNIFIED_TURN_BLOCK.md` §6 forbids
+            # comparing them as if they were the same thing.
+            #
+            # A client that has applied rev N ignores a snapshot stamped
+            # rev < N, which is what stops a slow /messages response from
+            # repainting an older answer over a newer one (invariant U05).
+            # Monotone per row, bumped on every successful write, and never
+            # reset — a straggler write still advances it, because it did
+            # change the row.
+            from kazma_ui.turn_document import TURN_SCHEMA_VERSION
+
+            try:
+                row["rev"] = int(row.get("rev") or 0) + 1
+            except (TypeError, ValueError):
+                row["rev"] = 1
+            row["schema"] = TURN_SCHEMA_VERSION
         return True
     except Exception:
         logger.warning(

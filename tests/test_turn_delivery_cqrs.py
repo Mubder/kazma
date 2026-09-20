@@ -435,9 +435,25 @@ def test_stream_silence_journals_turn_heartbeats() -> None:
 
     # Command-resume (the post-approve path): ainvoke journals nothing
     # until close_turn — the resume loop must heartbeat too.
-    resume = src.split("Heartbeat while the resumed graph runs", 1)[1][:900]
-    assert 'emit_j("turn_heartbeat"' in resume
-    assert '"phase": "resuming"' in resume
+    #
+    # Sliced to the NEXT heartbeat-bearing branch rather than a fixed
+    # character count. The original window was 900 characters, and the
+    # explanatory comment at that anchor grew past it when
+    # UNIFIED_TURN_BLOCK.md Phase 1 bound a delta queue to the resume leg
+    # — so the assertion started reading prose and the behaviour it
+    # guards had not changed at all.
+    after = src.split("Heartbeat while the resumed graph runs", 1)[1]
+    resume = after.split('yield await emit_j("turn_heartbeat"', 1)
+    assert len(resume) > 1, (
+        "the resumed graph no longer heartbeats; after an approve the "
+        "reader sees dead air for the whole resumed execution "
+        "(2026-09-03)"
+    )
+    # The frame itself, up to the end of its dict literal.
+    frame = resume[1][:400]
+    assert '"phase": "resuming"' in frame, (
+        f"the resume heartbeat no longer declares its phase: {frame[:120]}"
+    )
 
     # The client dispatches the frame to a dedicated handler on both the
     # send and attach callback builders, and the WS store feeds the same

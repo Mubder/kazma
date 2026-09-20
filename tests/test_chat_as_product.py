@@ -25,7 +25,11 @@ _IDS = (
     "voice-live-btn",
     "attach-btn",
     "file-input",
-    "thinking-indicator",
+    # "thinking-indicator" was here: the inert hidden node the Live
+    # Task Card had already replaced. Both are gone
+    # (docs/plans/UNIFIED_TURN_BLOCK.md §3) — the turn header is a
+    # slot inside the assistant bubble, so it has no page-level id to
+    # be unique about.
     "new-session-btn",
     "session-list",
     "session-search",
@@ -238,26 +242,30 @@ def test_scroll_is_pin_to_bottom_not_forced() -> None:
     assert js.count("scrollToBottomForce();") >= 2  # send + session load
 
 
-def test_thinking_strip_is_retired_and_inert() -> None:
-    """The strip is gone; the Live Task Card is the one turn-state surface.
+def test_no_in_flow_status_element_above_the_composer() -> None:
+    """The composer must not be shoved down by a status element.
 
-    The original contract here was "toggle a class, never x-show" — x-show's
-    display:none jumped the composer, so is-on animated opacity/height
-    instead. The Live Task Card merge retired the strip entirely and left
-    #thinking-indicator as an inert hidden node for the typingEl cache, so
-    the is-on rule has nothing left to toggle. What still matters is that
-    NOTHING re-attaches an Alpine display toggle to that in-flow element.
+    The original contract was "toggle a class, never x-show": #thinking-
+    indicator sat IN FLOW between the transcript and the composer, so
+    x-show's display:none jumped the composer ~33px every time the strip
+    appeared or vanished, and the streaming text bounced. The Live Task
+    Card inherited the slot and the problem; docs/plans/UNIFIED_TURN_BLOCK.md
+    §3 removes the slot itself.
+
+    Nothing to toggle means nothing to jump — so what is asserted now is
+    that neither element came back and that no Alpine display toggle is
+    bound to a thinking flag anywhere in the page.
     """
     html = _CHAT.read_text(encoding="utf-8")
-    assert "thinking-indicator" in html
-    strip = html[html.index('id="thinking-indicator"') - 200:]
-    strip = strip[: strip.index(">", strip.index('id="thinking-indicator"')) + 1]
-    assert "hidden" in strip, "the retired strip must stay inert"
-    assert "x-show" not in strip
+    assert 'id="thinking-indicator"' not in html
+    assert 'id="live-task-card"' not in html
     assert 'x-show="$store.agent && $store.agent.isThinking"' not in html
-    # The card that replaced it is docked in the same place.
-    assert 'id="live-task-card"' in html
-    assert html.index('id="live-task-card"') < html.index('id="thinking-indicator"')
+    assert "isThinking" not in html, (
+        "a status element is bound to the thinking flag again; if it sits "
+        "above the composer it will jump on every toggle"
+    )
+    # The status line the reader actually sees is a slot in the turn.
+    assert "modules/turn_presentation.js" in html
 
 
 def test_status_strip_never_toggles_per_token() -> None:
@@ -282,15 +290,26 @@ def test_live_assistant_bubble_is_pinned_not_minted() -> None:
     assert "function _pinLiveAssistantBubble(create)" in js
     assert "function _assistantBubbleForOpenTurn(create)" in js
     assert "if (!currentMsgEl) currentMsgEl = createAssistantMessage()" not in js
-    # `create: false` looks only. Since the Live Task Card took the live view
-    # out of the bubble, a progress-only frame that minted one left a bare
-    # avatar + timestamp + reaction buttons with nothing in it — the empty
-    # bubble every turn opened with.
+    # `create: false` looks only. A progress-only frame that minted a bubble
+    # left a bare avatar + timestamp + reaction buttons with nothing in it —
+    # the empty bubble every turn opened with.
     assert "return mayCreate ? createAssistantMessage() : null;" in js
-    # ensureProgressPanel is the live CoT mint site
-    body = js.split("function ensureProgressPanel()", 1)[1].split("\n  function ", 1)[0]
-    assert "_pinLiveAssistantBubble()" in body
-    assert "createAssistantMessage()" not in body
+    # The mint site moved. It was `ensureProgressPanel`, the pre-V2 progress
+    # painter, removed in Phase 5 of UNIFIED_TURN_BLOCK.md as the last second
+    # DOM writer. `renderTurn` owns the rule now and states it the same way:
+    # a document with nothing to show does not get a bubble.
+    assert "function ensureProgressPanel()" not in js, (
+        "the legacy progress painter is back; it is a second DOM writer "
+        "(plan §14.4) and this incident's rule would then live in two places"
+    )
+    body = js.split("function renderTurn(doc, meta)", 1)[1].split("\n  function ", 1)[0]
+    assert "_bubbleForTurn(turnId, paintable)" in body, (
+        "renderTurn no longer gates bubble creation on there being "
+        "something to paint"
+    )
+    assert "createAssistantMessage()" not in body, (
+        "renderTurn mints a bubble directly, bypassing the one mint site"
+    )
     # Semantic HITL must send interrupt_id (registry claim) and not stick
     # on Resolving… after a 409.
     sem = js.split("Clarification Needed", 1)[1].split("function setCardState", 1)[0]

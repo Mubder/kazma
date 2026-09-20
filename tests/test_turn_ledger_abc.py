@@ -298,16 +298,26 @@ def test_live_hitl_card_does_not_collapse_into_cot() -> None:
 
 
 def test_duplicate_terminal_flush_never_wipes_the_reply() -> None:
-    """SSE and WS both deliver a terminal frame; the first done's endTurn
-    zeroes tokenAccum, so the SECOND terminal's flush must not paint "" over
-    the finished reply (2026-09-02: reply vanished at end of stream until a
-    refresh re-painted it)."""
+    """SSE and WS both deliver a terminal frame.
+
+    The first done's endTurn zeroed ``tokenAccum``, so the SECOND
+    terminal's flush painted "" over the finished reply (2026-09-02: the
+    answer vanished at the end of the stream until a refresh re-painted
+    it).
+
+    That accumulator is gone (UNIFIED_TURN_BLOCK.md, invariant U06) and
+    with it the window: the painter reads the document, which a terminal
+    frame does not blank. The guard stays anyway — an empty read is never
+    an instruction to erase an answer, whatever produced it.
+    """
     chat = _src(_CHAT_JS)
     live = chat.split("function _paintLiveTextNow(textEl, final)", 1)[1].split("\n  function ", 1)[0]
-    # Guard: an empty live string at paint time is always a stale duplicate
-    # terminal — never truth to paint over a finished bubble. Source is the
-    # document, then the cache.
-    assert "_answerFromDoc" in live
+    assert "_liveAnswerText()" in live
+    # Only the comment that explains its removal may still name it.
+    code = "\n".join(
+        ln for ln in chat.splitlines() if not ln.lstrip().startswith("*")
+    )
+    assert "tokenAccum" not in code, "a second text authority is back"
     assert "if (!String(liveText || '').trim()) return;" in live
     flush = chat.split("function _flushLiveTextPaint()", 1)[1].split("\n  function ", 1)[0]
     assert "_liveRenderEl = null" in flush, "flush must release its target before painting"
@@ -335,8 +345,26 @@ def test_terminal_cot_swap_preserves_expansion() -> None:
     )
     assert "toggle('is-collapsed'" not in paint
     assert "list.innerHTML = html;" in paint  # rows are replaced, the panel is not
-    restored = chat.split("function _buildRestoredWorkbench(activity)", 1)[1].split("\n  function ", 1)[0]
-    assert "is-collapsed" in restored  # history builds still start collapsed
+    # "History builds start collapsed" is no longer a property of the
+    # builder: the fold is read from turn_preferences.js and defaults to
+    # collapsed when the reader has expressed nothing
+    # (docs/plans/UNIFIED_TURN_BLOCK.md section 3, invariant U08). The
+    # incident this line protects — a rebuild smuggling the collapse back
+    # in over a reader who opened it — is now protected by there being
+    # exactly ONE writer, so that is what is asserted.
+    restored = chat.split(
+        "function _buildRestoredWorkbench(activity, turnId)", 1
+    )[1].split("\n  function ", 1)[0]
+    assert "is-collapsed" in restored, "the builder no longer starts collapsed"
+    assert "_applyActivityFold" in paint, (
+        "the painter no longer asks the preference store what the reader "
+        "wanted — it is deciding the fold from execution state again"
+    )
+    writers = chat.count("prefs.setExpanded(")
+    assert writers == 1, (
+        f"{writers} writers of the disclosure preference; there must be "
+        f"exactly one, and it must be the reader's gesture"
+    )
 
 
 def test_cot_steps_do_not_trap_page_scroll() -> None:

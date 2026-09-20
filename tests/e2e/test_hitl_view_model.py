@@ -2,9 +2,15 @@
 
 Plan: ``docs/plans/HITL_VIEW_MODEL.md``. Refresh mid-pause (live Approve,
 no Alpine twin) and refresh after settle (Approved, no buttons). These
-are a CI gate in the Playwright smoke job (HITL_VIEW_MODEL F). Incidents
-1 and 4 stay unclaimed: F0 found that ``create_app()`` does not pause
-from preloaded ``tool_calls_pending``.
+are a CI gate in the Playwright smoke job (HITL_VIEW_MODEL F).
+
+Incidents 1 and 4 were unclaimed here because F0 found that ``create_app()``
+does not pause from preloaded ``tool_calls_pending``. That finding stands,
+but the conclusion drawn from it does not: the app graph pauses when the
+supervisor *produces* the tool call. ``tests/e2e/test_unified_turn_app_graph.py``
+drives four real pauses and four real ``POST /api/approve`` resumes through
+it. The browser half of 1 and 4 is owned by
+``docs/plans/UNIFIED_TURN_BLOCK.md`` Phase 3 and is not claimed yet.
 
 Does not start the operator's live server. In-process uvicorn, isolated
 ``KAZMA_DATA_DIR``. ``importorskip`` only when Playwright is absent,

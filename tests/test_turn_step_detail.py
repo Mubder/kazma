@@ -118,8 +118,8 @@ class TestChatJsUsesIt:
         """SSE and WS each had their own pair of call sites with the same bug.
         Fixing one would have left the other."""
         chat = self._chat()
-        assert chat.count("_tcDetailWithGist(_tcArgSummary(data.inputs), inputs)") == 2
-        assert chat.count("_tcDetailWithGist(_tcResultSummary(data.result), data.result)") == 2
+        assert chat.count("_toolDetailWithGist(_toolArgSummary(data.inputs), inputs)") == 2
+        assert chat.count("_toolDetailWithGist(_toolResultSummary(data.result), data.result)") == 2
         assert "detail: String(inputs || '')" not in chat
         assert "detail: String(data.result || '')" not in chat
 

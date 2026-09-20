@@ -1,0 +1,19 @@
+{
+  "name": "legacy_text_only",
+  "why": "A row written before parts existed: content and a timestamp, nothing else. Both languages must mint the SAME synthetic turn id, or one stored message can occupy two entries in the client's turn registry (invariant U01). They did not, until Phase 1 replaced sha256[:16] on one side and a 32-bit string hash on the other with the same pair of FNV-1a-32 passes.",
+  "message": {
+    "role": "assistant",
+    "content": "Hello there.",
+    "ts": "2026-09-20T10:00:00Z"
+  },
+  "expect": {
+    "turn_id": "legacy-0cdee065e20a7d91",
+    "text": "Hello there.",
+    "part_keys": ["text"],
+    "gates": [],
+    "activity": []
+  },
+  "notes": [
+    "The literal id is pinned on purpose. 'both languages agree' is satisfied by both being wrong in the same new way after a careless edit; a pinned value also catches that."
+  ]
+}

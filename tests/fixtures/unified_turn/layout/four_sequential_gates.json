@@ -1,0 +1,63 @@
+{
+  "name": "four_sequential_gates",
+  "why": "The agreed layout fixture of UNIFIED_TURN_BLOCK.md Phase 0. One turn pauses four times. Every layer -- app-graph harness, acceptance matrix, convergence oracle, browser evidence -- describes THIS scenario, so 'four requests, one group' means the same thing in all of them.",
+  "turn_id": "utb-fixture-turn-1",
+  "session_id": "utb-fixture-session-1",
+  "user_text": "Set up the project scaffold.",
+  "script": [
+    {
+      "step": 1,
+      "tool": "file_write",
+      "args": {"path": "README.md", "content": "# Scaffold"},
+      "decision": "approve",
+      "execution": "completed"
+    },
+    {
+      "step": 2,
+      "tool": "shell_exec",
+      "args": {"command": "npm init -y"},
+      "decision": "deny",
+      "execution": "not_run"
+    },
+    {
+      "step": 3,
+      "tool": "file_write",
+      "args": {"path": "src/index.js", "content": "export default 1;"},
+      "decision": "approve",
+      "execution": "completed"
+    },
+    {
+      "step": 4,
+      "tool": "file_delete",
+      "args": {"path": "src/old.js"},
+      "decision": "approve",
+      "execution": "completed"
+    }
+  ],
+  "final_answer": "Scaffold ready. I wrote README.md and src/index.js and removed src/old.js. I did not run npm init because you denied it.",
+  "expect_layout": {
+    "turn_blocks": 1,
+    "headers": 1,
+    "activity_disclosures": 1,
+    "activity_collapsed_by_default": true,
+    "approval_groups": 1,
+    "approval_rows": 4,
+    "approval_rows_above_answer": true,
+    "answer_regions": 1,
+    "answer_is_sibling_of_approvals": true,
+    "bottom_status_bars": 0,
+    "header_phase_at_end": "Completed"
+  },
+  "expect_rows": [
+    {"order": 1, "tool": "file_write", "decision": "Approved", "execution": "Execution completed"},
+    {"order": 2, "tool": "shell_exec", "decision": "Denied", "execution": "Not run"},
+    {"order": 3, "tool": "file_write", "decision": "Approved", "execution": "Execution completed"},
+    {"order": 4, "tool": "file_delete", "decision": "Approved", "execution": "Execution completed"}
+  ],
+  "notes": [
+    "Steps 1 and 3 are the SAME tool with different arguments: distinct gate ids must produce distinct rows (acceptance matrix 'Repeated identical tool/arguments').",
+    "Step 2 is denied and the turn continues: denial is not turn failure (plan section 7).",
+    "Decision and execution are separate columns: 'Approved' never implies 'Execution completed' (plan section 3).",
+    "The four rows must remain four rows after refresh, session switch and restart (invariants U07, U12)."
+  ]
+}

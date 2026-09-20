@@ -1,5 +1,12 @@
 # Plan: HITL view model — join before paint, one resolver
 
+> **SUPERSEDED IN PART — 2026-09-20.** [`UNIFIED_TURN_BLOCK.md`](UNIFIED_TURN_BLOCK.md)
+> supersedes the **incident-specific layout expectations that require
+> separate approval cards**. Server-owned gate views, the single resolver,
+> and decision/execution separation remain required and unchanged.
+> Incidents 1 and 4 stay unclaimed here; the unified plan's Phase 0 app-graph
+> harness is what claims them.
+
 **Date:** 2026-09-19
 **Status:** BINDING (F landing; Playwright 1 and 4 unclaimed)
 **Owner:** this series is held by one agent. Bouncing the working copy is how two locally-correct patches still broke the live install.

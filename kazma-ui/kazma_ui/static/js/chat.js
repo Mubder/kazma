@@ -16,7 +16,29 @@
   var KS = window.KazmaStream;
   var chatSessionId = null;
   var currentMsgEl = null;
-  var tokenAccum = '';
+  /**
+   * The answer this turn has produced so far, read from the document.
+   *
+   * This replaces `tokenAccum`, a module-level string that every paint
+   * wrote and four decisions read. AGENTS.md §31B already forbade the
+   * dual-PAINT ("Do not restore tokenAccum dual-paint (T-4)"); what was
+   * left was subtler and is the same defect one level down — a second
+   * answer to "has this turn produced anything", kept in a variable whose
+   * lifetime nobody owned. It was zeroed in eleven places, and every
+   * zeroing was somebody defending against a stale read: the empty-string
+   * guard in _paintLiveTextNow exists because one transport's terminal
+   * frame flushed after the other's endTurn had blanked it, and painted ""
+   * over a finished reply (2026-09-02).
+   *
+   * The document cannot go stale that way. It is keyed by turn, a retired
+   * turn's document is simply no longer the live one, and "what has this
+   * turn said" has exactly one answer (invariant U06).
+   */
+  function _liveAnswerText() {
+    var TD = window.KazmaTurnDocument;
+    var doc = _docs[_liveTurnId] || _docs.live || null;
+    return _answerFromDoc(TD, doc) || '';
+  }
   var _liveTurnId = '';
   /** Turn ids retired by abortThenSend / Stop. Old SSE/WS tokens with these
    *  ids must not paint (or switch `_liveTurnId` back to the first bubble). */
@@ -29,7 +51,6 @@
   var _docs = {};
   var activeStream = null;
   /** Live typing-indicator element for the current turn (cleared on abort). */
-  var activeTypingEl = null;
   // Track the last successfully-sent user message so the empty-turn
   // recovery can offer a one-click Retry instead of leaving the user
   // staring at "_No response received._" with no recourse. Reset on
@@ -50,7 +71,7 @@
   var _progressToolCount = 0;
 
   // DOM refs
-  var messagesEl, inputEl, sendBtn, typingEl, sessionListEl, searchInputEl;
+  var messagesEl, inputEl, sendBtn, sessionListEl, searchInputEl;
   var costBadge, tokensBadge, contextBadge, charBadge;
   var modelSelectorEl;
 
@@ -110,7 +131,6 @@
     _installScrollPinTracker();
     inputEl = $('chat-input');
     sendBtn = $('send-btn');
-    typingEl = $('thinking-indicator');
     sessionListEl = $('session-list');
     searchInputEl = $('session-search');
     costBadge = $('session-cost');
@@ -417,7 +437,6 @@
       onToken: function(data) {
         if (!_mine()) return;
         _noteSeq();
-        _taskCardEvent({ t: 'token' });
         applyTurnEvent({
           type: 'token',
           content: data.content,
@@ -428,11 +447,6 @@
       },
       onToolCall: function(data) {
         if (!_mine()) return;
-        _taskCardEvent({
-          t: 'tool',
-          name: data.tool_name || 'tool',
-          detail: _tcArgSummary(data.inputs),
-        });
         var inputs = data.inputs;
         if (typeof inputs === 'object') {
           try { inputs = JSON.stringify(inputs); } catch (e) { inputs = String(inputs); }
@@ -440,18 +454,27 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
+          detail: _toolDetailWithGist(_toolArgSummary(data.inputs), inputs),
           state: 'running',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
       },
       onToolResult: function(data) {
         if (!_mine()) return;
-        _taskCardEvent({ t: 'tool_end', name: data.tool_name || 'tool' });
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
+          detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
           state: 'done',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
       },
       onStatus: function(data) {
@@ -466,12 +489,16 @@
         // Journaled liveness frame — not epoch-gated (same rule as HITL):
         // a superseded stream's graph is the live graph.
         _noteSeq();
-        _taskCardEvent({
-          t: 'hb',
-          phase: (data && data.phase) || '',
-          current: (data && data.current) || '',
-          step: (data && data.step) || 0,
+        // The heartbeat is the only frame carrying a SERVER-measured
+        // elapsed. Without this the header would have to time the turn
+        // itself, which is the client clock that printed "Done 0s" while
+        // the graph was still working (plan §3).
+        applyTurnEvent({
+          type: 'turn_heartbeat',
           elapsed_s: (data && data.elapsed_s) || 0,
+          seq: data && data.seq,
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
         });
       },
       onApprovalRequired: function(data) {
@@ -770,6 +797,12 @@
             model: lastMsg.model || '',
             open: lastMsg.open,
             pending: lastMsg.pending,
+            // The durable revision this snapshot covers. /status and
+            // /messages are fetched in parallel and either can land late;
+            // the document refuses a snapshot older than what it already
+            // has (invariant U05).
+            rev: lastMsg.rev,
+            schema: lastMsg.schema,
           });
           if (!generating && !liveHitl && (lastMsg.content || '').trim()) {
             _forcePaintDoneContent(lastMsg.content);
@@ -849,6 +882,8 @@
           model: lastMsg.model || '',
           open: lastMsg.open,
           pending: lastMsg.pending,
+          rev: lastMsg.rev,
+          schema: lastMsg.schema,
         });
         // Refresh/pageshow must replace a leftover watchdog stamp with the
         // persisted reply (2026-09-08: replay showed "_No response received._"
@@ -961,9 +996,8 @@
    * NEVER create a second assistant without a new user row (duplicate root cause).
    *
    * @param {boolean} [create=true] Pass false to LOOK ONLY — returns null
-   *   instead of minting a bubble. Since the Live Task Card took the live
-   *   view out of the bubble, a progress-only frame that minted one left a
-   *   bare avatar + timestamp + reaction buttons with nothing inside it
+   *   instead of minting a bubble. A progress-only frame that minted one
+   *   left a bare avatar + timestamp + reaction buttons with nothing in it
    *   sitting above the composer until the first token: the "empty plain
    *   bubble before streaming" every turn opened with.
    */
@@ -1279,6 +1313,10 @@
    * flag set. Both transports must end every turn.
    */
   var _isGenerating = false;
+  /** The operator asked to stop and the server has not answered yet.
+   *  Produces "Stopping…" and NOTHING else: only the server can say a
+   *  cancellation took (plan §7, "do not prematurely mark cancelled"). */
+  var _stopRequested = false;
   var _awaitingApproval = false;
   var _serverGenerating = false;
   var _serverPaused = false;
@@ -1305,7 +1343,13 @@
     _liveTurnId = '';
     _liveRenderEl = null;
     currentMsgEl = null;
-    tokenAccum = '';
+  }
+
+  function _syncPrefsSession() {
+    var prefs = _turnPrefs();
+    if (prefs) {
+      try { prefs.setSession(chatSessionId || ''); } catch (e) { /* ignore */ }
+    }
   }
 
   function _resetSessionTurnState() {
@@ -1333,7 +1377,6 @@
     // one. forceEndTurn's 'done' frame left the card on screen for its
     // 1.6s retire animation, so a brand-new empty session flashed a
     // "Done" task card for a turn that never happened (2026-09-03).
-    _taskCardEvent({ t: 'reset' });
   }
 
   /** Apply a /status payload. Join-before-paint: call this BEFORE TurnView
@@ -1533,617 +1576,80 @@
     }, TURN_IDLE_WATCHDOG_MS);
   }
 
-  /**
-   * ── Live Task Card ──────────────────────────────────────────────────
-   * The ONE turn-state surface, merged from the retired status strip and
-   * the live in-bubble CoT panel. Single writer: _taskCardEvent — every
-   * other helper (_setStatusStrip, SSE/WS callbacks, pauseForApproval,
-   * endTurn) dispatches through it, so two surfaces can never disagree
-   * again (the frozen-thinking / blank-while-paused bug class).
-   *
-   * Header — phase icon + WHAT it is doing + elapsed + step:
-   *   ⚙ Running file_search "auth middleware" · 42s · 1:12 in this tool · step 23
-   *   🧠 Thinking · 12s
-   *   ⏳ Awaiting your approval · auto-denies in 3:12          [Review ↑]
-   *   ⚠ no signal 24s — checking…            (journal gap → resync w/ backoff)
-   *   ⚠ not responding                       (backoff exhausted)  [Retry]
-   *   ✓ Done · 12 steps · 3 tools · 18.4s · 4.2k tokens
-   * The turn's own actions live here too: Stop while running, Review to
-   * jump to the approval card, Retry once liveness recovery gives up.
-   *
-   * Body (remembers open/closed across turns and reloads): compact step
-   * list from the TurnDocument, reasoning clamped to 2 lines, 50-row cap,
-   * tail-pinned unless the reader scrolled up.
-   *
-   * Lifecycle: docked here while the turn runs; on done the summary
-   * finalizes into the transcript bubble (existing restored-workbench
-   * path) and the card unmounts.
-   *
-   * a11y: the toggle's accessible name is STATIC ("Task details") — its
-   * live text is aria-hidden, because a per-second header rewrite made
-   * screen readers re-announce the whole control every tick. Phase,
-   * countdown and liveness go to the role="status" region at coarse
-   * thresholds instead.
-   */
-  // >>> LIVE_TASK_CARD_BEGIN — self-contained state machine. tests/js/
-  // test_live_task_card.js extracts this block verbatim and drives it on a
-  // fake clock + fake DOM; only the stubs it declares may be referenced
-  // from outside these markers.
-  var _TC_OPEN_KEY = 'kazma.taskcard.open';
-  var _TC_STALL_MS = 20000;        // heartbeats land every ~8-10s
-  var _TC_STALL_RETRY_MS = 30000;  // backoff between resync attempts
-  var _TC_STALL_MAX_TRIES = 3;     // then stop retrying and say so
-  var _TC_STEP_CAP = 50;
-  var _TC_TOOL_PHASE_MIN_S = 15;   // below this, "in this tool" is noise
-
-  var _tc = {
-    el: null, header: null, toggle: null, phaseEl: null, label: null,
-    meta: null, stallEl: null, chevron: null, body: null, stepsEl: null,
-    liveEl: null, stopBtn: null, jumpBtn: null, retryBtn: null,
-    visible: false, phase: 'idle', current: '', detail: '', step: 0,
-    turnStart: 0, elapsedS: 0, elapsedFloor: 0,
-    srvElapsed: 0, srvElapsedAt: 0,
-    phaseStart: 0, lastSignal: 0, deadline: 0,
-    planTotal: 0, planDone: 0,
-    stalled: false, stallTries: 0, nextResyncAt: 0, dead: false,
-    open: false, tickTimer: null, doneTimer: null,
-    textOverride: '', summary: '', emptyTurn: false,
-    announced: '', stepsHtml: '',
-    // Label hysteresis (2026-09-03): tool→think→tool flips made the header
-    // churn on every event of a multi-step turn. A non-escalating label
-    // change is only accepted after this long; escalations always apply.
-    labelShown: '', labelShownAt: 0, phaseShown: '',
-  };
-  var _TC_LABEL_MIN_MS = 1200;
-
-  function _tcMount() {
-    if (_tc.el) return _tc.el;
-    _tc.el = document.getElementById('live-task-card');
-    if (!_tc.el) return null;
-    function q(sel) { return _tc.el.querySelector(sel); }
-    _tc.header = q('.live-task-header');
-    _tc.toggle = q('.live-task-toggle');
-    _tc.phaseEl = q('.live-task-phase');
-    _tc.label = q('.live-task-label');
-    _tc.meta = q('.live-task-meta');
-    _tc.stallEl = q('.live-task-stall');
-    _tc.chevron = q('.live-task-chevron');
-    _tc.body = q('.live-task-body');
-    _tc.stepsEl = q('.live-task-steps');
-    _tc.liveEl = q('.live-task-live');
-    _tc.stopBtn = q('.live-task-stop');
-    _tc.jumpBtn = q('.live-task-jump');
-    _tc.retryBtn = q('.live-task-retry');
-    // Readers who want the steps open want them open on the NEXT turn too.
-    try {
-      _tc.open = window.localStorage.getItem(_TC_OPEN_KEY) === '1';
-    } catch (eLs) { /* private mode / storage disabled */ }
-    if (_tc.toggle) {
-      _tc.toggle.addEventListener('click', function () {
-        _tc.open = !_tc.open;
-        try {
-          window.localStorage.setItem(_TC_OPEN_KEY, _tc.open ? '1' : '0');
-        } catch (eSet) { /* ignore */ }
-        if (_tc.open) _tcStepsFromDoc();
-        _tcRender();
-      });
+  // ── Turn timing format ──────────────────────────────────────────────
+  //
+  // What stood here was the Live Task Card: a docked status bar above the
+  // composer with its own phase machine, its own clock, its own stall
+  // detector and its own step list. docs/plans/UNIFIED_TURN_BLOCK.md §3
+  // removes it — one turn gets ONE status surface, and it lives in the
+  // turn block (see _buildTurnHeader / modules/turn_presentation.js).
+  //
+  // Where each of its jobs went:
+  //   phase, elapsed, counts, Stop  -> the turn header
+  //   open/closed body              -> the activity disclosure, whose
+  //                                    state is now a reader preference
+  //                                    (modules/turn_preferences.js)
+  //   step list                     -> the workbench, which already had one
+  //   stall detection + resync      -> _reconcileTick, which was ALREADY
+  //                                    polling every 6s while a turn might
+  //                                    be undelivered. The bar ran a second
+  //                                    recovery loop beside it with its own
+  //                                    retry budget; all that added was a
+  //                                    label, and that label is now the
+  //                                    header's connection indicator.
+  //
+  /** Seconds as m:ss / h:mm:ss. Pure formatting, no clock of its own. */
+  function _fmtMMSS(total) {
+    var s = Math.max(0, Math.floor(Number(total) || 0));
+    var h = Math.floor(s / 3600);
+    var m = Math.floor((s % 3600) / 60);
+    var sec = s % 60;
+    if (h) {
+      return h + ':' + (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
     }
-    if (_tc.stopBtn) {
-      _tc.stopBtn.addEventListener('click', function () {
-        try { abortGeneration(); } catch (eAb) { /* ignore */ }
-      });
-    }
-    if (_tc.jumpBtn) _tc.jumpBtn.addEventListener('click', _tcJumpToApproval);
-    if (_tc.retryBtn) {
-      _tc.retryBtn.addEventListener('click', function () {
-        _tc.stallTries = 0;
-        _tc.nextResyncAt = 0;
-        _tc.dead = false;
-        try { _resyncDelivery('stall-retry'); } catch (eR) { /* ignore */ }
-        _tcRender();
-      });
-    }
-    return _tc.el;
+    return m + ':' + (sec < 10 ? '0' : '') + sec;
   }
 
-  /** The countdown says "auto-denies in 3:12" — the buttons are hundreds of
-   *  pixels up the transcript. Put them one click away. */
-  function _tcJumpToApproval() {
-    if (!messagesEl) return;
-    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
-    for (var i = cards.length - 1; i >= 0; i--) {
-      if (!cards[i].querySelector('button:not([disabled])')) continue;
-      var card = cards[i];
-      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-      catch (eSc) { try { card.scrollIntoView(); } catch (eS2) { /* ignore */ } }
-      card.classList.add('is-flash');
-      setTimeout(function () { card.classList.remove('is-flash'); }, 1400);
-      return;
-    }
-  }
 
-  function _tcPhaseIcon(phase) {
-    if (phase === 'tool') return '⚙';
-    if (phase === 'awaiting') return '⏳';
-    if (phase === 'resuming') return '↻';
-    // A turn that delivered nothing must not wear a checkmark.
-    if (phase === 'done') return _tc.emptyTurn ? '⚠' : '✓';
-    if (phase === 'error') return '✕';
-    return '🧠'; // llm / supervisor / thinking
-  }
-
-  /**
-   * Structural phases outrank the free-text override. The override used to
-   * win unconditionally, so beginTurn's "Kazma is thinking…" painted itself
-   * over "Resuming after approval" one line after the resume set it — the
-   * card read "↻ Kazma is thinking…" through every approve.
-   */
-  function _tcPhaseLabel() {
-    switch (_tc.phase) {
-      case 'tool': {
-        var t = ti('task_running_tool', 'Running') + ' ' + (_tc.current || 'tool');
-        return _tc.detail ? t + ' ' + _tc.detail : t;
-      }
-      case 'awaiting': return ti('task_awaiting', 'Awaiting your approval');
-      case 'resuming': return ti('task_resuming', 'Resuming after approval');
-      case 'error': return _tc.textOverride || ti('task_error', 'Turn failed');
-      case 'done':
-        if (_tc.textOverride) return _tc.textOverride;
-        return _tc.emptyTurn
-          ? ti('task_no_reply', 'No reply received')
-          : ti('task_done', 'Done');
-      default:
-        if (_tc.textOverride) return _tc.textOverride;
-        return _tc.phase === 'llm'
-          ? ti('task_thinking', 'Thinking')
-          : ti('thinking', 'Kazma is thinking…');
-    }
-  }
-
-  function _tcFmtMMSS(s) {
-    s = Math.max(0, Math.floor(s));
-    var m = Math.floor(s / 60);
-    var r = s % 60;
-    return m + ':' + (r < 10 ? '0' : '') + r;
-  }
-
-  /**
-   * Server heartbeats are authoritative; the local clock fills the gaps.
-   * The first version had this backwards — it only recomputed while signals
-   * were FRESH, so the timer froze at exactly the moment you are staring at
-   * it wondering whether the turn hung. A resumed run restarts the server's
-   * own clock at zero, so take the max: the displayed turn time never goes
-   * backwards.
-   */
-  function _tcElapsed(now) {
-    var local = _tc.turnStart ? (now - _tc.turnStart) / 1000 : 0;
-    var srv = _tc.srvElapsedAt
-      ? _tc.srvElapsed + (now - _tc.srvElapsedAt) / 1000
-      : 0;
-    // Monotonic within a turn: whichever clock is further ahead wins, and
-    // the reading never moves backwards. Both can regress on their own — the
-    // server's restarts at zero on a resumed run, the local one starts late
-    // when this tab attached to a turn already in flight.
-    _tc.elapsedFloor = Math.max(local, srv, _tc.elapsedFloor || 0);
-    return _tc.elapsedFloor;
-  }
-
-  function _tcRender() {
-    if (!_tcMount() || !_tc.visible) return;
-    var now = Date.now();
-    var terminal = _tc.phase === 'done' || _tc.phase === 'error';
-    if (!terminal) _tc.elapsedS = _tcElapsed(now);
-    // Label hysteresis: show label + icon as ONE accepted snapshot so a
-    // fast tool batch cannot strobe the header (Thinking ↔ Running X ↔
-    // Thinking ↔ Running Y …). Escalations cut through immediately.
-    var escalated = _tc.phase === 'awaiting' || _tc.stalled || _tc.dead || terminal;
-    var lbl = _tcPhaseLabel();
-    if (lbl !== _tc.labelShown) {
-      if (escalated || !_tc.labelShownAt || now - _tc.labelShownAt >= _TC_LABEL_MIN_MS) {
-        _tc.labelShown = lbl;
-        _tc.phaseShown = _tc.phase;
-        _tc.labelShownAt = now;
-      }
-    } else {
-      _tc.phaseShown = escalated ? _tc.phase : (_tc.phaseShown || _tc.phase);
-    }
-    if (_tc.phaseEl) _tc.phaseEl.textContent = _tcPhaseIcon(_tc.phaseShown || _tc.phase);
-    if (_tc.label) _tc.label.textContent = _tc.labelShown || lbl;
-
-    var bits = [];
-    if (terminal) {
-      if (_tc.summary) bits.push(_tc.summary);
-    } else if (_tc.phase === 'awaiting' && _tc.deadline) {
-      var left = Math.floor(_tc.deadline - now / 1000);
-      bits.push('⏳ ' + (left > 0
-        ? ti('task_auto_deny_in', 'auto-denies in') + ' ' + _tcFmtMMSS(left)
-        : ti('approval_expired_short', 'expired')));
-    } else {
-      if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
-      // A tool that has been running three minutes is the thing worth
-      // seeing; total turn time hides it behind everything that came before.
-      var inPhase = _tc.phaseStart ? (now - _tc.phaseStart) / 1000 : 0;
-      if (_tc.phase === 'tool' && inPhase > _TC_TOOL_PHASE_MIN_S) {
-        bits.push(tiFmt('task_in_tool', '{d} in this tool', { d: _tcFmtMMSS(inPhase) }));
-      }
-      if (_tc.step > 0) bits.push(ti('task_step', 'step') + ' ' + _tc.step);
-      if (_tc.planTotal > 0) {
-        bits.push(ti('task_plan', 'plan') + ' ' + _tc.planDone + '/' + _tc.planTotal);
-      }
-    }
-    if (_tc.meta) _tc.meta.textContent = bits.join(' · ');
-
-    if (_tc.stallEl) {
-      _tc.stallEl.hidden = !_tc.stalled;
-      if (_tc.stalled) {
-        _tc.stallEl.textContent = '⚠ ' + (_tc.dead
-          ? ti('task_not_responding', 'not responding')
-          : ti('task_no_signal', 'no signal') + ' ' +
-            Math.floor((now - _tc.lastSignal) / 1000) + 's — ' +
-            ti('task_checking', 'checking…'));
-      }
-    }
-    if (_tc.stopBtn) _tc.stopBtn.hidden = terminal || _tc.phase === 'awaiting';
-    if (_tc.jumpBtn) _tc.jumpBtn.hidden = _tc.phase !== 'awaiting';
-    if (_tc.retryBtn) _tc.retryBtn.hidden = !_tc.dead;
-
-    if (_tc.chevron) {
-      _tc.chevron.hidden = true;
-      _tc.chevron.textContent = _tc.open ? '▾' : '▸';
-    }
-    if (_tc.toggle) _tc.toggle.setAttribute('aria-expanded', 'false');
-    if (_tc.body) _tc.body.hidden = true;
-    _tc.el.className = 'live-task-card' +
-      (_tc.phase === 'awaiting' ? ' is-awaiting' : '') +
-      (_tc.stalled ? ' is-stalled' : '') +
-      (_tc.dead ? ' is-dead' : '') +
-      (_tc.phase === 'done' ? ' is-done' : '') +
-      (_tc.phase === 'error' ? ' is-error' : '') +
-      (terminal && _tc.emptyTurn ? ' is-empty' : '') +
-      (_tc.open ? ' is-open' : '');
-    _tc.el.hidden = false;
-    _tcAnnounce(now, terminal);
-  }
-
-  /**
-   * Screen-reader channel. The header's visible text is aria-hidden and the
-   * toggle's name is fixed, so nothing here fires on the 1s tick — only on
-   * a phase change, a coarse countdown threshold, a liveness change, or the
-   * terminal summary.
-   */
-  function _tcAnnounce(now, terminal) {
-    if (!_tc.liveEl) return;
-    var say = _tcPhaseLabel();
-    if (_tc.phase === 'awaiting' && _tc.deadline) {
-      var left = Math.floor(_tc.deadline - now / 1000);
-      var bucket = left <= 0 ? 0
-        : (left <= 10 ? 10 : (left <= 30 ? 30 : (left <= 60 ? 60 : -1)));
-      if (bucket === 0) say += ' — ' + ti('approval_expired_short', 'expired');
-      else if (bucket > 0) {
-        say += ' — ' + tiFmt('auto_deny_seconds', 'auto-denies in {n} seconds',
-          { n: bucket });
-      }
-    }
-    if (_tc.stalled) {
-      say += ' — ' + (_tc.dead
-        ? ti('task_not_responding', 'not responding')
-        : ti('task_no_signal', 'no signal'));
-    }
-    if (terminal && _tc.summary) say += ' — ' + _tc.summary;
-    if (say === _tc.announced) return;
-    _tc.announced = say;
-    _tc.liveEl.textContent = say;
-  }
-
-  function _tcTick() {
-    if (!_tc.visible) return;
-    var now = Date.now();
-    // Stalled honesty: heartbeats arrive every ~8-10s during silence, so a
-    // _TC_STALL_MS gap means the JOURNAL went quiet — surface it and try to
-    // reconcile. Recovery is a BACKOFF, not a one-shot: the first version
-    // latched after a single resync, so a genuinely dead stream sat amber
-    // forever with nothing else attempted and no way to say so.
-    var watched = _tc.phase !== 'awaiting' && !_tcIsTerminal();
-    if (watched && _tc.lastSignal && now - _tc.lastSignal > _TC_STALL_MS) {
-      if (!_tc.stalled) {
-        _tc.stalled = true;
-        _tc.stallTries = 0;
-        _tc.nextResyncAt = 0;
-      }
-      if (!_tc.dead && now >= _tc.nextResyncAt) {
-        _tc.stallTries += 1;
-        _tc.nextResyncAt = now + _TC_STALL_RETRY_MS;
-        if (_tc.stallTries > _TC_STALL_MAX_TRIES) _tc.dead = true;
-        else { try { _resyncDelivery('heartbeat-gap'); } catch (eR) { /* ignore */ } }
-      }
-    } else if (_tc.stalled) {
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-    }
-    _tcRender();
-  }
-
-  function _tcIsTerminal() {
-    return _tc.phase === 'done' || _tc.phase === 'error';
-  }
-
-  function _tcStepsFromDoc() {
-    // Thoughts and tools live in the bubble workbench. This card is a bar.
-    if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
-    _tc.stepsHtml = '';
-  }
-
-  /**
-   * The single writer. Events:
-   *  begin | token | tool{name,detail} | tool_end{name}
-   *  hb{phase,current,detail,step,elapsed_s} | status{status,message}
-   *  text{msg} | plan{total,done} | approval{deadline} | resuming
-   *  done{ok,summary,msg} | error{msg} | doc
-   */
-  function _taskCardEvent(ev) {
-    ev = ev || {};
-    if (!_tcMount()) return;
-    var now = Date.now();
-
-    // A session change is the ABSENCE of a turn, not the end of one: unmount
-    // now, with no terminal frame and no retire animation.
-    if (ev.t === 'reset') {
-      if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
-      if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
-      _tc.visible = false;
-      _tc.phase = 'idle';
-      _tc.current = '';
-      _tc.detail = '';
-      _tc.step = 0;
-      _tc.elapsedS = 0;
-      _tc.elapsedFloor = 0;
-      _tc.turnStart = 0;
-      _tc.phaseStart = 0;
-      _tc.srvElapsed = 0;
-      _tc.srvElapsedAt = 0;
-      _tc.lastSignal = 0;
-      _tc.deadline = 0;
-      _tc.planTotal = 0;
-      _tc.planDone = 0;
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-      _tc.textOverride = '';
-      _tc.summary = '';
-      _tc.emptyTurn = false;
-      _tc.announced = '';
-      _tc.stepsHtml = '';
-      if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
-      if (_tc.liveEl) _tc.liveEl.textContent = '';
-      if (_tc.el) _tc.el.hidden = true;
-      return;
-    }
-
-    if (ev.t === 'begin') {
-      _tc.phase = 'idle';
-      _tc.current = '';
-      _tc.detail = '';
-      _tc.step = 0;
-      _tc.elapsedS = 0;
-      _tc.elapsedFloor = 0;
-      _tc.turnStart = now;
-      _tc.phaseStart = now;
-      _tc.srvElapsed = 0;
-      _tc.srvElapsedAt = 0;
-      _tc.deadline = 0;
-      _tc.planTotal = 0;
-      _tc.planDone = 0;
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-      _tc.textOverride = '';
-      _tc.summary = '';
-      _tc.emptyTurn = false;
-      _tc.announced = '';
-      _tc.stepsHtml = '';
-      _tc.labelShown = '';
-      _tc.phaseShown = '';
-      _tc.labelShownAt = 0;
-      if (_tc.stepsEl) _tc.stepsEl.innerHTML = '';
-      _tcWake(now);
-      _tcSetPhase('llm', '', '', now);
-    } else if (ev.t === 'token' || ev.t === 'tool' || ev.t === 'tool_end' ||
-               ev.t === 'status' || ev.t === 'hb' || ev.t === 'approval' ||
-               ev.t === 'resuming') {
-      // Every liveness event restores the card. `approval` and `resuming`
-      // used to skip this: a pending hide from the previous terminal frame
-      // stayed armed and blanked the card mid-approve, and a resume never
-      // restarted the tick timer (frozen elapsed, dead stall detection).
-      _tcWake(now);
-    }
-
-    switch (ev.t) {
-      case 'tool':
-        _tcSetPhase('tool', ev.name || 'tool', ev.detail, now);
-        _tc.step += 1;
-        _tc.textOverride = '';
-        break;
-      case 'tool_end':
-        if (_tc.phase === 'tool') _tcSetPhase('supervisor', '', '', now);
-        break;
-      case 'token':
-        if (_tc.phase !== 'awaiting') _tcSetPhase('llm', '', '', now);
-        break;
-      case 'hb':
-        if (ev.phase) _tcSetPhase(String(ev.phase), ev.current, ev.detail, now);
-        if (ev.step) _tc.step = Math.max(_tc.step, parseInt(ev.step, 10) || 0);
-        if (ev.elapsed_s) {
-          _tc.srvElapsed = Number(ev.elapsed_s) || 0;
-          _tc.srvElapsedAt = now;
-        }
-        if (_tc.phase !== 'awaiting') _tc.textOverride = '';
-        break;
-      case 'status': {
-        var st = String(ev.status || '');
-        if (st === 'synthesizing') {
-          _tcSetPhase('llm', '', '', now);
-          _tc.textOverride = ti('task_writing', 'Writing the reply…');
-        } else if (st === 'routing_node') {
-          _tc.textOverride = String(ev.message || '');
-        } else if (st === 'paused_for_approval') {
-          /* the approval event owns this */
-        } else if (ev.message) {
-          _tc.textOverride = String(ev.message);
-        }
-        break;
-      }
-      case 'text':
-        // An empty msg CLEARS. `if (ev.msg)` let _clearStatusStrip leave a
-        // stale override ("Writing the reply…") alive under a later phase.
-        _tc.textOverride = String(ev.msg || '');
-        break;
-      case 'plan':
-        _tc.planTotal = parseInt(ev.total, 10) || 0;
-        _tc.planDone = parseInt(ev.done, 10) || 0;
-        break;
-      case 'approval':
-        _tcSetPhase('awaiting', '', '', now);
-        _tc.deadline = Number(ev.deadline || 0);
-        _tc.textOverride = '';
-        break;
-      case 'resuming':
-        _tcSetPhase('resuming', '', '', now);
-        _tc.deadline = 0;
-        _tc.textOverride = '';
-        break;
-      case 'doc':
-        // Cheap when collapsed: the body is not on screen, so skip the
-        // rebuild entirely — the toggle builds it on open.
-        if (_tc.visible && _tc.open) _tcStepsFromDoc();
-        return;
-      case 'done':
-      case 'error':
-        _tc.phase = ev.t === 'error' ? 'error' : 'done';
-        _tc.phaseStart = now;
-        _tc.deadline = 0;
-        _tc.stalled = false;
-        _tc.dead = false;
-        _tc.textOverride = ev.msg ? String(ev.msg) : '';
-        _tc.summary = String(ev.summary || '');
-        // `ok: false` is an explicit "the turn delivered nothing" from
-        // endTurn — undefined (abort / forceEndTurn) is not a failure.
-        _tc.emptyTurn = ev.ok === false;
-        if (_tc.tickTimer) { clearInterval(_tc.tickTimer); _tc.tickTimer = null; }
-        if (!_tc.visible) return;
-        _tcRender();
-        // Bubble carries the durable summary now — card retires shortly.
-        if (_tc.doneTimer) clearTimeout(_tc.doneTimer);
-        _tc.doneTimer = setTimeout(function () {
-          _tc.visible = false;
-          if (_tc.el) _tc.el.hidden = true;
-          _tc.doneTimer = null;
-        }, ev.t === 'error' ? 4000 : (_tc.summary ? 3200 : 1600));
-        return;
-      default:
-        break;
-    }
-    _tcRender();
-    if (_tc.open) _tcStepsFromDoc();
-  }
-
-  /** Liveness restore, shared by every event that proves the turn is alive. */
-  function _tcWake(now) {
-    _tc.visible = true;
-    _tc.lastSignal = now;
-    if (!_tc.turnStart) _tc.turnStart = now;
-    if (!_tc.phaseStart) _tc.phaseStart = now;
-    // A frame IS the signal — clear the warning here, not a tick later, or
-    // the same render that shows the new phase also shows "no signal 0s".
-    if (_tc.stalled) {
-      _tc.stalled = false;
-      _tc.dead = false;
-      _tc.stallTries = 0;
-      _tc.nextResyncAt = 0;
-    }
-    // A hide armed by a previous terminal frame must never fire onto a live
-    // card — this is what blanked the card the instant you hit Approve.
-    if (_tc.doneTimer) { clearTimeout(_tc.doneTimer); _tc.doneTimer = null; }
-    if (!_tc.tickTimer) _tc.tickTimer = setInterval(_tcTick, 1000);
-  }
-
-  /** Phase changes restart the phase-scoped clock ("1:12 in this tool"). */
-  function _tcSetPhase(phase, current, detail, now) {
-    if (phase && phase !== _tc.phase) {
-      _tc.phase = phase;
-      _tc.phaseStart = now;
-    }
-    if (current !== undefined) _tc.current = String(current || '');
-    if (detail !== undefined) _tc.detail = String(detail || '');
-  }
-  // <<< LIVE_TASK_CARD_END
-
-  /**
-   * "12 steps · 3 tools · 18.4s · 4.2k tokens" for the card's terminal
-   * frame. The shape of what just happened used to be thrown away — the
-   * card flashed a bare "Done" and the counts died with the live panel.
-   */
-  function _tcTurnSummary() {
-    var bits = [];
-    if (_progressStepCount > 0) {
-      bits.push(_progressStepCount + ' ' +
-        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps')));
-    }
-    if (_progressToolCount > 0) {
-      bits.push(_progressToolCount + ' ' +
-        (_progressToolCount === 1 ? ti('task_tool', 'tool') : ti('task_tools', 'tools')));
-    }
-    var s = _lastTurnStats || null;
-    if (s && s.durationMs > 0 && KS.formatDuration) bits.push(KS.formatDuration(s.durationMs));
-    else if (_tc.elapsedS > 2) bits.push(_tcFmtMMSS(_tc.elapsedS));
-    if (s && s.tokens > 0 && KS.formatTokens) {
-      bits.push(KS.formatTokens(s.tokens) + ' ' + ti('tokens', 'tokens'));
-    }
-    if (s && s.cost > 0 && KS.formatCost) bits.push(KS.formatCost(s.cost));
-    return bits.join(' · ');
-  }
 
   /**
    * A compact "what is it doing this to" for the card header: the first
    * meaningful scalar out of a tool's arguments. "Running file_search" tells
    * you far less than 'Running file_search "auth middleware"'.
    */
-  var _TC_ARG_SKIP = { session_id: 1, thread_id: 1, workspace_id: 1, turn_id: 1, id: 1 };
-  var _TC_ARG_PREFER = ['query', 'q', 'path', 'file', 'file_path', 'url', 'name',
+  var _TOOL_ARG_SKIP = { session_id: 1, thread_id: 1, workspace_id: 1, turn_id: 1, id: 1 };
+  var _TOOL_ARG_PREFER = ['query', 'q', 'path', 'file', 'file_path', 'url', 'name',
     'command', 'cmd', 'pattern', 'text', 'prompt', 'title', 'to'];
-  function _tcArgSummary(inputs) {
+  function _toolArgSummary(inputs) {
     var obj = inputs;
     if (typeof obj === 'string') {
       var s = obj.trim();
       if (!s) return '';
       if (s.charAt(0) === '{' || s.charAt(0) === '[') {
-        try { obj = JSON.parse(s); } catch (eP) { return _tcQuote(s); }
+        try { obj = JSON.parse(s); } catch (eP) { return _toolQuote(s); }
       } else {
-        return _tcQuote(s);
+        return _toolQuote(s);
       }
     }
     if (!obj || typeof obj !== 'object') return '';
-    if (Array.isArray(obj)) return obj.length ? _tcArgSummary(obj[0]) : '';
+    if (Array.isArray(obj)) return obj.length ? _toolArgSummary(obj[0]) : '';
     var k, i;
-    for (i = 0; i < _TC_ARG_PREFER.length; i++) {
-      k = _TC_ARG_PREFER[i];
-      if (typeof obj[k] === 'string' && obj[k].trim()) return _tcQuote(obj[k]);
-      if (typeof obj[k] === 'number') return _tcQuote(String(obj[k]));
+    for (i = 0; i < _TOOL_ARG_PREFER.length; i++) {
+      k = _TOOL_ARG_PREFER[i];
+      if (typeof obj[k] === 'string' && obj[k].trim()) return _toolQuote(obj[k]);
+      if (typeof obj[k] === 'number') return _toolQuote(String(obj[k]));
     }
     var keys = Object.keys(obj);
     for (i = 0; i < keys.length; i++) {
       k = keys[i];
-      if (_TC_ARG_SKIP[k]) continue;
+      if (_TOOL_ARG_SKIP[k]) continue;
       var v = obj[k];
-      if (typeof v === 'string' && v.trim()) return _tcQuote(v);
-      if (typeof v === 'number' || typeof v === 'boolean') return _tcQuote(String(v));
+      if (typeof v === 'string' && v.trim()) return _toolQuote(v);
+      if (typeof v === 'number' || typeof v === 'boolean') return _toolQuote(String(v));
     }
     return '';
   }
-  function _tcQuote(s) {
+  function _toolQuote(s) {
     s = String(s).replace(/\s+/g, ' ').trim();
     if (!s) return '';
     return '“' + truncateStr(s, 48) + '”';
@@ -2158,11 +1664,11 @@
    * The wrappers degrade to the raw value if that file fails to load: a
    * missing gist is a cosmetic loss, and a step row that throws is not.
    */
-  function _tcResultSummary(result) {
+  function _toolResultSummary(result) {
     var M = window.KazmaTurnDetail;
     return M ? M.resultSummary(result) : '';
   }
-  function _tcDetailWithGist(gist, raw) {
+  function _toolDetailWithGist(gist, raw) {
     var M = window.KazmaTurnDetail;
     return M ? M.withGist(gist, raw) : String(raw == null ? '' : raw);
   }
@@ -2181,12 +1687,10 @@
 
   /** Legacy strip call sites route here — one surface, one writer. */
   function _setStatusStrip(msg) {
-    _taskCardEvent({ t: 'text', msg: msg });
     // Store flag kept for WS liveness logic; it no longer owns any DOM.
     _setStoreThinking(true, msg);
   }
   function _clearStatusStrip() {
-    _taskCardEvent({ t: 'text', msg: '' });
     _setStoreThinking(false);
   }
 
@@ -2198,10 +1702,6 @@
       }
     }
     return null;
-  }
-
-  function _isUserBubble(el) {
-    return !!(el && el.classList && el.classList.contains('message-user'));
   }
 
   function _bubbleContent(el) {
@@ -2237,7 +1737,6 @@
 
   function _resetTurnState() {
     currentMsgEl = null;
-    tokenAccum = '';
     _liveTurnId = '';
     _turnPainted = false;
     _progressEl = null;
@@ -2282,6 +1781,8 @@
    *   leaving a lone "Thinking…" row above the answer.
    */
   function beginTurn(opts) {
+    _stopRequested = false;
+    _startHeaderTicker();
     var resume = !!(opts && opts.resume);
     _isGenerating = true;
     _awaitingApproval = false;
@@ -2294,7 +1795,6 @@
     // Status strip shows the instant ANY turn starts (SSE, WS, or
     // approve-resume) — no longer dependent on WS frames arriving.
     // A resume is not a new card epoch (keeps elapsed/step).
-    _taskCardEvent(resume ? { t: 'resuming' } : { t: 'begin' });
     // Store flag only. Stamping a text override here painted "Kazma is
     // thinking\u2026" over the phase the line above just set \u2014 every approve
     // rendered as "\u21bb Kazma is thinking\u2026" instead of "Resuming after
@@ -2361,6 +1861,7 @@
   }
 
   function endTurn() {
+    _stopRequested = false;
     _clearTurnTimers();
     _isGenerating = false;
     _awaitingApproval = false;
@@ -2377,11 +1878,6 @@
     // The card's last frame carries the SHAPE of what just happened
     // ("12 steps · 3 tools · 18.4s · 4.2k tokens") instead of a bare "Done"
     // that threw the counts away with the live panel.
-    _taskCardEvent({ t: 'done', ok: !!_turnPainted, summary: _tcTurnSummary() });
-    if (activeTypingEl && KS.hideTyping) {
-      KS.hideTyping(activeTypingEl);
-    }
-    activeTypingEl = null;
     // Approve-resume used a local typing row that endTurn never saw, so
     // "Thinking…" stayed under a finished answer (2026-09-01).
     if (currentMsgEl) {
@@ -2413,7 +1909,6 @@
     }
     // Finalize open assistant bubble so the next token starts a new one.
     currentMsgEl = null;
-    tokenAccum = '';
     // The finished bubble is no longer a live-paint target — a duplicate
     // terminal frame (second transport's done) must not find it here.
     _liveRenderEl = null;
@@ -2428,7 +1923,6 @@
    * Always clears Stop + Alpine thinking even if the server never sent idle.
    */
   function forceEndTurn() {
-    _taskCardEvent({ t: 'done' });
     try {
       if (window.Alpine && Alpine.store && Alpine.store('agent')) {
         var store = Alpine.store('agent');
@@ -2461,13 +1955,10 @@
     // — _paintHitlFromDoc used to stamp "Approved — running…" on first paint
     // because pauseForApproval runs before the pending card is created.
     _serverPaused = true;
-    if (activeTypingEl && KS.hideTyping) KS.hideTyping(activeTypingEl);
-    activeTypingEl = null;
     _clearStatusStrip();
     // The card is the ONE surface while paused: it shows the awaiting
     // phase + the watchdog countdown (pause used to blank the strip and
     // leave dead air when the inline card was late — 2026-09-03).
-    _taskCardEvent({ t: 'approval', deadline: _hitlDeadlineOf(data) });
     if (inputEl) {
       inputEl.disabled = false;
       inputEl.placeholder = 'Approve above — or /steer /abort /long /yolo';
@@ -2496,6 +1987,7 @@
 
   function abortGeneration(opts) {
     opts = opts || {};
+    _stopRequested = true;
     // Invalidate in-flight SSE immediately. abortThenSend used to wait up
     // to 1.5s for POST /stop with the old epoch still current, so tokens
     // kept painting the first bubble while the new CoT opened below
@@ -2555,7 +2047,7 @@
         // Reply already painted and the SSE fetch is gone — Stop was stuck
         // because WS still had isThinking from a leftover status frame.
         var sseDead = !_streamIsLive();
-        var replyPainted = !!(tokenAccum && String(tokenAccum).trim());
+        var replyPainted = !!_liveAnswerText().trim();
         if (sseDead && replyPainted) {
           console.warn('[KazmaChat] Desync recovery: SSE ended with a painted reply — releasing Stop');
           endTurn();
@@ -3237,7 +2729,6 @@
         '</div>';
       resetSessionStats();
       currentMsgEl = null;
-      tokenAccum = '';
       _turnPainted = false;
       if (activeStream) { activeStream.abort(); activeStream = null; }
       renderSessionList();
@@ -3270,7 +2761,6 @@
     // leaving the sent text in the box (and Stop on the button, so the
     // only way to "clear" was to send it again).
     currentMsgEl = null;
-    tokenAccum = '';
     _turnPainted = false;
     clearPendingAttachments();
     _clearComposer();
@@ -3287,8 +2777,6 @@
       _resetTurnState();
     }
 
-    // Status strip is store-owned now; beginTurn arms it below.
-    activeTypingEl = typingEl;
 
     // Ensure we have a stable session id
     if (!chatSessionId) {
@@ -3349,7 +2837,6 @@
         if (!_mine()) return;
         noteTurnActivity();
         _noteSeq();
-        _taskCardEvent({ t: 'token' });
         _outboxClear();  // first streamed token = the server received the send
         // NOTE: do NOT clear the status strip per token. The strip sits
         // IN-FLOW between transcript and composer — every hide/show shifts
@@ -3357,8 +2844,7 @@
         // streaming text bounce (the flicker). While tokens flow the strip
         // stays steady ("Writing reply…"); terminal paths (done/error/
         // endTurn) are the only ones allowed to hide it.
-        activeTypingEl = null;
-        if (!tokenAccum) {
+        if (!_liveAnswerText()) {
           logProgress({ kind: 'status', title: ti('writing_reply', 'Writing reply\u2026'), state: 'running' });
         }
         applyTurnEvent({
@@ -3374,11 +2860,6 @@
       onToolCall: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        _taskCardEvent({
-          t: 'tool',
-          name: data.tool_name || 'tool',
-          detail: _tcArgSummary(data.inputs),
-        });
         // Look-only: a tool step has nothing to put IN the bubble, and
         // minting one here opened every tool-first turn with a blank bubble.
         _pinLiveAssistantBubble(false);
@@ -3389,22 +2870,31 @@
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcArgSummary(data.inputs), inputs),
+          detail: _toolDetailWithGist(_toolArgSummary(data.inputs), inputs),
           state: 'running',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
       },
 
       onToolResult: function(data) {
         if (!_mine()) return;
         noteTurnActivity();
-        _taskCardEvent({ t: 'tool_end', name: data.tool_name || 'tool' });
         if (!currentMsgEl) return;
         var isSwarm = (data.tool_name === 'dispatch_swarm' || data.tool_name === 'swarm_dispatch' || (data.result && data.result.indexOf('Swarm task dispatched') !== -1));
         logProgress({
           kind: 'tool',
           title: data.tool_name || 'tool',
-          detail: _tcDetailWithGist(_tcResultSummary(data.result), data.result),
+          detail: _toolDetailWithGist(_toolResultSummary(data.result), data.result),
           state: isSwarm ? 'running' : 'done',
+          // The graph's own run id, so the LIVE row and the row the
+          // server persisted are one row rather than two after a
+          // refresh. activityToParts reads 'tool#<id>' back into
+          // call_id, which is what partKey keys on.
+          id: data.tool_call_id ? 'tool#' + data.tool_call_id : undefined,
         });
         if (isSwarm) {
           var content = currentMsgEl.querySelector('.message-content');
@@ -3445,11 +2935,6 @@
             : (status === 'routing_node'
               ? tiFmt('routing', 'Routing: {node}', { node: (data && data.active_node) || 'Supervisor' })
               : (data.message || ti('thinking', 'Kazma is thinking\u2026')));
-          _taskCardEvent({
-            t: 'status',
-            status: status,
-            message: (data && data.message) || title,
-          });
           logProgress({
             kind: 'status',
             title: title,
@@ -3459,7 +2944,6 @@
         } else if (status === 'paused_for_approval' || status === 'idle') {
           // HITL / idle handled by other callbacks
         } else {
-          _taskCardEvent({ t: 'status', status: status, message: String(data.message || status) });
           logProgress({
             kind: 'status',
             title: String(data.message || status),
@@ -3474,12 +2958,16 @@
         // superseded stream's graph is the live graph (same rule as HITL).
         noteTurnActivity();
         _noteSeq();
-        _taskCardEvent({
-          t: 'hb',
-          phase: (data && data.phase) || '',
-          current: (data && data.current) || '',
-          step: (data && data.step) || 0,
+        // The heartbeat is the only frame carrying a SERVER-measured
+        // elapsed. Without this the header would have to time the turn
+        // itself, which is the client clock that printed "Done 0s" while
+        // the graph was still working (plan §3).
+        applyTurnEvent({
+          type: 'turn_heartbeat',
           elapsed_s: (data && data.elapsed_s) || 0,
+          seq: data && data.seq,
+          turn_id: (data && data.turn_id) || _liveTurnId,
+          source: 'sse',
         });
       },
 
@@ -3487,7 +2975,6 @@
         if (!_mine()) return;
         activeStream = null;
         _clearStatusStrip();
-        activeTypingEl = null;
         diag('done', {
           interrupted: !!(data && data.interrupted),
           truncated: !data,
@@ -3504,7 +2991,7 @@
         try {
         // Terminal frame is SoT — ALWAYS replace-paint, even when plan
         // tokens already arrived (glued ```plan + answer used to be skipped
-        // because tokenAccum was nonempty).
+        // because the turn had already produced an answer).
         if (data && data.content) {
           applyTurnEvent({
             type: 'done',
@@ -3534,13 +3021,13 @@
         // received." under the posted-tweets answer, 2026-08-26).
         // Do not stamp the watchdog until resync has had a chance — the
         // server often already persisted the reply.
-        if (!tokenAccum && !interrupted && !_awaitingApproval && !_turnPainted) {
+        if (!_liveAnswerText() && !interrupted && !_awaitingApproval && !_turnPainted) {
           diag('empty-terminal');
           dumpDiagnostics();
           _resyncDelivery('empty-terminal');
           var emptyTurnEl = currentMsgEl;
           setTimeout(function() {
-            if (tokenAccum || _turnPainted || _awaitingApproval) return;
+            if (_liveAnswerText() || _turnPainted || _awaitingApproval) return;
             try { _pinLiveAssistantBubble(); } catch (ePin2) { /* ignore */ }
             var host = emptyTurnEl || currentMsgEl;
             var emptyEl = host && host.querySelector('.message-text');
@@ -3628,7 +3115,6 @@
         if (_hitlAlreadyClaimed(data)) return;
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         _clearStatusStrip();
-        activeTypingEl = null;
         pauseForApproval(data);
         _ingestFrameGateViews(data);
         applyTurnEvent({
@@ -3652,7 +3138,6 @@
         if (data && data.thread_id) _lastInterruptedThreadId = String(data.thread_id);
         if (st === 'pending') {
           _clearStatusStrip();
-          activeTypingEl = null;
           pauseForApproval(data);
         } else {
           _awaitingApproval = false;
@@ -3711,8 +3196,6 @@
         // Final failure: surface it, then reconcile with server truth (the
         // turn may have completed server-side and be durable already).
         _clearStatusStrip();
-        _taskCardEvent({ t: 'error', msg: String(msg || '') });
-        activeTypingEl = null;
         _pinLiveAssistantBubble();
         var textEl = currentMsgEl.querySelector('.message-text');
         textEl.innerHTML = '<div class="error-message">\u26A0 ' + escapeHtml(msg) +
@@ -3863,19 +3346,6 @@
     return '<svg class="step-glyph" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + d + '</svg>';
   }
 
-  function _cotPhasesHtml(active) {
-    function chip(id, label) {
-      var on = active === id ? ' is-on' : '';
-      return '<span class="cot-phase' + on + '" data-phase="' + id + '">' +
-        escapeHtml(label) + '</span>';
-    }
-    return '<div class="cot-phases" aria-hidden="true">' +
-      chip('think', ti('phase_think', 'Think')) +
-      chip('act', ti('phase_act', 'Act')) +
-      chip('write', ti('phase_write', 'Write')) +
-      '</div>';
-  }
-
   function _setCotPhase(phase) {
     var panel = _progressEl;
     if (!panel || !phase) return;
@@ -3988,13 +3458,6 @@
     el.textContent = _formatElapsed(Date.now() - _progressStartedAt);
   }
 
-  function _startProgressTimer() {
-    _progressStartedAt = Date.now();
-    if (_progressTimerId) clearInterval(_progressTimerId);
-    _progressTimerId = setInterval(_tickProgressElapsed, 1000);
-    _tickProgressElapsed();
-  }
-
   function _stopProgressTimer() {
     if (_progressTimerId) {
       clearInterval(_progressTimerId);
@@ -4019,101 +3482,6 @@
     m = s.match(/(?:^|[\s"'])([A-Za-z]:\\[^\s"']+|\/[\w.\-\/]+|[\w.\-]+\/[\w.\-\/]+)/);
     if (m) return m[1];
     return '';
-  }
-
-  function ensureProgressPanel() {
-    if (_isUserBubble(currentMsgEl)) currentMsgEl = null;
-    _pinLiveAssistantBubble();
-    // No rescue pass: TurnView keeps every doc-derived node a flat sibling
-    // of .message-content, so a panel can no longer swallow the answer.
-    var content = _bubbleContent(currentMsgEl);
-    if (!content) return null;
-    var panel = _directChildByClass(content, 'agent-progress');
-    if (panel) {
-      _progressEl = panel;
-      return panel;
-    }
-    panel = document.createElement('div');
-    panel.className = 'agent-progress is-active';
-    var pageRtl = (document.documentElement.getAttribute('dir') || '') === 'rtl';
-    if (pageRtl) {
-      panel.setAttribute('dir', 'rtl');
-      panel.classList.add('is-rtl');
-    }
-    _panelSeq += 1;
-    var bodyId = 'agent-progress-body-' + _panelSeq;
-    panel.innerHTML =
-      '<div class="agent-progress-header" role="button" tabindex="0" title="Collapse/expand workbench"' +
-        ' aria-expanded="true" aria-controls="' + bodyId + '">' +
-        '<span class="agent-progress-pulse" aria-hidden="true"></span>' +
-        '<div class="agent-progress-heading">' +
-          '<span class="agent-progress-kicker">' + escapeHtml(ti('reasoning', 'Reasoning')) + '</span>' +
-          '<span class="agent-progress-title">' + escapeHtml(ti('working', 'Working\u2026')) + '</span>' +
-        '</div>' +
-        _cotPhasesHtml('think') +
-        '<span class="agent-progress-elapsed" title="Elapsed">0s</span>' +
-        '<span class="agent-progress-count">0 ' + escapeHtml(ti('steps', 'steps')) + '</span>' +
-        '<span class="agent-progress-chevron" aria-hidden="true">\u25BE</span>' +
-      '</div>' +
-      '<div class="agent-progress-body" id="' + bodyId + '">' +
-        '<div class="agent-plan' + (pageRtl ? ' is-rtl' : '') + '"' +
-          (pageRtl ? ' dir="rtl"' : '') + ' hidden>' +
-          '<div class="agent-plan-head">' +
-            '<div class="agent-plan-label">' + escapeHtml(ti('plan', 'Plan')) + '</div>' +
-            '<div class="agent-plan-meta"></div>' +
-          '</div>' +
-          '<div class="agent-plan-bar" aria-hidden="true"><div class="agent-plan-bar-fill"></div></div>' +
-          '<ol class="agent-plan-list"></ol>' +
-        '</div>' +
-        '<div class="agent-memory-explain is-collapsed" hidden>' +
-          '<div class="agent-memory-explain-head" role="button" tabindex="0" title="Collapse/expand memory">' +
-            '<div class="agent-memory-explain-label">' + escapeHtml(ti('memory_context', 'Memory context')) + '</div>' +
-            '<div class="agent-memory-explain-meta"></div>' +
-            '<span class="agent-memory-chevron" aria-hidden="true">\u25B8</span>' +
-          '</div>' +
-          '<div class="agent-memory-explain-body"></div>' +
-        '</div>' +
-        '<div class="agent-activity-label">' + escapeHtml(ti('activity', 'Activity')) + '</div>' +
-        '<ul class="agent-progress-steps" role="log" aria-live="polite"></ul>' +
-      '</div>';
-    var textEl = _directChildByClass(content, 'message-text');
-    if (textEl) content.insertBefore(panel, textEl);
-    else content.appendChild(panel);
-    var header = panel.querySelector('.agent-progress-header');
-    function toggle() {
-      panel.classList.toggle('is-collapsed');
-      var collapsed = panel.classList.contains('is-collapsed');
-      var chev = panel.querySelector('.agent-progress-chevron');
-      if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
-      if (header) header.setAttribute('aria-expanded', String(!collapsed));
-    }
-    if (header) {
-      header.addEventListener('click', toggle);
-      header.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
-      });
-    }
-    // Memory sub-panel: independently collapsible (starts collapsed to save space).
-    var memHead = panel.querySelector('.agent-memory-explain-head');
-    if (memHead) {
-      function toggleMem() {
-        var mem = panel.querySelector('.agent-memory-explain');
-        if (!mem) return;
-        mem.classList.toggle('is-collapsed');
-        var chev = mem.querySelector('.agent-memory-chevron');
-        if (chev) chev.textContent = mem.classList.contains('is-collapsed') ? '\u25B8' : '\u25BE';
-      }
-      memHead.addEventListener('click', toggleMem);
-      memHead.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMem(); }
-      });
-    }
-    _progressEl = panel;
-    _progressStepCount = 0;
-    _planItems = [];
-    _planParsedFromText = false;
-    _startProgressTimer();
-    return panel;
   }
 
   function _renderPlanList(panel) {
@@ -4167,14 +3535,10 @@
       });
       if (!exists) _planItems.push({ text: text, done: false });
     });
-    // Live Task Card: plan progress rides the card header meta. setPlan
-    // must NEVER create an in-bubble workbench — on hydration it painted a
-    // phantom "Working…" panel over finished history (2026-09-03).
-    _taskCardEvent({
-      t: 'plan',
-      total: _planItems.length,
-      done: _planItems.filter(function(p) { return p.done; }).length,
-    });
+    // setPlan must NEVER create an in-bubble workbench — on hydration it
+    // painted a phantom "Working…" panel over finished history
+    // (2026-09-03). It only updates a panel that is already open, which is
+    // why the query below is a look, not an ensure.
     var panel = messagesEl
       ? messagesEl.querySelector('.agent-progress.is-active')
       : null;
@@ -4182,34 +3546,6 @@
       _renderPlanList(panel);
       scrollToBottom();
     }
-  }
-
-  function markPlanProgress(toolName) {
-    // Soft match: mark first incomplete plan item that mentions the tool or shares a word
-    if (!_planItems.length || !toolName) return;
-    var t = String(toolName).toLowerCase().replace(/_/g, ' ');
-    var marked = false;
-    for (var i = 0; i < _planItems.length; i++) {
-      if (_planItems[i].done) continue;
-      var pt = _planItems[i].text.toLowerCase();
-      if (pt.indexOf(t) >= 0 || t.split(' ').some(function(w) { return w.length > 3 && pt.indexOf(w) >= 0; })) {
-        _planItems[i].done = true;
-        marked = true;
-        break;
-      }
-    }
-    // If no lexical match, advance the next open plan step on tool completion
-    if (!marked) {
-      for (var j = 0; j < _planItems.length; j++) {
-        if (!_planItems[j].done) { _planItems[j].done = true; break; }
-      }
-    }
-    if (_progressEl) _renderPlanList(_progressEl);
-    _taskCardEvent({
-      t: 'plan',
-      total: _planItems.length,
-      done: _planItems.filter(function(p) { return p.done; }).length,
-    });
   }
 
   /**
@@ -4631,6 +3967,22 @@
     });
   }
 
+  /**
+   * The ONE entry point for a progress step. Feeds the projector and
+   * stops.
+   *
+   * It used to fall through to `ensureProgressPanel()` and paint a
+   * panel itself whenever `window.KazmaTurnDocument` was missing. That
+   * fallback was the last pre-V2 DOM writer, and it could never do the
+   * job it looked like it was doing: with no projector module
+   * `_docs.live` is never created, so `_answerFromDoc` returns "" and
+   * the turn has no answer text. It would have painted progress over a
+   * chat that cannot show replies.
+   *
+   * Plan §14.4 — "never run two DOM writers"; invariant U03 — only the
+   * renderer mutates. Removed in Phase 5, together with
+   * `ensureProgressPanel`, whose only caller it was.
+   */
   function logProgress(step) {
     if (!step) return;
     var kind = step.kind || 'status';
@@ -4644,175 +3996,12 @@
     if (kind === 'tool') _setCotPhase('act');
     else if (/synth|compos|writing reply/i.test(String(step.title || ''))) _setCotPhase('write');
     else _setCotPhase('think');
-    if (window.KazmaTurnDocument && typeof window.KazmaTurnDocument.applyEvent === 'function') {
-      applyTurnEvent({
-        type: 'progress',
-        step: step,
-        source: 'progress',
-        turn_id: _liveTurnId,
-      });
-      return;
-    }
-
-    var panel = ensureProgressPanel();
-    if (!panel) return;
-
-    var state = step.state || (kind === 'error' ? 'failed' : (kind === 'done' ? 'done' : 'info'));
-
-    // Reactivate panel if a new active step arrives (prevents premature "Done" title during background execution)
-    if (panel.classList.contains('is-done') && (state === 'running' || kind === 'status' || kind === 'tool')) {
-      panel.classList.remove('is-done');
-      panel.classList.add('is-active');
-      var headerTitle = panel.querySelector('.agent-progress-title');
-      if (headerTitle) {
-        headerTitle.textContent = ti('thinking', 'Kazma is thinking\u2026');
-      }
-      var pulse = panel.querySelector('.agent-progress-pulse');
-      if (pulse) pulse.classList.remove('is-off');
-      _startProgressTimer();
-    }
-    var rawTitle = String(step.title || '').trim() || '\u2026';
-    var title = kind === 'tool' ? _friendlyToolName(rawTitle) : rawTitle;
-    // Canonical display for thinking heartbeats (localized)
-    if (kind === 'status' && _isThinkingStatus(title)) {
-      title = ti('thinking', 'Kazma is thinking\u2026');
-    }
-    // Localize leftover English HITL / CoT lines if server sent raw EN
-    if (kind !== 'tool') {
-      title = _localizeCotTitle(title);
-    }
-    var detail = step.detail != null ? String(step.detail) : '';
-
-    var list = panel.querySelector('.agent-progress-steps');
-    if (!list) return;
-
-    // Coalesce rapid identical status lines (heartbeats update last row).
-    // Also merge thinking variants from beginTurn + WS status frames.
-    var last = list.lastElementChild;
-    var sameStatus =
-      last &&
-      kind === 'status' &&
-      last.dataset.kind === 'status' &&
-      (
-        last.dataset.title === title ||
-        _normalizeStatusTitle(last.dataset.title) === _normalizeStatusTitle(title) ||
-        (_isThinkingStatus(last.dataset.title) && _isThinkingStatus(title))
-      ) &&
-      (!detail || detail === (last.dataset.detail || ''));
-    if (sameStatus) {
-      var tEl = last.querySelector('.step-time');
-      if (tEl) tEl.textContent = formatMsgTime();
-      last.className = 'agent-progress-step step-' + kind + ' state-' + state;
-      last.dataset.title = title;
-      last.dataset.detail = detail || '';
-      var titleNode = last.querySelector('.step-title');
-      if (titleNode) titleNode.textContent = title;
-      if (detail) {
-        var det0 = last.querySelector('.step-detail');
-        if (det0) det0.textContent = truncateStr(detail, TOOL_DETAIL_MAX);
-      }
-      list.scrollTop = list.scrollHeight;
-      scrollToBottom();
-      return;
-    }
-    // Update in-place when the same tool is completing — keep result expanded
-    // Match either friendly label or raw tool name on the row.
-    if (last && kind === 'tool' && state !== 'running' && last.dataset.kind === 'tool' &&
-        (last.dataset.title === title || last.dataset.rawTitle === rawTitle || last.dataset.title === rawTitle)) {
-      last.className = 'agent-progress-step step-tool state-' + state + ' is-expanded';
-      last.dataset.state = state;
-      last.dataset.title = title;
-      var st = last.querySelector('.step-state');
-      if (st) st.textContent = state === 'done'
-        ? ti('step_done', 'Done')
-        : (state === 'failed' ? ti('step_failed', 'Failed') : state);
-      var titleNode = last.querySelector('.step-title');
-      if (titleNode) titleNode.textContent = title;
-      if (detail) {
-        // Rebuild the detail block through the shared template so long
-        // results clamp with a "show more" toggle like freshly-appended rows.
-        var oldDet = last.querySelector('.step-detail');
-        if (oldDet) oldDet.remove();
-        var oldBtn = last.querySelector('.step-show-more');
-        if (oldBtn) oldBtn.remove();
-        var bodyEl = last.querySelector('.step-body');
-        if (bodyEl) bodyEl.insertAdjacentHTML('beforeend', _detailHtml(detail));
-        // Surface search backend / recovery source when present
-        _maybeAddSourceChip(last, detail);
-      }
-      var t2 = last.querySelector('.step-time');
-      if (t2) t2.textContent = formatMsgTime();
-      if (state === 'done') markPlanProgress(rawTitle);
-      list.scrollTop = list.scrollHeight;
-      scrollToBottom();
-      return;
-    }
-
-    _progressStepCount += 1;
-    if (kind === 'tool') _progressToolCount += 1;
-    var li = document.createElement('li');
-    li.className = 'agent-progress-step step-' + kind + ' state-' + state +
-      (kind === 'tool' ? ' is-expanded' : '');
-    li.dataset.kind = kind;
-    li.dataset.title = title;
-    li.dataset.rawTitle = rawTitle;
-    li.dataset.state = state;
-
-    li.innerHTML = _stepRowHtml({
-      kind: kind,
-      state: state,
-      title: title,
-      rawTitle: rawTitle,
-      detail: detail,
+    applyTurnEvent({
+      type: 'progress',
+      step: step,
+      source: 'progress',
+      turn_id: _liveTurnId,
     });
-    _wireStepToggles(list);
-
-    list.appendChild(li);
-    if (detail) _maybeAddSourceChip(li, detail);
-    while (list.children.length > 100) list.removeChild(list.firstChild);
-
-    var countEl = panel.querySelector('.agent-progress-count');
-    if (countEl) {
-      var planN = _planItems.length;
-      var donePlan = _planItems.filter(function(p) { return p.done; }).length;
-      var stepWord = _progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
-      var planBit = planN
-        ? ' \u00B7 ' + tiFmt('plan_progress', 'plan {done}/{total}', { done: donePlan, total: planN })
-        : '';
-      countEl.textContent = _progressStepCount + ' ' + stepWord + planBit;
-    }
-    var titleEl = panel.querySelector('.agent-progress-title');
-    if (titleEl && state === 'running') {
-      titleEl.textContent = kind === 'tool' ? title : ti('working', 'Working\u2026');
-    }
-    if (titleEl && kind === 'status' && step.title) titleEl.textContent = truncateStr(step.title, 48);
-
-    panel.classList.add('is-active');
-    // Never auto-expand (2026-09-03): un-done yes, un-collapse no — the
-    // user's chevron click is the only thing that opens a CoT panel.
-    panel.classList.remove('is-done');
-    list.scrollTop = list.scrollHeight;
-    scrollToBottom();
-  }
-
-  function _maybeAddSourceChip(li, detail) {
-    if (!li || !detail) return;
-    var body = li.querySelector('.step-body');
-    if (!body) return;
-    if (body.querySelector('.source-chip')) return;
-    var m = String(detail).match(/Source:\s*([a-z0-9_.@\/:\-]+)/i) ||
-      String(detail).match(/searxng:ok@([^\s,]+)/i) ||
-      String(detail).match(/\b(jina|firecrawl|playwright|duckduckgo|bing|wikipedia)\b/i);
-    if (!m) return;
-    var label = m[1] || m[0];
-    var chip = document.createElement('div');
-    chip.className = 'source-chip';
-    chip.title = 'Backend / source';
-    chip.innerHTML = '<span class="source-chip-label">via</span> ' +
-      '<code>' + escapeHtml(String(label).slice(0, 48)) + '</code>';
-    var detailEl = body.querySelector('.step-detail');
-    if (detailEl) body.insertBefore(chip, detailEl);
-    else body.appendChild(chip);
   }
 
   function finalizeProgress(ok) {
@@ -4918,7 +4107,62 @@
     return html;
   }
 
-  function _buildRestoredWorkbench(activity) {
+  /**
+   * Put the panel in the state the reader asked for.
+   *
+   * Idempotent and cheap: called on every render pass, writes only when
+   * the DOM disagrees, so a paint that changes nothing performs no
+   * mutation (the renderer's idempotence is testable and this must not
+   * cost it).
+   */
+  function _applyActivityFold(panel, turnId) {
+    if (!panel || !panel.classList) return;
+    var open = _activityExpanded(turnId);
+    var collapsed = panel.classList.contains('is-collapsed');
+    if (collapsed === !open) {
+      // already correct
+    } else if (open) {
+      panel.classList.remove('is-collapsed');
+    } else {
+      panel.classList.add('is-collapsed');
+    }
+    var chev = panel.querySelector('.agent-progress-chevron');
+    var want = open ? '\u25BE' : '\u25B8';
+    if (chev && chev.textContent !== want) chev.textContent = want;
+    var hdr = panel.querySelector('.agent-progress-header');
+    if (hdr && hdr.getAttribute('aria-expanded') !== String(open)) {
+      hdr.setAttribute('aria-expanded', String(open));
+    }
+  }
+
+  /** Which turn owns this panel, right now. Reads the attribute the
+   *  renderer keeps current through bind/promote rather than a value
+   *  captured when the node was built. */
+  function _turnIdOfPanel(panel) {
+    try {
+      var bubble = panel && panel.closest && panel.closest('[data-turn-id]');
+      return bubble ? String(bubble.getAttribute('data-turn-id') || '') : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /** The ONE place a disclosure preference is written: a reader gesture. */
+  function _toggleActivityFold(panel, turnId) {
+    var prefs = _turnPrefs();
+    var open = !panel.classList.contains('is-collapsed');
+    var next = !open;
+    if (prefs) prefs.setExpanded(String(turnId || ''), 'activity', next);
+    _applyActivityFold(panel, turnId);
+    if (!prefs) {
+      // No store (blocked site data): honour the click for this paint at
+      // least, rather than snapping back and looking broken.
+      panel.classList.toggle('is-collapsed', !next);
+    }
+    return next;
+  }
+
+  function _buildRestoredWorkbench(activity, turnId) {
     if (!Array.isArray(activity) || !activity.length) return null;
     var rows = _activityRowsHtml(activity);
     if (!rows) return null;
@@ -4956,12 +4200,20 @@
       '</div>';
     var header = panel.querySelector('.agent-progress-header');
     if (header) {
+      var builtUnder = String(turnId || '');
       function toggle() {
-        panel.classList.toggle('is-collapsed');
-        var collapsed = panel.classList.contains('is-collapsed');
-        var chev = panel.querySelector('.agent-progress-chevron');
-        if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
-        header.setAttribute('aria-expanded', String(!collapsed));
+        // Routed through the preference store so the choice survives the
+        // next token, the terminal frame, and a re-render from history.
+        // Flipping the class here directly is what made the fold a
+        // property of the last paint instead of of the reader.
+        //
+        // The id is resolved NOW, from the bubble the panel is in, rather
+        // than captured when the panel was built: a turn opens under the
+        // 'live' placeholder and is renamed on the first stamped frame,
+        // so a captured id goes stale within a second of the turn
+        // starting. TV.bind/promote keep data-turn-id current, which is
+        // why it is the honest source.
+        _toggleActivityFold(panel, _turnIdOfPanel(panel) || builtUnder);
       }
       header.addEventListener('click', toggle);
       header.addEventListener('keydown', function(e) {
@@ -5074,7 +4326,13 @@
       restoredActivity = KazmaTurnDocument.activityOf(opts.parts);
     }
     if (role === 'assistant' && restoredActivity && restoredActivity.length) {
-      var cotPanel = _buildRestoredWorkbench(restoredActivity);
+      // Same turn id the renderer will bind this bubble under, so a fold
+      // the reader opened before a refresh comes back open rather than
+      // being a different turn as far as the preference store is
+      // concerned.
+      var cotPanel = _buildRestoredWorkbench(
+        restoredActivity, String((opts && (opts.turnId || opts.turn_id)) || '')
+      );
       if (cotPanel) {
         var textWrap = wrapper.querySelector('.message-text');
         if (textWrap) textWrap.parentNode.insertBefore(cotPanel, textWrap);
@@ -5213,19 +4471,18 @@
   function _paintLiveTextNow(textEl, final) {
     if (!textEl) return;
     if (textEl.closest && textEl.closest('.message-user')) return;
-    var liveText = _answerFromDoc(window.KazmaTurnDocument, _docs[_liveTurnId])
-      || String(tokenAccum || '');
-    tokenAccum = liveText;
-    // An EMPTY accumulator at paint time is always a stale duplicate
-    // terminal: the first done's endTurn zeroed tokenAccum, then the SECOND
-    // transport's terminal frame (SSE + WS both deliver done) flushed after
-    // it and painted "" over the finished reply — the answer vanished at the
-    // end of the stream until a refresh re-painted it (2026-09-02). A final
-    // flush may only ever render real accumulated text.
+    var liveText = _liveAnswerText();
+    // Nothing to say means DO NOT PAINT, rather than paint nothing. Both
+    // transports deliver a terminal frame, so the second one used to flush
+    // after the first had cleared the accumulator and wrote "" over a
+    // finished reply — the answer vanished at the end of the stream until
+    // a refresh (2026-09-02). Reading the document instead removes the
+    // window rather than guarding it, and the guard stays anyway: an empty
+    // read is never an instruction to blank the answer.
     if (!String(liveText || '').trim()) return;
     if (final) {
-      if (_paintHTML(textEl, _renderReplyHTML(tokenAccum))) {
-        if (window.KazmaBidi) KazmaBidi.apply(textEl, tokenAccum);
+      if (_paintHTML(textEl, _renderReplyHTML(liveText))) {
+        if (window.KazmaBidi) KazmaBidi.apply(textEl, liveText);
       }
       // Re-apply dir="auto" after innerHTML (the attribute survives but the
       // bidi direction may need recalculating for the new content).
@@ -5239,7 +4496,7 @@
     // scrolling): the throttle bounds the rebuild churn, and nothing shifts
     // the layout around it. Plan fences stay stripped live; the plan-only
     // phase holds the bubble open with a blank line.
-    var liveParts = splitPlanAndProse(tokenAccum);
+    var liveParts = splitPlanAndProse(liveText);
     liveParts.prose = _scrubDsml(liveParts.prose);
     if (liveParts.prose) {
       if (_paintHTML(textEl, transformRenderedForPlan(KS.markdown(liveParts.prose)))) {
@@ -5791,19 +5048,6 @@
     return dl > 0 ? dl : 0;
   }
 
-  /** Deadline of the newest card that still has live buttons, 0 if none.
-   *  Lets the Live Task Card keep counting down for a SIBLING gate after the
-   *  first one is decided. */
-  function _liveHitlDeadline() {
-    if (!messagesEl) return 0;
-    var cards = messagesEl.querySelectorAll('.hitl-approval-card');
-    for (var i = cards.length - 1; i >= 0; i--) {
-      if (!cards[i].querySelector('button:not([disabled])')) continue;
-      return Number(cards[i].getAttribute('data-approval-deadline') || 0) || 0;
-    }
-    return 0;
-  }
-
   function _attachHitlCountdown(card, data) {
     if (!card) return;
     var dl = _hitlDeadlineOf(data);
@@ -5831,8 +5075,11 @@
     _stopHitlCountdown(card);
     var oldRow = card.querySelector('.hitl-countdown');
     if (oldRow && oldRow.parentNode) oldRow.parentNode.removeChild(oldRow);
-    // Published on the node so _liveHitlDeadline can find it — the value
-    // used to live only in this closure.
+    // Published on the node rather than kept in this closure: the card's
+    // own deadline is readable by anything reconciling it, and a reload
+    // that re-adopts the card can restart the ticker from the same value.
+    // (It also fed the retired Live Task Card's page-level countdown; per
+    // card is the level that survived, because two gates can be waiting.)
     try { card.setAttribute('data-approval-deadline', String(dl)); }
     catch (eDl) { /* ignore */ }
     var row = document.createElement('div');
@@ -6036,7 +5283,6 @@
           // re-orders the settled card above the incoming reply.
           _noteGateDecided(data, optId === 'cancel' ? 'denied' : 'approved');
           _collapseClaimedHitlCard(_semCard);
-          tokenAccum = '';
           // Resolving a semantic choice resumes THIS turn \u2014 same rule as the
           // security card: keep the workbench and its steps.
           beginTurn({ resume: true });
@@ -6239,7 +5485,6 @@
           : (action === 'deny' ? ti('denied', 'Denied ✗') : ti('approved', 'Approved ✓')));
       _clearStoreApproval();
       // Reset accum so post-approval final answer replaces (no pre-HITL + final concat).
-      tokenAccum = '';
       // RESUME, not a new turn: keep this turn's workbench and its steps.
       beginTurn({ resume: true });
       // beginTurn clears the HITL wait; keep recover/replay from re-arming
@@ -6367,9 +5612,6 @@
         // the turn stopped waiting on gate B.
         _awaitingApproval = hasLiveGate();
         _awaitingReply = true;
-        if (_awaitingApproval) {
-          _taskCardEvent({ t: 'approval', deadline: _liveHitlDeadline() });
-        }
         _notifyHitlResolved({
           thread_id: data.thread_id || targetThreadId,
           tool: data.tool || '',
@@ -6945,6 +6187,10 @@
 
     chatSessionId = sessionId;
     persistSessionId();
+    // After the assignment, not before: _resetSessionTurnState runs while
+    // chatSessionId is still the OLD session, and pointing the preference
+    // store at it there would have loaded the session being left.
+    _syncPrefsSession();
 
     // Connect to Central WebSocket Telemetry Bus for THIS session
     // (connect is a no-op if already OPEN on the same sessionId).
@@ -7207,6 +6453,7 @@
 
     chatSessionId = generateSessionId();
     persistSessionId();
+    _syncPrefsSession();
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
@@ -7215,7 +6462,6 @@
       '</div>';
     resetSessionStats();
     currentMsgEl = null;
-    tokenAccum = '';
     lastSentUserText = '';
     _awaitingReply = false;
     _turnPainted = false;
@@ -7509,8 +6755,9 @@
    * Text and reasoning are covered by _answerFromDoc. Beyond those, only two
    * things belong in the bubble: an approval card, and the durable one-line
    * workbench summary a FINISHED turn leaves behind (which needs a host even
-   * when the turn produced no prose). Everything else — the running step
-   * list — is the Live Task Card's job now.
+   * when the turn produced no prose). A running step list is not content:
+   * it is the activity fold, and a turn that has only that has nothing to
+   * show yet.
    */
   function _docHasBubbleContent(doc) {
     if (!doc) return false;
@@ -7546,6 +6793,37 @@
   // to undo the mis-nesting. modules/turn_view.js is the missing authority:
   // it owns the child list, derived from the document, keyed by the same
   // partKey the document dedupes with. Everything below is the adapter.
+
+  /**
+   * Who decides whether a fold is open.
+   *
+   * Invariant U08: "Event processing never changes disclosure
+   * preferences." Before modules/turn_preferences.js there was no owner —
+   * _paintWorkbenchSlot recomputed the fold from EXECUTION state on every
+   * pass, so a reader who collapsed the thoughts panel had it reopened by
+   * the next token. The document says what a turn contains; this store
+   * says whether the reader wants to look at it; nothing else writes
+   * either.
+   */
+  var _prefs = null;
+  function _turnPrefs() {
+    if (_prefs) return _prefs;
+    var TP = window.KazmaTurnPreferences;
+    if (!TP || typeof TP.create !== 'function') return null;
+    _prefs = TP.create({ sessionId: chatSessionId || '' });
+    return _prefs;
+  }
+
+  /** Should this turn's activity disclosure be open right now?
+   *
+   *  Default collapsed (plan §3). A preference, once expressed, outranks
+   *  the default for as long as the tab lives — including across the
+   *  terminal frame, which is where the old code flipped it back. */
+  function _activityExpanded(turnId) {
+    var prefs = _turnPrefs();
+    if (!prefs) return false;
+    return prefs.isExpanded(String(turnId || ''), 'activity', false);
+  }
 
   var _view = null;
   function _turnView() {
@@ -7603,13 +6881,258 @@
     });
   }
 
+
+  // ══ Turn header ════════════════════════════════════════════════════
+  //
+  // docs/plans/UNIFIED_TURN_BLOCK.md §3: one header per turn, INSIDE the
+  // turn block, owning phase, elapsed, counts and Stop. Those four facts
+  // used to live in #live-task-card — a second status surface outside any
+  // turn, with its own state machine and its own clock, which is how the
+  // operator got "Done 0s" while the graph was still working.
+  //
+  // The model is derived by modules/turn_presentation.js, which is a pure
+  // function of the document plus the server facts this page already
+  // holds. Nothing here decides anything; it paints what it is given.
+
+  var _HEADER_PHASE_LABELS = {
+    queued: ['queued', 'Starting\u2026'],
+    working: ['thinking', 'Working'],
+    approval: ['approval_required', 'Approval required'],
+    resuming: ['resuming', 'Resuming'],
+    stopping: ['stopping', 'Stopping\u2026'],
+    completed: ['completed', 'Completed'],
+    failed: ['failed', 'Failed'],
+    cancelled: ['cancelled', 'Cancelled'],
+    recovering: ['recovering', 'Recovering\u2026'],
+    interrupted: ['interrupted', 'Interrupted'],
+  };
+
+  var _HEADER_PHASE_ICONS = {
+    queued: '\u25CB', working: '\u25CF', approval: '\u270B',
+    resuming: '\u25B6', stopping: '\u25A0', completed: '\u2713',
+    failed: '\u26A0', cancelled: '\u2298', recovering: '\u21BB',
+    interrupted: '\u26A0',
+  };
+
+  /** The server facts the presentation model maps. Read-only snapshot. */
+  function _headerFacts() {
+    return {
+      streamLive: _streamIsLive(),
+      serverGenerating: !!_serverGenerating || !!_isGenerating,
+      stopRequested: !!_stopRequested,
+      gateViews: _serverGatesAuth ? _serverGateViews : null,
+      // The SAME resolver the renderer orders and labels gates with, so
+      // the header's count and the approval group's count are one number
+      // arrived at once (see turn_presentation.gateRows).
+      gateState: _hitlDisplayState,
+      // How long the journal has been quiet. noteTurnActivity() already
+      // stamps every live frame; the retired bar kept a SECOND clock and a
+      // SECOND retry budget for the same question, next to the reconciler
+      // that was already polling every 6s. Recovery stays the
+      // reconciler's; this is only the report.
+      lastSignalAgoMs: _lastTurnActivityTs
+        ? (Date.now() - _lastTurnActivityTs) : 0,
+      retrySupported: true,
+    };
+  }
+
+  function _headerModel(doc) {
+    var TP = window.KazmaTurnPresentation;
+    if (!TP || typeof TP.header !== 'function') return null;
+    try { return TP.header(doc, _headerFacts()); } catch (e) { return null; }
+  }
+
+  /** mm:ss from a server stamp, ticked forward locally while live.
+   *
+   *  Plan §3: "A local timer may update elapsed display. It cannot mark a
+   *  gate expired or a turn complete." The tick is display only and is
+   *  frozen the moment the phase is terminal, so a finished turn shows the
+   *  duration the server measured rather than one this tab kept counting.
+   */
+  function _headerElapsedText(model) {
+    if (!model) return '';
+    var secs = model.elapsed.seconds;
+    if (!model.terminal && model.elapsed.stampedAtMs) {
+      var drift = (Date.now() - model.elapsed.stampedAtMs) / 1000;
+      if (drift > 0 && drift < 3600) secs += drift;
+    }
+    if (secs <= 0) return '';
+    return _fmtMMSS(secs);
+  }
+
+  function _headerCountsText(model) {
+    if (!model) return '';
+    var bits = [];
+    var c = model.counts;
+    if (c.tools) {
+      bits.push(c.tools + ' ' + (c.tools === 1
+        ? ti('step', 'tool')
+        : tiFmt('summary_tools', '{n} tools', { n: c.tools }).replace(/^\d+\s*/, '')));
+    }
+    if (c.pending) {
+      bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
+        { n: c.pending }));
+    } else if (c.gates) {
+      bits.push(c.gates + ' ' + ti('approvals', 'approvals'));
+    }
+    return bits.join(' \u00B7 ');
+  }
+
+  /**
+   * Repaint the live turn's header once a second.
+   *
+   * Display only: the clock ticks forward from the server's stamp and the
+   * silence counter grows. It changes no state, decides nothing, and stops
+   * the moment the turn is terminal — plan §3, "A local timer may update
+   * elapsed display. It cannot mark a gate expired or a turn complete."
+   * The retired bar's tick did both, which is how a client wall clock came
+   * to print "Done 0s" over a turn the graph was still running.
+   */
+  var _headerTicker = null;
+
+  function _tickLiveHeader() {
+    var TV = _turnView();
+    var id = _liveTurnId || 'live';
+    var el = TV && TV.elFor(id);
+    var node = el && TV.slot(el, 'header');
+    if (!node) return false;
+    var doc = _docs[id];
+    if (!doc) return false;
+    _paintTurnHeader(node, doc);
+    var model = _headerModel(doc);
+    return !!(model && !model.terminal);
+  }
+
+  function _startHeaderTicker() {
+    if (_headerTicker) return;
+    _headerTicker = setInterval(function () {
+      var keepGoing = false;
+      try { keepGoing = _tickLiveHeader(); } catch (e) { keepGoing = false; }
+      if (!keepGoing) _stopHeaderTicker();
+    }, 1000);
+  }
+
+  function _stopHeaderTicker() {
+    if (!_headerTicker) return;
+    clearInterval(_headerTicker);
+    _headerTicker = null;
+  }
+
+  function _buildTurnHeader(turnId) {
+    var el = document.createElement('div');
+    el.className = 'turn-header';
+    el.setAttribute('data-turn-id', String(turnId || ''));
+    el.innerHTML =
+      '<span class="turn-header-phase" aria-hidden="true"></span>' +
+      '<span class="turn-header-label"></span>' +
+      '<span class="turn-header-meta"></span>' +
+      '<span class="turn-header-conn" hidden></span>' +
+      '<span class="turn-header-live sr-only" role="status" aria-live="polite"></span>' +
+      '<button type="button" class="turn-header-act turn-header-stop" hidden></button>' +
+      '<button type="button" class="turn-header-act turn-header-retry" hidden></button>';
+    var stop = el.querySelector('.turn-header-stop');
+    if (stop) {
+      stop.textContent = ti('stop_generation', 'Stop');
+      stop.addEventListener('click', function (e) {
+        e.preventDefault();
+        // The SAME command the composer Stop runs. A second surface with
+        // its own abort path is what the bottom bar was.
+        try { abortGeneration({ source: 'turn-header' }); } catch (e2) { /* ignore */ }
+      });
+    }
+    // Not named `retry`: that would shadow the retry() function this
+    // handler calls, and the call would silently become "invoke a DOM
+    // node" inside a try that swallows it — a button that does nothing.
+    var retryBtn = el.querySelector('.turn-header-retry');
+    if (retryBtn) {
+      retryBtn.textContent = ti('task_retry', 'Retry');
+      retryBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        try { retry(); } catch (e2) { /* ignore */ }
+      });
+    }
+    return el;
+  }
+
+  /**
+   * Paint the header. Writes only what changed, so a render pass that
+   * changes nothing performs no DOM mutation — the renderer's idempotence
+   * is a tested property and a header that rewrites itself every token
+   * would quietly cost it.
+   */
+  function _paintTurnHeader(el, doc) {
+    var model = _headerModel(doc);
+    if (!model) return;
+    var phase = model.phase;
+    var label = _HEADER_PHASE_LABELS[phase] || ['thinking', 'Working'];
+
+    function setText(sel, text) {
+      var node = el.querySelector(sel);
+      if (node && node.textContent !== text) node.textContent = text;
+    }
+    function setHidden(sel, hidden) {
+      var node = el.querySelector(sel);
+      if (node && node.hidden !== hidden) node.hidden = hidden;
+    }
+
+    var cls = 'turn-header is-' + phase;
+    if (model.connection === 'reconnecting') cls += ' is-reconnecting';
+    if (el.className !== cls) el.className = cls;
+
+    setText('.turn-header-phase', _HEADER_PHASE_ICONS[phase] || '\u25CF');
+    setText('.turn-header-label', ti(label[0], label[1]));
+
+    var meta = [];
+    var elapsed = _headerElapsedText(model);
+    if (elapsed) meta.push(elapsed);
+    var counts = _headerCountsText(model);
+    if (counts) meta.push(counts);
+    setText('.turn-header-meta', meta.join(' \u00B7 '));
+
+    // Connection is reported ALONGSIDE the phase, never instead of it.
+    // Plan §3: "Disconnection is not completion or failure."
+    var conn = el.querySelector('.turn-header-conn');
+    if (conn) {
+      var connText = '';
+      if (model.connection === 'stalled') {
+        // Silence, with its duration. The bar said "not responding" after
+        // exhausting a retry budget it owned; the reconciler never stops
+        // trying, so the honest thing to report is how long it has been
+        // quiet rather than a verdict this surface cannot reach.
+        connText = tiFmt('no_signal_for', 'No signal for {t}',
+          { t: _fmtMMSS(model.silentMs / 1000) });
+      } else if (model.connection === 'reconnecting') {
+        connText = ti('reconnecting', 'Reconnecting\u2026');
+      }
+      var show = !!connText;
+      if (conn.hidden !== !show) conn.hidden = !show;
+      if (conn.textContent !== connText) conn.textContent = connText;
+    }
+
+    setHidden('.turn-header-stop', !model.canStop);
+    setHidden('.turn-header-retry', !model.canRetry);
+
+    // Announce the coarse phase, not every token or timer tick (plan §11).
+    var live = el.querySelector('.turn-header-live');
+    if (live) {
+      var say = ti(label[0], label[1]);
+      if (model.awaiting) {
+        say = tiFmt('awaiting_decisions', '{n} awaiting your decision',
+          { n: model.awaiting });
+      }
+      if (live.getAttribute('data-said') !== say) {
+        live.setAttribute('data-said', say);
+        live.textContent = say;
+      }
+    }
+  }
+
   // ── Slot painters ──────────────────────────────────────────────────
 
   function _paintTextSlot(textEl, doc, meta) {
     var TD = window.KazmaTurnDocument;
     var text = _answerFromDoc(TD, doc);
     if (!text) return;
-    tokenAccum = text;
     tryIngestPlanFromText(text);
     var display = _scrubDsml(stripPlanFenceForDisplay(text));
     // A slot is never hidden by its own painter. (_rescueTurnDom used to
@@ -7652,22 +7175,16 @@
     _progressToolCount = (html.match(/data-kind="tool"/g) || []).length;
     _progressStepCount = (html.match(/<li /g) || []).length;
     var thoughtN = (html.match(/data-kind="thought"/g) || []).length;
-    _taskCardEvent({ t: 'doc' });
     var done = !!(doc && (doc.status === 'done' || doc.status === 'error'));
     panel.classList.toggle('is-done', done);
     panel.classList.toggle('is-active', !done);
-    // Live fold stays OPEN so thoughts are readable. Do not collapse at
-    // the terminal frame (that yanked the answer). Next beginTurn folds
-    // previous panels.
-    if (!done) {
-      panel.classList.remove('is-collapsed', 'kazma-cot-restored');
-      var liveChev2 = panel.querySelector('.agent-progress-chevron');
-      if (liveChev2) liveChev2.textContent = '\u25BE';
-      var liveHdr2 = panel.querySelector('.agent-progress-header');
-      if (liveHdr2) liveHdr2.setAttribute('aria-expanded', 'true');
-    } else {
-      panel.classList.remove('kazma-cot-restored');
-    }
+    // The fold follows the READER, not the turn. This used to force the
+    // panel open on every live pass and the reader could not keep it
+    // shut; before that it collapsed at the terminal frame and yanked the
+    // answer out of view. Both were the same mistake — execution state
+    // deciding a presentation preference (invariant U08).
+    _applyActivityFold(panel, (doc && doc.turnId) || '');
+    panel.classList.remove('kazma-cot-restored');
     var titleEl = panel.querySelector('.agent-progress-title');
     if (titleEl) {
       titleEl.textContent = done
@@ -7696,6 +7213,141 @@
     }
   }
 
+
+  // ══ Approval group ═════════════════════════════════════════════════
+  //
+  // docs/plans/UNIFIED_TURN_BLOCK.md §3: "Zero groups when there are no
+  // gates; exactly one when at least one exists. One row per actual gate
+  // ID. […] Approval group location stays stable above the answer. Rows
+  // update in request order without moving the answer between
+  // containers."
+  //
+  // Before this, four requests in one turn were four independent
+  // top-level cards, sorted by state: settled ones above the answer,
+  // still-asking ones below it. Approving the first therefore MOVED the
+  // answer, and a reader could not tell four requests in one turn from
+  // four turns.
+  //
+  // The cards themselves are unchanged — renderHitlCard still builds
+  // them, with the same argument preview, scope explanation, countdown
+  // and controls. What changed is that they are rows in one region
+  // instead of siblings of the answer.
+
+  var GATE_KEY_ATTR = 'data-gate-key';
+
+  function _buildApprovalGroup() {
+    var el = document.createElement('div');
+    el.className = 'turn-approvals';
+    el.setAttribute('role', 'group');
+    el.innerHTML =
+      '<div class="turn-approvals-head">' +
+        '<span class="turn-approvals-title"></span>' +
+        '<span class="turn-approvals-count"></span>' +
+      '</div>' +
+      '<div class="turn-approvals-rows"></div>';
+    return el;
+  }
+
+  /**
+   * Reconcile the region's rows against the plan.
+   *
+   * Keyed by gate id — the same `partKey` the document dedupes with, so
+   * "which row is this gate" cannot drift from "which part is this"
+   * (turn_view contract 1). Rows are created once and repainted in
+   * place; a decision changes a row's label, never its position, which is
+   * what keeps the answer still.
+   *
+   * Rows the plan no longer mentions are KEPT (contract 4: ambiguity
+   * never deletes). A truncated resync that stops mentioning a gate must
+   * leave its decision on screen.
+   */
+  function _paintApprovalGroup(el, entry, ctx) {
+    var rows = (entry && entry.rows) || [];
+    var host = el.querySelector('.turn-approvals-rows');
+    if (!host) return;
+
+    // renderHitlCard appends into `opts.host`, which the slot renderer
+    // used to set to .message-content. Point it at the rows container so
+    // a new card is born inside the region rather than beside the answer
+    // and then relocated — a card that appears in the wrong place for one
+    // frame is a card the reader can click in the wrong place.
+    var rowCtx = {};
+    var ck;
+    for (ck in (ctx || {})) {
+      if (Object.prototype.hasOwnProperty.call(ctx, ck)) rowCtx[ck] = ctx[ck];
+    }
+    rowCtx.content = host;
+
+    var byKey = el.__kzRows || (el.__kzRows = {});
+    var ordered = [];
+    var pending = 0;
+    var i;
+
+    for (i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var node = byKey[row.key] || null;
+      if (node && node.parentNode !== host) node = null;
+      if (node) {
+        // Same rebuild rule the flat slots had: a card frozen in the
+        // hydration 'awaiting' posture cannot have its live buttons
+        // painted back, so it is torn out and rebuilt once the registry
+        // says the gate is live.
+        var shown = '';
+        try { shown = String(node.getAttribute('data-hitl-shown') || ''); } catch (e) { shown = ''; }
+        if (String(row.state || '') === 'pending' && shown && shown !== 'pending') {
+          try { host.removeChild(node); } catch (eR) { /* ignore */ }
+          node = null;
+          delete byKey[row.key];
+        }
+      }
+      if (!node) {
+        node = _buildHitlSlotCard(row.part, rowCtx, row.state);
+        if (!node) continue;
+        try { node.setAttribute(GATE_KEY_ATTR, row.key); } catch (eA) { /* ignore */ }
+        byKey[row.key] = node;
+      }
+      _paintHitlSlotCard(node, row.part, rowCtx, row.state);
+      if (String(row.state || '') === 'pending') pending++;
+      ordered.push(node);
+    }
+
+    // Rows the plan dropped stay, after the planned ones, in the order
+    // they are already in.
+    var kids = host.children;
+    for (i = 0; i < kids.length; i++) {
+      if (ordered.indexOf(kids[i]) < 0) ordered.push(kids[i]);
+    }
+
+    // One ordering pass, comparing first so an unchanged region performs
+    // zero mutations (the renderer's idempotence is a tested property).
+    var cursor = null;
+    for (i = 0; i < ordered.length; i++) {
+      var want = cursor ? cursor.nextElementSibling : host.firstElementChild;
+      if (ordered[i] !== want) {
+        try { host.insertBefore(ordered[i], want || null); } catch (eI) { /* ignore */ }
+      }
+      cursor = ordered[i];
+    }
+
+    var total = ordered.length;
+    var titleEl = el.querySelector('.turn-approvals-title');
+    var countEl = el.querySelector('.turn-approvals-count');
+    var title = ti('approvals', 'Approvals');
+    if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
+    var bits = [];
+    bits.push(total === 1
+      ? ti('one_request', '1 request')
+      : tiFmt('n_requests', '{n} requests', { n: total }));
+    if (pending) {
+      bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
+        { n: pending }));
+    }
+    var count = bits.join(' \u00B7 ');
+    if (countEl && countEl.textContent !== count) countEl.textContent = count;
+    var cls = 'turn-approvals' + (pending ? ' is-awaiting' : ' is-settled');
+    if (el.className !== cls) el.className = cls;
+  }
+
   /**
    * Renderers handed to TurnView. build() creates a slot's node, paint()
    * updates it, discard() decides removal — and it always answers false.
@@ -7713,9 +7365,17 @@
     has: function(kind, doc) {
       if (kind === 'text') return !!_answerFromDoc(window.KazmaTurnDocument, doc);
       if (kind === 'workbench') return _activityOfDoc(doc).length > 0;
+      // The header is unconditional once a turn exists — it is the thing
+      // that says "this turn is starting" before there is anything else
+      // to show (plan §3).
+      if (kind === 'header') return !!window.KazmaTurnPresentation;
       return true;
     },
     build: function(entry, ctx) {
+      if (entry.kind === 'header') {
+        return _buildTurnHeader(String((ctx.doc && ctx.doc.turnId) || ''));
+      }
+      if (entry.kind === 'approvals') return _buildApprovalGroup();
       if (entry.kind === 'text') {
         var t = document.createElement('div');
         t.className = 'message-text';
@@ -7723,23 +7383,26 @@
         return t;
       }
       if (entry.kind === 'workbench') {
-        var panel = _buildRestoredWorkbench(_activityOfDoc(ctx.doc));
+        var turnId = String((ctx.doc && ctx.doc.turnId) || '');
+        var panel = _buildRestoredWorkbench(_activityOfDoc(ctx.doc), turnId);
         if (!panel) return null;
         var finished = ctx.doc && (ctx.doc.status === 'done' || ctx.doc.status === 'error');
         if (!finished) {
-          panel.classList.remove('is-collapsed', 'is-done', 'kazma-cot-restored');
+          panel.classList.remove('is-done', 'kazma-cot-restored');
           panel.classList.add('is-active');
-          var liveChev = panel.querySelector('.agent-progress-chevron');
-          if (liveChev) liveChev.textContent = '\u25BE';
-          var liveHdr = panel.querySelector('.agent-progress-header');
-          if (liveHdr) liveHdr.setAttribute('aria-expanded', 'true');
         }
+        // Collapsed unless this reader said otherwise — for a live turn
+        // exactly as for a restored one. A new turn starts collapsed
+        // because it has no preference yet, not because it is new.
+        _applyActivityFold(panel, turnId);
         return panel;
       }
       if (entry.kind === 'hitl') return _buildHitlSlotCard(entry.part, ctx, entry.state);
       return null;
     },
     paint: function(entry, el, ctx) {
+      if (entry.kind === 'header') return _paintTurnHeader(el, ctx.doc);
+      if (entry.kind === 'approvals') return _paintApprovalGroup(el, entry, ctx);
       if (entry.kind === 'text') return _paintTextSlot(el, ctx.doc, ctx.meta);
       if (entry.kind === 'workbench') return _paintWorkbenchSlot(el, ctx.doc);
       if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx, entry.state);
@@ -7749,11 +7412,11 @@
     // put those buttons back. When the registry later says the gate is
     // live, tear the frozen node out and let build() mint a real one.
     rebuild: function(entry, el) {
-      if (!entry || entry.kind !== 'hitl') return false;
-      if (String(entry.state || '') !== 'pending') return false;
-      var shown = '';
-      try { shown = String(el.getAttribute('data-hitl-shown') || ''); } catch (e) { shown = ''; }
-      return !!(shown && shown !== 'pending');
+      // Gates are rows inside the approvals region now, so their rebuild
+      // rule lives with the rows (_paintApprovalGroup). Nothing at the
+      // top level needs tearing out: the region itself is stable for the
+      // life of the turn, which is the point of it.
+      return false;
     },
     discard: function() { return false; },
   };
@@ -7780,7 +7443,19 @@
       // in the map — never a DOM search, and never leaves a bubble sitting
       // in the transcript advertising data-turn-id="live" for the NEXT
       // turn's tokens to find (2026-09-03 crossed bubbles).
-      if (!el) el = TV.promote('live', id);
+      if (!el) {
+        el = TV.promote('live', id);
+        // Every map keyed by the turn id hears about the rename, not just
+        // the bubble registry. The disclosure preference did not, so a
+        // fold the reader opened before the server stamped the turn was
+        // written under 'live' and read back under the real id — it shut
+        // again on the next token. Caught in the browser; the unit tests
+        // drove one constant id and never promoted.
+        var prefsP = _turnPrefs();
+        if (prefsP && typeof prefsP.promote === 'function') {
+          try { prefsP.promote('live', id); } catch (ePr) { /* ignore */ }
+        }
+      }
     } else {
       el = TV.elFor('live');
     }
@@ -8048,7 +7723,6 @@
       }
       try { scrollToBottom(); } catch (eScroll) { /* ignore */ }
     }
-    tokenAccum = text;
     _turnPainted = true;
     return true;
   }
@@ -8079,13 +7753,13 @@
     if (!TD || !TV) return;
     var turnId = String(doc.turnId || '');
 
-    // A doc with nothing to SHOW must not mint a bubble: the running step
-    // list is the Live Task Card's territory, and beginTurn seeds a
-    // "Thinking…" row that used to open every turn with an empty bubble.
+    // A doc with nothing to SHOW must not mint a bubble. beginTurn seeds a
+    // "Thinking…" row, and a row is not content — counting it opened every
+    // turn with an empty bubble. This is the one mint gate: see
+    // tests/test_chat_as_product.py::test_live_assistant_bubble_is_pinned_not_minted.
     var paintable = !!_answerFromDoc(TD, doc) || _docHasBubbleContent(doc);
     var el = _bubbleForTurn(turnId, paintable);
     if (!el) {
-      _taskCardEvent({ t: 'doc' });
       return;
     }
     if (turnId && turnId !== 'live') TV.bind(turnId, el);
@@ -8174,7 +7848,6 @@
     appendMessage('user', said);
     scrollToBottomForce(); // a new turn starts; don't leave the reader scrolled up
     currentMsgEl = null;
-    tokenAccum = '';
     _turnPainted = false;
     try {
       disableInput(); // → beginTurn() — a new utterance is a new turn (barge-in included), never resume
@@ -8190,8 +7863,7 @@
     retry: retry,
     destroy: destroyChatMouth,
     toggleArchivedView: toggleArchivedView,
-    /** Live Task Card single-writer dispatch (WS store + SSE both feed it). */
-    taskCard: _taskCardEvent,
+    /** HITL single-writer dispatch (WS store + SSE both feed it). */
     // The document is the entry point, never the card builder: every HITL
     // source (SSE frame, WS frame, gate registry, pending-approvals
     // recovery, hydration) feeds applyTurnEvent, and TurnView is the only
@@ -8300,14 +7972,12 @@
      * Keeps the open bubble (HITL card stays visible on the same turn).
      */
     preparePostApprovalTurn: function() {
-      tokenAccum = '';
       noteTurnActivity();
       // Keep currentMsgEl so renderTurn paints into the same turn bubble.
     },
     appendLiveToken: function(content, opts) {
       noteTurnActivity();
       _clearStatusStrip();
-      activeTypingEl = null;
       if (!content) return;
       applyTurnEvent({
         type: 'token',
@@ -8322,7 +7992,6 @@
     setPlan: setPlan,
     appendErrorMessage: function(errMsg) {
       _clearStatusStrip();
-      activeTypingEl = null;
       logProgress({ kind: 'error', title: ti('error', 'Error'), detail: String(errMsg || ''), state: 'failed' });
       _pinLiveAssistantBubble();
       var textEl = currentMsgEl.querySelector('.message-text');
@@ -8331,7 +8000,6 @@
       // endTurn is invoked by agentStore after graph_error; keep bubble closed.
       finalizeProgress(false);
       currentMsgEl = null;
-      tokenAccum = '';
     },
 
     // No live-voice ASSISTANT paint hooks here. The voice socket authors

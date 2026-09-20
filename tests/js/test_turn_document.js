@@ -264,5 +264,203 @@ var capRep = TD.applyEvent(capTok, {
 assert("capacity REPLACES streamed text (never appends)",
   TD.textOf(capRep.parts) === "MISSION ON" && capRep.stream === "MISSION ON");
 
+// ── Tool call identity (UNIFIED_TURN_BLOCK.md Phase 1) ─────────────────
+// The old key was name + state + result[:80]. Two things followed from it,
+// both wrong: the SAME call changed identity when it finished, so the
+// renderer tore its row down and rebuilt it (losing expansion and focus) on
+// every update; and two concurrent calls to one tool shared a key, so the
+// second overwrote the first. Both are now keyed by the graph's run id.
+
+var toolRunning = { type: "tool", name: "file_read", call_id: "run-1",
+  result: "", state: "running" };
+var toolDone = { type: "tool", name: "file_read", call_id: "run-1",
+  result: "alpha", state: "done" };
+
+assert("tool key is the call id",
+  TD.partKey(toolRunning) === "tool#run-1");
+assert("tool key is stable across running -> done",
+  TD.partKey(toolRunning) === TD.partKey(toolDone));
+assert("two calls to one tool are two keys",
+  TD.partKey(toolDone) !== TD.partKey({ type: "tool", name: "file_read",
+    call_id: "run-2", result: "alpha", state: "done" }));
+assert("a call-id-less part keeps the legacy content key",
+  TD.partKey({ type: "tool", name: "file_read", result: "x", state: "done" })
+    === "tool:file_read:done:x");
+
+// merge must ADVANCE the row, not drop the second stamp. The old
+// duplicate-key branch returned early, which with a stable key would have
+// frozen every tool row at "running".
+var merged = TD.mergeParts([toolRunning], [toolDone]);
+var mergedTools = merged.filter(function (p) { return p.type === "tool"; });
+assert("one call stays one part", mergedTools.length === 1);
+assert("the finished stamp wins", mergedTools[0].state === "done"
+  && mergedTools[0].result === "alpha");
+
+// ...and never backwards. A replayed start frame after the result landed
+// must not un-finish the call.
+var backwards = TD.mergeParts([toolDone], [toolRunning]);
+var backTools = backwards.filter(function (p) { return p.type === "tool"; });
+assert("a late running frame does not un-finish a call",
+  backTools.length === 1 && backTools[0].state === "done"
+  && backTools[0].result === "alpha");
+
+// A terminal frame with no result must not blank the one already delivered.
+var blanked = TD.mergeToolPart(toolDone,
+  { type: "tool", name: "file_read", call_id: "run-1", result: "", state: "done" });
+assert("an empty terminal result does not erase the delivered one",
+  blanked.result === "alpha");
+
+// Through applyEvent, which is the path the SSE frames actually take.
+var tDoc = TD.applyEvent(TD.empty("live"), {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "run-9",
+  inputs: "{}", seq: 1,
+});
+tDoc = TD.applyEvent(tDoc, {
+  type: "tool_result", tool_name: "file_read", tool_call_id: "run-9",
+  result: "done!", seq: 2,
+});
+var liveTools = tDoc.parts.filter(function (p) { return p.type === "tool"; });
+assert("start + result is ONE row through applyEvent", liveTools.length === 1);
+assert("the row carries the final result", liveTools[0].result === "done!");
+assert("the row keeps the call id", liveTools[0].call_id === "run-9");
+
+// Two concurrent calls to the same tool stay two rows.
+var twoDoc = TD.applyEvent(TD.empty("live"), {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "run-a", seq: 1,
+});
+twoDoc = TD.applyEvent(twoDoc, {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "run-b", seq: 2,
+});
+assert("concurrent calls to one tool are two rows",
+  twoDoc.parts.filter(function (p) { return p.type === "tool"; }).length === 2);
+
+// ── Activity rows carry the part key ──────────────────────────────────
+var actRows = TD.activityOf(twoDoc.parts);
+assert("activity rows carry an id", actRows.length === 2
+  && actRows[0].id === "tool#run-a" && actRows[1].id === "tool#run-b");
+assert("a row with no timestamp omits ts (Python omits it too)",
+  !Object.prototype.hasOwnProperty.call(actRows[0], "ts"));
+// ...and the id survives the round trip back into parts, or a history load
+// would split one call into two rows.
+var roundTrip = TD.mergeParts([], TD.activityToParts(actRows));
+assert("activity -> parts keeps the call id",
+  roundTrip.filter(function (p) { return p.type === "tool"; }).length === 2);
+
+// ── legacyTurnId agrees with turn_document.py ─────────────────────────
+// Pinned, not just prefix-checked. The whole point is that the SERVER
+// computes the same string; a "starts with legacy-" assertion is what let
+// sha256 on one side and a 32-bit string hash on the other both look
+// correct for months (UNIFIED_TURN_BLOCK_PHASE0.md §6.1).
+assert("legacyTurnId is the shared value",
+  TD.legacyTurnId({ ts: "2026-09-20T10:00:00Z", content: "Hello there." })
+    === "legacy-0cdee065e20a7d91");
+// The hash walks UTF-8 bytes. JavaScript strings are UTF-16, so a naive
+// port agrees on ASCII and diverges on the first Arabic character or emoji
+// (a surrogate pair) — in this product, the normal case.
+assert("legacyTurnId walks UTF-8, not UTF-16",
+  TD.legacyTurnId({ ts: "2026-09-20T11:30:00Z", content: "تم الحفظ 😀" })
+    === "legacy-4373231117a879b5");
+
+// A live progress row carries the same key the SERVER persisted, or a
+// refresh turns one call into two rows: one keyed tool#<id> from the
+// stored parts and one keyed by name+state+result from the live path.
+var progDoc = TD.applyEvent(TD.empty("live"), {
+  type: "progress", seq: 1,
+  step: { kind: "tool", title: "file_read", detail: "x", state: "running",
+          id: "tool#run-live" },
+});
+assert("a progress row keeps the call id",
+  progDoc.parts.filter(function (p) { return p.type === "tool"; })
+    .map(TD.partKey).join(",") === "tool#run-live");
+progDoc = TD.applyEvent(progDoc, {
+  type: "progress", seq: 2,
+  step: { kind: "tool", title: "file_read", detail: "done", state: "done",
+          id: "tool#run-live" },
+});
+assert("...and advances the SAME row",
+  progDoc.parts.filter(function (p) { return p.type === "tool"; }).length === 1);
+
+// ── Document revision (UNIFIED_TURN_BLOCK.md Phase 1, invariant U05) ───
+// _resyncDelivery fetches /status and /messages in PARALLEL and either can
+// land late. Before revisions the only defence was that mergeParts happens
+// to be additive — which says nothing about `status`, so a stale row could
+// stamp the turn done, or paused, over the truth.
+
+function hydrateEv(rev, extra) {
+  var ev = { type: "hydrate", turn_id: "t-rev", rev: rev, schema: 2 };
+  for (var k in (extra || {})) {
+    if (Object.prototype.hasOwnProperty.call(extra, k)) ev[k] = extra[k];
+  }
+  return ev;
+}
+
+var revDoc = TD.applyEvent(TD.empty("t-rev"), hydrateEv(7, {
+  content: "the newer answer", parts: [{ type: "text", text: "the newer answer" }],
+}));
+assert("a hydrate carries its revision", revDoc.rev === 7);
+assert("...and its schema", revDoc.schema === 2);
+
+var stale = TD.applyEvent(revDoc, hydrateEv(3, {
+  content: "an older answer",
+  parts: [{ type: "text", text: "an older answer" }],
+  open: true,
+}));
+assert("a stale snapshot is refused outright", stale === revDoc);
+assert("...so it cannot regress the answer",
+  TD.textOf(stale.parts) === "the newer answer");
+assert("...and cannot regress the status", stale.status === "done");
+
+var newer = TD.applyEvent(revDoc, hydrateEv(9, {
+  content: "the newest answer",
+  parts: [{ type: "text", text: "the newest answer" }],
+}));
+assert("a newer snapshot applies", TD.textOf(newer.parts) === "the newest answer");
+assert("...and advances the revision", newer.rev === 9);
+
+// Equal revisions are NOT stale. The comparison is `<`, not `<=`: two
+// hydrates at one revision can still differ (a /messages read and a
+// /status-driven repaint of the same row reach applyEvent by different
+// routes), and refusing the second would be a lost repaint, not a
+// protected one. An IDENTICAL hydrate is still deduped, but by eventKey —
+// that is the content dedupe, a separate rule from the revision rule, and
+// conflating them is how a refresh mid-pause loses its own paint.
+var sameRev = TD.applyEvent(revDoc, hydrateEv(7, {
+  content: "the newer answer, corrected",
+  parts: [{ type: "text", text: "the newer answer, corrected" }],
+  open: true, pending: true,
+}));
+assert("an equal revision is not refused", sameRev !== revDoc
+  && sameRev.status === "paused"
+  && TD.textOf(sameRev.parts) === "the newer answer, corrected");
+var identical = TD.applyEvent(revDoc, hydrateEv(7, {
+  content: "the newer answer",
+  parts: [{ type: "text", text: "the newer answer" }],
+}));
+assert("an identical hydrate is deduped by content, not by revision",
+  identical === revDoc);
+
+// A row written before revisions existed reads as 0 and must still paint
+// into a fresh document, or every legacy transcript would go blank.
+var legacyRev = TD.applyEvent(TD.empty("t-rev"), {
+  type: "hydrate", turn_id: "t-rev", content: "old row",
+  parts: [{ type: "text", text: "old row" }],
+});
+assert("an unversioned row still hydrates", TD.textOf(legacyRev.parts) === "old row");
+
+// A snapshot MERGES, it does not replace. It covers what was durable when
+// it was taken; tokens streamed since are not in it, and an omitted part
+// is ambiguity rather than an authoritative removal.
+var live = TD.applyEvent(TD.empty("t-rev"), {
+  type: "tool_call", tool_name: "file_read", tool_call_id: "live-1", seq: 1,
+});
+var afterSnap = TD.applyEvent(live, hydrateEv(2, {
+  content: "persisted answer",
+  parts: [{ type: "text", text: "persisted answer" }],
+}));
+assert("a snapshot does not drop live parts not in it",
+  afterSnap.parts.filter(function (p) { return p.type === "tool"; }).length === 1);
+assert("...while still delivering its own",
+  TD.textOf(afterSnap.parts) === "persisted answer");
+
 if (fail) process.exit(1);
 console.log("all ok");

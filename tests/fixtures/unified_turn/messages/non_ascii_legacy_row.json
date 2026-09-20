@@ -1,0 +1,16 @@
+{
+  "name": "non_ascii_legacy_row",
+  "why": "The shared hash walks UTF-8 bytes. JavaScript strings are UTF-16, so a naive port agrees on ASCII and diverges the moment Arabic or an emoji (a surrogate pair) appears — which in this product is the normal case, not the edge case.",
+  "message": {
+    "role": "assistant",
+    "content": "تم الحفظ 😀",
+    "ts": "2026-09-20T11:30:00Z"
+  },
+  "expect": {
+    "turn_id": "legacy-4373231117a879b5",
+    "text": "تم الحفظ 😀",
+    "part_keys": ["text"],
+    "gates": [],
+    "activity": []
+  }
+}
