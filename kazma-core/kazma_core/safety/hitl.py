@@ -19,6 +19,11 @@ import os
 import time
 from typing import Any
 
+# Module-level, not lazy: this is the owner of the one tenant ContextVar and
+# the whole point is that there is no window in which this module has its own.
+# ``tenant_context`` imports nothing from kazma_core, so this cannot cycle.
+from kazma_core import tenant_context as _tenant_context
+
 __all__ = [
     "ALWAYS_HITL_TOOLS",
     "CANONICAL_DANGER_TOOLS",
@@ -74,39 +79,48 @@ def get_current_thread_id() -> str | None:
 
 
 # Thread-safe context var for the active tenant_id (memory isolation).
-# Mirrors the _current_thread_id pattern — set in the tool worker / SSE / WS
-# so stateless memory tools (memory_search / memory_store) can read it.
-_current_tenant_id: contextvars.ContextVar[str] = contextvars.ContextVar(
-    "_current_tenant_id", default="default"
-)
+#
+# THIS IS NOT A SECOND VARIABLE. It is the *same object* as
+# ``kazma_core.tenant_context._current_tenant_id``, re-exported here because
+# the memory tools import the tenant from this module and the vault imports it
+# from that one.
+#
+# It used to be a genuinely separate ContextVar with a different default
+# ("default" here, None there), kept in step by a pair of mirror functions.
+# Mirroring is not an invariant — it is two writes that happen to agree, and
+# any direct ``_current_tenant_id.set`` on either module desynced them
+# silently. When they desynced, a secret stored under tenant 'default' read
+# back as absent and the product said "not configured": indistinguishable
+# from never having stored the key. That shipped three times (cron 09-12,
+# agent turn + `kazma doctor` 09-16, connector-health/backup 09-17) and the
+# conftest autouse guard had to know about both names to contain the leak.
+#
+# One object cannot drift from itself. The only asymmetry left is the
+# *contract*: callers here have always been promised a non-None ``str``, so
+# ``get_current_tenant_id`` below applies the "default" floor at the read
+# rather than storing a floored value that the vault would then see as an
+# explicit tenant. Storing the floor was the other half of the old bug.
+_current_tenant_id: contextvars.ContextVar[str | None] = _tenant_context._current_tenant_id
 
 
-def _mirror_vault_tenant(tenant_id: str) -> None:
-    """Keep tenant_context in lockstep. Never go through its set() (recurse)."""
-    try:
-        from kazma_core import tenant_context as _tc
-
-        _tc._current_tenant_id.set(tenant_id)
-    except Exception:
-        pass
-
-
-def set_current_tenant_id(tenant_id: str) -> contextvars.Token[str]:
+def set_current_tenant_id(tenant_id: str | None) -> contextvars.Token[str | None]:
     """Set the active tenant_id for the current async task context."""
-    token = _current_tenant_id.set(tenant_id)
-    _mirror_vault_tenant(tenant_id)
-    return token
+    return _tenant_context.set_current_tenant_id(tenant_id)
 
 
-def reset_current_tenant_id(token: contextvars.Token[str]) -> None:
+def reset_current_tenant_id(token: contextvars.Token[str | None]) -> None:
     """Reset the tenant_id context to its previous state."""
-    _current_tenant_id.reset(token)
-    _mirror_vault_tenant(_current_tenant_id.get())
+    _tenant_context.reset_current_tenant_id(token)
 
 
 def get_current_tenant_id() -> str:
-    """Get the active tenant_id for the current context (default 'default')."""
-    return _current_tenant_id.get()
+    """Get the active tenant_id for the current context (default 'default').
+
+    The floor is applied here, on read. ``tenant_context`` stores ``None`` for
+    "no tenant installed", which is what the vault's scoped resolver needs to
+    tell an explicit 'default' tenant from an absent one.
+    """
+    return _tenant_context.get_current_tenant_id() or "default"
 
 
 # ── Default tool tiers ────────────────────────────────────────────────

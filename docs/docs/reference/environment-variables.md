@@ -14,7 +14,7 @@ description: Master reference for Kazma environment variables (dev, single-opera
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | | With `logging.langfuse.enabled: auto`, both set → Langfuse backend |
 | `KAZMA_EMBED_FLEET` | (unset) | `1` + OpenAI/Voyage key → hosted embeddings (issue #78) |
 | `KAZMA_DOCLING` | `1` | `0` skips Docling salvage on weak PDF extracts |
-| `KAZMA_REMOTE_PARSE` | `1` | `0` skips LlamaParse/Reducto salvage |
+| `KAZMA_REMOTE_PARSE` | `0` (veto only) | **Off by default.** Remote PDF salvage (LlamaParse/Reducto) ships documents to a third party, so it is governed by `documents.security.remote_parse`, which defaults to `False`. This variable is a **veto, not a switch**: `0` force-disables salvage even where the policy allows it, and setting it to `1` does **not** enable salvage on its own. Having an API key configured is not consent — turn the policy on deliberately. |
 | `LLAMAPARSE_API_KEY` / `REDUCTO_API_KEY` | | Hard-PDF remote extract (parent process; not the parser sandbox) |
 | `KAZMA_SILERO_VAD` | (unset) | `1` tries Silero VAD (falls back to energy) |
 | `KAZMA_LITELLM_URL` | (unset) | LiteLLM proxy for OpenAI-compatible providers only (e.g. `http://127.0.0.1:4000`) |
@@ -321,6 +321,37 @@ Opt-in hardening from the deep-structure audit
 | `KAZMA_GATEWAY_STRICT_ALLOWLIST` | unset (compat) | Stop forcing `_allow_all` on the Telegram/Discord/Slack adapters — an empty allowlist then fails closed (no messages). Without it, forced allow-all logs a WARNING naming both remediations when no allowlist is configured. |
 | `KAZMA_MCP_SCOPE_GUARD` | `1` (on) | Fail-close MCP tool calls when a per-task `workspace_scope` targets a different root than the process-bound MCP root (prevents silent wrong-repo operations). Set `0` only if the guard blocks a legitimate flow. |
 | `KAZMA_EMBED_ALLOW_DOWNLOAD` | unset (contextual) | Force-allow the local embedder to download its model from HuggingFace. Fallback embedders (unknown provider / broken remote config) never download — they check the local HF cache and degrade to no embeddings with an actionable warning instead of stalling on a ~2GB download. Deliberate `local` configs keep first-run download rights. |
+
+---
+
+## Switches that weaken a security default
+
+Every variable here turns a protection **off**. They are listed together, on
+the operator-facing page, because a switch nobody can discover is a switch
+nobody can audit — including the operator who set it two years ago. Each row
+says what stops protecting you, not just what the flag does.
+
+`tests/test_static_gates.py::test_security_env_vars_are_documented` fails the
+build if the code reads one of these and it is missing from **both**
+`.env.example` and this table.
+
+| Variable | Default | What it turns OFF | Safe to set when |
+|----------|---------|-------------------|------------------|
+| `KAZMA_AUTH_DISABLED` | unset | The entire HTTP auth gate. A configured `KAZMA_SECRET` becomes irrelevant — the switch disables the check that reads it. | Loopback only. **Refused at boot on a non-loopback bind** (`security/boot_guard.py`), and refused outright with `KAZMA_PRODUCTION=1`. |
+| `KAZMA_DEV_WS_BYPASS` | unset | Authentication on **every WebSocket handshake**, including the chat socket that carries the turn stream. HTTP auth is unaffected, which is what makes it easy to miss. | Loopback only. **Refused at boot on a non-loopback bind**, same guard as `KAZMA_AUTH_DISABLED`. |
+| `KAZMA_DEMO_MODE` | unset | The auth gate, deliberately, for a public throwaway demo (`fly.toml`). Allowed on a public bind and announced loudly at boot. | A throwaway instance with no real data, credentials or vault. Never on an install you care about. |
+| `KAZMA_AUTOLOGIN_HOSTS` | loopback set | Restricts which hosts may be auto-issued a session cookie without presenting the secret. Widening it grants silent admin sessions to those hosts. | You control every host in the list. Adding a non-loopback host is equivalent to publishing the secret to it. |
+| `KAZMA_GATEWAY_ADMINS` | unset | Who may run privileged chat-platform commands. Empty means the adapter's own allowlist is the only gate. | Set it explicitly on any multi-user chat platform. |
+| `KAZMA_GATEWAY_STRICT_ALLOWLIST` | unset (compat) | *Enables* fail-closed adapters. Leaving it unset keeps the legacy forced `_allow_all` when no allowlist is configured. | Set to `1` on any deployment more than one person can message. |
+| `KAZMA_HITL_CANONICAL_FLOOR` | unset | *Enables* the floor. Leaving it unset lets Settings/YAML narrow `require_approval_for` below the canonical danger list. | Set to `1` for strict or multi-operator installs. |
+| `KAZMA_MCP_ALLOW_UNGATED` | unset | HITL approval for MCP tools that were not classified as safe. An MCP server's tool names are untrusted input. | Never, on an install with real credentials. Debugging a single trusted local server at most. |
+| `KAZMA_MCP_SAFE_ALLOWLIST` | built-in | Widens the set of MCP tools that skip HITL by name. Names come from the server, so this is a list of names you are trusting a third party to choose honestly. | Only for tools you have read the implementation of. |
+| `KAZMA_MCP_TRUSTED_IN_PROD` | unset | The production refusal for MCP servers not marked trusted. | You own every listed server. |
+| `KAZMA_CODE_EXEC_ALLOW_LOCAL` | unset | The ban on running `python_exec` as a host subprocess when Docker is absent. The local fallback has an import blocklist; it is **not a jail**. | A lab box with nothing worth stealing. Production and multi-user ban it regardless — see `KAZMA_CODE_EXEC_DOCKER=force`. |
+| `KAZMA_SHELL_ALLOW_MUTATE` | unset | The restricted PATH/allowlist applied to `shell_exec` *after* the human approves. Approval is consent; the allowlist is the containment. | You accept that an approved shell command runs unconstrained. |
+| `KAZMA_YOLO_TTL_SECONDS` | bounded | Lengthens the window in which further danger tools auto-approve after one YOLO grant. A long TTL turns one approval into an open session. | Short values only. This is a blast-radius dial. |
+| `KAZMA_DISABLE_COST_BREAKER` | unset | The spend ceiling that stops a runaway loop. | Never unattended. |
+| `KAZMA_CHAOS_ENABLED` | unset | *Enables* fault-injection routes. Off by default; the router does not mount without it. | Test environments only — must stay off in production. |
 
 ---
 

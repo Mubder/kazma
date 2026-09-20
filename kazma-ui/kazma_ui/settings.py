@@ -280,8 +280,18 @@ class SettingsRouterBuilder:
 
         @router.get("/api/settings")
         async def api_get_all_settings() -> dict[str, dict[str, Any]]:
-            """Get all settings grouped by category (secrets masked)."""
-            data = config_store.get_all()
+            """Get all settings grouped by category (secrets masked).
+
+            ``get_all`` is a whole-table scan plus a vault resolve per row, not
+            the single indexed lookup ``get`` is. Measured against a 900-key
+            store: ``get`` 1us warm, ``get_all`` 1.9ms mean / 7.6ms p99. On the
+            loop that is a visible stall in every SSE token stream and WS
+            heartbeat open at the moment somebody loads Settings, so it goes to
+            a thread. ``get`` itself stays inline — see the note on
+            ``UNBOUNDED_STORE_SCANS`` in tests/test_static_gates.py for why the
+            cheap one is deliberately not treated the same way.
+            """
+            data = await asyncio.to_thread(config_store.get_all)
             _mask_sensitive_values(data)
             return data
 
@@ -473,10 +483,21 @@ class SettingsRouterBuilder:
                 pass
 
             def _vault_has(key: str) -> bool:
+                # Scoped resolve. This probe answers "is this configured?" in
+                # the Settings UI, so a tenant miss here does not fail loudly —
+                # it renders the provider as NOT configured while the secret is
+                # in the vault, which is the single most confusing way this
+                # product can lie to its operator. A bare `retrieve` sees only
+                # global rows when no tenant is bound, and Settings-saved
+                # secrets land under 'default' (34 of 67 rows on the live
+                # install).
                 try:
-                    from kazma_core.security.vault import get_vault as _gv
+                    from kazma_core.security.vault import (
+                        get_vault as _gv,
+                        retrieve_scoped as _rs,
+                    )
                     _v = _gv()
-                    return bool(_v is not None and _v.retrieve(key))
+                    return bool(_v is not None and _rs(key, _v))
                 except Exception:
                     return False
 
@@ -1535,7 +1556,9 @@ class SettingsRouterBuilder:
                 return {"error": "Invalid JSON body. Expected {'confirm': 'RESET'}"}
             if body.get("confirm") != "RESET":
                 return {"error": "Confirmation required. Send {\"confirm\": \"RESET\"} to confirm."}
-            count = config_store.reset_all()
+            # Whole-table delete + cache invalidation. Unbounded in the number
+            # of settings rows, so it does not belong on the event loop.
+            count = await asyncio.to_thread(config_store.reset_all)
             config_store.invalidate_yaml_cache()
             return {"status": "ok", "reset": str(count)}
 

@@ -7,6 +7,7 @@ CRUD, and test-before-save semantics.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -700,14 +701,22 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
     async def delete_connector(name: str) -> dict[str, str]:
         """Remove a connector from ConfigStore."""
         # Delete all keys under connectors.{name}.* that exist in the DB.
-        all_settings = config_store.get_all()
-        prefix = f"connectors.{name}."
-        deleted = False
-        for category_values in all_settings.values():
-            for key in list(category_values.keys()):
-                if key.startswith(prefix):
-                    config_store.delete(key)
-                    deleted = True
+        #
+        # The scan AND the deletes go to one thread together. Splitting them
+        # (scan off-loop, delete inline) would put an unbounded number of
+        # writes back on the loop, which is the same stall with extra steps.
+        def _purge() -> bool:
+            all_settings = config_store.get_all()
+            prefix = f"connectors.{name}."
+            found = False
+            for category_values in all_settings.values():
+                for key in list(category_values.keys()):
+                    if key.startswith(prefix):
+                        config_store.delete(key)
+                        found = True
+            return found
+
+        deleted = await asyncio.to_thread(_purge)
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Connector '{name}' not found")
         return {"status": "ok"}

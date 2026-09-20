@@ -25,11 +25,13 @@ reads, which also closes the multi-tenant case where nothing leaked at all:
 any deployment setting a tenant context was writing sessions somewhere it
 would never look for them.
 
-Two more things made it expensive to find. There are two different modules
-exporting ``get_current_tenant_id`` over two different ContextVars
+Two more things made it expensive to find. There used to be two different
+modules exporting ``get_current_tenant_id`` over two different ContextVars
 (``tenant_context``, default None, which SessionManager uses;
 ``safety.hitl``, default "default", which the memory tools use), so guarding
-the obvious one changed nothing. And the repo's own
+the obvious one changed nothing. That is now one variable re-exported under
+both names — see ``test_the_tenant_context_var_is_one_object`` — because a
+pair of mirror functions is not an invariant. And the repo's own
 ``tests/order_flake_bisect.py`` swept ``test_session_manager.py ->
 test_session_directory.py``, which is backwards: the polluters sort BEFORE the
 victims, so the curated pairs could never reproduce it.
@@ -83,14 +85,55 @@ def test_put_and_get_agree_under_a_leaked_tenant():
     )
 
 
-def test_the_two_tenant_context_vars_are_distinct():
-    """Guarding one and assuming you covered both is the trap here."""
+def test_the_tenant_context_var_is_one_object():
+    """There is exactly one tenant ContextVar. Two cannot drift if there is one.
+
+    This assertion used to run the other way — it asserted the two vars were
+    *distinct* and warned that "if these ever become the same object this test
+    is obsolete". They are now the same object, deliberately: ``safety.hitl``
+    re-exports ``tenant_context``'s var instead of defining its own, and the
+    mirror functions that used to hold two vars in step are gone.
+
+    Mirroring was never an invariant. It was two writes that happened to
+    agree, and a direct ``.set`` on either module desynced them in silence.
+    The failure mode is a stored secret reading back absent, which is
+    indistinguishable from never having stored it — three shipped incidents.
+
+    Keep this test. It is the lock that stops someone re-introducing a second
+    var "for the different default"; the default difference is handled on
+    read, in ``hitl.get_current_tenant_id``.
+    """
     a = importlib.import_module("kazma_core.tenant_context")
     b = importlib.import_module("kazma_core.safety.hitl")
-    assert a._current_tenant_id is not b._current_tenant_id, (
-        "if these ever become the same object this test is obsolete; until "
-        "then, any tenant guard must cover both"
+    assert a._current_tenant_id is b._current_tenant_id, (
+        "safety.hitl defined its own tenant ContextVar again. It must "
+        "re-export kazma_core.tenant_context._current_tenant_id — two vars "
+        "drift, and a drifted tenant makes a stored secret read as absent."
     )
+
+
+def test_the_none_floor_is_applied_on_read_not_on_store():
+    """``tenant_context`` must keep None; only ``hitl`` floors it to 'default'.
+
+    Storing the floor was the other half of the original bug: the vault's
+    scoped resolver needs to tell "no tenant installed" (None) from an
+    explicit ``default`` tenant, and a floored store makes every context-less
+    caller look like an explicit default.
+    """
+    tc = importlib.import_module("kazma_core.tenant_context")
+    hitl = importlib.import_module("kazma_core.safety.hitl")
+
+    token = tc.set_current_tenant_id(None)
+    try:
+        assert tc.get_current_tenant_id() is None, (
+            "tenant_context floored a None tenant — the vault can no longer "
+            "distinguish an absent tenant from an explicit 'default'"
+        )
+        assert hitl.get_current_tenant_id() == "default", (
+            "safety.hitl must still promise a non-None str to the memory tools"
+        )
+    finally:
+        tc.reset_current_tenant_id(token)
 
 
 def test_conftest_guards_both_modules():

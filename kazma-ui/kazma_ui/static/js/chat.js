@@ -1385,18 +1385,39 @@
     status = status || {};
     _serverGenerating = !!status.generating;
     _serverPaused = !!status.paused;
-    _serverGateViews = Array.isArray(status.gate_views) ? status.gate_views : [];
+    // Merge, do not replace. /status builds gate_views from live_gates(),
+    // whose LIVE_STATES are ("pending","claimed","resuming") — a gate that has
+    // SETTLED is simply absent from the payload. A wholesale assign therefore
+    // deleted every settled card on the next status poll, the slot plan lost
+    // them, and they fell to keptTail UNDER the answer. That is the identical
+    // 2026-09-20 sequential-card defect that _ingestFrameGateViews was fixed
+    // for; this path kept the old assignment and so kept the bug, which is
+    // why the merge now lives in one function instead of two.
+    //
+    // A status payload for a DIFFERENT thread replaces rather than merges:
+    // carrying one thread's cards onto another is not a partial snapshot, it
+    // is the wrong conversation.
+    var incoming = Array.isArray(status.gate_views) ? status.gate_views : [];
+    var sameThread =
+      !status.thread_id ||
+      !_serverThreadId ||
+      String(status.thread_id) === String(_serverThreadId);
+    _serverGateViews = sameThread ? _mergeGateViews(incoming) : incoming;
     _serverGatesAuth = !!status.gates_authoritative;
     if (status.thread_id) _serverThreadId = String(status.thread_id);
   }
 
-  /** Journal HITL/done frames carry gate_views. Do not touch generating/paused.
-   *  Incoming overwrites by id. A partial snapshot must not drop prior
-   *  non-pending views — that omitted the claimed cards from slotPlan and
-   *  they fell to keptTail UNDER the answer (2026-09-20 sequential). */
-  function _ingestFrameGateViews(data) {
-    if (!data || !Array.isArray(data.gate_views)) return;
-    var incoming = data.gate_views;
+  /** Merge a partial gate_views snapshot over what we already hold.
+   *
+   *  Incoming wins per id. Prior views the snapshot omits are KEPT unless
+   *  they are still interactive — a card the server no longer lists as live
+   *  has settled, and a settled card must stay on screen in its slot. An
+   *  omitted *interactive* view is genuinely gone (superseded/aborted) and is
+   *  dropped.
+   *
+   *  Shared by the /status poll and by journal HITL/done frames so the two
+   *  cannot drift again. */
+  function _mergeGateViews(incoming) {
     var by = {};
     var seen = {};
     var i, v, id, out;
@@ -1420,7 +1441,16 @@
       if (v && v.interactive) continue;
       out.push(v);
     }
-    _serverGateViews = out;
+    return out;
+  }
+
+  /** Journal HITL/done frames carry gate_views. Do not touch generating/paused.
+   *  Incoming overwrites by id. A partial snapshot must not drop prior
+   *  non-pending views — that omitted the claimed cards from slotPlan and
+   *  they fell to keptTail UNDER the answer (2026-09-20 sequential). */
+  function _ingestFrameGateViews(data) {
+    if (!data || !Array.isArray(data.gate_views)) return;
+    _serverGateViews = _mergeGateViews(data.gate_views);
     _serverGatesAuth = true;
     try { _rerenderHitlDocs(); } catch (eGv) { /* ignore */ }
   }

@@ -265,8 +265,21 @@ def test_hitl_frames_ingest_gate_views() -> None:
     assert "_ingestFrameGateViews(data)" in ar
     assert "view: (data && data.view) || undefined" in ar
     ingest = js_function_body(js, "function _ingestFrameGateViews(data)")
-    assert "_serverGateViews = out" in ingest
-    assert "v.interactive" in ingest
+    # The merge itself moved into _mergeGateViews so that /status and journal
+    # frames cannot drift apart again — /status used to assign gate_views
+    # wholesale, and because live_gates() omits SETTLED rows that deleted every
+    # settled card on the next poll (the 2026-09-20 sequential defect, which
+    # this path had already been fixed for and that one had not). Assert the
+    # rule where it now lives, and assert that BOTH mouths reach it.
+    assert "_serverGateViews = _mergeGateViews(" in ingest
+    merge = js_function_body(js, "function _mergeGateViews(incoming)")
+    assert "v.interactive" in merge, "settled-card retention rule lost"
+    assert "return out" in merge
+    status_ingest = js_function_body(js, "function _ingestStatus(status)")
+    assert "_mergeGateViews(" in status_ingest, (
+        "/status went back to assigning gate_views wholesale; it drops every "
+        "settled card because live_gates() only returns pending|claimed|resuming"
+    )
     click = js.split("function submitApproval(action, scope)", 1)[1]
     # Decision is approved/denied; inflight is the overlay, not part.state
     # (HITL_RANK would then reject the settle frame).

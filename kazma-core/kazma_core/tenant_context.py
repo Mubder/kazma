@@ -5,15 +5,24 @@ from the HTTP gateway/middleware layer down into storage (session stores,
 memories, and vector DBs) without passing it explicitly through every
 function parameter.
 
-``kazma_core.safety.hitl`` used to keep a *second* ContextVar with the same
-exported names and a different default (``"default"`` vs ``None``). The
-tool worker bound only the HITL copy; vault reads the one in this module.
-Those two drifting is how Settings-saved keys look “not configured” on
-swarm / connector-health / backup (audit 2026-09-17). ``set`` / ``reset``
-here always mirror onto the HITL var (HITL cannot be ``None``, so a
-cleared vault scope becomes ``"default"`` there). HITL's setter mirrors
-back. Direct ``_current_tenant_id.set`` on either module still diverges
-— don't.
+This module owns **the** tenant ContextVar. ``kazma_core.safety.hitl``
+re-exports the same object under the same name; it does not define its own.
+
+It used to define its own, with a different default (``"default"`` vs
+``None``), kept in step by a pair of mirror functions. That is not an
+invariant, it is two writes that happen to agree: the tool worker bound only
+the HITL copy, the vault read this one, and a direct
+``_current_tenant_id.set`` on either module desynced them with no error. A
+desync presents as a stored secret reading back absent — "not configured",
+which is exactly what a never-stored key looks like. It shipped three times
+(cron 09-12, agent turn + ``kazma doctor`` 09-16, connector-health/backup
+09-17) before the variable itself was made single.
+
+``None`` means "no tenant installed", which is what
+:func:`kazma_core.security.vault.retrieve_scoped` needs in order to tell an
+explicit ``default`` tenant from an absent one. Callers that require a
+non-None string read through ``safety.hitl.get_current_tenant_id``, which
+applies the floor on read. Do not store the floor here.
 """
 
 from __future__ import annotations
@@ -35,16 +44,6 @@ _current_tenant_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 )
 
 
-def _mirror_hitl(tenant_id: str | None) -> None:
-    """Keep the HITL tenant var in lockstep. Never go through hitl.set (recurse)."""
-    try:
-        from kazma_core.safety import hitl
-
-        hitl._current_tenant_id.set(tenant_id if tenant_id else "default")
-    except Exception:
-        pass
-
-
 def set_current_tenant_id(tenant_id: str | None) -> contextvars.Token[str | None]:
     """Set the tenant_id for the current async/thread context.
 
@@ -52,15 +51,12 @@ def set_current_tenant_id(tenant_id: str | None) -> contextvars.Token[str | None
         A token that should be passed to `reset_current_tenant_id` to restore
         the prior value.
     """
-    token = _current_tenant_id.set(tenant_id)
-    _mirror_hitl(tenant_id)
-    return token
+    return _current_tenant_id.set(tenant_id)
 
 
 def reset_current_tenant_id(token: contextvars.Token[str | None]) -> None:
     """Restore the tenant_id ContextVar to its prior value."""
     _current_tenant_id.reset(token)
-    _mirror_hitl(_current_tenant_id.get())
 
 
 def get_current_tenant_id() -> str | None:

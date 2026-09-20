@@ -119,8 +119,11 @@ def _build_test_app() -> FastAPI:
     async def status_endpoint() -> dict:
         return {"ok": True}
 
-    @app.get("/api/telemetry")
-    async def telemetry() -> dict:
+    # Telemetry is GATED, not open. Registered here so the sensitive-path
+    # tests exercise a real route rather than a 404 (a 404 passes an auth
+    # assertion for the wrong reason).
+    @app.get("/api/telemetry/snapshot")
+    async def telemetry_snapshot() -> dict:
         return {"ok": True}
 
     # A non-sensitive API route (not in SENSITIVE_PREFIXES)
@@ -198,7 +201,6 @@ class TestIsAlwaysOpen:
         [
             "/",
             "/api/status",
-            "/api/telemetry",
             "/health",
             "/login",
             "/api/auth/login",
@@ -211,6 +213,36 @@ class TestIsAlwaysOpen:
 
     def test_sensitive_path_not_in_open_set(self):
         assert is_always_open("/api/settings") is False
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/telemetry",
+            "/api/telemetry/stream",
+            "/api/telemetry/snapshot",
+            "/api/telemetry/typing",
+        ],
+    )
+    def test_telemetry_subpaths_are_gated(self, path: str):
+        """Telemetry is host inventory (CPU/RAM/GPU) — never open.
+
+        ``/api/telemetry`` sat in ALWAYS_OPEN_PATHS for years as a fossil of a
+        mock endpoint that no longer exists. It never opened the real routes,
+        because ``is_always_open`` matches this set EXACTLY and only
+        ALWAYS_OPEN_PREFIXES by prefix — so ``/stream`` and ``/snapshot`` were
+        always caught by the default-deny on ``/api/``. That subtlety is
+        precisely why the entry survived: it looked dangerous to anyone
+        reading the list and was in fact inert, so a 2026-09-20 audit filed it
+        as an unauthenticated host-inventory leak and a reviewer had to read
+        the matcher to disprove it.
+
+        The entry is gone. This test is the lock: it pins the behaviour that
+        was already true AND the bare path that used to be listed, so nobody
+        re-adds it "because the stream needs it" — the stream is same-origin
+        from an authenticated page and carries the session cookie.
+        """
+        assert is_always_open(path) is False
+        assert is_sensitive_path(path) is True
 
 
 class TestVerifySecret:
@@ -298,12 +330,13 @@ SENSITIVE_TEST_PATHS = [
 OPEN_TEST_PATHS = [
     ("/", "GET"),
     ("/api/status", "GET"),
-    ("/api/telemetry", "GET"),
+    # /api/telemetry* is NOT open — see test_telemetry_subpaths_are_gated.
     # /api/public/* is default-deny (audit M1) — must not appear here
 ]
 
 SENSITIVE_EXTRA_PATHS = [
     "/api/public/info",  # default-deny: unknown API routes require auth
+    "/api/telemetry/snapshot",  # host CPU/RAM/GPU inventory — gated
 ]
 
 

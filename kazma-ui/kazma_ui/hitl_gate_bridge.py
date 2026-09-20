@@ -34,6 +34,7 @@ __all__ = [
     "gate_pending_from_payload",
     "gate_claimed",
     "gate_claimed_for_thread",
+    "gate_not_pending",
     "gate_resuming",
     "settle_thread_gates",
     "registry_on",
@@ -41,6 +42,56 @@ __all__ = [
     "pending_items_from_registry",
     "ensure_paused_gate",
 ]
+
+
+async def gate_not_pending(thread_id: str, gate_id: str) -> str:
+    """The gate's state when the registry says it is NOT awaiting an answer.
+
+    Returns ``""`` to mean "no objection": the registry is off, has never
+    heard of this id, or still has it ``pending``. Only a definite,
+    on-the-record "this gate already has its decision" refuses a resume,
+    because the dashboard, the TUI and the gateway all reach the approve
+    routes with ids the registry may not carry, and none of them should
+    start failing over a lookup miss.
+
+    ``LIVE_STATES`` is ``("pending", "claimed", "resuming")``: a claimed or
+    resuming gate has already been answered by someone. Only ``pending`` is
+    an open question.
+
+    **This lives here, and not in a route module, because there is more than
+    one mouth.** It was written inside ``routes_direct/misc.py`` for the HTTP
+    approve route, which left the WebSocket ``approve_tool`` path resuming
+    whatever interrupt happened to be live — the identical defect, one
+    transport over, closed on one side only. Establishing that a THREAD is
+    paused is not the same question as "is the gate the human answered still
+    open": after a resume the graph pauses again, so a retry or a double
+    click arriving late finds a pause and decides the NEXT ask. A gate
+    identity check that only one caller performs is not a check.
+    """
+    if not gate_id:
+        return ""
+    try:
+        from kazma_core.safety.hitl_gates import (
+            gate_for_async,
+            gate_registry_enabled,
+        )
+
+        if not gate_registry_enabled():
+            return ""
+        row = await gate_for_async(gate_id)
+    except Exception:
+        # Fail-open on plumbing, never on a recorded decision: a registry
+        # that cannot be read must not block a human who is waiting.
+        logger.debug("[HITL] gate-state probe failed", exc_info=True)
+        return ""
+    if row is None:
+        return ""
+    if str(getattr(row, "thread_id", "") or "") not in ("", thread_id):
+        # Someone else's gate id on this thread. Refusing by state would
+        # be an accident; refuse by ownership and say so.
+        return "foreign"
+    state = str(getattr(row, "state", "") or "")
+    return "" if state == "pending" else (state or "")
 
 
 def registry_on() -> bool:

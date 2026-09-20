@@ -488,15 +488,37 @@ SECURITY_ENV_MARKERS = (
 )
 
 
+#: Operator-facing documentation for security switches. BOTH are required.
+#:
+#: The gate originally checked ``.env.example`` alone. That is the file a
+#: developer copies, not the page an operator reads: on 2026-09-20 ten of the
+#: fifteen security switches — including ``KAZMA_DEV_WS_BYPASS``, which skips
+#: authentication on every WebSocket handshake — were in ``.env.example`` and
+#: absent from the reference page, and the one row that page *did* carry for a
+#: security default (``KAZMA_REMOTE_PARSE``) documented it as ON when the
+#: product defaults it OFF. A gate that watches one of two surfaces is how the
+#: docs come to teach the opposite of the policy.
+SECURITY_ENV_DOC_SURFACES = (
+    ".env.example",
+    "docs/docs/reference/environment-variables.md",
+)
+
+
 def test_security_env_vars_are_documented():
-    """Every security-weakening ``KAZMA_*`` switch appears in .env.example.
+    """Every security-weakening ``KAZMA_*`` switch is documented for operators.
 
     The 2026-09-16 audit found the code reading 272 ``KAZMA_*`` variables
     while ``.env.example`` documented 43 — and none of the sixteen that turn a
     safety default off. A switch nobody can discover is a switch nobody can
     audit, including the operator who set it two years ago.
+
+    Both surfaces are checked: ``.env.example`` (what a developer copies) and
+    the environment-variables reference (what an operator reads).
     """
-    documented = (REPO_ROOT / ".env.example").read_text(encoding="utf-8", errors="replace")
+    surfaces = {
+        rel: (REPO_ROOT / rel).read_text(encoding="utf-8", errors="replace")
+        for rel in SECURITY_ENV_DOC_SURFACES
+    }
     found: set[str] = set()
     for path in _product_files():
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -504,11 +526,17 @@ def test_security_env_vars_are_documented():
             if any(marker in name for marker in SECURITY_ENV_MARKERS):
                 found.add(name)
 
-    missing = sorted(n for n in found if n not in documented)
+    missing: list[str] = []
+    for name in sorted(found):
+        absent = [rel for rel, text in surfaces.items() if name not in text]
+        if absent:
+            missing.append(f"{name}  (missing from: {', '.join(absent)})")
+
     assert not missing, (
-        "Security-relevant env var read by the code but absent from "
-        ".env.example (audit 2026-09-16 F-8). Each of these weakens a "
-        "default; document it with what it turns off and why you would.\n  "
+        "Security-relevant env var read by the code but not documented for "
+        "operators (audit 2026-09-16 F-8; second surface added 2026-09-20). "
+        "Each of these weakens a default; document it with what it turns "
+        "OFF — not just what it does — and when it is safe to set.\n  "
         + "\n  ".join(missing)
     )
 
@@ -587,4 +615,110 @@ def test_shipped_mcp_servers_can_actually_run():
 
     assert not offenders, (
         "shipped MCP servers that cannot start: " + ", ".join(offenders)
+    )
+
+
+# ── 11. Unbounded settings-store scans on the event loop ─────────────────
+
+#: ConfigStore / WorkspaceStore methods that scan or rewrite the WHOLE store.
+#:
+#: This gate exists because the 2026-09-20 audit asked for the opposite rule:
+#: extend BLOCKING_HELPERS so that ``ConfigStore.get`` / ``get_config_store()``
+#: inside ``async def`` becomes visible. Measured before implementing, against
+#: a 900-key store on the reference box:
+#:
+#:     get(key) warm .............      1.0 us   (TTL cache hit, dict lookup)
+#:     get(key) cold .............      6.9 us   (one indexed SELECT, p99 19us)
+#:     get_category(cat) .........    122.0 us
+#:     get_all() .................  1_865.0 us   (p99 7.6 ms)
+#:     export_yaml() ............. 129_743.0 us  (p99 165 ms)
+#:
+#: ``get`` is a cached single-key read six orders of magnitude cheaper than the
+#: ``subprocess.run`` calls this file's sibling gate was widened to catch. It
+#: appears inside ``async def`` at 67 call sites. A rule that reddens 67 sites
+#: over one microsecond is a rule that gets 67 allowlist entries and teaches
+#: nobody anything — the "green gate next to a sibling that is wrong" failure
+#: with the colours swapped. So ``get`` is deliberately NOT gated, and the
+#: number is written down here so the next audit re-raises it with evidence or
+#: not at all.
+#:
+#: What IS gated is the unbounded set. ``export_yaml`` at 130 ms blocks every
+#: SSE token stream and WebSocket heartbeat open at that moment; ``get_all``
+#: at 7.6 ms p99 is a visible hitch on every Settings page load. Three call
+#: sites existed when this gate was written and all three were fixed, so the
+#: allowlist below is empty on purpose: this gate is closed by default.
+UNBOUNDED_STORE_SCANS = {
+    "get_all",
+    "get_category",
+    "export_yaml",
+    "import_yaml",
+    "reconcile_from_yaml",
+    "reset_all",
+}
+
+#: ``(file, function)`` pairs deliberately exempt, each with a reason.
+#: Empty by design — add an entry only with a measurement, not a hunch.
+UNBOUNDED_SCAN_ALLOWLIST: dict[tuple[str, str], str] = {}
+
+
+def test_no_unbounded_store_scan_on_the_event_loop():
+    """Whole-store scans must not run inline in ``async def``.
+
+    A single ``get`` is a cached indexed read and is fine on the loop. A scan
+    of every row, or a rewrite of the whole store, is not: it is unbounded in
+    the number of settings the operator has, and it stalls the one loop that
+    also serves every stream. Use ``await asyncio.to_thread(...)``.
+    """
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        stack: list[str | None] = []
+
+        class Visitor(ast.NodeVisitor):
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                stack.append(node.name)
+                self.generic_visit(node)
+                stack.pop()
+
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                # A sync def re-enters the threadpool, and `asyncio.to_thread`
+                # targets are sync defs — both are off the loop.
+                stack.append(None)
+                self.generic_visit(node)
+                stack.pop()
+
+            def visit_Lambda(self, node: ast.Lambda) -> None:
+                stack.append(None)
+                self.generic_visit(node)
+                stack.pop()
+
+            def visit_Call(self, node: ast.Call) -> None:
+                func = node.func
+                if (
+                    stack
+                    and stack[-1] is not None
+                    and isinstance(func, ast.Attribute)
+                    and func.attr in UNBOUNDED_STORE_SCANS
+                ):
+                    key = (_rel(path), stack[-1])
+                    if key not in UNBOUNDED_SCAN_ALLOWLIST:
+                        offenders.append(
+                            f"{_rel(path)}:{node.lineno} async def "
+                            f"{stack[-1]} calls .{func.attr}()"
+                        )
+                self.generic_visit(node)
+
+        Visitor().visit(tree)
+
+    assert not offenders, (
+        "Whole-store scan inside async def — this stalls the event loop that "
+        "serves every SSE and WebSocket stream. Measured: get_all() 1.9ms "
+        "mean / 7.6ms p99, export_yaml() 130ms mean, against a 900-key store.\n"
+        "Fix: `await asyncio.to_thread(store.get_all)`. If the handler then "
+        "writes back per row, move the whole read-modify-write into ONE "
+        "threaded function -- splitting it puts the writes back on the loop.\n  "
+        + "\n  ".join(offenders)
     )
