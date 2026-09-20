@@ -172,10 +172,47 @@ def test_a_thought_renders_as_markdown_not_as_source() -> None:
         "everything is rendered as markdown now; a tool payload must stay "
         "verbatim"
     )
-    # Truncation can cut inside a fence, and an unclosed fence swallows
-    # the rest of the row.
+    # An unclosed fence swallows everything after it.
     assert "fences % 2" in body, (
-        "a truncated thought can leave an unclosed code fence"
+        "an unbalanced code fence swallows the rest of the thought"
+    )
+
+
+def test_a_thought_is_never_truncated() -> None:
+    """Reported: the thoughts ended mid-sentence, at "Card …".
+
+    Measured — the visible text was 896 characters and
+    ``TOOL_DETAIL_MAX`` is 900, so ``truncateStr`` cut it and appended
+    the ellipsis.
+
+    That cap is right for a tool payload: a JSON result or a shell
+    transcript is already more than a row should carry at 900
+    characters. It is wrong for a thought, which is the whole turn's
+    thinking in one part — and it does not hide the remainder, it
+    removes it, so "Show more" reveals nothing past the cut. Nothing
+    caps parts server-side, so the loss was purely in the display.
+    """
+    chat = (
+        ROOT / "kazma-ui" / "kazma_ui" / "static" / "js" / "chat.js"
+    ).read_text(encoding="utf-8")
+    body = chat.split("function _detailHtml(detail, forceExpanded, kind)", 1)[1]
+    body = body.split(chr(10) + "  /**", 1)[0]
+
+    flat = " ".join(body.split())
+    assert "isThought ? String(detail)" in flat, (
+        "a thought goes through truncateStr again; the tail of the "
+        "turn's thinking is deleted, not hidden"
+    )
+    assert "truncateStr(String(detail), TOOL_DETAIL_MAX)" in body, (
+        "the payload cap is gone for tool details too; a shell transcript "
+        "will fill the row"
+    )
+    # Height is still bounded — by the clamp, which keeps the text.
+    assert "is-clamped" in body and "step-show-more" in body, (
+        "nothing bounds a long thought's height any more"
+    )
+    assert "STEP_DETAIL_CLAMP_AT" in body, (
+        "a short thought is clamped and given a pointless Show more"
     )
 
 

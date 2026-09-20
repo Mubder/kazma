@@ -3882,16 +3882,33 @@
    */
   function _detailHtml(detail, forceExpanded, kind) {
     if (!detail) return '';
-    var t = truncateStr(String(detail), TOOL_DETAIL_MAX);
-    if (kind === 'thought' && typeof KS !== 'undefined' && KS && KS.markdown) {
-      // Truncation can cut inside a fenced block, and an unclosed fence
-      // swallows everything after it. Balance before rendering.
+    var isThought = kind === 'thought';
+    // A thought is NOT truncated.
+    //
+    // TOOL_DETAIL_MAX is a payload cap: 900 characters of a JSON result
+    // or a shell transcript is already more than a row should carry. A
+    // thought is the whole turn's thinking in one part, and cutting it
+    // does not hide the rest — it removes it, so Show more reveals
+    // nothing past the cut. Reported from the installed build: the
+    // thoughts ended mid-sentence at "Card …", 896 characters in.
+    //
+    // Height is governed by `is-clamped` + Show more, which is the
+    // mechanism for "long" that keeps the text.
+    var t = isThought
+      ? String(detail)
+      : truncateStr(String(detail), TOOL_DETAIL_MAX);
+    if (isThought && typeof KS !== 'undefined' && KS && KS.markdown) {
+      // An unclosed fence swallows everything after it. The model can
+      // leave one open even without truncation, so balance regardless.
       var fences = (t.match(/^```/gm) || []).length;
       if (fences % 2) t += '\n```';
-      var cls = forceExpanded ? ' is-expanded' : ' is-clamped';
-      return '<div class="step-detail step-detail-md' + cls + '">' +
+      // Short prose expands, like the escaped path: a two-line thought
+      // with a Show more button under it is noise.
+      var openIt = forceExpanded || t.length <= STEP_DETAIL_CLAMP_AT;
+      return '<div class="step-detail step-detail-md' +
+        (openIt ? ' is-expanded' : ' is-clamped') + '">' +
         KS.markdown(_scrubDsml(t)) + '</div>' +
-        (forceExpanded ? '' :
+        (openIt ? '' :
           '<button type="button" class="step-show-more" data-open="0">' +
           escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>');
     }
