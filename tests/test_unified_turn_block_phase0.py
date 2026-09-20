@@ -191,7 +191,6 @@ _JS_CHECKS = [
 ]
 
 
-@XFAIL_PHASE3
 @pytest.mark.parametrize("check", _JS_CHECKS)
 def test_renderer_groups_gates_into_one_region(check: str) -> None:
     """``slotPlan`` emits one keyed approval region, not one slot per gate.

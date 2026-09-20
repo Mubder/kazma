@@ -6536,3 +6536,55 @@ html.kazma-soft-nav #main-content {
   .turn-header { font-size: 0.78rem; gap: 6px; }
   .turn-header-meta { flex-basis: 100%; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Approval group — docs/plans/UNIFIED_TURN_BLOCK.md §3
+   ══════════════════════════════════════════════════════════════════════
+   ONE region per turn, above the answer, holding one row per gate in ask
+   order. It replaces one top-level card per gate sorted by state — where
+   approving a gate moved it across the answer, and four requests in one
+   turn read as four unrelated cards.
+
+   The region is a flat sibling of the answer, never its ancestor: a
+   collapsed disclosure must not be able to swallow the reply, and a
+   pending request must never be hidden behind an unrelated fold.
+*/
+.turn-approvals {
+  display: block;
+  margin: 0 0 var(--sp-2, 8px);
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: var(--radius-md, 10px);
+  background: color-mix(in srgb, var(--bg-elevated, #1c1c1c) 60%, transparent);
+  overflow: visible;   /* a card's own popovers must not be clipped */
+}
+.turn-approvals.is-awaiting {
+  border-color: color-mix(in srgb, var(--warn, #d08b2c) 55%, transparent);
+  background: color-mix(in srgb, var(--warn, #d08b2c) 5%, var(--bg-elevated, transparent));
+}
+.turn-approvals-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  border-bottom: 1px solid var(--border, #3a3a3a);
+}
+.turn-approvals-title {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.turn-approvals-count { color: var(--text-tertiary, var(--text-secondary)); }
+.turn-approvals-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+}
+/* The cards keep their own styling; inside the region they lose the outer
+   margin that spaced them as siblings of the answer. */
+.turn-approvals-rows > .hitl-approval-card { margin: 0; }
+@media (max-width: 640px) {
+  .turn-approvals-head { font-size: 0.76rem; padding: 4px 8px; }
+  .turn-approvals-rows { padding: 6px; gap: 5px; }
+}

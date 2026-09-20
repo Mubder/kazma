@@ -486,6 +486,14 @@ def _activity_to_parts(activity: list[dict[str, Any]] | None) -> list[dict[str, 
             if detail.strip():
                 out.append({"type": "reasoning", "text": detail})
         elif kind in ("status", "info"):
+            # A row whose id names another part is that part's RENDERING,
+            # not a part of its own. Reviving it mints a duplicate with a
+            # different key: a gate's "Approved" row came back as a
+            # `status:Approved` part beside the `hitl:<id>` part it was
+            # derived from. Mirrors turn_document.js:activityToParts.
+            rid = str(row.get("id") or "")
+            if rid.startswith(("hitl:", "reasoning", "tool")):
+                continue
             title = str(row.get("title") or "").strip()
             if title:
                 out.append({

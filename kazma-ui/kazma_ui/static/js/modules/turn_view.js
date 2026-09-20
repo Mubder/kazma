@@ -32,21 +32,32 @@
 
    2. ORDER IS DECLARED, NOT PATCHED:
 
-          [workbench] [settled gates…] [answer] [pending gates…] [chrome]
+          [header] [activity] [approvals] [answer] [chrome]
 
-      A settled gate sits ABOVE the answer (the decision precedes the reply
-      it unblocked — what _parkClaimedHitlCard used to achieve by moving
-      nodes). A gate still being asked sits BELOW the text so far (the
-      question follows the content that provoked it — what _placeHitlCard
-      used to achieve with compareDocumentPosition). One rule, declaratively,
-      instead of two imperative movers fighting over the same children.
+      This is the docs/plans/UNIFIED_TURN_BLOCK.md §3 layout. It replaces
 
-   3. SLOTS ARE FLAT SIBLINGS. Every doc-derived node is a direct child of
-      .message-content — required by CSS anyway
-      (.message-assistant > .message-content > .message-text), and it makes
-      "the card trapped the answer inside the CoT panel" UNREPRESENTABLE.
-      There is no nesting for a node to be trapped in, so _rescueTurnDom has
-      nothing left to rescue.
+          [workbench] [settled gates…] [answer] [pending gates…]
+
+      where a gate's POSITION encoded its state: settled above the answer,
+      still-asking below it. That rule was a real improvement over the two
+      imperative movers it replaced (_parkClaimedHitlCard and
+      _placeHitlCard fighting over the same children), but it had a cost
+      the movers also had — deciding a gate MOVED the answer, because the
+      gate crossed it. And four requests in one turn read as four
+      unrelated cards scattered around the text.
+
+      Now every gate is a row inside ONE approvals region, in ask order,
+      and the region sits above the answer for the whole turn. Settling a
+      gate changes its label, not its place, and nothing moves the answer.
+
+   3. THE FOUR REGIONS ARE FLAT SIBLINGS. header, activity, approvals and
+      answer are direct children of .message-content — required by CSS
+      anyway (.message-assistant > .message-content > .message-text), and
+      it makes "the card trapped the answer inside the CoT panel"
+      UNREPRESENTABLE: the answer is never a descendant of a region that
+      can be collapsed. Approval ROWS are keyed inside the approvals
+      region by its own renderer, which is the one nesting there is, and
+      it is bounded to a region that is never collapsed away.
 
    4. AMBIGUITY NEVER DELETES. A slot is removed only when the caller's
       `discard` explicitly returns true; the default is to keep it. Keeping
@@ -159,15 +170,19 @@
       byKey[key] = p;
     }
 
-    var settled = [];
-    var pending = [];
+    // Rows in ASK order, whatever state they are in. Ordering by state is
+    // what used to move the answer: a settled gate sat above the text and
+    // a pending one below it, so approving the first gate relocated the
+    // reply. Ask order is stable, and settling a gate now changes its
+    // label rather than its place (plan §3).
+    var rows = [];
     for (i = 0; i < order.length; i++) {
       key = order[i];
       p = byKey[key];
       var shownRaw = resolve(p);
       // null / omit: no live view yet. A PENDING gate stays omitted
       // (honest empty). A CLAIMED gate in the document must keep its
-      // slot — skipping it left the DOM card unplanned (keptTail) under
+      // row — skipping it left the DOM card unplanned (keptTail) under
       // the answer (2026-09-20 sequential).
       if (shownRaw == null || shownRaw === '' || shownRaw === 'omit') {
         var partState = String((p && p.state) || '');
@@ -177,8 +192,7 @@
       var shown = String(shownRaw);
       // `state` is the resolved answer, carried so the painter uses THIS
       // value rather than resolving again and possibly differently.
-      var entry = { key: key, kind: 'hitl', part: p, state: shown };
-      (shown === 'pending' ? pending : settled).push(entry);
+      rows.push({ key: key, kind: 'hitl', part: p, state: shown });
     }
 
     var plan = [];
@@ -188,9 +202,30 @@
     // the gap the separate bottom bar was invented to fill.
     if (has.header) plan.push({ key: 'header', kind: 'header' });
     if (has.workbench) plan.push({ key: 'workbench', kind: 'workbench' });
-    for (i = 0; i < settled.length; i++) plan.push(settled[i]);
+    // ── ONE approval region, above the answer ──────────────────────────
+    //
+    // This replaces one top-level slot per gate. Four requests were four
+    // independent cards stacked around the text — settled ones above it,
+    // pending ones below — so approving the first MOVED the answer
+    // between containers, and a reader could not tell four requests in
+    // one turn from four turns.
+    //
+    // docs/plans/UNIFIED_TURN_BLOCK.md §3: "Zero groups when there are no
+    // gates; exactly one when at least one exists", "One row per actual
+    // gate ID", "Approval group location stays stable above the answer.
+    // Rows update in request order without moving the answer between
+    // containers."
+    //
+    // Rows stay in ASK order regardless of state, which is what makes the
+    // position stable: settling a gate changes its label, not its place.
+    // The old plan sorted by state, so every decision reshuffled the
+    // transcript.
+    //
+    // Row identity is still partKey — the same string the document
+    // dedupes with — so the renderer inside the region keys off exactly
+    // what the projector keys off (contract 1).
+    if (rows.length) plan.push({ key: 'approvals', kind: 'approvals', rows: rows });
     if (has.text) plan.push({ key: 'text', kind: 'text' });
-    for (i = 0; i < pending.length; i++) plan.push(pending[i]);
     return plan;
   }
 
@@ -304,7 +339,14 @@
         if (n.classList.contains('message-text')) key = 'text';
         else if (n.classList.contains('turn-header')) key = 'header';
         else if (n.classList.contains('agent-progress')) key = 'workbench';
+        else if (n.classList.contains('turn-approvals')) key = 'approvals';
         else if (n.classList.contains('hitl-approval-card')) {
+          // A LOOSE card, from history hydration or a transcript written
+          // before the approvals region existed. It is adopted under its
+          // own gate key so it is visible and reportable rather than
+          // silently duplicated beside the row the region will build —
+          // and `discard` is what decides whether it goes. Contract 4:
+          // this module never deletes on its own initiative.
           var iid = '';
           try { iid = String(n.getAttribute('data-interrupt-id') || ''); } catch (e) { iid = ''; }
           key = 'hitl:' + iid;
@@ -531,6 +573,8 @@
         }
       }
       var parts = (doc && doc.parts) || [];
+      var group = slots['approvals'];
+      var groupUp = !!(group && group.parentNode === content);
       for (var i = 0; i < parts.length; i++) {
         if (!parts[i] || parts[i].type !== 'hitl') continue;
         // Only a gate that COULD have produced a card counts. A part with no
@@ -541,8 +585,18 @@
         // nothing.
         if (!parts[i].payload) continue;
         var gk = gateSlotKey(parts[i], TD);
+        // The row lives INSIDE the approvals region now, so the question
+        // is "is it on screen", not "is it a direct child". A loose card
+        // adopted from history still counts as on screen: the reader can
+        // see it, which is what the invariant is about.
         var gnode = slots[gk];
-        if (!gnode || gnode.parentNode !== content) {
+        var rowUp = false;
+        if (groupUp) {
+          try {
+            rowUp = !!group.querySelector('[data-gate-key="' + gk + '"]');
+          } catch (eQ) { rowUp = false; }
+        }
+        if (!rowUp && (!gnode || gnode.parentNode !== content)) {
           issues.push('gate-missing:' + gk);
         }
       }

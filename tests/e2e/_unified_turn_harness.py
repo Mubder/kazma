@@ -304,6 +304,31 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
             ("llm.api_key", "sk-unified-turn-harness", "llm"),
             ("llm.model", "harness-model", "llm"),
         ])
+        # ...and as a real provider ENTRY, because the browser pins a model
+        # on every send. A pinned model sends the chat route through
+        # `get_client(model)`, which looks the model up in the registry;
+        # with no entry it "falls back to the active provider" and
+        # resolves the shipped OpenAI base_url, and the pre-stream key
+        # check then refuses the turn. The HTTP harness never saw this:
+        # it pins nothing, so it took the other branch.
+        cs.set(
+            "providers.list",
+            [{
+                "name": "custom",
+                "display_name": "Unified turn harness",
+                "base_url": "http://127.0.0.1:1/v1",
+                "api_key": "sk-unified-turn-harness",
+                "models": ["harness-model"],
+                "enabled": True,
+            }],
+            category="providers",
+        )
+        cs.batch_set([
+            ("registry.active_provider", "custom", "registry"),
+            ("registry.active_model", "harness-model", "registry"),
+            ("registry.discovered_models", {"custom": ["harness-model"]},
+             "registry"),
+        ])
         script = script or four_gate_script(tmp_dir)
         with scripted_provider(script):
             port = free_port()

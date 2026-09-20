@@ -210,13 +210,26 @@ jobs:
         run: python -m pytest tests/e2e/test_unified_turn_app_graph.py -q --timeout=600
         env:
           KAZMA_DB_BACKEND: sqlite
+      - name: Install Chromium for the browser acceptance suite
+        run: python -m playwright install chromium --with-deps
+      - name: Restart recovery (convergence oracle, source 4)
+        run: python -m pytest tests/e2e/test_unified_turn_restart.py -q --timeout=900
+        env:
+          KAZMA_DB_BACKEND: sqlite
+      - name: What the operator sees (HITL_VIEW_MODEL Playwright 1 and 4)
+        # The two incidents the 2026-09-19 F0 spike declared unharnessable.
+        # No `|| true`: if this cannot run, the job is red, because a
+        # skipped acceptance test is the thing that let them stay open.
+        run: python -m pytest tests/e2e/test_unified_turn_browser.py -q --timeout=1200
+        env:
+          KAZMA_DB_BACKEND: sqlite
       - name: Shared Python/JavaScript turn fixtures
         run: python -m pytest tests/test_unified_turn_fixtures.py -q --timeout=120
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: Turn identity, revision and durable presentation
         run: |
-          python -m pytest -q --timeout=240 tests/test_turn_document.py tests/test_turn_durable_presentation.py tests/test_chat_as_product.py tests/test_chat_steer_composer.py tests/test_delivery_v2_client.py
+          python -m pytest -q --timeout=240 tests/test_turn_document.py tests/test_turn_durable_presentation.py tests/test_chat_as_product.py tests/test_chat_steer_composer.py tests/test_delivery_v2_client.py tests/test_unified_turn_a11y.py
         env:
           KAZMA_DB_BACKEND: sqlite
       - name: Projector agreement under bare node
@@ -225,6 +238,8 @@ jobs:
           node tests/js/test_turn_view.js
           node tests/js/test_turn_preferences.js
           node tests/js/test_turn_presentation.js
+          node tests/js/test_turn_convergence.js
+          node tests/js/test_turn_performance.js
           node tests/js/test_unified_turn_fixtures.js
       - name: Unified turn block reproductions (xfail-strict)
         # Red on purpose until Phases 2 and 3 land. strict=True means an

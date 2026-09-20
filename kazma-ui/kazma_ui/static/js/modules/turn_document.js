@@ -430,6 +430,13 @@
         var detail = String(row.detail || '');
         if (detail.trim()) out.push({ type: 'reasoning', text: detail });
       } else if (kind === 'status' || kind === 'info') {
+        // A row whose id names another part is that part's RENDERING,
+        // not a part of its own. Reviving it mints a duplicate with a
+        // different key — belt to the braces above: even a caller that
+        // folds a derived activity list cannot conjure a second row.
+        var rid = String(row.id || '');
+        if (rid.indexOf('hitl:') === 0 || rid.indexOf('reasoning') === 0
+            || rid.indexOf('tool') === 0) continue;
         var title = String(row.title || '').trim();
         if (title) out.push({ type: 'status', title: title, state: String(row.state || 'done') });
       }
@@ -676,7 +683,16 @@
         next.parts = mergeParts(next.parts, [{ type: 'text', text: String(ev.content) }]);
         next.stream = String(ev.content);
       }
-      if (Array.isArray(ev.activity) && ev.activity.length) {
+      // Activity is DERIVED from parts, so folding both in double-counts.
+      // A stored row carries both (the /messages serializer sends
+      // `parts` and `activity`), and activity_of renders a gate as a
+      // status row — which activityToParts turned back into a `status`
+      // part keyed status:Approved, distinct from the hitl part it came
+      // from. Every reload grew one phantom row per gate. Only consult
+      // activity when there are no parts to derive it from, which is the
+      // legacy row this branch exists for.
+      var hadParts = Array.isArray(ev.parts) && ev.parts.length;
+      if (!hadParts && Array.isArray(ev.activity) && ev.activity.length) {
         next.parts = mergeParts(next.parts, activityToParts(ev.activity));
       }
       // The gate that matters is the one still waiting, not the newest one:

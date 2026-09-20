@@ -43,7 +43,11 @@ function assert(name, cond, detail) {
   }
 }
 
-/** Class names of a bubble's content children, in DOM order. */
+/** Class names of a bubble's content children, in DOM order.
+ *
+ *  The approvals region is summarised by its ROWS, in DOM order, because
+ *  that is what the layout rules are about now: one region, rows keyed by
+ *  gate, never moving the answer. */
 function shape(bubble) {
   const content = bubble.querySelector(".message-content");
   return content.children.map((c) => {
@@ -51,14 +55,30 @@ function shape(bubble) {
     if (cls.indexOf("message-text") >= 0) return "text";
     if (cls.indexOf("turn-header") >= 0) return "header";
     if (cls.indexOf("agent-progress") >= 0) return "workbench";
+    if (cls.indexOf("turn-approvals") >= 0) return "approvals(" + rows(bubble).join(",") + ")";
     if (cls.indexOf("hitl-approval-card") >= 0) {
-      return "card(" + (c.getAttribute("data-interrupt-id") || "") + ":" +
+      return "loose(" + (c.getAttribute("data-interrupt-id") || "") + ":" +
         (c.getAttribute("data-state") || "") + ")";
     }
     if (cls.indexOf("message-meta") >= 0) return "meta";
     if (cls.indexOf("message-actions") >= 0) return "actions";
     return c.className;
   });
+}
+
+/** The approval rows on screen, in DOM order, as "<gate>:<state>". */
+function rows(bubble) {
+  const group = bubble.querySelector(".turn-approvals");
+  if (!group) return [];
+  const host = group.querySelector(".turn-approvals-rows") || group;
+  return host.children.map((c) =>
+    (c.getAttribute("data-interrupt-id") || "") + ":" +
+    (c.getAttribute("data-state") || ""));
+}
+
+/** The one approvals region, or null. */
+function group(bubble) {
+  return bubble.querySelector(".turn-approvals");
 }
 
 /**
@@ -79,7 +99,14 @@ function makeRenderers(env, opts) {
       if (entry.kind === "text") el.className = "message-text";
       else if (entry.kind === "header") el.className = "turn-header";
       else if (entry.kind === "workbench") el.className = "agent-progress";
-      else if (entry.kind === "hitl") {
+      else if (entry.kind === "approvals") {
+        // Shaped like chat.js:_buildApprovalGroup — a region with a rows
+        // host, because the rows are what the layout rules are about.
+        el.className = "turn-approvals";
+        const host = env.document.createElement("div");
+        host.className = "turn-approvals-rows";
+        el.appendChild(host);
+      } else if (entry.kind === "hitl") {
         el.className = "hitl-approval-card";
         el.setAttribute("data-interrupt-id", TD.interruptIdOf(entry.part));
       }
@@ -91,9 +118,52 @@ function makeRenderers(env, opts) {
         const t = TD.textOf(ctx.doc.parts);
         el.setAttribute("data-md", t);
         el.textContent = t;
+      } else if (entry.kind === "approvals") {
+        // Keyed rows, mirroring chat.js:_paintApprovalGroup: one row per
+        // gate, created once, repainted in place, ask order. A row the
+        // plan stops mentioning is KEPT (contract 4).
+        const host = el.querySelector(".turn-approvals-rows");
+        const byKey = el.__rows || (el.__rows = {});
+        const ordered = [];
+        for (const row of entry.rows || []) {
+          let node = byKey[row.key];
+          // Mirrors chat.js:_paintApprovalGroup — a row frozen in the
+          // hydration 'awaiting' posture cannot have its live buttons
+          // painted back, so it is torn out and rebuilt once the
+          // registry says the gate is live. Inside the region, so the
+          // answer does not move.
+          if (node && String(row.state || "") === "pending") {
+            const shown = String(node.getAttribute("data-hitl-shown") || "");
+            if (shown && shown !== "pending") {
+              if (node.parentNode) node.parentNode.removeChild(node);
+              delete byKey[row.key];
+              node = null;
+            }
+          }
+          if (!node) {
+            node = env.document.createElement("div");
+            node.className = "hitl-approval-card";
+            node.setAttribute("data-interrupt-id", TD.interruptIdOf(row.part));
+            node.setAttribute("data-gate-key", row.key);
+            byKey[row.key] = node;
+            env.built.push(row.key);
+          }
+          // From row.state — the value TurnView resolved. Reading
+          // row.part.state here is the bug the contract exists to stop.
+          node.setAttribute("data-state", String(row.state || row.part.state || "pending"));
+          env.painted.push(row.key);
+          ordered.push(node);
+        }
+        for (const kid of host.children) {
+          if (ordered.indexOf(kid) < 0) ordered.push(kid);
+        }
+        let cursor = null;
+        for (const node of ordered) {
+          const want = cursor ? cursor.nextElementSibling : host.firstElementChild;
+          if (node !== want) host.insertBefore(node, want || null);
+          cursor = node;
+        }
       } else if (entry.kind === "hitl") {
-        // From entry.state — the value TurnView ORDERED by. Reading
-        // entry.part.state here is the bug this contract exists to stop.
         el.setAttribute("data-state", String(entry.state || entry.part.state || "pending"));
       } else if (entry.kind === "workbench") {
         el.textContent = TD.activityOf(ctx.doc.parts).length + " steps";
@@ -199,8 +269,16 @@ function feed(events, turnId) {
   ]);
   env.view.render(bubble, doc, makeRenderers(env));
   const s = shape(bubble);
-  assert("pending gate sits BELOW the interim text",
-    s.indexOf("text") < s.indexOf("card(g1:pending)"), s);
+  // The rule this locked was "the question follows the content that
+  // provoked it", encoded as POSITION relative to the answer. Position
+  // now encodes nothing: the region is above the answer for the whole
+  // turn, so deciding a gate no longer moves the reply across it
+  // (UNIFIED_TURN_BLOCK.md §3). What still has to hold is that the
+  // pending request is on screen and actionable.
+  assert("the pending gate is a row in the one region",
+    rows(bubble).join(",") === "g1:pending", rows(bubble));
+  assert("the region sits above the answer",
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
   assert("turn is paused", doc.status === "paused", doc.status);
 }
 
@@ -259,11 +337,15 @@ function feed(events, turnId) {
   env.view.render(bubble, doc, rend);
   let s = shape(bubble);
   assert("gate one survives gate two",
-    s.indexOf("card(g1:approved)") >= 0, s);
+    rows(bubble).indexOf("g1:approved") >= 0, rows(bubble));
   assert("both gates are on screen",
-    s.indexOf("card(g2:pending)") >= 0, s);
-  assert("the settled gate stays above the pending one",
-    s.indexOf("card(g1:approved)") < s.indexOf("card(g2:pending)"), s);
+    rows(bubble).indexOf("g2:pending") >= 0, rows(bubble));
+  // Ask order, not state order. Sorting by state is what made a decision
+  // reshuffle the transcript.
+  assert("rows are in ask order",
+    rows(bubble).join(",") === "g1:approved,g2:pending", rows(bubble));
+  assert("and they share ONE region",
+    bubble.querySelectorAll(".turn-approvals").length === 1);
   assert("still paused on gate two", doc.status === "paused", doc.status);
 
   // Approve gate two; the server finishes the turn.
@@ -276,9 +358,13 @@ function feed(events, turnId) {
       === "Skill installed: 1815 chars written.",
     bubble.querySelector(".message-text").getAttribute("data-md"));
   assert("both decisions stay in the transcript",
-    s.indexOf("card(g1:approved)") >= 0 && s.indexOf("card(g2:approved)") >= 0, s);
+    rows(bubble).join(",") === "g1:approved,g2:approved", rows(bubble));
   assert("answer sits below both decisions",
-    s.indexOf("card(g2:approved)") < s.indexOf("text"), s);
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
+  // THE thing the group is for: the answer did not move when either gate
+  // was decided.
+  assert("the answer never changed container",
+    s.indexOf("text") === s.length - 3, s);
   assert("no invariant raised on the sequential path",
     env.invariants.length === 0, env.invariants);
 }
@@ -429,15 +515,18 @@ function feed(events, turnId) {
     { type: "hitl", state: "approved", interrupt_id: "g1", tool: "t" },
   ]);
   env.view.render(bubble, doc, rend);
-  assert("card present before the drop", shape(bubble).indexOf("card(g1:approved)") >= 0);
+  assert("row present before the drop",
+    rows(bubble).indexOf("g1:approved") >= 0, rows(bubble));
 
   // A frame that loses the gate (truncated resync, partial hydrate) must
   // NOT take the decision off screen: removing is the silent failure.
   const thin = TD.empty("t1");
   const thinDoc = TD.applyEvent(thin, { type: "done", content: "one" });
   env.view.render(bubble, thinDoc, rend);
+  // The region keeps a row the plan stopped mentioning, for the same
+  // reason the slot table kept a card: removing is the silent failure.
   assert("a vanished part is KEPT, not deleted",
-    shape(bubble).indexOf("card(g1:approved)") >= 0, shape(bubble));
+    rows(bubble).indexOf("g1:approved") >= 0, rows(bubble));
 
   // ...unless the caller says so explicitly.
   const env2 = newEnv();
@@ -512,10 +601,9 @@ function feed(events, turnId) {
   env.view.render(bubble, doc, rend);
   const s = shape(bubble);
   assert("replayed gates land above the answer",
-    s.indexOf("card(g1:approved)") < s.indexOf("text") &&
-    s.indexOf("card(g2:approved)") < s.indexOf("text"), s);
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
   assert("replayed gates keep ask order",
-    s.indexOf("card(g1:approved)") < s.indexOf("card(g2:approved)"), s);
+    rows(bubble).join(",") === "g1:approved,g2:approved", rows(bubble));
   assert("answer still painted after replay",
     bubble.querySelector(".message-text").getAttribute("data-md") === "final");
   const again = env.view.render(bubble, doc, rend);
@@ -603,14 +691,17 @@ function feed(events, turnId) {
   // (the registry says the decision was claimed).
   const rend = makeRenderers(env);
   rend.gateState = (p) => (p.interrupt_id === "g1" ? "inflight" : String(p.state || "pending"));
+  const basePaint = rend.paint;
   rend.paint = (entry, el, ctx) => {
     if (entry.kind === "text") {
       const t = TD.textOf(ctx.doc.parts);
       el.setAttribute("data-md", t); el.textContent = t;
-    } else if (entry.kind === "hitl") {
-      // Label from the entry, never from the part.
-      el.setAttribute("data-state", entry.state);
+      return;
     }
+    // The rows carry entry.state; the group painter stamps it. Labelling
+    // from row.part.state instead is the bug this block exists to catch,
+    // and the shared painter is where that would now happen.
+    basePaint(entry, el, ctx);
   };
 
   const doc = feed([
@@ -621,10 +712,13 @@ function feed(events, turnId) {
   env.view.render(bubble, doc, rend);
 
   const s = shape(bubble);
-  assert("a claimed gate sorts ABOVE the answer, not below it",
-    s.indexOf("card(g1:inflight)") < s.indexOf("text"), s);
-  assert("the label matches the ordering",
-    s.indexOf("card(g1:inflight)") >= 0, s);
+  // Position no longer encodes state — the region is above the answer
+  // whatever the gates are doing — so what this locks is that the LABEL
+  // comes from the resolver and not from the part's own stamp.
+  assert("the row is labelled from the resolver, not the part stamp",
+    rows(bubble).join(",") === "g1:inflight", rows(bubble));
+  assert("and it is above the answer, as always",
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
   assert("nothing is sorted as pending while painted as approved",
     !s.some(x => x.includes(":pending")), s);
 }
@@ -644,8 +738,10 @@ function feed(events, turnId) {
   ]);
   env.view.render(bubble, doc, rend);
   const s = shape(bubble);
-  assert("the resolver decides ordering, not the raw part stamp",
-    s.indexOf("text") < s.indexOf("card(g1:pending)"), s);
+  assert("the resolver decides the label, not the raw part stamp",
+    rows(bubble).join(",") === "g1:pending", rows(bubble));
+  assert("...and the region stays above the answer either way",
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
 }
 
 {
@@ -656,17 +752,23 @@ function feed(events, turnId) {
     { text: true }, TD,
     () => "approved",
   );
-  const gate = plan.find(e => e.kind === "hitl");
-  assert("the entry carries the resolved state", gate && gate.state === "approved");
-  assert("and it sorted by that state", plan.map(e => e.key).join(",") === "hitl:a,text",
-    plan.map(e => e.key));
-  // No resolver → falls back to the part's own stamp.
+  const region = plan.find(e => e.kind === "approvals");
+  const gate = region && region.rows[0];
+  assert("the row carries the resolved state", gate && gate.state === "approved");
+  assert("and the region sits above the answer",
+    plan.map(e => e.key).join(",") === "approvals,text", plan.map(e => e.key));
+  // No resolver → falls back to the part's own stamp for the LABEL. The
+  // position is the same either way, which is the point: a decision
+  // changes what a row says, never where the answer is.
   const bare = TV.slotPlan(
     { parts: [{ type: "hitl", interrupt_id: "a", state: "pending" }] },
     { text: true }, TD,
   );
   assert("without a resolver it falls back to part.state",
-    bare.map(e => e.key).join(",") === "text,hitl:a", bare.map(e => e.key));
+    bare.find(e => e.kind === "approvals").rows[0].state === "pending",
+    JSON.stringify(bare.map(e => e.key)));
+  assert("and the layout is unchanged by which way it resolved",
+    bare.map(e => e.key).join(",") === "approvals,text", bare.map(e => e.key));
   const omitted = TV.slotPlan(
     { parts: [
       { type: "hitl", interrupt_id: "ghost", state: "pending" },
@@ -685,32 +787,41 @@ function feed(events, turnId) {
     { text: true }, TD,
     () => null,
   );
-  assert("a claimed gate with no view still sits ABOVE the answer",
-    claimed.map((p) => p.key).join(",") === "hitl:done,text",
+  assert("a claimed gate with no view still gets a row",
+    claimed.map((p) => p.key).join(",") === "approvals,text",
     claimed.map((p) => p.key));
+  assert("...and the row keeps the stamp as its label",
+    claimed.find((e) => e.kind === "approvals").rows[0].state === "approved");
 }
 
 {
   // Hydration paints a pending part as 'awaiting' (disabled, sorted as
   // settled) because the registry has not answered yet. Paint-in-place
   // cannot put the buttons back — awaiting replaced the actions HTML.
-  // When the registry later says pending, rebuild must tear the frozen
-  // node out so build() mints a live card, which then sorts BELOW the
-  // answer. Without this, a refresh on a live pause leaves "Waiting for
-  // approval…" with no buttons forever.
+  // When the registry later says pending, the frozen row must be torn
+  // out so a live card is minted in its place. Without this, a refresh
+  // on a live pause leaves "Waiting for approval…" with no buttons
+  // forever. It happens INSIDE the approvals region now, so the answer
+  // stays where it was — the old rule re-sorted the card below the text
+  // and moved the reply the moment the registry answered.
   const env = newEnv();
   const bubble = env.assistantBubble({ turnId: "t1" });
   env.ROOT.appendChild(bubble);
   const rend = makeRenderers(env);
-  rend.rebuild = (entry, el) => {
-    if (entry.kind !== "hitl" || String(entry.state || "") !== "pending") return false;
-    const shown = String(el.getAttribute("data-hitl-shown") || "");
-    return !!(shown && shown !== "pending");
-  };
+  // No slot-level rebuild any more: the region is stable for the life of
+  // the turn and the rebuild happens per ROW, inside it.
   const origPaint = rend.paint;
   rend.paint = (entry, el, ctx) => {
     origPaint(entry, el, ctx);
-    if (entry.kind === "hitl") el.setAttribute("data-hitl-shown", entry.state);
+    // The hydration posture is stamped on the ROW now, which is where
+    // chat.js:_paintApprovalGroup reads it to decide a rebuild.
+    if (entry.kind === "approvals") {
+      const host = el.querySelector(".turn-approvals-rows");
+      for (const row of entry.rows || []) {
+        const node = host.querySelector('[data-gate-key="' + row.key + '"]');
+        if (node) node.setAttribute("data-hitl-shown", row.state);
+      }
+    }
   };
   rend.gateState = () => "awaiting";
   const doc = feed([
@@ -720,19 +831,27 @@ function feed(events, turnId) {
   ]);
   env.view.render(bubble, doc, rend);
   let s = shape(bubble);
-  assert("hydrate awaiting sorts ABOVE the answer",
-    s.indexOf("card(g1:awaiting)") < s.indexOf("text"), s);
+  assert("a hydrated gate is a row, above the answer",
+    rows(bubble).join(",") === "g1:awaiting", rows(bubble));
+  assert("...and the answer is below the region",
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
 
   env.built = [];
   rend.gateState = () => "pending";
   env.view.render(bubble, doc, rend);
   s = shape(bubble);
-  assert("a live registry row rebuilds the frozen card",
+  // The rebuild is still required — a card frozen in the awaiting
+  // posture cannot have its live buttons painted back — but it happens
+  // inside the region, so the row is rebuilt and the ANSWER does not
+  // move. That is the whole difference: the old rule tore the card out
+  // and re-sorted it below the text, which relocated the reply the
+  // moment the registry answered.
+  assert("a live registry row rebuilds the frozen row",
     env.built.indexOf("hitl:g1") >= 0, env.built);
-  assert("the rebuilt card sorts BELOW the answer",
-    s.indexOf("text") < s.indexOf("card(g1:pending)"), s);
-  assert("and the label matches the new order",
-    s.indexOf("card(g1:pending)") >= 0, s);
+  assert("the rebuilt row is live", rows(bubble).join(",") === "g1:pending",
+    rows(bubble));
+  assert("and the answer never moved",
+    s.findIndex((x) => x.indexOf("approvals(") === 0) < s.indexOf("text"), s);
 }
 
 {
@@ -797,9 +916,12 @@ function feed(events, turnId) {
     ] },
     { workbench: true, text: true }, TD,
   );
-  assert("plan order is workbench, settled, text, pending",
-    plan.map((p) => p.key).join(",") === "workbench,hitl:a,text,hitl:b",
+  assert("plan order is workbench, approvals, text",
+    plan.map((p) => p.key).join(",") === "workbench,approvals,text",
     plan.map((p) => p.key));
+  assert("...with both gates as rows in ask order",
+    plan.find((e) => e.kind === "approvals").rows.map((r) => r.key).join(",")
+      === "hitl:a,hitl:b");
   assert("empty doc plans nothing",
     TV.slotPlan({}, {}, TD).length === 0);
   assert("plan is a pure function of the doc",
@@ -818,7 +940,7 @@ function feed(events, turnId) {
         { type: "text", text: "x" },
       ] },
       { header: true, workbench: true, text: true }, TD,
-    ).map((p) => p.key).join(",") === "header,workbench,hitl:a,text");
+    ).map((p) => p.key).join(",") === "header,workbench,approvals,text");
 
   assert("a turn with nothing in it still has a header",
     TV.slotPlan({ parts: [] }, { header: true }, TD)

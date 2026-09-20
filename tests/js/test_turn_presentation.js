@@ -72,10 +72,31 @@ ok("the server saying cancelled reads as Cancelled",
 
 // ── Approval ───────────────────────────────────────────────────────────
 const paused = doc({ status: "paused", parts: [gate("g1", "pending"), TEXT] });
+const livePaused = { gateViews: [
+  { interrupt_id: "g1", state: "pending", interactive: true },
+] };
 ok("a pending gate reads as Approval required",
-  TP.header(paused, {}).phase === P.APPROVAL);
+  TP.header(paused, livePaused).phase === P.APPROVAL);
 ok("...and says how many are waiting",
-  TP.header(paused, {}).awaiting === 1);
+  TP.header(paused, livePaused).awaiting === 1);
+
+// A pending part the registry has NOT confirmed is not yet a row: the
+// renderer omits it rather than mint Approve buttons for a gate nobody
+// has vouched for, and the header counts what the group shows. Claiming
+// "1 awaiting your decision" with no row to act on points the reader at
+// something invisible — and mid-resume it produced a header reading "4
+// approvals" above a group reading "3 requests" (observed in the
+// browser). The omission is loud, not silent: turn_view's verify() raises
+// gate-missing and the renderer resyncs once.
+ok("an unconfirmed pending gate is not counted as waiting",
+  TP.header(paused, {}).awaiting === 0);
+ok("...and the header does not claim a decision is due",
+  TP.header(paused, {}).phase !== P.APPROVAL);
+// A SETTLED stamp needs no confirmation — it is history, and history
+// with no row would be a decision the reader cannot see.
+ok("a settled gate is counted without a live view",
+  TP.header(doc({ status: "done", parts: [gate("g0", "approved"), TEXT] }), {})
+    .counts.gates === 1);
 
 // The SERVER's view outranks the part stamp. A part still stamped pending
 // while the registry has recorded the decision is exactly what put

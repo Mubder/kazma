@@ -7209,6 +7209,10 @@
       serverGenerating: !!_serverGenerating || !!_isGenerating,
       stopRequested: !!_stopRequested,
       gateViews: _serverGatesAuth ? _serverGateViews : null,
+      // The SAME resolver the renderer orders and labels gates with, so
+      // the header's count and the approval group's count are one number
+      // arrived at once (see turn_presentation.gateRows).
+      gateState: _hitlDisplayState,
       // How long the journal has been quiet. noteTurnActivity() already
       // stamps every live frame; the retired bar kept a SECOND clock and a
       // SECOND retry budget for the same question, next to the reconciler
@@ -7497,6 +7501,141 @@
     }
   }
 
+
+  // ══ Approval group ═════════════════════════════════════════════════
+  //
+  // docs/plans/UNIFIED_TURN_BLOCK.md §3: "Zero groups when there are no
+  // gates; exactly one when at least one exists. One row per actual gate
+  // ID. […] Approval group location stays stable above the answer. Rows
+  // update in request order without moving the answer between
+  // containers."
+  //
+  // Before this, four requests in one turn were four independent
+  // top-level cards, sorted by state: settled ones above the answer,
+  // still-asking ones below it. Approving the first therefore MOVED the
+  // answer, and a reader could not tell four requests in one turn from
+  // four turns.
+  //
+  // The cards themselves are unchanged — renderHitlCard still builds
+  // them, with the same argument preview, scope explanation, countdown
+  // and controls. What changed is that they are rows in one region
+  // instead of siblings of the answer.
+
+  var GATE_KEY_ATTR = 'data-gate-key';
+
+  function _buildApprovalGroup() {
+    var el = document.createElement('div');
+    el.className = 'turn-approvals';
+    el.setAttribute('role', 'group');
+    el.innerHTML =
+      '<div class="turn-approvals-head">' +
+        '<span class="turn-approvals-title"></span>' +
+        '<span class="turn-approvals-count"></span>' +
+      '</div>' +
+      '<div class="turn-approvals-rows"></div>';
+    return el;
+  }
+
+  /**
+   * Reconcile the region's rows against the plan.
+   *
+   * Keyed by gate id — the same `partKey` the document dedupes with, so
+   * "which row is this gate" cannot drift from "which part is this"
+   * (turn_view contract 1). Rows are created once and repainted in
+   * place; a decision changes a row's label, never its position, which is
+   * what keeps the answer still.
+   *
+   * Rows the plan no longer mentions are KEPT (contract 4: ambiguity
+   * never deletes). A truncated resync that stops mentioning a gate must
+   * leave its decision on screen.
+   */
+  function _paintApprovalGroup(el, entry, ctx) {
+    var rows = (entry && entry.rows) || [];
+    var host = el.querySelector('.turn-approvals-rows');
+    if (!host) return;
+
+    // renderHitlCard appends into `opts.host`, which the slot renderer
+    // used to set to .message-content. Point it at the rows container so
+    // a new card is born inside the region rather than beside the answer
+    // and then relocated — a card that appears in the wrong place for one
+    // frame is a card the reader can click in the wrong place.
+    var rowCtx = {};
+    var ck;
+    for (ck in (ctx || {})) {
+      if (Object.prototype.hasOwnProperty.call(ctx, ck)) rowCtx[ck] = ctx[ck];
+    }
+    rowCtx.content = host;
+
+    var byKey = el.__kzRows || (el.__kzRows = {});
+    var ordered = [];
+    var pending = 0;
+    var i;
+
+    for (i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var node = byKey[row.key] || null;
+      if (node && node.parentNode !== host) node = null;
+      if (node) {
+        // Same rebuild rule the flat slots had: a card frozen in the
+        // hydration 'awaiting' posture cannot have its live buttons
+        // painted back, so it is torn out and rebuilt once the registry
+        // says the gate is live.
+        var shown = '';
+        try { shown = String(node.getAttribute('data-hitl-shown') || ''); } catch (e) { shown = ''; }
+        if (String(row.state || '') === 'pending' && shown && shown !== 'pending') {
+          try { host.removeChild(node); } catch (eR) { /* ignore */ }
+          node = null;
+          delete byKey[row.key];
+        }
+      }
+      if (!node) {
+        node = _buildHitlSlotCard(row.part, rowCtx, row.state);
+        if (!node) continue;
+        try { node.setAttribute(GATE_KEY_ATTR, row.key); } catch (eA) { /* ignore */ }
+        byKey[row.key] = node;
+      }
+      _paintHitlSlotCard(node, row.part, rowCtx, row.state);
+      if (String(row.state || '') === 'pending') pending++;
+      ordered.push(node);
+    }
+
+    // Rows the plan dropped stay, after the planned ones, in the order
+    // they are already in.
+    var kids = host.children;
+    for (i = 0; i < kids.length; i++) {
+      if (ordered.indexOf(kids[i]) < 0) ordered.push(kids[i]);
+    }
+
+    // One ordering pass, comparing first so an unchanged region performs
+    // zero mutations (the renderer's idempotence is a tested property).
+    var cursor = null;
+    for (i = 0; i < ordered.length; i++) {
+      var want = cursor ? cursor.nextElementSibling : host.firstElementChild;
+      if (ordered[i] !== want) {
+        try { host.insertBefore(ordered[i], want || null); } catch (eI) { /* ignore */ }
+      }
+      cursor = ordered[i];
+    }
+
+    var total = ordered.length;
+    var titleEl = el.querySelector('.turn-approvals-title');
+    var countEl = el.querySelector('.turn-approvals-count');
+    var title = ti('approvals', 'Approvals');
+    if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
+    var bits = [];
+    bits.push(total === 1
+      ? ti('one_request', '1 request')
+      : tiFmt('n_requests', '{n} requests', { n: total }));
+    if (pending) {
+      bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
+        { n: pending }));
+    }
+    var count = bits.join(' \u00B7 ');
+    if (countEl && countEl.textContent !== count) countEl.textContent = count;
+    var cls = 'turn-approvals' + (pending ? ' is-awaiting' : ' is-settled');
+    if (el.className !== cls) el.className = cls;
+  }
+
   /**
    * Renderers handed to TurnView. build() creates a slot's node, paint()
    * updates it, discard() decides removal — and it always answers false.
@@ -7524,6 +7663,7 @@
       if (entry.kind === 'header') {
         return _buildTurnHeader(String((ctx.doc && ctx.doc.turnId) || ''));
       }
+      if (entry.kind === 'approvals') return _buildApprovalGroup();
       if (entry.kind === 'text') {
         var t = document.createElement('div');
         t.className = 'message-text';
@@ -7550,6 +7690,7 @@
     },
     paint: function(entry, el, ctx) {
       if (entry.kind === 'header') return _paintTurnHeader(el, ctx.doc);
+      if (entry.kind === 'approvals') return _paintApprovalGroup(el, entry, ctx);
       if (entry.kind === 'text') return _paintTextSlot(el, ctx.doc, ctx.meta);
       if (entry.kind === 'workbench') return _paintWorkbenchSlot(el, ctx.doc);
       if (entry.kind === 'hitl') return _paintHitlSlotCard(el, entry.part, ctx, entry.state);
@@ -7559,11 +7700,11 @@
     // put those buttons back. When the registry later says the gate is
     // live, tear the frozen node out and let build() mint a real one.
     rebuild: function(entry, el) {
-      if (!entry || entry.kind !== 'hitl') return false;
-      if (String(entry.state || '') !== 'pending') return false;
-      var shown = '';
-      try { shown = String(el.getAttribute('data-hitl-shown') || ''); } catch (e) { shown = ''; }
-      return !!(shown && shown !== 'pending');
+      // Gates are rows inside the approvals region now, so their rebuild
+      // rule lives with the rows (_paintApprovalGroup). Nothing at the
+      // top level needs tearing out: the region itself is stable for the
+      // life of the turn, which is the point of it.
+      return false;
     },
     discard: function() { return false; },
   };

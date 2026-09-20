@@ -1542,10 +1542,37 @@ and `HITL_VIEW_MODEL.md` (layouts that require separate cards). Delivery
 ordering (§31) and gate authority (§30) are preserved unchanged — any
 protocol extension must update those contracts explicitly.
 
-Baseline, evidence and known gaps: `docs/plans/UNIFIED_TURN_BLOCK_PHASE0.md`.
+Baseline, evidence and known gaps: `UNIFIED_TURN_BLOCK_PHASE0.md` through
+`_PHASE3.md` in the same directory. Each phase report states what it does
+NOT claim; read those before claiming any of it.
+
+Shipped so far: durable tool activity and a document revision (P1), the
+in-block header, reader-owned thoughts fold and one answer authority (P2),
+one approval group with keyed rows (P3).
+
+Load-bearing rules:
+
+- **One status surface per turn, inside the turn.** `#live-task-card` is
+  deleted. A page-level status element is what forced a second phase
+  machine, a second clock and a second recovery loop. The header derives
+  from `modules/turn_presentation.js`, a pure function — do not tell it a
+  phase.
+- **The fold belongs to the reader.** `modules/turn_preferences.js` is the
+  only writer of disclosure state, and only from a gesture. Any map keyed
+  by turn id must be promoted when the turn is renamed off `'live'`, like
+  `turn_view.js:promote` — the preference store was not, and the fold shut
+  itself a second into every turn.
+- **Gates are ROWS in one region above the answer**, in ask order. Never
+  order gates by state: that is what moved the answer when one settled.
+- **One count.** `turn_presentation.gateRows()` is what both the header
+  and the group count, so the two cannot contradict each other.
+
 Sequential approval is proven at the lifecycle level by
-`tests/e2e/test_unified_turn_app_graph.py` (four real pauses, four real
-`POST /api/approve`), which runs in the `unified-turn-lifecycle` CI job.
+`tests/e2e/test_unified_turn_app_graph.py` and in a browser by
+`tests/e2e/test_unified_turn_browser.py`, which claims HITL_VIEW_MODEL.md
+Playwright 1 and 4 — open since the 2026-09-19 F0 spike. Both run in the
+`unified-turn-lifecycle` CI job.
+
 Cross-language turn projection is locked by shared fixtures under
 `tests/fixtures/unified_turn/` — do NOT add a Python example and a
 JavaScript example for the same rule; that is how `legacy_turn_id` came to

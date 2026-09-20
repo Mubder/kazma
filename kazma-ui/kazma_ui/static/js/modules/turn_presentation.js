@@ -74,32 +74,68 @@
   }
 
   /**
-   * How many gates are still asking, per the SERVER's view.
+   * The gates the approval group will actually SHOW, with their states.
    *
-   * `facts.gateViews` is the canonical list the page already holds
-   * (`gate_view.py` -> `_serverGateViews`). It is used in preference to the
-   * part stamps for exactly the reason the renderer is: a part can still
-   * read `pending` while the registry has recorded the decision, and a
-   * header that counts stamps would announce "1 awaiting your decision"
-   * next to a card reading Approved (2026-09-19, live install).
+   * This applies the same omission rule as `turn_view.js:slotPlan`: a
+   * pending gate with no resolved view yet is left out, because minting a
+   * row for it would mean ghost Approve buttons for a gate the registry
+   * has not confirmed.
+   *
+   * It has to be the same rule, or the two surfaces contradict each other
+   * on screen. Observed in the browser mid-resume: the header read "4
+   * approvals" (counting parts) while the group beneath it read "3
+   * requests" (counting rendered rows). One fact, two answers — the class
+   * this whole plan exists to remove, reproduced in the fix for it.
+   *
+   * `facts.gateState` is the page's one resolver (`_hitlDisplayState`).
+   * Without it — pure tests, or a page that has not joined the registry
+   * yet — `facts.gateViews` is consulted, then the part's own stamp, which
+   * is the honest "nothing better to consult" answer rather than a
+   * confident zero.
    */
-  function pendingGates(doc, facts) {
-    var views = (facts && facts.gateViews) || null;
-    if (Array.isArray(views) && views.length) {
-      var live = 0;
-      for (var i = 0; i < views.length; i++) {
-        var v = views[i];
-        if (v && (v.interactive || String(v.state || '') === 'pending')) live++;
-      }
-      return live;
-    }
-    // No authoritative view yet. Fall back to the document's own stamps —
-    // an honest "we have not been told" rather than a confident zero.
+  function gateRows(doc, facts) {
+    facts = facts || {};
     var parts = (doc && doc.parts) || [];
+    var resolve = typeof facts.gateState === 'function' ? facts.gateState : null;
+    var views = Array.isArray(facts.gateViews) ? facts.gateViews : null;
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      if (!p || p.type !== 'hitl') continue;
+      var state = null;
+      if (resolve) {
+        try { state = resolve(p); } catch (e) { state = null; }
+      } else if (views) {
+        var iid = String(p.interrupt_id
+          || (p.payload && p.payload.interrupt_id) || '');
+        for (var v = 0; v < views.length; v++) {
+          var view = views[v];
+          if (!view) continue;
+          var vid = String(view.interrupt_id || view.gate_id || '');
+          if (vid && vid === iid) {
+            state = view.interactive ? 'pending' : String(view.state || '');
+            break;
+          }
+        }
+      }
+      var stamp = String(p.state || '');
+      if (state == null || state === '' || state === 'omit') {
+        // Same as slotPlan: a pending gate with no view stays omitted, a
+        // settled one keeps its row.
+        if (!stamp || stamp === 'pending') continue;
+        state = stamp;
+      }
+      out.push({ part: p, state: String(state) });
+    }
+    return out;
+  }
+
+  /** How many gates are still asking, per the resolver the renderer uses. */
+  function pendingGates(doc, facts) {
+    var rows = gateRows(doc, facts);
     var n = 0;
-    for (var j = 0; j < parts.length; j++) {
-      if (parts[j] && parts[j].type === 'hitl'
-          && String(parts[j].state || 'pending') === 'pending') n++;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].state === 'pending') n++;
     }
     return n;
   }
@@ -211,7 +247,14 @@
     facts = facts || {};
     var phase = phaseOf(doc, facts);
     var counts = countParts(doc, null);
-    counts.pending = pendingGates(doc, facts);
+    // Gates are counted as the group renders them, not as the document
+    // stamps them, so the header and the group can never disagree.
+    var rows = gateRows(doc, facts);
+    counts.gates = rows.length;
+    counts.pending = 0;
+    for (var g = 0; g < rows.length; g++) {
+      if (rows[g].state === 'pending') counts.pending++;
+    }
     var terminal = isTerminal(phase);
     return {
       turnId: String((doc && doc.turnId) || ''),
@@ -252,6 +295,7 @@
     elapsedOf: elapsedOf,
     countParts: countParts,
     pendingGates: pendingGates,
+    gateRows: gateRows,
     isTerminal: isTerminal,
   };
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

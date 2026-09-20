@@ -182,17 +182,22 @@ def test_chained_hitl_card_appends_below_previous() -> None:
     plan = js_function_body(view, "function slotPlan(doc, has, TD, gateState)")
     # Ask order in, ask order out.
     assert "order.push(key)" in plan
-    assert "settled" in plan and "pending" in plan
-    # The declared sequence: workbench, settled gates, answer, pending gates.
+    # The declared sequence is now header, workbench, approvals, answer
+    # (docs/plans/UNIFIED_TURN_BLOCK.md §3). Gate STATE no longer decides
+    # position: every gate is a row in one region above the answer, so a
+    # decision changes a label rather than moving the reply across it.
     tail = plan.split("var plan = [];", 1)[1]
+    i_head = tail.index("has.header")
     i_work = tail.index("has.workbench")
-    i_settled = tail.index("settled[i]")
+    i_appr = tail.index("kind: 'approvals'")
     i_text = tail.index("has.text")
-    i_pending = tail.index("pending[i]")
-    assert i_work < i_settled < i_text < i_pending, (
-        "the declared slot order changed — settled decisions must precede "
-        "the answer they unblocked, and a live question must follow the "
-        "text that provoked it"
+    assert i_head < i_work < i_appr < i_text, (
+        "the declared region order changed — the approval group must sit "
+        "above the answer, and the answer must stay a sibling of it"
+    )
+    assert "settled[i]" not in tail and "pending[i]" not in tail, (
+        "gates are being placed by state again; that is what moved the "
+        "answer every time a gate was decided"
     )
 
 
@@ -540,9 +545,18 @@ def test_a_gate_has_exactly_one_state_for_ordering_and_labelling() -> None:
     view = _view_js()
     plan = js_function_body(view, "function slotPlan(doc, has, TD, gateState)")
     assert "typeof gateState === 'function'" in plan
-    assert "state: shown" in plan, "the entry no longer carries the resolved state"
-    assert "shown === 'pending' ? pending : settled" in plan, (
-        "ordering is reading the raw part stamp again"
+    assert "state: String(shown)" in plan or "state: shown" in plan, (
+        "the row no longer carries the resolved state"
+    )
+    # Ordering no longer depends on state at all — which is the strongest
+    # possible form of "ordering cannot disagree with the label". What has
+    # to stay true is that the LABEL comes from the resolver.
+    assert "var shownRaw = resolve(p);" in plan, (
+        "the row state is no longer resolved through the host's resolver"
+    )
+    assert "p.state" not in plan.split("var rows = [];", 1)[1].split("rows.push", 1)[0] \
+        or "partState" in plan, (
+        "the raw part stamp is being read as the row state again"
     )
     # The helper that answered this from the raw part stamp is deleted, not
     # merely unused — an exported second opinion is an invitation to ask it.
@@ -596,10 +610,17 @@ def test_awaiting_card_rebuilds_when_registry_says_pending() -> None:
     rerender_at = resync.index("_rerenderHitlDocs()")
     assert ingest_at < rerender_at, "re-render ran before views were ingested"
 
-    rebuild = js_function_body(js, "rebuild: function(entry, el)")
-    assert "entry.kind !== 'hitl'" in rebuild or "entry.kind !== \"hitl\"" in rebuild
-    assert "!== 'pending'" in rebuild
-    assert "data-hitl-shown" in rebuild
+    # The rebuild moved from the top-level slot into the approval region:
+    # gates are rows there now, and rebuilding a row leaves the answer
+    # where it is. The old rule tore the card out and re-sorted it below
+    # the text, so the reply moved the instant the registry answered.
+    group = js_function_body(js, "function _paintApprovalGroup(el, entry, ctx)")
+    assert "data-hitl-shown" in group, (
+        "the frozen-row rebuild is gone; a refresh on a live pause would "
+        "leave 'Waiting for approval…' with no buttons forever"
+    )
+    assert "!== 'pending'" in group
+    assert "host.removeChild(node)" in group
 
     rerender = js_function_body(js, "function _rerenderHitlDocs()")
     assert "pendingIds" in rerender
@@ -1720,4 +1741,7 @@ def test_post_approve_attach_and_card_below_text() -> None:
     view = _TURN_VIEW_JS.read_text(encoding="utf-8")
     plan = js_function_body(view, "function slotPlan(doc, has, TD, gateState)")
     tail = plan.split("var plan = [];", 1)[1]
-    assert tail.index("has.text") < tail.index("pending[i]")
+    # A new pending gate is a row in the region above the answer, not a
+    # slot below it. Declared, not computed — which is what this line was
+    # really about; compareDocumentPosition is still banned above.
+    assert tail.index("kind: 'approvals'") < tail.index("has.text")
