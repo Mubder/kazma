@@ -78,6 +78,54 @@ def test_a_strong_secret_does_not_buy_past_the_guard(
     assert "does not help" in msg
 
 
+def test_ws_bypass_on_a_public_bind_is_refused(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``KAZMA_DEV_WS_BYPASS`` is the same risk as AUTH_DISABLED, one layer down.
+
+    It skips authentication on every WebSocket handshake, including the chat
+    socket that carries the turn stream. ``kazma_ui.auth`` refuses it only when
+    KAZMA_PRODUCTION is set — which is exactly the opt-in label the module
+    docstring explains nobody sets on a VPS, a LAN box or a tunnel. So the
+    composition this guard was written to close survived here after being
+    closed for its sibling, and a 2026-09-20 audit found it still open.
+
+    WS is not a lesser surface. Refused on a non-loopback bind.
+    """
+    monkeypatch.setenv("KAZMA_DEV_WS_BYPASS", "1")
+    ok, msg = check_exposure_posture("0.0.0.0")
+    assert ok is False
+    assert "KAZMA_DEV_WS_BYPASS" in msg
+    # And the production label must not be what makes it safe.
+    monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+    assert check_exposure_posture("0.0.0.0")[0] is False
+
+
+def test_demo_mode_does_not_excuse_the_ws_bypass(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Demo mode means "no login", not "every switch is fair game".
+
+    DEMO_MODE is deliberately allowed on a public bind. It is checked LAST so
+    the two hard refusals still apply inside it — otherwise setting one
+    permitted flag would silently re-open the other two.
+    """
+    monkeypatch.setenv("KAZMA_DEMO_MODE", "1")
+    monkeypatch.setenv("KAZMA_DEV_WS_BYPASS", "1")
+    ok, msg = check_exposure_posture("0.0.0.0")
+    assert ok is False
+    assert "KAZMA_DEV_WS_BYPASS" in msg
+
+
+def test_ws_bypass_on_loopback_still_works(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The switch exists for local development; that use is untouched."""
+    monkeypatch.setenv("KAZMA_DEV_WS_BYPASS", "1")
+    ok, msg = check_exposure_posture("127.0.0.1")
+    assert ok is True and msg == ""
+
+
 # ── What must keep working ─────────────────────────────────────────────
 
 
