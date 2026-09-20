@@ -18,6 +18,11 @@ os.environ["GIT_ASKPASS"] = "echo"
 
 logger = logging.getLogger(__name__)
 
+#: One-shot latch for the ``git_push_pull`` deprecation warning. It is called
+#: per git sync, so an unconditional warning would be log spam and the signal
+#: would be tuned out — which is the same as not having it.
+_GIT_PUSH_PULL_WARNED = False
+
 
 async def git_status() -> str:
     """Get the current git repository status, branch, and staged/unstaged changes."""
@@ -461,6 +466,30 @@ async def git_push_pull(action: str = "pull", branch: str | None = None, remote:
     :param branch: Branch name to push or pull (e.g. 'main'). Auto-detected if omitted.
     :param remote: Remote name (default 'origin').
     """
+    # Say so, out loud, once per process.
+    #
+    # This wrapper is invisible: absent from the skill manifest, so the agent
+    # cannot reach it, and reachable only by a direct import. That is exactly
+    # why a caller can sit on it for a year unnoticed — and its default is
+    # `action="pull"`, the footgun that made the agent PULL when it meant to
+    # push. Without a signal, "no known callers" is an assumption rather than
+    # an observation, and there is no safe moment to delete it.
+    #
+    # Asked for by AUDIT_360_GITHUB_2026-07-29 ("has no runtime deprecation
+    # log. Consider a one-time logger.warning if it's ever called directly")
+    # and not done until now. Once a release goes by with this silent, the
+    # function can be deleted on evidence instead of on hope.
+    global _GIT_PUSH_PULL_WARNED
+    if not _GIT_PUSH_PULL_WARNED:
+        _GIT_PUSH_PULL_WARNED = True
+        logger.warning(
+            "[git] git_push_pull(action=%r) is DEPRECATED and still being "
+            "called. Use git_push() or git_pull() — the merged tool defaults "
+            "to 'pull', which previously ran a pull when a push was meant. "
+            "This warning fires once per process; please report the caller.",
+            action,
+            stack_info=True,
+        )
     return await _git_sync(action=action, branch=branch, remote=remote)
 
 

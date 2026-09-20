@@ -986,8 +986,14 @@ class ChatPanel(Vertical):
                 from pathlib import Path
                 import json
 
-                export_dir = Path("kazma-data/exports")
-                export_dir.mkdir(parents=True, exist_ok=True)
+                # exports_dir(), not a CWD-relative literal. It honours
+                # KAZMA_DATA_DIR / KAZMA_EXPORTS_DIR and creates the dir.
+                # The hardcoded path wrote wherever the TUI happened to be
+                # STARTED from, and ignored a relocated data dir entirely —
+                # so on a production layout the operator's exports landed
+                # outside the data directory being backed up.
+                from kazma_core.paths import exports_dir
+                export_dir = exports_dir()
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                 path = export_dir / f"config_{ts}.json"
                 path.write_text(
@@ -1154,8 +1160,9 @@ class ChatPanel(Vertical):
             import json
 
             msgs, tokens, cost = await self._session_message_payload()
-            export_dir = Path("kazma-data/exports")
-            export_dir.mkdir(parents=True, exist_ok=True)
+            # Same reason as the /config export above.
+            from kazma_core.paths import exports_dir
+            export_dir = exports_dir()
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             sid = self._session_id
 
