@@ -232,6 +232,26 @@ def suite_exit_code(
 _HANG_DUMP_LINES = 400
 
 
+def _safe_print(text: str) -> None:
+    """Print a captured line without ever killing the runner on encoding.
+
+    The dump is pytest's own output, which routinely carries characters the
+    Windows console codepage (cp1252) cannot encode — a replacement char from a
+    mangled traceback is enough. `print` then raises UnicodeEncodeError, and
+    because this runs while REPORTING a failure it took the whole run down with
+    it: exit 1, no totals, no diagnosis, after the suite had already finished.
+
+    Found immediately after widening the dump from 25 lines to 400 — more lines
+    is more chances to hit one. A diagnostic that can crash the thing it is
+    diagnosing is worse than no diagnostic.
+    """
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(text.encode(enc, "replace").decode(enc, "replace"))
+
+
 def _failure_digest(log: str, limit: int = _DIGEST_LIMIT) -> str:
     """Extract the FAILURES/ERRORS sections (tracebacks) from pytest -q output.
 
@@ -358,7 +378,7 @@ def main() -> int:
         if _tail:
             print(f"[fast-test] --- chunk {r['idx']:02d}: last {_HANG_DUMP_LINES} lines ---")
             for _ln in _tail:
-                print(f"  | {_ln}")
+                _safe_print(f"  | {_ln}")
         else:
             print(f"[fast-test] --- chunk {r['idx']:02d} produced NO output at all ---")
         # Re-run the chunk MINUS the file it died in, as ONE process, then
@@ -502,7 +522,7 @@ def main() -> int:
                 continue
             print(f"\n[fast-test] --- {rel}: last 40 lines of the diagnostic rerun ---")
             for ln in tail:
-                print(f"  | {ln}")
+                _safe_print(f"  | {ln}")
     code = suite_exit_code(totals, failed=all_failed, poison=poison)
     passed = int(totals.get("passed", 0) or 0)
     if code == 2:
