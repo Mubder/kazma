@@ -129,9 +129,39 @@ def _friendly_error(exc: Exception, path: str) -> str:
 # content. This cache stores reads keyed by (path, offset, limit) for the
 # current turn; a re-read returns the cached content with a "already read"
 # note instead of a fresh disk read + full context injection.
-_turn_read_cache: dict[tuple, str] = {}
+#
+# Entries are STAMPED with the file's on-disk identity and revalidated on
+# every hit (incident 2026-09-21): the cache used to live until the end of
+# the turn, so a read -> write -> read inside one turn served the PRE-write
+# content. A probe run hit exactly that — file_apply_patch landed three
+# lines, the verifying file_read replayed the two-line original, and only a
+# different offset/limit shook it loose. Read-after-write is how an agent
+# checks its own work, so the cache was lying at the one moment it mattered.
+#
+# Stamping rather than having the five mutating tools (file_write,
+# file_append, file_apply_patch, file_apply_patch_set, file_delete) call an
+# invalidate hook: a hook is only as good as the next tool that remembers to
+# call it, and it cannot see writes Kazma did not perform — a shell_exec
+# redirect, an MCP filesystem server, a sibling swarm worker, or the user's
+# own editor. The stamp is a property of the bytes, so every writer is
+# covered including the ones that do not exist yet.
+_turn_read_cache: dict[tuple, tuple[tuple[int, int] | None, str]] = {}
 _turn_read_cache_order: list[tuple] = []
 _READ_CACHE_MAX = 50
+
+
+def _stat_stamp(p: Path) -> tuple[int, int] | None:
+    """Identity of the bytes on disk as ``(mtime_ns, size)``.
+
+    ``None`` when the file cannot be stat'd (deleted, replaced by a
+    directory, permissions) — which compares unequal to any real stamp and
+    therefore invalidates, the safe direction.
+    """
+    try:
+        st = p.stat()
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
 
 
 async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
@@ -170,7 +200,19 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
 
     # ── Per-turn dedup: same path+offset+limit already read this turn ──
     cache_key = (str(p), int(offset or 0), int(limit or 500))
-    cached = _turn_read_cache.get(cache_key)
+    entry = _turn_read_cache.get(cache_key)
+    cached: str | None = None
+    if entry is not None:
+        stamped, content = entry
+        if stamped is not None and stamped == _stat_stamp(p):
+            cached = content
+        else:
+            # Changed underneath us (or vanished). Drop it and read fresh —
+            # never serve "IDENTICAL to what you already received" about
+            # bytes that are no longer there.
+            _turn_read_cache.pop(cache_key, None)
+            if cache_key in _turn_read_cache_order:
+                _turn_read_cache_order.remove(cache_key)
     if cached is not None:
         return (
             f"[ALREADY READ THIS TURN — file_read({path}, offset={offset}, "
@@ -185,6 +227,13 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
             return _friendly_error(FileNotFoundError(), path)
         if p.is_dir():
             return _friendly_error(IsADirectoryError(), path)
+
+        # Stamp BEFORE reading, deliberately. A write landing between this
+        # stat and the read gives us new content carrying the old stamp, so
+        # the next hit revalidates and re-reads: a wasted read, never a lie.
+        # Stamping after the read inverts that — old content carrying the
+        # new stamp would look valid forever. Do not "tidy" this downward.
+        pre_read_stamp = _stat_stamp(p)
 
         # ── Runtime-ready document format delegation ─────────────────
         suffix = p.suffix.lower()
@@ -293,7 +342,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     if len(_turn_read_cache) >= _READ_CACHE_MAX:
         oldest = _turn_read_cache_order.pop(0)
         _turn_read_cache.pop(oldest, None)
-    _turn_read_cache[cache_key] = result
+    _turn_read_cache[cache_key] = (pre_read_stamp, result)
     if cache_key not in _turn_read_cache_order:
         _turn_read_cache_order.append(cache_key)
 
