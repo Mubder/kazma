@@ -242,7 +242,12 @@ def test_claimed_hitl_without_live_view_stays_settled() -> None:
     assert "ps !== 'pending'" in lookup
     assert "slot: 'settled'" in lookup
     build = js.split("if (entry.kind === 'workbench') {", 1)[1][:1200]
-    assert "is-collapsed" in build
+    # The fold moved to turn_preferences.js (UNIFIED_TURN_BLOCK.md §3), so
+    # the build no longer names the class. What this line is really about
+    # is that the workbench slot is BUILT for a claimed gate rather than
+    # omitted from the plan — keep that, and check the fold now goes
+    # through its one owner.
+    assert "_applyActivityFold" in build
     assert "is-active" in build
 
 

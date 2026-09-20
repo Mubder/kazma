@@ -1316,6 +1316,13 @@
     tokenAccum = '';
   }
 
+  function _syncPrefsSession() {
+    var prefs = _turnPrefs();
+    if (prefs) {
+      try { prefs.setSession(chatSessionId || ''); } catch (e) { /* ignore */ }
+    }
+  }
+
   function _resetSessionTurnState() {
     _docs = {};
     // The turn→bubble registry belongs to the transcript on screen. Leaving
@@ -4926,7 +4933,50 @@
     return html;
   }
 
-  function _buildRestoredWorkbench(activity) {
+  /**
+   * Put the panel in the state the reader asked for.
+   *
+   * Idempotent and cheap: called on every render pass, writes only when
+   * the DOM disagrees, so a paint that changes nothing performs no
+   * mutation (the renderer's idempotence is testable and this must not
+   * cost it).
+   */
+  function _applyActivityFold(panel, turnId) {
+    if (!panel || !panel.classList) return;
+    var open = _activityExpanded(turnId);
+    var collapsed = panel.classList.contains('is-collapsed');
+    if (collapsed === !open) {
+      // already correct
+    } else if (open) {
+      panel.classList.remove('is-collapsed');
+    } else {
+      panel.classList.add('is-collapsed');
+    }
+    var chev = panel.querySelector('.agent-progress-chevron');
+    var want = open ? '\u25BE' : '\u25B8';
+    if (chev && chev.textContent !== want) chev.textContent = want;
+    var hdr = panel.querySelector('.agent-progress-header');
+    if (hdr && hdr.getAttribute('aria-expanded') !== String(open)) {
+      hdr.setAttribute('aria-expanded', String(open));
+    }
+  }
+
+  /** The ONE place a disclosure preference is written: a reader gesture. */
+  function _toggleActivityFold(panel, turnId) {
+    var prefs = _turnPrefs();
+    var open = !panel.classList.contains('is-collapsed');
+    var next = !open;
+    if (prefs) prefs.setExpanded(String(turnId || ''), 'activity', next);
+    _applyActivityFold(panel, turnId);
+    if (!prefs) {
+      // No store (blocked site data): honour the click for this paint at
+      // least, rather than snapping back and looking broken.
+      panel.classList.toggle('is-collapsed', !next);
+    }
+    return next;
+  }
+
+  function _buildRestoredWorkbench(activity, turnId) {
     if (!Array.isArray(activity) || !activity.length) return null;
     var rows = _activityRowsHtml(activity);
     if (!rows) return null;
@@ -4964,12 +5014,13 @@
       '</div>';
     var header = panel.querySelector('.agent-progress-header');
     if (header) {
+      var foldTurn = String(turnId || '');
       function toggle() {
-        panel.classList.toggle('is-collapsed');
-        var collapsed = panel.classList.contains('is-collapsed');
-        var chev = panel.querySelector('.agent-progress-chevron');
-        if (chev) chev.textContent = collapsed ? '\u25B8' : '\u25BE';
-        header.setAttribute('aria-expanded', String(!collapsed));
+        // Routed through the preference store so the choice survives the
+        // next token, the terminal frame, and a re-render from history.
+        // Flipping the class here directly is what made the fold a
+        // property of the last paint instead of of the reader.
+        _toggleActivityFold(panel, foldTurn);
       }
       header.addEventListener('click', toggle);
       header.addEventListener('keydown', function(e) {
@@ -5082,7 +5133,13 @@
       restoredActivity = KazmaTurnDocument.activityOf(opts.parts);
     }
     if (role === 'assistant' && restoredActivity && restoredActivity.length) {
-      var cotPanel = _buildRestoredWorkbench(restoredActivity);
+      // Same turn id the renderer will bind this bubble under, so a fold
+      // the reader opened before a refresh comes back open rather than
+      // being a different turn as far as the preference store is
+      // concerned.
+      var cotPanel = _buildRestoredWorkbench(
+        restoredActivity, String((opts && (opts.turnId || opts.turn_id)) || '')
+      );
       if (cotPanel) {
         var textWrap = wrapper.querySelector('.message-text');
         if (textWrap) textWrap.parentNode.insertBefore(cotPanel, textWrap);
@@ -6953,6 +7010,10 @@
 
     chatSessionId = sessionId;
     persistSessionId();
+    // After the assignment, not before: _resetSessionTurnState runs while
+    // chatSessionId is still the OLD session, and pointing the preference
+    // store at it there would have loaded the session being left.
+    _syncPrefsSession();
 
     // Connect to Central WebSocket Telemetry Bus for THIS session
     // (connect is a no-op if already OPEN on the same sessionId).
@@ -7215,6 +7276,7 @@
 
     chatSessionId = generateSessionId();
     persistSessionId();
+    _syncPrefsSession();
     messagesEl.innerHTML =
       '<div class="chat-welcome">' +
         '<div class="welcome-icon"><img src="/static/img/kazma-icon.png" alt="Kazma" class="welcome-logo"></div>' +
@@ -7555,6 +7617,37 @@
   // it owns the child list, derived from the document, keyed by the same
   // partKey the document dedupes with. Everything below is the adapter.
 
+  /**
+   * Who decides whether a fold is open.
+   *
+   * Invariant U08: "Event processing never changes disclosure
+   * preferences." Before modules/turn_preferences.js there was no owner —
+   * _paintWorkbenchSlot recomputed the fold from EXECUTION state on every
+   * pass, so a reader who collapsed the thoughts panel had it reopened by
+   * the next token. The document says what a turn contains; this store
+   * says whether the reader wants to look at it; nothing else writes
+   * either.
+   */
+  var _prefs = null;
+  function _turnPrefs() {
+    if (_prefs) return _prefs;
+    var TP = window.KazmaTurnPreferences;
+    if (!TP || typeof TP.create !== 'function') return null;
+    _prefs = TP.create({ sessionId: chatSessionId || '' });
+    return _prefs;
+  }
+
+  /** Should this turn's activity disclosure be open right now?
+   *
+   *  Default collapsed (plan §3). A preference, once expressed, outranks
+   *  the default for as long as the tab lives — including across the
+   *  terminal frame, which is where the old code flipped it back. */
+  function _activityExpanded(turnId) {
+    var prefs = _turnPrefs();
+    if (!prefs) return false;
+    return prefs.isExpanded(String(turnId || ''), 'activity', false);
+  }
+
   var _view = null;
   function _turnView() {
     if (_view) return _view;
@@ -7664,18 +7757,13 @@
     var done = !!(doc && (doc.status === 'done' || doc.status === 'error'));
     panel.classList.toggle('is-done', done);
     panel.classList.toggle('is-active', !done);
-    // Live fold stays OPEN so thoughts are readable. Do not collapse at
-    // the terminal frame (that yanked the answer). Next beginTurn folds
-    // previous panels.
-    if (!done) {
-      panel.classList.remove('is-collapsed', 'kazma-cot-restored');
-      var liveChev2 = panel.querySelector('.agent-progress-chevron');
-      if (liveChev2) liveChev2.textContent = '\u25BE';
-      var liveHdr2 = panel.querySelector('.agent-progress-header');
-      if (liveHdr2) liveHdr2.setAttribute('aria-expanded', 'true');
-    } else {
-      panel.classList.remove('kazma-cot-restored');
-    }
+    // The fold follows the READER, not the turn. This used to force the
+    // panel open on every live pass and the reader could not keep it
+    // shut; before that it collapsed at the terminal frame and yanked the
+    // answer out of view. Both were the same mistake — execution state
+    // deciding a presentation preference (invariant U08).
+    _applyActivityFold(panel, (doc && doc.turnId) || '');
+    panel.classList.remove('kazma-cot-restored');
     var titleEl = panel.querySelector('.agent-progress-title');
     if (titleEl) {
       titleEl.textContent = done
@@ -7731,17 +7819,18 @@
         return t;
       }
       if (entry.kind === 'workbench') {
-        var panel = _buildRestoredWorkbench(_activityOfDoc(ctx.doc));
+        var turnId = String((ctx.doc && ctx.doc.turnId) || '');
+        var panel = _buildRestoredWorkbench(_activityOfDoc(ctx.doc), turnId);
         if (!panel) return null;
         var finished = ctx.doc && (ctx.doc.status === 'done' || ctx.doc.status === 'error');
         if (!finished) {
-          panel.classList.remove('is-collapsed', 'is-done', 'kazma-cot-restored');
+          panel.classList.remove('is-done', 'kazma-cot-restored');
           panel.classList.add('is-active');
-          var liveChev = panel.querySelector('.agent-progress-chevron');
-          if (liveChev) liveChev.textContent = '\u25BE';
-          var liveHdr = panel.querySelector('.agent-progress-header');
-          if (liveHdr) liveHdr.setAttribute('aria-expanded', 'true');
         }
+        // Collapsed unless this reader said otherwise — for a live turn
+        // exactly as for a restored one. A new turn starts collapsed
+        // because it has no preference yet, not because it is new.
+        _applyActivityFold(panel, turnId);
         return panel;
       }
       if (entry.kind === 'hitl') return _buildHitlSlotCard(entry.part, ctx, entry.state);

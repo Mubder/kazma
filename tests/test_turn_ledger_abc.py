@@ -335,8 +335,26 @@ def test_terminal_cot_swap_preserves_expansion() -> None:
     )
     assert "toggle('is-collapsed'" not in paint
     assert "list.innerHTML = html;" in paint  # rows are replaced, the panel is not
-    restored = chat.split("function _buildRestoredWorkbench(activity)", 1)[1].split("\n  function ", 1)[0]
-    assert "is-collapsed" in restored  # history builds still start collapsed
+    # "History builds start collapsed" is no longer a property of the
+    # builder: the fold is read from turn_preferences.js and defaults to
+    # collapsed when the reader has expressed nothing
+    # (docs/plans/UNIFIED_TURN_BLOCK.md section 3, invariant U08). The
+    # incident this line protects — a rebuild smuggling the collapse back
+    # in over a reader who opened it — is now protected by there being
+    # exactly ONE writer, so that is what is asserted.
+    restored = chat.split(
+        "function _buildRestoredWorkbench(activity, turnId)", 1
+    )[1].split("\n  function ", 1)[0]
+    assert "is-collapsed" in restored, "the builder no longer starts collapsed"
+    assert "_applyActivityFold" in paint, (
+        "the painter no longer asks the preference store what the reader "
+        "wanted — it is deciding the fold from execution state again"
+    )
+    writers = chat.count("prefs.setExpanded(")
+    assert writers == 1, (
+        f"{writers} writers of the disclosure preference; there must be "
+        f"exactly one, and it must be the reader's gesture"
+    )
 
 
 def test_cot_steps_do_not_trap_page_scroll() -> None:

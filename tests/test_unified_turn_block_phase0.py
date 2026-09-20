@@ -106,16 +106,21 @@ def test_no_live_task_card_styles() -> None:
 # ══════════════════════════════════════════════════════════════════════════
 
 
-@XFAIL_PHASE2
 def test_live_paint_does_not_reopen_collapsed_thoughts() -> None:
     """Invariant U08: "Event processing never changes disclosure
     preferences."
 
-    ``_paintWorkbenchSlot`` removes ``is-collapsed`` and forces
-    ``aria-expanded="true"`` on every live pass, so a user who folds the
-    panel has it reopened by the next token. Commit ``afbd22dd`` made this
-    deliberate; the unified plan reverses the decision and moves expansion
-    to a preference the renderer reads and events never write.
+    ``_paintWorkbenchSlot`` used to remove ``is-collapsed`` and force
+    ``aria-expanded="true"`` on every live pass, so a reader who folded the
+    panel had it reopened by the next token. Commit ``afbd22dd`` made that
+    deliberate after the opposite bug — collapsing at the terminal frame
+    yanked the answer out of view — and the two kept trading places because
+    neither separated "what the reader asked for" from "what the turn is
+    doing".
+
+    Landed in Phase 2: the fold is read from ``turn_preferences.js`` and
+    written only by a reader gesture. Behavioral coverage, including that
+    50 repaints move nothing, is ``tests/js/test_turn_preferences.js``.
     """
     src = _chat_js()
     start = src.index("function _paintWorkbenchSlot(")
@@ -129,7 +134,6 @@ def test_live_paint_does_not_reopen_collapsed_thoughts() -> None:
     )
 
 
-@XFAIL_PHASE2
 def test_expansion_preference_has_an_owner() -> None:
     """Plan §5: expansion state is owned by a preference store the renderer
     reads — not recomputed from execution state on each paint."""
@@ -139,9 +143,24 @@ def test_expansion_preference_has_an_owner() -> None:
         "recomputed by _paintWorkbenchSlot from execution state "
         "(turn_visibility.js is the hidden-tab title badge, not this)"
     )
-    src = owner.read_text(encoding="utf-8").lower()
-    assert "expand" in src or "collapse" in src, (
+    src = owner.read_text(encoding="utf-8")
+    low = src.lower()
+    assert "expand" in low or "collapse" in low, (
         "the preference owner does not model expansion at all"
+    )
+    # Plan §3: "Preferences never travel as execution facts."
+    assert "fetch(" not in src and "XMLHttpRequest" not in src, (
+        "the preference store talks to the server; a preference that rides "
+        "on an execution record can be replayed onto someone else's screen"
+    )
+    # A module nobody loads protects nothing.
+    chat_html = _chat_html()
+    assert "modules/turn_preferences.js" in chat_html, (
+        "turn_preferences.js is not loaded by the chat page"
+    )
+    chat = _chat_js()
+    assert "_toggleActivityFold" in chat and "_applyActivityFold" in chat, (
+        "chat.js does not route the fold through the preference store"
     )
 
 
@@ -261,3 +280,31 @@ def test_superseded_plans_carry_a_notice() -> None:
         assert "UNIFIED_TURN_BLOCK.md" in text, (
             f"{name} does not say what supersedes it"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Phase 2 — the fold follows the reader (driven under node)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def test_disclosure_preference_behaviors_under_node() -> None:
+    """Drive the store and the two chat.js fold helpers on a fake DOM.
+
+    Substring assertions pass happily while the fold still snaps back on
+    the next token, which is the bug the whole module exists to end — and
+    which has been "fixed" in both directions twice already. The node suite
+    re-renders 50 times in every execution state and asserts nothing moves.
+    """
+    node = shutil.which("node")
+    if not node:  # pragma: no cover - CI always has node
+        pytest.skip("node not available")
+    script = ROOT / "tests" / "js" / "test_turn_preferences.js"
+    assert script.is_file()
+    proc = subprocess.run(
+        [node, str(script)],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
