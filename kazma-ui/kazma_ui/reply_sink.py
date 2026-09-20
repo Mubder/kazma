@@ -233,6 +233,35 @@ def close_reply_turn(thread_id: str, session_id: str = "", turn_id: str = "") ->
         logger.debug("[reply_sink] close_reply_turn failed", exc_info=True)
 
 
+def _thread_has_live_gate(thread_id: str) -> bool:
+    """True when the gate registry still has an unanswered question here.
+
+    The registry is the decision authority (AGENTS.md §30); ``LIVE_STATES``
+    is pending/claimed/resuming, all of which mean the turn has not
+    finished. Used to rejoin an in-flight turn when the stored row's
+    ``open`` flag has already been cleared.
+
+    Fail-CLOSED on error, deliberately: if the registry cannot be read,
+    this returns False and the caller falls back to its previous
+    behaviour. A wrong True would glue a genuinely new question onto the
+    previous turn's row, which is worse than the bug it fixes.
+    """
+    if not thread_id:
+        return False
+    try:
+        from kazma_core.safety.hitl_gates import (
+            gate_registry_enabled,
+            live_gates,
+        )
+
+        if not gate_registry_enabled():
+            return False
+        return bool(live_gates(thread_id))
+    except Exception:
+        logger.debug("[reply_sink] live-gate probe failed", exc_info=True)
+        return False
+
+
 def resolve_reply_turn(thread_id: str, session_id: str = "") -> str:
     """Turn id to write under on a RESUME request (approve / steer).
 
@@ -260,17 +289,32 @@ def resolve_reply_turn(thread_id: str, session_id: str = "") -> str:
                     # in-flight turn; a user row below it means the open
                     # marker is stale.
                     break
-                if m.get(_OPEN) and m.get("turn_id"):
+                # The row's `open` flag is the weakest authority here. A
+                # LIVE gate on this thread means a question is still
+                # outstanding, so the turn is not over however that flag
+                # was left — and rejoining is the whole point of this
+                # function (see the docstring: "two bubbles for one
+                # question").
+                #
+                # Without this, a leg that finished without pausing closed
+                # the turn, the next tool call minted a new id, and every
+                # gate decided under the old one was orphaned on screen
+                # (2026-09-20).
+                if m.get("turn_id") and (
+                    m.get(_OPEN) or _thread_has_live_gate(thread_id)
+                ):
                     adopted = str(m["turn_id"])
+                    why = "open flag" if m.get(_OPEN) else "live gate"
                     if thread_id:
                         with _lock:
                             _open_turns[thread_id] = adopted
                             _open_turns.move_to_end(thread_id)
                     logger.info(
                         "[reply_sink] adopted open turn %s from stored row "
-                        "(thread=%s)",
+                        "(thread=%s, via=%s)",
                         adopted[:12],
                         (thread_id or "")[:12],
+                        why,
                     )
                     return adopted
                 break

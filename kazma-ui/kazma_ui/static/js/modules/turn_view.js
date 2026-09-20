@@ -575,6 +575,14 @@
       var parts = (doc && doc.parts) || [];
       var group = slots['approvals'];
       var groupUp = !!(group && group.parentNode === content);
+      //: Every gate key the document holds. Used twice below: once to
+      //: find a gate with no card, once to find a card with no gate.
+      var docGateKeys = {};
+      for (var dk = 0; dk < parts.length; dk++) {
+        if (parts[dk] && parts[dk].type === 'hitl') {
+          docGateKeys[gateSlotKey(parts[dk], TD)] = 1;
+        }
+      }
       for (var i = 0; i < parts.length; i++) {
         if (!parts[i] || parts[i].type !== 'hitl') continue;
         // Only a gate that COULD have produced a card counts. A part with no
@@ -600,6 +608,50 @@
           issues.push('gate-missing:' + gk);
         }
       }
+      // ── A card the document has stopped tracking ───────────────
+      //
+      // The inverse of `gate-missing:`, and the direction nothing
+      // checked. A card whose gate is absent from `doc.parts` is
+      // ORPHANED: the renderer will not reposition it (it is not in the
+      // plan), will not repaint it (paint runs for planned slots only)
+      // and will not remove it (contract 4). It simply sits there,
+      // frozen at whatever it last said, while the painter pushes it
+      // below the rows that are still tracked.
+      //
+      // That is what the 2026-09-20 report looked like from the reader's
+      // side — an early approval card below later ones — and every other
+      // invariant passed the whole time, because each one was true of
+      // the gates the document still knew about.
+      // Only when the document is TRACKING gates. A document with no
+      // hitl parts at all does not know anything yet — a fresh doc
+      // before hydration, or a truncated snapshot — and that is the
+      // ambiguity contract 4 protects, not an orphan. Flagging it would
+      // fire on every new document that lands over an existing card,
+      // and an invariant that cries wolf gets muted.
+      var tracking = false;
+      for (var tk in docGateKeys) {
+        if (Object.prototype.hasOwnProperty.call(docGateKeys, tk)) {
+          tracking = true;
+          break;
+        }
+      }
+      if (groupUp && tracking) {
+        var orphans = [];
+        var cards;
+        try {
+          cards = group.querySelectorAll('[data-gate-key]');
+        } catch (eO) { cards = null; }
+        for (var oi = 0; cards && oi < cards.length; oi++) {
+          var ok = '';
+          try { ok = String(cards[oi].getAttribute('data-gate-key') || ''); }
+          catch (eA) { ok = ''; }
+          if (ok && !docGateKeys[ok]) orphans.push(ok);
+        }
+        if (orphans.length) {
+          issues.push('orphaned-gate:' + orphans.join(','));
+        }
+      }
+
       // ── U02: one of each region, per turn ──────────────────────
       //
       // A duplicate is invisible to every other check: the answer is
