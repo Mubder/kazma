@@ -641,11 +641,13 @@
       return activityToParts([step]);
     }
     if (type === 'tool_start' || type === 'tool_call' || type === 'tool_lifecycle') {
+      var toolState = ev.status === 'tool_completed' ? 'done'
+        : (ev.status === 'tool_failed' ? 'failed' : 'running');
       var startPart = {
         type: 'tool',
         name: String(ev.tool_name || ev.name || step.title || 'tool'),
-        result: String(ev.inputs || ev.args || ev.detail || step.detail || ''),
-        state: 'running',
+        result: String(ev.result || ev.error || ev.inputs || ev.args || ev.detail || step.detail || ''),
+        state: toolState,
       };
       if (ev.tool_call_id) startPart.call_id = String(ev.tool_call_id);
       return [startPart];
@@ -666,6 +668,18 @@
       return [{ type: 'status', title: title, state: 'running' }];
     }
     return [];
+  }
+
+  // An action has one start boundary even when multiple transports/reporters
+  // describe it. A later update must not consume the next model invocation's
+  // text. Use document identity, not event sequence or rendered content.
+  // Callers require an action ID before destructive reclassification: legacy
+  // telemetry without identity cannot establish a new stream boundary.
+  function hasPart(doc, part) {
+    var key = partKey(part);
+    return (doc.parts || []).some(function (existing) {
+      return partKey(existing) === key;
+    });
   }
 
   function applyEvent(doc, ev) {
@@ -869,8 +883,13 @@
           && typeof hitlPayload.view === 'object') {
         hitlPart.view = hitlPayload.view;
       }
-      // The model asked before it acted; what it said was thinking.
-      next = foldNarration(next);
+      // Only a NEW request starts a boundary. Claims, settlement, and repeat
+      // announcements describe the earlier request, potentially while the
+      // next response is already streaming. Folding on those erased both
+      // the answer region and its token prefix until another token arrived.
+      if (hitlState === 'pending' && iid && !hasPart(next, hitlPart)) {
+        next = foldNarration(next);
+      }
       next.parts = mergeParts(next.parts, [hitlPart]);
       // Any pending gate pauses the turn — not just the newest one. With one
       // part per gate, "the last hitl part" is the gate asked most recently,
@@ -878,11 +897,14 @@
       // off it reported "streaming" while the graph sat blocked.
       var mergedHitl = hitlPartOf(next.parts);
       var resolved = String((mergedHitl && mergedHitl.state) || hitlState);
+      if (doc.status === 'done' || doc.status === 'error') return next;
       if (resolved === 'pending') next.status = 'paused';
       else if (resolved === 'approved' || resolved === 'denied' || resolved === 'inflight') {
         next.status = 'streaming';
-      } else {
-        next.status = 'done';
+      } else if (next.status === 'paused') {
+        // A settled gate is not a completed turn. Only the turn's terminal
+        // event can close it; further model output may still be in flight.
+        next.status = 'streaming';
       }
       return next;
     }
@@ -893,7 +915,8 @@
       // something and then asked to act, so what it said was thinking.
       // Only on start -- a tool_result arriving must not fold whatever
       // the next leg has already begun streaming.
-      if (toolish && String(extra[0].state || '') === 'running') {
+      if (toolish && String(extra[0].state || '') === 'running'
+          && toolCallIdOf(extra[0]) && !hasPart(next, extra[0])) {
         next = foldNarration(next);
       }
       next.parts = toolish
