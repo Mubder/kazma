@@ -610,10 +610,28 @@ restart. Until it does, recoverability is again a property asserted rather
 than measured — which is the precise failure this work was written to end.
 Do not describe backups as verified until a drill result exists in the log.
 
-**`snapshots.db` will prune but not shrink.** The retention fix commits its
-deletes now, so rows past retention do go. The 864 MB file only returns space
-when a `VACUUM` succeeds against a store that is written every few seconds,
-and that has not been demonstrated.
+**~~`snapshots.db` will prune but not shrink~~ — measured 2026-09-20, there is
+nothing to shrink.** The retention fix commits its deletes, and the worry was
+that space would not return without a `VACUUM` succeeding against a store
+written every few seconds.
+
+Measured on the live install, read-only, while the server was running
+(`PRAGMA page_count` x `page_size` against `freelist_count`):
+
+| store | size | free pages | reclaimable |
+|---|---:|---:|---:|
+| `snapshots.db` | 288.1 MB | 0 | **0.0%** |
+| `checkpoints.db` | 232.6 MB | 0 | **0.0%** |
+| `settings.db` | 29.4 MB | ~0 | 0.1% |
+| `memory_state.db` | 12.9 MB | 4.3 MB | 33.1% |
+
+`VACUUM` on `snapshots.db` would return zero bytes: every page is live data.
+The file is also 288 MB, not the 864 MB this entry claimed — that figure was
+stale and got repeated into a 2026-09-20 audit as a live concern.
+
+The only store with meaningful slack is `memory_state.db`, and 4.3 MB is not
+worth a maintenance window. Re-measure before acting; do not `VACUUM` on the
+assumption that a big file implies waste.
 
 **The injection A/B on OpenRouter's free tier cannot fit in a day.** The limit
 is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two
