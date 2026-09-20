@@ -445,8 +445,32 @@ def unified_turn_server(script: Script | None = None) -> Iterator[Harness]:
                 wait_live(base)
                 yield Harness(base=base, data_dir=tmp_dir, script=script)
             finally:
+                # The server must be FULLY down before this test ends.
+                #
+                # `app.py`'s shutdown handler calls `sm.close()` on the
+                # PROCESS-WIDE SessionManager singleton (~line 2437). A
+                # join that times out and carries on leaves that handler
+                # to fire during the NEXT test — closing the manager the
+                # next test's fixtures just created, whose `_conn` is
+                # then None. Observed in CI as `.FFFFF`: the first test
+                # passes and every one after it gets HTTP 500 from
+                # `SessionManager._upsert_db`.
+                #
+                # These tests deliberately abandon SSE streams mid-flight,
+                # so a graceful exit can wait on connections that will
+                # never close. `force_exit` is the escape hatch; it skips
+                # the lifespan shutdown, which is harmless here and
+                # strictly safer than letting it run late.
                 server.should_exit = True
                 thread.join(timeout=10.0)
+                if thread.is_alive():
+                    server.force_exit = True
+                    thread.join(timeout=15.0)
+                assert not thread.is_alive(), (
+                    "the harness server did not stop; its shutdown would "
+                    "run during the next test and close that test's "
+                    "SessionManager"
+                )
                 cs.close()
                 # Restore the environment BEFORE resetting the singletons,
                 # and both before this `with` block deletes `tmp_dir`.
