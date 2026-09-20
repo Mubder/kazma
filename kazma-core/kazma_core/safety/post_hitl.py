@@ -98,7 +98,29 @@ def interpreter_script_dirs() -> list[str]:
 
 
 def system_path_dirs() -> list[str]:
-    """Minimal PATH entries — no user home, no project node_modules, no secrets dir."""
+    """Minimal PATH entries for the post-HITL shell.
+
+    System directories, plus the directories that actually contain the
+    allowlisted build tools.
+
+    This docstring used to read "no user home, no project node_modules, no
+    secrets dir", and the first clause was not true: the ``shutil.which(tool)``
+    loop at the bottom has always added whatever directory ``uv`` resolves
+    from, which on this reference box is ``C:\\Users\\<user>\\.local\\bin`` —
+    a user-writable directory under the home the sentence said was excluded.
+    The ``interpreter_script_dirs()`` entries are the same category.
+
+    That is not a meaningful escalation on a single-operator install: anyone
+    who can write to the operator's home or the venv can already replace the
+    interpreter that runs Kazma. It is recorded accurately because a comment
+    that overstates a boundary is worse than no comment — the next reader
+    reasons from it, and this list is the boundary.
+
+    What this list is NOT is the thing that decides which commands may run.
+    That is the ``_SAFE_BINARIES`` allowlist in ``shell_exec``, which matches
+    by NAME before PATH is consulted. PATH only resolves a name that has
+    already been permitted.
+    """
     if os.name == "nt":
         windir = os.environ.get("WINDIR") or os.environ.get("SystemRoot") or r"C:\Windows"
         candidates = [
