@@ -921,6 +921,41 @@ is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two
 conditions) needs 56. Either split it across two days and label each side an
 anecdote, or raise the limit. Parked, not blocked on code.
 
+**Six tests pass or fail depending on how `fast_test.py` partitions the tree.**
+Measured 2026-09-21, same machine, same runner, three runs:
+
+| Run | Files | Result |
+|---|---|---|
+| `c11bdf8b`, unchanged tree | 648 | 9619 passed, **0 failed** |
+| HEAD with two new test files **removed** | 648 | 9620 passed, **0 failed** |
+| HEAD, full | 650 | 9638 passed, **7 failed** |
+
+The runner chunks by FILE, so adding two files repartitions the tree and
+changes which tests share a process. Replacing those two files' contents with
+inert placeholders — same names, same partition, no global state touched — still
+reproduces six of the seven, which is what rules out the new tests as the
+polluter. All six pass in isolation. CI is green because it happens to run a
+different partition, which is the same kind of luck as the control-plane store
+being safe by position.
+
+The two symptoms, recorded without a root cause because none has been proven:
+
+* `test_tools_quickwins.py::test_read_url_connection_error` — expects
+  `"Could not connect"`, gets `"Blocked URL … could not be resolved"`. The test
+  already stubs `ssrf.validate_url` (deliberately, with a comment explaining it
+  must not depend on live DNS), so the guard fired anyway and the stub did not
+  hold. Why it does not hold in a chunk but does alone is unknown. A plausible
+  mechanism — some earlier test reloading or re-importing the module and
+  dropping the monkeypatch — is a guess, and chasing it needs the chunk context
+  reproduced, not another reading of the file.
+* `test_turn_durable_presentation.py` (five tests) — `len(tools) == 1` gets `0`;
+  a shared store is not in the state the test expects.
+
+Not fixed here because the cause is not known, and a fix aimed at a guess would
+land as "reordered some fixtures, seems green now". The honest cost of leaving
+it: anyone who adds two test files can turn the suite red without touching any
+product code, and will reasonably blame their own diff first.
+
 **The control-plane write guard covers file tools, not the host.** Rule 0 in
 `check_path_access` makes Kazma's own databases unwritable by `file_write`,
 `file_append`, `file_apply_patch`, `file_delete` and the IDE service
