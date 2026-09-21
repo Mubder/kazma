@@ -210,10 +210,16 @@ def main() -> int:
         if not tables.isdigit() or int(tables) == 0:
             print("\nVERDICT: restore reported success but the database is EMPTY")
             return 1
-        print(f"\nVERDICT: the dump restores. {tables} tables rebuilt from the "
-              f"archive on a live server"
-              f"{'' if args.with_data else ' (schema only -- data integrity is '
-                 'covered by the drill read-back)'}.")
+        # NOTE: no multi-line expression inside an f-string brace. That is
+        # PEP 701 (Python 3.12+); this repo's venv is 3.12 but the live
+        # install runs 3.11, so it parsed here and was a SyntaxError there.
+        scope = (
+            "" if args.with_data
+            else " (schema only -- data integrity is covered by the drill "
+                 "read-back)"
+        )
+        print(f"\nVERDICT: the dump restores. {tables} tables rebuilt from "
+              f"the archive on a live server{scope}.")
         return 0
     finally:
         if SCRATCH_RE.match(scratch):
