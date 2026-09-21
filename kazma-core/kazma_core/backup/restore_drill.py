@@ -340,6 +340,42 @@ def _check_completeness(backup: Path, res: DrillResult) -> None:
     )
 
 
+def _run_pg_restore(
+    prefix: list[str],
+    dump: Path,
+    args: list[str],
+    **kw: Any,
+) -> subprocess.CompletedProcess:
+    """Run ``pg_restore`` over *dump*, by host path or by stdin as needed.
+
+    ``resolve_pg_restore`` may hand back
+    ``docker exec -i <container> pg_restore``. That binary runs INSIDE the
+    container and cannot see a host path, so the archive has to arrive on
+    stdin instead.
+
+    Both drill tiers go through this function, because only one of them used
+    to know. The TOC check learned it on its first live run and started
+    piping; the deep data check was added a week later, kept
+    ``[*prefix, "--file=-", str(dump)]``, and therefore never once verified a
+    data section on a containerised Postgres. Nobody noticed because the deep
+    tier fires every 168 hours: it failed on its FIRST scheduled run, seven
+    days after it landed, with
+
+        could not open input file "C:\\Users\\...\\pg_shared_*.dump"
+
+    which reads like a missing or corrupt backup. The dump was 1.9 GB and
+    perfectly healthy; only the drill was broken, which is the worst way for
+    a backup check to fail — it cries wolf about the one thing you cannot
+    afford to doubt.
+
+    One function so the third caller cannot repeat it.
+    """
+    if prefix and "docker" in prefix[0].lower():
+        with dump.open("rb") as fh:
+            return subprocess.run([*prefix, *args], stdin=fh, **kw)
+    return subprocess.run([*prefix, *args, str(dump)], **kw)
+
+
 def _check_pg_dump(dump: Path, res: DrillResult) -> None:
     """Parse the archive TOC. Reads only; writes to no database."""
     try:
@@ -363,25 +399,13 @@ def _check_pg_dump(dump: Path, res: DrillResult) -> None:
         res.add("postgres:toc", True, f"pg_restore unavailable, header only ({exc})")
         return
 
-    # resolve_pg_restore may hand back "docker exec -i <container> pg_restore".
-    # That tool runs INSIDE the container and cannot see a host path -- the
-    # first run of this drill against the live install failed with
-    # 'could not open input file "C:\\Users\\..."'. Piping the archive over
-    # stdin is what actually works, and is how the containerised deployment
-    # shape has to be verified.
-    via_docker = bool(prefix) and "docker" in prefix[0].lower()
+    # Host path vs stdin is decided in one place now -- see _run_pg_restore.
     try:
-        if via_docker:
-            with dump.open("rb") as fh:
-                proc = subprocess.run(
-                    [*prefix, "--list"], stdin=fh, capture_output=True,
-                    text=True, encoding="utf-8", errors="replace", timeout=_PG_LIST_TIMEOUT_S, check=False,
-                )
-        else:
-            proc = subprocess.run(
-                [*prefix, "--list", str(dump)], capture_output=True,
-                text=True, encoding="utf-8", errors="replace", timeout=_PG_LIST_TIMEOUT_S, check=False,
-            )
+        proc = _run_pg_restore(
+            prefix, dump, ["--list"], capture_output=True,
+            text=True, encoding="utf-8", errors="replace",
+            timeout=_PG_LIST_TIMEOUT_S, check=False,
+        )
     except Exception as exc:  # noqa: BLE001
         res.add("postgres:toc", False, f"pg_restore --list would not run: {exc}")
         return
@@ -483,8 +507,10 @@ def _check_pg_data_section(dump: Path, res: DrillResult) -> None:
     started = time.time()
     try:
         with open(os.devnull, "wb") as sink:
-            proc = subprocess.run(
-                [*prefix, "--file=-", str(dump)],
+            # Was [*prefix, "--file=-", str(dump)] -- a host path handed to a
+            # pg_restore running inside the container. See _run_pg_restore.
+            proc = _run_pg_restore(
+                prefix, dump, ["--file=-"],
                 stdout=sink,
                 stderr=subprocess.PIPE,
                 timeout=_DEEP_PG_TIMEOUT_S,
