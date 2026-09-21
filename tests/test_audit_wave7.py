@@ -70,14 +70,46 @@ def test_slack_and_discord_output_ids() -> None:
 
 
 def test_fork_writes_full_state_not_just_messages() -> None:
-    """M-8: aupdate_state gets the snapshot dict, not messages-only."""
+    """M-8: fork persists the whole snapshot, and chat_id never enters it.
+
+    The write lives in ``checkpoint_payload_from_snapshot``. Gateway fork
+    calls ``apply_snapshot_to_thread`` with that payload. A messages-only
+    dict is not the checkpoint update.
+    """
+    from kazma_core.time_travel import checkpoint_payload_from_snapshot
+
     src = Path("kazma-gateway/kazma_gateway/agent_handler/graph.py").read_text(
         encoding="utf-8"
     )
-    assert "await graph.aupdate_state(new_config, state)" in src
-    assert 'aupdate_state(new_config, {"messages": state.get("messages", [])})' not in src
-    assert 'gw.pop("chat_id", None)' in src
-    assert "active_thread" in src  # comment: do not overwrite
+    fork = src.split("async def _handle_fork", 1)[1].split("async def ", 1)[0]
+    assert "apply_snapshot_to_thread(graph, state, new_thread_id)" in fork
+    assert 'aupdate_state(new_config, {"messages": state.get("messages", [])})' not in fork
+    assert "active_thread" in fork  # comment: do not overwrite
+
+    payload = checkpoint_payload_from_snapshot(
+        {
+            "thread_id": "source",
+            "messages": [{"role": "user", "content": "hi"}],
+            "scratchpad": {"draft": "kept"},
+            "last_model": "model-a",
+            "_gateway": {
+                "thread_id": "source",
+                "chat_id": "999",
+                "user_id": "operator",
+                "message_id": "7",
+            },
+        },
+        "fork-thread",
+    )
+    assert payload["messages"][0]["content"] == "hi"
+    assert payload["scratchpad"] == {"draft": "kept"}
+    assert payload["last_model"] == "model-a"
+    assert payload["thread_id"] == "fork-thread"
+    assert set(payload) >= {"messages", "scratchpad", "last_model", "_gateway"}
+    assert "chat_id" not in payload["_gateway"]
+    assert "user_id" not in payload["_gateway"]
+    assert "message_id" not in payload["_gateway"]
+    assert payload["_gateway"]["thread_id"] == "fork-thread"
 
 
 def test_pg_dump_stale_hours_tracks_cadence() -> None:
