@@ -463,6 +463,16 @@ def register_system_tools(registry: Any) -> None:
                 for check in candidates_a:
                     if not check or check.startswith("-"):
                         continue
+                    from kazma_core.workspace.path_policy import (
+                        control_plane_store_targeted,
+                    )
+
+                    targeted = control_plane_store_targeted(check, cwd=cwd_s)
+                    if targeted:
+                        return (
+                            "Error: Kazma control-plane store — never writable "
+                            f"by shell_exec ({targeted})."
+                        )
                     # Rough path detection
                     looks_path = (
                         check.startswith("/")

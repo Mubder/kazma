@@ -860,20 +860,15 @@ land as "reordered some fixtures, seems green now". The honest cost of leaving
 it: anyone who adds two test files can turn the suite red without touching any
 product code, and will reasonably blame their own diff first.
 
-**The control-plane write guard covers file tools, not the host.** Rule 0 in
+**The control-plane write guard covers file tools, shell arguments, and named stores in `python_exec`.** Rule 0 in
 `check_path_access` makes Kazma's own databases unwritable by `file_write`,
-`file_append`, `file_apply_patch`, `file_delete` and the IDE service
-(2026-09-21). It does nothing about `shell_exec`, `python_exec` or
-`code_exec`, which do not go through path policy at all — an approved
-`sqlite3 kazma-data/hitl_gates.db "update ..."` still works. That is the
-existing "approval is consent, not containment" line below, and it is not a
-regression; it is recorded here because a guard named "never writable" invites
-the reader to assume more than it delivers. What the rule actually removes is
-the *quiet* route: `file_write` is danger-tier, but "Allow tool (session)"
-grants it for ~30 minutes, and inside that window one click the operator read
-as "let it write files" could forge approvals for every danger-tier action
-thereafter. A shell command that edits the registry is at least legible on the
-approval card.
+`file_append`, `file_apply_patch`, `file_delete` and the IDE service.
+`shell_exec` refuses an argument that resolves to one of those stores, and
+`python_exec` refuses source that names one (`hitl_gates.db` and the other
+`control_plane_db_names()`). A session grant does not skip rule 0. What
+remains is code that builds the path without spelling the filename, and a
+shell binary that writes a store without putting that path in its arguments.
+Approval is still consent for every other command.
 
 It is also **SQLite-only by construction**. The rule matches path suffixes
 under `data_dir()`; with a Postgres backend the gate registry is not a file
@@ -892,15 +887,15 @@ re-reads the file the cache exists to avoid reading. That was half right and
 is worth correcting rather than quietly reversing: it holds for a 40 MB PDF,
 where what the cache saves is the *parse*, and not for the source files an
 agent actually writes and reads back, where a blake2b over a few KB is
-microseconds. Files up to `_HASH_MAX_BYTES` (1 MB) now carry a digest; larger
-ones keep the weaker stamp.
+microseconds. Files up to `_HASH_MAX_BYTES` (1 MB) carry a digest of every
+byte. Larger files carry a digest of eight windows spread through the file,
+so a same-tick same-length rewrite of the head, the tail, or one of those
+windows is seen without re-reading a 40 MB PDF.
 
-**So the residual survives only above 1 MB**, where a same-tick same-length
-rewrite is correspondingly less likely and the parse cost is what matters.
-Both halves are pinned: one test reproduces the collision deterministically
-with `os.utime`, winding the mtime back to the exact nanosecond of the first
-write rather than waiting for luck, and another asserts large files still skip
-the digest — so "hash everything" cannot creep back in without going red.
+**The residual is a rewrite that lands only in a gap between those windows.**
+Both halves are pinned: one test reproduces the small-file collision with
+`os.utime`, and another shows a leading-byte change in a file over 1 MB
+changes the sampled digest.
 
 ## Scope
 

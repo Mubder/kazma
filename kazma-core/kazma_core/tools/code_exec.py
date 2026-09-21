@@ -574,6 +574,15 @@ async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:
     if not code or not code.strip():
         return "Error: No code provided."
 
+    from kazma_core.workspace.path_policy import code_mentions_control_plane
+
+    mentioned = code_mentions_control_plane(code)
+    if mentioned:
+        return (
+            "Error: Kazma control-plane store — never writable by python_exec "
+            f"({mentioned})."
+        )
+
     try:
         from kazma_core.sandbox.e2b import e2b_enabled, run_python as _e2b_run
 
