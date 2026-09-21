@@ -803,6 +803,7 @@ class ConfigStore:
                 self._pg_pool()
                 logger.info("[ConfigStore] using Postgres backend")
                 self._warn_if_stale_sqlite_shadow()
+                self._warn_if_data_dir_implies_isolation()
             except Exception as exc:
                 logger.error(
                     "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
@@ -820,6 +821,62 @@ class ConfigStore:
         # answer. Clearing it is as important as writing it: a stale warning
         # about staleness is worse than none, because it is believed.
         _mark_stale_settings_table(self._db_path, live=True)
+
+    def _warn_if_data_dir_implies_isolation(self) -> None:
+        """Say so when a relocated data dir is reading a SHARED config store.
+
+        ``KAZMA_DATA_DIR`` moves an install's files. It does not move its
+        settings when the backend is Postgres -- ``_use_postgres()`` keys off
+        ``KAZMA_DB_BACKEND`` / ``KAZMA_DATABASE_URL`` and nothing else -- so a
+        script, a test harness or a second checkout that points the data dir
+        at a scratch path still reads *and writes* the production store while
+        looking thoroughly isolated.
+
+        That is not hypothetical. The dev clone in this repo shared the
+        operator's live Postgres for days: ``kazma doctor`` gave different
+        answers on the two boxes, a test run wrote junk into the real
+        ``llm_calls.db``, and a ``vault://`` pointer written by one machine
+        resolved to nothing on the other -- which is the 2026-09-16 outage.
+
+        Deliberately a warning and not a behaviour change. ``KAZMA_DATA_DIR``
+        is documented as a *relocatable production layout* feature, so making
+        it imply SQLite would silently detach a legitimately relocated
+        production install from its own database. Loud beats clever here.
+
+        Restored 2026-09-21. This shipped once and was rolled back on
+        2026-09-17 in a bundle with the vault tripwire, because main was red
+        and only one of the two could be cleared of causing it. Neither was
+        the cause: the red runs were a 15-second teardown tax, fixed in
+        ``379ca476``, and ``KNOWN_GAPS`` now records the tripwire as *wrongly*
+        reverted. The condition for bringing this back was that the hang be
+        understood, and it is -- so it comes back unchanged, rather than
+        rewritten as if the original had been at fault.
+
+        One line at boot, best-effort, never fatal.
+        """
+        try:
+            raw = (os.environ.get("KAZMA_DATA_DIR") or "").strip()
+            if not raw:
+                return
+            from pathlib import Path as _Path
+
+            from kazma_core.paths import get_project_root
+
+            relocated = _Path(raw).expanduser().resolve()
+            default = (get_project_root() / "kazma-data").resolve()
+            if relocated == default:
+                return  # pointed at its own dir; nothing surprising
+            logger.warning(
+                "[ConfigStore] KAZMA_DATA_DIR relocates files to %s, but "
+                "settings come from POSTGRES, which is SHARED with every other "
+                "install pointing at the same KAZMA_DATABASE_URL. This process "
+                "can read and WRITE that store. If you meant an isolated "
+                "install, also set KAZMA_DB_BACKEND=sqlite; if you meant a "
+                "relocated production layout, this is correct and expected.",
+                relocated,
+            )
+        except Exception:  # noqa: BLE001 — a diagnostic must never fail boot
+            logger.debug("[ConfigStore] data-dir isolation check failed", exc_info=True)
 
     def _warn_if_stale_sqlite_shadow(self) -> None:
         """Say so when a dead SQLite settings DB is shadowing the live one.
