@@ -474,6 +474,22 @@ config present on a dev box is absent on the runner. Second: whether the hang
 is in this test at all or merely *after* it — the chunk file order shifts as
 test files are added, and the specific victim has moved between runs.
 
+**The first hypothesis is now instrumented** (2026-09-21). All six
+`subprocess.run` mocks in that file used `side_effect=[a, b, c, d]`, which
+raises `StopIteration` on the call after the last — inside a coroutine, close
+to the worst available error: unreadable, awkward for the async machinery, and
+able to present as a process that simply stops. They now use a `_scripted_run`
+helper that raises an `AssertionError` **naming the unscripted command** and
+listing the calls that preceded it.
+
+That does not fix the hang and is not claimed to. It converts one specific
+outcome from a chunk with no parseable tally into a sentence. If the next
+Linux run prints that assertion, the hypothesis is confirmed and the extra git
+invocation is named; if the hang persists silently, the hypothesis is wrong and
+the search moves on with one lead eliminated rather than still open. The
+tests behave identically for the calls they do script, so this costs nothing
+if it turns out to be the wrong lead.
+
 
 **On CI (Linux), 2026-09-17: 9,019 passed, 0 failed, 67 skipped, 3 xfailed —
 job green** (run `35152707624`, commit `a1cb6650`). Local Windows runs give
