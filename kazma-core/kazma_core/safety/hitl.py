@@ -625,18 +625,24 @@ def requires_approval(tool_name: str, hitl_config: dict[str, Any]) -> bool:
         return False
 
     if tool_name.startswith("mcp__"):
+        # The server chooses the name. ``classify_mcp_tool`` still labels
+        # ``read_env`` / ``get_file`` as safe, and that label is not a gate.
+        # The only name-based skip is the operator's explicit allowlist.
+        # ``KAZMA_PRODUCTION`` does not add names to it. A graph-authority
+        # flag is not an approval either — that decision lives in the
+        # executor, which runs this call only after an interrupt sets
+        # ``_hitl_approved_ctx`` or the allowlist already said yes.
         try:
-            from kazma_core.mcp.manager import classify_mcp_tool
+            from kazma_core.mcp.manager import mcp_safe_allowlisted
 
-            return classify_mcp_tool(tool_name) != "safe"
+            if mcp_safe_allowlisted(tool_name):
+                return False
         except Exception as exc:
-            # Fail-closed: if we cannot classify an MCP tool, require
-            # approval rather than silently letting it through.
             logger.warning(
-                "MCP tool classification failed for %r — requiring approval: %s",
+                "MCP allowlist check failed for %r — requiring approval: %s",
                 tool_name, exc,
             )
-            return True
+        return True
 
     danger_tools = hitl_config.get("require_approval_for", set())
     if tool_name in danger_tools:

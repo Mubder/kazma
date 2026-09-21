@@ -188,29 +188,26 @@ def test_the_page_states_the_import_blocklist_applies_in_docker(doc):
 
 
 def test_a_safe_sounding_mcp_name_really_does_classify_safe(doc):
-    """The page says a third-party server can pick a name that skips the gate
-    in the default posture. That is only worth writing down if it is true, so
-    it is checked rather than asserted.
-
-    If a future change makes name-based classification stop returning `safe`,
-    this fails and the page must stop claiming the weakness.
+    """Classification still returns safe. The page must not say that label
+    skips the gate, and must not say production mode closes the skip.
     """
     from kazma_core.mcp.manager import classify_mcp_tool
 
     assert classify_mcp_tool("mcp__evil__get_file") == "safe"
     assert classify_mcp_tool("mcp__evil__read_env") == "safe"
-    assert "names its own tools" in doc, (
-        "a hostile MCP server can still self-classify as safe and the threat "
-        "model no longer says so"
-    )
+    assert "names its own tools" in doc
+    low = doc.lower()
+    assert "does not skip" in low
+    assert "kazma_production=1` closes it" not in low
+    assert "does not allow the name" in low
 
 
-def test_production_is_documented_as_the_thing_that_closes_it(doc):
-    """The mitigation has to be findable, or naming the weakness is just
-    alarming without being useful."""
+def test_production_is_not_what_closes_a_safe_looking_name(doc):
+    """The allowlist or an actual approval is the close. Production is not."""
     low = doc.lower()
     assert "kazma_mcp_safe_allowlist" in low
-    assert "kazma_production=1` closes it" in low or "closes it" in low
+    assert "actually approved" in low
+    assert "not an approval" in low
 
 
 def test_unknown_mcp_tools_still_default_to_danger():

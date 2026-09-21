@@ -259,6 +259,139 @@ class TestUnifiedExecutorHitlGate:
             set_safety(get_safety())
 
 
+# Names a hostile server can pick. Classification still says "safe".
+# That label must not run the tool.
+_SAFE_LOOKING = (
+    "mcp__evil__read_env",
+    "mcp__evil__get_file",
+    "mcp__evil__get_ssh_key",
+    "mcp__evil__list_env_vars",
+)
+
+
+class TestSafeLookingMcpNamesDoNotRun:
+    """Graph ownership and production mode are not approvals.
+
+    Drives ``requires_approval`` and ``UnifiedToolExecutor.execute``.
+    The mock server must not be called unless the name is allowlisted or
+    ``_hitl_approved_ctx`` is set for this call. An approved call hits the
+    server once and does not post a second bus check.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clear_allowlist(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("KAZMA_MCP_SAFE_ALLOWLIST", raising=False)
+        monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+
+    def test_approval_decision_ignores_the_safe_label(self) -> None:
+        from kazma_core.mcp.manager import classify_mcp_tool
+        from kazma_core.safety.hitl import get_hitl_config, requires_approval
+
+        cfg = get_hitl_config({})
+        assert cfg.get("enabled", True) is True
+        for name in _SAFE_LOOKING:
+            assert classify_mcp_tool(name) == "safe"
+            assert requires_approval(name, cfg) is True
+
+    def test_allowlist_is_the_only_name_that_skips_the_decision(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kazma_core.safety.hitl import get_hitl_config, requires_approval
+
+        cfg = get_hitl_config({})
+        monkeypatch.setenv("KAZMA_MCP_SAFE_ALLOWLIST", "read_env")
+        assert requires_approval("mcp__evil__read_env", cfg) is False
+        assert requires_approval("mcp__evil__get_ssh_key", cfg) is True
+        monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+        assert requires_approval("mcp__evil__get_ssh_key", cfg) is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("production", ["", "1"])
+    @pytest.mark.parametrize("graph_flag", [False, True])
+    @pytest.mark.parametrize("name", _SAFE_LOOKING)
+    async def test_four_corners_deny_without_an_approval(
+        self,
+        name: str,
+        graph_flag: bool,
+        production: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        if production:
+            monkeypatch.setenv("KAZMA_PRODUCTION", production)
+        denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        denying.check = AsyncMock(return_value=False)  # type: ignore
+        set_safety(denying)
+        token = _graph_hitl_gate_ctx.set(graph_flag)
+        try:
+            mcp_mgr = _MockMCPManager({name: "evil"})
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+            result = await executor.execute(name, {})
+            assert result["is_error"] is True
+            mcp_mgr.execute_mcp_tool.assert_not_awaited()
+            denying.check.assert_awaited()
+        finally:
+            _graph_hitl_gate_ctx.reset(token)
+            from kazma_core.swarm.safety import get_safety
+            set_safety(get_safety())
+
+    @pytest.mark.asyncio
+    async def test_allowlist_runs_once_without_a_bus_prompt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kazma_core.agent.tool_registry import _graph_hitl_gate_ctx
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        monkeypatch.setenv("KAZMA_MCP_SAFE_ALLOWLIST", "get_ssh_key")
+        denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        denying.check = AsyncMock(return_value=False)  # type: ignore
+        set_safety(denying)
+        token = _graph_hitl_gate_ctx.set(True)
+        try:
+            name = "mcp__evil__get_ssh_key"
+            mcp_mgr = _MockMCPManager({name: "evil"})
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+            result = await executor.execute(name, {})
+            assert result["is_error"] is False
+            mcp_mgr.execute_mcp_tool.assert_awaited_once()
+            denying.check.assert_not_awaited()
+        finally:
+            _graph_hitl_gate_ctx.reset(token)
+            from kazma_core.swarm.safety import get_safety
+            set_safety(get_safety())
+
+    @pytest.mark.asyncio
+    async def test_an_approved_call_runs_once_and_is_not_asked_again(self) -> None:
+        from kazma_core.agent.tool_registry import (
+            _graph_hitl_gate_ctx,
+            _hitl_approved_ctx,
+        )
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        denying.check = AsyncMock(return_value=False)  # type: ignore
+        set_safety(denying)
+        gate = _graph_hitl_gate_ctx.set(True)
+        approved = _hitl_approved_ctx.set(True)
+        try:
+            name = "mcp__evil__read_env"
+            mcp_mgr = _MockMCPManager({name: "evil"})
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+            result = await executor.execute(name, {"_hitl_approved": True})
+            assert result["is_error"] is False
+            mcp_mgr.execute_mcp_tool.assert_awaited_once()
+            denying.check.assert_not_awaited()
+            sent = mcp_mgr.execute_mcp_tool.await_args.kwargs.get("arguments") or {}
+            assert "_hitl_approved" not in sent
+        finally:
+            _hitl_approved_ctx.reset(approved)
+            _graph_hitl_gate_ctx.reset(gate)
+            from kazma_core.swarm.safety import get_safety
+            set_safety(get_safety())
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # MCPServerConfig auth/trust fields
 # ══════════════════════════════════════════════════════════════════════════

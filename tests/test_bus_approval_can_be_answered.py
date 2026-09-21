@@ -150,7 +150,13 @@ class TestTheCardGetsARealId:
 class TestTheGraphIsNotOverruled:
     """Parsed, not grepped: the check must be real code, not a comment."""
 
-    def test_the_mcp_gate_defers_to_the_graph(self) -> None:
+    def test_the_mcp_gate_does_not_treat_graph_ownership_as_approval(self) -> None:
+        """The graph flag is set for the whole turn, including calls nobody approved.
+
+        Clearing ``force_hitl`` on that flag let ``read_env`` run. The skip
+        that prevents a second prompt is the approval ContextVar, set only
+        after this call was approved.
+        """
         src = _MANAGER.read_text(encoding="utf-8")
         tree = ast.parse(src)
         names = {
@@ -158,25 +164,33 @@ class TestTheGraphIsNotOverruled:
         } | {
             n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)
         }
-        assert "_graph_hitl_gate_ctx" in names, (
-            "the MCP approval gate does not consult the graph's HITL authority"
-        )
+        assert "_hitl_approved_ctx" in names
+        assert "_graph_hitl_gate_ctx" not in names
+        assert "_graph_owns_gate" not in names
 
     def test_it_turns_the_prompt_off_rather_than_approving(self) -> None:
-        """Deferring must skip the ASK, never fabricate a yes."""
+        """A recorded approval skips the ASK. It must not invent a yes."""
         src = _MANAGER.read_text(encoding="utf-8")
-        block = src.split("_graph_owns_gate = bool(", 1)[1][:800]
-        assert "force_hitl = False" in block
-        assert "approved = True" not in block, "deferring must not invent an approval"
+        assert "_hitl_already_approved = _hitl_approved_ctx.get()" in src
+        assert "if not _hitl_already_approved and not _server_trusted:" in src
+        assert "force_hitl = False" not in src
+        assert "approved = True" not in src.split("force_hitl = not mcp_safe_allowlisted", 1)[-1][:500]
 
-    def test_both_gates_now_honour_the_same_signal(self) -> None:
-        """The registry gate and the MCP gate must not drift apart again."""
+    def test_both_gates_honour_an_actual_approval(self) -> None:
+        """Local tools and MCP tools skip a second prompt on the same signal.
+
+        That signal is ``_hitl_approved_ctx``. The graph-authority flag stays
+        on the local registry, where the tool list is ours. It is not an
+        MCP approval.
+        """
         registry = (
             _ROOT / "kazma-core" / "kazma_core" / "agent" / "tool_registry.py"
         ).read_text(encoding="utf-8")
         manager = _MANAGER.read_text(encoding="utf-8")
-        for src, label in ((registry, "tool_registry"), (manager, "mcp.manager")):
-            assert "_graph_hitl_gate_ctx" in src, label
+        assert "_hitl_approved_ctx" in registry
+        assert "_hitl_approved_ctx" in manager
+        assert "_graph_hitl_gate_ctx" in registry
+        assert "_graph_hitl_gate_ctx" not in manager
 
 
 class TestTheCountdownIsHonest:
