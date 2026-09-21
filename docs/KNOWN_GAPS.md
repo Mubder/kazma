@@ -359,21 +359,22 @@ answer is a reduction rather than an elimination.
 
 ## The MCP bridge
 
-**An MCP server names its own tools, and in the default posture the name
-decides whether you see the call.** `classify_mcp_tool` reads the tool name —
-which is supplied by the third-party server — and a name matching a safe verb
-classifies `safe`. Verified 2026-09-13: `get_file`, `read_env` and bare `get`
-all classify **safe**, so a hostile or compromised MCP server can pick a name
-that skips the approval gate. `read_env` is the sharp example: `env` is
-deliberately absent from the `shell_exec` allowlist precisely because one
-approval should not become a credential dump, and an MCP tool called `read_env`
-runs with no approval at all.
+**An MCP server names its own tools. The name does not decide the call.**
+`classify_mcp_tool` still labels `get_file`, `read_env`, `get_ssh_key` and
+`list_env_vars` as **safe**. That label is not a gate. The tool runs only
+when it is on `KAZMA_MCP_SAFE_ALLOWLIST`, or when that specific call was
+approved. `KAZMA_PRODUCTION=1` does not add names to the allowlist, and the
+turn-wide "graph owns HITL" flag is not an approval of the call.
 
-**Closed 2026-09-17 in every posture.** Allowlist is the only HITL skip;
-`read_env` / `get_file` / `list_env_vars` no longer run unattended because
-their names look safe. `KAZMA_MCP_SAFE_ALLOWLIST` is the opt-out for tools
-you actually want unattended. Classification by name remains as a log
-label; it is not a gate.
+The 2026-09-17 note that said the allowlist close already covered the graph
+path was wrong while the executor treated that flag as a decision. A chat
+turn set the flag for every tool, including ones `requires_approval` had
+just waved through because the name looked safe. Both sites now use the
+allowlist. The executor asks unless the allowlist hit or this call was
+actually approved, so a second prompt is not posted after a real approval.
+A server marked `trust: trusted` remains an explicit opt-in that skips the
+executor gate; production ignores that mark unless
+`KAZMA_MCP_TRUSTED_IN_PROD=1`.
 
 **A bus-less approval has no session grant and no YOLO.** One decision, one
 tool call — those are properties of a chat thread, and a separate process has
@@ -568,12 +569,11 @@ rerun's output and kept one line. `exit=-11` is not a diagnosis. The runner
 now prints a 40-line tail for crashed chunks; without that this was
 unfixable by reading.
 
-**Still mislabelled:** `fast_test.py` reports a chunk exiting `1` (ordinary
-test failures) as "crashed/timed out", and chunks 00/03 still report `0p/0f`
-and trigger a per-file retry pass for reasons not yet understood — visible in
-the green run above as `chunk 00 crashed/timed out (exit=1) — retrying 156
-files individually`. The totals are correct; the label is not, and it costs
-whoever reads the log a wrong first hypothesis.
+**A parsed ordinary failure is not a crash.** `fast_test.py` prints a chunk
+whose tally parsed and exited 1 as `exit=1` and does not retry it. A retry
+happens when the process timed out, crashed, or exited 0/1 with no parseable
+tally. That last case is labeled `produced no parseable test tally`, which
+is a different problem from a red assertion.
 
 **`pytest tests/` is not the suite, and running only it hides failures for
 days.** `pyproject.toml` declares six testpaths; the habit here has been to

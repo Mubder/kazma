@@ -169,6 +169,27 @@ def _mcp_raw_tool_name(tool_name: str) -> str:
     return name
 
 
+def mcp_safe_allowlisted(tool_name: str) -> bool:
+    """True when the operator named this tool in ``KAZMA_MCP_SAFE_ALLOWLIST``.
+
+    The match is the full name the model calls (``mcp__server__read_env``) or
+    the leaf after the server segment (``read_env``). A safe-looking verb is
+    not an entry. ``KAZMA_PRODUCTION`` is not an entry. An empty variable
+    allowlists nothing.
+    """
+    raw = (os.environ.get("KAZMA_MCP_SAFE_ALLOWLIST") or "").strip()
+    if not raw:
+        return False
+    allow = {part.strip().lower() for part in raw.split(",") if part.strip()}
+    name = (tool_name or "").strip().lower()
+    if not name:
+        return False
+    if name in allow:
+        return True
+    leaf = _mcp_raw_tool_name(tool_name).strip().lower()
+    return bool(leaf) and leaf in allow
+
+
 _FS_PATH_KEYS = ("path", "paths", "directory", "filePath", "filepath",
                   "source", "destination", "src", "dst", "target", "folder")
 # Filesystem verbs that are writes but not always in `_MUTATOR_TOKENS`
@@ -2221,13 +2242,14 @@ class UnifiedToolExecutor:
             server_name = self._mcp.get_server_for_tool(tool_name)
             if server_name:
                 # ── HITL gate for MCP tools ──────────────────────────
-                # MCP tools are runtime-discovered and bypass the graph's
-                # static interrupt() gate. Classify by name pattern and
-                # route danger-tier tools through the swarm bus for approval.
-                # Skip if the graph already approved (double-gating prevention).
+                # MCP tools are runtime-discovered. A read-shaped name is not
+                # an approval. Skip the bus only when this call was actually
+                # approved (``_hitl_approved_ctx``, YOLO, or a thread grant)
+                # or the operator allowlisted the name. The graph-authority
+                # flag is set for the whole turn and is not that approval.
                 # Skip if the server is explicitly trusted (trust: trusted).
                 # We NEVER trust _hitl_approved from LLM args (prompt-injection
-                # risk); only the ContextVar set by graph_builder is honored.
+                # risk); only the ContextVar set after interrupt() is honored.
                 arguments.pop("_hitl_approved", None)
                 try:
                     from kazma_core.agent.tool_hooks import apply_pre_tool_hooks
@@ -2243,79 +2265,41 @@ class UnifiedToolExecutor:
                 if not _hitl_already_approved:
                     try:
                         from kazma_core.safety.hitl import get_current_thread_id
+                        from kazma_core.safety.hitl_grants import has_tool_grant
+                        from kazma_core.safety.task_grants import has_task_grant
                         from kazma_core.safety.yolo import is_yolo_active
 
                         _tid = get_current_thread_id()
-                        if _tid and is_yolo_active(_tid):
+                        # YOLO, a task grant, and a per-tool grant are
+                        # recorded approvals of this call. The graph-authority
+                        # flag is not: it is set for the whole tool-worker
+                        # turn, including tools the graph never asked about.
+                        if _tid and (
+                            is_yolo_active(_tid)
+                            or has_task_grant(_tid)
+                            or has_tool_grant(_tid, tool_name)
+                        ):
                             _hitl_already_approved = True
                     except Exception:
-                        logger.debug("[Unified] YOLO check skipped", exc_info=True)
+                        logger.debug("[Unified] approval-grant check skipped", exc_info=True)
                 _server_trusted = (
                     self._mcp.get_server_trust(server_name) == "trusted"
                 )
                 if not _hitl_already_approved and not _server_trusted:
-                    # Audit M10 / WP-3.6: untrusted MCP — force HITL for all
-                    # tools except explicit allowlist. "safe" name patterns are
-                    # not enough (list_keys, get_env, export_data, …).
-                    import os as _os_mcp
-
-                    allow_raw = (
-                        _os_mcp.environ.get("KAZMA_MCP_SAFE_ALLOWLIST") or ""
-                    ).strip()
-                    allowlist = {
-                        a.strip().lower()
-                        for a in allow_raw.split(",")
-                        if a.strip()
-                    }
+                    # The server picks the name. A read-shaped name
+                    # (``read_env``, ``get_ssh_key``) used to run on a chat
+                    # turn because the turn-wide graph-authority flag cleared
+                    # this gate after ``requires_approval`` had trusted the
+                    # classifier. Allowlist is the only name-based skip.
+                    # Production mode does not add names to it.
                     _tier = classify_mcp_tool(tool_name)
                     logger.debug(
-                        "[MCP] %s classified %s — HITL unless allowlisted",
+                        "[MCP] %s classified %s — HITL unless allowlisted "
+                        "or this call was approved",
                         tool_name,
                         _tier,
                     )
-                    # Tool *names* are supplied by the third-party server. A
-                    # name matching a safe verb (`read_env`, `get_file`) used
-                    # to skip HITL in the default posture — only production
-                    # force-gated. Names are the same untrusted channel as
-                    # output (audit 2026-09-17). Allowlist is the only skip.
-                    force_hitl = tool_name.lower() not in allowlist
-                    # The supervisor graph may already BE the HITL authority
-                    # for this turn. `LocalToolRegistry.execute` has skipped
-                    # this same bus gate on that signal for a while: a second
-                    # prompt asks the operator twice and can deadlock the turn,
-                    # because the bus waits for an approval they already gave
-                    # to the graph. This path never learned it, so MCP tools
-                    # prompted on Telegram and Discord while the operator was
-                    # in the Web UI answering the graph -- and on 2026-09-14
-                    # they watched two surfaces say REJECTED for a turn they
-                    # had approved.
-                    #
-                    # This does not widen what runs unasked. The graph is a
-                    # COMPLETE gate for these tools: `requires_approval` routes
-                    # `mcp__` names through `classify_mcp_tool` and treats
-                    # anything not 'safe' as needing approval -- the same tier
-                    # test used just above. When the graph holds the gate it
-                    # has already decided about this exact call.
-                    if force_hitl:
-                        try:
-                            from kazma_core.agent.tool_registry import (
-                                _graph_hitl_gate_ctx,
-                            )
-
-                            _graph_owns_gate = bool(_graph_hitl_gate_ctx.get())
-                        except Exception:
-                            logger.debug(
-                                "[MCP] graph-gate check unavailable", exc_info=True
-                            )
-                            _graph_owns_gate = False
-                        if _graph_owns_gate:
-                            logger.info(
-                                "[MCP] %s: the graph holds the HITL gate this "
-                                "turn - not posting a second bus approval",
-                                tool_name,
-                            )
-                            force_hitl = False
-
+                    force_hitl = not mcp_safe_allowlisted(tool_name)
                     if force_hitl:
                         try:
                             import json as _json

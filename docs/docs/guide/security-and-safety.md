@@ -332,7 +332,7 @@ SQLite `kazma-data/disclosure.db` enforces the transition chain `submitted → a
 10. **Set `KAZMA_HITL_CANONICAL_FLOOR=1`** on strict deployments so the danger-tool approval list cannot be narrowed below the canonical set.
 11. **Set `KAZMA_TRUSTED_PROXIES`** when behind nginx/Caddy/Docker. Peer `127.0.0.1` is not a credential.
 12. **Do not pin scraping through `proxy=`.** Direct hops use `PinHostAsyncTransport`; peer-private abort always.
-13. **If you connect MCP servers, set `KAZMA_MCP_SAFE_ALLOWLIST` or run with `KAZMA_PRODUCTION=1`.** In the default posture an MCP tool is classified by its *name*, and that name is supplied by the third-party server — `get_file`, `read_env` and a bare `get` all classify `safe` and skip the approval gate. `read_env` is the one to think about: `env` is deliberately absent from the `shell_exec` allowlist precisely so a single approval cannot become a credential dump. Production mode gates every MCP tool not on the allowlist, name irrelevant.
+13. **If you connect MCP servers, approve each call or name the tool in `KAZMA_MCP_SAFE_ALLOWLIST`.** The server supplies the tool name. `get_file`, `read_env`, `get_ssh_key` and `list_env_vars` still classify `safe`, and that label does not skip the gate. `read_env` is the one to think about: `env` is deliberately absent from the `shell_exec` allowlist precisely so a single approval cannot become a credential dump. `KAZMA_PRODUCTION=1` does not allow these names.
 
 ---
 
@@ -402,10 +402,10 @@ to discover it.
   consent, not containment.
 - [Known gaps](https://github.com/Mubder/kazma/blob/main/docs/KNOWN_GAPS.md)
   — open weaknesses, dated. Including one that affects **this** page's
-  defaults: in the default posture an MCP server's own tool name decides
-  whether you are asked to approve the call, so a server naming its tool
-  `read_env` runs unattended. `KAZMA_PRODUCTION=1` or `KAZMA_MCP_SAFE_ALLOWLIST`
-  closes that.
+  defaults: an MCP server's own tool name still classifies `read_env` as
+  safe, and that label is not an approval. The call runs when you approve
+  it, or when that name is on `KAZMA_MCP_SAFE_ALLOWLIST`. Production mode
+  does not close it.
 
 The fence reduces attack success. It does not eliminate it, and no honest number
 here will ever be 0%.

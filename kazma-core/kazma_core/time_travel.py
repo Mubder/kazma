@@ -55,6 +55,8 @@ __all__ = [
     "SnapshotRecord",
     "SnapshotRecorder",
     "SnapshotStore",
+    "apply_snapshot_to_thread",
+    "checkpoint_payload_from_snapshot",
     "create_recorder",
     "maintain_snapshots",
     "start_snapshot_maintenance_loop",
@@ -786,6 +788,61 @@ def maintain_snapshots(
         "remaining_old": remaining_old,
         "vacuum": vacuum_status,
     }
+
+
+# Platform ids stay out of graph state (AGENTS.md §2). Both rewind and fork
+# strip them so a snapshot that captured a routing sub-dict cannot put
+# chat_id back into the checkpoint.
+_SNAPSHOT_PLATFORM_IDS = ("chat_id", "user_id", "message_id")
+
+
+def checkpoint_payload_from_snapshot(
+    state: dict[str, Any],
+    thread_id: str,
+) -> dict[str, Any]:
+    """Copy a snapshot into the dict ``/replay`` and ``/fork`` both persist.
+
+    Every field on the snapshot travels, including fields other than
+    ``messages`` (scratchpad, counters, summaries). The destination
+    ``thread_id`` replaces the id stored in the snapshot, so a rewind keeps
+    the live thread and a fork does not keep the source id.
+    """
+    if not isinstance(state, dict):
+        raise TypeError("snapshot state must be a dict")
+    dest = str(thread_id or "").strip()
+    if not dest:
+        raise ValueError("thread_id is required")
+    payload = dict(state)
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        payload["messages"] = list(messages)
+    scratchpad = payload.get("scratchpad")
+    if isinstance(scratchpad, dict):
+        payload["scratchpad"] = dict(scratchpad)
+    payload["thread_id"] = dest
+    raw_gw = payload.get("_gateway")
+    gateway = dict(raw_gw) if isinstance(raw_gw, dict) else {}
+    gateway["thread_id"] = dest
+    for key in _SNAPSHOT_PLATFORM_IDS:
+        gateway.pop(key, None)
+    payload["_gateway"] = gateway
+    return payload
+
+
+async def apply_snapshot_to_thread(
+    graph: Any,
+    state: dict[str, Any],
+    thread_id: str,
+) -> dict[str, Any]:
+    """Write ``checkpoint_payload_from_snapshot`` onto ``thread_id``.
+
+    The configurable thread id and the payload's ``thread_id`` are the same
+    value. Callers pass the live thread for rewind and a new id for fork.
+    """
+    payload = checkpoint_payload_from_snapshot(state, thread_id)
+    config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
+    await graph.aupdate_state(config, payload)
+    return payload
 
 
 _MAINTENANCE_INTERVAL_HOURS = 24

@@ -2248,7 +2248,11 @@ def create_graph_handler(
     async def _handle_replay(thread_id: str, config: dict[str, Any], iteration: int) -> str:
         """Restore a snapshot in-place: rewind the live thread to *iteration*."""
         try:
-            from kazma_core.time_travel import ReplayEngine, create_recorder
+            from kazma_core.time_travel import (
+                ReplayEngine,
+                apply_snapshot_to_thread,
+                create_recorder,
+            )
 
             recorder = create_recorder()
             engine = ReplayEngine(recorder)
@@ -2256,10 +2260,10 @@ def create_graph_handler(
             if state is None:
                 return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
 
-            # Write the snapshot state back to the live thread checkpoint.
-            msg_count = len(state.get("messages", []))
-            model = state.get("last_model", "unknown")
-            await graph.aupdate_state(config, {"messages": state.get("messages", [])})
+            # Same payload a fork persists, written onto this thread id.
+            payload = await apply_snapshot_to_thread(graph, state, thread_id)
+            msg_count = len(payload.get("messages") or [])
+            model = payload.get("last_model", "unknown")
             logger.info(
                 "[agent-handler] /replay restored thread=%s iter=%d msgs=%d",
                 thread_id, iteration, msg_count,
@@ -2286,7 +2290,11 @@ def create_graph_handler(
         try:
             import uuid
 
-            from kazma_core.time_travel import ReplayEngine, create_recorder
+            from kazma_core.time_travel import (
+                ReplayEngine,
+                apply_snapshot_to_thread,
+                create_recorder,
+            )
 
             recorder = create_recorder()
             engine = ReplayEngine(recorder)
@@ -2301,21 +2309,12 @@ def create_graph_handler(
 
             record_thread_owner(new_thread_id, sender)
 
-            # Override thread identity in the state for the new branch.
-            # Full snapshot (scratchpad, summaries, counters) — not messages
-            # only (audit M-8). chat_id/user_id/message_id stay out of graph
-            # state (AGENTS.md §2). Do not touch active_thread.{sender}.
-            state["thread_id"] = new_thread_id
-            gw = dict(state.get("_gateway") or {})
-            gw["thread_id"] = new_thread_id
-            gw.pop("chat_id", None)
-            gw.pop("user_id", None)
-            gw.pop("message_id", None)
-            state["_gateway"] = gw
-
-            # Seed the new thread with the snapshot state.
-            new_config = {"configurable": {"thread_id": new_thread_id, "checkpoint_ns": ""}}
-            await graph.aupdate_state(new_config, state)
+            # Same payload rewind uses. The new id is the destination, so
+            # scratchpad and the other snapshot fields travel with the fork
+            # and the source thread id stays on the source snapshot.
+            # chat_id/user_id/message_id stay out of graph state (AGENTS.md §2).
+            # Do not touch active_thread.{sender}.
+            state = await apply_snapshot_to_thread(graph, state, new_thread_id)
             logger.info("[agent-handler] /fork seeded new thread=%s from %s iter=%d", new_thread_id, thread_id, iteration)
 
             # Copy platform context so the fork can route replies. Override

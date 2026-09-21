@@ -155,13 +155,14 @@ def create_replay_router(
             state = engine.replay_from(thread_id, int(iteration))
             if state is None:
                 return JSONResponse({"error": "snapshot not found"}, status_code=404)
-            config = {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-            await graph.aupdate_state(config, {"messages": state.get("messages", [])})
+            from kazma_core.time_travel import apply_snapshot_to_thread
+
+            payload = await apply_snapshot_to_thread(graph, state, thread_id)
             return JSONResponse({
                 "ok": True,
                 "thread_id": thread_id,
                 "iteration": int(iteration),
-                "message_count": len(state.get("messages", [])),
+                "message_count": len(payload.get("messages") or []),
             })
         except Exception as exc:
             logger.exception("[replay] restore failed")
@@ -192,9 +193,9 @@ def create_replay_router(
             if state is None:
                 return JSONResponse({"error": "snapshot not found"}, status_code=404)
             new_thread_id = f"fork-{uuid.uuid4().hex[:12]}"
-            state["thread_id"] = new_thread_id
-            new_config = {"configurable": {"thread_id": new_thread_id, "checkpoint_ns": ""}}
-            await graph.aupdate_state(new_config, {"messages": state.get("messages", [])})
+            from kazma_core.time_travel import apply_snapshot_to_thread
+
+            state = await apply_snapshot_to_thread(graph, state, new_thread_id)
 
             # Create a Web UI session for the fork.
             try:

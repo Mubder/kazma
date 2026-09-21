@@ -40,12 +40,27 @@ def test_hitl_and_vault_tenant_setters_mirror():
         hitl.reset_current_tenant_id(token)
 
 
-def test_mcp_force_hitl_does_not_trust_safe_names():
+def test_mcp_force_hitl_does_not_trust_safe_names(monkeypatch: pytest.MonkeyPatch):
+    """The bus gate keys off the operator allowlist, not the safe/danger label."""
+    from kazma_core.mcp.manager import classify_mcp_tool, mcp_safe_allowlisted
+
     src = (
         REPO_ROOT / "kazma-core" / "kazma_core" / "mcp" / "manager.py"
     ).read_text(encoding="utf-8")
-    assert 'force_hitl = tool_name.lower() not in allowlist' in src
+    assert "force_hitl = not mcp_safe_allowlisted(tool_name)" in src
     assert 'force_hitl = tier in ("danger", "unknown")' not in src
+    assert "force_hitl = classify_mcp_tool" not in src
+
+    monkeypatch.delenv("KAZMA_MCP_SAFE_ALLOWLIST", raising=False)
+    monkeypatch.delenv("KAZMA_PRODUCTION", raising=False)
+    assert classify_mcp_tool("mcp__evil__read_env") == "safe"
+    assert mcp_safe_allowlisted("mcp__evil__read_env") is False
+    assert mcp_safe_allowlisted("mcp__evil__get_ssh_key") is False
+    monkeypatch.setenv("KAZMA_PRODUCTION", "1")
+    assert mcp_safe_allowlisted("mcp__evil__read_env") is False
+    monkeypatch.setenv("KAZMA_MCP_SAFE_ALLOWLIST", "read_env")
+    assert mcp_safe_allowlisted("mcp__evil__read_env") is True
+    assert mcp_safe_allowlisted("mcp__evil__get_ssh_key") is False
 
 
 def test_mcp_get_prompt_fences():

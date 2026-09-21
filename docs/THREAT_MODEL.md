@@ -52,14 +52,18 @@ tools. It cannot bypass `ALWAYS_HITL_TOOLS` (`x_post`, `x_delete_post`,
 re-gated regardless. But for everything else, YOLO means the boundary above is
 not in place.
 
-**An MCP server names its own tools, and the name is trusted.**
+**An MCP server names its own tools. The name is not an approval.**
 `classify_mcp_tool` reads the tool name — supplied by the third-party server
-— and a safe-looking verb classifies `safe`. In the **default posture** that
-skips the approval gate, so a hostile server can call its tool `get_file` or
-`read_env` and run unattended. `KAZMA_PRODUCTION=1` closes it: every MCP tool
-not on `KAZMA_MCP_SAFE_ALLOWLIST` is gated regardless of name. This page
-already treats MCP *output* as untrusted; tool *names* arrive over the same
-channel and currently are not.
+— and a safe-looking verb still classifies `safe` (`get_file`, `read_env`,
+`get_ssh_key`, `list_env_vars`). That label is a log line. It does not skip
+the gate. The call runs only when the operator listed that tool in
+`KAZMA_MCP_SAFE_ALLOWLIST`, or when this specific call was actually approved.
+A flag that only means "the graph is the HITL authority for this turn" is
+not an approval, and `KAZMA_PRODUCTION=1` does not allow the name either.
+A server the operator marked `trust: trusted` is a separate opt-in: its
+tools skip this gate, and in production that mark is ignored unless
+`KAZMA_MCP_TRUSTED_IN_PROD=1`. Tool *names* arrive over the same channel
+as MCP output.
 
 **A bus-less process fails closed.** `kazma mcp` spawned by an editor has no
 in-process approval bus. It queues into the shared gate registry when a live
