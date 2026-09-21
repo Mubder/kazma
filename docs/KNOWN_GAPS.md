@@ -419,13 +419,11 @@ attempts produced three different wrong numbers before the probe settled it.
 
 ## The commitment / date guard
 
-**Relative timings are only guarded when the text names a known subject.**
-`validate_timing_against_memory(..., require_subject_match=True)` returns
-`no_memory` for a reminder that names no subject Kazma has a belief about, so
-"remind me in 10 minutes" is unchecked. Deliberate: `memory_beliefs` is every
-functional belief the tenant has, unfiltered by topic, so guarding every
-relative offset against all of them would refuse ordinary short reminders.
-Narrowing the belief set by topic would let this tighten.
+**Short relative reminders are unchecked when the text names no subject.**
+"Remind me in 10 minutes" still schedules. An offset longer than 24 hours is
+compared with stored dates even when no subject is named, so "2660m" cannot
+stand in for a date the guard already refused. A long offset that merely
+lands near an unrelated belief can be held. That is the remaining friction.
 
 **Subject matching is alias-based and will miss.** A belief predicate is
 matched by a canonical alias table, a spelled-out form, and a distinctive head

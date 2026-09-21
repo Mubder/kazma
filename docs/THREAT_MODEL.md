@@ -60,10 +60,11 @@ the gate. The call runs only when the operator listed that tool in
 `KAZMA_MCP_SAFE_ALLOWLIST`, or when this specific call was actually approved.
 A flag that only means "the graph is the HITL authority for this turn" is
 not an approval, and `KAZMA_PRODUCTION=1` does not allow the name either.
-A server the operator marked `trust: trusted` is a separate opt-in: its
-tools skip this gate, and in production that mark is ignored unless
-`KAZMA_MCP_TRUSTED_IN_PROD=1`. Tool *names* arrive over the same channel
-as MCP output.
+A server the operator marked `trust: trusted` may run an ordinary read
+such as `list_directory` without a card. It may not run a credential-shaped
+name (`read_env`, `get_ssh_key`) unless that name is on the allowlist. In
+production the trust mark is ignored unless `KAZMA_MCP_TRUSTED_IN_PROD=1`.
+Tool *names* arrive over the same channel as MCP output.
 
 **A bus-less process fails closed.** `kazma mcp` spawned by an editor has no
 in-process approval bus. It queues into the shared gate registry when a live

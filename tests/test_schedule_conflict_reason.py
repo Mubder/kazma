@@ -169,6 +169,16 @@ def test_the_relative_bypass_is_closed():
     assert c == "conflict"
 
 
+def test_a_long_offset_without_a_subject_is_still_checked():
+    """``2660m`` with no subject name is the bypass. Past 24 hours it is checked."""
+    c, _ = validate_timing_against_memory(
+        "2660m", STALE,
+        user_text="remind me in 2660 minutes",
+        request_at=NOW, require_subject_match=True,
+    )
+    assert c == "conflict"
+
+
 def test_a_plain_short_reminder_is_not_guarded():
     """The counterweight to closing the bypass.
 

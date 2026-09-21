@@ -411,8 +411,9 @@ def validate_timing_against_memory(
     the ISO string it was substituted for, and returned ``not_absolute`` --
     so the guard could be sidestepped by writing the time a different way.
     Given ``request_at``, a compact offset is resolved and checked like any
-    other. (Without a subject match it lands on ``no_memory`` and is allowed,
-    so "remind me in 10 minutes" stays friction-free.)
+    other. Without a subject match, an offset of 24 hours or less lands on
+    ``no_memory`` and is allowed, so "remind me in 10 minutes" stays
+    friction-free. A longer offset is compared with stored dates.
     """
     win = window if window is not None else timedelta(days=2)
 
@@ -461,7 +462,16 @@ def validate_timing_against_memory(
                 if str(b.get("predicate") or "").strip().lower() in preds
             ]
         elif require_subject_match:
-            return ("no_memory", None)
+            # A short offset ("10m", "in 2 hours") names no stored event.
+            # A long one is how a refused date was rewritten as minutes
+            # ("2660m") and skipped this guard. Past 24 hours, compare it
+            # with the beliefs anyway.
+            _short = timedelta(hours=24)
+            _delta = (
+                compact_relative_delta(timing) if request_at is not None else None
+            )
+            if _delta is None or _delta <= _short:
+                return ("no_memory", None)
 
     belief_dates: list[tuple[datetime, dict[str, Any]]] = []
     for b in scoped:

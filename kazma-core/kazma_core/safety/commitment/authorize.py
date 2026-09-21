@@ -426,8 +426,9 @@ def _resolve_remind_act(
             # different way -- and a misleading error message talked a model
             # into doing exactly that (2026-09-12). Run the same check here,
             # now that it can resolve an offset against request_at. Reminders
-            # that name no known subject land on no_memory and are unaffected,
-            # which is nearly all of them.
+            # that name no known subject stay unchecked when the offset is
+            # 24 hours or less. A longer offset is compared with memory,
+            # because that is how "2660m" walked around a refused date.
             _rel_consistency, _ = validate_timing_against_memory(
                 _timing_arg, memory_beliefs or [],
                 user_text=user_text, request_at=request_at,
