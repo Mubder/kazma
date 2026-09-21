@@ -821,6 +821,147 @@ def test_no_new_cwd_relative_data_paths():
     )
 
 
+def test_the_write_veto_is_checked_by_every_caller():
+    """A refusal returned as ``None`` must be honoured by whoever asked.
+
+    ``_prepare_value_for_storage`` signals "do not write this" by returning
+    ``None``. ``set()`` had always honoured that. ``atomic_update`` fed the
+    result straight into ``json.dumps`` and wrote the string ``"null"`` over
+    the row it had just refused to blank — **while logging the refusal**. A
+    guard that fires, logs, and is overruled by its own caller is worse than
+    no guard, because the log says it worked.
+
+    That instance was fixed on 2026-09-14. The class was not: a sentinel
+    return is only as good as the callers that check it, and ``KNOWN_GAPS``
+    records that nothing lints for the ones that do not.
+
+    So: every call must be followed immediately by a test of what came back —
+    either ``is None`` directly, or ``_refused_the_write``, which exists to
+    make the same decision in the two places that need to unwind a
+    transaction first. Five call sites today, all five compliant.
+    """
+    path = REPO_ROOT / _CONFIG_STORE
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+
+    def _is_the_call(node: ast.AST) -> bool:
+        return (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "_prepare_value_for_storage"
+        )
+
+    offenders: list[str] = []
+    checked = 0
+    for parent in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(parent, field, None)
+            if not isinstance(block, list):
+                continue
+            for i, stmt in enumerate(block):
+                if not (
+                    isinstance(stmt, ast.Assign)
+                    and _is_the_call(stmt.value)
+                    and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], ast.Name)
+                ):
+                    continue
+                name = stmt.targets[0].id
+                nxt = block[i + 1] if i + 1 < len(block) else None
+                guarded = isinstance(nxt, ast.If) and any(
+                    isinstance(n, ast.Name) and n.id == name
+                    for n in ast.walk(nxt.test)
+                )
+                if guarded:
+                    checked += 1
+                else:
+                    offenders.append(
+                        f"{_CONFIG_STORE}:{stmt.lineno} -> {name!r} is used "
+                        "without testing it first"
+                    )
+
+    assert checked, (
+        "no checked call sites found — this gate has stopped matching the "
+        "code it guards, which makes it decoration"
+    )
+    assert not offenders, (
+        "the result of _prepare_value_for_storage is used without being "
+        "checked. It returns None to REFUSE a write; using it unchecked "
+        "writes the refusal itself to the database — that is how "
+        "atomic_update once stored the string 'null' over a secret it had "
+        "just declined to blank, while logging that it had declined.\n"
+        "Fix: follow the call with `if x is None:` or "
+        "`if self._refused_the_write(...)`.\n  " + "\n  ".join(offenders)
+    )
+
+
+#: SQL that writes a configuration row, in either backend's table.
+_CONFIG_WRITE_RE = re.compile(
+    r"\b(?:INSERT\s+(?:OR\s+REPLACE\s+)?INTO|UPDATE|DELETE\s+FROM)\s+"
+    r"(?:settings|kazma_settings)\b",
+    re.I,
+)
+
+#: The one module allowed to write configuration rows.
+_CONFIG_STORE = "kazma-core/kazma_core/config_store.py"
+
+
+def test_config_writes_stay_inside_the_chokepoint():
+    """Only ``config_store`` may write a configuration row.
+
+    Pressing **Test** on a provider once deleted every saved API key.
+    ``set_provider_health`` was a read-modify-write over the whole provider
+    list through the vault-*resolved* view, and a pointer that could not be
+    decrypted resolved to ``None`` -> ``""``, so one write from a process
+    without the key blanked every pointer on disk. Permanently, with a single
+    WARNING as the only symptom, after which the UI truthfully reported that
+    no key was stored.
+
+    The fix put the refusal in ``_prepare_value_for_storage`` — the chokepoint
+    every writer inside ``ConfigStore`` passes through. That protects the
+    writers that exist. It does nothing about a future one that opens the
+    database directly and never reaches the chokepoint at all, and
+    ``KNOWN_GAPS`` recorded exactly that: "no test or lint asserts that a
+    diagnostic path may not call a mutating one".
+
+    This is that lint, in the form that is actually checkable: the guard
+    cannot be bypassed if there is nowhere else to write from. Ten write
+    sites exist today and all ten are inside ``config_store``, so this gate
+    starts closed with no debt — the cheapest moment to install one.
+    """
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        if rel == _CONFIG_STORE:
+            continue
+        try:
+            src = path.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(src)
+        except (SyntaxError, OSError):
+            continue
+        docs = _docstring_node_ids(tree)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docs
+                and _CONFIG_WRITE_RE.search(node.value)
+            ):
+                snippet = " ".join(node.value.split())[:70]
+                offenders.append(f"{rel}:{node.lineno} -> {snippet!r}")
+
+    assert not offenders, (
+        "configuration row written outside kazma_core.config_store. Every "
+        "writer must go through ConfigStore so it passes "
+        "_prepare_value_for_storage, which refuses to blank a stored secret. "
+        "A writer that opens the database directly skips that refusal, and "
+        "the failure mode is silent and permanent: a vault pointer that "
+        "cannot be decrypted resolves to the empty string, and the UI then "
+        "truthfully reports that no key is stored.\n"
+        "Fix: call ConfigStore.set / atomic_update instead of writing SQL.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
 #: Extensions whose files are genuinely binary and must not be scanned.
 _BINARY_EXT = {
     ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".docx", ".xlsx",
