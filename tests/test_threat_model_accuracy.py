@@ -208,6 +208,14 @@ def test_production_is_not_what_closes_a_safe_looking_name(doc):
     assert "kazma_mcp_safe_allowlist" in low
     assert "actually approved" in low
     assert "not an approval" in low
+    prod_rows = [
+        ln.lower() for ln in doc.splitlines() if "`kazma_production=1`" in ln.lower()
+    ]
+    assert prod_rows, "the configuration table lost the production row"
+    for ln in prod_rows:
+        assert "name-independent" not in ln
+        assert "gates every mcp" not in ln
+    assert any("does not close a safe-looking mcp name" in ln for ln in prod_rows)
 
 
 def test_unknown_mcp_tools_still_default_to_danger():

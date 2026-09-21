@@ -195,7 +195,7 @@ the above applies. Check yours:
 | `KAZMA_CODE_EXEC_ALLOW_LOCAL=1` | Local fallback re-enabled **even in production** |
 | `KAZMA_E2B_API_KEY` set | The only real isolation boundary here |
 | `KAZMA_ALLOW_YOLO=1` | Section 1 is off for canonical danger tools |
-| `KAZMA_PRODUCTION=1` | Bans local exec, narrows the shell allowlist, requires a workspace root, **and gates every MCP tool by name-independent rule** |
+| `KAZMA_PRODUCTION=1` | Bans local `python_exec`, turns on the strict shell allowlist, and requires `KAZMA_WORKSPACE_ROOT`. For MCP it only ignores a server marked `trust: trusted` unless `KAZMA_MCP_TRUSTED_IN_PROD=1`. It does not close a safe-looking MCP name: that call runs when the name is on `KAZMA_MCP_SAFE_ALLOWLIST` or this call was approved, with or without this flag |
 | `KAZMA_SHELL_STRICT=0` | Relaxes PATH restriction and binary resolution |
 
 A single-operator box with `DOCKER=0`, `ALLOW_LOCAL=1` and `ALLOW_YOLO=1` is a
