@@ -339,6 +339,64 @@ CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 """
 
 
+#: Key for the in-table stale notice. Chosen to sort to the very top of an
+#: unsorted `SELECT * FROM settings` listing, so it is the first thing the
+#: person debugging sees rather than something they scroll past.
+_STALE_NOTICE_KEY = "!!!_THIS_TABLE_IS_NOT_READ"
+
+_STALE_NOTICE_VALUE = (
+    "Postgres is the live config backend. The rows in THIS settings table are "
+    "a leftover from before the cutover and are NOT read by Kazma. They can "
+    "show providers as disabled with empty keys while the real store has them "
+    "enabled -- debugging credentials against this file gives a confident "
+    "wrong answer. DO NOT DELETE THIS FILE: the same file holds the live "
+    "Knowledge Library (knowledge_chunks), which is SQLite-only and not stale. "
+    "This row is written by ConfigStore at boot and removed automatically if "
+    "SQLite ever becomes the live backend again."
+)
+
+
+def _mark_stale_settings_table(db_path: Any, *, live: bool) -> None:
+    """Write (or clear) the in-table notice on a shadowed ``settings`` table.
+
+    The boot warning is delivered on the day of boot. The operator this
+    protects opens the file days later in a SQLite browser, mid-incident, and
+    reads plausible wrong rows — which has happened twice here. A row inside
+    the table is the only warning that travels with the file.
+
+    ``live=True`` removes the notice: SQLite is the backend again and these
+    rows mean something, so a leftover warning would itself be the lie.
+
+    Never raises. This is a diagnostic aid; a locked database or a read-only
+    filesystem must not affect boot, and the row is not load-bearing.
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=1.0)
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        if live:
+            conn.execute("DELETE FROM settings WHERE key = ?",
+                         (_STALE_NOTICE_KEY,))
+        else:
+            conn.execute(
+                "INSERT INTO settings (key, value, category, updated_at) "
+                "VALUES (?, ?, 'internal', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "updated_at = excluded.updated_at",
+                (_STALE_NOTICE_KEY, _STALE_NOTICE_VALUE,
+                 datetime.now(UTC).isoformat()),
+            )
+        conn.commit()
+    except Exception:  # noqa: BLE001 — never break boot over a hint
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 _MISSING = object()
 
 # YAML flattens to ``safety.hitl.approval_timeout_seconds``; Settings and
@@ -757,6 +815,11 @@ class ConfigStore:
             conn = self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
+        # SQLite is the live backend, so any in-table "this table is not read"
+        # notice left by an earlier Postgres run is now itself the wrong
+        # answer. Clearing it is as important as writing it: a stale warning
+        # about staleness is worse than none, because it is believed.
+        _mark_stale_settings_table(self._db_path, live=True)
 
     def _warn_if_stale_sqlite_shadow(self) -> None:
         """Say so when a dead SQLite settings DB is shadowing the live one.
@@ -847,6 +910,21 @@ class ConfigStore:
                               file=_sys.stderr, flush=True)
                     except Exception:  # noqa: BLE001 — never break boot
                         pass
+
+                # Put the warning where the confusion actually happens.
+                #
+                # Everything above is delivered at BOOT. The operator who gets
+                # burned by this file opens it in a SQLite browser three days
+                # later, debugging a credential failure, and sees a `settings`
+                # table full of plausible, wrong rows — that has happened twice
+                # in this repo's history. A log line emitted on Tuesday does not
+                # reach them on Friday.
+                #
+                # So leave a row IN the table, where any `SELECT * FROM
+                # settings` puts it on screen next to the rows it is warning
+                # about. Written under the key below because it sorts to the
+                # top of an unsorted browser listing.
+                _mark_stale_settings_table(stale, live=False)
         except Exception:  # pragma: no cover - a hint must never break boot
             logger.debug("[ConfigStore] stale-shadow check skipped", exc_info=True)
 
