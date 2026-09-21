@@ -60,8 +60,10 @@ SCRATCH_RE = re.compile(rf"^{SCRATCH_PREFIX}\d+$")
 
 
 def _redact(argv: list[str]) -> str:
+    """Log-safe argv. Replaces the VALUE only -- the `-e` before it is its
+    own element, and emitting "-e PGPASSWORD=***" here printed it twice."""
     return " ".join(
-        "-e PGPASSWORD=***" if a.startswith("PGPASSWORD=") else a for a in argv
+        "PGPASSWORD=***" if a.startswith("PGPASSWORD=") else a for a in argv
     )
 
 
