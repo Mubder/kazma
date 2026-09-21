@@ -165,6 +165,31 @@ def test_user_files_stay_writable(rel: str, tmp_path) -> None:
     )
 
 
+def test_shell_and_python_refuse_a_named_control_plane_store(tmp_path, monkeypatch) -> None:
+    """The file-tool rule is not the only mouth that can open the registry."""
+    import asyncio
+
+    from kazma_core.tools.code_exec import python_exec
+    from kazma_core.workspace.path_policy import control_plane_store_targeted
+
+    data = tmp_path / "kazma-data"
+    data.mkdir()
+    store = data / "hitl_gates.db"
+    store.write_bytes(b"")
+    monkeypatch.setenv("KAZMA_DATA_DIR", str(data))
+
+    hit = control_plane_store_targeted(str(store), cwd=tmp_path)
+    assert hit is not None and hit.endswith("hitl_gates.db")
+    assert control_plane_store_targeted("notes.txt", cwd=data) is None
+    assert control_plane_store_targeted(
+        "workspace/project.db", cwd=data
+    ) is None
+
+    out = asyncio.run(python_exec("open('hitl_gates.db','wb').write(b'x')"))
+    assert "control-plane" in out
+    assert store.read_bytes() == b""
+
+
 def test_reads_are_still_allowed(tmp_path) -> None:
     """Self-audit must keep working; the severe failures here are writes."""
     out = _run_probe(

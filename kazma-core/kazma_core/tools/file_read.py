@@ -167,10 +167,10 @@ _HASH_MAX_BYTES = 1_048_576
 def _stat_stamp(p: Path) -> tuple | None:
     """Identity of the bytes on disk.
 
-    ``(mtime_ns, size, digest)`` for files up to ``_HASH_MAX_BYTES``, and
-    ``(mtime_ns, size, None)`` above it — where the residual same-tick,
-    same-length collision is still theoretically possible and is recorded in
-    ``docs/KNOWN_GAPS.md`` rather than papered over.
+    ``(mtime_ns, size, digest)`` always. Up to ``_HASH_MAX_BYTES`` the digest
+    covers every byte. Above that it covers eight windows spread through the
+    file. A same-tick, same-length rewrite that touches only a gap between
+    those windows can still collide; that residual is in ``docs/KNOWN_GAPS.md``.
 
     ``None`` when the file cannot be read at all (deleted, replaced by a
     directory, permissions) — which compares unequal to any real stamp and
@@ -181,18 +181,40 @@ def _stat_stamp(p: Path) -> tuple | None:
     except OSError:
         return None
 
-    digest: bytes | None = None
-    if st.st_size <= _HASH_MAX_BYTES:
-        try:
-            h = hashlib.blake2b(digest_size=16)
-            with p.open("rb") as fh:
-                for block in iter(lambda: fh.read(65536), b""):
-                    h.update(block)
-            digest = h.digest()
-        except OSError:
-            # Unreadable now, whatever stat said. Treat as invalid.
-            return None
+    try:
+        digest = _content_digest(p, st.st_size)
+    except OSError:
+        # Unreadable now, whatever stat said. Treat as invalid.
+        return None
     return (st.st_mtime_ns, st.st_size, digest)
+
+
+def _content_digest(p: Path, size: int) -> bytes:
+    """Full blake2b up to ``_HASH_MAX_BYTES``, then eight sampled windows.
+
+    A 40 MB PDF is not re-read in full. The samples are spread across the
+    file so a same-tick, same-length rewrite of the head, the tail, or one
+    of the middle windows changes the stamp. A rewrite that lands only in
+    a gap between windows can still collide; that is the residual.
+    """
+    h = hashlib.blake2b(digest_size=16)
+    window = 65536
+    with p.open("rb") as fh:
+        if size <= _HASH_MAX_BYTES:
+            for block in iter(lambda: fh.read(window), b""):
+                h.update(block)
+            return h.digest()
+        slots = 8
+        step = max(window, size // slots)
+        offset = 0
+        seen = 0
+        while offset < size and seen < slots:
+            fh.seek(offset)
+            h.update(fh.read(window))
+            offset += step
+            seen += 1
+        h.update(int(size).to_bytes(8, "little"))
+    return h.digest()
 
 
 async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:

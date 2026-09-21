@@ -73,9 +73,15 @@ class TestClassifyMcpTool:
 class _MockMCPManager:
     """Minimal mock AsyncMCPManager for HITL testing."""
 
-    def __init__(self, tools_map: dict[str, str] | None = None):
+    def __init__(
+        self,
+        tools_map: dict[str, str] | None = None,
+        *,
+        trust: str = "approval_required",
+    ):
         # tools_map: {tool_name: server_name}
         self._tools_map = tools_map or {}
+        self._trust = trust
         self.execute_mcp_tool = AsyncMock(
             return_value={"content": "executed", "is_error": False}
         )
@@ -87,7 +93,7 @@ class _MockMCPManager:
         return self._tools_map.get(name)
 
     def get_server_trust(self, server_name: str) -> str:
-        return "approval_required"
+        return self._trust
 
 
 class TestUnifiedExecutorHitlGate:
@@ -388,6 +394,70 @@ class TestSafeLookingMcpNamesDoNotRun:
         finally:
             _hitl_approved_ctx.reset(approved)
             _graph_hitl_gate_ctx.reset(gate)
+            from kazma_core.swarm.safety import get_safety
+            set_safety(get_safety())
+
+
+class TestTrustedServerDoesNotSkipCredentialNames:
+    """``trust: trusted`` still runs an ordinary read. It does not run read_env."""
+
+    @pytest.mark.asyncio
+    async def test_a_credential_shaped_name_is_still_asked(self) -> None:
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        denying.check = AsyncMock(return_value=False)  # type: ignore
+        set_safety(denying)
+        try:
+            name = "mcp__evil__read_env"
+            mcp_mgr = _MockMCPManager({name: "evil"}, trust="trusted")
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+            result = await executor.execute(name, {})
+            assert result["is_error"] is True
+            mcp_mgr.execute_mcp_tool.assert_not_awaited()
+            denying.check.assert_awaited()
+        finally:
+            from kazma_core.swarm.safety import get_safety
+            set_safety(get_safety())
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_read_on_a_trusted_server_still_runs(self) -> None:
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        denying.check = AsyncMock(return_value=False)  # type: ignore
+        set_safety(denying)
+        try:
+            name = "mcp__fs__list_directory"
+            mcp_mgr = _MockMCPManager({name: "fs"}, trust="trusted")
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+            result = await executor.execute(name, {})
+            assert result["is_error"] is False
+            mcp_mgr.execute_mcp_tool.assert_awaited_once()
+            denying.check.assert_not_awaited()
+        finally:
+            from kazma_core.swarm.safety import get_safety
+            set_safety(get_safety())
+
+    @pytest.mark.asyncio
+    async def test_allowlist_still_runs_a_credential_name(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from kazma_core.swarm.safety import SafetyMiddleware, set_safety
+
+        monkeypatch.setenv("KAZMA_MCP_SAFE_ALLOWLIST", "read_env")
+        denying = SafetyMiddleware(enabled=True, allow_headless_danger=False)
+        denying.check = AsyncMock(return_value=False)  # type: ignore
+        set_safety(denying)
+        try:
+            name = "mcp__evil__read_env"
+            mcp_mgr = _MockMCPManager({name: "evil"}, trust="trusted")
+            executor = UnifiedToolExecutor(local=None, mcp=mcp_mgr)  # type: ignore
+            result = await executor.execute(name, {})
+            assert result["is_error"] is False
+            mcp_mgr.execute_mcp_tool.assert_awaited_once()
+            denying.check.assert_not_awaited()
+        finally:
             from kazma_core.swarm.safety import get_safety
             set_safety(get_safety())
 

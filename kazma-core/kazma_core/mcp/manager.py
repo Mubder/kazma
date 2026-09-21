@@ -169,6 +169,26 @@ def _mcp_raw_tool_name(tool_name: str) -> str:
     return name
 
 
+_CREDENTIAL_TOKENS = frozenset({
+    "env", "ssh", "secret", "token", "password", "credential", "credentials",
+})
+_KEY_PARTNERS = frozenset({"ssh", "api", "private", "secret", "access", "auth"})
+
+
+def mcp_leaf_is_credential_shaped(tool_name: str) -> bool:
+    """True when the tool leaf looks like a credential read.
+
+    ``trust: trusted`` may skip approval for ordinary reads such as
+    ``list_directory``. It may not skip ``read_env`` or ``get_ssh_key``.
+    The operator allowlist is still an explicit yes for either.
+    """
+    leaf = _mcp_raw_tool_name(tool_name).lower().replace("-", "_")
+    tokens = {part for part in leaf.split("_") if part}
+    if tokens & _CREDENTIAL_TOKENS:
+        return True
+    return "key" in tokens and bool(tokens & _KEY_PARTNERS)
+
+
 def mcp_safe_allowlisted(tool_name: str) -> bool:
     """True when the operator named this tool in ``KAZMA_MCP_SAFE_ALLOWLIST``.
 
@@ -2284,6 +2304,7 @@ class UnifiedToolExecutor:
                         logger.debug("[Unified] approval-grant check skipped", exc_info=True)
                 _server_trusted = (
                     self._mcp.get_server_trust(server_name) == "trusted"
+                    and not mcp_leaf_is_credential_shaped(tool_name)
                 )
                 if not _hitl_already_approved and not _server_trusted:
                     # The server picks the name. A read-shaped name

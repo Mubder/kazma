@@ -210,9 +210,8 @@ async def test_same_tick_same_length_rewrite_is_caught(workspace, allow_all_path
     here ``os.utime`` forces the mtime back to the exact nanosecond of the first
     write, which is the same collision without waiting for luck.
 
-    Small files now carry a content digest, so the bytes themselves are what is
-    compared. Above ``_HASH_MAX_BYTES`` the digest is skipped and this residual
-    is real — see the companion test below, and KNOWN_GAPS.
+    Small files carry a full content digest. Larger files carry a sampled
+    digest, so a change in one of those windows is still seen.
     """
     target = workspace / "same_tick.txt"
     target.write_text("AAAA\nBBBB\n", encoding="utf-8")
@@ -237,22 +236,31 @@ async def test_same_tick_same_length_rewrite_is_caught(workspace, allow_all_path
     assert ALREADY_READ not in second
 
 
-def test_large_files_skip_the_digest_and_say_so(workspace, allow_all_paths):
-    """The bound is deliberate, so pin it rather than let it drift.
+def test_large_files_sample_the_digest(workspace, allow_all_paths):
+    """Above the full-hash bound the stamp still changes when a sample changes.
 
-    Hashing every read would re-read the very files the cache exists to avoid
-    re-reading — a large PDF's cost is the parse. Small files are cheap to hash;
-    large ones keep the weaker stamp, and that is the recorded residual.
+    The whole file is not re-read. The first window is. A same-tick rewrite
+    of those leading bytes must not keep the previous cache entry.
     """
     small = workspace / "small.txt"
     small.write_text("x" * 1000, encoding="utf-8")
     assert fr._stat_stamp(small)[2] is not None, "a small file must be hashed"
 
     big = workspace / "big.bin"
-    big.write_bytes(b"y" * (fr._HASH_MAX_BYTES + 1))
-    assert fr._stat_stamp(big)[2] is None, (
-        "a file over the bound must skip the digest, or the cache re-reads "
-        "exactly what it exists to avoid re-reading"
+    payload = bytearray(b"y" * (fr._HASH_MAX_BYTES + 1))
+    big.write_bytes(payload)
+    before = fr._stat_stamp(big)
+    assert before is not None and before[2] is not None
+
+    payload[0] = ord("z")
+    big.write_bytes(payload)
+    os.utime(big, ns=(big.stat().st_atime_ns, before[0]))
+    after = fr._stat_stamp(big)
+    assert after is not None
+    assert after[0] == before[0]
+    assert after[1] == before[1]
+    assert after[2] != before[2], (
+        "a leading-byte rewrite of a large file kept the same digest"
     )
 
 

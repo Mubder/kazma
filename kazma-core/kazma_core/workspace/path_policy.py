@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -29,6 +30,8 @@ from kazma_core.workspace.path_grants import (
 __all__ = [
     "PathAccessResult",
     "check_path_access",
+    "code_mentions_control_plane",
+    "control_plane_store_targeted",
     "denied_message",
     "is_path_allowed",
 ]
@@ -122,6 +125,93 @@ def _is_control_plane_store(resolved: Path) -> bool:
             name = name[: -len(sidecar)]
             break
     return name.endswith(_DB_SUFFIXES)
+
+
+def _strip_db_sidecars(name: str) -> str:
+    lowered = name.lower()
+    for sidecar in _DB_SIDECARS:
+        if lowered.endswith(sidecar):
+            return lowered[: -len(sidecar)]
+    return lowered
+
+
+def _looks_like_store_token(token: str) -> bool:
+    name = _strip_db_sidecars(Path(token).name)
+    if name in control_plane_db_names():
+        return True
+    return name.endswith(_DB_SUFFIXES)
+
+
+def control_plane_store_targeted(
+    token: str,
+    *,
+    cwd: str | Path | None = None,
+) -> str | None:
+    """Return the resolved path when *token* points at a control-plane store.
+
+    Absolute paths, paths relative to *cwd*, and a store basename resolved
+    under ``data_dir()`` all count. A user's ``workspace/project.db`` does
+    not: that tree is excluded by :func:`_is_control_plane_store`.
+    """
+    text = (token or "").strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in "'\"":
+        text = text[1:-1].strip()
+    if not text or text.startswith("-") or not _looks_like_store_token(text):
+        return None
+    candidates: list[Path] = []
+    raw = Path(text)
+    if raw.is_absolute():
+        candidates.append(raw)
+    else:
+        if cwd is not None:
+            candidates.append(Path(cwd) / text)
+        try:
+            from kazma_core.paths import data_dir
+
+            root = data_dir()
+            candidates.append(root / text)
+            # A bare ``hitl_gates.db`` is the store even when cwd is the
+            # sandbox. Do not do this for every ``*.db``: ``project.db``
+            # under the sandbox is the user's file.
+            base = _strip_db_sidecars(raw.name)
+            if base in control_plane_db_names():
+                candidates.append(root / raw.name)
+        except Exception:
+            logger.debug("[path_policy] data_dir unavailable", exc_info=True)
+    for cand in candidates:
+        try:
+            resolved = cand.expanduser().resolve()
+        except OSError:
+            continue
+        if _is_control_plane_store(resolved):
+            return str(resolved)
+    return None
+
+
+def code_mentions_control_plane(code: str) -> str | None:
+    """Return the store name when *code* names a control-plane database.
+
+    ``python_exec`` does not go through :func:`check_path_access`. A script
+    that opens ``hitl_gates.db`` by name is the same write the file tools
+    already refuse. Dynamic construction that never spells the filename
+    still gets through — that limit stays written down.
+    """
+    low = (code or "").lower()
+    if not low:
+        return None
+    for name in sorted(control_plane_db_names()):
+        if name and name in low:
+            return name
+    for token in re.findall(r"""['"]([^'"]+)['"]""", code):
+        if not (
+            token.startswith(("/", "\\"))
+            or (len(token) > 2 and token[1] == ":")
+        ):
+            continue
+        hit = control_plane_store_targeted(token)
+        if hit:
+            return Path(hit).name
+    return None
 
 
 @dataclass(frozen=True, slots=True)
