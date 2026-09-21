@@ -826,14 +826,26 @@ and there is no path to deny. Nothing is worse than before — a file tool
 cannot write a Postgres table either — but do not read the passing tests as
 coverage of a Postgres deployment.
 
-**The file-read cache can still be fooled inside one filesystem tick.** Entries
-are stamped with `(mtime_ns, size)` and revalidated on every hit (2026-09-21),
-which closes read-after-write for every writer including ones outside Kazma.
-A second write landing in the same mtime tick *and* producing an identical
-size would not move the stamp and would serve stale bytes. Content hashing
-would close it and was rejected: it re-reads the whole file on every cache
-hit, which is the cost the cache exists to avoid. The tests here deliberately
-vary the size so the residual is never what a red test means.
+**~~The file-read cache can still be fooled inside one filesystem tick.~~**
+Narrowed to files over 1 MB, 2026-09-21. Entries are stamped and revalidated
+on every hit, which closes read-after-write for every writer including ones
+outside Kazma; the residual was a second write landing in the same mtime tick
+*and* producing an identical length, which `(mtime_ns, size)` cannot see.
+
+Content hashing was rejected when the stamp landed, on the grounds that it
+re-reads the file the cache exists to avoid reading. That was half right and
+is worth correcting rather than quietly reversing: it holds for a 40 MB PDF,
+where what the cache saves is the *parse*, and not for the source files an
+agent actually writes and reads back, where a blake2b over a few KB is
+microseconds. Files up to `_HASH_MAX_BYTES` (1 MB) now carry a digest; larger
+ones keep the weaker stamp.
+
+**So the residual survives only above 1 MB**, where a same-tick same-length
+rewrite is correspondingly less likely and the parse cost is what matters.
+Both halves are pinned: one test reproduces the collision deterministically
+with `os.utime`, winding the mtime back to the exact nanosecond of the first
+write rather than waiting for luck, and another asserts large files still skip
+the digest — so "hash everything" cannot creep back in without going red.
 
 ## Scope
 

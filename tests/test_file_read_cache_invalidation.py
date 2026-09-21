@@ -37,6 +37,7 @@ and restoring the 9x context bloat the cache was built to stop.
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 
 import pytest
@@ -198,6 +199,61 @@ async def test_unchanged_file_still_dedupes(workspace, allow_all_paths):
     )
     assert "unchanging" in second
     assert ALREADY_READ not in first
+
+
+@pytest.mark.asyncio
+async def test_same_tick_same_length_rewrite_is_caught(workspace, allow_all_paths):
+    """The residual the stamp could not see, reproduced deterministically.
+
+    ``(mtime_ns, size)`` cannot distinguish two writes of the SAME length that
+    land inside one filesystem mtime tick. In the wild that needs a coincidence;
+    here ``os.utime`` forces the mtime back to the exact nanosecond of the first
+    write, which is the same collision without waiting for luck.
+
+    Small files now carry a content digest, so the bytes themselves are what is
+    compared. Above ``_HASH_MAX_BYTES`` the digest is skipped and this residual
+    is real — see the companion test below, and KNOWN_GAPS.
+    """
+    target = workspace / "same_tick.txt"
+    target.write_text("AAAA\nBBBB\n", encoding="utf-8")
+    st = target.stat()
+
+    first = await _read(target)
+    assert "AAAA" in first
+
+    # Same LENGTH, different content, and the clock wound back to match.
+    target.write_text("CCCC\nDDDD\n", encoding="utf-8")
+    os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+    after = target.stat()
+    assert (after.st_mtime_ns, after.st_size) == (st.st_mtime_ns, st.st_size), (
+        "the collision was not actually reproduced; this test proves nothing"
+    )
+
+    second = await _read(target)
+    assert "CCCC" in second, (
+        "a same-length rewrite inside one mtime tick served the OLD bytes — "
+        "the digest is not being consulted"
+    )
+    assert ALREADY_READ not in second
+
+
+def test_large_files_skip_the_digest_and_say_so(workspace, allow_all_paths):
+    """The bound is deliberate, so pin it rather than let it drift.
+
+    Hashing every read would re-read the very files the cache exists to avoid
+    re-reading — a large PDF's cost is the parse. Small files are cheap to hash;
+    large ones keep the weaker stamp, and that is the recorded residual.
+    """
+    small = workspace / "small.txt"
+    small.write_text("x" * 1000, encoding="utf-8")
+    assert fr._stat_stamp(small)[2] is not None, "a small file must be hashed"
+
+    big = workspace / "big.bin"
+    big.write_bytes(b"y" * (fr._HASH_MAX_BYTES + 1))
+    assert fr._stat_stamp(big)[2] is None, (
+        "a file over the bound must skip the digest, or the cache re-reads "
+        "exactly what it exists to avoid re-reading"
+    )
 
 
 @pytest.mark.asyncio

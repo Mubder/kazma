@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import codecs
+import hashlib
 from pathlib import Path
 
 # Shared workspace configuration (re-exported for convenience so callers
@@ -145,15 +146,33 @@ def _friendly_error(exc: Exception, path: str) -> str:
 # redirect, an MCP filesystem server, a sibling swarm worker, or the user's
 # own editor. The stamp is a property of the bytes, so every writer is
 # covered including the ones that do not exist yet.
-_turn_read_cache: dict[tuple, tuple[tuple[int, int] | None, str]] = {}
+_turn_read_cache: dict[tuple, tuple[tuple | None, str]] = {}
 _turn_read_cache_order: list[tuple] = []
 _READ_CACHE_MAX = 50
 
 
-def _stat_stamp(p: Path) -> tuple[int, int] | None:
-    """Identity of the bytes on disk as ``(mtime_ns, size)``.
+#: Files at or under this size carry a content digest in their stamp as well.
+#:
+#: ``(mtime_ns, size)`` alone cannot see a write that lands inside a single
+#: filesystem mtime tick AND leaves the length unchanged — a same-length edit
+#: saved twice in the same instant. Hashing was rejected when the stamp first
+#: landed, on the grounds that it re-reads the file the cache exists to avoid
+#: reading. That is true of a 40 MB PDF, where what the cache saves is the
+#: PARSE, and false of the source files an agent actually writes and reads back,
+#: where a blake2b over a few KB is microseconds. So hash the small ones and
+#: stat the big ones, and say which is which rather than claiming both.
+_HASH_MAX_BYTES = 1_048_576
 
-    ``None`` when the file cannot be stat'd (deleted, replaced by a
+
+def _stat_stamp(p: Path) -> tuple | None:
+    """Identity of the bytes on disk.
+
+    ``(mtime_ns, size, digest)`` for files up to ``_HASH_MAX_BYTES``, and
+    ``(mtime_ns, size, None)`` above it — where the residual same-tick,
+    same-length collision is still theoretically possible and is recorded in
+    ``docs/KNOWN_GAPS.md`` rather than papered over.
+
+    ``None`` when the file cannot be read at all (deleted, replaced by a
     directory, permissions) — which compares unequal to any real stamp and
     therefore invalidates, the safe direction.
     """
@@ -161,7 +180,19 @@ def _stat_stamp(p: Path) -> tuple[int, int] | None:
         st = p.stat()
     except OSError:
         return None
-    return (st.st_mtime_ns, st.st_size)
+
+    digest: bytes | None = None
+    if st.st_size <= _HASH_MAX_BYTES:
+        try:
+            h = hashlib.blake2b(digest_size=16)
+            with p.open("rb") as fh:
+                for block in iter(lambda: fh.read(65536), b""):
+                    h.update(block)
+            digest = h.digest()
+        except OSError:
+            # Unreadable now, whatever stat said. Treat as invalid.
+            return None
+    return (st.st_mtime_ns, st.st_size, digest)
 
 
 async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
