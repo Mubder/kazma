@@ -9,6 +9,29 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# Imported for its SIDE EFFECT on sys.modules, not for its API.
+#
+# Four tests in this file use `patch.dict(sys.modules, {...})`. That helper
+# snapshots the dict on entry and, on exit, CLEARS it and restores the
+# snapshot — so any module first imported *inside* one of those blocks is
+# wiped when the block ends, because it was never in the snapshot.
+#
+# `read_url` imports `kazma_core.security.ssrf` lazily, inside the function.
+# If the first such import happens inside a patch.dict block, the module is
+# evicted at the end of it. A later test then does
+# `monkeypatch.setattr("kazma_core.security.ssrf.validate_url", ...)`, which
+# imports a FRESH module object and patches that one — and when `read_url`
+# does its own lazy import it can end up resolving a different object again,
+# with the real guard still in place. The stub is never bypassed; it is
+# installed on a copy nobody uses.
+#
+# That is what made `test_read_url_connection_error` pass alone and fail
+# inside a chunk (2026-09-21): whether it breaks depends on whether something
+# earlier in the process had already imported ssrf, which depends on which
+# files share the chunk. Importing it here, before any patch.dict runs, puts
+# it in every snapshot and therefore in every restore.
+import kazma_core.security.ssrf  # noqa: F401  (see above)
+
 
 @pytest.fixture(autouse=True)
 def _disable_commitment_gate(monkeypatch: pytest.MonkeyPatch):

@@ -757,12 +757,29 @@ It is better characterised than before, and the mechanism is measured:
   a FRESH module with the real guard. The stub is not bypassed; it is patched
   onto a copy that is no longer the one imported.
 
-What is NOT established is what removes it. It is absent through setup and
-call and present again by teardown, which does not fit the test importing it
-itself, and the three `del sys.modules[...]` sites in `hub/loader.py` are all
-scoped to `_kazma_skill_*`. Not fixed, because a fix aimed at the wrong half of
-that chain would look green for the wrong reason — which is the failure mode
-this whole page exists to record.
+**What removed it, found 2026-09-21 and now fixed:** `patch.dict`.
+
+`sys.modules` is a plain dict, so a deletion cannot be hooked — but it can be
+*replaced* with a subclass that reports `__delitem__`, `pop` and `clear` with a
+stack. That named the caller immediately:
+`unittest.mock._patch_dict._unpatch_dict` → `_clear_dict` → `in_dict.clear()`.
+
+`patch.dict(sys.modules, {...})` snapshots the dict on entry and, on exit,
+CLEARS it and restores the snapshot. Any module first imported *inside* the
+block is therefore wiped, because it was never in the snapshot. This file uses
+it four times (lines 97, 121, 158, 501), three of them before the failing test,
+and `read_url` imports `ssrf` lazily — so whether the module survives depends
+on whether something earlier in the PROCESS had already imported it, which
+depends on which files share the chunk. That is the whole order-dependence.
+
+Fixed by importing `kazma_core.security.ssrf` at the top of the test module,
+before any `patch.dict` runs, so it is in every snapshot and every restore.
+Verified in the context that reproduced it: the chunk-02 prefix goes from one
+failure to **811 passed, 0 failed**.
+
+Worth keeping as a general hazard rather than as one file's quirk: any test
+using `patch.dict(sys.modules, ...)` silently evicts whatever gets imported
+while it is open, and the damage lands on a *later* test that looks unrelated.
 
 **Two surfaces measured while fixing the above, neither of them a bug list.**
 Both were counted on 2026-09-21 because the next order-dependent failure
