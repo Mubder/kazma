@@ -537,6 +537,16 @@ def _check_pg_data_section(dump: Path, res: DrillResult) -> None:
     res.add("postgres:data", True, f"{mb} MB streamed in {elapsed:.0f}s")
 
 
+def _is_locked_error(text: str | None) -> bool:
+    """True when restic refused because the repository is locked.
+
+    Matched on restic's own wording: "unable to create lock in backend:
+    repository is already locked by PID ... on <host>".
+    """
+    t = (text or "").lower()
+    return "already locked" in t or "unable to create lock" in t
+
+
 def _check_restic_data(res: DrillResult) -> None:
     """Re-read and re-hash a slice of the restic packs.
 
@@ -569,6 +579,41 @@ def _check_restic_data(res: DrillResult) -> None:
         out = restic_repo.check(
             repo, password, read_data_subset=_DEEP_RESTIC_SUBSET
         )
+
+        if not out.ok and _is_locked_error(out.error):
+            # Two very different things produce this one message.
+            #
+            # A DEAD owner's lock is the dangerous one: restic_repo.unlock_stale
+            # documents that a killed restic leaves an EXCLUSIVE lock and every
+            # later backup then fails, "while the schedule keeps reporting that
+            # it ran". Clearing it here fixes the backups, not just the drill.
+            # `unlock` without --remove-all only removes locks restic itself
+            # judges stale, so this is safe against a live repository.
+            restic_repo.unlock_stale(repo, password)
+            out = restic_repo.check(
+                repo, password, read_data_subset=_DEEP_RESTIC_SUBSET
+            )
+
+        if not out.ok and _is_locked_error(out.error):
+            # Still locked after the dead ones were cleared, so a LIVE backup
+            # holds it. A backup in progress is health. Reporting it as "a
+            # backup cannot be restored" is a false alarm of exactly the kind
+            # this drill exists to avoid being -- observed 2026-09-21, when a
+            # manual deep run collided with the scheduled pg snapshot and the
+            # repository was provably fine seconds later.
+            #
+            # The cost of this branch is that a collision means this pass did
+            # not verify anything, so the detail says so rather than claiming
+            # a re-read that never happened. Two collisions in a row on a
+            # weekly cadence would hide a real problem for a fortnight; if
+            # that ever shows up in the logs, retry rather than skip.
+            res.add(
+                f"restic:{scope}", True,
+                "a backup holds the repository lock; packs NOT re-read this "
+                "pass (not a failure -- a running backup is health)",
+            )
+            continue
+
         res.add(
             f"restic:{scope}", bool(out.ok),
             f"{_DEEP_RESTIC_SUBSET} of packs re-read" if out.ok
