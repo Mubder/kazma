@@ -134,7 +134,34 @@ from kazma_ui.sse_chat._helpers import (
 from kazma_ui.sse_chat._persistence import (
     _persist_detached_reply,
 )
-from kazma_ui.turn_runtime import persist_reply
+#: Imported as a MODULE, and every call below is qualified, so the function is
+#: resolved at call time.
+#:
+#: This was `from kazma_ui.turn_runtime import persist_reply`, which binds the
+#: function object into this module's namespace at import. That is a private
+#: copy nothing can reach afterwards, and it broke a test suite for weeks
+#: without anyone knowing (diagnosed 2026-09-21):
+#:
+#:   1. test_hitl_gate_read_cutover monkeypatches turn_runtime.persist_reply
+#:      with a fake that returns True and writes nothing.
+#:   2. While that patch is live, something imports THIS module for the first
+#:      time, and line 137 captures the fake.
+#:   3. monkeypatch restores turn_runtime.persist_reply at teardown. It cannot
+#:      reach the copy here, so this module calls the fake for the rest of the
+#:      process.
+#:
+#: Every later test that persists through this module then saw commit() return
+#: True while nothing was written — five failures in
+#: test_turn_durable_presentation, blamed on the test that merely ran last.
+#: Whether it happens at all depends on import ORDER, which depends on how the
+#: suite is partitioned into chunks, so adding two unrelated test files
+#: anywhere in the tree could turn it on or off.
+#:
+#: Every other caller of persist_reply in this codebase already imports it
+#: inside the function (ws_chat, hitl_gate_bridge, _persistence, sse_chat's
+#: __init__). This module was the only module-level binding, and the only one
+#: that could go stale.
+from kazma_ui import turn_runtime as _turn_runtime
 
 __all__: list[str] = []
 
@@ -296,7 +323,7 @@ class DurablePresentation:
         try:
             text_out = body if wants_text else ""
             await asyncio.to_thread(
-                persist_reply,
+                _turn_runtime.persist_reply,
                 self.session_id,
                 self.reply_turn_id,
                 text_out,
@@ -371,7 +398,7 @@ def stamp_hitl_part_state(
             "denied",
             "inflight",
         )
-        persist_reply(
+        _turn_runtime.persist_reply(
             session_id,
             reply_turn_id,
             "",
@@ -1438,7 +1465,7 @@ async def _stream_langgraph_events(
             # paints must find it in the store. Emitting `done` first left a
             # window where the browser reloaded into a transcript that did
             # not yet contain the reply it had just rendered.
-            persist_reply(
+            _turn_runtime.persist_reply(
                 session_id,
                 reply_turn_id,
                 content_acc,
@@ -1522,7 +1549,7 @@ async def _stream_langgraph_events(
                 )
             # A crashed turn still owes the user a durable record of whatever
             # it managed to say; without this the transcript reloads blank.
-            persist_reply(
+            _turn_runtime.persist_reply(
                 session_id,
                 reply_turn_id,
                 content_acc,
