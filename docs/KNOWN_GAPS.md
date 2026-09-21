@@ -569,11 +569,11 @@ rerun's output and kept one line. `exit=-11` is not a diagnosis. The runner
 now prints a 40-line tail for crashed chunks; without that this was
 unfixable by reading.
 
-**A parsed ordinary failure is not a crash.** `fast_test.py` prints a chunk
-whose tally parsed and exited 1 as `exit=1` and does not retry it. A retry
-happens when the process timed out, crashed, or exited 0/1 with no parseable
-tally. That last case is labeled `produced no parseable test tally`, which
-is a different problem from a red assertion.
+**A parsed ordinary failure is not a crash.** `fast_test.py` treats exit 1 as
+a benign code when the summary line parsed, so the chunk line prints `OK`
+and the runner does not retry it. A retry happens when the process timed
+out, crashed, or exited 0 or 1 with no parseable tally. That last case is
+labeled `produced no parseable test tally`.
 
 **`pytest tests/` is not the suite, and running only it hides failures for
 days.** `pyproject.toml` declares six testpaths; the habit here has been to

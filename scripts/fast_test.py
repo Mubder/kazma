@@ -348,7 +348,8 @@ def main() -> int:
         # "crashed/timed out" sent a 2026-09-20 audit to the wrong diagnosis:
         # it read the label and reported that ORDINARY test failures were
         # being mislabelled as crashes. They are not — an exit-1 chunk whose
-        # tally parsed is reported as `exit=1` and is never retried. It only
+        # tally parsed is reported as `OK` (exit 1 is a benign code) and is
+        # never retried. It only
         # lands here when the tally did NOT parse, which is a different and
         # much more confusing problem: the chunk ran, something is wrong with
         # our reading of its output, and re-running 155 files one at a time
