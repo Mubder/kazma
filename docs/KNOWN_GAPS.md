@@ -921,7 +921,45 @@ is 50 free-model requests/day; the smallest useful A/B (`--runs 1`, two
 conditions) needs 56. Either split it across two days and label each side an
 anecdote, or raise the limit. Parked, not blocked on code.
 
-**Six tests pass or fail depending on how `fast_test.py` partitions the tree.**
+**~~Six tests pass or fail depending on how `fast_test.py` partitions the tree.~~**
+Five of the six are **fixed** (2026-09-21). `sse_chat/_streaming.py` held the
+codebase's only module-level `from kazma_ui.turn_runtime import persist_reply`.
+Every other caller imports it inside the function and re-resolves per call; a
+module-level `from … import` binds the function OBJECT into a private copy
+nothing can reach afterwards. `test_hitl_gate_read_cutover` monkeypatches
+`turn_runtime.persist_reply` with a fake that returns `True` and writes
+nothing; if `_streaming` is first imported while that patch is live it captures
+the fake, and `monkeypatch` restoring the owner cannot reach the copy. Proven
+with an identity probe rather than argued — after the cutover file runs,
+`_streaming.persist_reply` is `fake_persist` while `turn_runtime.persist_reply`
+is the real one; alone they are the same object. That is why
+`DurablePresentation.commit()` returned `True` with nothing written. Found by
+bisecting the reproduced chunk (14 runs over 73 files named one culprit); the
+module now qualifies all four call sites. Full suite went 7 failed → 1.
+
+The **sixth is still open**: `test_tools_quickwins.py::test_read_url_connection_error`.
+It is better characterised than before, and the mechanism is measured:
+
+* It reproduces as a PAIR — `tests/integration/test_agent_uses_graph.py` then
+  the WHOLE of `test_tools_quickwins.py` (15s). Running only the failing test
+  node after the culprit does NOT reproduce, which is why the first bisect came
+  back clean: the reproduction has to match the real execution shape.
+* At the moment `read_url` resolves the guard, `kazma_core.security.ssrf` is
+  **absent from `sys.modules`** — measured, while nine other
+  `kazma_core.security.*` modules are loaded. So the test's
+  `monkeypatch.setattr("kazma_core.security.ssrf.validate_url", …)` patches one
+  module object, and `read_url`'s lazy `from … import validate_url` then builds
+  a FRESH module with the real guard. The stub is not bypassed; it is patched
+  onto a copy that is no longer the one imported.
+
+What is NOT established is what removes it. It is absent through setup and
+call and present again by teardown, which does not fit the test importing it
+itself, and the three `del sys.modules[...]` sites in `hub/loader.py` are all
+scoped to `_kazma_skill_*`. Not fixed, because a fix aimed at the wrong half of
+that chain would look green for the wrong reason — which is the failure mode
+this whole page exists to record.
+
+**Historic detail, kept because the partition sensitivity is still real:**
 Measured 2026-09-21, same machine, same runner, three runs:
 
 | Run | Files | Result |
