@@ -162,6 +162,32 @@ jobs:
         # and a job that is red on day one gets ignored, which is how we got
         # here. This is a tripwire for the pg code paths, NOT parity with the
         # SQLite suite — docs/KNOWN_GAPS.md says so explicitly.
+        #
+        # The list grew from 7 files to 17 on 2026-09-21, and every addition
+        # was VERIFIED against a real Postgres before being added — a scratch
+        # database created next to the operator's live one, each candidate run
+        # against it in its own process, then dropped. 14 candidates were
+        # tried; 9 passed as-is, 1 passed only after the bug it exposed was
+        # fixed, and 4 were rejected. Adding them blind is what the comment
+        # above warns against, and guessing would have been the same mistake
+        # in a new coat.
+        #
+        # The four rejected, so nobody re-adds them expecting green:
+        #   test_config_store_vault.py, test_config_write_race.py — force a
+        #     SQLite connection while Postgres is active; the RuntimeError
+        #     they hit is the backend guard working, not a defect.
+        #   test_audit_2026_09_16_regressions.py — one test writes through a
+        #     SQLite path that has no `settings` table under Postgres.
+        #   test_document_operations_phase9.py — test_pg_readiness_is_truthful
+        #     asserts NOT-ready, which cannot hold when Postgres is genuinely
+        #     up. It is a SQLite-shaped assertion, not a product failure.
+        #
+        # Adding test_atomic_update_does_not_deadlock.py found a real one:
+        # ConfigStore's Postgres branch indexed rows POSITIONALLY while the
+        # pool is opened with row_factory=dict_row, so `row[0]` raised
+        # KeyError: 0 on every read-modify-write against Postgres. Fixed in
+        # the same commit. That path had no CI coverage, which is exactly the
+        # hole this job exists to close.
         run: |
           python -m pytest -q --timeout=300 \
             tests/test_pg_backup.py \
@@ -170,7 +196,17 @@ jobs:
             tests/test_pg_bridge_docker_env.py \
             tests/test_document_jobs_pg_idempotency.py \
             tests/test_document_repository_pg_quota.py \
-            tests/test_memory_pgvector.py
+            tests/test_memory_pgvector.py \
+            tests/test_db_backend.py \
+            tests/test_config_store.py \
+            tests/test_config_store_stale_shadow.py \
+            tests/test_stale_settings_db_notice.py \
+            tests/test_data_dir_does_not_isolate_postgres.py \
+            tests/test_atomic_update_does_not_deadlock.py \
+            tests/test_importer_atomicity.py \
+            tests/test_memory_mirror.py \
+            tests/test_task_store_workspace.py \
+            tests/test_audit_2026_09_17_regressions.py
         env:
           KAZMA_DB_BACKEND: postgres
           KAZMA_DATABASE_URL: postgresql://kazma:kazma@localhost:5432/kazma_test

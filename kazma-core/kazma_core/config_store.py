@@ -339,6 +339,64 @@ CREATE INDEX IF NOT EXISTS idx_settings_category ON settings(category);
 """
 
 
+#: Key for the in-table stale notice. Chosen to sort to the very top of an
+#: unsorted `SELECT * FROM settings` listing, so it is the first thing the
+#: person debugging sees rather than something they scroll past.
+_STALE_NOTICE_KEY = "!!!_THIS_TABLE_IS_NOT_READ"
+
+_STALE_NOTICE_VALUE = (
+    "Postgres is the live config backend. The rows in THIS settings table are "
+    "a leftover from before the cutover and are NOT read by Kazma. They can "
+    "show providers as disabled with empty keys while the real store has them "
+    "enabled -- debugging credentials against this file gives a confident "
+    "wrong answer. DO NOT DELETE THIS FILE: the same file holds the live "
+    "Knowledge Library (knowledge_chunks), which is SQLite-only and not stale. "
+    "This row is written by ConfigStore at boot and removed automatically if "
+    "SQLite ever becomes the live backend again."
+)
+
+
+def _mark_stale_settings_table(db_path: Any, *, live: bool) -> None:
+    """Write (or clear) the in-table notice on a shadowed ``settings`` table.
+
+    The boot warning is delivered on the day of boot. The operator this
+    protects opens the file days later in a SQLite browser, mid-incident, and
+    reads plausible wrong rows — which has happened twice here. A row inside
+    the table is the only warning that travels with the file.
+
+    ``live=True`` removes the notice: SQLite is the backend again and these
+    rows mean something, so a leftover warning would itself be the lie.
+
+    Never raises. This is a diagnostic aid; a locked database or a read-only
+    filesystem must not affect boot, and the row is not load-bearing.
+    """
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=1.0)
+    except Exception:  # noqa: BLE001
+        return
+    try:
+        if live:
+            conn.execute("DELETE FROM settings WHERE key = ?",
+                         (_STALE_NOTICE_KEY,))
+        else:
+            conn.execute(
+                "INSERT INTO settings (key, value, category, updated_at) "
+                "VALUES (?, ?, 'internal', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value, "
+                "updated_at = excluded.updated_at",
+                (_STALE_NOTICE_KEY, _STALE_NOTICE_VALUE,
+                 datetime.now(UTC).isoformat()),
+            )
+        conn.commit()
+    except Exception:  # noqa: BLE001 — never break boot over a hint
+        pass
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 _MISSING = object()
 
 # YAML flattens to ``safety.hitl.approval_timeout_seconds``; Settings and
@@ -745,6 +803,7 @@ class ConfigStore:
                 self._pg_pool()
                 logger.info("[ConfigStore] using Postgres backend")
                 self._warn_if_stale_sqlite_shadow()
+                self._warn_if_data_dir_implies_isolation()
             except Exception as exc:
                 logger.error(
                     "[ConfigStore] Postgres init failed (%s) — falling back is unsafe; "
@@ -757,6 +816,67 @@ class ConfigStore:
             conn = self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
+        # SQLite is the live backend, so any in-table "this table is not read"
+        # notice left by an earlier Postgres run is now itself the wrong
+        # answer. Clearing it is as important as writing it: a stale warning
+        # about staleness is worse than none, because it is believed.
+        _mark_stale_settings_table(self._db_path, live=True)
+
+    def _warn_if_data_dir_implies_isolation(self) -> None:
+        """Say so when a relocated data dir is reading a SHARED config store.
+
+        ``KAZMA_DATA_DIR`` moves an install's files. It does not move its
+        settings when the backend is Postgres -- ``_use_postgres()`` keys off
+        ``KAZMA_DB_BACKEND`` / ``KAZMA_DATABASE_URL`` and nothing else -- so a
+        script, a test harness or a second checkout that points the data dir
+        at a scratch path still reads *and writes* the production store while
+        looking thoroughly isolated.
+
+        That is not hypothetical. The dev clone in this repo shared the
+        operator's live Postgres for days: ``kazma doctor`` gave different
+        answers on the two boxes, a test run wrote junk into the real
+        ``llm_calls.db``, and a ``vault://`` pointer written by one machine
+        resolved to nothing on the other -- which is the 2026-09-16 outage.
+
+        Deliberately a warning and not a behaviour change. ``KAZMA_DATA_DIR``
+        is documented as a *relocatable production layout* feature, so making
+        it imply SQLite would silently detach a legitimately relocated
+        production install from its own database. Loud beats clever here.
+
+        Restored 2026-09-21. This shipped once and was rolled back on
+        2026-09-17 in a bundle with the vault tripwire, because main was red
+        and only one of the two could be cleared of causing it. Neither was
+        the cause: the red runs were a 15-second teardown tax, fixed in
+        ``379ca476``, and ``KNOWN_GAPS`` now records the tripwire as *wrongly*
+        reverted. The condition for bringing this back was that the hang be
+        understood, and it is -- so it comes back unchanged, rather than
+        rewritten as if the original had been at fault.
+
+        One line at boot, best-effort, never fatal.
+        """
+        try:
+            raw = (os.environ.get("KAZMA_DATA_DIR") or "").strip()
+            if not raw:
+                return
+            from pathlib import Path as _Path
+
+            from kazma_core.paths import get_project_root
+
+            relocated = _Path(raw).expanduser().resolve()
+            default = (get_project_root() / "kazma-data").resolve()
+            if relocated == default:
+                return  # pointed at its own dir; nothing surprising
+            logger.warning(
+                "[ConfigStore] KAZMA_DATA_DIR relocates files to %s, but "
+                "settings come from POSTGRES, which is SHARED with every other "
+                "install pointing at the same KAZMA_DATABASE_URL. This process "
+                "can read and WRITE that store. If you meant an isolated "
+                "install, also set KAZMA_DB_BACKEND=sqlite; if you meant a "
+                "relocated production layout, this is correct and expected.",
+                relocated,
+            )
+        except Exception:  # noqa: BLE001 — a diagnostic must never fail boot
+            logger.debug("[ConfigStore] data-dir isolation check failed", exc_info=True)
 
     def _warn_if_stale_sqlite_shadow(self) -> None:
         """Say so when a dead SQLite settings DB is shadowing the live one.
@@ -847,6 +967,21 @@ class ConfigStore:
                               file=_sys.stderr, flush=True)
                     except Exception:  # noqa: BLE001 — never break boot
                         pass
+
+                # Put the warning where the confusion actually happens.
+                #
+                # Everything above is delivered at BOOT. The operator who gets
+                # burned by this file opens it in a SQLite browser three days
+                # later, debugging a credential failure, and sees a `settings`
+                # table full of plausible, wrong rows — that has happened twice
+                # in this repo's history. A log line emitted on Tuesday does not
+                # reach them on Friday.
+                #
+                # So leave a row IN the table, where any `SELECT * FROM
+                # settings` puts it on screen next to the rows it is warning
+                # about. Written under the key below because it sorts to the
+                # top of an unsorted browser listing.
+                _mark_stale_settings_table(stale, live=False)
         except Exception:  # pragma: no cover - a hint must never break boot
             logger.debug("[ConfigStore] stale-shadow check skipped", exc_info=True)
 
@@ -1469,7 +1604,12 @@ class ConfigStore:
                         )
                         row = cur.fetchone()
                         if row is not None:
-                            existing_val = row[0]
+                            # The pool is opened with row_factory=dict_row, so
+                            # rows are MAPPINGS. `row[0]` raises KeyError: 0 on
+                            # every Postgres install; the neighbouring SQLite
+                            # branch below indexes positionally and is correct
+                            # there, which is how the two drifted apart.
+                            existing_val = row["value"]
                             if isinstance(existing_val, str):
                                 try:
                                     existing_val = json.loads(existing_val)
@@ -1483,7 +1623,9 @@ class ConfigStore:
                                     is_expired = True
                             elif ttl is not None:
                                 try:
-                                    up_at = datetime.fromisoformat(str(row[1])).timestamp()
+                                    up_at = datetime.fromisoformat(
+                                        str(row["updated_at"])
+                                    ).timestamp()
                                     if (now_sec - up_at) >= ttl:
                                         is_expired = True
                                 except Exception:
@@ -1574,11 +1716,17 @@ class ConfigStore:
                         )
                         row = cur.fetchone()
                         curr = None
-                        if row is not None and row[0]:
+                        # dict_row again — see the note in the lock path above.
+                        # This one is the sharper failure: atomic_update is the
+                        # chokepoint every read-modify-write passes through, so
+                        # `row[0]` meant KeyError: 0 on EVERY such update
+                        # against Postgres.
+                        if row is not None and row["value"]:
+                            _raw = row["value"]
                             try:
-                                curr = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                                curr = json.loads(_raw) if isinstance(_raw, str) else _raw
                             except Exception:
-                                curr = row[0]
+                                curr = _raw
                         new_val = updater(curr)
                         to_store = self._prepare_value_for_storage(key, new_val)
                         if self._refused_the_write(key, new_val, to_store):

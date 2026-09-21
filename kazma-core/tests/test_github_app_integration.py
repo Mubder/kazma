@@ -10,6 +10,48 @@ import pytest
 from kazma_core.git_identity import get_bot_identity, get_commit_env, _try_app_email
 
 
+def _scripted_run(*results):
+    """A ``subprocess.run`` side effect that FAILS loudly when it runs out.
+
+    A plain ``side_effect=[a, b, c, d]`` raises ``StopIteration`` on the fifth
+    call. Inside a coroutine that is close to the worst possible error: it is
+    not an assertion anyone can read, it interacts badly with the async
+    machinery, and it can present as a process that simply stops.
+
+    That matters here specifically. ``chunk 00`` on CI dies inside THIS file,
+    on the 5th test, the first ``async`` one, with MainThread parked in
+    ``run_until_complete`` -> ``selector.poll`` — an event loop waiting for I/O
+    that never arrives. It has never reproduced off Linux, and the standing
+    hypothesis in ``docs/KNOWN_GAPS.md`` is that ``_git_sync`` makes one MORE
+    subprocess call on the runner than on a dev box, because some git config
+    present here is absent there — which would exhaust exactly these lists.
+
+    This does not fix that. It makes the next occurrence say so: the failure
+    becomes an AssertionError naming the unscripted command, instead of a
+    chunk that produces no parseable tally. If the hypothesis is wrong, the
+    tests behave exactly as before, because the first N calls are unchanged.
+    """
+    remaining = list(results)
+    seen: list[list[str]] = []
+
+    def _run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args")
+        seen.append(cmd)
+        if not remaining:
+            raise AssertionError(
+                f"subprocess.run called {len(seen)} times but only "
+                f"{len(results)} results were scripted. The unscripted call "
+                f"was: {cmd!r}\nCalls so far: {seen!r}\n"
+                "If this fires on CI and not locally, that is the KNOWN_GAPS "
+                "chunk-00 hypothesis confirmed — an extra git invocation on "
+                "the runner — and it is now a readable failure instead of a "
+                "hang."
+            )
+        return remaining.pop(0)
+
+    return _run
+
+
 def test_github_app_bot_email_derivation():
     """Verify GitHub App bot email is auto-derived as <bot_user_id>+<app_slug>[bot]@users.noreply.github.com.
 
@@ -84,7 +126,7 @@ async def test_git_push_pull_upstream():
         mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
         mock_push = MagicMock(returncode=0, stdout="Everything up-to-date", stderr="")
 
-        mock_run.side_effect = [mock_b, mock_u, mock_url, mock_push]
+        mock_run.side_effect = _scripted_run(mock_b, mock_u, mock_url, mock_push)
 
         res = await git_push_pull(action="push")
         assert "Everything up-to-date" in res
@@ -116,7 +158,7 @@ async def test_git_push_delegates_to_push_path():
         mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
         mock_push = MagicMock(returncode=0, stdout="   abc..def  main -> main\n", stderr="")
 
-        mock_run.side_effect = [mock_b, mock_u, mock_url, mock_push]
+        mock_run.side_effect = _scripted_run(mock_b, mock_u, mock_url, mock_push)
 
         res = await git_push()  # NO action argument — must push, not pull
 
@@ -142,7 +184,7 @@ async def test_git_pull_delegates_to_pull_path():
         mock_url = MagicMock(returncode=0, stdout="https://github.com/owner/repo.git\n")
         mock_pull = MagicMock(returncode=0, stdout="Already up to date.", stderr="")
 
-        mock_run.side_effect = [mock_url, mock_pull]
+        mock_run.side_effect = _scripted_run(mock_url, mock_pull)
 
         res = await git_pull()
 
@@ -183,7 +225,7 @@ async def test_git_push_pull_retries_on_auth_failure_after_re_mint():
         mock_push_fail = MagicMock(returncode=128, stdout="", stderr="fatal: Authentication failed for https://github.com/owner/repo.git/")
         mock_push_ok = MagicMock(returncode=0, stdout="To https://github.com/owner/repo.git\n   abc..def  main -> main\n", stderr="")
 
-        mock_run.side_effect = [mock_b, mock_u, mock_url, mock_push_fail, mock_push_ok]
+        mock_run.side_effect = _scripted_run(mock_b, mock_u, mock_url, mock_push_fail, mock_push_ok)
 
         res = await git_push_pull(action="push")
 
@@ -237,11 +279,11 @@ async def test_git_push_pull_detects_false_up_to_date():
         # Post-refresh ls-remote verify: still missing HEAD.
         mock_ls_retry_fail = MagicMock(returncode=0, stdout="999000111222\trefs/heads/main\n")
 
-        mock_run.side_effect = [
+        mock_run.side_effect = _scripted_run(
             mock_b, mock_u, mock_url, mock_push_noop,
             mock_head, mock_ahead, mock_ls_fail,
             mock_push_retry, mock_ls_retry_fail,
-        ]
+        )
 
         res = await git_push_pull(action="push")
 
@@ -272,7 +314,7 @@ async def test_git_push_pull_up_to_date_when_truly_in_sync():
         mock_head = MagicMock(returncode=0, stdout=HEAD_SHA + "\n")
         mock_ahead_zero = MagicMock(returncode=0, stdout="0\n")
 
-        mock_run.side_effect = [mock_b, mock_u, mock_url, mock_push_ok]
+        mock_run.side_effect = _scripted_run(mock_b, mock_u, mock_url, mock_push_ok)
 
         res = await git_push_pull(action="push")
         # No verification error — genuinely in sync.

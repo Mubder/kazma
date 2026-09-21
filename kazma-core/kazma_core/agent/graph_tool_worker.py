@@ -1110,6 +1110,51 @@ async def tool_worker_node(
                     _n = _jail_note(str(_tc.get("name") or ""))
                     if _n and _n not in _notes:
                         _notes.append(_n)
+
+                # Name Kazma's own databases when a command mentions one.
+                #
+                # File tools cannot write these at all (path_policy rule 0),
+                # but shell_exec and python_exec do not go through path policy
+                # — after approval they are host power, which THREAT_MODEL
+                # states plainly and this does not change. What it changes is
+                # what the operator is looking at when they decide: the
+                # difference between `sqlite3 kazma-data/hitl_gates.db "update
+                # ..."` and any other sqlite3 invocation is one filename in
+                # the middle of a long line, and hitl_gates.db is the record
+                # of what they themselves approved.
+                #
+                # Deliberately a disclosure and NOT a block. A command-string
+                # check is bypassable by a variable, an encoding or a python
+                # one-liner, so refusing here would buy a guarantee it cannot
+                # keep while breaking legitimate read-only inspection. The
+                # human is the control; this gives the human the fact.
+                try:
+                    from kazma_core.workspace.path_policy import (
+                        control_plane_db_names,
+                    )
+
+                    _names = control_plane_db_names()
+                    _hits: list[str] = []
+                    for _tc in danger_tools:
+                        # NOTE: the raw call carries "arguments"; only
+                        # tools_payload renames it to "args". Reading the
+                        # wrong key here would make this silently never fire,
+                        # which is the worst failure mode a disclosure has.
+                        _blob = str(_tc.get("arguments") or "").lower()
+                        for _n2 in _names:
+                            if _n2 in _blob and _n2 not in _hits:
+                                _hits.append(_n2)
+                    if _hits:
+                        _notes.append(
+                            "This references Kazma's own store(s): "
+                            + ", ".join(sorted(_hits))
+                            + ". hitl_gates.db is the record of what you have "
+                            "approved; the others hold configuration, secrets, "
+                            "permissions, memory or the audit trail."
+                        )
+                except Exception:  # noqa: BLE001 — a disclosure must not break the card
+                    pass
+
                 _jail = "\n".join(_notes)
             except Exception:
                 _jail = ""
