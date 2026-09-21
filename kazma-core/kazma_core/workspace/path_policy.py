@@ -42,6 +42,38 @@ _DB_SUFFIXES = (".db", ".sqlite", ".sqlite3")
 _DB_SIDECARS = ("-wal", "-shm", "-journal")
 
 
+def control_plane_db_names() -> frozenset[str]:
+    """Filenames of Kazma's own databases, lowercased.
+
+    One list, so a guard and a disclosure cannot disagree about what counts.
+    Used by the write refusal below, and by the approval card, which warns a
+    human when a danger-tier command mentions one of these by name.
+
+    Derived from ``kazma_core.paths`` rather than hardcoded, so a store added
+    there is covered without anyone remembering this function — the same
+    reason the refusal matches by suffix instead of by an enumerated list.
+    """
+    names: set[str] = {"hitl_gates.db"}          # not exposed via paths
+    try:
+        from kazma_core import paths as _paths
+
+        for helper in (
+            "vault_db_path", "checkpoints_db", "settings_db", "snapshots_db",
+            "swarm_tasks_db", "audit_db", "rbac_db", "hub_registry_db",
+            "primary_memory_db", "memory_ops_db", "knowledge_graph_db",
+        ):
+            fn = getattr(_paths, helper, None)
+            if fn is None:
+                continue
+            try:
+                names.add(Path(str(fn())).name.lower())
+            except Exception:  # noqa: BLE001 — a name we cannot resolve is skipped
+                continue
+    except Exception:  # noqa: BLE001
+        pass
+    return frozenset(n for n in names if n)
+
+
 def _is_control_plane_store(resolved: Path) -> bool:
     """True if *resolved* is one of Kazma's own databases.
 
