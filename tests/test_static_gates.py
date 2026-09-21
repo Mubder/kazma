@@ -821,6 +821,128 @@ def test_no_new_cwd_relative_data_paths():
     )
 
 
+#: Files that still bet on a duration: `sleep(<2s)` immediately followed by an
+#: `assert`, at statement level (a sleep INSIDE a loop is a poll, and correct).
+#:
+#: A ledger, not an endorsement. Two of these bets went red in CI on
+#: 2026-09-21 and were converted to polling; the rest are untouched because
+#: many are legitimate — where the sleep IS the stimulus, such as a watchdog
+#: that must fire after N seconds, polling would test nothing. Telling those
+#: apart needs reading each one, and none of them has failed.
+#:
+#: The gate exists so the number cannot GROW quietly. Deleting an entry when a
+#: file is fixed is the intended direction; adding one needs a reason.
+SLEEP_THEN_ASSERT_DEBT: dict[str, int] = {
+    "tests/e2e/test_unified_turn_browser.py": 2,
+    "tests/test_audit_deep_structure_fixes.py": 5,
+    "tests/test_document_operations_phase9.py": 1,
+    "tests/test_gateway.py": 1,
+    "tests/test_hitl_gates.py": 1,
+    "tests/test_loop_stall_watchdog.py": 2,
+    "tests/test_procedural_recorder_worker.py": 1,
+    "tests/test_swarm_engine_core.py": 1,
+    "tests/test_swarm_notify.py": 1,
+    "tests/test_swarm_reliability.py": 3,
+    "tests/test_swarm_timeout_validation_concurrency.py": 2,
+    "tests/test_typing_keepalive.py": 2,
+    "tests/test_unrestricted_unified.py": 1,
+}
+
+
+def _sleep_seconds(node: ast.stmt) -> float | None:
+    """Seconds, if *node* is a bare `sleep(...)` / `wait_for_timeout(...)`."""
+    val = node.value if isinstance(node, ast.Expr) else None
+    if isinstance(val, ast.Await):
+        val = val.value
+    if not isinstance(val, ast.Call) or not isinstance(val.func, ast.Attribute):
+        return None
+    name = val.func.attr
+    if name not in ("sleep", "wait_for_timeout"):
+        return None
+    if not val.args or not isinstance(val.args[0], ast.Constant):
+        return None
+    raw = val.args[0].value
+    if not isinstance(raw, (int, float)) or raw == 0:
+        return None
+    return float(raw) / (1000.0 if name == "wait_for_timeout" else 1.0)
+
+
+def test_no_new_sleep_then_assert_in_tests():
+    """A test must not wait a fixed duration and then assert once.
+
+    Both CI flakes fixed on 2026-09-21 were this shape. The journaled-frames
+    e2e waited for the client's render pipeline to mount and asserted once; the
+    swarm checkpoint test waited 300ms for a 100ms timeout and asserted once.
+    Neither was waiting for TIME — one waited for a mount, the other for the
+    scheduler to reach a task — and neither has a fixed upper bound on a loaded
+    runner. Both failed in CI, passed locally, and read as regressions in
+    whatever commit happened to be running.
+
+    A longer sleep is the same bet at better odds. Polling to a deadline
+    removes the bet without weakening anything: the assertion is unchanged, and
+    a condition that never arrives still fails, at the deadline.
+
+    Not every sleep is wrong — where the sleep IS the stimulus it is exactly
+    right, which is why the existing ones are ledgered rather than banned. This
+    gate stops the count growing.
+    """
+    offenders: list[str] = []
+    counts: dict[str, int] = {}
+
+    for path in sorted((REPO_ROOT / "tests").rglob("*.py")):
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except (SyntaxError, OSError):
+            continue
+
+        in_loop: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.While, ast.For, ast.AsyncFor)):
+                for d in ast.walk(node):
+                    in_loop.add(id(d))
+
+        rel = _rel(path)
+        for parent in ast.walk(tree):
+            for field in ("body", "orelse", "finalbody"):
+                block = getattr(parent, field, None)
+                if not isinstance(block, list):
+                    continue
+                for i, stmt in enumerate(block):
+                    secs = _sleep_seconds(stmt)
+                    if secs is None or secs > 2.0 or id(stmt) in in_loop:
+                        continue
+                    nxt = block[i + 1] if i + 1 < len(block) else None
+                    if isinstance(nxt, ast.Assert):
+                        counts[rel] = counts.get(rel, 0) + 1
+                        if counts[rel] > SLEEP_THEN_ASSERT_DEBT.get(rel, 0):
+                            offenders.append(f"{rel}:{stmt.lineno} sleep({secs})")
+
+    assert not offenders, (
+        "a test sleeps for a fixed duration and then asserts once. That is a "
+        "bet that the work finishes in time — it passes on an idle machine and "
+        "fails on a loaded CI runner, and the failure looks like a regression "
+        "in whoever's commit is running.\n"
+        "Fix: poll to a deadline instead. Keep the assertion; a condition that "
+        "never arrives still fails, at the deadline, with a message saying "
+        "which it was.\n"
+        "If the sleep IS the stimulus (a watchdog that must fire after N "
+        "seconds), add the file to SLEEP_THEN_ASSERT_DEBT with that reason.\n  "
+        + "\n  ".join(offenders)
+    )
+
+    stale = {
+        rel: n for rel, n in SLEEP_THEN_ASSERT_DEBT.items()
+        if counts.get(rel, 0) < n
+    }
+    assert not stale, (
+        "the ledger claims more sleep-then-assert sites than exist — someone "
+        "fixed these and did not lower the number, which is how a ledger stops "
+        "meaning anything:\n  "
+        + "\n  ".join(f"{r}: ledger {n}, actual {counts.get(r, 0)}"
+                      for r, n in stale.items())
+    )
+
+
 def test_the_write_veto_is_checked_by_every_caller():
     """A refusal returned as ``None`` must be honoured by whoever asked.
 
