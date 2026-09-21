@@ -381,6 +381,28 @@ no thread whose later calls could be re-checked against a grant. Working as
 intended, but it means an MCP client approving twenty file writes asks twenty
 times.
 
+**Decided 2026-09-21: this stays as it is, and is not a to-do.** Building
+session grants here was considered and rejected on the asymmetry. Not building
+costs occasional extra prompts — bounded, visible, annoying. Building it wrong
+costs the silent loss of the strongest control in the system: an approval the
+operator never gave. There is also nothing trustworthy to scope a grant *to* —
+a bus-less client has no thread, so the key would have to be something
+forgeable, and a grant keyed to a forgeable identity is worse than no grant.
+
+The same shape produced the most serious finding of that day: `file_write` is
+danger-tier, but "Allow tool (session)" grants it for ~30 minutes, and inside
+that window one click the operator read as "let it write files" could have
+rewritten `hitl_gates.db` and forged approvals for everything after. Adding a
+second, weaker version of that mechanism for clients with *less* identity is
+the wrong direction.
+
+The designed answer to twenty prompts already exists and is the better one:
+`KAZMA_MCP_SAFE_ALLOWLIST` names the specific tools you want unattended. It is
+explicit rather than implicit, per-tool rather than per-session, and lives in
+configuration where it can be audited — instead of a time window nobody
+remembers opening. Documented in `.env.example`, `THREAT_MODEL.md` and
+`ARCHITECTURE_AND_SYSTEM_MAP.md`.
+
 **The watcher heartbeat proves a process is alive, not that a human is.**
 A running Kazma instance with nobody at the keyboard still heartbeats, so
 danger tools are published and the approval simply times out (and denies). That

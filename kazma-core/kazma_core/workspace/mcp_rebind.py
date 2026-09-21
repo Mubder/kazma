@@ -24,12 +24,28 @@ import time
 from pathlib import Path
 from typing import Any
 
+from kazma_core.workspace import binding as _binding
 from kazma_core.workspace.binding import (
-    get_bound_mcp_root,
     resolve_active_root,
     set_bound_mcp_root,
     subscribe_root_changed,
 )
+
+# `get_bound_mcp_root` is called through the MODULE, not bound by value.
+#
+# A module-level `from ... import get_bound_mcp_root` captures the function
+# object at import. If this module is first imported while a test has
+# monkeypatched `binding.get_bound_mcp_root`, the fake is captured here and
+# survives the monkeypatch being undone — nothing can reach this copy to
+# restore it. Measured 2026-09-21: a divergence probe over 1,077 module-level
+# bindings found this one holding a `<lambda>` while the owner held the real
+# function, after `test_audit_deep_structure_fixes` ran.
+#
+# It is the same defect that made `sse_chat/_streaming` call a test double for
+# the rest of the process and reddened five unrelated tests. The other imports
+# above are left as they are: they are not patched by any test, and rewriting
+# every value-import in the tree trades a rare, order-dependent problem for a
+# tree-wide diff.
 
 __all__ = [
     "ACTIVE_WORKSPACE_PLACEHOLDER",
@@ -167,7 +183,7 @@ async def rebind_workspace_mcp_servers(
     lock = _get_rebind_lock()
     async with lock:
         now = time.monotonic()
-        if now - _last_rebind_at < _REBIND_DEBOUNCE_S and get_bound_mcp_root() == root.resolve():
+        if now - _last_rebind_at < _REBIND_DEBOUNCE_S and _binding.get_bound_mcp_root() == root.resolve():
             return 0
         _last_rebind_at = now
 
