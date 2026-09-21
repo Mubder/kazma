@@ -959,6 +959,28 @@ scoped to `_kazma_skill_*`. Not fixed, because a fix aimed at the wrong half of
 that chain would look green for the wrong reason — which is the failure mode
 this whole page exists to record.
 
+**Two surfaces measured while fixing the above, neither of them a bug list.**
+Both were counted on 2026-09-21 because the next order-dependent failure
+should start here rather than with a day of bisecting:
+
+* **104 module-level value-imports of a name some test monkeypatches** —
+  `from pkg.mod import func` at module scope, where a test patches
+  `pkg.mod.func`. That is the `_streaming` shape. A trap only fires if the
+  importing module is FIRST imported while the patch is live, which depends on
+  import order, so 104 is an exposure surface and exactly one has ever fired.
+* **64 `sleep(<2s)`-then-`assert` sites in tests** — the shape behind both
+  flakes fixed today. Not all are wrong: where the sleep IS the stimulus (a
+  watchdog that must fire after N seconds) it is correct, and only the ones
+  waiting on asynchronous work to land are bets. Telling them apart means
+  reading each one.
+
+Neither was swept. A 104-import refactor or a 64-test rewrite trades a rare,
+order-dependent latent issue for a large diff across the whole tree, which is
+a worse bargain than it looks — especially against a suite whose own failures
+are order-dependent. The scanners that produced these counts are twenty lines
+each and easy to rewrite; the numbers are here so nobody re-derives them from
+scratch.
+
 **Historic detail, kept because the partition sensitivity is still real:**
 Measured 2026-09-21, same machine, same runner, three runs:
 

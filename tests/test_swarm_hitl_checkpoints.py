@@ -13,6 +13,7 @@ Validation contract assertions covered:
 from __future__ import annotations
 
 import asyncio
+import time
 from unittest.mock import AsyncMock
 
 import pytest
@@ -310,13 +311,36 @@ async def test_checkpoint_timeout_auto_rejects(empty_config):
     pause_result = await engine.dispatch(task)
     assert pause_result.status == "paused"
 
-    # Wait for timeout to fire
-    await asyncio.sleep(0.3)
-
-    # Task should have been auto-rejected
+    # Poll for the auto-reject instead of sleeping once.
+    #
+    # This was a flat `await asyncio.sleep(0.3)` against a 100ms timeout —
+    # three times the timeout on an idle machine, and not always enough on a
+    # loaded CI runner. What is actually being waited on is not the 100ms
+    # elapsing but the scheduler getting round to the rejection task, and that
+    # has no fixed upper bound. It failed in CI with the task still PAUSED on
+    # a commit whose code was green in the runs either side of it (2026-09-21),
+    # which is the signature of a race rather than a regression.
+    #
+    # A longer sleep would be the same bet at better odds. Polling removes the
+    # bet without weakening anything: the assertion below is unchanged, and if
+    # the timeout never fires this still fails — at the deadline, with a
+    # message saying which of the two it was.
+    deadline = time.monotonic() + 15.0
     task_obj = engine.get_task(pause_result.task_id)
+    while time.monotonic() < deadline:
+        task_obj = engine.get_task(pause_result.task_id)
+        if task_obj is not None and task_obj.status in (
+            TaskStatus.FAILED, TaskStatus.COMPLETED
+        ):
+            break
+        await asyncio.sleep(0.05)
+
     assert task_obj is not None
-    assert task_obj.status in (TaskStatus.FAILED, TaskStatus.COMPLETED)
+    assert task_obj.status in (TaskStatus.FAILED, TaskStatus.COMPLETED), (
+        f"the 100ms checkpoint timeout never auto-rejected: status is still "
+        f"{task_obj.status} after 15s of polling. That is the timeout failing "
+        "to fire, not the test being impatient."
+    )
     if task_obj.result:
         assert task_obj.result.status == "failed"
         assert task_obj.result.error is not None
