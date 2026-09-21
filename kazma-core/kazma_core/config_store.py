@@ -1604,7 +1604,12 @@ class ConfigStore:
                         )
                         row = cur.fetchone()
                         if row is not None:
-                            existing_val = row[0]
+                            # The pool is opened with row_factory=dict_row, so
+                            # rows are MAPPINGS. `row[0]` raises KeyError: 0 on
+                            # every Postgres install; the neighbouring SQLite
+                            # branch below indexes positionally and is correct
+                            # there, which is how the two drifted apart.
+                            existing_val = row["value"]
                             if isinstance(existing_val, str):
                                 try:
                                     existing_val = json.loads(existing_val)
@@ -1618,7 +1623,9 @@ class ConfigStore:
                                     is_expired = True
                             elif ttl is not None:
                                 try:
-                                    up_at = datetime.fromisoformat(str(row[1])).timestamp()
+                                    up_at = datetime.fromisoformat(
+                                        str(row["updated_at"])
+                                    ).timestamp()
                                     if (now_sec - up_at) >= ttl:
                                         is_expired = True
                                 except Exception:
@@ -1709,11 +1716,17 @@ class ConfigStore:
                         )
                         row = cur.fetchone()
                         curr = None
-                        if row is not None and row[0]:
+                        # dict_row again — see the note in the lock path above.
+                        # This one is the sharper failure: atomic_update is the
+                        # chokepoint every read-modify-write passes through, so
+                        # `row[0]` meant KeyError: 0 on EVERY such update
+                        # against Postgres.
+                        if row is not None and row["value"]:
+                            _raw = row["value"]
                             try:
-                                curr = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+                                curr = json.loads(_raw) if isinstance(_raw, str) else _raw
                             except Exception:
-                                curr = row[0]
+                                curr = _raw
                         new_val = updater(curr)
                         to_store = self._prepare_value_for_storage(key, new_val)
                         if self._refused_the_write(key, new_val, to_store):
