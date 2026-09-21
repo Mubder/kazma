@@ -160,7 +160,16 @@ def test_a_failed_checkpoint_keeps_its_parts(session, monkeypatch) -> None:
     def _boom(*a: Any, **kw: Any) -> bool:
         raise RuntimeError("disk on fire")
 
-    monkeypatch.setattr(_streaming, "persist_reply", _boom)
+    # Patch the OWNER, not this module. `_streaming` used to keep its own
+    # `from kazma_ui.turn_runtime import persist_reply` copy, and that private
+    # binding is precisely what let a fake from ANOTHER test file outlive its
+    # monkeypatch and redden five tests in this file — but only when import
+    # order happened to capture it, which depends on how the suite is chunked
+    # (diagnosed 2026-09-21). `_streaming` now resolves it at call time, so
+    # patching the owner both reaches it and is properly undone.
+    import kazma_ui.turn_runtime as _tr
+
+    monkeypatch.setattr(_tr, "persist_reply", _boom)
     assert asyncio.run(dp.commit("", force=True)) is False
     assert dp.failures == 1
 
