@@ -541,24 +541,30 @@ class TestToolWorkerIntegration:
         local = LocalToolRegistry(include_builtins=False)
 
         call_order: list[str] = []
-        # (name, entered, exited) -- concurrency is proved by overlap, not by a
-        # stopwatch. See the assertion at the end of this test.
-        spans: list[tuple[str, float, float]] = []
+        # Concurrency is proved by a RENDEZVOUS: each tool announces it has
+        # started and then waits for the other to start. Two calls in flight
+        # together both get through; a serial executor strands the first one
+        # waiting for a call that has not begun. See the assertion below.
+        entered = {"a": asyncio.Event(), "b": asyncio.Event()}
+        met: list[str] = []
 
-        async def _timed(name: str) -> str:
-            entered = asyncio.get_event_loop().time()
-            await asyncio.sleep(0.05)
+        async def _rendezvous(name: str, other: str) -> str:
+            entered[name].set()
+            try:
+                await asyncio.wait_for(entered[other].wait(), timeout=10)
+            except TimeoutError:
+                return f"stranded_{name}"
+            met.append(name)
             call_order.append(name)
-            spans.append((name, entered, asyncio.get_event_loop().time()))
             return f"result_{name}"
 
         @local.register(description="Slow tool A")
         async def tool_a() -> str:
-            return await _timed("a")
+            return await _rendezvous("a", "b")
 
         @local.register(description="Slow tool B")
         async def tool_b() -> str:
-            return await _timed("b")
+            return await _rendezvous("b", "a")
 
         executor = UnifiedToolExecutor(local=local)
         tracer = KazmaTracer(backend="console")
@@ -572,24 +578,18 @@ class TestToolWorkerIntegration:
         result = await tool_worker_node(state, tool_executor=executor, tracer=tracer)
 
         assert len(result["tool_calls_done"]) == 2
-        assert set(call_order) == {"a", "b"}
 
-        # Concurrency is proved by OVERLAP, not by a stopwatch.
+        # Concurrency is proved by the rendezvous, not by any clock.
         #
-        # This used to assert `elapsed < 0.15` against two 50ms sleeps, leaving
-        # 50ms of headroom for everything else the call does. That measures the
-        # host, not the code: it passed on an idle machine and failed at 0.187s
-        # on the same commit when the box was merely busy. Comparing against a
-        # serial run measured in the same test was no better -- under load the
-        # baseline is just as noisy, and it still failed two runs in three.
-        #
-        # If A entered before B exited, the two were in flight together. That
-        # is the actual invariant and no amount of CPU starvation can make a
-        # correctly-parallel implementation fail it.
-        assert len(spans) == 2, spans
-        (_, a_in, a_out), (_, b_in, b_out) = sorted(spans, key=lambda s: s[1])
-        assert a_in < b_out and b_in < a_out, (
-            f"tool calls did not overlap, so they ran serially: {spans}"
+        # A stopwatch (`elapsed < 0.15` for two 50ms sleeps) failed at 0.187s
+        # on a busy box. The overlap check that replaced it (A entered before B
+        # exited) failed in a full-suite run on 2026-09-22 with b_in == a_out:
+        # B's pre-tool work took longer than A's 50ms sleep, so a correctly
+        # parallel executor still produced no overlap. Any assertion about
+        # WHEN things happened measures the host. This one asks only whether
+        # both calls were in flight at once, which load cannot fake or break.
+        assert sorted(met) == ["a", "b"], (
+            f"tool calls ran serially — one was stranded waiting for the other: {call_order}"
         )
 
     @pytest.mark.asyncio

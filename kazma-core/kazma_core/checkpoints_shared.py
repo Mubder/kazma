@@ -162,7 +162,9 @@ async def close_shared_checkpoints() -> None:
 
                     done = threading.Event()
 
-                    def _close(s: Any = saver) -> None:
+                    # Both bound as defaults: a close that overruns the 5s
+                    # wait below must set ITS event, not the next key's.
+                    def _close(s: Any = saver, done: threading.Event = done) -> None:
                         try:
                             s.conn._stop_running()  # noqa: SLF001
                         except Exception:

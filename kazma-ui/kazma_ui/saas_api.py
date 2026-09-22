@@ -17,23 +17,16 @@ def create_saas_router() -> APIRouter:
     router = APIRouter(prefix="/api/saas", tags=["saas"])
 
     def _require_admin(request: Request) -> JSONResponse | None:
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        # Open mode (no secret) passes inside admin_decision: gating status
+        # there blanked Settings → Ops on a no-secret install (audit 2026-09-17).
+        from kazma_ui.auth import admin_decision
 
-        secret = get_kazma_secret()
-        if not secret:
-            # Open mode — the rest of the API is unauthenticated; there is
-            # no admin role to require. Gating status here blanked
-            # Settings → Ops on a no-secret install (audit 2026-09-17).
+        decision = admin_decision(request)
+        if decision == "ok":
             return None
-        if not is_authenticated(request, secret):
+        if decision == "unauthorized":
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
-        principal = get_request_principal(request) or {}
-        # Shared secret = full admin; multi-user needs admin role
-        if principal.get("source") == "secret":
-            return None
-        if principal.get("role") != "admin":
-            return JSONResponse({"error": "Admin role required"}, status_code=403)
-        return None
+        return JSONResponse({"error": "Admin role required"}, status_code=403)
 
     @router.get("/status")
     async def saas_status(request: Request) -> JSONResponse:

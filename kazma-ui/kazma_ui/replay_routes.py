@@ -10,7 +10,10 @@ Provides routes for the Web UI's Time Travel panel:
   POST /api/replay/compare                      — diff two snapshots
   DELETE /api/replay/threads/{thread_id}        — clear snapshots for a thread
 
-All routes are auto-auth-gated by the ``/api/`` default-deny policy.
+All routes are auto-auth-gated by the ``/api/`` default-deny policy, and every
+route acts only on threads the current tenant owns (``_require_thread_owned``).
+``tests/test_replay_route_ownership.py`` walks this router's route table, so a
+new route that forgets the check fails there.
 """
 
 from __future__ import annotations
@@ -59,23 +62,13 @@ def create_replay_router(
             status_code=503,
         )
 
-    def _require_thread_owned(thread_id: str) -> JSONResponse | None:
-        """Return a 404 if *thread_id* is not owned by the current tenant, else None.
+    # Every route here takes a thread, so every route checks it — list, read,
+    # compare and delete as well as restore and fork. Only the last two used to
+    # (audit 2026-09-22), and that check failed OPEN on a store error while
+    # saying it mirrored the approval gate, which fails closed.
+    from kazma_ui.thread_ownership import owned_threads_async, require_thread_owned
 
-        Mirrors the HITL approval ownership gate (routes_direct). Without this,
-        any authenticated user could rewind/fork another tenant's thread via
-        ``aupdate_state`` (audit finding). Best-effort: if the session manager
-        is unavailable, fail open for the admin-scoped replay panel.
-        """
-        try:
-            from kazma_ui.session_manager import get_session_manager
-
-            if get_session_manager().get_by_thread_id(thread_id) is None:
-                logger.warning("[replay] thread not owned by current tenant: %s", thread_id)
-                return JSONResponse({"error": "not found"}, status_code=404)
-        except Exception:
-            logger.debug("[replay] ownership check skipped", exc_info=True)
-        return None
+    _require_thread_owned = require_thread_owned
 
     @router.get("/api/replay/threads")
     async def list_threads() -> JSONResponse:
@@ -83,7 +76,12 @@ def create_replay_router(
         if recorder is None:
             return _unavailable()
         try:
-            threads = recorder.list_distinct_threads()
+            threads = await owned_threads_async(recorder.list_distinct_threads())
+            if threads is None:
+                return JSONResponse(
+                    {"threads": [], "count": 0, "error": "ownership check failed"},
+                    status_code=403,
+                )
             return JSONResponse({"threads": threads, "count": len(threads)})
         except Exception as exc:
             logger.exception("[replay] list threads failed")
@@ -94,6 +92,8 @@ def create_replay_router(
         """List snapshots for a thread, ordered by iteration."""
         if recorder is None:
             return _unavailable()
+        if (denied := await _require_thread_owned(thread_id)) is not None:
+            return denied
         try:
             snaps = recorder.list_snapshots(thread_id)
             items = [
@@ -116,6 +116,8 @@ def create_replay_router(
         """Get a single snapshot's detail (state + messages)."""
         if recorder is None:
             return _unavailable()
+        if (denied := await _require_thread_owned(thread_id)) is not None:
+            return denied
         try:
             state = engine.replay_from(thread_id, iteration)
             if state is None:
@@ -148,9 +150,8 @@ def create_replay_router(
         iteration = body.get("iteration")
         if not thread_id or iteration is None:
             return JSONResponse({"error": "thread_id and iteration required"}, status_code=400)
-        _own = _require_thread_owned(thread_id)
-        if _own is not None:
-            return _own
+        if (denied := await _require_thread_owned(thread_id)) is not None:
+            return denied
         try:
             state = engine.replay_from(thread_id, int(iteration))
             if state is None:
@@ -185,9 +186,8 @@ def create_replay_router(
         iteration = body.get("iteration")
         if not thread_id or iteration is None:
             return JSONResponse({"error": "thread_id and iteration required"}, status_code=400)
-        _own = _require_thread_owned(thread_id)
-        if _own is not None:
-            return _own
+        if (denied := await _require_thread_owned(thread_id)) is not None:
+            return denied
         try:
             state = engine.replay_from(thread_id, int(iteration))
             if state is None:
@@ -233,6 +233,8 @@ def create_replay_router(
         b = body.get("b")
         if not thread_id or a is None or b is None:
             return JSONResponse({"error": "thread_id, a, b required"}, status_code=400)
+        if (denied := await _require_thread_owned(thread_id)) is not None:
+            return denied
         try:
             state_a = engine.replay_from(thread_id, int(a))
             state_b = engine.replay_from(thread_id, int(b))
@@ -249,6 +251,8 @@ def create_replay_router(
         """Clear all snapshots for a thread."""
         if recorder is None:
             return _unavailable()
+        if (denied := await _require_thread_owned(thread_id)) is not None:
+            return denied
         try:
             count = recorder.clear_snapshots(thread_id)
             return JSONResponse({"ok": True, "cleared": count})

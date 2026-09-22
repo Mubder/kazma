@@ -7,6 +7,11 @@
 const fs = require("fs");
 const path = require("path");
 
+// renderTable reads window.KazmaBidi (RTL tables). This file was not run by CI
+// for a long time and failed on that ReferenceError without anyone seeing it;
+// tests/test_js_suite.py now runs every tests/js/test_*.js.
+global.window = global;
+
 const srcPath = path.join(
   __dirname,
   "..",

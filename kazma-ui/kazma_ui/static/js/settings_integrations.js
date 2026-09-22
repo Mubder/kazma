@@ -26,7 +26,7 @@
                 if (data.env && typeof data.env === 'string') {
                     try { data.env = JSON.parse(data.env); } catch { data.env = {}; }
                 }
-                await fetch('/api/settings/mcp', {
+                await window.kazmaSave('/api/settings/mcp', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
@@ -62,11 +62,16 @@
         },
 
         async toggleMcpServer(name, enabled) {
-            await fetch(`/api/settings/mcp/${encodeURIComponent(name)}/toggle`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled }),
-            });
+            try {
+                await window.kazmaSave(`/api/settings/mcp/${encodeURIComponent(name)}/toggle`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled }),
+                });
+            } catch (e) {
+                showToast('Toggle failed: ' + e.message, 'error');
+            }
+            // Reload either way: the list shows what the server actually has.
             await this.loadMcpServers();
         },
 
@@ -92,11 +97,15 @@
         },
 
         async toggleSkill(skillId, enabled) {
-            await fetch(`/api/settings/skills/${encodeURIComponent(skillId)}/toggle`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ enabled }),
-            });
+            try {
+                await window.kazmaSave(`/api/settings/skills/${encodeURIComponent(skillId)}/toggle`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled }),
+                });
+            } catch (e) {
+                showToast('Toggle failed: ' + e.message, 'error');
+            }
             await this.loadSkills();
         },
 
@@ -107,9 +116,13 @@
                 confirmText: 'Uninstall',
                 danger: true,
             }))) return;
-            await fetch(`/api/settings/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+            try {
+                await window.kazmaSave(`/api/settings/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+                showToast('Skill uninstalled', 'success');
+            } catch (e) {
+                showToast('Uninstall failed: ' + e.message, 'error');
+            }
             await this.loadSkills();
-            showToast('Skill uninstalled', 'success');
         },
 
         get filteredSkills() {

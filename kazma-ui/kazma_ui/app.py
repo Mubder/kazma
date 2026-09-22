@@ -96,90 +96,35 @@ class KazmaAppBuilder:
             self._load_env_files()
         except Exception as e:
             logger.debug("[env] Failed to load .env: %s", e)
+        self._bootstrap_services()
 
     @staticmethod
     def _env_file_ladder() -> list[Path]:
-        """``.env`` files to load, **lowest precedence first**.
+        """``.env`` files to load — see :func:`kazma_core.env_files.env_file_ladder`."""
+        from kazma_core.env_files import env_file_ladder
 
-        Replaces a ladder that hardcoded one developer's absolute path
-        (``C:/Users/balfa/kazma``) as the default "user workspace", and loaded
-        it *last with override* — so on that machine a clone at any other path
-        silently inherited a different clone's secrets, database DSN included,
-        and the repo you actually launched lost to one you did not.
-
-        Three defects, all fixed here:
-
-        1. No guessed paths. Nothing outside this installation is read unless
-           the operator names it.
-        2. ``KAZMA_WORKSPACE`` is the *agent's code workspace* (which repo it
-           edits) and is switchable from the UI. Deriving config location from
-           it meant "Switch Repo" could change which ``.env`` is authoritative.
-           Config location is now its own variable, ``KAZMA_ENV_FILE``.
-        3. Most specific wins last. The CWD you launched from beats the
-           per-install default; an explicitly named file beats both.
-        """
-        from kazma_core.paths import user_home
-
-        ladder: list[Path] = []
-
-        # Per-install defaults (`<kazma home>/.env`), lowest precedence.
-        try:
-            ladder.append(Path(user_home()) / ".env")
-        except Exception:
-            pass
-
-        # The directory you launched from — the repo actually being run.
-        ladder.append(Path.cwd() / ".env")
-
-        # Explicit override, highest precedence. Use this to point a dev clone
-        # at a shared env file on purpose, instead of it happening by accident.
-        explicit = (os.environ.get("KAZMA_ENV_FILE") or "").strip()
-        if explicit:
-            ladder.append(Path(explicit).expanduser())
-
-        return ladder
+        return env_file_ladder()
 
     def _load_env_files(self) -> None:
-        """Load ``.env`` files before any subsystem reads env-derived config.
+        """Load ``.env`` before any subsystem reads env-derived config.
 
         Must run first: the Postgres pool resolver reads ``KAZMA_DB_BACKEND``
-        / ``KAZMA_DATABASE_URL`` at import time. ``load_dotenv()``'s own search
-        walks up from the *package* location — which under an editable install
-        is whichever repo was installed, not the one you are running — so every
-        path here is explicit.
-
-        ``override=True`` is deliberate (a stale empty shell value must not
-        shadow a real one), which is exactly why precedence order matters: each
-        file overwrites the one before it, so the list runs lowest-first.
+        / ``KAZMA_DATABASE_URL``. The ladder and its precedence live in
+        :mod:`kazma_core.env_files`, shared with every other entry point.
         """
-        from dotenv import load_dotenv
+        from kazma_core.env_files import load_env_files
 
-        loaded: list[str] = []
-        seen: set[str] = set()
-        for path in self._env_file_ladder():
-            try:
-                if not path.is_file():
-                    continue
-                key = str(path.resolve()).lower()
-                if key in seen:
-                    continue
-                seen.add(key)
-                load_dotenv(dotenv_path=path, override=True)
-                loaded.append(str(path))
-            except OSError:
-                continue
+        load_env_files()
 
-        if loaded:
-            # Name the files. A .env loaded from somewhere unexpected used to
-            # be completely invisible, which is how the cross-clone leak above
-            # went unnoticed.
-            # ASCII arrow: this line is read on the Windows console, where a
-            # U+2192 renders as an escape and buries the useful part.
-            logger.info("[env] Loaded (lowest->highest precedence): %s", " -> ".join(loaded))
-        else:
-            logger.debug("[env] No .env file found on the ladder")
+    def _bootstrap_services(self) -> None:
+        """Logging, config store, agent, registry, secret, workspace, FastAPI app.
 
-
+        This used to be the tail of ``_load_env_files``: a 2026-08-29 edit
+        inserted the ladder methods into the middle of ``_bootstrap_environment``,
+        so everything below ran inside its ``try/except`` that logs at DEBUG.
+        A boot failure here vanished, and the next phase then failed on a
+        ``None`` app with an error naming the wrong cause (audit 2026-09-22).
+        """
         # Setup structured JSON logging if requested (now env-aware).
         try:
             from kazma_core.logging_config import setup_logging
@@ -2633,6 +2578,12 @@ def main() -> None:
     """
     import argparse
     import os as _os3
+
+    # Before KAZMA_PORT / KAZMA_HOST / KAZMA_SECRET are read below. Those used
+    # to see .env only because an import did a package-relative load_dotenv().
+    from kazma_core.env_files import load_env_files
+
+    load_env_files()
 
     # Windows: SelectorEventLoop for psycopg async compat (see
     # kazma_core.eventloop). Must run before uvicorn.run below.

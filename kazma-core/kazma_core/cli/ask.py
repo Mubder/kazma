@@ -346,13 +346,9 @@ def _boot_env(*, workspace: str = "", model: str = "") -> None:
     except Exception:
         pass
     try:
-        from pathlib import Path
+        from kazma_core.env_files import load_env_files
 
-        from dotenv import load_dotenv
-
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.exists():
-            load_dotenv(dotenv_path=cwd_env, override=True)
+        load_env_files()
     except Exception:
         pass
     from pathlib import Path as _Path

@@ -50,7 +50,7 @@ window.KazmaPushClient = (function() {
         applicationServerKey: urlBase64ToUint8Array(info.public_key),
       });
       const payload = sub.toJSON();
-      await fetch('/api/push/subscribe', {
+      await window.kazmaSave('/api/push/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ subscription: payload }),

@@ -673,18 +673,14 @@ class KazmaTUI(App[None]):
 
 
 def _load_local_env() -> None:
-    """Pick up cwd `.env` so TUI mouths send the same KAZMA_SECRET as the server.
+    """Pick up the `.env` ladder so TUI mouths send the same KAZMA_SECRET as the server.
 
     Does not override variables already in the process environment.
     """
     try:
-        from pathlib import Path
+        from kazma_core.env_files import load_env_files
 
-        from dotenv import load_dotenv
-
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.is_file():
-            load_dotenv(dotenv_path=cwd_env, override=False)
+        load_env_files(override=False)
     except Exception:
         logger.debug("TUI .env load skipped", exc_info=True)
 

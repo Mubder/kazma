@@ -32,25 +32,14 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
 
     def _require_admin(request: Request) -> JSONResponse | None:
         """Admin/operator gate for skill modification operations."""
-        try:
-            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import admin_decision
 
-            secret = get_kazma_secret()
-            if not secret:
-                return None
-            if not is_authenticated(request, secret):
-                return JSONResponse({"status": "error", "error": "Unauthorized"}, status_code=401)
-            principal = get_request_principal(request) or {}
-            if principal.get("source") == "secret":
-                return None
-            if principal.get("role") != "admin":
-                return JSONResponse(
-                    {"status": "error", "error": "Admin role required"}, status_code=403
-                )
+        decision = admin_decision(request)
+        if decision == "ok":
             return None
-        except Exception as exc:
-            logger.warning("[skills_ui] admin check failed: %s", exc)
-            return JSONResponse({"status": "error", "error": "Authentication error"}, status_code=401)
+        if decision == "unauthorized":
+            return JSONResponse({"status": "error", "error": "Unauthorized"}, status_code=401)
+        return JSONResponse({"status": "error", "error": "Admin role required"}, status_code=403)
 
     def _localize_skill_desc(name: str, description: str, lang: str) -> str:
         """Prefer skill.desc.{name} i18n when present."""

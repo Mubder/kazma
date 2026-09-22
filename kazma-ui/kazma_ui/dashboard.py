@@ -15,6 +15,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+from kazma_ui.auth import require_admin
+
 if TYPE_CHECKING:
     from kazma_core.cost_breaker import CostCircuitBreaker
     from kazma_core.tracing import KazmaTracer
@@ -312,7 +314,7 @@ async def dashboard_status() -> JSONResponse:
 
 
 @router.get("/api/sessions")
-async def list_sessions(limit: int = 50) -> JSONResponse:
+async def list_sessions(request: Request, limit: int = 50) -> JSONResponse:
     """List all checkpointed sessions with metadata.
     
     Args:
@@ -332,6 +334,12 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
             }
         ]
     """
+    # Every thread, every tenant: this is the instance's checkpoint store, so
+    # it is an admin view. It used to be open to any role — a viewer could list
+    # every thread and an operator could delete one or clear them all (audit
+    # 2026-09-22). platform_rbac lists /api/sessions as admin-only as well.
+    if (denied := require_admin(request)) is not None:
+        return denied
     if not _checkpoint_manager:
         return JSONResponse({"sessions": [], "error": "CheckpointManager not initialized"})
 
@@ -372,7 +380,7 @@ async def list_sessions(limit: int = 50) -> JSONResponse:
 
 
 @router.delete("/api/sessions/{thread_id}")
-async def delete_session(thread_id: str) -> JSONResponse:
+async def delete_session(request: Request, thread_id: str) -> JSONResponse:
     """Delete all checkpoints for a specific thread.
     
     Args:
@@ -382,6 +390,12 @@ async def delete_session(thread_id: str) -> JSONResponse:
         JSONResponse with deletion result:
         {"deleted": bool, "thread_id": str, "message": str}
     """
+    # Every thread, every tenant: this is the instance's checkpoint store, so
+    # it is an admin view. It used to be open to any role — a viewer could list
+    # every thread and an operator could delete one or clear them all (audit
+    # 2026-09-22). platform_rbac lists /api/sessions as admin-only as well.
+    if (denied := require_admin(request)) is not None:
+        return denied
     if not _checkpoint_manager:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     
@@ -432,7 +446,7 @@ async def delete_session(thread_id: str) -> JSONResponse:
 
 
 @router.post("/api/sessions/clear-all")
-async def clear_all_sessions() -> JSONResponse:
+async def clear_all_sessions(request: Request) -> JSONResponse:
     """Delete ALL checkpointed sessions.
     
     WARNING: This is a destructive operation. Use with caution.
@@ -441,6 +455,12 @@ async def clear_all_sessions() -> JSONResponse:
         JSONResponse with deletion result:
         {"deleted": bool, "count": int, "message": str}
     """
+    # Every thread, every tenant: this is the instance's checkpoint store, so
+    # it is an admin view. It used to be open to any role — a viewer could list
+    # every thread and an operator could delete one or clear them all (audit
+    # 2026-09-22). platform_rbac lists /api/sessions as admin-only as well.
+    if (denied := require_admin(request)) is not None:
+        return denied
     if not _checkpoint_manager:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     

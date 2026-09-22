@@ -1371,6 +1371,9 @@ async def main() -> None:
 if __name__ == "__main__":
     import os as _os
 
+    from kazma_core.env_files import load_env_files
+
+    load_env_files()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

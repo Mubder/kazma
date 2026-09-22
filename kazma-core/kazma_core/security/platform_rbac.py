@@ -54,6 +54,9 @@ _ADMIN_PREFIXES = (
     "/api/provider",
     "/api/config",
     "/api/chaos",
+    # Every tenant's checkpointed threads: list, delete one, clear all. Was on
+    # the viewer list (audit 2026-09-22).
+    "/api/sessions",
     "/settings",
 )
 
@@ -61,8 +64,6 @@ _ADMIN_PREFIXES = (
 _VIEWER_OK_PREFIXES = (
     "/api/status",
     "/api/telemetry",
-    "/api/sessions",
-    "/api/session",
     "/api/chat",
     "/api/memory",
     "/api/dashboard",

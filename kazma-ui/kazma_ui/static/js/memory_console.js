@@ -433,7 +433,7 @@
       installBtn.textContent = I18N.installing;
       try {
         // Prefer full [rag] extra (chromadb + sentence-transformers + sqlite-vec)
-        await fetch('/api/system/install', {
+        await window.kazmaSave('/api/system/install', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ extra: 'rag' })
@@ -962,7 +962,13 @@
       ? await window.kazmaConfirm({ title: 'Unlink belief?', message: 'Soft-invalidate this edge from active memory.' })
       : await window.confirm('Unlink (invalidate) belief?');
     if (!ok) return;
-    await fetch('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
+    try {
+      await window.kazmaSave('/api/memory/v2/beliefs/' + encodeURIComponent(_openBeliefId) + '/invalidate', { method: 'POST' });
+    } catch (e) {
+      // Keep the drawer open: the belief is still active.
+      window.kazmaAlert({ title: 'Unlink failed', message: e.message, variant: 'btn-danger' });
+      return;
+    }
     const d = document.getElementById('v2-belief-drawer');
     if (d) d.style.display = 'none';
     loadV2Beliefs();
@@ -992,7 +998,11 @@
       el.querySelectorAll('.v2-queue-retry').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           const id = btn.getAttribute('data-retry');
-          await fetch('/api/memory/v2/queue/' + encodeURIComponent(id) + '/retry', { method: 'POST' });
+          try {
+            await window.kazmaSave('/api/memory/v2/queue/' + encodeURIComponent(id) + '/retry', { method: 'POST' });
+          } catch (e) {
+            window.kazmaAlert({ title: 'Retry failed', message: e.message, variant: 'btn-danger' });
+          }
           loadV2Queue();
         });
       });
@@ -1033,11 +1043,15 @@
         btn.addEventListener('click', async function() {
           const id = btn.getAttribute('data-mid');
           const act = btn.getAttribute('data-act');
-          await fetch('/api/memory/v2/entity-merges/' + encodeURIComponent(id), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: act }),
-          });
+          try {
+            await window.kazmaSave('/api/memory/v2/entity-merges/' + encodeURIComponent(id), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: act }),
+            });
+          } catch (e) {
+            window.kazmaAlert({ title: 'Merge action failed', message: e.message, variant: 'btn-danger' });
+          }
           loadV2Merges();
         });
       });

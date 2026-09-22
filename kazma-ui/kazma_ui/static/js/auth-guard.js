@@ -72,3 +72,54 @@
         });
     };
 })();
+
+/* kazmaSave — the one way the UI writes and then says "saved".
+ *
+ * 24 save/delete handlers did `await fetch(...)`, threw the Response away,
+ * and showed a success toast (audit 2026-09-22): a 403, 422 or 500 still said
+ * "saved" — Settings → Safety, the HITL policy, among them — and seven more
+ * had no error path at all. This resolves with the parsed body only when the
+ * server accepted the write, and rejects with the server's own reason
+ * otherwise, so the caller's catch shows what actually happened.
+ *
+ * Goes through window.fetch at call time, so the 401 guard above still runs.
+ * tests/test_static_gates.py forbids discarding an awaited fetch() result;
+ * tests/js/test_kazma_save.js holds the behaviour.
+ */
+(function () {
+    "use strict";
+    if (typeof window.kazmaSave === "function") return;
+
+    function _reason(body, res) {
+        if (body && typeof body === "object") {
+            var r = body.detail || body.error || body.message || body.reason;
+            if (Array.isArray(r) && r.length) {
+                // FastAPI validation errors: [{loc, msg, type}, ...]
+                return r.map(function (x) { return (x && x.msg) || String(x); }).join("; ");
+            }
+            if (typeof r === "string" && r) return r;
+        }
+        return "HTTP " + res.status;
+    }
+
+    window.kazmaSave = async function (url, init) {
+        var opts = Object.assign({ credentials: "same-origin" }, init || {});
+        var headers = Object.assign({ "X-Requested-With": "XMLHttpRequest" }, opts.headers || {});
+        var isForm = typeof FormData !== "undefined" && opts.body instanceof FormData;
+        if (opts.body !== undefined && opts.body !== null && typeof opts.body !== "string" && !isForm) {
+            opts.body = JSON.stringify(opts.body);
+            if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
+        }
+        opts.headers = headers;
+        var res = await window.fetch(url, opts);
+        var body = null;
+        try { body = await res.json(); } catch (e) { body = null; }
+        if (!res.ok || (body && body.status === "error")) {
+            var err = new Error(_reason(body, res));
+            err.status = res.status;
+            err.body = body;
+            throw err;
+        }
+        return body;
+    };
+})();

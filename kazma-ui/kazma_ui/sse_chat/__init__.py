@@ -30,6 +30,7 @@ from kazma_core.exceptions import sanitize_error
 from kazma_core.shutdown import is_shutting_down
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_ui.thread_ownership import resolve_caller_thread
 
 logger = logging.getLogger(__name__)
 
@@ -1886,13 +1887,11 @@ def create_sse_chat_router(
         except Exception:
             payload = {}
         session_id = str(payload.get("session_id") or "")
-        thread_id = str(payload.get("thread_id") or "")
-        if not thread_id and session_id:
-            try:
-                sess = _get_store().get(session_id)
-                thread_id = (sess.thread_id if sess else "") or session_id
-            except Exception:
-                thread_id = session_id
+        # Only a thread the caller owns (audit 2026-09-22): these used to act
+        # on any thread id in the body, and abort wrote into its graph state.
+        thread_id = await resolve_caller_thread(
+            session_id, str(payload.get("thread_id") or ""), store=_get_store()
+        )
         task = cancel_turn(thread_id) if thread_id else None
         logger.info(
             "[SSE] Stop requested for thread=%s -> %s",
@@ -1903,14 +1902,8 @@ def create_sse_chat_router(
     @r.get("/api/chat/capacity")
     async def chat_capacity(session_id: str = "", thread_id: str = "") -> dict[str, Any]:
         """Live budget + YOLO snapshot for the composer capacity bar."""
-        tid = (thread_id or "").strip()
         sid = (session_id or "").strip()
-        if not tid and sid:
-            try:
-                sess = _get_store().get(sid)
-                tid = (sess.thread_id if sess else "") or sid
-            except Exception:
-                tid = sid
+        tid = await resolve_caller_thread(sid, thread_id, store=_get_store())
         if not tid:
             return {"ok": False, "reason": "missing_session"}
         from kazma_core.agent.capacity_commands import snapshot_capacity
@@ -1945,13 +1938,11 @@ def create_sse_chat_router(
         except Exception:
             payload = {}
         session_id = str(payload.get("session_id") or "")
-        thread_id = str(payload.get("thread_id") or "")
-        if not thread_id and session_id:
-            try:
-                sess = _get_store().get(session_id)
-                thread_id = (sess.thread_id if sess else "") or session_id
-            except Exception:
-                thread_id = session_id
+        # Only a thread the caller owns (audit 2026-09-22): these used to act
+        # on any thread id in the body, and abort wrote into its graph state.
+        thread_id = await resolve_caller_thread(
+            session_id, str(payload.get("thread_id") or ""), store=_get_store()
+        )
         text = str(payload.get("text") or "").strip()
         mode = str(payload.get("mode") or "soft").strip().lower()
         if mode not in ("soft", "hard"):
@@ -2105,13 +2096,11 @@ def create_sse_chat_router(
         except Exception:
             payload = {}
         session_id = str(payload.get("session_id") or "")
-        thread_id = str(payload.get("thread_id") or "")
-        if not thread_id and session_id:
-            try:
-                sess = _get_store().get(session_id)
-                thread_id = (sess.thread_id if sess else "") or session_id
-            except Exception:
-                thread_id = session_id
+        # Only a thread the caller owns (audit 2026-09-22): these used to act
+        # on any thread id in the body, and abort wrote into its graph state.
+        thread_id = await resolve_caller_thread(
+            session_id, str(payload.get("thread_id") or ""), store=_get_store()
+        )
         if not thread_id:
             return {"ok": False, "reason": "missing_session"}
 
