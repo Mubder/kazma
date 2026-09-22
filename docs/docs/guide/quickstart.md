@@ -114,6 +114,8 @@ Optional extras (only install the ones you need; Settings → Packages can add t
 
 **Document Intelligence first use:** open `/documents` after start (core text parsers work without extras). For convert/redact engines: `pip install -e ".[document-platform]"`. Optional system packages: Tesseract (OCR), ClamAV (malware scan), LibreOffice (some conversions). Guide: [Document Intelligence](document-intelligence).
 
+**Windows: ClamAV.** Production turns malware fail-closed on, so uploads are rejected until `clamscan` can actually scan. Install Cisco ClamAV, then download the virus database with `freshclam`. The package ships the programs and no signatures. Kazma runs `clamdscan` when that program is on `PATH`, and `clamscan` otherwise. `clamdscan` needs a running `clamd`. The Windows folder contains both executables, so do not add that folder to `PATH` unless the daemon is running. Leave `clamdscan` off `PATH` and put only `clamscan` there. Steps: [How do I enable malware scanning?](./faq#how-do-i-enable-malware-scanning).
+
 ### Path C — Production Docker Compose
 
 ```bash
