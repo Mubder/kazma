@@ -37,7 +37,11 @@ class PinHostAsyncTransport(httpx.AsyncHTTPTransport):
         if not pin:
             return await super().handle_async_request(request)
         headers = httpx.Headers(request.headers)
-        headers["host"] = request.url.host or host
+        # The URL remains the logical origin. Preserve its HTTP authority
+        # (including a non-default port and IPv6 brackets) independently of
+        # the connect IP; TLS SNI below uses only the hostname.
+        if "host" not in headers:
+            headers["host"] = httpx.Request(request.method, request.url).headers["host"]
         extensions = dict(request.extensions)
         extensions["sni_hostname"] = request.url.host or host
         try:

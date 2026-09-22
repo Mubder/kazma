@@ -13,7 +13,7 @@ import os
 import logging
 import sys
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding

@@ -54,6 +54,25 @@ for p in (REPO / "kazma-core", REPO / "kazma-ui"):
     if p.is_dir() and str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
+def rehearsal_targets_live_database(live_dsn: str, rehearsal_dsn: str) -> bool:
+    """True when both URLs name the same host, port and database.
+
+    An isolated rehearsal must use a disposable server. Matching the live
+    URL means CREATE DATABASE would land on production.
+    """
+    from kazma_core.migration.pg_bridge import _parse_dsn
+
+    if not (live_dsn or "").strip() or not (rehearsal_dsn or "").strip():
+        return True
+    live = _parse_dsn(live_dsn)
+    other = _parse_dsn(rehearsal_dsn)
+    return (
+        live.host == other.host
+        and str(live.port) == str(other.port)
+        and live.dbname == other.dbname
+    )
+
+
 SCRATCH_PREFIX = "kazma_rehearsal_"
 #: Never drop anything that is not obviously ours.
 SCRATCH_RE = re.compile(rf"^{SCRATCH_PREFIX}\d+$")
@@ -70,12 +89,12 @@ def _redact(argv: list[str]) -> str:
 class Runner:
     """Builds and runs libpq client commands the way pg_bridge does."""
 
-    def __init__(self) -> None:
+    def __init__(self, dsn: str | None = None) -> None:
         from kazma_core.db.backend import get_database_url
         from kazma_core.migration import pg_bridge as pb
 
         self._pb = pb
-        self.dsn = get_database_url()
+        self.dsn = dsn or get_database_url()
         if not self.dsn or not self.dsn.startswith("postgres"):
             raise SystemExit(f"not a Postgres deployment (dsn={self.dsn!r})")
         self.parts = pb._parse_dsn(self.dsn)
@@ -159,14 +178,33 @@ def main() -> int:
     ap.add_argument("--with-data", action="store_true",
                     help="restore data too, not just the schema (minutes)")
     ap.add_argument("--timeout", type=float, default=3600.0)
+    ap.add_argument(
+        "--isolated",
+        action="store_true",
+        help="require KAZMA_REHEARSAL_DATABASE_URL on a different server than the live database",
+    )
     args = ap.parse_args()
+    if args.isolated:
+        from kazma_core.db.backend import get_database_url
+
+        live = get_database_url() or ""
+        rehearsal = (os.environ.get("KAZMA_REHEARSAL_DATABASE_URL") or "").strip()
+        if not rehearsal or rehearsal_targets_live_database(live, rehearsal):
+            print(
+                "refusing: --isolated needs KAZMA_REHEARSAL_DATABASE_URL "
+                "pointing at a different Postgres server than KAZMA_DATABASE_URL"
+            )
+            return 2
+        isolated_dsn = rehearsal
+    else:
+        isolated_dsn = None
 
     dump = Path(args.dump) if args.dump else _latest_dump()
     if dump is None or not dump.is_file():
         print("no Postgres dump found")
         return 1
 
-    r = Runner()
+    r = Runner(dsn=isolated_dsn)
     size_gb = dump.stat().st_size / (1024 ** 3)
     print(f"dump    : {dump}")
     print(f"size    : {size_gb:.2f} GB")

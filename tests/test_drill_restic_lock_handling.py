@@ -122,9 +122,10 @@ def test_a_live_backup_is_not_reported_as_a_restore_failure(restic):
 
     assert state["unlocked"] == 1
     got = _detail(res, "restic:remote")
-    assert got["ok"] is True, (
-        "a backup being written was reported as 'a backup cannot be restored'"
-    )
+    assert got["ok"] is False
+    assert got["status"] == "unverified"
+    assert res.verdict == "UNVERIFIED"
+    assert not res.failures, "a live lock is not evidence of corruption"
     assert "NOT re-read" in got["detail"], (
         "the skip must say the packs were not verified rather than claim a "
         "re-read that never happened"

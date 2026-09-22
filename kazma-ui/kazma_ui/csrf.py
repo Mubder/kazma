@@ -6,27 +6,26 @@ this middleware extends origin checking to every mutating ``/api/`` route:
 
 - Applies to non-GET/HEAD/OPTIONS requests under ``/api/``.
 - Browser-based CSRF requests always carry an ``Origin`` (or ``Referer``)
-  naming the attacker's site — when either is present and its host does
-  not match the served host, the request is rejected with 403.
+  naming the attacker's site — scheme, hostname and effective port must
+  match the request origin or an explicitly configured browser origin.
 - Non-browser clients (curl, CLI, server-to-server webhooks) send no
   Origin/Referer and pass untouched. Requests carrying an explicit
   ``Authorization`` header are exempt — an explicit credential cannot be
   attached cross-site by a browser, so it is not CSRF-able.
-- Proxied deployments: every ``X-Forwarded-Host`` value is accepted as an
-  additional allowed host. Ports are intentionally NOT compared (a proxy's
-  internal port differs from the public one); host equality is the
-  CSRF-relevant boundary.
+- Proxied deployments declare their external origin in ``KAZMA_PUBLIC_URL``.
+  Forwarded headers never enlarge the trusted-origin set. Additional clients
+  may be explicitly trusted through ``KAZMA_CORS_ORIGINS``.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Awaitable, Callable
-from urllib.parse import urlsplit
 
 from fastapi import Request, Response
 from fastapi.responses import JSONResponse
+
+from kazma_ui.browser_origins import configured_browser_origins, normalize_origin
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +34,9 @@ __all__ = ["create_csrf_middleware"]
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
-def _host_of(url: str) -> str | None:
-    try:
-        netloc = urlsplit(url).netloc
-        if not netloc:
-            return None
-        return (netloc.rsplit("@", 1)[-1].split(":")[0] or "").lower()
-    except Exception:
-        return None
-
-
 def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
     """Build the cross-origin mutation guard (see module docstring)."""
+    configured = frozenset(configured_browser_origins())
 
     async def csrf_middleware(
         request: Request,
@@ -65,29 +55,17 @@ def create_csrf_middleware() -> Callable[[Request], Awaitable[Response]]:
             # No browser context (curl/CLI/webhook) — nothing to check.
             return await call_next(request)
 
-        # request.url.HOSTNAME — Starlette's URL has no `host` property
-        # (netloc/hostname); the original `request.url.host` raised
-        # AttributeError on the first real browser POST (every non-GET
-        # /api/* request carrying Origin/Referer 500'd). TestClient requests
-        # carry no Origin, which is why the test suites never hit it.
-        allowed: set[str] = {(request.url.hostname or "").lower()}
-        # Only trust X-Forwarded-Host when it matches the configured public
-        # origin — a client-supplied host must not enlarge the allowlist.
-        public = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip()
-        public_host = _host_of(public) if public else None
-        forwarded = request.headers.get("x-forwarded-host")
-        if forwarded and public_host:
-            for raw in forwarded.split(","):
-                cand = raw.split(":")[0].strip().lower()
-                if cand == public_host:
-                    allowed.add(cand)
+        allowed = set(configured)
+        served_origin = normalize_origin(str(request.url), allow_path=True)
+        if served_origin:
+            allowed.add(served_origin)
 
-        for candidate in (origin, referer):
+        for candidate, allow_path in ((origin, False), (referer, True)):
             if not candidate:
                 continue
-            host = _host_of(candidate)
+            candidate_origin = normalize_origin(candidate, allow_path=allow_path)
             # Origin "null" (sandboxed frame) has no host — reject.
-            if host is None or host not in allowed:
+            if candidate_origin is None or candidate_origin not in allowed:
                 logger.warning(
                     "[CSRF] Rejected cross-origin %s %s (origin=%r referer=%r)",
                     request.method,

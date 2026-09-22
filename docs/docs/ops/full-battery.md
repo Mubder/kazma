@@ -260,7 +260,7 @@ if (-not $env:KAZMA_RESTIC_PASSWORD -and (Test-Path '.\.kazma\restic.pass')) {
   $env:KAZMA_RESTIC_PASSWORD = (Get-Content '.\.kazma\restic.pass' -Raw).Trim()
 }
 
-# Restore drill: sqlite integrity + vault decrypt + pg dump TOC. Non-zero = FAIL.
+# Restore drill: 0=PASS, 1=FAIL, 2=UNVERIFIED (required check did not run).
 & '.venv\Scripts\python.exe' -m kazma_core.backup.restore_drill
 
 # restic: local + offsite snapshot lists (newest DATA, not restic latest).

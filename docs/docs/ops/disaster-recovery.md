@@ -117,7 +117,15 @@ travelling with the data it protects.
 python -m kazma_core.backup.restore_drill
 ```
 
-Non-zero exit on failure. It also runs on its own, **daily**, five minutes
+Exit codes distinguish evidence: **0 / PASS** means every applicable check
+passed; **1 / FAIL** means a check found a failure; **2 / UNVERIFIED** means
+required checks could not complete, without evidence of corruption. Missing
+`pg_restore`, unavailable readback, and a repository locked by a live backup
+cannot certify recovery. Unverified runs issue a warning through the existing
+ops channel; failed checks issue a critical alert. Install the missing client
+tools or resolve the reported dependency and rerun the read-only drill.
+
+It also runs on its own, **daily**, five minutes
 after boot and then once every 24 hours — counted from the last *completed*
 run, stored in the config store, so a host that restarts often cannot keep
 resetting the clock. (It used to be weekly, and the loop slept a full

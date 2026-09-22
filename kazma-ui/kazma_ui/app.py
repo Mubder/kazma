@@ -456,62 +456,11 @@ class KazmaAppBuilder:
         # CORS
         from fastapi.middleware.cors import CORSMiddleware
 
-        # Loopback only. `allow_credentials=True` means an allowed origin can
-        # read authenticated responses, so this list is a list of sites
-        # trusted to read this operator's settings, session list and
-        # masked-key status — not a list of sites the project is friendly with.
-        #
-        # `https://kazma.ai` and `https://www.kazma.ai` used to be baked in
-        # here unconditionally. On a default install that grants the marketing
-        # site credentialed read access to a local Kazma for any operator who
-        # happens to have both open, forever, whether or not they have ever
-        # used the hosted product. CSRF Origin checks still blocked cross-site
-        # POST, so this was a read-only hole rather than a write one, which is
-        # precisely why nobody would have noticed it.
-        #
-        # The public host is now derived, not assumed: it is allowed only when
-        # the operator has declared it as this install's own public URL. That
-        # is the same variable OIDC already builds its redirect from, so an
-        # install that genuinely is kazma.ai keeps working and an install that
-        # is not stops advertising.
-        _default_cors_origins = [
-            "http://localhost:9090",
-            "http://127.0.0.1:9090",
-            "http://localhost:9091",
-            "http://127.0.0.1:9091",
-            "http://localhost:8000",
-            "http://127.0.0.1:8000",
-            "http://localhost:4321",
-            "http://localhost:4322",
-        ]
-        _public_url = (os.environ.get("KAZMA_PUBLIC_URL") or "").strip().rstrip("/")
-        if _public_url:
-            try:
-                from urllib.parse import urlsplit
+        # Same-origin clients need no CORS exemption. Additional credentialed
+        # origins are declared explicitly and shared with the CSRF policy.
+        from kazma_ui.browser_origins import configured_browser_origins
 
-                _pu = urlsplit(_public_url)
-                if _pu.scheme in ("http", "https") and _pu.netloc:
-                    _origin = f"{_pu.scheme}://{_pu.netloc}"
-                    if _origin not in _default_cors_origins:
-                        _default_cors_origins.append(_origin)
-            except Exception:  # noqa: BLE001 — a malformed URL must not fail boot
-                logger.warning(
-                    "[CORS] KAZMA_PUBLIC_URL=%r is not a parseable origin; ignoring",
-                    _public_url,
-                )
-        _cors_env = os.environ.get("KAZMA_CORS_ORIGINS", "").strip()
-        if _cors_env:
-            _cors_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
-        else:
-            _cors_origins = _default_cors_origins
-        if "*" in _cors_origins:
-            logger.warning(
-                "[CORS] rejecting wildcard origin with credentials; "
-                "using default loopback origins"
-            )
-            _cors_origins = [o for o in _cors_origins if o != "*"] or list(
-                _default_cors_origins
-            )
+        _cors_origins = configured_browser_origins()
 
         self.app.add_middleware(
             CORSMiddleware,

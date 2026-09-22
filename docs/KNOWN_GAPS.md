@@ -875,25 +875,9 @@ cannot write a Postgres table either — but do not read the passing tests as
 coverage of a Postgres deployment.
 
 **~~The file-read cache can still be fooled inside one filesystem tick.~~**
-Narrowed to files over 1 MB, 2026-09-21. Entries are stamped and revalidated
-on every hit, which closes read-after-write for every writer including ones
-outside Kazma; the residual was a second write landing in the same mtime tick
-*and* producing an identical length, which `(mtime_ns, size)` cannot see.
-
-Content hashing was rejected when the stamp landed, on the grounds that it
-re-reads the file the cache exists to avoid reading. That was half right and
-is worth correcting rather than quietly reversing: it holds for a 40 MB PDF,
-where what the cache saves is the *parse*, and not for the source files an
-agent actually writes and reads back, where a blake2b over a few KB is
-microseconds. Files up to `_HASH_MAX_BYTES` (1 MB) carry a digest of every
-byte. Larger files carry a digest of eight windows spread through the file,
-so a same-tick same-length rewrite of the head, the tail, or one of those
-windows is seen without re-reading a 40 MB PDF.
-
-**The residual is a rewrite that lands only in a gap between those windows.**
-Both halves are pinned: one test reproduces the small-file collision with
-`os.utime`, and another shows a leading-byte change in a file over 1 MB
-changes the sampled digest.
+Closed 2026-09-22. The stamp is `(mtime_ns, size, blake2b of every byte)`.
+A same-tick same-length rewrite anywhere in the file changes the digest.
+The hash runs in a worker thread so it does not pin the server loop.
 
 ## Scope
 

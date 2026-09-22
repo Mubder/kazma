@@ -567,6 +567,9 @@ async def _fetch_with_playwright_impl(url: str) -> str | None:
                     window.chrome = { runtime: {} };
                     """
                 )
+                from kazma_core.security.browser_egress import install_async_browser_egress
+
+                await install_async_browser_egress(context)
                 page = await context.new_page()
                 await page.goto(url, wait_until="networkidle", timeout=30000)
                 await page.wait_for_timeout(2000)

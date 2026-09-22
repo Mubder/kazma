@@ -1228,6 +1228,9 @@ async def _render_with_playwright_impl(url: str, *, want_text: bool) -> str | No
                 """
             )
 
+        from kazma_core.security.browser_egress import install_async_browser_egress
+
+        await install_async_browser_egress(ctx)
         page = await ctx.new_page()
         try:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)

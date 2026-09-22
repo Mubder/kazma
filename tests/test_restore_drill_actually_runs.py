@@ -248,9 +248,8 @@ class TestTheDeepTierReadsTheBytes:
         chk = _check(res, "postgres:data")
         assert chk and chk["ok"], chk
 
-    def test_a_host_without_pg_restore_is_not_a_failure(self, tmp_path, monkeypatch):
-        """A missing client tool is not a broken backup, and crying about it
-        would teach an operator to ignore the drill."""
+    def test_a_host_without_pg_restore_is_unverified(self, tmp_path, monkeypatch):
+        """Missing tools are unverified evidence, distinct from corruption."""
         dump = tmp_path / "pg.dump"
         dump.write_bytes(b"PGDMP")
         monkeypatch.setattr(
@@ -261,7 +260,10 @@ class TestTheDeepTierReadsTheBytes:
         res = restore_drill.DrillResult(backup_dir="x")
         restore_drill._check_pg_data_section(dump, res)
         chk = _check(res, "postgres:data")
-        assert chk and chk["ok"]
+        assert chk and not chk["ok"]
+        assert chk["status"] == "unverified"
+        assert res.verdict == "UNVERIFIED"
+        assert not res.failures
 
     def test_restic_is_asked_for_a_data_subset_not_just_structure(self, monkeypatch):
         seen: dict = {}

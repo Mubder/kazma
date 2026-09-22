@@ -62,21 +62,40 @@ class DrillResult:
     ok: bool = True
     checks: list[dict[str, Any]] = field(default_factory=list)
 
-    def add(self, name: str, ok: bool, detail: str = "") -> None:
-        self.checks.append({"check": name, "ok": bool(ok), "detail": detail})
-        if not ok:
+    def add(self, name: str, ok: bool | None, detail: str = "") -> None:
+        """Record evidence: True verified, False failed, None unverified.
+
+        The legacy boolean remains fail-closed for callers checking ``ok``.
+        ``status`` preserves the distinction between corruption and an absent
+        verifier, so neither CLI nor alerting needs to infer it from prose.
+        """
+        status = "passed" if ok is True else "failed" if ok is False else "unverified"
+        self.checks.append({"check": name, "ok": ok is True, "status": status, "detail": detail})
+        if ok is not True:
             self.ok = False
 
     @property
     def failures(self) -> list[dict[str, Any]]:
-        return [c for c in self.checks if not c["ok"]]
+        return [c for c in self.checks if c["status"] == "failed"]
+
+    @property
+    def unverified(self) -> list[dict[str, Any]]:
+        return [c for c in self.checks if c["status"] == "unverified"]
+
+    @property
+    def verdict(self) -> str:
+        if self.failures:
+            return "FAIL"
+        if self.unverified:
+            return "UNVERIFIED"
+        return "PASS" if self.ok else "FAIL"
 
     def summary(self) -> str:
-        bad = self.failures
-        head = "PASS" if self.ok else "FAIL"
+        passed = sum(c["status"] == "passed" for c in self.checks)
         return (
-            f"{head}: {len(self.checks) - len(bad)}/{len(self.checks)} checks "
+            f"{self.verdict}: {passed}/{len(self.checks)} checks "
             f"passed for {Path(self.backup_dir).name or '(none)'}"
+            f" ({len(self.failures)} failed, {len(self.unverified)} unverified)"
         )
 
 
@@ -394,9 +413,7 @@ def _check_pg_dump(dump: Path, res: DrillResult) -> None:
 
         prefix = list(resolve_pg_restore())
     except Exception as exc:  # noqa: BLE001
-        # Not a failure: the dump's header is still verified above, and a
-        # host without client tools must not fail a drill for lacking them.
-        res.add("postgres:toc", True, f"pg_restore unavailable, header only ({exc})")
+        res.add("postgres:toc", None, f"pg_restore unavailable, header only ({exc}); install PostgreSQL client tools")
         return
 
     # Host path vs stdin is decided in one place now -- see _run_pg_restore.
@@ -501,7 +518,7 @@ def _check_pg_data_section(dump: Path, res: DrillResult) -> None:
 
         prefix = list(resolve_pg_restore())
     except Exception as exc:  # noqa: BLE001
-        res.add("postgres:data", True, f"pg_restore unavailable ({exc}); skipped")
+        res.add("postgres:data", None, f"pg_restore unavailable ({exc}); install PostgreSQL client tools")
         return
 
     started = time.time()
@@ -558,11 +575,12 @@ def _check_restic_data(res: DrillResult) -> None:
     try:
         from kazma_core.backup import restic_repo
     except Exception as exc:  # noqa: BLE001
-        res.add("restic:data", True, f"restic layer unavailable ({exc}); skipped")
+        res.add("restic:data", None, f"restic layer unavailable ({exc}); unverified")
         return
 
     if not restic_repo.restic_available():
-        res.add("restic:data", True, "restic is not installed; skipped")
+        if any(restic_repo.repo_paths().values()):
+            res.add("restic:data", None, "restic is not installed; configured repositories unverified")
         return
     password, _ = restic_repo.ensure_password()
     if not password:
@@ -602,15 +620,12 @@ def _check_restic_data(res: DrillResult) -> None:
             # manual deep run collided with the scheduled pg snapshot and the
             # repository was provably fine seconds later.
             #
-            # The cost of this branch is that a collision means this pass did
-            # not verify anything, so the detail says so rather than claiming
-            # a re-read that never happened. Two collisions in a row on a
-            # weekly cadence would hide a real problem for a fortnight; if
-            # that ever shows up in the logs, retry rather than skip.
+            # A collision proves neither corruption nor successful verification.
+            # Preserve that uncertainty in the structured verdict and warning.
             res.add(
-                f"restic:{scope}", True,
+                f"restic:{scope}", None,
                 "a backup holds the repository lock; packs NOT re-read this "
-                "pass (not a failure -- a running backup is health)",
+                "pass; verification must be retried",
             )
             continue
 
@@ -652,14 +667,14 @@ def _check_offsite_object(backup: Path, res: DrillResult) -> None:
 
         provider = get_sync_provider()
     except Exception as exc:  # noqa: BLE001
-        res.add("offsite:object", True, f"provider unavailable ({exc}); skipped")
+        res.add("offsite:object", None, f"provider unavailable ({exc}); unverified")
         return
     if provider is None:
-        res.add("offsite:object", True, "no cloud provider configured; skipped")
+        res.add("offsite:object", None, "upload recorded but no cloud provider configured; unverified")
         return
     if not hasattr(provider, "stat_file"):
         res.add(
-            "offsite:object", True,
+            "offsite:object", None,
             f"{type(provider).__name__} cannot read an object back; unverified",
         )
         return
@@ -671,7 +686,7 @@ def _check_offsite_object(backup: Path, res: DrillResult) -> None:
     except RuntimeError:
         # Already inside a loop (the scheduler runs this in a thread, so this
         # is the unusual path). Nothing to verify from here.
-        res.add("offsite:object", True, "not verifiable from a running loop; skipped")
+        res.add("offsite:object", None, "not verifiable from a running loop; run the drill in a worker thread")
         return
     except Exception as exc:  # noqa: BLE001
         res.add("offsite:object", False, f"could not read it back: {exc}")
@@ -751,6 +766,7 @@ def run_deep_drill(pg_dump: str | Path | None = None) -> DrillResult:
                 )
         except Exception:  # noqa: BLE001
             logger.debug("[restore-drill] pg_backup_enabled check failed", exc_info=True)
+            res.add("postgres:configuration", None, "could not determine whether PostgreSQL verification is required")
     else:
         _check_pg_data_section(dump, res)
     _check_restic_data(res)
@@ -768,6 +784,7 @@ def run_deep_drill(pg_dump: str | Path | None = None) -> DrillResult:
                 _check_offsite_object(d, res)
     except Exception:  # noqa: BLE001
         logger.debug("[restore-drill] offsite check skipped", exc_info=True)
+        res.add("offsite:configuration", None, "could not determine the offsite verification target")
     return res
 
 
@@ -840,6 +857,7 @@ def run_drill(backup_dir: str | Path | None = None) -> DrillResult:
         except Exception:  # noqa: BLE001
             logger.debug("[restore-drill] pg_backup_enabled check failed",
                          exc_info=True)
+            res.add("postgres:configuration", None, "could not determine whether PostgreSQL verification is required")
     return res
 
 
@@ -948,20 +966,20 @@ async def drill_scheduler() -> None:
 
 
 def _alert_failure(res: DrillResult) -> None:
-    """Tell the operator the backup cannot be read back. Never raises."""
+    """Report failed evidence separately from incomplete verification."""
     try:
         from kazma_core.observability.ops_alerts import alert
 
         failed = ", ".join(
             f"{c['check']}" + (f" ({c['detail']})" if c["detail"] else "")
-            for c in res.failures[:4]
+            for c in (res.failures + res.unverified)[:4]
         )
+        incomplete = res.verdict == "UNVERIFIED"
         alert(
-            "backup.restore_drill_failed",
-            "A backup cannot be restored -- the drill failed.",
-            f"{res.summary()}. Failed: {failed}. The data is being written; "
-            "what is in doubt is whether it can be read back.",
-            severity="critical",
+            "backup.restore_drill_unverified" if incomplete else "backup.restore_drill_failed",
+            "Backup verification is incomplete." if incomplete else "Backup verification failed.",
+            f"{res.summary()}. Checks requiring attention: {failed}.",
+            severity="warning" if incomplete else "critical",
         )
     except Exception:  # noqa: BLE001
         logger.debug("[restore-drill] could not raise the alert", exc_info=True)
@@ -978,11 +996,11 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     res = run_drill(args.backup)
     for c in res.checks:
-        mark = "ok  " if c["ok"] else "FAIL"
+        mark = c["status"].upper()
         detail = f" -- {c['detail']}" if c["detail"] else ""
         print(f"  [{mark}] {c['check']}{detail}")
     print(res.summary())
-    return 0 if res.ok else 1
+    return 0 if res.ok else 2 if res.verdict == "UNVERIFIED" else 1
 
 
 if __name__ == "__main__":

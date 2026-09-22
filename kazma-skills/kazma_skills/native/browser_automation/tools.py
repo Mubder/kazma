@@ -103,6 +103,9 @@ def _ensure_page_sync() -> Any:
             try:
                 browser = pw.chromium.launch(headless=True)
                 page = browser.new_page()
+                from kazma_core.security.browser_egress import install_sync_browser_egress
+
+                install_sync_browser_egress(page.context)
             except Exception:
                 # Don't leak a half-booted driver if launch/new_page fails.
                 try:

@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import codecs
 import hashlib
 from pathlib import Path
@@ -151,30 +152,16 @@ _turn_read_cache_order: list[tuple] = []
 _READ_CACHE_MAX = 50
 
 
-#: Files at or under this size carry a content digest in their stamp as well.
-#:
-#: ``(mtime_ns, size)`` alone cannot see a write that lands inside a single
-#: filesystem mtime tick AND leaves the length unchanged — a same-length edit
-#: saved twice in the same instant. Hashing was rejected when the stamp first
-#: landed, on the grounds that it re-reads the file the cache exists to avoid
-#: reading. That is true of a 40 MB PDF, where what the cache saves is the
-#: PARSE, and false of the source files an agent actually writes and reads back,
-#: where a blake2b over a few KB is microseconds. So hash the small ones and
-#: stat the big ones, and say which is which rather than claiming both.
-_HASH_MAX_BYTES = 1_048_576
-
-
 def _stat_stamp(p: Path) -> tuple | None:
-    """Identity of the bytes on disk.
+    """Identity of the bytes on disk: ``(mtime_ns, size, full digest)``.
 
-    ``(mtime_ns, size, digest)`` always. Up to ``_HASH_MAX_BYTES`` the digest
-    covers every byte. Above that it covers eight windows spread through the
-    file. A same-tick, same-length rewrite that touches only a gap between
-    those windows can still collide; that residual is in ``docs/KNOWN_GAPS.md``.
+    The digest covers every byte. A same-tick, same-length rewrite anywhere
+    in the file changes it. ``None`` when the file cannot be read at all
+    (deleted, replaced by a directory, permissions) — which compares unequal
+    to any real stamp and therefore invalidates, the safe direction.
 
-    ``None`` when the file cannot be read at all (deleted, replaced by a
-    directory, permissions) — which compares unequal to any real stamp and
-    therefore invalidates, the safe direction.
+    Callers on the server loop must use :func:`_stat_stamp_async`. This
+    function reads the file.
     """
     try:
         st = p.stat()
@@ -189,31 +176,18 @@ def _stat_stamp(p: Path) -> tuple | None:
     return (st.st_mtime_ns, st.st_size, digest)
 
 
-def _content_digest(p: Path, size: int) -> bytes:
-    """Full blake2b up to ``_HASH_MAX_BYTES``, then eight sampled windows.
+async def _stat_stamp_async(p: Path) -> tuple | None:
+    """Same stamp as :func:`_stat_stamp`, off the event loop."""
+    return await asyncio.to_thread(_stat_stamp, p)
 
-    A 40 MB PDF is not re-read in full. The samples are spread across the
-    file so a same-tick, same-length rewrite of the head, the tail, or one
-    of the middle windows changes the stamp. A rewrite that lands only in
-    a gap between windows can still collide; that is the residual.
-    """
+
+def _content_digest(p: Path, size: int) -> bytes:
+    """Blake2b of the whole file, plus the size so a truncation cannot collide."""
     h = hashlib.blake2b(digest_size=16)
-    window = 65536
     with p.open("rb") as fh:
-        if size <= _HASH_MAX_BYTES:
-            for block in iter(lambda: fh.read(window), b""):
-                h.update(block)
-            return h.digest()
-        slots = 8
-        step = max(window, size // slots)
-        offset = 0
-        seen = 0
-        while offset < size and seen < slots:
-            fh.seek(offset)
-            h.update(fh.read(window))
-            offset += step
-            seen += 1
-        h.update(int(size).to_bytes(8, "little"))
+        for block in iter(lambda: fh.read(65536), b""):
+            h.update(block)
+    h.update(int(size).to_bytes(8, "little"))
     return h.digest()
 
 
@@ -257,7 +231,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
     cached: str | None = None
     if entry is not None:
         stamped, content = entry
-        if stamped is not None and stamped == _stat_stamp(p):
+        if stamped is not None and stamped == await _stat_stamp_async(p):
             cached = content
         else:
             # Changed underneath us (or vanished). Drop it and read fresh —
@@ -286,7 +260,7 @@ async def file_read(path: str, offset: int = 0, limit: int = 500) -> str:
         # the next hit revalidates and re-reads: a wasted read, never a lie.
         # Stamping after the read inverts that — old content carrying the
         # new stamp would look valid forever. Do not "tidy" this downward.
-        pre_read_stamp = _stat_stamp(p)
+        pre_read_stamp = await _stat_stamp_async(p)
 
         # ── Runtime-ready document format delegation ─────────────────
         suffix = p.suffix.lower()
