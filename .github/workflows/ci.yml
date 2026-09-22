@@ -52,6 +52,24 @@ jobs:
       - name: Run Ruff (full — advisory)
         run: ruff check kazma-core/kazma_core/ kazma-gateway/kazma_gateway/ kazma-ui/kazma_ui/ kazma-cli/kazma_cli/ kazma-tui/kazma_tui/ kazma-skills/kazma_skills/ --exit-zero
 
+  shipped-install:
+    name: Shipped wheel and locked dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v5
+      - name: Lockfile is the dependency set
+        run: uv export --frozen --no-dev --no-emit-project --format requirements-txt -o "$RUNNER_TEMP/requirements.lock.txt"
+      - name: Build the wheel
+        run: uv build --wheel --out-dir dist
+      - name: Install that wheel into a clean environment
+        run: |
+          set -euo pipefail
+          uv venv "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" dist/*.whl
+          "$RUNNER_TEMP/wheel-venv/bin/python" -c "import kazma_core, kazma_gateway, kazma_ui, kazma_cli, kazma_tui, kazma_skills; print('wheel imports ok')"
+          "$RUNNER_TEMP/wheel-venv/bin/kazma" --help
+
   tests:
     name: Tests
     runs-on: ubuntu-latest

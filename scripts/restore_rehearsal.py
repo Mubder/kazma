@@ -259,7 +259,7 @@ def main() -> int:
                  "read-back)"
         )
         print(f"\nVERDICT: the dump restores. {tables} tables rebuilt from "
-              f"the archive on a live server{scope}.")
+              f"the archive{scope}.")
         return 0
     finally:
         if SCRATCH_RE.match(scratch):

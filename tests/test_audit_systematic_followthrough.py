@@ -140,6 +140,15 @@ def test_document_and_tui_extras_are_base_aliases() -> None:
             assert pkg in base, f"{name} extra package {pkg} is not already a base dependency"
 
 
+def test_shipped_install_job_uses_the_lockfile_and_the_wheel() -> None:
+    text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    job = text.split("shipped-install:", 1)[1].split("\n  tests:", 1)[0]
+    assert "uv export --frozen" in job
+    assert "uv build --wheel" in job
+    assert "dist/*.whl" in job
+    assert "import kazma_core, kazma_gateway, kazma_ui, kazma_cli, kazma_tui, kazma_skills" in job
+
+
 def test_lint_gate_covers_every_product_package() -> None:
     text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     gate = text.split("Run Ruff (syntax/undefined names — GATE)", 1)[1].split("Run Ruff (full", 1)[0]

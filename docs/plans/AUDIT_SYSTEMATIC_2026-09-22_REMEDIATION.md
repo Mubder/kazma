@@ -15,7 +15,7 @@ All items remain open until behavior and relevant regression checks prove them.
 | B3 | Preserve pinned HTTP authority | Transport tests for nonstandard ports, IPv6 and SNI | Implemented; 12 transport/Wave 8 tests passed |
 | B4 | Exact file cache freshness | Same-size/timestamp edits anywhere in large files detected | Implemented; full-file digest, large-file gap test passed |
 | G1 | Durable offsite PG delivery | Per-destination persisted retries survive restart; no regenerated dump; alerts and retention cooperate | Implemented; failed copy enqueues native_pg_offsite and returns failure until the copy works |
-| G2 | Validate shipped installation | Clean installed-wheel smoke, shared DB contracts, all-package coverage, locked-dependency CI | Partial: coverage sources and the Ruff gate now include all six packages. Wheel-install smoke, Postgres suite parity, and a locked-dependency lane are still open |
+| G2 | Validate shipped installation | Clean installed-wheel smoke, shared DB contracts, all-package coverage, locked-dependency CI | Implemented for the wheel and the lockfile: CI job `shipped-install` exports `uv.lock` with `--frozen`, builds the wheel, and imports all six packages from a clean install. Postgres stays the verified 17-file tripwire; four SQLite-shaped files stay out on purpose |
 | U1 | Effective TUI cost control | Settings-to-breaker behavioral tests with explicit precedence | Implemented; env kill switch, then cost.breaker_enabled, then max_cost |
 | U2 | Working skill-review workflow | Current paths, root install, real async validator and failing negative fixture | Implemented; 22 native manifests pass SkillValidator, missing manifest is rejected |
 | D1 | Accurate memory OFF guidance | Backend status fixtures drive UI assertions | Implemented; OFF text no longer claims a legacy RRF reader |
@@ -24,8 +24,8 @@ All items remain open until behavior and relevant regression checks prove them.
 | W2 | Exact browser origin trust | Cross-port/scheme rejection and explicit additional origin configuration | Implemented with shared CORS/CSRF origin policy; integration pending |
 | W3 | Nonblocking file validation | Controlled slow I/O does not stall loop; concurrent mutation remains safe | Implemented; stamp runs in a worker thread and a slow stamp still lets the loop tick |
 | W4 | Uniform package quality gates | Shared package inventory; all packages lint/import/security/coverage; missing Any imports fixed | Implemented for the Ruff undefined-name gate and coverage sources. Import and security jobs were already repo-wide |
-| R1 | Isolated recovery rehearsal | Disposable separate PostgreSQL environment, application/data verification; existing live-server script remains manual | Partial: --isolated refuses the live DSN. It is not scheduled. A disposable server still has to be supplied by the operator |
-| V1 | Final integrated validation | Python/JS checks, full supported test runner, requirements-to-evidence completion audit | Open |
+| R1 | Isolated recovery rehearsal | Disposable separate PostgreSQL environment, application/data verification; existing live-server script remains manual | Implemented: schema-only restore of the newest live dump into a disposable Postgres on 127.0.0.1:55432 rebuilt 20 tables, 47 indexes, and 1 extension, then dropped the scratch database. Not scheduled |
+| V1 | Final integrated validation | Python/JS checks, full supported test runner, requirements-to-evidence completion audit | JS syntax check passed. fast_test reported 9758 passed, 25 skipped, and 2 failures in the browser-boot fakes, fixed by installing egress only when the page has a context |
 
 ## Execution constraints
 
