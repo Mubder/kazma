@@ -918,6 +918,7 @@ def register_backup_export_handlers() -> None:
     register_handler("native_backup", _handle_native_backup)
     register_handler("nightly_export", _handle_nightly_export)
     register_handler("native_pg_backup", _handle_native_pg_backup)
+    register_handler("native_pg_offsite", _handle_native_pg_offsite)
     register_handler("restic_maintenance", _handle_restic_maintenance)
     register_handler("connector_health", _handle_connector_health)
     register_handler("universal_backup", _handle_universal_backup)
@@ -1098,6 +1099,47 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
         return True  # never retry-storm on a maintenance task
 
 
+def _enqueue_pg_offsite_retry(path: Any) -> None:
+    """Queue another copy of an existing dump. Does not run pg_dump."""
+    try:
+        from kazma_core.memory.task_queue import enqueue_task
+
+        enqueue_task("native_pg_offsite", {"path": str(path)})
+    except Exception:
+        logger.warning("[memory_worker] could not queue pg offsite retry", exc_info=True)
+
+
+def _alert_pg_offsite(failed: list[str]) -> None:
+    try:
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "backup.pg_offsite",
+            "Postgres offsite copy failed",
+            "Destinations still missing this dump: " + ", ".join(failed),
+            severity="critical",
+        )
+    except Exception:
+        logger.debug("[memory_worker] pg offsite alert failed", exc_info=True)
+
+
+async def _handle_native_pg_offsite(payload: dict[str, Any]) -> bool:
+    """Retry restic copies of one dump file. False keeps the task pending."""
+    from pathlib import Path
+
+    raw = str((payload or {}).get("path") or "")
+    path = Path(raw)
+    if not path.is_file():
+        _alert_pg_offsite(["missing-file"])
+        return False
+    failed = await asyncio.to_thread(_snapshot_pg_to_restic, path)
+    if failed:
+        _alert_pg_offsite(failed)
+        return False
+    logger.info("[memory_worker] pg offsite copy done: %s", path.name)
+    return True
+
+
 def _alert_repo_unhealthy(name: str, error: str) -> None:
     """A repository that fails `check` is a backup you do not have."""
     try:
@@ -1114,21 +1156,15 @@ def _alert_repo_unhealthy(name: str, error: str) -> None:
         logger.debug("[memory_worker] restic alert failed", exc_info=True)
 
 
-def _snapshot_pg_to_restic(path: Any) -> None:
-    """Put the Postgres dump in the restic repositories, offsite included.
+def _snapshot_pg_to_restic(path: Any) -> list[str]:
+    """Copy the dump into each configured restic repo.
 
-    Until 2026-08-29 the Postgres database -- chat sessions, memory vectors,
-    shared state -- had NO offsite copy at all. The universal sweep excludes
-    the whole ``backups`` directory, and the nightly dump writes only to
-    local disk, so a disk failure lost the primary datastore outright while
-    every other component was protected.
-
-    Deduplication makes this nearly free: a second 1.55 GB dump adds about
-    2 MB, because pg_dump -Fc compresses each data block independently and
-    unchanged tables produce byte-identical blocks.
-
-    Never raises. The dump itself has already succeeded by this point.
+    Returns the destination names that failed. An empty list means every
+    configured destination accepted the file, or restic is not configured.
+    A missing password or a rejected upload is a failure. The caller retries
+    those copies without running ``pg_dump`` again.
     """
+    failed: list[str] = []
     try:
         from kazma_core.backup.restic_repo import (
             backup,
@@ -1137,25 +1173,30 @@ def _snapshot_pg_to_restic(path: Any) -> None:
             restic_available,
         )
 
+        paths = {name: repo for name, repo in repo_paths().items() if repo}
+        if not paths:
+            return []
         if not restic_available():
-            return
+            logger.warning("[memory_worker] pg dump not copied: restic is not installed")
+            return sorted(paths)
         password, _ = ensure_password()
         if not password:
             from kazma_core.backup.restic_repo import alert_missing_password
 
             alert_missing_password("memory worker pg dump")
-            return
-        for name, repo in repo_paths().items():
-            if not repo:
-                continue
+            return sorted(paths)
+        for name, repo in paths.items():
             res = backup(repo, password, [str(path)], tags=["kazma", "pg"])
             if res.ok:
                 logger.info("[memory_worker] pg dump snapshotted to %s", name)
             else:
                 logger.warning("[memory_worker] pg dump -> %s failed: %s",
                                name, res.error[:200])
+                failed.append(name)
     except Exception:
         logger.warning("[memory_worker] pg restic snapshot failed", exc_info=True)
+        return failed or ["snapshot"]
+    return failed
 
 
 async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
@@ -1175,7 +1216,10 @@ async def _handle_native_pg_backup(payload: dict[str, Any]) -> bool:
             return True  # not on Postgres / kill-switched — nothing to do
         path = await asyncio.to_thread(perform_pg_backup)
         if path is not None:
-            await asyncio.to_thread(_snapshot_pg_to_restic, path)
+            failed = await asyncio.to_thread(_snapshot_pg_to_restic, path)
+            if failed:
+                _enqueue_pg_offsite_retry(path)
+                _alert_pg_offsite(failed)
         if path is None:
             logger.warning("[memory_worker] native_pg_backup produced no dump")
             try:

@@ -3,9 +3,10 @@ name: Skill Review
 on:
   pull_request:
     paths:
-      - 'skills/*/skill_manifest.yaml'
-      - 'skills/*/README.md'
-      - 'skills/*/tests/**'
+      - 'kazma-skills/**'
+      - 'kazma-core/kazma_core/hub/**'
+      - 'kazma-core/kazma_core/agent_skills/**'
+      - 'skills/**'
 
 jobs:
   validate-manifest:
@@ -17,48 +18,45 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install Kazma
-        run: pip install -e ./kazma-core
-      - name: Validate Skill Manifest
+        run: pip install -e ".[test]"
+      - name: Validate skills and a negative fixture
         run: |
           python -c "
-          from kazma_core.hub.manifest_schema import SkillManifest
+          import asyncio, sys
           from pathlib import Path
-          import yaml, sys
+          from kazma_core.hub.validator import SkillValidator
 
-          manifests = list(Path('skills').glob('*/skill_manifest.yaml'))
-          if not manifests:
-              print('No skill manifests found — skipping validation')
-              sys.exit(0)
+          async def main():
+              v = SkillValidator()
+              bad = Path('kazma-skills') / '_negative_fixture_absent'
+              result = await v.validate(bad)
+              if result.passed:
+                  print('negative control failed: missing manifest was accepted')
+                  return 1
+              roots = [
+                  Path('kazma-skills/kazma_skills/native'),
+                  Path('skills'),
+              ]
+              found = 0
+              for root in roots:
+                  if not root.is_dir():
+                      continue
+                  for skill in sorted(p for p in root.iterdir() if p.is_dir()):
+                      if not (skill / 'skill_manifest.yaml').is_file():
+                          continue
+                      found += 1
+                      checked = await v.validate(skill)
+                      if not checked.passed:
+                          print(f'FAIL {skill}: {checked.errors}')
+                          return 1
+                      print(f'OK {skill}')
+              if found == 0:
+                  print('No skill_manifest.yaml files found')
+                  return 1
+              print(f'Validated {found} skills; negative fixture rejected')
+              return 0
 
-          for f in manifests:
-              try:
-                  data = yaml.safe_load(f.read_text())
-                  SkillManifest(**data)
-                  print(f'OK: {f}')
-              except Exception as e:
-                  print(f'FAIL: {f}: {e}')
-                  sys.exit(1)
-          "
-      - name: Run Security Linter
-        run: |
-          python -c "
-          from kazma_core.hub.validator import SecurityValidator
-          from pathlib import Path
-          import sys
-
-          v = SecurityValidator()
-          skill_dirs = [d for d in Path('skills').iterdir()
-                        if d.is_dir() and (d / 'skill_manifest.yaml').exists()]
-          if not skill_dirs:
-              print('No skill directories found — skipping security lint')
-              sys.exit(0)
-
-          for d in skill_dirs:
-              result = v.scan_directory(str(d))
-              if result.get('critical', 0) > 0:
-                  print(f'CRITICAL findings in {d.name}: {result}')
-                  sys.exit(1)
-              print(f'Security OK: {d.name} ({result})')
+          sys.exit(asyncio.run(main()))
           "
 
   test-skill:
@@ -72,7 +70,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install -e ./kazma-core
+          pip install -e ".[test]"
           pip install pytest pytest-cov
       - name: Run Skill Tests
         run: pytest skills/*/tests/ -v --tb=short
@@ -91,7 +89,7 @@ jobs:
           python-version: '3.11'
       - name: Install dependencies
         run: |
-          pip install -e ./kazma-core
+          pip install -e ".[test]"
           pip install pip-audit
       - name: Check Dependency Vulnerabilities
         run: pip-audit --strict || echo "pip-audit completed with warnings"

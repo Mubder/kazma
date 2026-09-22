@@ -210,8 +210,8 @@ async def test_same_tick_same_length_rewrite_is_caught(workspace, allow_all_path
     here ``os.utime`` forces the mtime back to the exact nanosecond of the first
     write, which is the same collision without waiting for luck.
 
-    Small files carry a full content digest. Larger files carry a sampled
-    digest, so a change in one of those windows is still seen.
+    The stamp includes a digest of every byte, so the length and mtime can
+    match and the new bytes are still seen.
     """
     target = workspace / "same_tick.txt"
     target.write_text("AAAA\nBBBB\n", encoding="utf-8")
@@ -236,31 +236,24 @@ async def test_same_tick_same_length_rewrite_is_caught(workspace, allow_all_path
     assert ALREADY_READ not in second
 
 
-def test_large_files_sample_the_digest(workspace, allow_all_paths):
-    """Above the full-hash bound the stamp still changes when a sample changes.
-
-    The whole file is not re-read. The first window is. A same-tick rewrite
-    of those leading bytes must not keep the previous cache entry.
-    """
-    small = workspace / "small.txt"
-    small.write_text("x" * 1000, encoding="utf-8")
-    assert fr._stat_stamp(small)[2] is not None, "a small file must be hashed"
-
+def test_large_files_hash_every_byte(workspace, allow_all_paths):
+    """A same-tick edit past the old sample gap still changes the stamp."""
     big = workspace / "big.bin"
-    payload = bytearray(b"y" * (fr._HASH_MAX_BYTES + 1))
+    payload = bytearray(b"y" * (1_048_576 + 200_000))
     big.write_bytes(payload)
     before = fr._stat_stamp(big)
     assert before is not None and before[2] is not None
 
-    payload[0] = ord("z")
+    payload[100_000] = ord("z")
     big.write_bytes(payload)
     os.utime(big, ns=(big.stat().st_atime_ns, before[0]))
     after = fr._stat_stamp(big)
     assert after is not None
+    assert after[2] != before[2]
     assert after[0] == before[0]
     assert after[1] == before[1]
     assert after[2] != before[2], (
-        "a leading-byte rewrite of a large file kept the same digest"
+        "a mid-file rewrite of a large file kept the same digest"
     )
 
 

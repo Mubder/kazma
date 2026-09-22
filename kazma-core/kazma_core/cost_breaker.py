@@ -65,6 +65,21 @@ def _get_default_max_cost() -> float:
     return DEFAULT_MAX_COST
 
 
+def _cost_breaker_enabled_setting() -> bool:
+    """Live ``cost.breaker_enabled``. Missing key means the breaker stays on."""
+    try:
+        from kazma_core.config_store import get_config_store
+
+        val = get_config_store().get("cost.breaker_enabled")
+    except Exception:
+        return True
+    if val is None:
+        return True
+    if isinstance(val, str):
+        return val.strip().lower() not in {"0", "false", "no", "off", ""}
+    return bool(val)
+
+
 def _get_default_silence_window() -> float:
     env_val = os.getenv("KAZMA_SILENCE_WINDOW")
     if env_val:
@@ -154,7 +169,14 @@ class CostCircuitBreaker:
 
         If max_cost <= 0 or KAZMA_DISABLE_COST_BREAKER=1, the cost breaker is disabled.
         """
-        if self.max_cost <= 0 or os.getenv("KAZMA_DISABLE_COST_BREAKER", "0") == "1":
+        # Precedence: the env kill switch wins, then the settings flag the
+        # TUI writes (``cost.breaker_enabled``). An unset flag keeps the
+        # historical breaker on. ``max_cost <= 0`` remains an off switch.
+        if os.getenv("KAZMA_DISABLE_COST_BREAKER", "0") == "1":
+            return False
+        if not _cost_breaker_enabled_setting():
+            return False
+        if self.max_cost <= 0:
             return False
 
         if self._halted:

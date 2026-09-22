@@ -692,7 +692,7 @@
         } else if (h.use_new_stack) {
           desc.textContent = 'V2 is the active read path (use_new_stack=true). Recall serves bi-temporal beliefs + tiered episodes.';
         } else {
-          desc.textContent = 'Dual-write mode (use_new_stack=false). V2 receives writes; legacy RRF serves reads. Flip the flag to cut over.';
+          desc.textContent = 'V2 is off (use_new_stack=false). Recall injection and post-turn consolidation are paused. There is no legacy reader to fall back to.';
         }
       }
       // KPIs

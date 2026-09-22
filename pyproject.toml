@@ -75,6 +75,8 @@ push = [
     # feature self-disables when absent — see kazma_ui/push.py.
     "pywebpush>=2.0.0",
 ]
+# Compatibility alias. textual and python-bidi are already base dependencies.
+# Installing without this extra does not remove the TUI libraries.
 tui = [
     "textual>=8.0.0",
     "python-bidi>=0.4.0",
@@ -95,7 +97,8 @@ postgres = [
     "psycopg[binary,pool]>=3.1.0",
     "langgraph-checkpoint-postgres>=2.0.0",
 ]
-# Document generation (document_generator skill)
+# Compatibility alias. These libraries are already base dependencies.
+# Installing without this extra does not remove document generation.
 document = [
     "reportlab>=4.0.0",
     "python-docx>=1.1.0",
@@ -207,7 +210,14 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["kazma-core/kazma_core", "kazma-gateway/kazma_gateway"]
+source = [
+    "kazma-core/kazma_core",
+    "kazma-gateway/kazma_gateway",
+    "kazma-ui/kazma_ui",
+    "kazma-cli/kazma_cli",
+    "kazma-tui/kazma_tui",
+    "kazma-skills/kazma_skills",
+]
 omit = ["*/tests/*", "*/migrations/*"]
 
 [tool.coverage.report]

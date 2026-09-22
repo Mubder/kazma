@@ -380,8 +380,8 @@ class TestVisionAnalyzeSSRFIntegration:
 class TestCORSMiddleware:
     """CORS headers must only be present for allowed origins."""
 
-    def test_default_origins_allow_localhost(self):
-        """A request from http://localhost:8000 gets CORS allow headers."""
+    def test_default_origins_do_not_trust_localhost_development_ports(self):
+        """Another local service is not implicitly a credentialed client."""
         from kazma_ui.app import create_app
         from starlette.testclient import TestClient
 
@@ -400,16 +400,16 @@ class TestCORSMiddleware:
                             "Access-Control-Request-Method": "GET",
                         },
                     )
-                    assert resp.status_code in (200, 204)
+                    assert resp.status_code == 400
                     assert (
                         resp.headers.get("access-control-allow-origin")
-                        == "http://localhost:8000"
+                        != "http://localhost:8000"
                     )
             finally:
                 if old is not None:
                     os.environ["KAZMA_CORS_ORIGINS"] = old
 
-    def test_default_origins_allow_127(self):
+    def test_default_origins_do_not_trust_loopback_development_ports(self):
         from kazma_ui.app import create_app
         from starlette.testclient import TestClient
 
@@ -427,10 +427,10 @@ class TestCORSMiddleware:
                             "Access-Control-Request-Method": "GET",
                         },
                     )
-                    assert resp.status_code in (200, 204)
+                    assert resp.status_code == 400
                     assert (
                         resp.headers.get("access-control-allow-origin")
-                        == "http://127.0.0.1:8000"
+                        != "http://127.0.0.1:8000"
                     )
             finally:
                 if old is not None:

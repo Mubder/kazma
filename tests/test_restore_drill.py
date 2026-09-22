@@ -139,9 +139,8 @@ def test_a_truncated_dump_is_rejected(tmp_path):
     assert any(c["check"] == "postgres:toc" for c in res.failures)
 
 
-def test_a_host_without_pg_restore_still_passes(tmp_path, monkeypatch):
-    """Missing client tools is not a broken backup. Failing the drill for
-    it would train operators to ignore a real failure."""
+def test_a_host_without_pg_restore_is_unverified(tmp_path, monkeypatch):
+    """Missing tools prove neither corruption nor recoverability."""
     import kazma_core.migration.pg_bridge as bridge
 
     monkeypatch.setattr(bridge, "resolve_pg_restore",
@@ -150,7 +149,10 @@ def test_a_host_without_pg_restore_still_passes(tmp_path, monkeypatch):
     good = tmp_path / "pg_shared_3.dump"
     good.write_bytes(b"PGDMP" + b"\x00" * 512)
     res = verify_backup(d, pg_dump=good)
-    assert res.ok, res.failures
+    assert not res.ok
+    assert res.verdict == "UNVERIFIED"
+    assert not res.failures
+    assert [c["check"] for c in res.unverified] == ["postgres:toc"]
 
 
 # ── the verdict is usable ─────────────────────────────────────────────
@@ -162,9 +164,11 @@ def test_the_summary_names_the_backup_and_the_verdict(tmp_path):
     assert "1787942545" in res.summary()
 
 
-def test_the_cli_exits_nonzero_on_a_bad_backup(tmp_path):
+def test_the_cli_exits_nonzero_on_a_bad_backup(tmp_path, monkeypatch):
     """So it can be scheduled, rather than relying on someone reading it."""
     from kazma_core.backup.restore_drill import main
+
+    monkeypatch.setattr("kazma_core.backup.restore_drill._latest_pg_dump", lambda: None)
 
     bad = _make_backup(tmp_path, with_env=False)
     assert main(["--backup", str(bad)]) == 1
