@@ -18,6 +18,7 @@ new route that forgets the check fails there.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -76,7 +77,9 @@ def create_replay_router(
         if recorder is None:
             return _unavailable()
         try:
-            threads = await owned_threads_async(recorder.list_distinct_threads())
+            threads = await owned_threads_async(
+                await asyncio.to_thread(recorder.list_distinct_threads)
+            )
             if threads is None:
                 return JSONResponse(
                     {"threads": [], "count": 0, "error": "ownership check failed"},
@@ -95,17 +98,21 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            snaps = recorder.list_snapshots(thread_id)
-            items = [
-                {
-                    "iteration": s.iteration,
-                    "timestamp": s.timestamp,
-                    "model": s.model_used or "",
-                    "id": s.id,
-                    "message_count": len(s.get_state().get("messages", [])),
-                }
-                for s in snaps
-            ]
+            def _items() -> list[dict[str, Any]]:
+                # Decoding every snapshot's state to count its messages is the
+                # expensive part; none of it may run on the event loop.
+                return [
+                    {
+                        "iteration": s.iteration,
+                        "timestamp": s.timestamp,
+                        "model": s.model_used or "",
+                        "id": s.id,
+                        "message_count": len(s.get_state().get("messages", [])),
+                    }
+                    for s in recorder.list_snapshots(thread_id)
+                ]
+
+            items = await asyncio.to_thread(_items)
             return JSONResponse({"snapshots": items, "count": len(items)})
         except Exception as exc:
             logger.exception("[replay] list snapshots failed for %s", thread_id)
@@ -119,7 +126,7 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state = engine.replay_from(thread_id, iteration)
+            state = await asyncio.to_thread(engine.replay_from, thread_id, iteration)
             if state is None:
                 return JSONResponse({"error": "not found"}, status_code=404)
             messages = state.get("messages", [])
@@ -153,7 +160,7 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state = engine.replay_from(thread_id, int(iteration))
+            state = await asyncio.to_thread(engine.replay_from, thread_id, int(iteration))
             if state is None:
                 return JSONResponse({"error": "snapshot not found"}, status_code=404)
             from kazma_core.time_travel import apply_snapshot_to_thread
@@ -189,7 +196,7 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state = engine.replay_from(thread_id, int(iteration))
+            state = await asyncio.to_thread(engine.replay_from, thread_id, int(iteration))
             if state is None:
                 return JSONResponse({"error": "snapshot not found"}, status_code=404)
             new_thread_id = f"fork-{uuid.uuid4().hex[:12]}"
@@ -236,11 +243,11 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            state_a = engine.replay_from(thread_id, int(a))
-            state_b = engine.replay_from(thread_id, int(b))
+            state_a = await asyncio.to_thread(engine.replay_from, thread_id, int(a))
+            state_b = await asyncio.to_thread(engine.replay_from, thread_id, int(b))
             if state_a is None or state_b is None:
                 return JSONResponse({"error": "one or both snapshots not found"}, status_code=404)
-            diff = engine.compare_replays(state_a, state_b)
+            diff = await asyncio.to_thread(engine.compare_replays, state_a, state_b)
             return JSONResponse({"diff": diff})
         except Exception as exc:
             logger.exception("[replay] compare failed")
@@ -254,7 +261,7 @@ def create_replay_router(
         if (denied := await _require_thread_owned(thread_id)) is not None:
             return denied
         try:
-            count = recorder.clear_snapshots(thread_id)
+            count = await asyncio.to_thread(recorder.clear_snapshots, thread_id)
             return JSONResponse({"ok": True, "cleared": count})
         except Exception as exc:
             logger.exception("[replay] clear failed for %s", thread_id)

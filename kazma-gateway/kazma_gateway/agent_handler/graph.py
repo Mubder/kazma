@@ -1304,7 +1304,13 @@ def create_graph_handler(
                 # Build context for the command resolver with real data
                 slash_ctx = await _build_slash_ctx(thread_id, msg, state, _store)
 
-                reply = resolve_slash_command(msg.text, context=slash_ctx)
+                # Off the loop: the resolver is sync and some commands do real
+                # I/O — `/replay list` reads SQLite and decodes every snapshot
+                # (audit 2026-09-22). It uses no asyncio, and to_thread copies
+                # the context, so the tenant travels with it.
+                reply = await asyncio.to_thread(
+                    resolve_slash_command, msg.text, context=slash_ctx
+                )
                 if reply is not None:
                     # Command was recognised — send the response and skip graph
                     ctx = await _store.get(thread_id)
@@ -2254,9 +2260,12 @@ def create_graph_handler(
                 create_recorder,
             )
 
-            recorder = create_recorder()
-            engine = ReplayEngine(recorder)
-            state = engine.replay_from(thread_id, iteration)
+            # Opening the snapshot DB and decoding a full state is blocking
+            # work; keep it off the gateway's event loop.
+            def _load() -> dict[str, Any] | None:
+                return ReplayEngine(create_recorder()).replay_from(thread_id, iteration)
+
+            state = await asyncio.to_thread(_load)
             if state is None:
                 return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
 
@@ -2296,9 +2305,12 @@ def create_graph_handler(
                 create_recorder,
             )
 
-            recorder = create_recorder()
-            engine = ReplayEngine(recorder)
-            state = engine.replay_from(thread_id, iteration)
+            # Opening the snapshot DB and decoding a full state is blocking
+            # work; keep it off the gateway's event loop.
+            def _load() -> dict[str, Any] | None:
+                return ReplayEngine(create_recorder()).replay_from(thread_id, iteration)
+
+            state = await asyncio.to_thread(_load)
             if state is None:
                 return f"📭 No snapshot found for iteration `{iteration}`. Use `/replay list` to see available snapshots."
 
