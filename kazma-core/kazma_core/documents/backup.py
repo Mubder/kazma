@@ -148,7 +148,13 @@ def perform_document_backup(
 
 
 def _read_references(db_path: Path) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    """Return ([(sha256, storage_kind)], [(document_id, version_id)]) refs."""
+    """Return blobs and versions still owned by a document that is not deleted.
+
+    A soft-deleted document can keep its version row after garbage collection
+    has removed the file. That missing file must not fail a backup or a
+    migrate. A blob still referenced by any live document stays required,
+    including when a deleted document points at the same bytes.
+    """
     refs: list[tuple[str, str]] = []
     versions: list[tuple[str, str]] = []
     conn = sqlite3.connect(str(db_path))
@@ -163,14 +169,26 @@ def _read_references(db_path: Path) -> tuple[list[tuple[str, str]], list[tuple[s
             SELECT DISTINCT b.sha256 AS sha256, b.storage_kind AS storage_kind
             FROM document_blobs b
             WHERE b.id IN (
-                SELECT source_blob_id FROM document_versions
-                UNION SELECT blob_id FROM document_artifacts
+                SELECT v.source_blob_id
+                FROM document_versions v
+                JOIN documents d ON d.id = v.document_id
+                WHERE d.deleted_at IS NULL
+                UNION
+                SELECT a.blob_id
+                FROM document_artifacts a
+                JOIN documents d ON d.id = a.document_id
+                WHERE d.deleted_at IS NULL
             )
             """
         ):
             refs.append((row["sha256"], row["storage_kind"]))
         for row in conn.execute(
-            "SELECT id, document_id FROM document_versions"
+            """
+            SELECT v.id AS id, v.document_id AS document_id
+            FROM document_versions v
+            JOIN documents d ON d.id = v.document_id
+            WHERE d.deleted_at IS NULL
+            """
         ):
             versions.append((row["document_id"], row["id"]))
     finally:

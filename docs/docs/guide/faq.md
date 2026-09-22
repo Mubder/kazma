@@ -114,8 +114,28 @@ truthful **422/503** when degraded.
 
 ### How do I enable malware scanning?
 
-Install ClamAV so `clamscan` or `clamdscan` is on PATH. Settings → Documents →
-malware scan `auto` or `on`. Readiness includes `malware.available`.
+Kazma does not install ClamAV with pip. It runs `clamdscan` when that program is on `PATH`, and `clamscan` otherwise. Settings → Documents sets the mode (`auto`, `on`, or `off`) and the fail-closed switch. Readiness reports `malware.available`.
+
+With `KAZMA_PRODUCTION=1`, fail-closed is on. A missing scanner, a missing virus database, or a scanner error rejects the upload.
+
+**Linux and Docker.** The image installs `clamav` and runs `freshclam`. On a host, install the distro ClamAV package and run `freshclam` once so `clamscan` has signatures.
+
+**Windows.**
+
+```powershell
+winget install --id Cisco.ClamAV -e --accept-package-agreements --accept-source-agreements
+```
+
+The installer places `clamscan.exe` and `clamdscan.exe` in `C:\Program Files\ClamAV` and does not add that folder to `PATH`. Do not add the whole folder unless `clamd` is running. Kazma prefers `clamdscan`, and a daemon client with no daemon is a failed scan. Production then rejects the upload.
+
+To use `clamscan` by itself:
+
+1. Create a `database` directory you can write, and a `freshclam.conf` next to the copy of `clamscan.exe` you will put on `PATH`. Writing those under `C:\Program Files\ClamAV` needs an elevated shell. A copy under `%LOCALAPPDATA%\ClamAV` does not.
+2. `freshclam.conf` must not contain the sample `Example` line. Set `DatabaseMirror database.clamav.net` and `DatabaseDirectory` to that database folder.
+3. Run `freshclam.exe`. It downloads `main.cvd`, `daily.cvd`, and `bytecode.cvd`.
+4. Put `clamscan.exe` and the DLLs from the install on `PATH`, with the database beside the executable (or a junction to it). Leave `clamdscan.exe` off `PATH`.
+
+`clamscan --no-summary` on a small text file should print `OK`. Reload Kazma from a new terminal so the server process inherits the updated `PATH`. Readiness then shows `malware.available` true and `scanner` `clamscan`.
 
 ---
 
