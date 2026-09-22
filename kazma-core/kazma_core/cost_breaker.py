@@ -12,11 +12,9 @@ import os
 import time
 from dataclasses import dataclass, field
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    pass
+# No load_dotenv() here. It ran at import time, and kazma_core/__init__ imports
+# this module, so it loaded a package-relative .env into every process —
+# including the document sandbox (audit 2026-09-22). See kazma_core.env_files.
 
 __all__ = ["CostCircuitBreaker", "DEFAULT_HARD_MAX_COST", "DEFAULT_MAX_COST", "DEFAULT_SILENCE_WINDOW_SECONDS", "create_cost_breaker"]
 

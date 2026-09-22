@@ -472,6 +472,184 @@ async def listen(ws, chains, loop):
     assert _deferred_loop_closures(ast.parse(source)) == []
 
 
+# ── 2c. The environment is set by entry points, not imports (2026-09-22) ──
+#
+# ``cost_breaker`` ran a bare ``load_dotenv()`` at import time. Because
+# ``kazma_core/__init__`` imports it, every process that imported kazma_core
+# loaded a ``.env`` found by walking up from the package or the working
+# directory — including the document sandbox, which had just scrubbed its
+# environment before parsing an untrusted file (KAZMA_VAULT_KEY came back).
+# The root conftest no-ops ``dotenv.load_dotenv``, so no test could see it.
+# ``tests/test_env_loading.py`` holds the behavioural half of this gate.
+
+_ENV_LOADER = "kazma-core/kazma_core/env_files.py"
+
+#: Import-time ``os.environ`` writes that are deliberate: ``(file, key)``.
+_IMPORT_TIME_ENV_WRITES: dict[tuple[str, str], str] = {
+    ("kazma-core/kazma_core/__init__.py", "GIT_TERMINAL_PROMPT"): (
+        "git must fail instead of prompting for credentials in any process"
+    ),
+    ("kazma-core/kazma_core/__init__.py", "GIT_ASKPASS"): "same as GIT_TERMINAL_PROMPT",
+    (
+        "kazma-skills/kazma_skills/native/git_github_manager/tools.py",
+        "GIT_ASKPASS",
+    ): "same as GIT_TERMINAL_PROMPT, for the skill loaded without kazma_core",
+    (
+        "kazma-skills/kazma_skills/native/git_github_manager/tools.py",
+        "GIT_TERMINAL_PROMPT",
+    ): "same as GIT_TERMINAL_PROMPT, for the skill loaded without kazma_core",
+    # Entry-point modules turning Hugging Face telemetry and a warning OFF
+    # before any model library is imported. They remove behaviour; they add
+    # nothing a sandbox would need to scrub.
+    ("kazma-ui/kazma_ui/app.py", "HF_HUB_DISABLE_TELEMETRY"): "privacy: no hub telemetry",
+    ("kazma-ui/kazma_ui/app.py", "HF_HUB_DISABLE_SYMLINKS_WARNING"): "Windows log noise",
+    ("kazma-cli/kazma_cli/main.py", "HF_HUB_DISABLE_TELEMETRY"): "privacy: no hub telemetry",
+    ("kazma-cli/kazma_cli/main.py", "HF_HUB_DISABLE_SYMLINKS_WARNING"): "Windows log noise",
+}
+
+
+def _load_dotenv_calls(tree: ast.AST) -> list[int]:
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and (
+            (isinstance(n.func, ast.Name) and n.func.id == "load_dotenv")
+            or (isinstance(n.func, ast.Attribute) and n.func.attr == "load_dotenv")
+        )
+    ]
+
+
+def _is_os_environ(node: ast.expr) -> bool:
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "environ"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "os"
+    )
+
+
+def _import_time_env_writes(tree: ast.Module) -> list[tuple[int, str]]:
+    """``(line, key or '?')`` for environment writes that run on import.
+
+    Import time is the module body and class bodies, but not function bodies
+    and not an ``if __name__ == "__main__":`` block, which only runs as a
+    script.
+    """
+    out: list[tuple[int, str]] = []
+
+    def is_main_guard(node: ast.stmt) -> bool:
+        return (
+            isinstance(node, ast.If)
+            and isinstance(node.test, ast.Compare)
+            and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "__name__"
+        )
+
+    def key_of(sub: ast.expr) -> str:
+        return sub.value if isinstance(sub, ast.Constant) and isinstance(sub.value, str) else "?"
+
+    stack: list[ast.AST] = [s for s in tree.body if not is_main_guard(s)]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            continue
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.Delete)):
+            targets = node.targets if isinstance(node, (ast.Assign, ast.Delete)) else [node.target]
+            for t in targets:
+                if isinstance(t, ast.Subscript) and _is_os_environ(t.value):
+                    out.append((node.lineno, key_of(t.slice)))
+        elif isinstance(node, ast.Call):
+            f = node.func
+            if (
+                isinstance(f, ast.Attribute)
+                and _is_os_environ(f.value)
+                and f.attr in {"update", "setdefault", "pop", "clear", "popitem", "__setitem__"}
+            ):
+                out.append((node.lineno, key_of(node.args[0]) if node.args else "?"))
+            elif _dotted(f) in {"os.putenv", "os.unsetenv"}:
+                out.append((node.lineno, key_of(node.args[0]) if node.args else "?"))
+            elif (isinstance(f, ast.Name) and f.id == "load_dotenv") or (
+                isinstance(f, ast.Attribute) and f.attr == "load_dotenv"
+            ):
+                out.append((node.lineno, "<load_dotenv>"))
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def test_load_dotenv_lives_only_in_the_env_loader():
+    """One ``.env`` loader: every other module calls ``load_env_files()``."""
+    offenders: list[str] = []
+    for path in [*_product_files(), REPO_ROOT / "serve.py"]:
+        rel = _rel(path)
+        if rel == _ENV_LOADER:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{rel}:{line}" for line in _load_dotenv_calls(tree)]
+    assert not offenders, (
+        "load_dotenv() outside kazma_core/env_files.py. Its default search walks "
+        "up from the package or the working directory and loaded the "
+        "installation's secrets into the document sandbox (audit 2026-09-22).\n"
+        "Fix: call `kazma_core.env_files.load_env_files()` from the entry "
+        "point instead.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_no_import_time_environment_writes():
+    """Importing a module must not change ``os.environ`` (audit 2026-09-22)."""
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for line, key in _import_time_env_writes(tree):
+            if (rel, key) not in _IMPORT_TIME_ENV_WRITES:
+                offenders.append(f"{rel}:{line} {key}")
+    assert not offenders, (
+        "Importing this module changes os.environ for the whole process — "
+        "including sandboxed workers that scrubbed it on purpose.\n"
+        "Fix: do it in a function the entry point calls, or add it to "
+        "_IMPORT_TIME_ENV_WRITES with the reason it must happen on import.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_env_gates_catch_the_cost_breaker_shape():
+    """Negative control (§28): both gates flag the pre-fix cost_breaker code."""
+    source = '''
+import os
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+os.environ["KAZMA_X"] = "1"
+os.environ.setdefault("KAZMA_Y", "2")
+
+class Config:
+    os.environ.update({"KAZMA_Z": "3"})
+
+def fine():
+    os.environ["INSIDE_A_FUNCTION"] = "ok"
+
+if __name__ == "__main__":
+    os.environ["SCRIPT_ONLY"] = "ok"
+'''
+    tree = ast.parse(source)
+    assert _load_dotenv_calls(tree) == [5]
+    assert sorted(k for _, k in _import_time_env_writes(tree)) == [
+        "<load_dotenv>",
+        "?",
+        "KAZMA_X",
+        "KAZMA_Y",
+    ]
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

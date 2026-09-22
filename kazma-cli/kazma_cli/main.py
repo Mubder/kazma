@@ -42,6 +42,13 @@ def main() -> None:
     # one-shot command.
     import os as _os
 
+    # Every subcommand sees the installation's .env — doctor and migrate read
+    # KAZMA_VAULT_KEY straight from os.environ. This used to happen as a side
+    # effect of importing kazma_core, from a package-relative path.
+    from kazma_core.env_files import load_env_files
+
+    load_env_files()
+
     from kazma_core.tenant_context import set_current_tenant_id
 
     set_current_tenant_id(_os.environ.get("KAZMA_TENANT_ID") or "default")
@@ -158,24 +165,12 @@ def _run_serve(port: int) -> None:
     except Exception:
         pass
 
-    # Load the CWD's .env with override=True BEFORE anything else.
-    # IMPORTANT: do NOT rely on load_dotenv()'s default search — it walks up
-    # from the kazma package location (which may be an editable install in a
-    # DIFFERENT repo than the one being served), loading the WRONG .env. We
-    # load the .env in the current working directory explicitly. override=True
-    # is required so stale empty values in the shell env (e.g. an exported
-    # ``KAZMA_DATABASE_URL=''``) don't shadow the real value from .env — that
+    # The .env ladder (explicit paths, override=True) already ran at the top of
+    # main(). override=True matters here: a stale empty shell value such as an
+    # exported ``KAZMA_DATABASE_URL=''`` must not shadow the real one — that
     # shadow was the root cause of the "Postgres pool unavailable" boot crash.
-    try:
-        from pathlib import Path
-
-        from dotenv import load_dotenv
-
-        cwd_env = Path.cwd() / ".env"
-        if cwd_env.exists():
-            load_dotenv(dotenv_path=cwd_env, override=True)
-    except Exception:
-        pass
+    # Never rely on load_dotenv()'s default search: it walks up from the
+    # package location, which under an editable install is another repo.
 
     # Initialise logging as the FIRST thing so every subsequent import
     # (app factory, agent, MCP manager, KB subsystem) records to
