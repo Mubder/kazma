@@ -999,6 +999,45 @@ def get_request_principal(request: Request) -> dict[str, Any] | None:
     return None
 
 
+def admin_decision(request: Request) -> str:
+    """``"ok"``, ``"unauthorized"`` or ``"forbidden"`` for an admin-only route.
+
+    No secret configured (local single-operator mode) is ``"ok"``: the rest of
+    the API is open too, so there is no admin role to require. With a secret,
+    the shared-secret principal is admin and a session or token needs
+    ``role == "admin"``.
+
+    Fails CLOSED. This decision used to be copied into six route modules, and
+    the copies had drifted: three denied when the check raised and three
+    ALLOWED — including backup download, which hands out every database and
+    secret-bearing file (audit 2026-09-22). One copy now, and
+    ``tests/test_static_gates.py`` keeps it that way.
+    """
+    try:
+        secret = get_kazma_secret()
+        if not secret:
+            return "ok"
+        if not is_authenticated(request, secret):
+            return "unauthorized"
+        principal = get_request_principal(request) or {}
+        if principal.get("source") == "secret" or principal.get("role") == "admin":
+            return "ok"
+        return "forbidden"
+    except Exception:
+        logger.warning("[auth] admin check failed — denying", exc_info=True)
+        return "forbidden"
+
+
+def require_admin(request: Request) -> JSONResponse | None:
+    """``None`` for an admin caller; otherwise the 401/403 response to return."""
+    decision = admin_decision(request)
+    if decision == "ok":
+        return None
+    if decision == "unauthorized":
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return JSONResponse({"error": "Admin role required"}, status_code=403)
+
+
 def _mint_auth_cookie(response: Response, request: Request, expected: str) -> None:
     """Set browser auth cookie — opaque session preferred (audit H1)."""
     try:
@@ -1370,6 +1409,8 @@ __all__: list[str] = [
     "verify_api_token",
     "extract_provided_credential",
     "is_authenticated",
+    "admin_decision",
+    "require_admin",
     "websocket_is_authenticated",
     "create_tenant_middleware",
     "TRUSTED_PROXIES_ENV_VAR",

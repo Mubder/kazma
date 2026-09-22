@@ -28,16 +28,6 @@ _approve_locks: dict[str, asyncio.Lock] = {}
 _approve_locks_activity: dict[str, float] = {}
 _APPROVE_LOCKS_MAX: int = 512
 _resume_inflight: set[str] = set()
-_snapshot_store: Any = None
-
-
-def _get_snapshot_store() -> Any:
-    global _snapshot_store
-    if _snapshot_store is None:
-        import kazma_core.time_travel as _tt_mod
-
-        _snapshot_store = _tt_mod.SnapshotStore()
-    return _snapshot_store
 
 
 def _body_interrupt_id(body: dict[str, Any] | None) -> str:
@@ -218,34 +208,10 @@ def register_misc_routes(self: Any) -> None:
         task_id = req.get("task_id", "")
         logger.info("[Stream] Typing started — worker=%s task=%s", worker_name, task_id)
         return {"status": "stream_started", "worker_name": worker_name, "task_id": task_id}
-    @self.app.get("/api/session/history")
-    async def _session_history(thread_id: str = "", limit: int = 20):
-        limit = max(1, min(limit, 500))
-        if not thread_id:
-            return {"sessions": []}
-        store = _get_snapshot_store()
-        records = await asyncio.to_thread(store.list_for_thread, thread_id)
-        return {"sessions": [r.to_dict() for r in records[:limit]]}
-    @self.app.post("/api/session/replay")
-    async def _session_replay(req: dict):
-        thread_id = req.get("thread_id", "")
-        iteration = req.get("iteration", 0)
-        if not thread_id:
-            from fastapi import HTTPException as _httpx
-
-            raise _httpx(status_code=400, detail="thread_id required")
-        try:
-            iteration = int(iteration)
-            if iteration < 0:
-                raise ValueError
-        except (ValueError, TypeError):
-            from fastapi import HTTPException as _httpx
-
-            raise _httpx(status_code=400, detail="iteration must be a non-negative integer")
-
-        import kazma_core.time_travel as _tt_mod
-        engine = _tt_mod.ReplayEngine()
-        return await engine.replay_from(thread_id, iteration)
+    # /api/session/history and /api/session/replay were removed (audit
+    # 2026-09-22): duplicates of /api/replay/* with no caller, no test, and no
+    # ownership check — history returned any thread's full state_json, and
+    # replay raised TypeError on every call. Use /api/replay/*.
     @self.app.get("/api/alerts/recent")
     async def _get_recent_alerts():
         from fastapi.encoders import jsonable_encoder
