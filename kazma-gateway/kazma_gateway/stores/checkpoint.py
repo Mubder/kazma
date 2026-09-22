@@ -209,6 +209,47 @@ class CheckpointManager(BaseCheckpointSaver):
             if hasattr(saver, "adelete_thread"):
                 await saver.adelete_thread(thread_id)
 
+    async def adelete_all_threads(self) -> int:
+        """Delete every checkpoint thread. Returns how many threads were removed.
+
+        Postgres and SQLite do not share a placeholder or a connection type.
+        A raw ``DELETE … ?`` against the Postgres pool is what made the
+        dashboard clear-all route return 500 on a Postgres install.
+        """
+        saver = await self._get_saver()
+        tables = ("checkpoint_writes", "checkpoint_blobs", "checkpoints")
+        if "Postgres" in type(saver).__name__:
+            pool = getattr(saver, "conn", None)
+            if pool is None:
+                return 0
+            async with pool.connection() as conn:  # type: ignore[union-attr]
+                async with conn.cursor() as cur:  # type: ignore[union-attr]
+                    await cur.execute("SELECT COUNT(DISTINCT thread_id) FROM checkpoints")
+                    row = await cur.fetchone()
+                    if isinstance(row, dict):
+                        count = int(next(iter(row.values()), 0) or 0)
+                    else:
+                        count = int(row[0] if row else 0)
+                    for table in tables:
+                        await cur.execute(f"DELETE FROM {table}")
+            return count
+
+        conn = saver.conn if hasattr(saver, "conn") else None
+        if conn is None:
+            return 0
+        cursor = await conn.execute("SELECT COUNT(DISTINCT thread_id) FROM checkpoints")
+        row = await cursor.fetchone()
+        count = int(row[0] if row else 0)
+        for table in tables:
+            try:
+                await conn.execute(f"DELETE FROM {table}")
+            except Exception:
+                if table == "checkpoints":
+                    raise
+                logger.debug("[Checkpoint] skip missing table %s", table, exc_info=True)
+        await conn.commit()
+        return count
+
     async def setup(self) -> None:
         """Initialize the underlying saver."""
         await self._saver.setup()

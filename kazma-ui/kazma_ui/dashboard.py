@@ -386,18 +386,19 @@ async def delete_session(thread_id: str) -> JSONResponse:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     
     try:
-        # Use the CheckpointManager's public conn property instead of
-        # the private _conn attribute.
-        conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
-        if not conn:
-            return JSONResponse({"deleted": False, "error": "Database not initialized"}, status_code=500)
-        
-        # Delete all checkpoints for this thread_id
-        await conn.execute(
-            "DELETE FROM checkpoints WHERE thread_id = ?",
-            (thread_id,),
-        )
-        await conn.commit()
+        # Postgres checkpointers reject the SQLite '?' placeholder. The
+        # saver's own delete knows the dialect and the related tables.
+        if hasattr(_checkpoint_manager, "adelete_thread"):
+            await _checkpoint_manager.adelete_thread(thread_id)
+        else:
+            conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
+            if not conn:
+                return JSONResponse({"deleted": False, "error": "Database not initialized"}, status_code=500)
+            await conn.execute(
+                "DELETE FROM checkpoints WHERE thread_id = ?",
+                (thread_id,),
+            )
+            await conn.commit()
 
         # Gateway platform SessionStore (chat_id mapping)
         try:
@@ -444,19 +445,16 @@ async def clear_all_sessions() -> JSONResponse:
         return JSONResponse({"deleted": False, "error": "CheckpointManager not initialized"}, status_code=500)
     
     try:
-        # Use the CheckpointManager's public conn property instead of
-        # the private _conn attribute.
-        conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
-        if not conn:
-            return JSONResponse({"deleted": False, "error": "Database not initialized"}, status_code=500)
-        
-        # Count before deletion
-        cursor = await conn.execute("SELECT COUNT(*) FROM checkpoints")
-        count = (await cursor.fetchone())[0]
-        
-        # Delete all checkpoints
-        await conn.execute("DELETE FROM checkpoints")
-        await conn.commit()
+        if hasattr(_checkpoint_manager, "adelete_all_threads"):
+            count = await _checkpoint_manager.adelete_all_threads()
+        else:
+            conn = _checkpoint_manager.conn if hasattr(_checkpoint_manager, "conn") else None
+            if not conn:
+                return JSONResponse({"deleted": False, "error": "Database not initialized"}, status_code=500)
+            cursor = await conn.execute("SELECT COUNT(*) FROM checkpoints")
+            count = (await cursor.fetchone())[0]
+            await conn.execute("DELETE FROM checkpoints")
+            await conn.commit()
         
         logger.warning("Cleared ALL sessions: %d checkpoints deleted", count)
         return JSONResponse({

@@ -68,6 +68,26 @@ class TestContextIndicator:
         assert "Summarization threshold" in result
 
     @pytest.mark.asyncio
+    async def test_threshold_is_the_trim_budget_not_the_4k_constant(self) -> None:
+        """A short turn must not look over budget because of a hardcoded 4,000."""
+        messages = [{"role": "user", "content": "hello"}]
+        with (
+            patch("kazma_core.config_store.ConfigStore", side_effect=Exception("no config")),
+            patch(
+                "kazma_core.agent.turn_input.resolve_trim_token_budget",
+                return_value=24000,
+            ),
+            patch(
+                "kazma_core.token_counter.resolve_context_window",
+                return_value=1_000_000,
+            ),
+        ):
+            result = await context_cmd(messages)
+
+        assert "Summarization threshold: 24,000 tokens" in result
+        assert "Summarization threshold: 4,000 tokens" not in result
+
+    @pytest.mark.asyncio
     async def test_context_identity_from_live_profile(self) -> None:
         """Identity lines come from workspace binding + the active profile."""
         messages = [{"role": "user", "content": "who am i"}]

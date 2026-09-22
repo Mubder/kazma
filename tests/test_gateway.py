@@ -889,6 +889,23 @@ class TestGatewayStatus:
 
         await store.close()
 
+    @pytest.mark.asyncio
+    async def test_status_names_a_postgres_checkpointer(self) -> None:
+        """An attached Postgres saver is not reported as unconfigured sqlite."""
+
+        class AsyncPostgresSaver:
+            pass
+
+        class _Holder:
+            _saver = AsyncPostgresSaver()
+
+        manager = GatewayManager()
+        manager.set_persistence(checkpointer=_Holder(), checkpointer_path="")
+        status = await manager.get_status()
+        checkpointer = status["persistence"]["checkpointer"]
+        assert checkpointer["type"] == "postgres"
+        assert checkpointer["path"] == "(postgres)"
+
 
 # ══════════════════════════════════════════════════════════════════════════
 # send_message Tool Registration

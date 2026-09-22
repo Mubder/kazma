@@ -45,43 +45,33 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
     Returns:
         Formatted context report.
     """
-    from kazma_core.summarizer import TOKEN_THRESHOLD, estimate_tokens
+    from kazma_core.summarizer import estimate_tokens
 
     total_tokens = estimate_tokens(messages)
 
-    # Context window: Settings UI (ConfigStore context.*) → yaml
-    # (memory.max_context_tokens) → 128k default. Mirrors
-    # KazmaAgent._resolve_context_window() — previously this fell back to
-    # 16k, understating utilization for every 128k-context model.
-    context_window = 128_000
+    model = "unknown"
+    provider = "unknown"
     try:
-        from kazma_core.config_store import get_config_store
+        from kazma_core.model_registry import get_model_registry
 
-        store = get_config_store()
-        cs_val = store.get("context.max_context_tokens")
-        if cs_val is not None:
-            try:
-                context_window = max(1024, int(cs_val))
-            except (TypeError, ValueError):
-                pass
-    except Exception as exc:
-        logger.debug("Failed to read context_window config: %s", exc)
-    if context_window == 128_000:
-        try:
-            from kazma_core.config_store import get_config_store
+        prof = get_model_registry().get_active_profile() or {}
+        model = str(prof.get("model") or "unknown")
+        provider = str(prof.get("provider") or "unknown")
+    except Exception:
+        logger.debug("[context_cmd] active model unavailable", exc_info=True)
 
-            yaml_val = get_config_store().get("memory.max_context_tokens")
-            if yaml_val is not None:
-                try:
-                    context_window = max(1024, int(yaml_val))
-                except (TypeError, ValueError):
-                    pass
-        except Exception as exc:
-            logger.debug("Failed to read yaml context_window config: %s", exc)
+    # Same window and trim budget the supervisor uses. The old meter
+    # reported summarizer.TOKEN_THRESHOLD (a hardcoded 4,000) against a
+    # million-token window, so a short turn looked 123% over budget.
+    from kazma_core.agent.turn_input import resolve_trim_token_budget
+    from kazma_core.token_counter import resolve_context_window
+
+    named_model = None if model == "unknown" else model
+    context_window = resolve_context_window(None, named_model)
+    trim_budget = resolve_trim_token_budget(last_model=named_model)
 
     pct = (total_tokens / context_window * 100) if context_window > 0 else 0
-    threshold_pct = (TOKEN_THRESHOLD / context_window * 100) if context_window > 0 else 0
-    threshold_utilization = (total_tokens / TOKEN_THRESHOLD * 100) if TOKEN_THRESHOLD > 0 else 0
+    threshold_utilization = (total_tokens / trim_budget * 100) if trim_budget > 0 else 0
 
     lines: list[str] = [
         "📊 Context Window",
@@ -94,7 +84,9 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
             parts = [f"{role}={count:,}" for role, count in sorted(role_counts.items())]
             lines.append(f"Role breakdown: {', '.join(parts)}")
 
-    lines.append(f"Summarization threshold: {TOKEN_THRESHOLD:,} tokens ({threshold_utilization:.0f}% utilized)")
+    lines.append(
+        f"Summarization threshold: {trim_budget:,} tokens ({threshold_utilization:.0f}% utilized)"
+    )
 
     # Identity block — always emit these lines (even as "(unavailable)").
     # context_info used to return only the token bar, so Part A could not
@@ -107,17 +99,6 @@ async def context_cmd(messages: list[dict[str, Any]], detailed: bool = False) ->
     except Exception:
         logger.debug("[context_cmd] workspace root unavailable", exc_info=True)
     lines.append(f"Workspace: {workspace}")
-
-    model = "unknown"
-    provider = "unknown"
-    try:
-        from kazma_core.model_registry import get_model_registry
-
-        prof = get_model_registry().get_active_profile() or {}
-        model = str(prof.get("model") or "unknown")
-        provider = str(prof.get("provider") or "unknown")
-    except Exception:
-        logger.debug("[context_cmd] active model unavailable", exc_info=True)
     lines.append(f"Model: {model}  Provider: {provider}")
 
     return "\n".join(lines)
