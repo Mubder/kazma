@@ -704,6 +704,66 @@ def test_admin_rederivation_gate_catches_the_drifted_copy():
     assert _admin_rederivations(fixed) == []
 
 
+# ── 2e. A write the server refused is not reported as saved (2026-09-22) ──
+#
+# 24 save/delete handlers in the web UI did `await fetch(...)`, threw the
+# Response away and toasted success — a 403, 422 or 500 still said "saved",
+# Settings → Safety (the HITL policy) among them. Seven more had no error path
+# at all. The rule: never discard an awaited fetch. Use
+# `window.kazmaSave(url, init)` (auth-guard.js), which rejects with the
+# server's reason, or keep the Response and check `resp.ok`.
+# tests/js/test_kazma_save.js holds the behavioural half.
+
+_UI_SCRIPT_ROOTS = (
+    REPO_ROOT / "kazma-ui" / "kazma_ui" / "static" / "js",
+    REPO_ROOT / "kazma-ui" / "kazma_ui" / "templates",
+)
+_DISCARDED_FETCH = re.compile(r"^\s*await\s+fetch\s*\(")
+
+
+def _discarded_fetches(text: str) -> list[int]:
+    return [i for i, line in enumerate(text.splitlines(), 1) if _DISCARDED_FETCH.match(line)]
+
+
+def test_no_discarded_fetch_results_in_the_ui():
+    offenders: list[str] = []
+    for root in _UI_SCRIPT_ROOTS:
+        for path in sorted([*root.rglob("*.js"), *root.rglob("*.html")]):
+            if path.name.endswith(".min.js") or "vendor" in path.parts:
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            offenders += [f"{_rel(path)}:{line}" for line in _discarded_fetches(text)]
+    assert not offenders, (
+        "An awaited fetch() whose Response is thrown away cannot tell a refused "
+        "write from a saved one (audit 2026-09-22).\n"
+        "Fix: `await window.kazmaSave(url, init)` inside try/catch, or keep the "
+        "Response and check `resp.ok`.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_discarded_fetch_gate_catches_the_audited_shape():
+    """Negative control (§28): flags the pre-fix saveSafety, passes the fix."""
+    js = """
+        async saveSafety() {
+            try {
+                await fetch('/api/settings/agent/safety', { method: 'PUT' });
+                showToast('Safety settings saved', 'success');
+            } catch (e) {}
+        },
+        async fixed() {
+            try {
+                await window.kazmaSave('/api/settings/agent/safety', { method: 'PUT' });
+                const resp = await fetch('/api/x');
+                if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            } catch (e) {}
+        },
+        async ping() {
+            await fetch('/api/push/subscribe', {}).catch(function () {});
+        },
+    """
+    assert _discarded_fetches(js) == [4, 16]
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

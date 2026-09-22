@@ -7,7 +7,7 @@
         async saveAgent() {
             this.saving = true;
             try {
-                await fetch('/api/settings/agent', {
+                await window.kazmaSave('/api/settings/agent', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.agent),
@@ -28,7 +28,7 @@
         async saveSafety() {
             this.saving = true;
             try {
-                await fetch('/api/settings/agent/safety', {
+                await window.kazmaSave('/api/settings/agent/safety', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.safety),
@@ -92,7 +92,7 @@
         async saveContext() {
             this.saving = true;
             try {
-                await fetch('/api/settings/agent/context', {
+                await window.kazmaSave('/api/settings/agent/context', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.context),
@@ -128,7 +128,7 @@
         async saveTenantMode() {
             this.saving = true;
             try {
-                await fetch('/api/settings', {
+                await window.kazmaSave('/api/settings', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify([{ key: 'memory.tenant_mode', value: this.memoryTenantMode, category: 'memory' }]),
@@ -142,7 +142,7 @@
 
         async saveMemoryKbMerge() {
             try {
-                await fetch('/api/settings/memory/merge-kb', {
+                await window.kazmaSave('/api/settings/memory/merge-kb', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
@@ -337,7 +337,7 @@
         async saveLogging() {
             this.saving = true;
             try {
-                await fetch('/api/settings/system/logging', {
+                await window.kazmaSave('/api/settings/system/logging', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.logging),
@@ -408,7 +408,7 @@
         async saveProxy() {
             this.saving = true;
             try {
-                await fetch('/api/settings/proxy', {
+                await window.kazmaSave('/api/settings/proxy', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.proxy),
@@ -425,7 +425,7 @@
             this.proxyTestResult = null;
             try {
                 // Save first so the test uses the just-entered credentials.
-                await fetch('/api/settings/proxy', {
+                await window.kazmaSave('/api/settings/proxy', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.proxy),

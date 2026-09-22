@@ -43,7 +43,7 @@ function skillsApp() {
 
         async toggleSkill(skillId, enabled) {
             try {
-                await fetch('/api/skills/toggle', {
+                await window.kazmaSave('/api/skills/toggle', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ skill_id: skillId, enabled: enabled })
@@ -62,7 +62,7 @@ function skillsApp() {
                 danger: true,
             }))) return;
             try {
-                await fetch('/api/skills/uninstall', {
+                await window.kazmaSave('/api/skills/uninstall', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ skill_id: skillId })

@@ -22,7 +22,7 @@
         async saveAppearance() {
             this.saving = true;
             try {
-                await fetch('/api/settings/appearance', {
+                await window.kazmaSave('/api/settings/appearance', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(this.appearance),
@@ -143,14 +143,20 @@
         },
 
         async saveShortcut(action, keys) {
+            const previous = this.shortcuts[action];
             this.shortcuts[action] = keys;
-            await fetch('/api/settings/shortcuts', {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, keys }),
-            });
+            try {
+                await window.kazmaSave('/api/settings/shortcuts', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action, keys }),
+                });
+                showToast(_t('settings.shortcut_updated', 'Shortcut for "{action}" updated', {action: action}), 'success');
+            } catch (e) {
+                this.shortcuts[action] = previous; // the server kept the old one
+                showToast('Shortcut not saved: ' + e.message, 'error');
+            }
             this.shortcutConflicts = this.detectConflicts();
-            showToast(_t('settings.shortcut_updated', 'Shortcut for "{action}" updated', {action: action}), 'success');
         },
 
         async resetShortcuts() {
@@ -160,10 +166,14 @@
                 confirmText: 'Reset',
                 danger: false,
             }))) return;
-            await fetch('/api/settings/shortcuts/reset', { method: 'POST' });
+            try {
+                await window.kazmaSave('/api/settings/shortcuts/reset', { method: 'POST' });
+                showToast(_t('settings.shortcuts_reset', 'Shortcuts reset'), 'success');
+            } catch (e) {
+                showToast('Reset failed: ' + e.message, 'error');
+            }
             this.shortcuts = await this._fetch('/api/settings/shortcuts') || {};
-            this.shortcutConflicts = [];
-            showToast(_t('settings.shortcuts_reset', 'Shortcuts reset'), 'success');
+            this.shortcutConflicts = this.detectConflicts();
         },
 
         detectConflicts() {
@@ -422,7 +432,7 @@
         },
 
         async toggleTool(toolName, enabled) {
-            await fetch(`/api/settings/tools/${encodeURIComponent(toolName)}/toggle`, {
+            await window.kazmaSave(`/api/settings/tools/${encodeURIComponent(toolName)}/toggle`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled }),
@@ -665,7 +675,7 @@
                 danger: true,
             }))) return;
             try {
-                await fetch('/api/settings/reset', { method: 'POST' });
+                await window.kazmaSave('/api/settings/reset', { method: 'POST' });
                 showToast(_t('settings.system_reset_reloading', 'System reset complete. Reloading...'), 'success');
                 setTimeout(() => location.reload(), 1500);
             } catch (e) {
@@ -692,7 +702,7 @@
             if (!this.importData.trim()) { showToast(_t('settings.paste_or_upload', 'Paste or upload config data'), 'error'); return; }
             this.saving = true;
             try {
-                await fetch('/api/settings/import', {
+                await window.kazmaSave('/api/settings/import', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({
@@ -729,7 +739,7 @@
                 danger: true,
             }))) return;
             try {
-                await fetch('/api/settings/reset', { method: 'POST' });
+                await window.kazmaSave('/api/settings/reset', { method: 'POST' });
                 showToast(_t('settings.settings_reset_reloading', 'Settings reset. Reloading...'), 'success');
                 setTimeout(() => location.reload(), 1500);
             } catch (e) {

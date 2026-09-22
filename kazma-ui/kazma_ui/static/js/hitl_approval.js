@@ -428,7 +428,7 @@
         if (!ok) return;
         clearBtn.disabled = true;
         try {
-          await fetch('/api/pending-approvals/clear', { method: 'POST', credentials: 'same-origin' });
+          await window.kazmaSave('/api/pending-approvals/clear', { method: 'POST', credentials: 'same-origin' });
         } catch (e) {}
         clearBtn.disabled = false;
         refreshPending();

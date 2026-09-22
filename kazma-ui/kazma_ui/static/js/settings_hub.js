@@ -45,7 +45,7 @@
                 key: 'llm.' + k, value: v, category: 'model'
             }));
             try {
-                await fetch('/api/settings', {
+                await window.kazmaSave('/api/settings', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(updates),
@@ -53,7 +53,7 @@
                 // Reconfigure the live LLM provider so subsequent chat
                 // requests use the new model/base_url/api_key (Bug 3 fix).
                 try {
-                    await fetch('/api/provider/switch', {
+                    await window.kazmaSave('/api/provider/switch', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                         body: JSON.stringify({
@@ -141,7 +141,7 @@
                 danger: true,
             }))) return;
             try {
-                await fetch(`/api/models/saved/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await window.kazmaSave(`/api/models/saved/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadSavedModels();
                 showToast(`Profile "${name}" deleted`, 'success');
             } catch (e) {
@@ -186,7 +186,7 @@
         async saveConnector(platform) {
             this.saving = true;
             try {
-                await fetch('/api/settings/connectors', {
+                await window.kazmaSave('/api/settings/connectors', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ platform, settings: this.connectors[platform] || {} }),
@@ -714,7 +714,7 @@
                 danger: true,
             }))) return;
             try {
-                await fetch(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await window.kazmaSave(`/api/providers/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubProviders();
                 showToast('Provider removed', 'success');
             } catch (e) {
@@ -724,7 +724,7 @@
 
         async toggleHubProvider(name, enabled) {
             try {
-                await fetch(`/api/providers/${encodeURIComponent(name)}/toggle`, {
+                await window.kazmaSave(`/api/providers/${encodeURIComponent(name)}/toggle`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ enabled }),
@@ -926,7 +926,7 @@
                 p.selected_models = p.selected_models.filter(m => m !== model);
             }
             try {
-                await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
+                await window.kazmaSave(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ models: p.selected_models }),
@@ -952,7 +952,7 @@
                 p.selected_models = Array.from(set);
             }
             try {
-                await fetch(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
+                await window.kazmaSave(`/api/providers/${encodeURIComponent(providerName)}/select-models`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ models: p.selected_models }),
@@ -1061,7 +1061,7 @@
                     this.hubConnectorModal = false;
                     await this.loadHubConnectors();
                     try {
-                        await fetch('/api/gateway/refresh-adapters', { method: 'POST' });
+                        await window.kazmaSave('/api/gateway/refresh-adapters', { method: 'POST' });
                     } catch (refreshErr) {
                         console.warn('[Hub] Gateway refresh failed:', refreshErr);
                     }
@@ -1081,7 +1081,7 @@
                 danger: true,
             }))) return;
             try {
-                await fetch(`/api/connectors/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await window.kazmaSave(`/api/connectors/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubConnectors();
                 showToast('Connector removed', 'success');
             } catch (e) {
@@ -1091,7 +1091,7 @@
 
         async toggleHubConnector(name, enabled) {
             try {
-                await fetch(`/api/connectors/${encodeURIComponent(name)}/toggle`, {
+                await window.kazmaSave(`/api/connectors/${encodeURIComponent(name)}/toggle`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify({ enabled }),
@@ -1129,7 +1129,7 @@
                 delete extras._existing;
                 data.extras = extras;
                 delete data._existing;
-                await fetch('/api/connectors', {
+                await window.kazmaSave('/api/connectors', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
                     body: JSON.stringify(data),
@@ -1214,7 +1214,7 @@
                 danger: true,
             }))) return;
             try {
-                await fetch(`/api/models/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
+                await window.kazmaSave(`/api/models/profiles/${encodeURIComponent(name)}`, { method: 'DELETE' });
                 await this.loadHubProfiles();
                 showToast(`Profile "${name}" deleted`, 'success');
             } catch (e) {

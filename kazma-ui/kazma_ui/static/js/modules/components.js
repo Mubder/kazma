@@ -371,13 +371,20 @@ export function sidebarModel() {
         async saveModel() {
             if (!this.selectedModel) return;
             try {
-                await fetch('/api/settings/active_model', {
+                await window.kazmaSave('/api/settings/active_model', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ model: this.selectedModel })
                 });
                 window.dispatchEvent(new CustomEvent('model-changed', { detail: { model: this.selectedModel } }));
-            } catch (e) { console.error('Failed to save model', e); }
+            } catch (e) {
+                // The server kept its model: show that, and say why.
+                console.error('Failed to save model', e);
+                if (typeof window.showToast === 'function') {
+                    window.showToast('Model not switched: ' + e.message, 'error');
+                }
+                if (typeof this._fetchActiveModel === 'function') this._fetchActiveModel();
+            }
         }
     };
 }

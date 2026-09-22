@@ -612,7 +612,7 @@
         danger: true,
       }))) return;
       try {
-        await fetch('/api/sessions/' + encodeURIComponent(threadId), { method: 'DELETE', credentials: 'same-origin' });
+        await window.kazmaSave('/api/sessions/' + encodeURIComponent(threadId), { method: 'DELETE', credentials: 'same-origin' });
         loadSessions();
       } catch (e) {
         window.kazmaAlert && window.kazmaAlert({ title: 'Error', message: 'Error deleting session', variant: 'btn-danger' });
@@ -627,7 +627,7 @@
         danger: true,
       }))) return;
       try {
-        await fetch('/api/sessions/clear-all', { method: 'POST', credentials: 'same-origin' });
+        await window.kazmaSave('/api/sessions/clear-all', { method: 'POST', credentials: 'same-origin' });
         loadSessions();
       } catch (e) {
         window.kazmaAlert && window.kazmaAlert({ title: 'Error', message: 'Error clearing sessions', variant: 'btn-danger' });
