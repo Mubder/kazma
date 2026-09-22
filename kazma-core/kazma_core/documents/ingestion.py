@@ -1750,6 +1750,20 @@ class DocumentIngestionService:
         rollout = get_document_rollout()
         data["rollout"] = rollout.to_dict()
         data["accepting_durable_writes"] = rollout.enabled
+        try:
+            from .malware import malware_blocks_intake
+
+            blocked = malware_blocks_intake(self.config, data.get("malware"))
+        except Exception:  # noqa: BLE001
+            blocked = None
+        if blocked:
+            data["accepting_durable_writes"] = False
+            reasons = list(data.get("degraded_reasons") or [])
+            if blocked not in reasons:
+                reasons.append(blocked)
+            data["degraded_reasons"] = reasons
+            if data.get("status") == "ok":
+                data["status"] = "degraded"
         if not rollout.enabled:
             data["underlying_status"] = data["status"]
             data["status"] = "disabled"

@@ -25,6 +25,7 @@ def _write_bundle(
     omit_members: list[str] | None = None,
     corrupt_member: str | None = None,
     keep_hashes_for_omitted: bool = True,
+    table_counts: dict | None = None,
 ) -> Path:
     """Write a minimal but structurally valid bundle zip.
 
@@ -59,6 +60,7 @@ def _write_bundle(
         source_workspace_root="/src/kazma",
         source_data_dir="/src/kazma/kazma-data",
         file_hashes=hashes,
+        table_counts=table_counts or {},
     )
     with zipfile.ZipFile(path, "w") as zf:
         zf.writestr("manifest.json", manifest.to_json())
@@ -78,7 +80,15 @@ class TestManifestArchiveCrossCheck:
         report = KazmaBundle(bundle).verify()
         assert report.ok, report.errors
         assert report.file_count == 6  # incl. manifest.json itself
-        assert report.errors == []
+
+    def test_incomplete_document_store_fails_verify(self, tmp_path: Path) -> None:
+        bundle = _write_bundle(
+            tmp_path / "incomplete.zip",
+            table_counts={"_document_store": {"error": "referenced blob is missing"}},
+        )
+        report = KazmaBundle(bundle).verify()
+        assert not report.ok
+        assert any("document store export incomplete" in err for err in report.errors)
 
     def test_unlisted_extra_db_fails_verification(self, tmp_path: Path) -> None:
         """Rogue zip member absent from the manifest is a tamper signal."""

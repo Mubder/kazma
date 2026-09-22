@@ -1864,6 +1864,21 @@ class KazmaAppBuilder:
             from kazma_ui.dashboard import set_dashboard_context
 
             set_dashboard_context(checkpoint_manager=self._checkpointer)
+            # The gateway status card was wired before this saver existed, so
+            # it kept reporting the checkpointer as not configured.
+            if getattr(self, "gateway", None) is not None:
+                try:
+                    from kazma_core.db.backend import is_postgres as _cp_is_pg
+
+                    _cp_path = "" if _cp_is_pg() else str(_cpdb())
+                except Exception:
+                    _cp_path = str(_cpdb())
+                self.gateway.set_persistence(
+                    session_store=getattr(self, "session_store", None),
+                    checkpointer=self._checkpointer,
+                    session_store_path=getattr(self.gateway, "_session_store_path", ""),
+                    checkpointer_path=_cp_path,
+                )
 
             # Always recompile graph with checkpointer + HITL for SSE holder
             from kazma_core.agent.graph_builder import build_supervisor_graph

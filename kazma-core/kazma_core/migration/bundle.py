@@ -256,6 +256,11 @@ class KazmaBundle:
             report.add_error(f"corrupt zip: {exc}")
 
         report.table_counts = dict(self.manifest.table_counts)
+        doc_store = report.table_counts.get("_document_store")
+        if isinstance(doc_store, dict) and doc_store.get("error"):
+            report.add_error(
+                "document store export incomplete: " + str(doc_store["error"])
+            )
         return report
 
     # ── Extraction ─────────────────────────────────────────────────────

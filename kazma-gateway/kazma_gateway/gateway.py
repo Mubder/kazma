@@ -843,15 +843,28 @@ class GatewayManager:
                 }
             )
 
-        # Persistence info
+        # Persistence info. The type used to be hardcoded to sqlite, and an
+        # empty path string read as "not configured" even when a Postgres
+        # saver was attached. The object is the authority; the path is extra.
+        saver = getattr(self._checkpointer, "_saver", self._checkpointer)
+        saver_name = type(saver).__name__ if saver is not None else ""
+        if self._checkpointer is None:
+            cp_type = "sqlite"
+            cp_path = self._checkpointer_path or "(not configured)"
+        elif "Postgres" in saver_name:
+            cp_type = "postgres"
+            cp_path = self._checkpointer_path or "(postgres)"
+        else:
+            cp_type = "sqlite"
+            cp_path = self._checkpointer_path or "(configured)"
         persistence: dict[str, Any] = {
             "session_store": {
                 "type": "sqlite",
                 "path": self._session_store_path or "(not configured)",
             },
             "checkpointer": {
-                "type": "sqlite",
-                "path": self._checkpointer_path or "(not configured)",
+                "type": cp_type,
+                "path": cp_path,
             },
             "active_threads": 0,
         }

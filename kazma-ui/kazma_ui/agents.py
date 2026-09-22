@@ -158,13 +158,29 @@ def _get_agent_info(agent: Any) -> dict[str, Any]:
         "servers": 0,
     }
 
-    # LLM config via facade method (avoids llm_config.* access)
+    # LLM config via facade method (avoids llm_config.* access).
+    # llm_config is the model the agent object was built with. Chat answers
+    # with the registry's active profile, which can be a different provider
+    # after a switch. The card must show the model that will actually answer.
     llm_info = agent.get_llm_config() if hasattr(agent, "get_llm_config") else {
         "model": "unknown",
         "base_url": "",
         "max_tokens": 4096,
         "temperature": 0.7,
     }
+    try:
+        from kazma_core.model_registry import get_model_registry
+
+        profile = get_model_registry().get_active_profile() or {}
+        active_model = str(profile.get("model") or "").strip()
+        if active_model:
+            llm_info = dict(llm_info)
+            llm_info["model"] = active_model
+            active_url = str(profile.get("base_url") or "").strip()
+            if active_url:
+                llm_info["base_url"] = active_url
+    except Exception:
+        logger.debug("[agents] active profile overlay skipped", exc_info=True)
 
     # Derive agent state from running flag + recent traces
     recent_traces = store.recent(10)

@@ -211,8 +211,13 @@ def export_bundle(
     _log("Exporting document store…")
     try:
         _export_document_store(staging, manifest, _log)
-    except Exception as exc:  # noqa: BLE001 - document store is optional
+    except Exception as exc:  # noqa: BLE001 - keep the rest of the bundle
+        # A missing quarantine blob used to be logged and then forgotten.
+        # verify() treated the zip as valid because the absent file was
+        # never hashed. Record the failure so verify refuses the bundle.
         logger.warning("[migrate:export] document store export failed: %s", exc)
+        manifest.table_counts["_document_store"] = {"error": str(exc)[:300]}
+        _log(f"  ⚠ document store incomplete: {exc}")
 
     # 7. meta.env — vault key (so vault.db decrypts) + public url.
     meta = {
