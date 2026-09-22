@@ -1715,7 +1715,16 @@ def create_ws_chat_router(
                             "[WS-Chat] working-memory pin skipped", exc_info=True
                         )
 
-                    async def _run_prompt_stream():
+                    # Loop values are bound as defaults: the receive loop keeps
+                    # running while this task does, and the next message
+                    # rebinds these names (audit 2026-09-22, loop-closure gate).
+                    async def _run_prompt_stream(
+                        *,
+                        graph_inst: Any = graph_inst,
+                        input_state: Any = input_state,
+                        requested_model: str = requested_model,
+                        ws_workspace_id: str = ws_workspace_id,
+                    ) -> None:
                         from kazma_core.safety.hitl import (
                             reset_current_thread_id,
                             set_current_thread_id,
@@ -2440,7 +2449,20 @@ def create_ws_chat_router(
                         )
                     )
 
-                    async def _run_approve_stream():
+                    # Bound as defaults for the same reason as _run_prompt_stream:
+                    # a second approve_tool rebinds every one of these while this
+                    # task (or its cancellation cleanup) is still running.
+                    async def _run_approve_stream(
+                        *,
+                        approval_start_time: float = approval_start_time,
+                        approve_config: dict[str, Any] = approve_config,
+                        approved: bool = approved,
+                        graph_inst: Any = graph_inst,
+                        resume_command: Any = resume_command,
+                        scope: str = scope,
+                        target_thread_id: str = target_thread_id,
+                        tool_name: str = tool_name,
+                    ) -> None:
                         from kazma_core.safety.hitl import (
                             reset_current_thread_id,
                             set_current_thread_id,
@@ -2810,7 +2832,7 @@ def create_ws_chat_router(
                     active_task = asyncio.create_task(_run_approve_stream())
                     register_turn(target_thread_id, active_task)
                     active_task.add_done_callback(
-                        lambda t: unregister_turn(target_thread_id, t)
+                        lambda t, tid=target_thread_id: unregister_turn(tid, t)
                     )
 
         except WebSocketDisconnect:

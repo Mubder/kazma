@@ -288,6 +288,190 @@ def test_no_unretained_thread_start():
     )
 
 
+# ── 2b. Deferred closures reading loop-rebound names (audit 2026-09-22) ──
+#
+# The Discord gateway defined its per-channel chain closure inside the
+# ``async for`` receive loop and handed it to ``create_task``. The closure read
+# the previous task and the parsed message only when it first ran, and
+# ``websockets`` returns buffered frames without suspending — so a burst let the
+# loop rebind both names first. A burst of four was delivered as the LAST
+# message four times: three lost, one run four times. Slack and Telegram had
+# the correct shape; nothing compared the siblings.
+#
+# The rule: a closure created in a loop and scheduled to run later (task,
+# callback, thread, executor) must not read a name the loop rebinds. Bind it
+# as a default argument, or pass it to a method. A closure that is awaited in
+# the same iteration is fine — the loop cannot advance while it waits.
+
+_SCHEDULERS = {
+    "create_task", "ensure_future", "spawn_background", "add_done_callback",
+    "call_soon", "call_soon_threadsafe", "call_later", "call_at",
+    "run_in_executor", "submit", "run_coroutine_threadsafe", "start_soon",
+    "Thread", "Timer",
+}
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+_LOOPS = (ast.For, ast.AsyncFor, ast.While)
+
+
+def _own_nodes(stmts: list[ast.stmt]):
+    """Walk statements without entering nested function or class bodies."""
+    stack: list[ast.AST] = list(stmts)
+    while stack:
+        node = stack.pop()
+        yield node
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, _SCOPES):
+                yield child  # the definition itself, not its body
+            else:
+                stack.append(child)
+
+
+def _loop_rebound(loop: ast.For | ast.AsyncFor | ast.While) -> set[str]:
+    """Names each iteration of *loop* binds afresh."""
+    names: set[str] = set()
+    if isinstance(loop, (ast.For, ast.AsyncFor)):
+        names |= {n.id for n in ast.walk(loop.target) if isinstance(n, ast.Name)}
+    for n in _own_nodes(loop.body):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            names.add(n.id)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(n.name)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            names.add(n.name)
+        # An import inside a loop rebinds the same module object: harmless.
+    return names
+
+
+def _free_reads(fn: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> set[str]:
+    """Names *fn*'s body reads from an enclosing scope (defaults excluded)."""
+    body = [fn.body] if isinstance(fn, ast.Lambda) else fn.body
+    params: set[str] = set()
+    local: set[str] = set()
+    reads: set[str] = set()
+    for sub in [fn, *(n for stmt in body for n in ast.walk(stmt))]:
+        if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            a = sub.args
+            params |= {x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs)}
+            params |= {x.arg for x in (a.vararg, a.kwarg) if x is not None}
+            if sub is not fn and not isinstance(sub, ast.Lambda):
+                local.add(sub.name)
+        elif isinstance(sub, ast.Name):
+            (reads if isinstance(sub.ctx, ast.Load) else local).add(sub.id)
+        elif isinstance(sub, ast.ExceptHandler) and sub.name:
+            local.add(sub.name)
+        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+            local |= {(a.asname or a.name).split(".")[0] for a in sub.names}
+        elif isinstance(sub, ast.ClassDef):
+            local.add(sub.name)
+    return reads - params - local
+
+
+def _deferred_loop_closures(tree: ast.AST) -> list[tuple[int, str, list[str]]]:
+    """``(line, closure name, [late-read names])`` for every offending closure."""
+    found: dict[tuple[int, str], set[str]] = {}
+    for loop in ast.walk(tree):
+        if not isinstance(loop, _LOOPS):
+            continue
+        rebound = _loop_rebound(loop)
+        defs = {
+            n.name: n
+            for n in _own_nodes(loop.body)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        awaited = {id(n.value) for n in _own_nodes(loop.body) if isinstance(n, ast.Await)}
+        for call in _own_nodes(loop.body):
+            if not isinstance(call, ast.Call) or id(call) in awaited:
+                continue
+            func = call.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+            if name not in _SCHEDULERS:
+                continue
+            for arg in (*call.args, *(k.value for k in call.keywords)):
+                closure = None
+                if isinstance(arg, ast.Lambda):
+                    closure = arg
+                elif isinstance(arg, ast.Name) and arg.id in defs:
+                    closure = defs[arg.id]
+                elif (
+                    isinstance(arg, ast.Call)
+                    and isinstance(arg.func, ast.Name)
+                    and arg.func.id in defs
+                ):
+                    closure = defs[arg.func.id]
+                if closure is None:
+                    continue
+                late = _free_reads(closure) & rebound
+                if late:
+                    key = (closure.lineno, getattr(closure, "name", "<lambda>"))
+                    found.setdefault(key, set()).update(late)
+    return sorted((line, label, sorted(names)) for (line, label), names in found.items())
+
+
+def test_no_deferred_closure_reads_loop_rebound_names():
+    """A closure scheduled from a loop must bind the loop's names (2026-09-22)."""
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for line, label, names in _deferred_loop_closures(tree):
+            offenders.append(f"{_rel(path)}:{line} {label} reads {', '.join(names)}")
+
+    assert not offenders, (
+        "A closure defined in a loop is scheduled to run later but reads names "
+        "the loop rebinds. By the time it runs, the next iteration may have "
+        "replaced them — the Discord gateway delivered a burst of four "
+        "messages as the last one four times (audit 2026-09-22).\n"
+        "Fix: bind each name as a default (`def f(x=x)`, `lambda t, x=x: ...`) "
+        "or pass it to a method, as Slack's `_chain_channel_work` does.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_loop_closure_gate_catches_the_discord_shape():
+    """Negative control (§28): the gate flags the pre-fix Discord code."""
+    source = '''
+async def listen(ws, chains, queue):
+    async for raw in ws:
+        parsed = parse(raw)
+        _prev = chains.get("c")
+
+        async def _chained():
+            if _prev is not None:
+                await _prev
+            await enqueue(parsed)
+
+        chains["c"] = loop.create_task(_chained())
+        task.add_done_callback(lambda t: unregister(parsed, t))
+'''
+    hits = _deferred_loop_closures(ast.parse(source))
+    assert [(label, names) for _, label, names in hits] == [
+        ("_chained", ["_prev", "parsed"]),
+        ("<lambda>", ["parsed"]),
+    ]
+
+
+def test_loop_closure_gate_passes_correct_shapes():
+    """The gate must not block the shapes it tells people to use."""
+    source = '''
+async def listen(ws, chains, loop):
+    async for raw in ws:
+        parsed = parse(raw)
+        _prev = chains.get("c")
+
+        async def _bound(_prev=_prev, parsed=parsed):
+            await enqueue(parsed)
+
+        chains["c"] = loop.create_task(_bound())
+        chains["c"].add_done_callback(lambda t, p=parsed: unregister(p, t))
+        self._chain_channel_work("c", self._process(parsed))
+        # Awaited in the same iteration: the loop cannot advance meanwhile.
+        await loop.run_in_executor(None, lambda: handle(parsed))
+'''
+    assert _deferred_loop_closures(ast.parse(source)) == []
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

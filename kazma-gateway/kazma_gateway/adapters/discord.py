@@ -300,48 +300,16 @@ class DiscordAdapter(BaseAdapter):
                                     )
                                     continue
 
-                            # Voice: offload fetch + transcribe to background so
-                            # the Gateway WebSocket receive loop is never blocked.
-                            async def _process_and_enqueue(msg_parsed: IncomingMessage) -> None:
-                                try:
-                                    msg_transcribed = await self._maybe_transcribe_audio(msg_parsed)
-                                    try:
-                                        queue.put_nowait(msg_transcribed)
-                                        logger.info(
-                                            "[discord] Enqueued from %s (ch=%s): %.80s",
-                                            msg_transcribed.context_metadata.get("username", "?"),
-                                            msg_transcribed.context_metadata.get("channel_id", "?"),
-                                            msg_transcribed.text,
-                                        )
-                                    except asyncio.QueueFull:
-                                        logger.warning("[discord] Queue full — dropping message")
-                                except Exception:
-                                    logger.exception("[discord] Failed to process message in background")
-
-                            # Per-channel serial chain (audit L-28): a voice
-                            # message queued behind a slow transcription used
-                            # to enqueue AFTER a later text message from the
-                            # same channel, attaching turns out of order.
-                            _chain_key = str(
-                                (parsed.context_metadata or {}).get("channel_id")
-                                or (parsed.context_metadata or {}).get("user_id")
-                                or "?"
+                            # Voice fetch + transcribe run off the receive loop,
+                            # on a per-channel serial chain (audit L-28).
+                            self._chain_channel_work(
+                                str(
+                                    (parsed.context_metadata or {}).get("channel_id")
+                                    or (parsed.context_metadata or {}).get("user_id")
+                                    or "?"
+                                ),
+                                self._process_and_enqueue(parsed, queue),
                             )
-                            _prev = self._channel_chains.get(_chain_key)
-
-                            async def _chained() -> None:
-                                if _prev is not None and not _prev.done():
-                                    try:
-                                        await _prev
-                                    except Exception:
-                                        pass
-                                await _process_and_enqueue(parsed)
-
-                            _task = asyncio.get_running_loop().create_task(_chained())
-                            self._channel_chains[_chain_key] = _task
-                            if len(self._channel_chains) > 64:
-                                for _k in [k for k, t in self._channel_chains.items() if t.done()]:
-                                    self._channel_chains.pop(_k, None)
 
                     elif op == 0 and t == "INTERACTION_CREATE":
                         # HITL approval button press — route to the active
@@ -367,6 +335,63 @@ class DiscordAdapter(BaseAdapter):
         except ImportError:
             logger.error("[discord] websockets package not installed — run: pip install websockets")
             await asyncio.sleep(10)
+
+    async def _process_and_enqueue(
+        self, msg: IncomingMessage, queue: asyncio.Queue[IncomingMessage]
+    ) -> None:
+        """Transcribe voice attachments, then put the message on the bus."""
+        try:
+            msg = await self._maybe_transcribe_audio(msg)
+            try:
+                queue.put_nowait(msg)
+                logger.info(
+                    "[discord] Enqueued from %s (ch=%s): %.80s",
+                    msg.context_metadata.get("username", "?"),
+                    msg.context_metadata.get("channel_id", "?"),
+                    msg.text,
+                )
+            except asyncio.QueueFull:
+                logger.warning("[discord] Queue full — dropping message")
+        except Exception:
+            logger.exception("[discord] Failed to process message in background")
+
+    def _chain_channel_work(self, chain_key: str, coro: Any) -> None:
+        """Run *coro* after the previous work for *chain_key* finishes.
+
+        Keeps arrival order within a channel — a voice note being transcribed
+        used to enqueue AFTER a later text message and swap the turns (audit
+        L-28) — while the receive loop returns immediately.
+
+        This is a method, not a closure inside the receive loop, on purpose.
+        The closure read the previous task and the parsed message only when
+        its task first ran; ``websockets`` hands out buffered frames without
+        suspending, so a burst rebound both names first and a burst of four
+        was delivered as the last message four times (audit 2026-09-22).
+        Here both are bound when this is called. Same shape as Slack's
+        ``_chain_channel_work`` and Telegram's ``_process_update_chained``.
+        """
+        prev = self._channel_chains.get(chain_key)
+        task = asyncio.get_running_loop().create_task(
+            self._run_chained(chain_key, prev, coro)
+        )
+        self._channel_chains[chain_key] = task
+
+    async def _run_chained(
+        self, chain_key: str, prev: asyncio.Task | None, coro: Any
+    ) -> None:
+        started = False
+        try:
+            if prev is not None and not prev.done():
+                # wait() rather than await: the previous message's failure or
+                # cancellation is its own, and must not abort this one.
+                await asyncio.wait({prev})
+            started = True
+            await coro
+        finally:
+            if not started:
+                coro.close()  # cancelled while waiting; never ran
+            if self._channel_chains.get(chain_key) is asyncio.current_task():
+                self._channel_chains.pop(chain_key, None)
 
     async def _heartbeat(
         self,

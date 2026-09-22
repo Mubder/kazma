@@ -746,7 +746,11 @@ class GatewayManager:
                     handler = self._handler
                     suggester = self._suggester
 
-                    async def _handle_one(msg: IncomingMessage = msg) -> None:
+                    async def _handle_one(
+                        msg: IncomingMessage = msg,
+                        handler: Any = handler,
+                        suggester: Any = suggester,
+                    ) -> None:
                         handler_ok = False
                         try:
                             await handler(msg)
