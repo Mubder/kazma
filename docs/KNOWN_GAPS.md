@@ -305,13 +305,11 @@ so "zero provider errors" means what it says. `--analyze` now reports
 comes within 20% of the window, because this was clean by luck of
 configuration rather than by design.
 
-**A fenced MCP transport error is no longer flagged as an error.** Closing the
-`Error:` fence bypass (2026-09-13) means `spec_tools`' own failure strings now
-arrive fenced, so `LocalToolRegistry` no longer sets `is_error` on them. The
-message is still readable by the model; supervisor retry logic no longer sees
-it as a failure. Accepted deliberately — a bypassable fence is worse — but the
-right repair is for `spec_tools` to signal failure out of band instead of by
-string prefix.
+**An MCP failure is flagged without handing the server the `Error:` channel.**
+`spec_tools` puts Kazma's own `Error:` prefix at the start of the string and
+fences the server's words under it. `LocalToolRegistry` still sees `is_error`
+from that prefix. The body is not marked `is_error` on the fence, so a server
+cannot forge the prefix from inside the fence.
 
 **~~The fixture's statistics are not produced by committed code.~~** Closed
 2026-09-13. `--analyze` derives the raw counts, `--report` the pooled figures
@@ -425,11 +423,13 @@ compared with stored dates even when no subject is named, so "2660m" cannot
 stand in for a date the guard already refused. A long offset that merely
 lands near an unrelated belief can be held. That is the remaining friction.
 
-**Subject matching is alias-based and will miss.** A belief predicate is
-matched by a canonical alias table, a spelled-out form, and a distinctive head
-token. `supergrok_heavy_reset` was unmatchable until 2026-09-12 because it ends
-in none of the known suffixes. Others like it are presumably still unmatched,
-and an unmatched subject silently weakens the scoping.
+**Subject matching still misses a wording that shares no token with the predicate.**
+A predicate is matched by its alias table, the name with underscores turned
+into spaces, and a head token of at least five characters that is not a
+generic word (`user`, `weekly`, …). `supergrok_heavy_reset` is covered by
+the spelled form. What still misses is a short head (`tax_due` → `tax` is
+only three letters) or a sentence that never uses any of those strings. An
+unmatched subject skips the subject-scoped check.
 
 **Contentless text falls back to comparing against every belief.** "yes" names
 no subject but the conversation may still be about one, so the conservative
