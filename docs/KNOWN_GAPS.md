@@ -219,6 +219,59 @@ tree. Assume the same class exists elsewhere.
 
 ---
 
+## What the 2026-09-22 audit found, and the gates that now hold it
+
+The same pattern as 2026-09-16, one level up: **a correct fix in one sibling,
+missing from the next.** Slack and Telegram chained messages correctly and
+Discord did not; `app.py` loaded `.env` from explicit paths and `cost_breaker`
+did not; the approval route checked thread ownership and the replay, chat
+control and dashboard routes did not; six copies of the admin check disagreed
+about what to do when it failed. Each fix below landed with a gate that
+enumerates the siblings from the real source, plus a negative control.
+
+| Closed | Gate that fails if it returns |
+|---|---|
+| Discord burst delivered the last message N times (lost the rest) | `test_adapter_burst_ordering.py` (all adapters); `test_no_deferred_closure_reads_loop_rebound_names` |
+| Importing `kazma_core` loaded a `.env`, into the document sandbox too | `test_env_loading.py` (production launch shape, planted `.env`; every entry point declares a policy); `test_load_dotenv_lives_only_in_the_env_loader`; `test_no_import_time_environment_writes` |
+| Boot errors hidden behind a DEBUG-only `try` | `test_app_bootstrap_errors.py` |
+| Replay reads/deletes, chat stop/steer/abort, `/api/sessions` acted on any thread | `test_thread_route_policy.py` (every thread-taking route declares owner/admin/session); `test_thread_ownership_routes.py` |
+| Admin check copied six times; half allowed on error | `test_the_admin_decision_lives_in_one_place`; `test_admin_decision.py` |
+| 43 UI writes discarded the response; 24 toasted success on failure | `test_no_discarded_fetch_results_in_the_ui`; `tests/js/test_kazma_save.js` |
+| Five `tests/js` files never ran in CI (one failing unseen) | `test_js_suite.py` runs the whole directory |
+
+**Still open from that audit** (found, not fixed in the same change):
+
+- **`SnapshotRecorder._memory` is an unlocked `OrderedDict`** mutated from
+  `asyncio.to_thread` captures and iterated on the loop; the supervisor awaits
+  `capture()` with no `try`, so a failure fails the user's turn. Forced
+  interleaving (`sys.setswitchinterval(1e-6)`) produced 2,313 capture errors;
+  none at the default interval in 3,200 captures. Rare under the GIL, common on
+  free-threaded Python. `kazma_core/time_travel.py`, `agent/graph_builder.py:173`.
+- **Replay handlers read SQLite on the event loop**, under a lock the capture
+  thread also holds, and `list_snapshots` JSON-decodes every snapshot to count
+  messages.
+- **Web sessions never carry a tenant.** `create_session(tenant_id=...)` is
+  never called with one and `get_request_principal` drops it, so the
+  tenant-binding branch of `POST /api/memory/graph/clear` is unreachable.
+- **`serve.py` ignores `KAZMA_HOST` from `.env`**: it reads the bind host
+  before any `.env` loads, while `docs/docs/ops/wsl-fixed-access.md` says to
+  put it there. Kept as-is on purpose so no running deployment changes which
+  interface it binds; whether `.env` should decide the bind address is the
+  operator's call.
+- **`KAZMA_REALTIME_CODEC` is documented and does nothing.** No runtime path
+  imports `voice/realtime_codec.py`.
+- **`kubernetes/hub-deployment.yaml` cannot work**: no Dockerfile builds
+  `kazma/hub-api`, `hub.api.configure_api()` is called only by tests (every
+  endpoint 503s), and the probes hit paths the hub does not serve.
+- **Test-only duplicate of a live route.** `hitl_approval.create_hitl_approval_router`
+  mounts `GET /api/pending-approvals`, which the app serves from
+  `routes_direct/misc.py`; its tests exercise the copy production never runs.
+- **Unreferenced modules**: `skills/exporter.py`, `skills/file_merger.py`,
+  `safety/markup_guard.py`, `kazma_tui/footer.py`,
+  `email_manager/backends/base.py`.
+- **`documents/sandbox.py` uses `preexec_fn`** in a multi-threaded server, and
+  sitemaps fetched from the web are parsed with the stdlib XML parser.
+
 ## Prompt injection
 
 **Every live number on the injection page carries a measured 5.7-point spread.**
