@@ -449,17 +449,9 @@ def register_misc_routes(self: Any) -> None:
         }
 
     def _is_caller_admin(request: Request) -> bool:
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import admin_decision
 
-        secret = get_kazma_secret()
-        if not secret:
-            return True
-        if not is_authenticated(request, secret):
-            return False
-        principal = get_request_principal(request) or {}
-        if principal.get("source") == "secret":
-            return True
-        return principal.get("role") == "admin"
+        return admin_decision(request) == "ok"
 
     @self.app.get("/health")
     async def health_check(request: Request) -> dict[str, Any]:

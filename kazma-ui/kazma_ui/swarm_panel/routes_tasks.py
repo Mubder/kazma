@@ -110,29 +110,17 @@ def register_tasks_routes(
 
         Previously these operated on {task_id} with no ownership check — any
         authenticated user could approve/reject/cancel another user's swarm
-        HITL checkpoint (audit finding). Mirrors documents_api._require_admin:
-        fail-open for single-user / no-secret deployments.
+        HITL checkpoint (audit finding). No-secret deployments pass; a check
+        that raises now DENIES — this copy used to allow (audit 2026-09-22).
         """
-        try:
-            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import admin_decision
 
-            secret = get_kazma_secret()
-            if secret and not is_authenticated(request, secret):
-                return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
-            if not secret:
-                # Single-user / no-secret deployment: fail-open (documented
-                # intent — the role check below only applies when auth is on).
-                return None
-            principal = get_request_principal(request) or {}
-            if principal.get("source") == "secret":
-                return None
-            if principal.get("role") != "admin":
-                return JSONResponse(
-                    {"status": "error", "message": "Admin role required"}, status_code=403
-                )
-        except Exception:  # noqa: BLE001 - single-user/no-auth deployments allow it
+        decision = admin_decision(request)
+        if decision == "ok":
             return None
-        return None
+        if decision == "unauthorized":
+            return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+        return JSONResponse({"status": "error", "message": "Admin role required"}, status_code=403)
 
     async def _maybe_send_to_output_target_fallback(
         text: str, *, is_html: bool = False

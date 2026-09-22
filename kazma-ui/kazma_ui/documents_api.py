@@ -148,26 +148,14 @@ def create_documents_router() -> APIRouter:
 
     def _require_admin(request: Request) -> JSONResponse | None:
         """Admin/operator gate for destructive operations (GC/maintenance)."""
-        try:
-            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import admin_decision
 
-            secret = get_kazma_secret()
-            if not secret:
-                # Single-user/no-auth local development mode
-                return None
-            if not is_authenticated(request, secret):
-                return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
-            principal = get_request_principal(request) or {}
-            if principal.get("source") == "secret":
-                return None
-            if principal.get("role") != "admin":
-                return JSONResponse(
-                    {"ok": False, "error": "Admin role required"}, status_code=403
-                )
+        decision = admin_decision(request)  # the one fail-closed decision
+        if decision == "ok":
             return None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[documents_api] admin check failed: %s", exc)
-            return JSONResponse({"ok": False, "error": "Forbidden"}, status_code=403)
+        if decision == "unauthorized":
+            return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+        return JSONResponse({"ok": False, "error": "Admin role required"}, status_code=403)
 
     # ── Upload intake (streamed, bounded) ───────────────────────────────
 

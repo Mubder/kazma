@@ -975,7 +975,12 @@ def get_request_principal(request: Request) -> dict[str, Any] | None:
                 return None
             return {
                 "username": payload.get("username") or payload.get("actor") or "session",
-                "role": payload.get("role") or "admin",
+                # A payload with no role is the least privileged, not the most.
+                # create_session() has required a role for a long time and
+                # always stored one, so this only decides for a payload that
+                # did not come from it (audit 2026-09-22: the writer failed
+                # closed while this reader still failed open).
+                "role": payload.get("role") or "viewer",
                 "user_id": payload.get("user_id") or "",
                 "source": "session",
             }

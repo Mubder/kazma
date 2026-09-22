@@ -31,23 +31,16 @@ def _require_admin(request: Request) -> _JSONResponse | None:
     single-operator mode) passes; the shared secret principal passes;
     cookie/API principals need the admin role.
     """
-    try:
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+    # This copy used to return None — ALLOW — when the check raised, so a
+    # session-store error handed out backup downloads (audit 2026-09-22).
+    from kazma_ui.auth import admin_decision
 
-        secret = get_kazma_secret()
-        if not secret:
-            return None
-        if not is_authenticated(request, secret):
-            return _JSONResponse({"error": "Unauthorized"}, status_code=401)
-        principal = get_request_principal(request) or {}
-        if principal.get("source") == "secret":
-            return None
-        if principal.get("role") != "admin":
-            return _JSONResponse({"error": "Admin role required"}, status_code=403)
+    decision = admin_decision(request)
+    if decision == "ok":
         return None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("[backup] admin check failed: %s", exc)
-        return None
+    if decision == "unauthorized":
+        return _JSONResponse({"error": "Unauthorized"}, status_code=401)
+    return _JSONResponse({"error": "Admin role required"}, status_code=403)
 
 
 def register_backup_routes(self: Any) -> None:

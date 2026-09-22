@@ -112,17 +112,16 @@ def register_memory_routes(self: Any) -> None:
 
         tid = (tenant or "default").strip() or "default"
 
-        from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import admin_decision, get_request_principal
 
-        secret = get_kazma_secret()
-        if secret and not is_authenticated(request, secret):
+        decision = admin_decision(request)  # no secret configured => "ok"
+        if decision == "unauthorized":
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
         principal = get_request_principal(request) or {}
-        is_admin = principal.get("source") == "secret" or principal.get("role") == "admin"
         caller_tenant = principal.get("tenant") or principal.get("tenant_id")
 
-        if not is_admin and secret:
+        if decision != "ok":
             if not caller_tenant:
                 return JSONResponse({"error": "Admin role or tenant binding required"}, status_code=403)
             if caller_tenant != tid:

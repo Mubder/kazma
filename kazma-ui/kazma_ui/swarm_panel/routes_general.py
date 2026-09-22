@@ -285,29 +285,18 @@ def register_general_routes(
 
         Templates define workers that spawn with arbitrary system prompts,
         models and instance caps — a non-admin used to be able to persist
-        one (audit H-5). Mirrors routes_tasks._require_admin: fail-open for
-        single-user/no-secret deployments, role-checked otherwise.
+        one (audit H-5). No-secret deployments pass; otherwise role-checked,
+        and a check that raises now DENIES — this copy used to allow
+        (audit 2026-09-22).
         """
-        try:
-            from kazma_ui.auth import get_kazma_secret, get_request_principal, is_authenticated
+        from kazma_ui.auth import admin_decision
 
-            secret = get_kazma_secret()
-            if secret and not is_authenticated(request, secret):
-                return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
-            if not secret:
-                return None
-            principal = get_request_principal(request) or {}
-            if principal.get("source") == "secret":
-                return None
-            if principal.get("role") != "admin":
-                return JSONResponse(
-                    {"status": "error", "message": "Admin role required"},
-                    status_code=403,
-                )
+        decision = admin_decision(request)
+        if decision == "ok":
             return None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[swarm-general] admin check failed: %s", exc)
-            return None
+        if decision == "unauthorized":
+            return JSONResponse({"status": "error", "message": "Unauthorized"}, status_code=401)
+        return JSONResponse({"status": "error", "message": "Admin role required"}, status_code=403)
 
     @router.get("/api/swarm/templates")
     async def list_templates() -> JSONResponse:

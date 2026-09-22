@@ -648,6 +648,60 @@ if __name__ == "__main__":
         "KAZMA_X",
         "KAZMA_Y",
     ]
+    assert _import_time_env_writes(ast.parse("import os\nos.putenv('K', '1')\n")) == [(2, "K")]
+
+
+# ── 2d. "Is this caller an admin?" has one answer (2026-09-22) ─────────────
+#
+# The decision was copied into six route modules and the copies drifted: three
+# denied when the check raised and three ALLOWED, backup download among them.
+# kazma_ui.auth.admin_decision is the one copy and it fails closed; a route
+# keeps its own response shape by wrapping it, never by re-deriving it.
+
+_ADMIN_DECISION_HOME = "kazma-ui/kazma_ui/auth.py"
+_ADMIN_REDERIVED = re.compile(
+    r"""get\(\s*["']role["']\s*\)\s*(==|!=)\s*["']admin["']"""
+    r"""|get\(\s*["']source["']\s*\)\s*==\s*["']secret["']"""
+)
+
+
+def _admin_rederivations(text: str) -> list[int]:
+    return [i for i, line in enumerate(text.splitlines(), 1) if _ADMIN_REDERIVED.search(line)]
+
+
+def test_the_admin_decision_lives_in_one_place():
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        if rel == _ADMIN_DECISION_HOME:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        offenders += [f"{rel}:{line}" for line in _admin_rederivations(text)]
+    assert not offenders, (
+        "The admin decision is re-derived here. Six copies of it drifted until "
+        "half of them allowed access when the check failed (audit 2026-09-22).\n"
+        "Fix: `from kazma_ui.auth import admin_decision` (or require_admin) "
+        "and map its result to this route's response shape.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_admin_rederivation_gate_catches_the_drifted_copy():
+    """Negative control (§28): the pre-fix backup gate, and the fix passes."""
+    drifted = '''
+        principal = get_request_principal(request) or {}
+        if principal.get("source") == "secret":
+            return None
+        if principal.get("role") != "admin":
+            return _JSONResponse({"error": "Admin role required"}, status_code=403)
+'''
+    fixed = '''
+        decision = admin_decision(request)
+        if decision == "ok":
+            return None
+'''
+    assert _admin_rederivations(drifted) == [3, 5]
+    assert _admin_rederivations(fixed) == []
 
 
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
