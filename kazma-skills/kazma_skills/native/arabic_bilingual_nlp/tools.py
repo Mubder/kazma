@@ -6,6 +6,7 @@ import logging
 import httpx
 from datetime import datetime, date
 from kazma_core.cultural_context import _gregorian_to_hijri_approx, _hijri_month_name
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ async def arabic_translate(text: str, target_lang: str = "ar") -> str:
         return _LOCAL_DICT[cleaned]
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
             url = f"https://api.mymemory.translated.net/get"
             r = await client.get(url, params={"q": text, "langpair": langpair})
             if r.status_code == 200:

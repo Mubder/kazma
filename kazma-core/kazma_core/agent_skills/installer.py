@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 from kazma_core.agent_skills.discovery import user_agent_skills_dir
 from kazma_core.agent_skills.parser import is_safe_skill_name, parse_skill_md
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "InstallResult",
@@ -295,6 +296,7 @@ async def _download_github_zip(
             "User-Agent": "Kazma-AgentSkills/1.0",
             "Accept": "application/vnd.github+json",
         },
+        verify=shared_ssl_context(),
     ) as client:
         for url in candidates:
             try:

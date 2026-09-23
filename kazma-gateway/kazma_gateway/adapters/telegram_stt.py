@@ -20,6 +20,7 @@ from kazma_gateway.adapters.voice_helpers import (
     synthesize_speech,
     transcribe_audio,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ async def transcribe_openai(audio_bytes: bytes, api_key: str | None = None) -> s
         logger.error("[telegram] No OpenAI API key for STT")
         return None
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {key}"},
@@ -72,7 +73,7 @@ async def transcribe_groq(audio_bytes: bytes, api_key: str | None = None) -> str
         logger.error("[telegram] No Groq API key for STT")
         return None
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
                 headers={"Authorization": f"Bearer {key}"},

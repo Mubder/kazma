@@ -736,6 +736,17 @@ def _port_holder_pid(port: int) -> int:
 _PORT_EXHAUSTION_MARKERS = ("10048", "10055")
 TCP_SNAPSHOT_EVERY_S = 600.0
 _last_tcp_snapshot = 0.0
+#: Consecutive unrunnable probes (at PROBE_INTERVAL_S) before one page.
+UNRUNNABLE_PAGE_AFTER = 10
+
+
+def probe_could_not_run(detail: str) -> bool:
+    """True when the probe failed for lack of a local port, not a bad answer.
+
+    Windows' own event log confirms these are machine-wide (Tcpip 4231 /
+    4227: 11 + 17 in the fortnight to 2026-09-23), at times Kazma was idle.
+    """
+    return any(m in (detail or "") for m in _PORT_EXHAUSTION_MARKERS)
 
 
 def tcp_snapshot_from_netstat(stdout: str, names: dict[str, str] | None = None,
@@ -788,7 +799,7 @@ def maybe_log_tcp_snapshot(log, detail: str, *, now: float | None = None) -> boo
     on a diagnostic. Returns True when a snapshot was logged.
     """
     global _last_tcp_snapshot
-    if os.name != "nt" or not any(m in (detail or "") for m in _PORT_EXHAUSTION_MARKERS):
+    if os.name != "nt" or not probe_could_not_run(detail):
         return False
     stamp = time.time() if now is None else now
     if stamp - _last_tcp_snapshot < TCP_SNAPSHOT_EVERY_S:
@@ -1423,6 +1434,7 @@ class Guard:
     def _supervise(self) -> str:
         """Watch a healthy child. Returns the reason it needs restarting."""
         consecutive = 0
+        unrunnable = 0
         while not self._stop:
             self._sleep(PROBE_INTERVAL_S, wake_on_child_exit=True)
             if self._stop:
@@ -1445,12 +1457,35 @@ class Guard:
                 if consecutive:
                     self.log("info", "health.recovered", after_failures=consecutive)
                 consecutive = 0
+                unrunnable = 0
                 continue
+
+            if probe_could_not_run(detail):
+                # The MACHINE had no free local port: Kazma was never asked.
+                # Killing it cannot free a port and adds churn, so this does
+                # not count toward the restart -- 169 of 257 "failed" probes
+                # in one week were this. It is recorded, with who holds the
+                # sockets, and a long run of it pages once.
+                unrunnable += 1
+                self.log("warn", "health.probe_unrunnable", detail=detail,
+                         run=unrunnable)
+                maybe_log_tcp_snapshot(self.log, detail)
+                if unrunnable == UNRUNNABLE_PAGE_AFTER:
+                    self._page(
+                        "warn",
+                        "This machine has run out of network ports",
+                        "The guard cannot reach Kazma to check it -- not because "
+                        "Kazma is down, but because Windows has no free local "
+                        "port. Restarting Kazma would not help. guard.log "
+                        "health.port_exhaustion names who holds the sockets.",
+                        fingerprint="probe-unrunnable",
+                    )
+                continue
+            unrunnable = 0
 
             consecutive += 1
             self.log("warn", "health.failed", detail=detail,
                      consecutive=consecutive, threshold=FAILURES_TO_KILL)
-            maybe_log_tcp_snapshot(self.log, detail)
             if consecutive >= FAILURES_TO_KILL:
                 # Alive but not healthy -- the case no OS supervisor catches.
                 stop_child(self.proc, self.log)

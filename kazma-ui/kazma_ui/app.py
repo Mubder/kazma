@@ -1560,6 +1560,12 @@ class KazmaAppBuilder:
 
     async def _on_startup(self) -> None:
         """Application startup: checkpointer, HITL graph, gateway, cron."""
+        # One TLS context for every httpx client, built here in a thread so no
+        # event-loop caller pays the CA load (kazma_core.http_tls). prewarm()
+        # does not raise: a failure degrades to httpx's per-client default.
+        from kazma_core.http_tls import prewarm as _prewarm_tls
+
+        await asyncio.to_thread(_prewarm_tls)
         # ── Volatile settings store alarm (2026-09-04) ────────────────
         # The init-time CRITICAL for the in-memory fallback fires BEFORE
         # file logging is up, so the reason lands on an unread console.

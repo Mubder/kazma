@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from kazma_skills.native.email_manager.credentials import vault_store
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ async def start_device_code_flow() -> dict[str, Any]:
         }
     tenant = _tenant()
     url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             url,
             data={"client_id": client_id, "scope": SCOPES},
@@ -93,7 +94,7 @@ async def poll_device_code_flow(device_code: str) -> dict[str, Any]:
     client_id = meta["client_id"]
     tenant = meta["tenant"]
     token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             token_url,
             data={

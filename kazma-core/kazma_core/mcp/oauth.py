@@ -36,6 +36,7 @@ from urllib.parse import urlencode, urlparse, urlunparse
 
 import httpx
 from kazma_core.background import spawn_background
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ async def discover_auth_requirements(
     Raises :class:`MCPOAuthError` when the resource does not advertise OAuth.
     """
     owns_client = client is None
-    http = client or httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True)
+    http = client or httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context())
     try:
         # 1. Protected-resource metadata (RFC 9728). The challenge tells us
         #    the exact metadata URL; fall back to the well-known path with the
@@ -317,7 +318,7 @@ async def start_oauth_flow(
 
     redirect_uri = f"http://127.0.0.1:{listener_port}{_CALLBACK_PATH}"
 
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True) as http:
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context()) as http:
         client_id = await _register_client(
             http, endpoints["registration_endpoint"], redirect_uri
         )
@@ -398,7 +399,7 @@ async def _wait_for_code(server_name: str) -> str:
 
 
 async def _exchange_code(pending: OAuthPending, code: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True) as http:
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context()) as http:
         r = await http.post(
             pending.token_endpoint,
             data={
@@ -473,7 +474,7 @@ def _load_tokens(server_name: str) -> dict[str, Any] | None:
 
 async def _refresh(pending_record: dict[str, Any]) -> dict[str, Any] | None:
     endpoints = await discover_auth_requirements(pending_record["resource_url"])
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True) as http:
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT_S, follow_redirects=True, verify=shared_ssl_context()) as http:
         r = await http.post(
             endpoints["token_endpoint"],
             data={

@@ -15,6 +15,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from kazma_ui.rate_limit import rate_limit
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -384,7 +385,7 @@ async def _discover_groq_stt_models() -> list[str]:
     try:
         import httpx
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
             resp = await client.get(
                 "https://api.groq.com/openai/v1/models",
                 headers={"Authorization": f"Bearer {key}"},

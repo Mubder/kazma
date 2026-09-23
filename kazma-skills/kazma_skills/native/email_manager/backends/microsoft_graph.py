@@ -17,6 +17,7 @@ from kazma_skills.native.email_manager.models import (
     SendRequest,
     SendResult,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ class MicrosoftGraphBackend:
         params: dict[str, Any] | None = None,
     ) -> Any:
         url = path if path.startswith("http") else f"{GRAPH}{path}"
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=45.0, verify=shared_ssl_context()) as client:
             r = await client.request(
                 method,
                 url,
@@ -122,7 +123,7 @@ class MicrosoftGraphBackend:
         }
         if self.client_secret:
             data["client_secret"] = self.client_secret
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
             r = await client.post(token_url, data=data)
             if r.status_code >= 400:
                 raise RuntimeError(f"Token refresh failed: {r.status_code} {r.text[:200]}")

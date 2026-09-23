@@ -30,6 +30,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "OidcConfig",
@@ -85,7 +86,7 @@ def oidc_tenant_from_claims(claims: dict[str, Any], cfg: OidcConfig) -> str | No
 
 async def fetch_discovery(issuer: str) -> dict[str, Any]:
     url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         return resp.json()
@@ -180,7 +181,7 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
     if cfg.client_secret:
         data["client_secret"] = cfg.client_secret
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=20.0, verify=shared_ssl_context()) as client:
         resp = await client.post(token_ep, data=data)
         if resp.status_code >= 400:
             raise RuntimeError(f"OIDC token exchange failed: {resp.status_code} {resp.text[:200]}")
@@ -258,7 +259,7 @@ _HS_ALGS = ("HS256", "HS384", "HS512")
 
 async def _userinfo_claims(access_token: str, endpoint: str) -> dict[str, Any]:
     """OIDC UserInfo fallback — only when the token response has no id_token."""
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
         ui = await client.get(
             endpoint,
             headers={"Authorization": f"Bearer {access_token}"},

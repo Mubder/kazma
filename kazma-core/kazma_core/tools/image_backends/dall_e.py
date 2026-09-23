@@ -6,6 +6,7 @@ import base64
 import os
 
 from kazma_core.tools.image_backends.base import BackendError
+from kazma_core.http_tls import shared_ssl_context
 
 # Map pixel dimensions → the sizes DALL-E 3 accepts. DALL-E 3 supports only
 # 1024x1024, 1024x1792, 1792x1024. DALL-E 2 supports 256/512/1024 square.
@@ -33,6 +34,7 @@ class DallEBackend:
             base_url="https://api.openai.com/v1",
             headers={"Authorization": f"Bearer {self._api_key}"},
             timeout=120.0,
+            verify=shared_ssl_context(),
         ) as client:
             resp = await client.post(
                 "/images/generations",

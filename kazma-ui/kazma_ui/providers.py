@@ -26,6 +26,7 @@ from kazma_ui.models import (
     ProviderToggleRequest,
     ProviderUpdateRequest,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -401,7 +402,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             if safe_key:
                 headers["Authorization"] = f"Bearer {safe_key}"
             await asyncio.to_thread(validate_url, base, allow_private=True)
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                 last_status = None
                 last_body = ""
                 last_exc: Exception | None = None
@@ -749,7 +750,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
         if name == "telegram":
             token = _normalize_telegram_bot_token(token)
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                     resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
                     if resp.status_code == 200:
                         data = resp.json()
@@ -773,7 +774,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
         if name == "discord":
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                     resp = await client.get(
                         "https://discord.com/api/v10/users/@me",
                         headers={"Authorization": f"Bot {token}"},
@@ -788,7 +789,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
 
         if name == "slack":
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
+                async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                     resp = await client.post(
                         "https://slack.com/api/auth.test",
                         headers={"Authorization": f"Bearer {token}"},

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class OutlookCalendarBackend:
             if self._client_secret:
                 data["client_secret"] = self._client_secret
             try:
-                async with httpx.AsyncClient(timeout=30.0) as c:
+                async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as c:
                     r = await c.post(token_url, data=data)
                     payload = r.json() if r.content else {}
                     if r.status_code >= 400:
@@ -104,7 +105,7 @@ class OutlookCalendarBackend:
         import httpx
 
         await self._ensure_token()
-        async with httpx.AsyncClient(timeout=30.0) as c:
+        async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as c:
             r = await c.request(
                 method, url, headers=self._headers(), params=params, json=json
             )
@@ -172,7 +173,7 @@ class OutlookCalendarBackend:
         import httpx
 
         await self._ensure_token()
-        async with httpx.AsyncClient(timeout=30.0) as c:
+        async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as c:
             r = await c.delete(f"{_GRAPH}/events/{event_id}", headers=self._headers())
             if r.status_code == 401 and await self._do_refresh():
                 r = await c.delete(

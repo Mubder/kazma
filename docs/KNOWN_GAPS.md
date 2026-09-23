@@ -270,19 +270,29 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | 169 health probes failed on port exhaustion with nothing recording who held the ports | the guard logs `health.port_exhaustion` (states + top owners) — `tests/test_guard_port_exhaustion.py` |
 | Restic retention never deleted a snapshot: `forget` grouped by host+paths and every backup is a new path (199 snapshots, 199 groups) | `forget --group-by host,tags`, daily retention 30 (operator's choice); `test_forget_applies_the_policy_per_kind_not_per_path` runs real restic, and its control shows the old grouping keeping all. restic's dry run on the live repo: keep 90, remove 110; the kept 2026-08-29 snapshot was checked to still hold the 69 recovered memories |
 
+**Closed the same day, from the open list:**
+
+| Closed | Gate / evidence |
+|---|---|
+| 131 `httpx.AsyncClient`s built in async code loaded the CA bundle on the loop, per client | `kazma_core.http_tls` (one context, built in a thread at boot); `test_async_http_clients_share_the_tls_context`; `tests/test_http_tls.py` |
+| `_handle_micro_consolidation` did its SQLite work on the loop (the one entry in the blocking-driver allowlist) | prepare + apply run in threads around the awaited LLM call; allowlist emptied; `tests/test_micro_consolidation_off_loop.py` |
+| The 2026-09-21 deep restore drill failure could not be diagnosed | Re-run on 2026-09-23: 4/4 passed (1.9 GB Postgres stream, 5% of local and offsite restic packs re-read, offsite object present). Transient; the next failure names its check |
+| The guard counted "this machine has no free port" as "Kazma is unhealthy" | `health.probe_unrunnable` does not count toward a restart and pages once after ~5 min; `tests/test_guard_port_exhaustion.py` |
+
 **Still open — honest list:**
 
-- **Port exhaustion is diagnosed, not fixed.** The next occurrence records
-  the processes holding sockets (338 BOUND sockets, 200 of them Docker's, at
-  the time of writing — not at a failure).
-- **132 httpx clients are built inside async functions without the shared
-  SSL context**, each loading the CA store on the loop. The LLM provider and
-  the X client share one context built off the loop; the rest do not yet.
-- **`_handle_micro_consolidation` does SQLite work on the loop** between
-  awaits of an async LLM extraction that shares the connections. Not in any
-  stall dump; threading it is a refactor, not a wrap.
-- **The deep restore drill failed once (2026-09-21) and its log did not name
-  the check.** It now does; the next weekly run is due around 2026-09-28.
+- **Port exhaustion: real, machine-wide, not Kazma — culprit unnamed.**
+  Windows' own log (System, Tcpip) has 11 × 4231 (TCP port space full),
+  17 × 4227 (TIME_WAIT reuse) and 11 × 4266 (UDP port space full) in the
+  fortnight to 2026-09-23. None of the 4231s was within 20 minutes of a
+  backup, and Kazma logged 4–20 requests a minute around each. The guard's
+  `health.port_exhaustion` line names the socket holders at the next
+  occurrence (Docker holds the most at rest: ~200 bound). Mitigation is a
+  machine setting, not code: a wider dynamic port range
+  (`netsh int ipv4 set dynamicport tcp start=10000 num=55535`, admin).
+- **Slack is connected but lets nobody in.** No allowlist, so it rejects
+  every message (fail-closed); no Slack user has ever written to it, so there
+  is no ID to derive. It needs the operator's member ID in Settings.
 
 ## Prompt injection
 

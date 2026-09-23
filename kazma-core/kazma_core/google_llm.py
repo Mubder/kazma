@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from kazma_core.llm_provider import LLMConfig, LLMProvider, LLMResponse
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["GeminiAPIError", "GeminiProvider", "GoogleGeminiClient"]
 
@@ -329,6 +330,7 @@ class GeminiProvider(LLMProvider):
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
+                verify=shared_ssl_context(),
             )
         else:
             # Update the token on the existing client.

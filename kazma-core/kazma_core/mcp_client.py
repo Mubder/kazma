@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["MCPClient", "MCPConnectionError", "MCPError", "MCPServerConfig"]
 
@@ -306,6 +307,7 @@ class MCPClient:
             base_url=cfg.url,
             headers=headers,
             timeout=cfg.timeout,
+            verify=shared_ssl_context(),
         )
         logger.debug("Created SSE HTTP client for %s", cfg.url)
 

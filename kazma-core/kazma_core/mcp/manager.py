@@ -53,6 +53,7 @@ from typing import Any
 import httpx
 
 from kazma_core.chaos import InjectionTarget, chaos_injection
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "AsyncMCPManager",
@@ -1615,6 +1616,7 @@ class AsyncMCPManager:
             base_url=url,
             headers=headers,
             timeout=timeout,
+            verify=shared_ssl_context(),
         )
 
         handle = MCPServerHandle(
@@ -1955,6 +1957,7 @@ class AsyncMCPManager:
             base_url=url,
             headers=headers,
             timeout=timeout,
+            verify=shared_ssl_context(),
         )
 
         handle = MCPServerHandle(

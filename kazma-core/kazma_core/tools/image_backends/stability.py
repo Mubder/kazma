@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from kazma_core.tools.image_backends.base import BackendError
+from kazma_core.http_tls import shared_ssl_context
 
 # Stability engine id for SDXL 1.0. Users can override via env.
 _DEFAULT_ENGINE = os.getenv("STABILITY_ENGINE_ID", "stable-diffusion-xl-1024-v1-0")
@@ -42,6 +43,7 @@ class StabilityBackend:
                 "Accept": "application/json",
             },
             timeout=120.0,
+            verify=shared_ssl_context(),
         ) as client:
             resp = await client.post(
                 f"/v1/generation/{self._engine_id}/text-to-image",

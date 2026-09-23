@@ -19,6 +19,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,7 @@ class SettingsManager:
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                 }
-                async with httpx.AsyncClient(timeout=30.0) as client:
+                async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
                     resp = await client.post(
                         f"{base_url}/chat/completions",
                         json=payload,
@@ -877,7 +878,7 @@ class SettingsManager:
         """Shared HTTP connector test for Telegram/Discord."""
         import httpx
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                 resp = await client.get(url, headers=headers)
                 if resp.status_code == 200:
                     data = resp.json()

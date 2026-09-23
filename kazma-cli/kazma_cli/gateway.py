@@ -16,6 +16,7 @@ from typing import Any
 import httpx
 from rich.console import Console
 from rich.table import Table
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ async def _request(
 
 async def cmd_status(base_url: str) -> int:
     """GET /api/gateway/status and render an adapter table."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "GET", "/api/gateway/status")
         except ServerNotRunningError:
@@ -157,7 +158,7 @@ async def cmd_status(base_url: str) -> int:
 
 async def cmd_start(base_url: str) -> int:
     """POST /api/gateway/start."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/gateway/start")
         except ServerNotRunningError:
@@ -173,7 +174,7 @@ async def cmd_start(base_url: str) -> int:
 
 async def cmd_stop(base_url: str) -> int:
     """POST /api/gateway/stop."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/gateway/stop")
         except ServerNotRunningError:
@@ -189,7 +190,7 @@ async def cmd_stop(base_url: str) -> int:
 
 async def cmd_restart(base_url: str) -> int:
     """POST stop then POST start."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             await _request(client, "POST", "/api/gateway/stop")
         except ServerNotRunningError:
@@ -212,7 +213,7 @@ async def cmd_restart(base_url: str) -> int:
 
 async def cmd_refresh(base_url: str) -> int:
     """POST /api/gateway/refresh-adapters."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/gateway/refresh-adapters")
         except ServerNotRunningError:

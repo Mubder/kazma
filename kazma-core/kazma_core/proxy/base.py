@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["ProxyProvider", "NullProvider"]
 
@@ -58,7 +59,7 @@ class ProxyProvider:
         if not proxy_url:
             return {"success": False, "error": "Proxy not configured."}
         try:
-            async with httpx.AsyncClient(proxy=proxy_url, timeout=15.0) as client:
+            async with httpx.AsyncClient(proxy=proxy_url, timeout=15.0, verify=shared_ssl_context()) as client:
                 resp = await client.get("https://api.ipify.org")
                 if resp.status_code == 200:
                     return {"success": True, "exit_ip": resp.text.strip()}

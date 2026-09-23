@@ -35,6 +35,7 @@ from kazma_core.llm_provider import LLMConfig, LLMProvider
 from kazma_core.provider_adapters import build_client
 from kazma_core.providers import PROVIDER_PRESETS
 from kazma_core.runtime.live_llm import coerce_api_key
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["ModelRegistry", "get_model_registry", "initialize_model_registry", "lookup_context_window", "reset_model_registry"]
 
@@ -690,7 +691,7 @@ class ModelRegistry:
             if clean_name == "google":
                 if api_key:
                     try:
-                        async with httpx.AsyncClient(timeout=10.0) as client:
+                        async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
                             # Pass the key via header, not the URL query string —
                             # ?key= leaks the API key into proxy/access logs and
                             # httpx error tracebacks (audit finding).
@@ -766,7 +767,7 @@ class ModelRegistry:
                 headers[auth_header_type] = api_key
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                 resp = await client.get(url, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()

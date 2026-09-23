@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from collections.abc import Iterable
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "auth_headers",
@@ -158,7 +159,7 @@ async def request_json_async(
     for base in candidate_api_bases():
         url = _json_url(base, path)
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=2.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=2.0), verify=shared_ssl_context()) as client:
                 resp = await client.request(
                     method.upper(), url, json=payload, headers=headers
                 )

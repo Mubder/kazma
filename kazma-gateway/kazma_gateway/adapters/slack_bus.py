@@ -21,6 +21,7 @@ from kazma_core.swarm.bus import (
     BusMessage,
     SwarmReport,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class SlackBusAdapter(BusAdapter):
         if self._http is None:
             import httpx
 
-            self._http = httpx.AsyncClient(timeout=15.0)
+            self._http = httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context())
         return self._http
 
     async def _post_message(self, payload: dict[str, Any]) -> dict[str, Any] | None:

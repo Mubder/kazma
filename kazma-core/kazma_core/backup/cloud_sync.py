@@ -31,6 +31,7 @@ from typing import Any, Protocol
 from urllib.parse import quote
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +258,7 @@ class GoogleDriveSync:
         )
         if token:
             # Check it still works (a cheap metadata call)
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, verify=shared_ssl_context()) as client:
                 resp = await client.get(
                     "https://www.googleapis.com/drive/v3/about",
                     params={"fields": "user"},
@@ -281,7 +282,7 @@ class GoogleDriveSync:
         if not client_id or not client_secret:
             raise RuntimeError("Google Drive not configured — missing Gmail OAuth client")
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, verify=shared_ssl_context()) as client:
             resp = await client.post(
                 _GDRIVE_TOKEN_URL,
                 data={
@@ -307,7 +308,7 @@ class GoogleDriveSync:
             query += f" and '{parent}' in parents"
         else:
             query += " and 'root' in parents"
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, verify=shared_ssl_context()) as client:
             resp = await client.get(
                 _GDRIVE_FILES_URL,
                 params={"q": query, "fields": "files(id,name)"},
@@ -348,7 +349,7 @@ class GoogleDriveSync:
             for folder in parts[:-1]:
                 parent_id = await self._ensure_folder(token, folder, parent=parent_id)
 
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
                 with open(local, "rb") as f:
                     resp = await client.post(
                         _GDRIVE_UPLOAD_URL,
@@ -371,7 +372,7 @@ class GoogleDriveSync:
     async def upload_file(self, local: Path, remote_name: str) -> dict[str, Any]:
         token = await self._get_access_token()
         root_id = await self._ensure_folder(token, _GDRIVE_ROOT_FOLDER)
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
             with open(local, "rb") as f:
                 resp = await client.post(
                     _GDRIVE_UPLOAD_URL,
@@ -394,7 +395,7 @@ class GoogleDriveSync:
     async def test_connection(self) -> dict[str, Any]:
         try:
             token = await self._get_access_token()
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, verify=shared_ssl_context()) as client:
                 resp = await client.get(
                     "https://www.googleapis.com/drive/v3/about",
                     params={"fields": "user(displayName,emailAddress)"},
@@ -451,7 +452,7 @@ class OneDriveSync:
             "EMAIL_MS_ACCESS_TOKEN", ""
         )
         if token:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, verify=shared_ssl_context()) as client:
                 resp = await client.get(
                     "https://graph.microsoft.com/v1.0/me",
                     headers={"Authorization": f"Bearer {token}"},
@@ -487,7 +488,7 @@ class OneDriveSync:
         if client_secret:
             payload["client_secret"] = client_secret
 
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, verify=shared_ssl_context()) as client:
             resp = await client.post(
                 _MS_TOKEN_URL_TEMPLATE.format(tenant=tenant),
                 data=payload,
@@ -511,7 +512,7 @@ class OneDriveSync:
             # PUT to /me/drive/root:/kazma-backups/<timestamp>/<rel>:/content
             path = quote(f"{_MS_ROOT_FOLDER}/{remote_path}/{rel}")
             url = f"{_MS_GRAPH_DRIVE}:/{path}:/content"
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
                 # bytes read up-front: httpx 0.28 async clients reject sync
                 # file objects as content
                 with open(local, "rb") as f:
@@ -536,7 +537,7 @@ class OneDriveSync:
         # bytes read up-front: httpx 0.28 async clients reject sync file objects
         with open(local, "rb") as f:
             data = f.read()
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
             resp = await client.put(
                 url,
                 content=data,
@@ -553,7 +554,7 @@ class OneDriveSync:
     async def test_connection(self) -> dict[str, Any]:
         try:
             token = await self._get_access_token()
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, verify=shared_ssl_context()) as client:
                 resp = await client.get(
                     "https://graph.microsoft.com/v1.0/me/drive",
                     headers={"Authorization": f"Bearer {token}"},
@@ -988,7 +989,7 @@ class S3Sync:
             url = self._build_url(config, key)
             content_type = "application/octet-stream"
             base_headers = {"content-type": content_type}
-            async with httpx.AsyncClient(timeout=300) as client:
+            async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
                 with open(local, "rb") as f:
                     payload = f.read()
                 signed = self._sign_request("PUT", url, base_headers, payload, config)
@@ -1007,7 +1008,7 @@ class S3Sync:
         with open(local, "rb") as f:
             payload = f.read()
         signed = self._sign_request("PUT", url, base_headers, payload, config)
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=300, verify=shared_ssl_context()) as client:
             resp = await client.put(url, content=payload, headers=signed)
         display = f"s3:{config['bucket']}/{key}"
         if resp.status_code in (200, 201):
@@ -1032,7 +1033,7 @@ class S3Sync:
         url = self._build_url(config, key)
         try:
             signed = self._sign_request("HEAD", url, {}, None, config)
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=30, verify=shared_ssl_context()) as client:
                 resp = await client.head(url, headers=signed)
         except Exception as exc:  # noqa: BLE001
             return {"ok": False, "error": str(exc)[:200]}
@@ -1053,7 +1054,7 @@ class S3Sync:
         url = self._build_url(config, "")
         try:
             signed = self._sign_request("HEAD", url, {}, None, config)
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, verify=shared_ssl_context()) as client:
                 resp = await client.head(url, headers=signed)
                 if resp.status_code in (200, 403):
                     # 403 means the bucket exists but access is restricted — still connected

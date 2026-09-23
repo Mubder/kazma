@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.parse
+from kazma_core.http_tls import shared_ssl_context
 
 POLLINATIONS_URL = "https://image.pollinations.ai/prompt/"
 
@@ -21,6 +22,7 @@ class PollinationsBackend:
             follow_redirects=True,
             timeout=60.0,
             headers={"User-Agent": "KazmaBot/1.0 (image generator)"},
+            verify=shared_ssl_context(),
         ) as client:
             response = await client.get(url)
             response.raise_for_status()

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from kazma_core.safety.prompt_fence import fence_untrusted
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "DEFAULT_CHUNK_SIZE",
@@ -639,7 +640,7 @@ async def _try_jina_reader(url: str) -> str | None:
             headers["Authorization"] = f"Bearer {token}"
         # Direct to Jina (third-party API holds the target fetch). Scraping
         # proxy is for target-site egress; do not force API keys through it.
-        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(timeout=45.0, follow_redirects=True, verify=shared_ssl_context()) as client:
             r = await client.get(jina_url, headers=headers)
             if r.status_code == 200 and r.text and len(r.text.strip()) > 50:
                 logger.info("[read_url] Jina Reader ok for %s (%d chars)", url, len(r.text))
@@ -676,7 +677,7 @@ async def _try_firecrawl(url: str) -> str | None:
         }
         body = {"url": url, "formats": ["markdown", "html"]}
         # Direct to Firecrawl API (same rationale as Jina — not target egress).
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
             last_status = 0
             for attempt in range(3):
                 r = await client.post(

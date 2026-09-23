@@ -21,6 +21,7 @@ from kazma_core.swarm.bus import (
     BusMessage,
     SwarmReport,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,7 @@ class DiscordBusAdapter(BusAdapter):
                 base_url=_DISCORD_API,
                 timeout=15.0,
                 headers={"Authorization": f"Bot {self._bot_token}"},
+                verify=shared_ssl_context(),
             )
         return self._http
 

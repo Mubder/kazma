@@ -57,6 +57,7 @@ from urllib.parse import urldefrag, urljoin, urlparse
 from kazma_core.stores.knowledge import get_knowledge_store
 from kazma_core.stores.knowledge_chunker import chunk_markdown_doc, chunk_to_dict
 from kazma_core.stores.knowledge_index import get_knowledge_index
+from kazma_core.http_tls import shared_ssl_context
 # Prefer public web_acquire façade (shared recovery ladder with research)
 try:
     from kazma_core.web_acquire import fetch_text as _web_fetch_text
@@ -622,7 +623,7 @@ async def _firecrawl_map_site(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=45.0, verify=shared_ssl_context()) as client:
             # Firecrawl has historically shipped both /v1 and /v2 of the
             # map endpoint (the scrape side is on /v1 in this codebase and
             # works).  Try /v1/map first (matches the working scrape path),

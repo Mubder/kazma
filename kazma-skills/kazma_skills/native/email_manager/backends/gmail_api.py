@@ -18,6 +18,7 @@ from kazma_skills.native.email_manager.models import (
     SendRequest,
     SendResult,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class GmailApiBackend:
         params: dict[str, Any] | None = None,
     ) -> Any:
         url = path if path.startswith("http") else f"{GMAIL_API}{path}"
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=45.0, verify=shared_ssl_context()) as client:
             r = await client.request(
                 method, url, headers=self._headers(), json=json_body, params=params
             )

@@ -6,6 +6,7 @@ import json
 import logging
 from collections.abc import Callable
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +135,7 @@ async def stream_chat_turn(
         assembled: list[str] = []
         saw_sse = False
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=2.0)) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=2.0), verify=shared_ssl_context()) as client:
                 async with client.stream("POST", url, json=body, headers=headers) as resp:
                     if resp.status_code in (401, 403):
                         raise RuntimeError(

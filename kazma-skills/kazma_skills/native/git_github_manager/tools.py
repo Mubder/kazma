@@ -13,6 +13,7 @@ from kazma_core.tools.file_write import _get_workspace
 
 # Network-bound git push/pull used to run ON the event loop (audit F-4).
 from kazma_skills.native._subprocess import run_off_loop
+from kazma_core.http_tls import shared_ssl_context
 
 # Disable interactive terminal credential prompts across all Git sub-processes
 os.environ["GIT_TERMINAL_PROMPT"] = "0"
@@ -539,7 +540,7 @@ async def github_create_pr(title: str, body: str, head: str, base: str = "main")
     if not token:
         return "Error: No GitHub token configured. Set GITHUB_TOKEN or connect GitHub in the Web UI."
     try:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.post(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls",
                 json={"title": title, "body": body, "head": head, "base": base},
@@ -582,7 +583,7 @@ async def github_merge_pr(number: int, commit_title: str | None = None, merge_me
     if not token:
         return "Error: No GitHub token configured."
     try:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.put(
                 f"https://api.github.com/repos/{owner}/{repo}/pulls/{number}/merge",
                 json=payload,
@@ -620,7 +621,7 @@ async def github_create_issue(title: str, body: str, labels: list[str] | None = 
     if not token:
         return "Error: No GitHub token configured."
     try:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.post(
                 f"https://api.github.com/repos/{owner}/{repo}/issues",
                 json=payload,
@@ -657,7 +658,7 @@ async def github_comment_issue(number: int, body: str) -> str:
     if not token:
         return "Error: No GitHub token configured."
     try:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.post(
                 f"https://api.github.com/repos/{owner}/{repo}/issues/{number}/comments",
                 json={"body": body},
@@ -709,7 +710,7 @@ async def github_list_issues(repo: str | None = None, state: str = "open") -> st
     if token:
         headers["Authorization"] = f"token {token}"
     try:
-        async with httpx.AsyncClient() as http:
+        async with httpx.AsyncClient(verify=shared_ssl_context()) as http:
             r = await http.get(
                 f"https://api.github.com/repos/{slug}/issues?state={state}",
                 headers=headers,

@@ -23,6 +23,7 @@ from kazma_cli.gateway import (
     extract_port,
     resolve_base_url,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ def _default_provider() -> str:
 
 async def cmd_status(base_url: str) -> int:
     """GET /api/swarm/status and render a worker table."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "GET", "/api/swarm/status")
         except ServerNotRunningError:
@@ -167,7 +168,7 @@ async def cmd_status(base_url: str) -> int:
 
 async def cmd_workers(base_url: str) -> int:
     """GET /api/swarm/status and list workers."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "GET", "/api/swarm/status")
         except ServerNotRunningError:
@@ -192,7 +193,7 @@ async def cmd_worker_add(base_url: str, positionals: list[str], flags: dict[str,
         "type": flags.get("--type", "in-process"),
         "role": flags.get("--role", ""),
     }
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/swarm/workers", json=payload)
         except ServerNotRunningError:
@@ -222,7 +223,7 @@ async def cmd_worker_spawn(base_url: str, positionals: list[str], flags: dict[st
         "provider": flags.get("--provider", _default_provider()),
         "worker_type": flags.get("--type", "in_process"),
     }
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/swarm/workers/spawn", json=payload)
         except ServerNotRunningError:
@@ -244,7 +245,7 @@ async def cmd_worker_remove(base_url: str, positionals: list[str]) -> int:
         console.print("[red]Usage:[/red] kazma swarm worker remove <name>")
         return 1
     name = positionals[0]
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "DELETE", f"/api/swarm/workers/{name}")
         except ServerNotRunningError:
@@ -359,7 +360,7 @@ async def _do_dispatch(
     if aggregation is not None:
         payload["aggregation"] = aggregation
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/swarm/dispatch", json=payload)
         except ServerNotRunningError:
@@ -401,7 +402,7 @@ async def cmd_history(base_url: str, flags: dict[str, str]) -> int:
     if flags.get("--page-size"):
         params["pageSize"] = flags["--page-size"]
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "GET", "/api/swarm/tasks", params=params)
         except ServerNotRunningError:
@@ -443,7 +444,7 @@ async def cmd_task(base_url: str, positionals: list[str]) -> int:
         console.print("[red]Usage:[/red] kazma swarm task <id>")
         return 1
     task_id = positionals[0]
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "GET", f"/api/swarm/tasks/{task_id}")
         except ServerNotRunningError:
@@ -471,7 +472,7 @@ async def cmd_task(base_url: str, positionals: list[str]) -> int:
 async def cmd_metrics(base_url: str, flags: dict[str, str]) -> int:
     """GET worker or all-worker metrics."""
     worker = flags.get("--worker")
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             if worker:
                 data = await _request(client, "GET", f"/api/swarm/workers/{worker}/metrics")
@@ -511,7 +512,7 @@ async def cmd_metrics(base_url: str, flags: dict[str, str]) -> int:
 
 async def cmd_start(base_url: str) -> int:
     """POST /api/swarm/start."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/swarm/start")
         except ServerNotRunningError:
@@ -528,7 +529,7 @@ async def cmd_start(base_url: str) -> int:
 
 async def cmd_stop(base_url: str) -> int:
     """POST /api/swarm/stop."""
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", "/api/swarm/stop")
         except ServerNotRunningError:
@@ -549,7 +550,7 @@ async def cmd_approve(base_url: str, positionals: list[str]) -> int:
         console.print("[red]Usage:[/red] kazma swarm approve <task_id>")
         return 1
     task_id = positionals[0]
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", f"/api/swarm/tasks/{task_id}/approve")
         except ServerNotRunningError:
@@ -571,7 +572,7 @@ async def cmd_reject(base_url: str, positionals: list[str]) -> int:
         console.print("[red]Usage:[/red] kazma swarm reject <task_id>")
         return 1
     task_id = positionals[0]
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             data = await _request(client, "POST", f"/api/swarm/tasks/{task_id}/reject")
         except ServerNotRunningError:
@@ -599,7 +600,7 @@ async def cmd_circuit_breaker(
     worker = positionals[0] if positionals else None
     reset = "--reset" in bools
 
-    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT) as client:
+    async with httpx.AsyncClient(base_url=base_url, timeout=DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
         try:
             if worker is None:
                 data = await _request(client, "GET", "/api/swarm/circuit-breakers")
