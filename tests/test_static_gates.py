@@ -877,6 +877,64 @@ def test_dns_gate_catches_the_redirect_hop_shape():
     assert _blocking_dns_in_async(ast.parse(good)) == []
 
 
+# ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)
+#
+# Archival nulls an episode's raw text. The one statement that did it used
+# COALESCE(summary_text, ...) — and ordinary chat turns are written with
+# summary_text = '' (not NULL), so every archived chat turn kept nothing at
+# all. The fixed statement is memory/macro_sleep.py:_ARCHIVE_EPISODE_SQL; a
+# second path that nulls episode text would have to re-solve the stub, and
+# the first one got it wrong.
+
+_EPISODE_TEXT_NULLED = re.compile(r"\b(?:user_text|assistant_text)\s*=\s*NULL\b", re.IGNORECASE)
+_ARCHIVE_STATEMENT_HOME = "kazma-core/kazma_core/memory/macro_sleep.py"
+
+
+def _episode_text_drops(text: str, *, allowed_name: str | None) -> list[int]:
+    allowed: set[int] = set()
+    if allowed_name:
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == allowed_name for t in node.targets
+            ):
+                allowed.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return [
+        i for i, line in enumerate(text.splitlines(), 1)
+        if _EPISODE_TEXT_NULLED.search(line) and i not in allowed
+    ]
+
+
+def test_only_the_archive_statement_drops_episode_text():
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not _EPISODE_TEXT_NULLED.search(text):
+            continue
+        home = rel.replace("\\", "/") == _ARCHIVE_STATEMENT_HOME
+        offenders += [
+            f"{rel}:{line}"
+            for line in _episode_text_drops(text, allowed_name="_ARCHIVE_EPISODE_SQL" if home else None)
+        ]
+    assert not offenders, (
+        "Episode text is nulled outside macro_sleep._ARCHIVE_EPISODE_SQL. Archive "
+        "through that statement: it keeps a stub, and the first hand-written "
+        "version kept nothing (summary_text '' is not NULL).\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_episode_text_gate_catches_a_second_archive_path():
+    """Negative control (§28): the pre-fix statement outside the constant."""
+    bad = (
+        "_ARCHIVE_EPISODE_SQL = (\n"
+        "    \"UPDATE episodes SET user_text=NULL, assistant_text=NULL WHERE id=?\"\n"
+        ")\n"
+        "SQL = \"UPDATE episodes SET tier='archived', user_text = NULL WHERE id=?\"\n"
+    )
+    assert _episode_text_drops(bad, allowed_name="_ARCHIVE_EPISODE_SQL") == [4]
+    assert _episode_text_drops(bad, allowed_name=None) == [2, 4]
+
+
 # ── 2g. Voice never hands the conversation to a Realtime/Live API ─────────
 #
 # OpenAI Realtime and Gemini Live run their own tool loop; Kazma cannot keep

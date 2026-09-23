@@ -252,18 +252,11 @@ control proving the gate fails on the old code.
 | Knowledge API ran SQLite on the event loop (every route, plus a ConfigStore write per crawl progress update); crawls embedded each page inline; the async index search façades ran their whole body inline; recrawls under-counted unchanged pages | `test_kb_api_routes.py` walks the router's own route table; `test_kb_smart_reindex.py` (crawl, page ingest, search façades, `pages_unchanged`) |
 | 23 async functions resolved DNS inline through `validate_url` (fetch, research, crawl, per-hop redirect checks, model discovery, provider tests) | `test_no_blocking_dns_in_async_functions` |
 | 3,846 blind / 577 silent exception handlers | `test_debt_ratchet.py` — the counts may only go down |
+| Chat memories archived to empty shells on day 30 however often they were recalled: every chat turn is importance 1 (never promoted), archival tested creation age only, and the "keep a summary" fallback used COALESCE on an empty string | `test_memory_v2_phase3.py` (in-use turn survives, stub kept, own summary kept, moves reach the mirrors); `test_only_the_archive_statement_drops_episode_text` |
+| The V_retention decay score decided nothing, and its λs were per-second (a "general" memory's usage term halved every ~70 s) | Removed with its five Settings knobs, decided 2026-09-23; `test_v2_defaults_present` keeps the knobs out |
 
-**Still open — a product decision, not a defect:**
-
-- **Memory decay scoring is not used to decide anything.**
-  `memory/macro_sleep.py:compute_retention` implements the V_retention score
-  (importance × trust, with access decaying by memory class), but every tier
-  move in the macro-sleep sweep is rule-based — TTLs, importance, access
-  counts. The sweep used to compute the score and throw it away; the dead call
-  was removed on 2026-09-23 and the docs no longer claim "decay scoring".
-  Wiring the score in would change which memories get archived, and archiving
-  drops their original text, so it is left for an explicit decision rather
-  than slipped in behind a cleanup.
+Nothing from this audit remains open. Memories already emptied by the old
+archival can only come back from backups taken before their archive date.
 
 ## Prompt injection
 

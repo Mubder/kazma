@@ -43,7 +43,7 @@ kazma-data/                             # Runtime data (gitignored)
 | `ppr.py` | Local Ego-Graph Personalized PageRank | `compute_local_ppr()`, `build_ego_graph()` |
 | `task_queue.py` | Durable SQLite-backed consolidation queue | `enqueue_task()`, `register_handler()`, `start_worker()` |
 | `worker_bootstrap.py` | Handler registration + worker start at boot + schedulers (6h `macro_sleep` + ego-anchor + FTS drift, 24h backup/export + mirror-drift warning) | `start_memory_worker()`, `register_v2_handlers()`, `register_backup_export_handlers()` |
-| `macro_sleep.py` | Rule-based tier demotion/promotion, archival (V_retention implemented, not yet used for decisions) | `run_macro_sleep()`, `compute_retention()` |
+| `macro_sleep.py` | Rule-based tier lifecycle. Archives only memories stale on both clocks (created and not recalled within the TTL), keeps a stub, propagates moves to the optional state mirror / remote vector index | `run_macro_sleep()`, `_ARCHIVE_EPISODE_SQL` |
 | `entity_resolution.py` | 3-tier cascade (exact → vector → LLM) + quarantine; `preserve_merge_ledger` copies rows to `entity_merges_archive` on entity DELETE (M-14) | `resolve_entity()`, `decide_entity_merge()`, `preserve_merge_ledger()` |
 | `ego_anchor.py` | Hub `related_to` edges for payload-object leaf subjects (orphan-node root fix, M-03) | `anchor_orphan_leaf_concepts()` |
 | `fts_health.py` | Periodic FTS `*_docsize` COUNT vs base + rebuild (M-10) | `fts_drift_check()` |
@@ -217,12 +217,9 @@ memory:
     use_new_stack: true            # V2 is the active stack (single stack post-cutover)
     trust_weight_user: 1.0
     trust_weight_tool: 0.85
-    trust_weight_llm: 0.60
-    decay_lambda_identity: 0.0001
-    decay_lambda_general: 0.01
-    decay_lambda_ephemeral: 0.10
+    trust_weight_llm: 0.60          # belief supersede trust (not decay)
     recall_ttl_days: 90
-    episodic_ttl_days: 30
+    episodic_ttl_days: 30          # archive = created AND unrecalled past this
     archive_after_days: 180
     ppr_alpha: 0.15                # Local Ego-Graph PPR restart factor
     ppr_max_nodes: 200

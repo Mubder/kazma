@@ -1,72 +1,111 @@
-"""Macro-consolidation "sleep cycle" — decay, tier demotion, compaction, archive.
+"""Macro-consolidation "sleep cycle" — tier lifecycle and archive.
 
 Runs as a ``macro_sleep`` task on the durable queue during idle periods.
-Implements the V_retention scoring (§4.1) and the tier lifecycle:
+Every move is a rule on TTLs, importance and use:
 
-  - **V_retention** — ``compute_retention`` implements the score below, but
-    no tier decision uses it: every move here is rule-based (TTLs,
-    importance, access). Wiring it in changes which memories are archived
-    (their text is dropped), so it is a product decision, recorded in
-    docs/KNOWN_GAPS.md. The sweep used to compute it and discard it.
-  - **Demote recall→episodic** — recall rows with no recent access for
-    ``recall_demote_idle_days`` drop to episodic.
-  - **Demote episodic→archived** — episodic rows past ``episodic_ttl_days``
-    with low importance are archived (raw text dropped, summary kept).
+  - **Working → episodic** — the active buffer drains after
+    ``working_ttl_hours``.
+  - **Episodic → recall** — important (``promote_to_recall_min_importance``)
+    and used (``promote_to_recall_min_access``) episodes are promoted.
+  - **Recall → episodic** — recall rows idle for ``recall_demote_idle_days``.
+  - **Archive** — raw text is dropped and a stub kept (see
+    ``_ARCHIVE_EPISODE_SQL``). Only rows stale on BOTH clocks are archived —
+    created past the TTL *and* not recalled within it — and below the
+    promote floor. A memory still being recalled is never archived.
   - **Archive beliefs** — superseded beliefs older than
     ``archive_after_days`` move to ``beliefs_archive`` cold storage.
 
-The decay formula (§4.1):
-
-    V_retention(m) = W_trust(m) * [ω1 * I(m) + ω2 * ln(1 + A_m) * exp(-λ * Δt)]
-
-where ``λ`` is selected by ``memory_class`` (resolution #4).
+There used to be a V_retention decay score (``compute_retention``) here that
+no rule consulted. Its decay rates were applied per SECOND — the usage term
+of a "general" memory halved every ~70 s — so it could not have ranked by use
+either; it and its Settings knobs were removed on 2026-09-23. Graded decay,
+if it comes back, needs corrected units and a dry run on real data first.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import math
 import sqlite3
 import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["compute_retention", "run_macro_sleep"]
+__all__ = ["run_macro_sleep"]
+
+# Archiving drops the raw text; what survives is ``summary_text``, so it must
+# never be left empty. Ordinary chat turns are written with summary_text = ''
+# (not NULL) and COALESCE only replaces NULL, so every archived chat turn used
+# to keep nothing at all — no question, no answer, no summary (2026-09-23).
+# The stub is the start of the question and of the answer.
+_ARCHIVE_EPISODE_SQL = (
+    "UPDATE episodes SET tier='archived', "
+    "summary_text=COALESCE(NULLIF(TRIM(summary_text), ''), TRIM("
+    "SUBSTR(COALESCE(user_text, ''), 1, 200) || "
+    "CASE WHEN TRIM(COALESCE(user_text, '')) <> '' "
+    "AND TRIM(COALESCE(assistant_text, '')) <> '' THEN ' — ' ELSE '' END || "
+    "SUBSTR(COALESCE(assistant_text, ''), 1, 300))), "
+    "user_text=NULL, assistant_text=NULL WHERE id=?"
+)
+
+_EPISODE_MIRROR_COLUMNS = (
+    "id, tenant_id, session_id, turn_number, user_text, assistant_text, "
+    "summary_text, tier, structural_importance, created_at, metadata_json"
+)
 
 
-def compute_retention(
+def _propagate_episode_moves(
+    conn: sqlite3.Connection,
     *,
-    trust_weight: float,
-    importance: int,
-    access_count: int,
-    age_seconds: float,
-    memory_class: str,
-    cfg: dict[str, Any] | None = None,
-) -> float:
-    """V_retention per §4.1.
+    tenant_id: str,
+    moved: list[str],
+    archived: list[str],
+) -> None:
+    """Carry this sweep's tier moves to the optional shared mirrors.
 
-    Args:
-        trust_weight: Source trust (user=1.0, tool=0.85, llm=0.60).
-        importance: 1..5 structural importance.
-        access_count: Lifetime access frequency.
-        age_seconds: Time since last access (or creation if never accessed).
-        memory_class: 'identity' | 'general' | 'ephemeral' (resolution #4).
-        cfg: V2 config block for the weights/lambdas.
+    SQLite is the source of truth, but the Postgres state mirror and a remote
+    vector index (pgvector / Qdrant) each hold their own copy. Nothing here
+    used to reach them: with a mirror on, an archived episode kept its full
+    text and its old tier there, and stayed searchable in the remote index.
+    Beliefs already had this (``unmirror_belief_to_state``). Both mirrors are
+    best-effort and swallow their own failures; the default local setup has
+    neither, and this returns without touching anything.
     """
-    v2 = (cfg or {}).get("v2") or {}
-    omega1 = float(v2.get("retention_importance_weight", 0.60))
-    omega2 = float(v2.get("retention_access_weight", 0.40))
-    lambdas = {
-        "identity": float(v2.get("decay_lambda_identity", 0.0001)),
-        "general": float(v2.get("decay_lambda_general", 0.01)),
-        "ephemeral": float(v2.get("decay_lambda_ephemeral", 0.10)),
-    }
-    lam = lambdas.get(memory_class, lambdas["general"])
-    decay = math.exp(-lam * age_seconds)
-    access_term = math.log(1 + max(0, access_count)) * decay
-    return trust_weight * (omega1 * importance + omega2 * access_term)
+    if not moved and not archived:
+        return
+    from kazma_core.memory.state_backend import (
+        NullStateBackend,
+        get_state_backend,
+        mirror_episode_to_state,
+    )
+
+    if not isinstance(get_state_backend(), NullStateBackend):
+        for eid in dict.fromkeys([*moved, *archived]):
+            row = conn.execute(
+                f"SELECT {_EPISODE_MIRROR_COLUMNS} FROM episodes WHERE id=?", (eid,)
+            ).fetchone()
+            if row is not None:
+                mirror_episode_to_state(dict(row))
+
+    if not archived:
+        return
+    from kazma_core.memory.backends import LocalSqliteVectorBackend, get_vector_backend
+
+    try:
+        backend = get_vector_backend(conn)
+    except RuntimeError:  # failover=raise while the remote index is down
+        logger.warning(
+            "[macro_sleep] %d archived episode(s) left in the remote vector index "
+            "(backend unavailable, failover=raise)",
+            len(archived),
+        )
+        return
+    # The local index filters on episodes.tier in SQL, so archived rows are
+    # already out of it; only a remote index keeps a stale copy.
+    if not isinstance(backend, LocalSqliteVectorBackend):
+        for eid in archived:
+            backend.delete(eid, tenant_id=tenant_id)
 
 
 def run_macro_sleep(
@@ -160,9 +199,19 @@ def run_macro_sleep(
             elif tier == "recall" and age > recall_idle:
                 _idle_to_episodic.append(eid)
                 stats["demoted_recall"] += 1
-            # Demote episodic→archived when past TTL + low importance
-            elif tier == "episodic" and (now - float(r["created_at"] or now)) > episodic_ttl and importance < promote_min_importance:
-                # Drop raw text, keep summary (or synthesize a stub)
+            # Demote episodic→archived: past the TTL on BOTH clocks and below
+            # the promote floor. This used to test created_at only. Every
+            # ordinary chat turn is written at importance 1, so it can never
+            # be promoted, and a turn recalled daily still lost its text on
+            # day 30. Recall bumps last_accessed, so `age` (now − last
+            # touch) keeps an in-use memory out of the archive. Same rule
+            # as the recall branch above (audit H18).
+            elif (
+                tier == "episodic"
+                and created_age > episodic_ttl
+                and age > episodic_ttl
+                and importance < promote_min_importance
+            ):
                 _archive_episodic.append(eid)
                 stats["demoted_episodic"] += 1
 
@@ -176,15 +225,10 @@ def run_macro_sleep(
                 "UPDATE episodes SET tier='recall' WHERE id=?",
                 [(eid,) for eid in _to_recall],
             )
-        _archive_sql = (
-            "UPDATE episodes SET tier='archived', "
-            "summary_text=COALESCE(summary_text, SUBSTR(user_text, 1, 200)), "
-            "user_text=NULL, assistant_text=NULL WHERE id=?"
-        )
         if _archive_recall:
-            primary_conn.executemany(_archive_sql, [(eid,) for eid in _archive_recall])
+            primary_conn.executemany(_ARCHIVE_EPISODE_SQL, [(eid,) for eid in _archive_recall])
         if _archive_episodic:
-            primary_conn.executemany(_archive_sql, [(eid,) for eid in _archive_episodic])
+            primary_conn.executemany(_ARCHIVE_EPISODE_SQL, [(eid,) for eid in _archive_episodic])
 
         # ── Archive old superseded beliefs ──
         old_superseded = primary_conn.execute(
@@ -220,6 +264,12 @@ def run_macro_sleep(
                 logger.debug("[macro_sleep] unmirror skipped for %s", bid, exc_info=True)
 
         primary_conn.commit()
+        _propagate_episode_moves(
+            primary_conn,
+            tenant_id=tenant_id,
+            moved=_to_episodic + _idle_to_episodic + _to_recall,
+            archived=_archive_recall + _archive_episodic,
+        )
     except Exception:
         # A broken sweep (schema drift, corrupt row, locked DB) previously
         # logged at DEBUG and the caller still reported success — macro_sleep

@@ -459,10 +459,16 @@ left backups/export inert). Current boot list:
 
 **B. Distinct cadences (do not collapse them):**
 - **6h `macro_sleep`:** rule-based tier demotion/promotion (TTLs,
-  importance, access) and archival. `compute_retention` (V_retention) exists
-  but decides nothing — wiring it in is an open product decision
-  (docs/KNOWN_GAPS.md), because archival drops text.
-  (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
+  importance, access) and archival (`macro_sleep.py:run_macro_sleep`).
+  First sweep 60s after boot. Archival drops text, so three rules hold:
+  only rows stale on BOTH clocks are archived (created past the TTL *and*
+  not recalled within it — every chat turn is importance 1 and can never
+  be promoted, so the recall clock is what keeps an in-use memory);
+  `_ARCHIVE_EPISODE_SQL` is the only statement that nulls episode text and
+  always keeps a stub (summary, else question — answer); and moves reach
+  the optional state mirror / remote vector index. There is no decay
+  score: `compute_retention` was removed 2026-09-23 (per-second λ, no
+  reader).
 - **6h backup/export** (`_BACKUP_EXPORT_INTERVAL_HOURS = 6`, not 24):
   enqueues `native_backup` + `nightly_export` + `native_pg_backup` →
   native `sqlite3.backup()` of both memory DBs (`backup.py`) + JSONL/GraphML

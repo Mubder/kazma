@@ -97,9 +97,6 @@ class SettingsPanel(VerticalScroll):
 
     # V2 numeric tunables: (label, configstore key, type, default)
     V2_NUMERIC = [
-        ("Decay λ identity", "memory.v2.decay_lambda_identity", float, "0.0001"),
-        ("Decay λ general", "memory.v2.decay_lambda_general", float, "0.01"),
-        ("Decay λ ephemeral", "memory.v2.decay_lambda_ephemeral", float, "0.1"),
         ("Recall TTL (days)", "memory.v2.recall_ttl_days", int, "90"),
         ("Episodic TTL (days)", "memory.v2.episodic_ttl_days", int, "30"),
         ("Archive after (days)", "memory.v2.archive_after_days", int, "180"),
@@ -240,8 +237,9 @@ class SettingsPanel(VerticalScroll):
         with Container(classes="settings-section"):
             yield Static("V2 cognitive engine · tunables", classes="settings-title")
             yield Static(
-                "[dim]Decay λ controls forgetting speed. TTLs control tier "
-                "lifecycle. Edit + Enter to persist on the live server.[/]",
+                "[dim]TTLs control the tier lifecycle; a memory still being "
+                "recalled is never archived. Edit + Enter to persist on the "
+                "live server.[/]",
                 classes="settings-hint",
             )
             for label, key, cast, default in self.V2_NUMERIC:
