@@ -60,7 +60,10 @@ __all__ = [
 ]
 
 # Grandfather-father-son. A day of hourlies covers "I broke it an hour ago",
-# a week of dailies covers "I broke it yesterday", two months of weeklies
+# a month of dailies covers "it broke and nobody noticed for weeks" (30, not
+# 7: on 2026-09-23, 69 chat memories emptied between 08-30 and 09-21 were
+# recoverable only from a 3-week-old snapshot; the operator chose 30), two
+# months of weeklies
 # covers "this has been wrong for a while", and a year of monthlies covers
 # the slow corruption nobody noticed. Retention by COUNT -- what the system
 # did before this -- gives you none of those guarantees: thirty backups is
@@ -74,7 +77,7 @@ __all__ = [
 # quietly does not do what its interval says.
 KEEP_POLICY: tuple[str, ...] = (
     "--keep-hourly", "24",
-    "--keep-daily", "7",
+    "--keep-daily", "30",
     "--keep-weekly", "8",
     "--keep-monthly", "12",
 )
@@ -657,9 +660,20 @@ def backup(repo: str, password: str, paths: list[str], *,
     return res
 
 
+#: How ``forget`` groups snapshots before applying KEEP_POLICY to each group.
+#: restic's default is ``host,paths``, and every universal backup is a new
+#: ``backups/universal/<epoch>`` directory and every pg dump a new file -- so
+#: each snapshot was a group of one, and a group keeps its newest snapshot.
+#: Retention deleted nothing, ever: 199 snapshots, 199 groups (2026-09-23).
+#: Tags name the KIND of backup (universal / pg / legacy / probe), which is
+#: what the policy is meant to be applied per.
+FORGET_GROUP_BY = "host,tags"
+
+
 def forget_prune(repo: str, password: str,
                  policy: tuple[str, ...] = KEEP_POLICY) -> ResticResult:
-    return _run(["forget", "--prune", *policy], repo, password, action="forget")
+    return _run(["forget", "--prune", "--group-by", FORGET_GROUP_BY, *policy],
+                repo, password, action="forget")
 
 
 def check(
