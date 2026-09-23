@@ -22,6 +22,7 @@ Backward-compatible storage keys:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -740,7 +741,7 @@ class ModelRegistry:
             _host = (urlparse(url).hostname or "").lower()
             _loopback = _host in ("localhost", "127.0.0.1", "::1")
             from kazma_core.security.ssrf import SSRFError, validate_url
-            validate_url(url, block_unresolved=True, allow_private=_loopback)
+            await asyncio.to_thread(validate_url, url, block_unresolved=True, allow_private=_loopback)
         except SSRFError as exc:
             logger.warning("discover_models: SSRF blocked %r for %r: %s", url, clean_name, exc)
             return []

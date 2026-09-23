@@ -21,6 +21,7 @@ SSRF-safe (validate URL + redirects). Knowledge ingest reuses ``_fetch_full_text
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -625,7 +626,7 @@ async def _try_jina_reader(url: str) -> str | None:
         import httpx
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url, block_unresolved=True)
+        await asyncio.to_thread(validate_url, url, block_unresolved=True)
         # Proxy is public; still SSRF-check the *target* URL above.
         jina_url = f"https://r.jina.ai/{url}"
         token = (os.environ.get("JINA_API_KEY") or os.environ.get("KAZMA_JINA_API_KEY") or "").strip()
@@ -668,7 +669,7 @@ async def _try_firecrawl(url: str) -> str | None:
         import httpx
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url, block_unresolved=True)
+        await asyncio.to_thread(validate_url, url, block_unresolved=True)
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -830,7 +831,7 @@ async def _fetch_full_text(url: str) -> str:
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
 
-        validated_ips = validate_url(url, block_unresolved=True) or ()
+        validated_ips = await asyncio.to_thread(validate_url, url, block_unresolved=True) or ()
     except SSRFError as exc:
         return f"Error: {exc}"
     except ValueError as exc:
@@ -924,7 +925,7 @@ async def _fetch_full_text(url: str) -> str:
                 try:
                     from kazma_core.security.ssrf import SSRFError, validate_url
 
-                    validated_ips = validate_url(redirect_url, block_unresolved=True) or ()
+                    validated_ips = await asyncio.to_thread(validate_url, redirect_url, block_unresolved=True) or ()
                 except SSRFError as exc:
                     return f"Error: Redirect blocked (SSRF): {exc}"
                 except ValueError as exc:

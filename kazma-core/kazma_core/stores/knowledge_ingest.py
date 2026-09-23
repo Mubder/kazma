@@ -482,7 +482,7 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
         from kazma_core.proxy.client import get_scraping_client
         from kazma_core.security.ssrf import SSRFError, resolve_redirects, validate_url
 
-        validate_url(url, block_unresolved=True)
+        await asyncio.to_thread(validate_url, url, block_unresolved=True)
         # Sitemap/robots discovery uses the same Proxy Provider as page fetch.
         # Redirects are resolved with every hop SSRF-checked, then fetched with
         # redirects OFF (audit F-08). Validating only the *final* URL still let
@@ -517,7 +517,7 @@ async def _http_get_text(url: str, *, timeout: float = 20.0) -> tuple[str | None
                 return None, url
             final = str(r.url)
             try:
-                validate_url(final, block_unresolved=True)
+                await asyncio.to_thread(validate_url, final, block_unresolved=True)
             except SSRFError:
                 return None, url
             if r.status_code >= 400:
@@ -607,7 +607,7 @@ async def _firecrawl_map_site(
         import httpx
         from kazma_core.security.ssrf import SSRFError, validate_url
 
-        validate_url(seed_url, block_unresolved=True)
+        await asyncio.to_thread(validate_url, seed_url, block_unresolved=True)
         # ``search`` ranks URLs by relevance; omit it for section-root maps
         # so Firecrawl returns the full URL set rather than a seed-ranked
         # slice.  ``limit`` caps the result set; we scope/filter locally.
@@ -1457,11 +1457,11 @@ async def ingest_url(
     Fetches → chunks → indexes.  Returns a :class:`IngestResult` summary.
     """
     result = IngestResult(pages_discovered=1)
-    index = get_knowledge_index()
+    index = await asyncio.to_thread(get_knowledge_index)
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url, block_unresolved=True)
+        await asyncio.to_thread(validate_url, url, block_unresolved=True)
     except Exception as exc:
         result.errors.append(f"SSRF/invalid URL {url}: {exc}")
         result.failed_urls.append(url)
@@ -1480,8 +1480,26 @@ async def ingest_url(
         result.errors.append(msg)
         return result
 
-    _save_provenance(library_id, url, text)
+    new, skipped, _ = await asyncio.to_thread(
+        _store_page, index, library_id, url, text, document_title
+    )
+    result.pages_fetched = 1
+    result.chunks_new += new
+    result.chunks_skipped += skipped
+    return result
 
+
+def _store_page(
+    index: Any, library_id: str, url: str, text: str, document_title: str = ""
+) -> tuple[int, int, int]:
+    """Provenance, chunking and indexing for one fetched page.
+
+    Returns ``(new, skipped, chunk_count)``. All of it blocks — indexing embeds
+    every chunk and writes the vector store and SQLite, seconds for a large
+    page — so the async ingest paths run it through ``asyncio.to_thread``
+    instead of on the loop that serves every chat stream (AGENTS.md §26E).
+    """
+    _save_provenance(library_id, url, text)
     chunks = chunk_markdown_doc(
         text,
         source_url=url,
@@ -1489,15 +1507,41 @@ async def ingest_url(
         document_title=document_title or _derive_title(text, url),
     )
     if not chunks:
-        result.pages_fetched = 1
-        return result
+        return 0, 0, 0
+    new, skipped = index.index(library_id, [chunk_to_dict(c) for c in chunks])
+    return new, skipped, len(chunks)
 
-    chunk_dicts = [chunk_to_dict(c) for c in chunks]
-    new, skipped = index.index(library_id, chunk_dicts)
-    result.pages_fetched = 1
-    result.chunks_new += new
-    result.chunks_skipped += skipped
-    return result
+
+def _prune_gone_urls(
+    index: Any, store: Any, library_id: str, seed_url: str, pages: list[str]
+) -> int:
+    """Drop in-scope URLs that discovery no longer finds; refresh the chunk count.
+
+    Blocking (SQLite + vector store): called through ``asyncio.to_thread``.
+    """
+    pruned_urls = 0
+    try:
+        discovered_set = set(pages)
+        existing = set(store.list_source_urls(library_id))
+        scope_mode = _kb_scope_mode()
+        candidates = {
+            u for u in existing if u and _in_scope(seed_url, u, scope_mode)
+        }
+        pruned_urls = index.prune_sources_not_in(
+            library_id,
+            discovered_set,
+            candidate_urls=candidates,
+        )
+    except Exception as exc:
+        logger.debug("[kb_ingest] gone-URL prune skipped: %s", exc)
+
+    # Persist final chunk_count on the library row (index() also updates it,
+    # but this is the authoritative post-crawl value).
+    try:
+        store.set_chunk_count(library_id, store.count_chunks(library_id))
+    except Exception as exc:
+        logger.debug("[kb_ingest] set_chunk_count failed: %s", exc)
+    return pruned_urls
 
 
 async def ingest_site(
@@ -1534,7 +1578,7 @@ async def ingest_site(
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(seed_url, block_unresolved=True)
+        await _aio.to_thread(validate_url, seed_url, block_unresolved=True)
     except Exception as exc:
         yield ProgressUpdate(phase="error", message=f"invalid seed: {exc}", started_at=started)
         return
@@ -1571,8 +1615,8 @@ async def ingest_site(
     )
 
     # ── Fetch + ingest each page (shared Playwright for the job) ─────
-    index = get_knowledge_index()
-    store = get_knowledge_store()
+    index = await asyncio.to_thread(get_knowledge_index)
+    store = await asyncio.to_thread(get_knowledge_store)
     fetched = 0
     failed = 0
     chunks_new = 0
@@ -1611,22 +1655,17 @@ async def ingest_site(
                         started_at=started,
                     )
                     continue
-                _save_provenance(library_id, url, text)
-                chunks = chunk_markdown_doc(
-                    text,
-                    source_url=url,
-                    library_id=library_id,
-                    document_title=_derive_title(text, url),
+                new, skipped, n_chunks = await asyncio.to_thread(
+                    _store_page, index, library_id, url, text
                 )
-                if chunks:
-                    chunk_dicts = [chunk_to_dict(c) for c in chunks]
-                    # Smart re-index: unchanged page hash sequence → skip embed
-                    before_skip = chunks_skipped
-                    new, skipped = index.index(library_id, chunk_dicts)
-                    chunks_new += new
-                    chunks_skipped += skipped
-                    if new == 0 and skipped > before_skip and skipped >= len(chunk_dicts):
-                        pages_unchanged += 1
+                chunks_new += new
+                chunks_skipped += skipped
+                # Smart re-index: every chunk of the page already indexed →
+                # the page is unchanged. (This compared the page's own
+                # `skipped` with the crawl's running total, so after the
+                # first unchanged page no later one was ever counted.)
+                if n_chunks and new == 0 and skipped >= n_chunks:
+                    pages_unchanged += 1
                 fetched += 1
                 result.pages_fetched += 1
             except Exception as exc:
@@ -1640,28 +1679,9 @@ async def ingest_site(
 
     # Prune URLs that were in-scope under this seed but disappeared from discovery
     # (site shrink) — keeps orphan safety at the *site* level, not only page shrink.
-    pruned_urls = 0
-    try:
-        discovered_set = set(pages)
-        existing = set(store.list_source_urls(library_id))
-        scope_mode = _kb_scope_mode()
-        candidates = {
-            u for u in existing if u and _in_scope(seed_url, u, scope_mode)
-        }
-        pruned_urls = index.prune_sources_not_in(
-            library_id,
-            discovered_set,
-            candidate_urls=candidates,
-        )
-    except Exception as exc:
-        logger.debug("[kb_ingest] gone-URL prune skipped: %s", exc)
-
-    # Persist final chunk_count on the library row (index() also updates it,
-    # but this is the authoritative post-crawl value).
-    try:
-        store.set_chunk_count(library_id, store.count_chunks(library_id))
-    except Exception as exc:
-        logger.debug("[kb_ingest] set_chunk_count failed: %s", exc)
+    pruned_urls = await asyncio.to_thread(
+        _prune_gone_urls, index, store, library_id, seed_url, pages
+    )
 
     # If everything failed, surface the FIRST failure reason in the done
     # message — that's what the user sees in the toast/progress panel, and

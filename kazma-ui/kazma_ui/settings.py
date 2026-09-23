@@ -1573,7 +1573,7 @@ class SettingsRouterBuilder:
             try:
                 # SSRF protection: validate the base_url
                 from kazma_core.security.ssrf import SSRFError, validate_url
-                validate_url(req.base_url)
+                await asyncio.to_thread(validate_url, req.base_url)
             except SSRFError as exc:
                 return {"success": False, "error": f"Blocked: {exc}"}
             except ValueError as exc:

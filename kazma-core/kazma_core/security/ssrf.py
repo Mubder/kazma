@@ -38,6 +38,7 @@ Two rules follow from that limitation:
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
@@ -313,7 +314,7 @@ async def resolve_redirects(
     """
     import httpx
 
-    validate_url(url, block_unresolved=block_unresolved)
+    await asyncio.to_thread(validate_url, url, block_unresolved=block_unresolved)
     current = url
     for _ in range(max_hops):
         resp = await client.request(
@@ -325,7 +326,7 @@ async def resolve_redirects(
         if not location:
             return current
         current = str(httpx.URL(current).join(location))
-        validate_url(current, block_unresolved=block_unresolved)
+        await asyncio.to_thread(validate_url, current, block_unresolved=block_unresolved)
     raise SSRFError(
         f"Blocked URL '{url}': more than {max_hops} redirects."
     )

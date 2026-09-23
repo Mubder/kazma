@@ -271,7 +271,7 @@ async def browser_navigate(url: str) -> str:
     try:
         from kazma_core.security.ssrf import validate_url
 
-        validate_url(url, block_unresolved=True)
+        await asyncio.to_thread(validate_url, url, block_unresolved=True)
     except Exception as exc:
         return f"Error: URL blocked by security policy — {exc}"
 

@@ -33,6 +33,7 @@ ChromaDB is unavailable.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -441,6 +442,24 @@ class KnowledgeIndex:
         top_k: int = 5,
         tenant_id: str | None = None,
     ) -> list[KnowledgeHit]:
+        """Async façade over :meth:`search_sync`, run off the event loop.
+
+        The work is SQLite FTS, a vector query and the query embedding — all
+        blocking. These façades used to run it inline on the loop that serves
+        every SSE and WebSocket stream (AGENTS.md §26E).
+        """
+        return await asyncio.to_thread(
+            self.search_sync, query, library_id, top_k=top_k, tenant_id=tenant_id
+        )
+
+    def search_sync(
+        self,
+        query: str,
+        library_id: str,
+        *,
+        top_k: int = 5,
+        tenant_id: str | None = None,
+    ) -> list[KnowledgeHit]:
         """Semantic + lexical search scoped to one library, RRF-blended.
 
         Args:
@@ -473,6 +492,25 @@ class KnowledgeIndex:
         return self._hydrate(blended)
 
     async def search_document(
+        self,
+        query: str,
+        *,
+        tenant_id: str,
+        library_id: str,
+        document_id: str,
+        top_k: int = 5,
+    ) -> list[KnowledgeHit]:
+        """Async façade over :meth:`search_document_sync`, run off the event loop."""
+        return await asyncio.to_thread(
+            self.search_document_sync,
+            query,
+            tenant_id=tenant_id,
+            library_id=library_id,
+            document_id=document_id,
+            top_k=top_k,
+        )
+
+    def search_document_sync(
         self,
         query: str,
         *,
@@ -589,8 +627,8 @@ class KnowledgeIndex:
     async def search_all(
         self, query: str, library_ids: list[str], *, top_k: int = 5
     ) -> list[KnowledgeHit]:
-        """Cross-library search with a single fused RRF pass (async façade)."""
-        return self.search_all_sync(query, library_ids, top_k=top_k)
+        """Cross-library search with a single fused RRF pass (async façade, off the loop)."""
+        return await asyncio.to_thread(self.search_all_sync, query, library_ids, top_k=top_k)
 
     def search_all_sync(
         self, query: str, library_ids: list[str], *, top_k: int = 5

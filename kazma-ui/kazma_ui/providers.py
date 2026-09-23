@@ -400,7 +400,7 @@ def create_providers_router(config_store: ConfigStore) -> APIRouter:
             headers: dict[str, str] = {"Content-Type": "application/json"}
             if safe_key:
                 headers["Authorization"] = f"Bearer {safe_key}"
-            validate_url(base, allow_private=True)
+            await asyncio.to_thread(validate_url, base, allow_private=True)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 last_status = None
                 last_body = ""

@@ -807,6 +807,76 @@ def test_executor_gate_catches_the_tool_registry_shape():
     assert _context_dropping_executor_calls(ast.parse(good)) == []
 
 
+# ── 2f'. No DNS resolution on the event loop (2026-09-23) ─────────────────
+#
+# ``validate_url`` resolves the host (``socket.getaddrinfo``) — milliseconds
+# normally, the resolver timeout when a name does not answer. 23 async
+# functions called it inline (read_url, web research, KB crawl, per-hop
+# redirect checks, model discovery, provider tests), each stalling every SSE
+# and WebSocket stream while it waited (AGENTS.md §26E). The fix keeps the
+# name — ``await asyncio.to_thread(validate_url, url, ...)`` — so the tests
+# that patch it still patch it.
+
+_BLOCKING_DNS_CALLS = frozenset({"validate_url", "getaddrinfo", "gethostbyname", "gethostbyname_ex"})
+
+
+def _blocking_dns_in_async(tree: ast.AST) -> list[int]:
+    lines: list[int] = []
+
+    def visit(node: ast.AST, in_async: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.AsyncFunctionDef):
+                visit(child, True)
+            elif isinstance(child, (ast.FunctionDef, ast.Lambda)):
+                visit(child, False)  # a sync helper is what to_thread runs
+            else:
+                if in_async and isinstance(child, ast.Call):
+                    fn = child.func
+                    name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
+                    if name in _BLOCKING_DNS_CALLS:
+                        lines.append(child.lineno)
+                visit(child, in_async)
+
+    visit(tree, False)
+    return lines
+
+
+def test_no_blocking_dns_in_async_functions():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _blocking_dns_in_async(tree)]
+    assert not offenders, (
+        "DNS resolution called directly inside an async function blocks the "
+        "event loop for every chat stream until the resolver answers.\n"
+        "Fix: `await asyncio.to_thread(validate_url, url, block_unresolved=True)`.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_dns_gate_catches_the_redirect_hop_shape():
+    """Negative control (§28): the pre-fix redirect loop, and the fix passes."""
+    bad = (
+        "async def hops(client, url):\n"
+        "    validate_url(url, block_unresolved=True)\n"
+        "    ips = socket.getaddrinfo(url, None)\n"
+        "    def later():\n"
+        "        return validate_url(url)\n"
+        "    return later\n"
+    )
+    good = (
+        "async def hops(client, url):\n"
+        "    await asyncio.to_thread(validate_url, url, block_unresolved=True)\n"
+        "def sync_path(url):\n"
+        "    validate_url(url)\n"
+    )
+    assert _blocking_dns_in_async(ast.parse(bad)) == [2, 3]
+    assert _blocking_dns_in_async(ast.parse(good)) == []
+
+
 # ── 2g. Voice never hands the conversation to a Realtime/Live API ─────────
 #
 # OpenAI Realtime and Gemini Live run their own tool loop; Kazma cannot keep
