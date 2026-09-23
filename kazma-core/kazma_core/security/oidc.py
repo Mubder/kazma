@@ -9,6 +9,8 @@ Configure::
     # optional role claim mapping
     KAZMA_OIDC_ROLE_CLAIM=role
     KAZMA_OIDC_DEFAULT_ROLE=operator
+    # optional: the claim naming the user's Kazma tenant (off by default)
+    KAZMA_OIDC_TENANT_CLAIM=tenant
 
 Flow: browser → /api/auth/oidc/start → IdP → /api/auth/oidc/callback
 → opaque kazma-session with bound username/role.
@@ -36,6 +38,7 @@ __all__ = [
     "fetch_discovery",
     "oidc_configured",
     "oidc_role_from_claims",
+    "oidc_tenant_from_claims",
 ]
 
 logger = logging.getLogger(__name__)
@@ -57,6 +60,27 @@ class OidcConfig:
         self.scopes = (os.environ.get("KAZMA_OIDC_SCOPES") or "openid profile email").strip()
         self.role_claim = (os.environ.get("KAZMA_OIDC_ROLE_CLAIM") or "role").strip()
         self.default_role = (os.environ.get("KAZMA_OIDC_DEFAULT_ROLE") or "operator").strip()
+        # Opt-in: the claim naming the user's Kazma tenant. Unset = every OIDC
+        # user shares the default tenant, as before.
+        self.tenant_claim = (os.environ.get("KAZMA_OIDC_TENANT_CLAIM") or "").strip()
+
+
+def oidc_tenant_from_claims(claims: dict[str, Any], cfg: OidcConfig) -> str | None:
+    """The tenant named by ``KAZMA_OIDC_TENANT_CLAIM``, if configured and valid."""
+    if not cfg.tenant_claim:
+        return None
+    value = claims.get(cfg.tenant_claim)
+    if isinstance(value, list):
+        value = value[0] if len(value) == 1 else None
+    if not value:
+        return None
+    from kazma_core.security.platform_rbac import valid_tenant_id
+
+    tenant = str(value).strip()
+    if not valid_tenant_id(tenant):
+        logger.warning("[oidc] ignoring malformed tenant claim %r", tenant[:64])
+        return None
+    return tenant
 
 
 async def fetch_discovery(issuer: str) -> dict[str, Any]:
@@ -205,6 +229,7 @@ async def exchange_code(code: str, state: str) -> dict[str, Any]:
             or "oidc-user"
         ),
         "user_id": str(claims.get("sub") or claims.get("email") or "oidc"),
+        "tenant_id": oidc_tenant_from_claims(claims, cfg),
         "tokens": {"token_type": tokens.get("token_type"), "expires_in": tokens.get("expires_in")},
     }
 

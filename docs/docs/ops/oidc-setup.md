@@ -26,7 +26,15 @@ KAZMA_OIDC_REDIRECT_URI=https://kazma.example.com/api/auth/oidc/callback
 KAZMA_OIDC_SCOPES=openid profile email
 KAZMA_OIDC_ROLE_CLAIM=role          # or groups / custom claim
 KAZMA_OIDC_DEFAULT_ROLE=operator    # viewer | operator | admin
+KAZMA_OIDC_TENANT_CLAIM=org         # optional: claim naming the user's Kazma tenant
 ```
+
+`KAZMA_OIDC_TENANT_CLAIM` is off by default, and then every OIDC user shares the
+`default` tenant. When set, the named claim (a slug of letters, digits, `.`, `_`,
+`-`; a one-element list is accepted) is stored in the user's session and every
+request runs under that tenant: its secrets, memory, sessions and threads. A
+malformed value is ignored and logged. Local users get the same binding from
+`tenant_id` on `POST /api/saas/users`.
 
 ## IdP app registration
 

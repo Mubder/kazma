@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import secrets
 from dataclasses import dataclass
 from typing import Any
@@ -32,6 +33,7 @@ __all__ = [
     "list_users",
     "require_role",
     "role_allows",
+    "valid_tenant_id",
 ]
 
 logger = logging.getLogger(__name__)
@@ -84,6 +86,20 @@ class PlatformUser:
 
     def has_at_least(self, role: str) -> bool:
         return ROLE_RANK.get(self.role, 0) >= ROLE_RANK.get(role, 999)
+
+    @property
+    def tenant_id(self) -> str | None:
+        """The tenant this user's requests run under, if bound (``meta.tenant_id``)."""
+        value = (self.meta or {}).get("tenant_id")
+        return str(value) if value else None
+
+
+_TENANT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
+
+
+def valid_tenant_id(value: str) -> bool:
+    """A tenant id is a short slug: it keys secrets, memory and sessions."""
+    return bool(_TENANT_ID_RE.match(value or ""))
 
 
 def role_allows(role: str, path: str, method: str = "GET") -> bool:
@@ -219,23 +235,38 @@ def create_local_user(
     *,
     role: str = "operator",
     user_id: str | None = None,
+    tenant_id: str | None = None,
 ) -> PlatformUser:
-    """Create or update a local username/password user."""
+    """Create or update a local username/password user.
+
+    ``tenant_id`` binds the user's requests to that tenant (their sessions
+    carry it and the tenant middleware scopes every request by it). Omitted
+    on an update, an existing binding is kept.
+    """
     if role not in ROLE_RANK:
         raise ValueError(f"Invalid role {role!r}; use viewer|operator|admin")
+    if tenant_id is not None and not valid_tenant_id(tenant_id):
+        raise ValueError(f"Invalid tenant_id {tenant_id!r}")
     users = _load_users_from_store()
     uid = user_id or secrets.token_hex(8)
     ph = _hash_password(password)
+    meta: dict[str, Any] = {}
     found = False
     for u in users:
         if str(u.get("username", "")).lower() == username.lower():
             u["password_hash"] = ph
             u["role"] = role
             u["enabled"] = True
+            meta = dict(u.get("meta") or {})
+            if tenant_id is not None:
+                meta["tenant_id"] = tenant_id
+            u["meta"] = meta
             uid = str(u.get("user_id") or uid)
             found = True
             break
     if not found:
+        if tenant_id is not None:
+            meta["tenant_id"] = tenant_id
         users.append(
             {
                 "user_id": uid,
@@ -243,12 +274,15 @@ def create_local_user(
                 "password_hash": ph,
                 "role": role,
                 "enabled": True,
-                "meta": {},
+                "meta": meta,
             }
         )
     _save_users_to_store(users)
-    logger.warning("[platform_rbac] user upsert username=%s role=%s", username, role)
-    return PlatformUser(user_id=uid, username=username, role=role, enabled=True)
+    logger.warning(
+        "[platform_rbac] user upsert username=%s role=%s tenant=%s",
+        username, role, meta.get("tenant_id") or "-",
+    )
+    return PlatformUser(user_id=uid, username=username, role=role, enabled=True, meta=meta)
 
 
 def authenticate_local_user(username: str, password: str) -> PlatformUser | None:

@@ -66,6 +66,7 @@ def create_saas_router() -> APIRouter:
                 "username": u.username,
                 "role": u.role,
                 "enabled": u.enabled,
+                "tenant_id": u.tenant_id,
             }
             for u in list_users()
         ]
@@ -90,10 +91,16 @@ def create_saas_router() -> APIRouter:
             )
         if role not in ("viewer", "operator", "admin"):
             return JSONResponse({"error": "role must be viewer|operator|admin"}, status_code=400)
+        tenant_id = str(body.get("tenant_id") or "").strip() or None
         try:
-            from kazma_core.security.platform_rbac import create_local_user
+            from kazma_core.security.platform_rbac import create_local_user, valid_tenant_id
 
-            user = create_local_user(username, password, role=role)
+            if tenant_id is not None and not valid_tenant_id(tenant_id):
+                return JSONResponse(
+                    {"error": "tenant_id: letters, digits, '.', '_' or '-', up to 64"},
+                    status_code=400,
+                )
+            user = create_local_user(username, password, role=role, tenant_id=tenant_id)
             return JSONResponse({
                 "status": "ok",
                 "user": {
@@ -101,6 +108,7 @@ def create_saas_router() -> APIRouter:
                     "username": user.username,
                     "role": user.role,
                     "enabled": user.enabled,
+                    "tenant_id": user.tenant_id,
                 },
             })
         except Exception as exc:

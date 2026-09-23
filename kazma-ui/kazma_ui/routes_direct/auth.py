@@ -143,6 +143,7 @@ def register_auth_routes(self: Any) -> None:
         session_user = None
         session_role = "admin"
         session_uid = None
+        session_tenant = None
         authenticated = False
 
         # Path A: multi-user local username + password (Phase 4.4)
@@ -156,6 +157,7 @@ def register_auth_routes(self: Any) -> None:
                     session_user = pu.username
                     session_role = pu.role
                     session_uid = pu.user_id
+                    session_tenant = pu.tenant_id
             except Exception:
                 logger.debug("[auth] local user auth failed", exc_info=True)
 
@@ -198,6 +200,7 @@ def register_auth_routes(self: Any) -> None:
                 username=session_user,
                 role=session_role,
                 user_id=session_uid,
+                tenant_id=session_tenant,
             )
             resp.set_cookie(
                 key=SESSION_COOKIE,
@@ -260,6 +263,7 @@ def register_auth_routes(self: Any) -> None:
                 username=result.get("username"),
                 role=result.get("role") or "operator",
                 user_id=result.get("user_id"),
+                tenant_id=result.get("tenant_id"),
             )
             resp = RedirectResponse(url="/", status_code=302)
             resp.set_cookie(
