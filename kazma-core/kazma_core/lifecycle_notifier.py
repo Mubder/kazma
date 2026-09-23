@@ -228,10 +228,8 @@ async def notify_lifecycle(event: str, detail: str = "") -> None:
         )
         sends: list[Any] = [a.send(msg) for a in targets]
         if "telegram-group" in channels:
-            loop = asyncio.get_running_loop()
             sends.append(
-                loop.run_in_executor(
-                    None, lambda t=text: _telegram_direct(t, group_route=True)
+                asyncio.to_thread(lambda t=text: _telegram_direct(t, group_route=True)
                 )
             )
         if not sends:

@@ -334,14 +334,13 @@ class MCPClient:
             proc = self._process
             if proc is None or proc.stdin is None:
                 return
-            loop = asyncio.get_running_loop()
             try:
                 await asyncio.wait_for(
-                    loop.run_in_executor(None, proc.stdin.write, raw.encode()),
+                    asyncio.to_thread(proc.stdin.write, raw.encode()),
                     timeout=self._config.timeout,
                 )
                 await asyncio.wait_for(
-                    loop.run_in_executor(None, proc.stdin.flush),
+                    asyncio.to_thread(proc.stdin.flush),
                     timeout=self._config.timeout,
                 )
             except asyncio.TimeoutError as exc:
@@ -361,19 +360,18 @@ class MCPClient:
         # stdio responses have no background JSON-RPC dispatcher here, so
         # serialize a complete write/read transaction to preserve response
         # ownership when callers execute tools concurrently.
-        loop = asyncio.get_running_loop()
         async with self._read_lock:
             try:
                 await asyncio.wait_for(
-                    loop.run_in_executor(None, proc.stdin.write, raw.encode()),
+                    asyncio.to_thread(proc.stdin.write, raw.encode()),
                     timeout=self._config.timeout if self._config else 90.0,
                 )
                 await asyncio.wait_for(
-                    loop.run_in_executor(None, proc.stdin.flush),
+                    asyncio.to_thread(proc.stdin.flush),
                     timeout=self._config.timeout if self._config else 90.0,
                 )
                 line = await asyncio.wait_for(
-                    loop.run_in_executor(None, proc.stdout.readline),
+                    asyncio.to_thread(proc.stdout.readline),
                     timeout=self._config.timeout if self._config else 90.0,
                 )
             except asyncio.TimeoutError as exc:

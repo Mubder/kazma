@@ -274,8 +274,7 @@ async def _deliver(text: str) -> bool:
     sent_group = False
     if "telegram-group" in channels:
         try:
-            sent_group = await asyncio.get_running_loop().run_in_executor(
-                None, lambda t=text: _telegram_direct(t, group_route=True)
+            sent_group = await asyncio.to_thread(lambda t=text: _telegram_direct(t, group_route=True)
             )
         except Exception:  # noqa: BLE001
             logger.warning("[ops_alerts] telegram-group delivery failed", exc_info=True)
@@ -323,8 +322,7 @@ async def _deliver(text: str) -> bool:
             channels,
         )
         return True
-    return await asyncio.get_running_loop().run_in_executor(
-        None, _telegram_direct, text
+    return await asyncio.to_thread(_telegram_direct, text
     )
 
 

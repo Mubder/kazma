@@ -135,5 +135,4 @@ async def run_python(code: str, timeout: int = 30) -> str:
     """Run *code* in an E2B microVM. Raises on SDK/config failure."""
     if not e2b_enabled():
         raise RuntimeError("E2B is not enabled")
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, lambda: _run_sync(code, int(timeout)))
+    return await asyncio.to_thread(lambda: _run_sync(code, int(timeout)))

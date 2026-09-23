@@ -764,6 +764,49 @@ def test_discarded_fetch_gate_catches_the_audited_shape():
     assert _discarded_fetches(js) == [4, 16]
 
 
+# ── 2f. Work sent to a thread keeps the caller's context (2026-09-22) ─────
+#
+# ``loop.run_in_executor`` does not copy ContextVars; ``asyncio.to_thread``
+# does. The tenant, per-task workspace scope, thread id and HITL flags are all
+# ContextVars, so a sync tool run through the executor read no tenant and the
+# global workspace (tests/test_sync_tool_context.py). Every call is now
+# to_thread; a custom executor drops the context just the same, so the whole
+# API is off-limits in product code.
+
+
+def _context_dropping_executor_calls(tree: ast.AST) -> list[int]:
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "run_in_executor"
+    ]
+
+
+def test_no_context_dropping_executor_calls():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _context_dropping_executor_calls(tree)]
+    assert not offenders, (
+        "run_in_executor does not carry ContextVars into the thread — the "
+        "tenant, workspace scope and HITL flags are lost (audit 2026-09-22).\n"
+        "Fix: `await asyncio.to_thread(fn, *args)`.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_executor_gate_catches_the_tool_registry_shape():
+    """Negative control (§28): the pre-fix sync-tool path, and the fix passes."""
+    bad = "async def f(tool, args):\n    loop = asyncio.get_running_loop()\n    return await loop.run_in_executor(None, lambda: tool(**args))\n"
+    good = "async def f(tool, args):\n    return await asyncio.to_thread(tool, **args)\n"
+    assert _context_dropping_executor_calls(ast.parse(bad)) == [3]
+    assert _context_dropping_executor_calls(ast.parse(good)) == []
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

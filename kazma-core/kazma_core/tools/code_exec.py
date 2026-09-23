@@ -460,8 +460,7 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
                     except Exception:
                         pass
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _run_sync)
+        return await asyncio.to_thread(_run_sync)
 
 
 async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
@@ -554,8 +553,7 @@ async def _run_docker_jail(code_file: Path, tmp_dir: str, timeout: int) -> str:
                 p.wait()
                 return f"[Exit code: 124 — docker timed out after {timeout}s]"
 
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _run_docker_sync)
+        return await asyncio.to_thread(_run_docker_sync)
 
 
 async def python_exec(code: str, timeout: int = DEFAULT_TIMEOUT) -> str:

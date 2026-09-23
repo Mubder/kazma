@@ -1352,7 +1352,7 @@ async def main() -> None:
 
     try:
         while agent._running:
-            user_input = await asyncio.get_running_loop().run_in_executor(None, lambda: input("kazma> "))
+            user_input = await asyncio.to_thread(lambda: input("kazma> "))
             if user_input.strip().lower() in ("quit", "exit"):
                 break
             if not user_input.strip():

@@ -827,7 +827,6 @@ class SettingsRouterBuilder:
                 category="embedding",
             )
 
-            loop = asyncio.get_running_loop()
 
             def _progress(done: int, total: int) -> None:
                 _get_sm()._cs.set(
@@ -846,7 +845,7 @@ class SettingsRouterBuilder:
 
             async def _run() -> None:
                 try:
-                    summary = await loop.run_in_executor(None, rebuild_embeddings, _progress)
+                    summary = await asyncio.to_thread(rebuild_embeddings, _progress)
                     _get_sm()._cs.set(
                         REBUILD_STATUS_KEY,
                         {

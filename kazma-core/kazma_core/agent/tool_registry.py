@@ -764,8 +764,7 @@ class LocalToolRegistry:
                     result = await tool.func(**valid_params)
                 else:
                     # Run sync functions in a thread pool
-                    loop = asyncio.get_running_loop()
-                    result = await loop.run_in_executor(None, lambda: tool.func(**valid_params))
+                    result = await asyncio.to_thread(lambda: tool.func(**valid_params))
 
                 duration_ms = (time.monotonic() - start) * 1000
                 logger.info("Tool '%s' executed in %.0fms", tool_name, duration_ms)
