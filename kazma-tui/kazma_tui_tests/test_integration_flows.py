@@ -360,7 +360,6 @@ class TestNoModelSwitchingIntegration:
         [
             "app.py",
             "header.py",
-            "footer.py",
             "dashboard.py",
             # chat.py EXEMPT: it has a deliberate /model set <name> command
             # (VAL-TUI-032 predates the feature; display-only widgets keep
@@ -414,7 +413,6 @@ class TestEnglishOnlyComprehensive:
             "__main__.py",
             "app.py",
             "header.py",
-            "footer.py",
             "dashboard.py",
             "chat.py",
         ],
