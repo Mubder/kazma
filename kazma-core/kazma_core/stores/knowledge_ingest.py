@@ -694,10 +694,13 @@ _SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 
 def _extract_urls_from_sitemap(xml_text: str) -> list[str]:
     """Pull every ``<loc>`` URL out of a sitemap XML (index or leaf)."""
+    from kazma_core.security.safe_xml import UnsafeXMLError, parse_untrusted_xml
+
     urls: list[str] = []
     try:
-        root = ET.fromstring(xml_text)
-    except ET.ParseError as exc:
+        # Fetched from the web: DTDs/entities are refused before parsing.
+        root = parse_untrusted_xml(xml_text)
+    except (ET.ParseError, UnsafeXMLError) as exc:
         logger.debug("[kb_discover] sitemap parse failed: %s", exc)
         return urls
     # Sitemap URLs live in <url><loc> or <sitemap><loc>; just grab all <loc>.
