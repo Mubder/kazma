@@ -268,16 +268,10 @@ All 341 emptied memories on the live install were restored on 2026-09-23:
 | A failed restore drill did not say which check failed | `DrillResult.summary()` names failed and unverified checks |
 | 70 event-loop stalls (one forced restart): HITL watchdog, X scheduler/poller/client, per-request session lookup, queue handlers, self-improvement recall, GC | `test_loop_stall_helpers_are_not_called_on_the_loop`; `tests/test_web_session_cache.py`; loop stalls now counted in the weekly report |
 | 169 health probes failed on port exhaustion with nothing recording who held the ports | the guard logs `health.port_exhaustion` (states + top owners) — `tests/test_guard_port_exhaustion.py` |
+| Restic retention never deleted a snapshot: `forget` grouped by host+paths and every backup is a new path (199 snapshots, 199 groups) | `forget --group-by host,tags`, daily retention 30 (operator's choice); `test_forget_applies_the_policy_per_kind_not_per_path` runs real restic, and its control shows the old grouping keeping all. restic's dry run on the live repo: keep 90, remove 110; the kept 2026-08-29 snapshot was checked to still hold the 69 recovered memories |
 
 **Still open — honest list:**
 
-- **Restic retention has never deleted a snapshot (decision pending).**
-  `forget` uses restic's default grouping (host + paths), and every universal
-  backup is a new `backups/universal/<epoch>` path, so 199 snapshots formed
-  199 groups of one and "keep 7 daily / 8 weekly / 12 monthly" kept all of
-  them. Grouping by host + tags applies the documented policy and would remove
-  141 of 199 on the first run (keep-daily 30 instead: 113). It deletes
-  backups, so it waits for the operator; the local repository is 4.6 GB.
 - **Port exhaustion is diagnosed, not fixed.** The next occurrence records
   the processes holding sockets (338 BOUND sockets, 200 of them Docker's, at
   the time of writing — not at a failure).

@@ -1056,7 +1056,8 @@ async def _handle_connector_health(payload: dict[str, Any]) -> bool:
 async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
     """Apply retention and verify the restic repositories.
 
-    Retention here is time-based (7 daily / 8 weekly / 12 monthly) rather
+    Retention here is time-based (24 hourly / 30 daily / 8 weekly / 12
+    monthly, grouped by kind -- see restic_repo.FORGET_GROUP_BY) rather
     than the count-based rule the legacy generations use. "Keep the last
     30" is thirty days or thirty hours depending on how often the loop
     happened to run, which is not a recovery guarantee.

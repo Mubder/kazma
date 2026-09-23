@@ -103,6 +103,42 @@ def test_forget_prune_runs_and_keeps_the_recent_snapshot(repo, payload):
     assert snaps.ok and snaps.detail["count"] >= 1
 
 
+def _three_universal_backups(repo, tmp_path):
+    """Three snapshots of one KIND, each of a new directory -- the shape of
+    backups/universal/<epoch>/, within one hour."""
+    for i in range(3):
+        d = tmp_path / f"universal-{i}"
+        d.mkdir()
+        (d / "f.txt").write_text(str(i), encoding="utf-8")
+        assert rr.backup(repo, _PW, [str(d)], tags=["kazma", "universal"]).ok
+
+
+def test_forget_applies_the_policy_per_kind_not_per_path(repo, tmp_path):
+    """restic groups by host+paths unless told otherwise, and every universal
+    backup is a new directory: each snapshot was a group of one, a group keeps
+    its newest, and retention deleted nothing, ever (199 of 199 kept on the
+    live install, 2026-09-23). Three in one hour: the hourly rule keeps the
+    newest, and restic also keeps the oldest while a rule's buckets are not
+    yet full -- so the middle one goes."""
+    import json
+
+    _three_universal_backups(repo, tmp_path)
+    res = rr.forget_prune(repo, _PW)
+    assert res.ok, res.error
+    listed = rr.snapshots(repo, _PW)
+    kept = {p.rsplit("\\", 1)[-1].rsplit("/", 1)[-1] for s in json.loads(listed.stdout) for p in s["paths"]}
+    assert "universal-2" in kept, "the newest snapshot must survive"
+    assert "universal-1" not in kept, f"retention removed nothing: {sorted(kept)}"
+
+
+def test_default_grouping_keeps_every_snapshot(repo, tmp_path):
+    """Negative control (§28): the pre-fix command on the same repository."""
+    _three_universal_backups(repo, tmp_path)
+    res = rr._run(["forget", "--prune", *rr.KEEP_POLICY], repo, _PW, action="forget")
+    assert res.ok, res.error
+    assert rr.snapshots(repo, _PW).detail["count"] == 3
+
+
 def test_the_policy_is_time_based_not_count_based():
     """Retention by count gives no guarantee: thirty backups is thirty days
     or thirty hours depending on how often the loop happened to run."""
