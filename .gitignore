@@ -106,7 +106,6 @@ kazma.local.yaml
 *.sqlite-shm
 
 # Kubernetes secrets (never commit credentials)
-kubernetes/*secrets*.yaml
 
 # Research / smoke scratch (not production)
 research/kb/

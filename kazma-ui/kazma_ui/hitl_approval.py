@@ -1,12 +1,15 @@
-"""HITL (Human-in-the-Loop) approval API helpers.
+"""HITL (Human-in-the-Loop) approval helpers.
 
-Provides ``GET /api/pending-approvals`` which inspects the LangGraph
-checkpointer for threads that are currently paused on an ``interrupt()``
-call, extracts the pending tool execution details (tool name + arguments),
-and returns them so the frontend can render Approve / Deny cards.
+``_get_pending_approvals`` inspects the LangGraph checkpointer for threads
+paused on an ``interrupt()`` and extracts the pending tool call, so a surface
+can render Approve / Deny cards. The live ``GET /api/pending-approvals`` (and
+its clear) are registered in ``kazma_ui/routes_direct/misc.py``; they use this
+as the thin fallback when the gate registry is off.
 
-The matching ``POST /api/approve/{thread_id}`` endpoint lives in ``app.py``
-inside the gateway setup closure (it needs access to the compiled graph).
+This module used to carry a second copy of that route in a router factory no
+app mounted — its tests exercised the copy production never ran. The factory
+was removed on 2026-09-23 and its tests now drive the live route
+(``tests/test_hitl_approval_ui.py``).
 """
 
 from __future__ import annotations
@@ -14,13 +17,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
-from kazma_core.errors import safe_error
-
 logger = logging.getLogger(__name__)
 
-__all__ = ["create_hitl_approval_router"]
+__all__: list[str] = []
 
 
 def _extract_interrupt_info(task: Any) -> dict[str, Any] | None:
@@ -267,93 +266,3 @@ async def _get_pending_approvals(
                 break
 
     return approvals
-
-
-async def clear_pending_approvals(graph: Any, checkpointer: Any) -> int:
-    """Clear/delete checkpoints for all threads currently in an interrupt state."""
-    pending = await _get_pending_approvals(graph, checkpointer)
-    cleared = 0
-    for item in pending:
-        thread_id = item.get("thread_id")
-        if thread_id:
-            try:
-                if hasattr(checkpointer, "adelete_thread"):
-                    await checkpointer.adelete_thread(thread_id)
-                elif hasattr(checkpointer, "_saver") and hasattr(checkpointer._saver, "adelete_thread"):
-                    await checkpointer._saver.adelete_thread(thread_id)
-                cleared += 1
-            except Exception as exc:
-                logger.warning("[HITL] Failed to delete checkpoint thread=%s: %s", thread_id, exc)
-    return cleared
-
-
-def create_hitl_approval_router(graph: Any, checkpointer: Any) -> APIRouter:
-    """Create a router exposing the pending-approvals listing endpoint.
-
-    NOTE (SoT): the LIVE /api/pending-approvals routes are registered in
-    kazma_ui/routes_direct.py — this factory is kept because
-    tests/test_hitl_approval_ui.py builds a test app with it. Do not mount
-    both in the real app (duplicate routes); if you change one, mirror the
-    other or fold this factory away by porting its tests to routes_direct.
-
-    Args:
-        graph:        Compiled LangGraph instance (must support ``aget_state``).
-        checkpointer: The checkpointer with a ``conn`` for thread enumeration.
-
-    Returns:
-        ``APIRouter`` with ``GET /api/pending-approvals`` mounted.
-    """
-    router = APIRouter(tags=["hitl"])
-
-    @router.get("/api/pending-approvals")
-    async def list_pending_approvals(request: Request) -> JSONResponse:
-        """List all threads currently waiting for HITL tool approval.
-
-        Returns:
-            ``{"pending": [{"thread_id", "tool_name", "arguments", "message"}], "count": N}``
-        """
-        try:
-            pending = await _get_pending_approvals(graph, checkpointer)
-            try:
-                from kazma_core.mcp.spec_client import list_sampling_pending
-
-                pending = list(pending) + list(list_sampling_pending())
-            except Exception:
-                pass
-            # A standalone router without tenant middleware is single-tenant.
-            # When middleware establishes a tenant, never expose a checkpoint
-            # unless that tenant owns its session projection.
-            from kazma_core.tenant_context import get_current_tenant_id
-
-            if get_current_tenant_id() is not None:
-                from kazma_ui.session_manager import get_session_manager
-
-                store = get_session_manager()
-                pending = [
-                    item
-                    for item in pending
-                    if store.get_by_thread_id(str(item["thread_id"])) is not None
-                ]
-            return JSONResponse({"pending": pending, "count": len(pending)})
-        except Exception as exc:
-            logger.exception("[HITL] Failed to list pending approvals")
-            return JSONResponse(
-                {"pending": [], "count": 0, "error": safe_error(exc)},
-                status_code=500,
-            )
-
-    @router.post("/api/pending-approvals/clear")
-    @router.delete("/api/pending-approvals")
-    async def clear_pending_endpoint(request: Request) -> JSONResponse:
-        """Clear all pending approvals by deleting their interrupted checkpoints."""
-        try:
-            cleared = await clear_pending_approvals(graph, checkpointer)
-            return JSONResponse({"status": "ok", "cleared": cleared})
-        except Exception as exc:
-            logger.exception("[HITL] Failed to clear pending approvals")
-            return JSONResponse(
-                {"status": "error", "error": safe_error(exc)},
-                status_code=500,
-            )
-
-    return router

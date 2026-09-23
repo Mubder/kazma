@@ -1056,8 +1056,6 @@ def register_misc_routes(self: Any) -> None:
             return _JSONResponse({"error": "Internal error"}, status_code=500)
     @self.app.get("/api/pending-approvals")
     async def list_pending_approvals() -> _JSONResponse:
-        from kazma_ui.session_manager import get_session_manager
-
         graph = _resolve_hitl_graph()
         checkpointer = _resolve_hitl_checkpointer()
         sampling: list[Any] = []
@@ -1081,26 +1079,31 @@ def register_misc_routes(self: Any) -> None:
 
             registry_items = await pending_items_from_registry()
             if registry_items is not None:
-                pending = [
-                    item
-                    for item in registry_items
-                    if get_session_manager().get_by_thread_id(
-                        str(item.get("thread_id") or "")
-                    )
-                    is not None
-                    or _is_own_bridge_gate(item)
-                ]
+                candidates = list(registry_items)
             else:
                 # Kill-switch / registry outage: checkpoint scan is the
                 # thin execution fallback (live interrupt ⇒ pending card).
                 from kazma_ui.hitl_approval import _get_pending_approvals
 
-                pending = [
-                    item
-                    for item in await _get_pending_approvals(graph, checkpointer)
-                    if get_session_manager().get_by_thread_id(str(item["thread_id"]))
-                    is not None
-                ]
+                candidates = list(await _get_pending_approvals(graph, checkpointer))
+            # One ownership answer for every thread route (thread_ownership):
+            # off the event loop, and closed when the session store fails.
+            from kazma_ui.thread_ownership import owned_threads_async
+
+            owned = await owned_threads_async(
+                str(item.get("thread_id") or "") for item in candidates
+            )
+            if owned is None:
+                return _JSONResponse(
+                    {"pending": [], "count": 0, "error": "ownership check failed"},
+                    status_code=403,
+                )
+            owned_set = set(owned)
+            pending = [
+                item
+                for item in candidates
+                if str(item.get("thread_id") or "") in owned_set or _is_own_bridge_gate(item)
+            ]
             pending = list(pending) + list(sampling)
             return _JSONResponse({"pending": pending, "count": len(pending)})
         except Exception:

@@ -123,7 +123,6 @@ kazma/
 ├── kazma-cli/               # `kazma` CLI
 ├── kazma-skills/            # Native skill packages + YAML manifests
 ├── kazma-data/              # Runtime DBs (local; do not commit secrets)
-└── kubernetes/              # Sample manifests
 ```
 
 

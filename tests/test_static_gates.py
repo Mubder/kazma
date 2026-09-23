@@ -807,6 +807,44 @@ def test_executor_gate_catches_the_tool_registry_shape():
     assert _context_dropping_executor_calls(ast.parse(good)) == []
 
 
+# ── 2g. Voice never hands the conversation to a Realtime/Live API ─────────
+#
+# OpenAI Realtime and Gemini Live run their own tool loop; Kazma cannot keep
+# them codec-only without bypassing HITL, turn_failed and the commitment
+# layer. voice/realtime_codec.py described that policy behind a
+# KAZMA_REALTIME_CODEC flag nothing read (removed 2026-09-23). The policy is
+# unconditional, so it is enforced here instead of in a flag.
+
+_REALTIME_API_MARKERS = re.compile(
+    r"v1/realtime|gpt-4o[\w.-]*realtime|BidiGenerateContent|live\.connect\(|aio\.live\b",
+    re.IGNORECASE,
+)
+
+
+def _realtime_api_uses(text: str) -> list[int]:
+    return [i for i, line in enumerate(text.splitlines(), 1) if _REALTIME_API_MARKERS.search(line)]
+
+
+def test_no_realtime_or_live_conversation_apis():
+    offenders: list[str] = []
+    for path in _product_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        offenders += [f"{_rel(path)}:{line}" for line in _realtime_api_uses(text)]
+    assert not offenders, (
+        "A Realtime/Live API owns its own tool loop and would bypass HITL. "
+        "Voice uses REST STT/TTS only (voice/mode.py).\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_realtime_gate_catches_a_live_session():
+    """Negative control (§28)."""
+    assert _realtime_api_uses(
+        'url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"\n'
+        "session = await client.aio.live.connect(model=m)\n"
+        "text = await transcribe(audio)\n"
+    ) == [1, 2]
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

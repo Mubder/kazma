@@ -181,7 +181,7 @@ park and the D-wontfix table (CHANGELOG + this file).
 | A1 | Done — `kazma_core/mcp/spec_client.py` + manager methods + native tools |
 | A2 | Done — `computer_use_planners.py`; vision-JSON fallback |
 | A3 | Done — browser `publishTrack` of TTS; `tts_in_room` on LiveKit status |
-| A4 | Done — REST codec + skip Realtime/Live (`KAZMA_REALTIME_CODEC=1`) |
+| A4 | Done — Realtime/Live never used; voice is REST STT/TTS. (The `KAZMA_REALTIME_CODEC` flag listed here had no caller and was removed 2026-09-23.) |
 | B1 | Done — Retry-After backoff on generic + Anthropic; `transient` preserved |
 | B2 | Done — word-boundary classify; `models.defaults.<kind>` wins |
 | B3 | Done — `tool_trace` + `computer_use` HITL in eval pack |

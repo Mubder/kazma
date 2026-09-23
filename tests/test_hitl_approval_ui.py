@@ -290,57 +290,94 @@ class TestGetPendingApprovals:
 # ══════════════════════════════════════════════════════════════════════════
 
 
+def _interrupted(tool: str, path: str) -> MockStateSnapshot:
+    return MockStateSnapshot(
+        next_nodes=("tool_worker",),
+        tasks=[MockTask(interrupts=[
+            MockInterrupt({
+                "type": "hitl_approval",
+                "tool": tool,
+                "args": {"path": path},
+                "message": "write file",
+            })
+        ])],
+    )
+
+
+def _live_client(monkeypatch, graph, checkpointer, *, owned=("t-1",), registry=None):
+    """The LIVE route (routes_direct/misc.py), not a test-only copy.
+
+    These tests used to drive hitl_approval.create_hitl_approval_router, a
+    second implementation of this route that no app mounted (removed
+    2026-09-23). ``registry=None`` means the gate registry is off, so the
+    route falls back to scanning checkpoints.
+    """
+    from unittest.mock import MagicMock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    import kazma_ui.hitl_gate_bridge as bridge
+    import kazma_ui.session_manager as sm
+    from kazma_ui.routes_direct.misc import register_misc_routes
+
+    class _TenantStore:
+        def get_by_thread_id(self, thread_id: str):
+            return object() if thread_id in owned else None
+
+    async def _registry():
+        return registry
+
+    monkeypatch.setattr(sm, "get_session_manager", lambda: _TenantStore())
+    monkeypatch.setattr(bridge, "pending_items_from_registry", _registry)
+    app = FastAPI()
+    builder = MagicMock()
+    builder.app = app
+    builder._hitl_state = {"graph": graph, "checkpointer": checkpointer}
+    builder._graph_holder = {"graph": graph}
+    register_misc_routes(builder)
+    return TestClient(app)
+
+
 class TestPendingApprovalsEndpoint:
-    """Test the GET /api/pending-approvals endpoint through FastAPI."""
+    """GET /api/pending-approvals — the route production serves."""
 
-    def test_endpoint_returns_empty_when_no_checkpointer(self) -> None:
-        """When the graph/checkpointer are None, return 200 with empty pending."""
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from kazma_ui.hitl_approval import create_hitl_approval_router
-
-        app = FastAPI()
-        app.include_router(create_hitl_approval_router(graph=None, checkpointer=None))
-
-        with TestClient(app) as client:
+    def test_not_ready_answers_503_with_nothing_pending(self, monkeypatch) -> None:
+        with _live_client(monkeypatch, None, None) as client:
             resp = client.get("/api/pending-approvals")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["pending"] == []
-            assert data["count"] == 0
+        assert resp.status_code == 503
+        assert resp.json()["pending"] == [] and resp.json()["count"] == 0
 
-    def test_endpoint_returns_pending_list(self) -> None:
-        """With interrupted threads, endpoint returns them as JSON."""
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-        from kazma_ui.hitl_approval import create_hitl_approval_router
+    def test_checkpoint_fallback_lists_the_callers_pending_call(self, monkeypatch) -> None:
+        graph = MockGraph({"t-1": _interrupted("file_write", "/x")})
+        with _live_client(monkeypatch, graph, MockCheckpointer(thread_ids=["t-1"])) as client:
+            data = client.get("/api/pending-approvals").json()
+        assert data["count"] == 1
+        assert data["pending"][0]["thread_id"] == "t-1"
+        assert data["pending"][0]["tool_name"] == "file_write"
+        assert data["pending"][0]["arguments"]["path"] == "/x"
 
+    def test_another_tenants_pending_call_is_not_listed(self, monkeypatch) -> None:
         graph = MockGraph({
-            "t-1": MockStateSnapshot(
-                next_nodes=("tool_worker",),
-                tasks=[MockTask(interrupts=[
-                    MockInterrupt({
-                        "type": "hitl_approval",
-                        "tool": "file_write",
-                        "args": {"path": "/x"},
-                        "message": "write file",
-                    })
-                ])],
-            ),
+            "t-1": _interrupted("file_write", "/mine"),
+            "t-other": _interrupted("shell_exec", "/theirs"),
         })
-        checkpointer = MockCheckpointer(thread_ids=["t-1"])
+        checkpointer = MockCheckpointer(thread_ids=["t-1", "t-other"])
+        with _live_client(monkeypatch, graph, checkpointer) as client:
+            data = client.get("/api/pending-approvals").json()
+        assert [p["thread_id"] for p in data["pending"]] == ["t-1"]
 
-        app = FastAPI()
-        app.include_router(create_hitl_approval_router(graph=graph, checkpointer=checkpointer))
-
-        with TestClient(app) as client:
-            resp = client.get("/api/pending-approvals")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["count"] == 1
-            assert data["pending"][0]["thread_id"] == "t-1"
-            assert data["pending"][0]["tool_name"] == "file_write"
-            assert data["pending"][0]["arguments"]["path"] == "/x"
+    def test_registry_items_are_filtered_the_same_way(self, monkeypatch) -> None:
+        registry = [
+            {"thread_id": "t-1", "tool_name": "file_write"},
+            {"thread_id": "t-other", "tool_name": "shell_exec"},
+        ]
+        graph = MockGraph({})
+        with _live_client(
+            monkeypatch, graph, MockCheckpointer(thread_ids=[]), registry=registry
+        ) as client:
+            data = client.get("/api/pending-approvals").json()
+        assert [p["thread_id"] for p in data["pending"]] == ["t-1"]
 
 
 # ══════════════════════════════════════════════════════════════════════════

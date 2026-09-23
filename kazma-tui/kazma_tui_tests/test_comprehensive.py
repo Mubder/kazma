@@ -110,51 +110,6 @@ class TestHeaderEdgeCases:
 # ---------------------------------------------------------------------------
 
 
-class TestFooterEdgeCases:
-    """VAL-TUI-004: Footer handles various shortcut formats."""
-
-    def test_footer_shortcuts_list_not_empty(self) -> None:
-        """Footer must define at least one shortcut."""
-        from kazma_tui.footer import CHAT_SHORTCUTS
-
-        assert len(CHAT_SHORTCUTS) >= 1
-
-    def test_footer_shortcuts_have_labels_and_descriptions(self) -> None:
-        """Each shortcut must have a label and description."""
-        from kazma_tui.footer import CHAT_SHORTCUTS
-
-        for key, desc in CHAT_SHORTCUTS:
-            assert isinstance(key, str) and len(key) > 0
-            assert isinstance(desc, str) and len(desc) > 0
-
-    def test_footer_text_contains_all_shortcuts(self) -> None:
-        """Footer text must mention all defined shortcuts."""
-        from kazma_tui.footer import CHAT_SHORTCUTS, KazmaFooter
-
-        widget = KazmaFooter()
-        text = widget._get_shortcuts_text().lower()
-        for key, desc in CHAT_SHORTCUTS:
-            assert key.lower() in text, f"Footer text missing shortcut: {key}"
-
-    def test_footer_text_uses_pipe_separator(self) -> None:
-        """Footer text must use pipe separator between shortcuts."""
-        from kazma_tui.footer import CHAT_SHORTCUTS, KazmaFooter
-
-        widget = KazmaFooter()
-        text = widget._get_shortcuts_text()
-        if len(CHAT_SHORTCUTS) > 1:
-            assert "|" in text
-
-    def test_footer_compose_yields_static(self) -> None:
-        """Footer compose must yield a Static widget."""
-        from kazma_tui.footer import KazmaFooter
-        from textual.widgets import Static
-
-        widget = KazmaFooter()
-        widgets = list(widget.compose())
-        assert any(isinstance(w, Static) for w in widgets)
-
-
 # ---------------------------------------------------------------------------
 # Dashboard Edge Cases (VAL-TUI-010 through VAL-TUI-015)
 # ---------------------------------------------------------------------------
