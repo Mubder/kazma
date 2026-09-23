@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -144,8 +145,28 @@ def save_providers(config_store: Any, providers: list[dict[str, Any]]) -> None:
     config_store.set("providers.list", protected, category="providers")
 
 
+_GCP_PROJECT_TTL_S = 300.0
+_gcp_project_cache: tuple[float, str] | None = None
+
+
 def detect_gcp_project_id() -> str:
-    """Best-effort GCP project id from ADC or gcloud config files."""
+    """Best-effort GCP project id from ADC or gcloud config files.
+
+    Cached for a few minutes: ``list_providers`` calls this on every provider
+    lookup, on the event loop, and a loop-stall dump caught it reading these
+    files (2026-09-22). A project id changes about never; a gcloud change is
+    still picked up within the TTL.
+    """
+    global _gcp_project_cache
+    now = time.monotonic()
+    if _gcp_project_cache is not None and _gcp_project_cache[0] > now:
+        return _gcp_project_cache[1]
+    value = _read_gcp_project_id()
+    _gcp_project_cache = (now + _GCP_PROJECT_TTL_S, value)
+    return value
+
+
+def _read_gcp_project_id() -> str:
     try:
         adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
         if not adc_path.exists():

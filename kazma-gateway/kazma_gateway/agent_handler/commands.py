@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import OrderedDict
 import logging
 import re
@@ -2244,7 +2245,7 @@ async def _try_x_command(
     with tenant_scope("default"):
         from kazma_core.x_api.stance import get_reply_config
 
-        cfg = get_reply_config()
+        cfg = await asyncio.to_thread(get_reply_config)
 
         if sub == "subjects":
             if not cfg.subjects:
@@ -2399,7 +2400,7 @@ async def _try_x_command(
                     from kazma_core.x_api.client import XClient
                     from kazma_core.x_api.config import get_x_config
 
-                    xcfg = get_x_config()
+                    xcfg = await asyncio.to_thread(get_x_config)
                     tweet, includes = await XClient(xcfg.credentials).get_tweet(parent_id)
                     parent_text = str(tweet.get("text") or "")
                     users = includes.get("users") or []

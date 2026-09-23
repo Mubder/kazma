@@ -19,6 +19,7 @@ summon per iteration — is slow, rate-capped, and irreversible.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -521,7 +522,7 @@ async def x_reply_poll() -> JSONResponse:
         from kazma_core.x_api.stance import get_reply_config
 
         with tenant_scope("default"):
-            cfg = get_reply_config()
+            cfg = await asyncio.to_thread(get_reply_config)
             if not cfg.can_draft():
                 return JSONResponse(
                     {

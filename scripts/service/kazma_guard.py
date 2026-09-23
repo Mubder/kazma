@@ -730,6 +730,81 @@ def _port_holder_pid(port: int) -> int:
         return 0
 
 
+#: Probe errors that mean "this machine has no free local port", not "Kazma is
+#: down": WSAEADDRINUSE and WSAENOBUFS on connect. 169 of 257 failed probes in
+#: the week to 2026-09-23 were 10048 -- and nothing recorded who held the ports.
+_PORT_EXHAUSTION_MARKERS = ("10048", "10055")
+TCP_SNAPSHOT_EVERY_S = 600.0
+_last_tcp_snapshot = 0.0
+
+
+def tcp_snapshot_from_netstat(stdout: str, names: dict[str, str] | None = None,
+                              top: int = 6) -> dict[str, object]:
+    """TCP sockets by state, and the processes holding the most.
+
+    Parsed from ``netstat -a -n -o -q -p TCP`` (``-q`` adds BOUND sockets,
+    which hold a port without a connection -- 338 of them on the live box).
+    """
+    states: dict[str, int] = {}
+    owners: dict[str, int] = {}
+    for line in (stdout or "").splitlines():
+        parts = line.split()
+        if len(parts) < 5 or parts[0].upper() != "TCP":
+            continue
+        state, pid = parts[3].upper(), parts[4]
+        states[state] = states.get(state, 0) + 1
+        # Listeners do not consume ephemeral ports; TIME_WAIT is reported as
+        # pid 0 ("System Idle Process") and is already counted by state.
+        if state != "LISTENING" and pid != "0":
+            owners[pid] = owners.get(pid, 0) + 1
+    ranked = sorted(owners.items(), key=lambda kv: -kv[1])[:top]
+    return {
+        "total": sum(states.values()),
+        "states": dict(sorted(states.items(), key=lambda kv: -kv[1])),
+        "top_owners": [
+            f"{(names or {}).get(pid, '?')} (pid {pid}): {n}" for pid, n in ranked
+        ],
+    }
+
+
+def _process_names() -> dict[str, str]:
+    try:
+        out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True, text=True,
+                             encoding="utf-8", errors="replace", timeout=20, check=False).stdout
+    except Exception:
+        return {}
+    names: dict[str, str] = {}
+    for line in out.splitlines():
+        cols = [c.strip('"') for c in line.split('","')]
+        if len(cols) >= 2 and cols[1].strip('"').isdigit():
+            names[cols[1].strip('"')] = cols[0].strip('"')
+    return names
+
+
+def maybe_log_tcp_snapshot(log, detail: str, *, now: float | None = None) -> bool:
+    """On a port-exhaustion probe failure, record who holds the sockets.
+
+    Rate-limited, Windows-only, and never raises: supervision must not depend
+    on a diagnostic. Returns True when a snapshot was logged.
+    """
+    global _last_tcp_snapshot
+    if os.name != "nt" or not any(m in (detail or "") for m in _PORT_EXHAUSTION_MARKERS):
+        return False
+    stamp = time.time() if now is None else now
+    if stamp - _last_tcp_snapshot < TCP_SNAPSHOT_EVERY_S:
+        return False
+    _last_tcp_snapshot = stamp
+    try:
+        out = subprocess.run(["netstat", "-a", "-n", "-o", "-q", "-p", "TCP"],
+                             capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=20, check=False).stdout
+        log("warn", "health.port_exhaustion", **tcp_snapshot_from_netstat(out, _process_names()))
+        return True
+    except Exception as exc:  # noqa: BLE001 -- a diagnostic, never fatal
+        log("warn", "health.port_exhaustion", error=str(exc)[:200])
+        return True
+
+
 def parse_tasklist_image(stdout: str) -> str:
     """Image name from ``tasklist /FO CSV /NH`` (or table) output.
 
@@ -1375,6 +1450,7 @@ class Guard:
             consecutive += 1
             self.log("warn", "health.failed", detail=detail,
                      consecutive=consecutive, threshold=FAILURES_TO_KILL)
+            maybe_log_tcp_snapshot(self.log, detail)
             if consecutive >= FAILURES_TO_KILL:
                 # Alive but not healthy -- the case no OS supervisor catches.
                 stop_child(self.proc, self.log)

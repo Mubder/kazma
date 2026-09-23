@@ -518,7 +518,7 @@ async def _invoke_supervisor(
     hitl = None
     checkpointer: Any = None
     if not yolo:
-        hitl = get_hitl_config(agent.config.raw)
+        hitl = await asyncio.to_thread(get_hitl_config, agent.config.raw)
         if isinstance(hitl, dict) and not hitl.get("enabled", True):
             hitl = None
         if hitl:

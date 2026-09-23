@@ -1054,7 +1054,7 @@ class KazmaAgent:
             # Prefer get_hitl_config() so ConfigStore / Settings UI overrides
             # apply on the run path the same way as the streaming graph.
             from kazma_core.safety.hitl import get_hitl_config
-            hitl_config = get_hitl_config(self.config.raw)
+            hitl_config = await asyncio.to_thread(get_hitl_config, self.config.raw)
 
             # Time Travel — create the snapshot recorder once (honors kazma.yaml
             # time_travel.enabled / max_snapshots / db_path).

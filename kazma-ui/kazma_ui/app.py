@@ -2099,7 +2099,7 @@ class KazmaAppBuilder:
 
             running = await ensure_mentions_loop()
             with tenant_scope("default"):
-                _reply_cfg = get_reply_config()
+                _reply_cfg = await asyncio.to_thread(get_reply_config)
             if running:
                 logger.info(
                     "[X] Mentions poller started (mode=%s, %d subject(s), %ds)",

@@ -187,7 +187,10 @@ async def _watchdog_loop(
             if is_shutting_down():
                 break
 
-            cfg = get_hitl_config()
+            # Off the loop: a ConfigStore read (a Postgres round trip) plus a
+            # YAML merge. This tick was the most frequent loop-stall site in
+            # the live install's dumps (14 of 70, 2026-08-30 .. 09-23).
+            cfg = await asyncio.to_thread(get_hitl_config)
             if not cfg.get("enabled"):
                 continue
 
@@ -200,7 +203,9 @@ async def _watchdog_loop(
             try:
                 from kazma_core.safety.bus_bridge import record_watcher
 
-                record_watcher(kind="ui", detail="hitl-timeout-watchdog")
+                await asyncio.to_thread(
+                    record_watcher, kind="ui", detail="hitl-timeout-watchdog"
+                )  # a SQLite write to hitl_gates.db
             except Exception:
                 logger.debug("[HITL-WD] watcher heartbeat skipped", exc_info=True)
             timeout_s = float(cfg.get("approval_timeout_seconds", 300) or 0)

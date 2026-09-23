@@ -818,7 +818,7 @@ async def handle_summon(
             ``draft`` so an operator typing the command by hand is always the
             approval, whatever the poller is configured to do.
     """
-    cfg = cfg or get_reply_config()
+    cfg = cfg or await asyncio.to_thread(get_reply_config)
     mode = (force_mode or cfg.mode).strip().lower()
 
     if not cfg.enabled or mode not in (MODE_DRAFT, MODE_AUTO):
@@ -1143,7 +1143,7 @@ async def preview_reply(
     *subject_id* forces a subject, so you can check how one reads against a
     post its keywords would not have matched.
     """
-    cfg = cfg or get_reply_config()
+    cfg = cfg or await asyncio.to_thread(get_reply_config)
 
     # *subject_override* is the subject as it exists in the editor RIGHT NOW,
     # including edits not yet saved. Without it the dry run could only test

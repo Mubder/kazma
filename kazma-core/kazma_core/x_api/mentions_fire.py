@@ -98,7 +98,7 @@ async def ensure_mentions_loop() -> bool:
     from kazma_core.x_api.stance import get_reply_config
 
     with tenant_scope("default"):
-        cfg = get_reply_config()
+        cfg = await asyncio.to_thread(get_reply_config)  # ConfigStore + vault reads
     if cfg.can_draft():
         await start_mentions_loop()
         task = get_mentions_task()
@@ -118,7 +118,9 @@ async def _loop(poll_interval: float | None) -> None:
             with tenant_scope("default"):
                 from kazma_core.x_api.stance import get_reply_config
 
-                cfg = get_reply_config()
+                # Off the loop (ConfigStore reads). to_thread copies the
+                # context, so tenant_scope still applies in the thread.
+                cfg = await asyncio.to_thread(get_reply_config)
                 if poll_interval is None:
                     wait = float(cfg.poll_interval_s)
                 if cfg.can_draft():
@@ -277,8 +279,8 @@ async def poll_once(cfg: Any = None, *, ignore_cursor: bool = False) -> list[dic
     from kazma_core.x_api.reply_store import get_reply_store
     from kazma_core.x_api.stance import get_reply_config
 
-    cfg = cfg or get_reply_config()
-    xcfg = get_x_config()
+    cfg = cfg or await asyncio.to_thread(get_reply_config)
+    xcfg = await asyncio.to_thread(get_x_config)
     if not xcfg.can_post():
         logger.debug("[x-mentions] X connector cannot post — not polling")
         return []

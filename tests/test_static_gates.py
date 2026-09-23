@@ -877,6 +877,84 @@ def test_dns_gate_catches_the_redirect_hop_shape():
     assert _blocking_dns_in_async(ast.parse(good)) == []
 
 
+# ── 2f'''. Helpers the loop-stall dumps caught stay off the loop (2026-09-23)
+#
+# The live install wrote 70 loop-stall dumps between 2026-08-30 and 09-23, one
+# of which ended in a health-gated restart. None of the frames was a direct
+# sqlite3.connect or DNS call in an async body -- the gates above cover those.
+# Each was a synchronous helper that does I/O (a Postgres ConfigStore read, a
+# SQLite write, a backup) called from async code: the HITL watchdog tick, the
+# X scheduler and mentions poller, the per-request session lookup, queue
+# handlers. The same helpers were then found at 17 more async call sites.
+#
+# This list is the helpers a dump has proven slow. It grows when a new dump
+# names one; a call in an async body must go through asyncio.to_thread.
+
+_LOOP_STALL_HELPERS = frozenset({
+    "get_hitl_config", "record_watcher", "get_reply_config", "get_x_config",
+    "list_due", "perform_native_backups", "perform_document_backup",
+    "export_nightly_snapshots", "run_gc_cycle", "gc_sweep", "log_x_event",
+    "get_session_payload", "run_weekly_sweep", "build_report", "scan_log",
+    "mirror_drift_summary", "purge_completed_tasks", "expire_due_gates",
+    "check_database", "perform_universal_backup",
+})
+
+
+def _loop_stall_helper_calls(tree: ast.AST) -> list[tuple[int, str]]:
+    found: list[tuple[int, str]] = []
+
+    def visit(node: ast.AST, in_async: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.AsyncFunctionDef):
+                visit(child, True)
+            elif isinstance(child, (ast.FunctionDef, ast.Lambda)):
+                visit(child, False)  # what to_thread runs
+            else:
+                if in_async and isinstance(child, ast.Call):
+                    fn = child.func
+                    name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", "")
+                    if name in _LOOP_STALL_HELPERS:
+                        found.append((child.lineno, name))
+                visit(child, in_async)
+
+    visit(tree, False)
+    return found
+
+
+def test_loop_stall_helpers_are_not_called_on_the_loop():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line} {name}()" for line, name in _loop_stall_helper_calls(tree)]
+    assert not offenders, (
+        "A helper a loop-stall dump caught blocking the event loop is called "
+        "directly in async code. Every SSE/WebSocket stream and the guard's "
+        "health probe wait on it.\nFix: `await asyncio.to_thread(helper, ...)`.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_loop_stall_gate_catches_the_watchdog_shape():
+    """Negative control (§28): the pre-fix HITL watchdog tick."""
+    bad = (
+        "async def _watchdog_loop():\n"
+        "    cfg = get_hitl_config()\n"
+        "    record_watcher(kind='ui')\n"
+        "    def later():\n"
+        "        return get_hitl_config()\n"
+    )
+    good = (
+        "async def _watchdog_loop():\n"
+        "    cfg = await asyncio.to_thread(get_hitl_config)\n"
+        "    await asyncio.to_thread(record_watcher, kind='ui')\n"
+    )
+    assert _loop_stall_helper_calls(ast.parse(bad)) == [(2, "get_hitl_config"), (3, "record_watcher")]
+    assert _loop_stall_helper_calls(ast.parse(good)) == []
+
+
 # ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)
 #
 # Archival nulls an episode's raw text. The one statement that did it used

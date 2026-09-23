@@ -82,9 +82,18 @@ def _isolated_config_store(tmp_path):
         yaml_path=str(tmp_path / "kazma.yaml"),
     )
     set_config_store(isolated)
+    _clear_web_session_cache()  # it caches reads of the store this replaced
     yield
     isolated.close()
     reset_config_store()
+
+
+def _clear_web_session_cache() -> None:
+    from kazma_core.security import web_sessions
+
+    with web_sessions._cache_lock:
+        web_sessions._cache.clear()
+        web_sessions._revoked.clear()
 
 
 @pytest.fixture(autouse=True)

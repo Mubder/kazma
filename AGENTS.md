@@ -1341,8 +1341,17 @@ is critical, and silent only when no repository exists yet.
 mechanisms that never run.** Successful restic snapshot + restore each log
 one line. `observability/firing_ledger.py` (`run_weekly_sweep`, started
 from `start_memory_worker`) counts them. `_log_paths()` must read
-**guard.log and kazma.log**; signatures must be copied from the emitting
-line; the sweep must be scheduled (it shipped unscheduled once).
+**guard.log and kazma.log, and their rotated siblings** (the app log rotates
+at midnight; reading only the live file made a weekly report of one day and
+called six days of backups "silent", 2026-09-23). Signatures are checked
+against the code: `test_every_ledger_signature_matches_a_line_the_code_emits`
+derives the emitted lines from logger format strings, ops-alert keys and the
+result `summary()` methods -- a signature no code emits fails the build. A
+mechanism logs on SUCCESS too (restic maintenance did not, and its signature
+matched only the failure line). A health-gated restart is a
+`guard.restarting` whose reason is `unhealthy (...)`, not a failed probe. The
+sweep runs in a thread (it reads ~4M lines) and must stay scheduled (it
+shipped unscheduled once).
 
 **Chaos injection is only real where it lands.** `InjectionTarget.LLM_PROVIDER`
 is injected INSIDE `resilient_chat`'s attempt loop. `ChaosInjectionError`
@@ -1749,6 +1758,14 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
 - **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
   exception-handler counts; they may only go down, and lowering them means
   updating the baseline in the same change.
+- **Loop-stall dumps name the next gate entry.** `kazma_core.observability.
+  loop_stall` writes every thread's stack to `.kazma/stall-*.txt` when the
+  loop is unresponsive for 15s, and the weekly ledger counts them. The frame
+  on the loop thread is a sync helper doing I/O from async code; add it to
+  `_LOOP_STALL_HELPERS` in `tests/test_static_gates.py` and every async call
+  site must then use `to_thread` (`test_loop_stall_helpers_are_not_called_on_the_loop`).
+  The first pass (2026-09-23) found 12 helpers from 70 dumps, and 17 more
+  call sites of them nobody had caught yet.
 
 ## UI Conventions (Web)
 

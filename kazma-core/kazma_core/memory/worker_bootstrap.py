@@ -748,8 +748,9 @@ def _start_commitment_gc_scheduler() -> None:
 
     ``run_gc_cycle`` does sweep_expired (rule 1) + enforce_all_pending_caps
     (rule 6) + delete_retained (rules 3+4). All three are lightweight SQL
-    passes on the ops DB and idempotent, so this runs inline (no durable-queue
-    overhead, unlike the heavy backup/export path). Without this scheduler,
+    passes on the ops DB and idempotent, so this runs in this loop (no
+    durable-queue overhead, unlike the heavy backup/export path) -- each
+    pass in a thread, never on the event loop itself. Without this scheduler,
     expired pending commitments would accumulate forever even though the sweep
     logic exists — the same "scheduler existed but nothing called it" gap that
     once left backups inert (AGENTS.md §15B). Failures are logged and the
@@ -769,7 +770,7 @@ def _start_commitment_gc_scheduler() -> None:
             try:
                 from kazma_core.safety.commitment.store import run_gc_cycle
 
-                summary = run_gc_cycle()
+                summary = await asyncio.to_thread(run_gc_cycle)
                 if any(summary.values()):
                     logger.info("[memory_worker] commitment GC: %s", summary)
             except Exception:
@@ -781,7 +782,9 @@ def _start_commitment_gc_scheduler() -> None:
             try:
                 from kazma_core.agent.artifacts import get_artifact_store
 
-                art = get_artifact_store().gc_sweep()
+                # SQLite on both: off the loop (a loop-stall dump caught
+                # gc_sweep's connect holding it, 2026-09-23).
+                art = await asyncio.to_thread(lambda: get_artifact_store().gc_sweep())
                 if art.get("evicted"):
                     logger.info("[memory_worker] artifact GC: %s", art)
             except Exception:
@@ -938,7 +941,9 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
         from kazma_core.memory.backup import perform_native_backups
 
         retention = int(payload.get("retention", 10))
-        written = perform_native_backups(retention=retention)
+        # sqlite3.backup() of both memory DBs: seconds of disk I/O, off the
+        # loop (a loop-stall dump caught _backup_one on it, 2026-09-13).
+        written = await asyncio.to_thread(perform_native_backups, retention=retention)
         logger.info("[memory_worker] native_backup done: %d file(s)", len(written))
     except Exception:
         logger.warning("[memory_worker] native_backup handler failed", exc_info=True)
@@ -948,7 +953,10 @@ async def _handle_native_backup(payload: dict[str, Any]) -> bool:
     try:
         from kazma_core.documents.backup import perform_document_backup
 
-        report = perform_document_backup(retention=max(1, int(payload.get("retention", 10)) // 2))
+        report = await asyncio.to_thread(
+            perform_document_backup,
+            retention=max(1, int(payload.get("retention", 10)) // 2),
+        )
         if report.get("ok"):
             logger.info(
                 "[memory_worker] document backup done: %s blob(s)",
@@ -994,7 +1002,7 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
         from kazma_core.memory.export import export_nightly_snapshots
 
         tenant_id = str(payload.get("tenant_id", "default"))
-        written = export_nightly_snapshots(tenant_id=tenant_id)
+        written = await asyncio.to_thread(export_nightly_snapshots, tenant_id=tenant_id)
         logger.info("[memory_worker] nightly_export done: %d file(s)", len(written))
 
         # M-04 guard: nightly mirror-drift assertion (audit
@@ -1007,17 +1015,20 @@ async def _handle_nightly_export(payload: dict[str, Any]) -> bool:
             from kazma_core.memory.state_backend import mirror_drift_summary
             from kazma_core.paths import primary_memory_db
 
-            conn = _sq.connect(primary_memory_db(), timeout=10)
-            conn.row_factory = _sq.Row
-            try:
-                drift = mirror_drift_summary(conn)
-                if drift.get("only_in_mirror") or drift.get("dead_mismatch"):
-                    logger.warning(
-                        "[memory_worker] MIRROR DRIFT detected — run "
-                        "scripts/reconcile_memory_mirror.py: %s", drift,
-                    )
-            finally:
-                conn.close()
+            def _drift() -> dict[str, Any]:
+                conn = _sq.connect(primary_memory_db(), timeout=10)
+                conn.row_factory = _sq.Row
+                try:
+                    return mirror_drift_summary(conn)
+                finally:
+                    conn.close()
+
+            drift = await asyncio.to_thread(_drift)  # connect + scan: off the loop
+            if drift.get("only_in_mirror") or drift.get("dead_mismatch"):
+                logger.warning(
+                    "[memory_worker] MIRROR DRIFT detected — run "
+                    "scripts/reconcile_memory_mirror.py: %s", drift,
+                )
         except Exception:
             logger.debug("[memory_worker] mirror drift check skipped", exc_info=True)
         return True
@@ -1093,6 +1104,11 @@ async def _handle_restic_maintenance(payload: dict[str, Any]) -> bool:
                 logger.error("[memory_worker] restic check FAILED for %s: %s",
                              name, verified.error[:200])
                 _alert_repo_unhealthy(name, verified.error)
+                continue
+            # Logged on success on purpose (AGENTS.md §27C): this spoke only
+            # on failure, so the weekly report could not tell a maintenance
+            # that ran clean 23 times from one that never ran.
+            logger.info("[restic] maintenance ok: %s (forget --prune, check)", name)
         return True
     except Exception:
         logger.warning("[memory_worker] restic maintenance failed", exc_info=True)

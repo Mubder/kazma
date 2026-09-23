@@ -57,13 +57,18 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("MCP reconnect", r"\[MCP-reconnect\] '.+' (re)?connected",
               "a server came back without a restart"),
     Signature("MCP reconnect attempt", r"\[MCP-reconnect\] '.+' still down"),
-    Signature("operator alerting", r"\[ops-alert\]|\[alert\]"),
+    # ops_alerts.alert() logs "[ops_alert] <key> | <title>" -- underscore. This
+    # watched "[ops-alert]" and reported alerting silent in a week that sent
+    # five alerts, one of them a failed restore drill (2026-09-23).
+    Signature("operator alerting", r"\[ops_alert\] "),
     Signature("universal backup", r"\[universal-backup\] complete:"),
     Signature("graph memory backup", r"\[neo4j-backup\] exported \d+ nodes"),
     Signature("restic snapshot",
               r"pg dump snapshotted to|restic \w+ snapshot ok"),
-    Signature("restic maintenance", r"restic (forget|check|unlock)"),
-    Signature("restore drill", r"\[restore-drill\] (PASS|FAIL):",
+    # The success line. Maintenance used to log only on failure, so this
+    # matched failures and could not tell "ran fine" from "never ran".
+    Signature("restic maintenance", r"\[restic\] maintenance ok"),
+    Signature("restore drill", r"\[restore-drill\] (deep: )?(PASS|FAIL|UNVERIFIED):",
               "a backup was verified readable, not merely written"),
     Signature("repetition loop breaker", r"\[Supervisor\] Tool LOOP detected",
               "never observed in production as of 2026-08-29"),
@@ -71,8 +76,15 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("detached-pump watchdog", r"Reaping stalled detached pump"),
     Signature("stale turn reap", r"Reaping stale detached turn"),
     Signature("guard restart", r'"event": "guard.restarting"'),
-    Signature("health-gated restart", r'"event": "health\.(failed|recovered)"',
-              "the guard only restarts on a failed health probe"),
+    # A health-gated restart is a restart whose reason is "unhealthy (...)"
+    # -- FAILURES_TO_KILL consecutive failed probes. This used to count every
+    # health.failed/recovered event, and reported 430 restarts in a week that
+    # had none: each was one missed probe answered by the next.
+    Signature("health-gated restart",
+              r'"event": "guard\.restarting".*"reason": "unhealthy',
+              "the guard only restarts on consecutive failed health probes"),
+    Signature("probe miss tolerated", r'"event": "health\.recovered"',
+              "a failed health probe the guard rode out without restarting"),
     Signature("crash-loop refusal", r'"event": "guard\.(crash_loop|refused_to_start)"',
               "restarting forever is worse than stopping and saying so"),
     Signature("orphan reap", r'"event": "(orphan|port)\.(reaping|reaped|reaping_holder|holder_reaped)"'),
@@ -85,6 +97,11 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
     Signature("offsite fallback", r"offsite sync failed.*trying rclone"),
     Signature("connector health warning", r"connector\.google_(expired|expiring)"),
     Signature("chaos injection", r"\[Chaos\] Injecting"),
+    # Not a recovery -- a symptom, and the report is where a chronic one gets
+    # seen. 70 of these piled up in .kazma/stall-*.txt with nobody looking,
+    # and one week they ended in a health-gated restart (2026-09-23).
+    Signature("event loop stall (stacks dumped)", r"\[loop-stall\] event loop unresponsive",
+              "every stack is in .kazma/stall-*.txt; the loop's frame names the blocker"),
 )
 
 
@@ -159,6 +176,16 @@ def _log_paths() -> list[Path]:
         ]
     except Exception:  # noqa: BLE001
         candidates = [Path.home() / ".kazma" / "guard.log"]
+    # Rotated siblings too (``kazma.log.2026-09-16``, ``guard.log.1``). The
+    # app log rotates at midnight and the sweep runs weekly, so reading only
+    # the live file saw one day of a 168h window -- and reported the backups,
+    # restic snapshots and restore drills of the other six days "silent"
+    # (2026-09-23). The per-line timestamp filter still bounds the window.
+    for c in list(candidates):
+        try:
+            candidates.extend(sorted(c.parent.glob(c.name + ".*")))
+        except OSError:
+            continue
     for c in candidates:
         try:
             if c.is_file() and c.resolve() not in {f.resolve() for f in found}:
@@ -199,8 +226,11 @@ def _scan_one(log: Path, compiled, counts: dict, last: dict,
             for sig, rx in compiled:
                 if rx.search(text):
                     counts[sig.mechanism] += 1
-                    if ts:
-                        last[sig.mechanism] = ts[:19]
+                    # Newest wins: rotated files are read after the live one,
+                    # and a plain overwrite reported yesterday as "last seen".
+                    stamp = ts[:19].replace(" ", "T")
+                    if stamp > last.get(sig.mechanism, ""):
+                        last[sig.mechanism] = stamp
 
 
 def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerReport:
@@ -226,6 +256,8 @@ def scan_log(hours: float = 168.0, path: str | Path | None = None) -> LedgerRepo
 
     for log in logs:
         try:
+            if log.stat().st_mtime < cutoff:
+                continue  # a rotated file last written before the window
             _scan_one(log, compiled, counts, last, cutoff, report)
         except Exception as exc:  # noqa: BLE001
             report.error = f"{log.name}: {str(exc)[:150]}"
@@ -336,7 +368,11 @@ async def ledger_scheduler() -> None:
     first = True
     while True:
         try:
-            last = _last_run_epoch()
+            # Both off the loop: the ConfigStore read is a Postgres round
+            # trip, and the scan reads a week of rotated logs (~4M lines on
+            # the live install). A scan on the loop was already one of the
+            # 70 loop-stall dumps before the rotated files were added.
+            last = await asyncio.to_thread(_last_run_epoch)
             now = time.time()
             if last is None:
                 delay = 120.0 if first else interval
@@ -346,7 +382,7 @@ async def ledger_scheduler() -> None:
             first = False
             if delay > 0:
                 await asyncio.sleep(delay)
-            run_weekly_sweep(SWEEP_INTERVAL_HOURS)
+            await asyncio.to_thread(run_weekly_sweep, SWEEP_INTERVAL_HOURS)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 -- a failed sweep must not
