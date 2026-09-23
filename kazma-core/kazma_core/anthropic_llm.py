@@ -33,6 +33,7 @@ from kazma_core.llm_provider import (
     retry_after_seconds,
 )
 from kazma_core.llm_stream import StreamDelta
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,7 @@ class AnthropicProvider(LLMProvider):
                     "Content-Type": "application/json",
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
+                verify=shared_ssl_context(),
             )
         return self._http
 

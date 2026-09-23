@@ -39,6 +39,7 @@ from kazma_tui.widgets.status_bar import KazmaStatusBar
 from kazma_tui.widgets.toast import Toast
 from kazma_tui.widgets.tutorial import TutorialScreen
 from kazma_tui.widgets.hitl_modal import HitlApprovalScreen
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["KazmaTUI", "main"]
 
@@ -498,7 +499,7 @@ class KazmaTUI(App[None]):
 
             headers = dict(auth_headers())
             if self._hitl_http is None:
-                self._hitl_http = httpx.AsyncClient(timeout=2.0)
+                self._hitl_http = httpx.AsyncClient(timeout=2.0, verify=shared_ssl_context())
             response = None
             for _base in candidate_api_bases():
                 try:
@@ -589,7 +590,7 @@ class KazmaTUI(App[None]):
 
             headers = dict(auth_headers())
             response = None
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, verify=shared_ssl_context()) as client:
                 for _base in candidate_api_bases():
                     try:
                         response = await client.post(

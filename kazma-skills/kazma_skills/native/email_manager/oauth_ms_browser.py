@@ -16,6 +16,7 @@ from kazma_skills.native.email_manager.oauth_common import (
     pop_state,
     public_base_url,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ async def finish_ms_browser_oauth(code: str, state: str) -> dict[str, Any]:
     if secret:
         data["client_secret"] = secret
     token_url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(token_url, data=data)
         payload = r.json() if r.content else {}
         if r.status_code >= 400:

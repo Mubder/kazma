@@ -85,6 +85,8 @@ FIRING_SIGNATURES: tuple[Signature, ...] = (
               "the guard only restarts on consecutive failed health probes"),
     Signature("probe miss tolerated", r'"event": "health\.recovered"',
               "a failed health probe the guard rode out without restarting"),
+    Signature("probe unrunnable (machine out of ports)", r'"event": "health\.probe_unrunnable"',
+              "Windows had no free local port; the guard did not count it as Kazma failing"),
     Signature("crash-loop refusal", r'"event": "guard\.(crash_loop|refused_to_start)"',
               "restarting forever is worse than stopping and saying so"),
     Signature("orphan reap", r'"event": "(orphan|port)\.(reaping|reaped|reaping_holder|holder_reaped)"'),

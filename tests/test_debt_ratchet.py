@@ -26,7 +26,7 @@ BASELINE = {
     # except Exception / except BaseException / bare except, any body
     "blind_except": 3846,
     # ...whose body is only `pass` (or a docstring): the error vanishes
-    "silent_except": 577,
+    "silent_except": 576,
 }
 
 

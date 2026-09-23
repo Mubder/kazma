@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from kazma_core.llm_provider import LLMConfig, LLMError, LLMProvider
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class AzureProvider(LLMProvider):
                 },
                 timeout=httpx.Timeout(self.config.timeout, connect=10.0),
                 params={"api-version": self._api_version},
+                verify=shared_ssl_context(),
             )
         return self._http
 

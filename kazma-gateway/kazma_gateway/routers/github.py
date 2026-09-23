@@ -22,6 +22,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from kazma_core.errors import safe_error, validation_error
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -266,7 +267,7 @@ async def github_status() -> JSONResponse:
         payload.update(extra)
         return payload
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context()) as client:
         try:
             # Fetch repo metadata
             repo_resp = await client.get(api_url, headers=headers)

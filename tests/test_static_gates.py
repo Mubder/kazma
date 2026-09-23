@@ -105,16 +105,9 @@ BLOCKING_CALLS = {
 BLOCKING_HELPERS = {"_conn", "_connect_sqlite"}
 
 #: ``(file, function)`` pairs that are deliberately exempt, each with a reason.
-BLOCKING_ALLOWLIST: dict[tuple[str, str], str] = {
-    (
-        "kazma-core/kazma_core/memory/worker_bootstrap.py",
-        "_handle_micro_consolidation",
-    ): (
-        "Interleaves an awaited LLM call with its SQLite work, so it cannot be "
-        "offloaded wholesale. Its synchronous queries are a single indexed "
-        "lookup by episode id."
-    ),
-}
+#: (Empty since 2026-09-23: _handle_micro_consolidation was the only entry;
+#: its SQLite halves now run in threads around the awaited LLM call.)
+BLOCKING_ALLOWLIST: dict[tuple[str, str], str] = {}
 
 
 def test_no_blocking_db_driver_in_async():
@@ -953,6 +946,67 @@ def test_loop_stall_gate_catches_the_watchdog_shape():
     )
     assert _loop_stall_helper_calls(ast.parse(bad)) == [(2, "get_hitl_config"), (3, "record_watcher")]
     assert _loop_stall_helper_calls(ast.parse(good)) == []
+
+
+# ── 2f''''. httpx clients built on the loop share one TLS context (2026-09-23)
+#
+# httpx.AsyncClient() with the default verify builds an SSLContext and loads
+# the CA bundle in its constructor -- synchronously, on the loop, per client.
+# 131 async call sites did it per request; kazma_core.http_tls holds one
+# context built in a thread at boot.
+
+
+def _unshared_async_clients(tree: ast.AST) -> list[int]:
+    lines: list[int] = []
+
+    def visit(node: ast.AST, in_async: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.AsyncFunctionDef):
+                visit(child, True)
+            elif isinstance(child, (ast.FunctionDef, ast.Lambda)):
+                visit(child, False)
+            else:
+                if (
+                    in_async
+                    and isinstance(child, ast.Call)
+                    and isinstance(child.func, ast.Attribute)
+                    and child.func.attr == "AsyncClient"
+                    and not any(k.arg == "verify" or k.arg is None for k in child.keywords)
+                ):
+                    lines.append(child.lineno)
+                visit(child, in_async)
+
+    visit(tree, False)
+    return lines
+
+
+def test_async_http_clients_share_the_tls_context():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _unshared_async_clients(tree)]
+    assert not offenders, (
+        "httpx.AsyncClient built in async code without verify= loads the CA "
+        "bundle on the event loop.\nFix: `verify=shared_ssl_context()` "
+        "(from kazma_core.http_tls import shared_ssl_context).\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_tls_gate_catches_a_default_client():
+    """Negative control (§28)."""
+    bad = "async def f():\n    async with httpx.AsyncClient(timeout=5) as c:\n        pass\n"
+    good = (
+        "async def f():\n"
+        "    async with httpx.AsyncClient(timeout=5, verify=shared_ssl_context()) as c:\n"
+        "        pass\n"
+        "def sync_path():\n"
+        "    return httpx.AsyncClient()\n"
+    )
+    assert _unshared_async_clients(ast.parse(bad)) == [2]
+    assert _unshared_async_clients(ast.parse(good)) == []
 
 
 # ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)

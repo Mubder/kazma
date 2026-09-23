@@ -21,6 +21,7 @@ from kazma_skills.native.email_manager.oauth_common import (
     new_state,
     pop_state,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ async def finish_google_calendar_oauth(code: str, state: str) -> dict[str, Any]:
     redirect = meta.get("redirect_uri") or _redirect_uri()
     if not cid or not secret:
         return {"ok": False, "error": "Google OAuth client not configured"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             TOKEN_URL,
             data={
@@ -239,7 +240,7 @@ async def refresh_google_calendar_access_token(
     """Return (access_token, refresh_token). Also persists."""
     cid = client_id or _client_id()
     secret = client_secret or _client_secret()
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             TOKEN_URL,
             data={

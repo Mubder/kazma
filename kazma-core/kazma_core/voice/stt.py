@@ -25,6 +25,7 @@ from contextvars import ContextVar
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "STTProvider",
@@ -332,7 +333,7 @@ def _openai_stt() -> STTProvider:
             "webm": "audio/webm",
         }.get(ext, f"audio/{ext}")
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(
                     "https://api.openai.com/v1/audio/transcriptions",
                     headers={"Authorization": f"Bearer {key}"},
@@ -381,7 +382,7 @@ def _groq_stt() -> STTProvider:
             "webm": "audio/webm",
         }.get(ext, f"audio/{ext}")
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(
                     "https://api.groq.com/openai/v1/audio/transcriptions",
                     headers={"Authorization": f"Bearer {key}"},
@@ -439,7 +440,7 @@ def _cohere_stt() -> STTProvider:
         else:
             model = "cohere-transcribe-03-2026"
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
                 data: dict[str, Any] = {"model": model}
                 if language != "auto":
                     data["language"] = language
@@ -610,7 +611,7 @@ def _nvidia_stt() -> STTProvider:
             headers["Authorization"] = f"Bearer {key}"
 
         try:
-            async with httpx.AsyncClient(timeout=90.0) as client:
+            async with httpx.AsyncClient(timeout=90.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(
                     target_url,
                     headers=headers,

@@ -14,6 +14,7 @@ from typing import Any
 
 from kazma_gateway.gateway import OutboundMessage
 from kazma_gateway.telegram_format import md_to_tg_html, tg_escape
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class TelegramSwarmOutputTarget(SwarmOutputTarget):
                 )
 
                 chunks = chunk_html_message(html_text)
-                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0), verify=shared_ssl_context()) as client:
                     all_chunks_ok = True
                     for chunk in chunks:
                         chunk_ok = False

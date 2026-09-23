@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 from urllib.parse import quote
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ async def fetch_season_messages_http_async(
     for base in candidate_api_bases():
         url = session_messages_url(base, session_id)
         try:
-            async with httpx.AsyncClient(timeout=timeout_cfg) as client:
+            async with httpx.AsyncClient(timeout=timeout_cfg, verify=shared_ssl_context()) as client:
                 resp = await client.get(url, headers=headers)
         except Exception:
             continue

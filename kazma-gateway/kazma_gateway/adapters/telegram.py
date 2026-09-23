@@ -46,6 +46,7 @@ from kazma_gateway.gateway import (
     RateLimiter,
 )
 from kazma_gateway.slash_commands import BOT_MENU_COMMANDS
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +236,7 @@ class TelegramAdapter(BaseAdapter):
             base_url=self._api_base,
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            verify=shared_ssl_context(),
         )
 
         try:

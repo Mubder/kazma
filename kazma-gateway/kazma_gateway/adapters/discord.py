@@ -38,6 +38,7 @@ from kazma_gateway.gateway import (
     OutboundMessage,
     RateLimiter,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,7 @@ class DiscordAdapter(BaseAdapter):
             timeout=httpx.Timeout(30.0, connect=5.0),
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             headers={"Authorization": f"Bot {self._token}"},
+            verify=shared_ssl_context(),
         )
 
         try:
@@ -435,6 +437,7 @@ class DiscordAdapter(BaseAdapter):
                         base_url=_DISCORD_API,
                         timeout=15.0,
                         headers={"Authorization": f"Bot {self._token}"},
+                        verify=shared_ssl_context(),
                     )
                 await self._http.post(
                     f"/interactions/{interaction_id}/{interaction_token}/callback",
@@ -613,6 +616,7 @@ class DiscordAdapter(BaseAdapter):
                 timeout=httpx.Timeout(30.0, connect=5.0),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
                 headers={"Authorization": f"Bot {self._token}"},
+                verify=shared_ssl_context(),
             )
 
         channel_id = resolve_channel_id(outbound.context_metadata, outbound.target_id)

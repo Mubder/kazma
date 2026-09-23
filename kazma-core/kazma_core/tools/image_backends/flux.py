@@ -6,6 +6,7 @@ import asyncio
 import os
 
 from kazma_core.tools.image_backends.base import BackendError
+from kazma_core.http_tls import shared_ssl_context
 
 _MODEL = os.getenv("FAL_FLUX_MODEL", "fal-ai/flux/schnell")
 
@@ -31,6 +32,7 @@ class FluxBackend:
                 "Content-Type": "application/json",
             },
             timeout=180.0,
+            verify=shared_ssl_context(),
         ) as client:
             # 1. Submit
             sub = await client.post(

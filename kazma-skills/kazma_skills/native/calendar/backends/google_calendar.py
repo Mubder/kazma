@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class GoogleCalendarBackend:
         import httpx
 
         await self._ensure_token()
-        async with httpx.AsyncClient(timeout=30.0) as c:
+        async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as c:
             r = await c.request(
                 method, url, headers=self._headers(), params=params, json=json
             )
@@ -138,7 +139,7 @@ class GoogleCalendarBackend:
         import httpx
 
         await self._ensure_token()
-        async with httpx.AsyncClient(timeout=30.0) as c:
+        async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as c:
             r = await c.delete(
                 f"{_API}/calendars/primary/events/{event_id}",
                 headers=self._headers(),

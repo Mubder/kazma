@@ -107,9 +107,8 @@ def register_v2_handlers() -> None:
 
     register_handler("macro_sleep", _handle_macro_sleep)
     register_handler("entity_merge", _handle_entity_merge)
-    # micro_consolidation interleaves an awaited LLM call with its SQLite work,
-    # so it cannot be offloaded wholesale. Its synchronous queries are a single
-    # indexed lookup by episode id; the expensive part already yields.
+    # micro_consolidation awaits an LLM call, so it cannot be offloaded
+    # wholesale: its SQLite halves (prepare, apply) run in threads inside it.
     register_handler("micro_consolidation", _handle_micro_consolidation)
     register_handler("global_reconsolidation", _handle_global_reconsolidation)
     _registered = True
@@ -284,79 +283,110 @@ def _handle_global_reconsolidation_sync(payload: dict[str, Any]) -> bool:
 # entity_resolution.decide_entity_merge. (audit finding)
 
 
+def _micro_consolidation_prepare(episode_id: str) -> dict[str, Any] | None:
+    """The synchronous half: open, check schema, read the episode, cost-gate.
+
+    Returns ``None`` when there is nothing to do (connections closed), else a
+    dict holding thread-safe connections the caller must close.
+    """
+    from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
+    from kazma_core.paths import memory_ops_db, primary_memory_db
+
+    primary = sqlite3.connect(primary_memory_db(), check_same_thread=False, isolation_level=None)
+    primary.row_factory = sqlite3.Row
+    ops = sqlite3.connect(memory_ops_db(), check_same_thread=False, isolation_level=None)
+    keep = False
+    try:
+        ensure_primary_schema(primary)
+        ensure_ops_schema(ops)
+        row = primary.execute(
+            "SELECT user_text, assistant_text, session_id, turn_number, tenant_id FROM episodes WHERE id=?",
+            (episode_id,),
+        ).fetchone()
+        if not row:
+            return None  # episode gone
+        # ── Cost-gate (memory.v2.extraction_every_n_turns /
+        #   skip_llm_if_heuristic_extracted) ─────────────────────
+        from kazma_core.memory.config import read_memory_cfg
+
+        v2cfg = (read_memory_cfg().get("v2") or {})
+        every_n = max(1, int(v2cfg.get("extraction_every_n_turns", 1)))
+        turn_n = int(row["turn_number"] or 0)
+        # Skip the LLM pass entirely on turns that don't fall on the cadence
+        if every_n > 1 and (turn_n % every_n) != 0:
+            logger.debug(
+                "[memory_worker] skip LLM extraction for %s (turn %d, every_n=%d)",
+                episode_id, turn_n, every_n,
+            )
+            return None
+        # If the sync heuristic pass already extracted beliefs and the
+        # skip flag is set, don't spend another LLM call on this turn.
+        use_llm = True
+        if bool(v2cfg.get("skip_llm_if_heuristic_extracted", False)):
+            try:
+                from kazma_core.memory.belief_extractor import extract_and_apply_beliefs_sync
+
+                sync_stats = extract_and_apply_beliefs_sync(
+                    primary, ops,
+                    row["user_text"] or "", row["assistant_text"] or "",
+                    session_id=row["session_id"], turn=row["turn_number"],
+                    tenant_id=row["tenant_id"],
+                )
+                if sync_stats.get("applied", 0) > 0:
+                    logger.debug(
+                        "[memory_worker] heuristic already extracted %d belief(s) for %s — skipping LLM",
+                        sync_stats["applied"], episode_id,
+                    )
+                    use_llm = False
+            except Exception:
+                logger.debug("[memory_worker] heuristic pre-pass failed; using the LLM", exc_info=True)
+        keep = True
+        return {"primary": primary, "ops": ops, "row": dict(row), "use_llm": use_llm}
+    finally:
+        if not keep:
+            primary.close()
+            ops.close()
+
+
 async def _handle_micro_consolidation(payload: dict[str, Any]) -> bool:
-    """Re-extract beliefs from a stored episode (background deep-consolidation)."""
+    """Re-extract beliefs from a stored episode (background deep-consolidation).
+
+    Only the LLM call is awaited on the loop. Opening the databases, the
+    schema check, the episode read, the heuristic pre-pass and applying the
+    beliefs (entity resolution + mutations) are SQLite work and run in a
+    thread -- they used to run inline, between awaits, on the loop that
+    serves every chat stream.
+    """
     try:
         episode_id = payload.get("episode_id")
         if not episode_id:
             return False
-        from kazma_core.memory.belief_extractor import extract_and_apply_beliefs
-        from kazma_core.memory.schema_v2 import ensure_ops_schema, ensure_primary_schema
-        from kazma_core.paths import memory_ops_db, primary_memory_db
+        from kazma_core.memory.belief_extractor import (
+            _apply_beliefs_to_v2,
+            extract_beliefs_for_turn,
+        )
 
-        primary = sqlite3.connect(primary_memory_db(), check_same_thread=False, isolation_level=None)
-        primary.row_factory = sqlite3.Row
-        ops = sqlite3.connect(memory_ops_db(), check_same_thread=False, isolation_level=None)
+        prep = await asyncio.to_thread(_micro_consolidation_prepare, str(episode_id))
+        if prep is None:
+            return True
+        primary, ops, row = prep["primary"], prep["ops"], prep["row"]
         try:
-            ensure_primary_schema(primary)
-            ensure_ops_schema(ops)
-            row = primary.execute(
-                "SELECT user_text, assistant_text, session_id, turn_number, tenant_id FROM episodes WHERE id=?",
-                (episode_id,),
-            ).fetchone()
-            if not row:
-                return True  # episode gone
-            # ── Cost-gate (memory.v2.extraction_every_n_turns /
-            #   skip_llm_if_heuristic_extracted) ─────────────────────
-            from kazma_core.memory.config import read_memory_cfg
-
-            v2cfg = (read_memory_cfg().get("v2") or {})
-            every_n = max(1, int(v2cfg.get("extraction_every_n_turns", 1)))
-            turn_n = int(row["turn_number"] or 0)
-            # Skip the LLM pass entirely on turns that don't fall on the cadence
-            if every_n > 1 and (turn_n % every_n) != 0:
-                logger.debug(
-                    "[memory_worker] skip LLM extraction for %s (turn %d, every_n=%d)",
-                    episode_id, turn_n, every_n,
-                )
-                return True
-            # If the sync heuristic pass already extracted beliefs and the
-            # skip flag is set, don't spend another LLM call on this turn.
-            skip_if_heur = bool(v2cfg.get("skip_llm_if_heuristic_extracted", False))
-            use_llm = True
-            if skip_if_heur:
-                try:
-                    from kazma_core.memory.belief_extractor import extract_and_apply_beliefs_sync
-
-                    sync_stats = extract_and_apply_beliefs_sync(
-                        primary, ops,
-                        row["user_text"] or "", row["assistant_text"] or "",
-                        session_id=row["session_id"], turn=row["turn_number"],
-                        tenant_id=row["tenant_id"],
-                    )
-                    if sync_stats.get("applied", 0) > 0:
-                        logger.debug(
-                            "[memory_worker] heuristic already extracted %d belief(s) for %s — skipping LLM",
-                            sync_stats["applied"], episode_id,
-                        )
-                        use_llm = False
-                except Exception:
-                    pass  # fall through to LLM extraction
-            stats = await extract_and_apply_beliefs(
-                primary, ops,
-                row["user_text"] or "", row["assistant_text"] or "",
-                session_id=row["session_id"], turn=row["turn_number"],
-                tenant_id=row["tenant_id"],
-                use_llm=use_llm,
+            raw, stats = await extract_beliefs_for_turn(
+                row["user_text"] or "", row["assistant_text"] or "", use_llm=prep["use_llm"],
             )
+            if raw:
+                stats = await asyncio.to_thread(
+                    _apply_beliefs_to_v2, raw, primary, ops, stats=stats,
+                    session_id=row["session_id"], turn=row["turn_number"],
+                    tenant_id=row["tenant_id"],
+                )
             logger.info(
                 "[memory_worker] micro_consolidation of %s: applied=%d (llm=%s)",
-                episode_id, stats.get("applied", 0), use_llm,
+                episode_id, stats.get("applied", 0), prep["use_llm"],
             )
             return True
         finally:
-            primary.close()
-            ops.close()
+            await asyncio.to_thread(lambda: (primary.close(), ops.close()))
     except Exception:
         logger.warning("[memory_worker] micro_consolidation handler failed", exc_info=True)
         return False

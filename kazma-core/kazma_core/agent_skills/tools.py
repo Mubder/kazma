@@ -8,6 +8,7 @@ import os
 from typing import Any
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "activate_skill",
@@ -145,7 +146,7 @@ async def search_agent_skills(query: str, limit: int = 8) -> str:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
             resp = await client.get(
                 "https://api.github.com/search/repositories",
                 params={

@@ -36,6 +36,7 @@ from kazma_ui.models import (
     ShortcutUpdate,
     VoiceSettingsUpdate,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -1601,7 +1602,7 @@ class SettingsRouterBuilder:
                     "messages": [{"role": "user", "content": "Say 'ok' in one word."}],
                     "max_tokens": 10,
                 }
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                     resp = await client.post(
                         f"{req.base_url}/chat/completions",
                         json=payload,

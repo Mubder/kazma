@@ -33,6 +33,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = [
     "AUTO_VOICE",
@@ -411,7 +412,7 @@ def _openai_tts_provider() -> TTSProvider:
         # OpenAI TTS output formats: mp3, opus, aac, flac, wav, pcm
         resp_format = output_format if output_format in ("mp3", "opus", "aac", "flac", "wav", "pcm") else "mp3"
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(
                     "https://api.openai.com/v1/audio/speech",
                     headers={"Authorization": f"Bearer {key}"},
@@ -466,7 +467,7 @@ def _nvidia_tts_provider() -> TTSProvider:
             "https://ai.api.nvidia.com/v1/tts",
         )
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(
                     f"{base_url}/speech",
                     headers={

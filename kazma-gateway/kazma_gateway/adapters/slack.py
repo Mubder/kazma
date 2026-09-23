@@ -39,6 +39,7 @@ from kazma_gateway.gateway import (
     IncomingMessage,
     OutboundMessage,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,7 @@ class SlackAdapter(BaseAdapter):
             for attempt in range(1, _MAX_RETRIES + 1):
                 try:
                     if not self._http:
-                        self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+                        self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0), verify=shared_ssl_context())
 
                     resp = await self._http.post(
                         f"{_SLACK_API}/chat.postMessage",
@@ -515,7 +516,7 @@ class SlackAdapter(BaseAdapter):
         if not self._bot_token:
             return
 
-        self._http = httpx.AsyncClient(timeout=httpx.Timeout(_MAX_TIMEOUT + 5, connect=10.0))
+        self._http = httpx.AsyncClient(timeout=httpx.Timeout(_MAX_TIMEOUT + 5, connect=10.0), verify=shared_ssl_context())
         self._queue = queue
         self._shutdown = shutdown_event
 
@@ -714,7 +715,7 @@ class SlackAdapter(BaseAdapter):
                                                         },
                                                     }
                                                 ]
-                                                async with httpx.AsyncClient() as client:
+                                                async with httpx.AsyncClient(verify=shared_ssl_context()) as client:
                                                     await client.post(
                                                         response_url,
                                                         json={
@@ -733,7 +734,7 @@ class SlackAdapter(BaseAdapter):
                                             route_swarm_bus(value)
                                             if response_url:
                                                 label = "✅ Approved" if "approve" in value else "❌ Rejected"
-                                                async with httpx.AsyncClient() as client:
+                                                async with httpx.AsyncClient(verify=shared_ssl_context()) as client:
                                                     await client.post(
                                                         response_url,
                                                         json={
@@ -788,7 +789,7 @@ class SlackAdapter(BaseAdapter):
                                             self._queue.put_nowait(incoming)
                                             if response_url:
                                                 try:
-                                                    async with httpx.AsyncClient() as client:
+                                                    async with httpx.AsyncClient(verify=shared_ssl_context()) as client:
                                                         await client.post(
                                                             response_url,
                                                             json={
@@ -873,7 +874,12 @@ class SlackAdapter(BaseAdapter):
                 break
             except Exception as exc:
                 if not self._shutdown.is_set():
-                    logger.warning("[Slack] Socket Mode error: %s — reconnecting in %.1fs", exc, reconnect_delay)
+                    # The type as well: several websockets errors have an empty str(), and
+                    # the log read "Socket Mode error:  — reconnecting" (2026-09-23).
+                    logger.warning(
+                        "[Slack] Socket Mode error: %s: %s — reconnecting in %.1fs",
+                        type(exc).__name__, exc, reconnect_delay,
+                    )
                     await asyncio.sleep(reconnect_delay)
                     reconnect_delay = min(reconnect_delay * 2, _SOCKET_MAX_RECONNECT_DELAY)
 
@@ -893,7 +899,7 @@ class SlackAdapter(BaseAdapter):
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning("[Slack] Poll error: %s", exc)
+                logger.warning("[Slack] Poll error: %s: %s", type(exc).__name__, exc)
                 await asyncio.sleep(5)
 
     # ── Polling internals ───────────────────────────────────────────

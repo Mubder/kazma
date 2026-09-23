@@ -336,9 +336,44 @@ async def extract_and_apply_beliefs(
 
     This is the function the post-turn hook calls to populate the V2
     belief graph from live conversation.
-    """
-    from kazma_core.memory.belief_mutation import mutate_belief
 
+    The apply step is synchronous SQLite work on the caller's connections, so
+    it runs where this is awaited. A caller on the server loop that owns
+    thread-safe connections should use :func:`extract_beliefs_for_turn` and
+    run :func:`_apply_beliefs_to_v2` in a thread (the micro-consolidation
+    handler does).
+    """
+    raw_beliefs, stats = await extract_beliefs_for_turn(
+        user_text, assistant_text, use_llm=use_llm, ignore_filler=ignore_filler
+    )
+    if not raw_beliefs:
+        return stats
+
+    # Apply via the shared sync helper (entity resolution + mutate)
+    return _apply_beliefs_to_v2(
+        raw_beliefs,
+        primary_conn,
+        ops_conn,
+        stats=stats,
+        session_id=session_id,
+        turn=turn,
+        tenant_id=tenant_id,
+        cfg=cfg,
+        extraction_method=extraction_method,
+    )
+
+
+async def extract_beliefs_for_turn(
+    user_text: str,
+    assistant_text: str = "",
+    *,
+    use_llm: bool = True,
+    ignore_filler: bool = False,
+) -> tuple[list[dict[str, Any]] | None, dict[str, Any]]:
+    """The extraction half, with no database: ``(raw_beliefs, stats)``.
+
+    LLM preferred, heuristic fallback; filler and slash commands skipped.
+    """
     stats: dict[str, Any] = {
         "skipped_filler": False,
         "source": "none",
@@ -348,10 +383,10 @@ async def extract_and_apply_beliefs(
     }
     user_text = (user_text or "").strip()
     if not user_text or user_text.startswith("/"):
-        return stats
+        return None, stats
     if not ignore_filler and is_filler_turn(user_text):
         stats["skipped_filler"] = True
-        return stats
+        return None, stats
 
     # Extract (LLM preferred, heuristic fallback)
     raw_beliefs: list[dict[str, Any]] | None = None
@@ -369,22 +404,7 @@ async def extract_and_apply_beliefs(
     if not raw_beliefs:
         raw_beliefs = extract_beliefs_heuristic(user_text)
         stats["source"] = "heuristic" if raw_beliefs else "none"
-
-    if not raw_beliefs:
-        return stats
-
-    # Apply via the shared sync helper (entity resolution + mutate)
-    return _apply_beliefs_to_v2(
-        raw_beliefs,
-        primary_conn,
-        ops_conn,
-        stats=stats,
-        session_id=session_id,
-        turn=turn,
-        tenant_id=tenant_id,
-        cfg=cfg,
-        extraction_method=extraction_method,
-    )
+    return (raw_beliefs or None), stats
 
 
 def _apply_beliefs_to_v2(

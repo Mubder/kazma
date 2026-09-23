@@ -17,6 +17,7 @@ import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["DependabotStyleScanner", "DependencyReport", "DependencyScanner", "OSV_API_URL", "ScanReport", "ScanResult", "SkillScanResult", "Vulnerability"]
 
@@ -129,7 +130,7 @@ class DependencyScanner:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(OSV_API_URL, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -720,7 +721,7 @@ class DependabotStyleScanner:
             "version": ver,
         }
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                 resp = await client.post(OSV_API_URL, json=payload)
                 resp.raise_for_status()
                 data = resp.json()
@@ -752,7 +753,7 @@ class DependabotStyleScanner:
         results: list[ScanResult] = []
         for pkg, ver in deps:
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                     resp = await client.get(
                         self.GITHUB_ADVISORIES_URL,
                         params={"ecosystem": "pip", "package": pkg},
@@ -802,7 +803,7 @@ class DependabotStyleScanner:
         results: list[ScanResult] = []
         for pkg, ver in deps:
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                     resp = await client.get(
                         self.NVD_API_URL,
                         params={"keywordSearch": pkg, "resultsPerPage": 5},

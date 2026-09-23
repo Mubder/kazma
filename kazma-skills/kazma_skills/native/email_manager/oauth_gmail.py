@@ -16,6 +16,7 @@ from kazma_skills.native.email_manager.oauth_common import (
     pop_state,
     public_base_url,
 )
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -259,7 +260,7 @@ async def finish_gmail_oauth(code: str, state: str) -> dict[str, Any]:
     redirect = meta.get("redirect_uri") or gmail_redirect_uri()
     if not cid or not secret:
         return {"ok": False, "error": "Gmail OAuth client not configured"}
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             TOKEN_URL,
             data={
@@ -461,7 +462,7 @@ async def refresh_gmail_access_token(
     """Return (access_token, refresh_token)."""
     cid = client_id or _client_id()
     secret = client_secret or _client_secret()
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=shared_ssl_context()) as client:
         r = await client.post(
             TOKEN_URL,
             data={

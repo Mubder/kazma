@@ -25,6 +25,7 @@ import logging
 import time
 from dataclasses import dataclass
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +199,7 @@ async def _probe_google() -> tuple[bool, str]:
             return False, "no Gmail access token"
         import httpx
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, verify=shared_ssl_context()) as client:
             r = await client.get(
                 "https://gmail.googleapis.com/gmail/v1/users/me/profile",
                 headers={"Authorization": f"Bearer {access}"},
@@ -291,7 +292,7 @@ async def _probe_google_calendar() -> tuple[bool, str]:
             return False, "no Calendar access token"
         import httpx
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, verify=shared_ssl_context()) as client:
             ok, reason = await probe_calendar_api(client, access)
             return ok, reason if ok else (reason or "calendar probe failed")
     except Exception as exc:  # noqa: BLE001

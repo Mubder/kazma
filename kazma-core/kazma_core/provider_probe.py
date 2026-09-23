@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["ChatProbeResult", "probe_chat_completion"]
 
@@ -78,7 +79,7 @@ async def probe_chat_completion(
 
     start = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=timeout) as http:
+        async with httpx.AsyncClient(timeout=timeout, verify=shared_ssl_context()) as http:
             resp = await http.post(url, headers=headers, json=payload)
         ms = int((time.monotonic() - start) * 1000)
 

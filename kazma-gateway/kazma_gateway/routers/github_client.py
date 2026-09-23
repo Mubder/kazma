@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -212,7 +213,8 @@ class GitHubClient:
 
     async def __aenter__(self) -> GitHubClient:
         self._client = httpx.AsyncClient(
-            base_url=_API_BASE, timeout=self._timeout, headers=self._headers()
+            base_url=_API_BASE, timeout=self._timeout, headers=self._headers(),
+            verify=shared_ssl_context(),
         )
         return self
 
@@ -422,7 +424,7 @@ async def exchange_code_for_token(code: str, redirect_uri: str) -> dict[str, Any
     }
     headers = {"Accept": "application/json", "User-Agent": _USER_AGENT}
     try:
-        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT, verify=shared_ssl_context()) as client:
             resp = await client.post(_OAUTH_TOKEN_URL, json=payload, headers=headers)
     except httpx.RequestError as exc:
         raise GitHubError(0, f"Transport error during OAuth exchange: {exc}") from exc

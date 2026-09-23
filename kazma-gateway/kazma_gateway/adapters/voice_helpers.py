@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from kazma_gateway.gateway import Attachment, IncomingMessage
+from kazma_core.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ async def download_audio_bytes(
         return data
     if not url:
         return None
-    client = http or httpx.AsyncClient(timeout=60.0)
+    client = http or httpx.AsyncClient(timeout=60.0, verify=shared_ssl_context())
     own_client = http is None
     try:
         resp = await client.get(url, headers=headers or {}, timeout=60.0)

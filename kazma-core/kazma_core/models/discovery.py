@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from kazma_core.url_utils import normalize_provider_url
+from kazma_core.http_tls import shared_ssl_context
 
 __all__ = ["ProviderInfo", "check_ollama_health", "discover_custom_models", "discover_lm_studio_models", "discover_models", "discover_ollama_models", "get_active_local_models", "get_model_base_url", "pull_ollama_model"]
 
@@ -115,7 +116,7 @@ async def discover_ollama_models(base_url: str | None = None) -> ProviderInfo:
         return info
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0), verify=shared_ssl_context()) as client:
             resp = await client.get(tags_url)
             resp.raise_for_status()
             data = resp.json()
@@ -196,7 +197,7 @@ async def discover_lm_studio_models(
         return info
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0), verify=shared_ssl_context()) as client:
             resp = await client.get(models_url)
             resp.raise_for_status()
             data = resp.json()
@@ -254,7 +255,7 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
         return info
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT, connect=2.0), verify=shared_ssl_context()) as client:
             resp = await client.get(models_url)
             resp.raise_for_status()
             data = resp.json()
@@ -340,7 +341,7 @@ async def _discover_openai_compatible(base_url: str, api_key: str | None, provid
         headers["Authorization"] = f"Bearer {api_key}"
 
     try:
-        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=False, verify=shared_ssl_context()) as client:
             resp = await client.get(url, headers=headers)
             if resp.status_code in (200, 401):
                 # 401 with valid key often means the endpoint requires /v1 prefix already
@@ -431,7 +432,7 @@ async def check_ollama_health(base_url: str | None = None) -> dict[str, Any]:
     base = _ollama_native_base(base_url or _ollama_base_from_registry())
     tags_url = f"{base}/api/tags"
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0), verify=shared_ssl_context()) as client:
             resp = await client.get(tags_url)
             resp.raise_for_status()
             data = resp.json()

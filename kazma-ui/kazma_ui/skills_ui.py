@@ -16,6 +16,7 @@ from fastapi.templating import Jinja2Templates
 from kazma_ui.models import SkillInstallRequest, SkillToggleRequest
 from kazma_ui.rate_limit import rate_limit
 from kazma_core.errors import safe_error
+from kazma_core.http_tls import shared_ssl_context
 
 if TYPE_CHECKING:
     from kazma_core.agent import KazmaAgent
@@ -258,7 +259,7 @@ def create_skills_router(agent: KazmaAgent, templates: Jinja2Templates) -> APIRo
         if token:
             headers["Authorization"] = f"Bearer {token}"
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=15.0, verify=shared_ssl_context()) as client:
                 resp = await client.get(
                     "https://api.github.com/search/repositories",
                     params={
