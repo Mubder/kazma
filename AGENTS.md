@@ -458,7 +458,10 @@ left backups/export inert). Current boot list:
 - `_start_restore_drill_scheduler()`
 
 **B. Distinct cadences (do not collapse them):**
-- **6h `macro_sleep`:** decay scoring, tier demotion/promotion, archival
+- **6h `macro_sleep`:** rule-based tier demotion/promotion (TTLs,
+  importance, access) and archival. `compute_retention` (V_retention) exists
+  but decides nothing — wiring it in is an open product decision
+  (docs/KNOWN_GAPS.md), because archival drops text.
   (`macro_sleep.py:run_macro_sleep`). First sweep 60s after boot.
 - **6h backup/export** (`_BACKUP_EXPORT_INTERVAL_HOURS = 6`, not 24):
   enqueues `native_backup` + `nightly_export` + `native_pg_backup` →
@@ -1707,6 +1710,39 @@ in the vault and does **not** automatically feed Calendar.
   stand-in for Gmail.
 
 Tests: `tests/test_calendar_connector.py`, `tests/test_connector_health.py`.
+
+### 35. Class gates from the 2026-09-22 audit — fix the class, not the instance
+
+Every finding in that audit was a correct fix in one sibling and missing from
+the next. Each now has a gate that enumerates the siblings from the real
+source, with a negative control. When one fails, fix the code; do not edit
+the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
+
+- **One copy of each decision.** Admin: `kazma_ui.auth.admin_decision`
+  (fail-closed; wrappers keep their response shape). Thread ownership:
+  `kazma_ui.thread_ownership` (fail-closed, off the loop). `.env` loading:
+  `kazma_core.env_files.load_env_files`, called by entry points, never on
+  import. Untrusted XML: `kazma_core.security.safe_xml`. Child rlimits:
+  `kazma_core.security.rlimits` (no `preexec_fn`). UI writes:
+  `window.kazmaSave` (never discard an awaited `fetch`).
+- **Every thread-taking route declares its rule** in
+  `tests/test_thread_route_policy.py` (owner / admin / admin+owner / session).
+- **Closures scheduled from a loop bind the loop's names** as defaults or
+  method arguments (`test_no_deferred_closure_reads_loop_rebound_names`).
+- **`asyncio.to_thread`, never `run_in_executor`** — only `to_thread` carries
+  the tenant/workspace/HITL ContextVars into the thread.
+- **No blocking I/O inline in `async def`.** A route handler that never
+  awaits is a plain `def` (FastAPI threadpools it, context included); one that
+  does awaits `to_thread` around its store calls. An `async def` façade over a
+  sync body (`KnowledgeIndex.search`) runs the body in `to_thread`. DNS is I/O:
+  `await asyncio.to_thread(validate_url, …)` — keep the name so test patches
+  still apply (`test_no_blocking_dns_in_async_functions`). Route walks with
+  loop-detecting fakes: `tests/test_kb_api_routes.py`.
+- **Every product module is reached** (`tests/test_orphan_modules.py`); a
+  module only its own tests import fails, unless allowlisted with a reason.
+- **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
+  exception-handler counts; they may only go down, and lowering them means
+  updating the baseline in the same change.
 
 ## UI Conventions (Web)
 

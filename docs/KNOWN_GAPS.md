@@ -226,51 +226,44 @@ missing from the next.** Slack and Telegram chained messages correctly and
 Discord did not; `app.py` loaded `.env` from explicit paths and `cost_breaker`
 did not; the approval route checked thread ownership and the replay, chat
 control and dashboard routes did not; six copies of the admin check disagreed
-about what to do when it failed. Each fix below landed with a gate that
-enumerates the siblings from the real source, plus a negative control.
+about what to do when it failed. Every finding is closed, and each landed with
+a gate that enumerates the siblings from the real source, plus a negative
+control proving the gate fails on the old code.
 
 | Closed | Gate that fails if it returns |
 |---|---|
 | Discord burst delivered the last message N times (lost the rest) | `test_adapter_burst_ordering.py` (all adapters); `test_no_deferred_closure_reads_loop_rebound_names` |
 | Importing `kazma_core` loaded a `.env`, into the document sandbox too | `test_env_loading.py` (production launch shape, planted `.env`; every entry point declares a policy); `test_load_dotenv_lives_only_in_the_env_loader`; `test_no_import_time_environment_writes` |
+| `serve.py` ignored `KAZMA_HOST` from `.env` | `test_serve_env.py` |
 | Boot errors hidden behind a DEBUG-only `try` | `test_app_bootstrap_errors.py` |
 | Replay reads/deletes, chat stop/steer/abort, `/api/sessions` acted on any thread | `test_thread_route_policy.py` (every thread-taking route declares owner/admin/session); `test_thread_ownership_routes.py` |
 | Admin check copied six times; half allowed on error | `test_the_admin_decision_lives_in_one_place`; `test_admin_decision.py` |
+| Web sessions never carried a tenant | `test_session_tenant_binding.py` |
 | 43 UI writes discarded the response; 24 toasted success on failure | `test_no_discarded_fetch_results_in_the_ui`; `tests/js/test_kazma_save.js` |
 | Five `tests/js` files never ran in CI (one failing unseen) | `test_js_suite.py` runs the whole directory |
+| Snapshot cache raced; a capture error failed the turn; replay I/O on the event loop | `test_time_travel_concurrency.py`; the replay route walk in `test_thread_ownership_routes.py` fails on loop I/O |
+| `run_in_executor` dropped the tenant/workspace ContextVars | `test_sync_tool_context.py`; `test_no_context_dropping_executor_calls` |
+| Stdlib XML parse of fetched sitemaps (DTD accepted) | `test_safe_xml.py`; `test_untrusted_xml_uses_the_guarded_parser` |
+| `preexec_fn` in the document sandbox and `python_exec` | `test_rlimits.py` (real limits on Linux CI); `test_no_preexec_fn` |
+| Dead or unwired modules (realtime codec, TUI footer, PDF exporter, file merger, markup guard, email base, a test-only HITL router, the hub Kubernetes manifest) | `test_orphan_modules.py` builds the import graph; `test_no_realtime_or_live_conversation_apis` |
+| HTML exports: `\$` kept its backslash, URL isolation ate the full stop, `<p>` nested in `<p>` | `test_html_export_of_an_arabic_report` |
+| Unused locals hiding bugs (JSON skill manifest ignored, validated ports discarded) | `test_unused_locals_that_were_bugs.py`; CI's gating Ruff step now includes F841 and B033 |
+| `kazma docs` looked in site-packages and could not start `npm.cmd` | `test_cli_docs.py` |
+| Knowledge API ran SQLite on the event loop (every route, plus a ConfigStore write per crawl progress update); crawls embedded each page inline; the async index search façades ran their whole body inline; recrawls under-counted unchanged pages | `test_kb_api_routes.py` walks the router's own route table; `test_kb_smart_reindex.py` (crawl, page ingest, search façades, `pages_unchanged`) |
+| 23 async functions resolved DNS inline through `validate_url` (fetch, research, crawl, per-hop redirect checks, model discovery, provider tests) | `test_no_blocking_dns_in_async_functions` |
+| 3,846 blind / 577 silent exception handlers | `test_debt_ratchet.py` — the counts may only go down |
 
-**Still open from that audit** (found, not fixed in the same change):
+**Still open — a product decision, not a defect:**
 
-- **`SnapshotRecorder._memory` is an unlocked `OrderedDict`** mutated from
-  `asyncio.to_thread` captures and iterated on the loop; the supervisor awaits
-  `capture()` with no `try`, so a failure fails the user's turn. Forced
-  interleaving (`sys.setswitchinterval(1e-6)`) produced 2,313 capture errors;
-  none at the default interval in 3,200 captures. Rare under the GIL, common on
-  free-threaded Python. `kazma_core/time_travel.py`, `agent/graph_builder.py:173`.
-- **Replay handlers read SQLite on the event loop**, under a lock the capture
-  thread also holds, and `list_snapshots` JSON-decodes every snapshot to count
-  messages.
-- **Web sessions never carry a tenant.** `create_session(tenant_id=...)` is
-  never called with one and `get_request_principal` drops it, so the
-  tenant-binding branch of `POST /api/memory/graph/clear` is unreachable.
-- **`serve.py` ignores `KAZMA_HOST` from `.env`**: it reads the bind host
-  before any `.env` loads, while `docs/docs/ops/wsl-fixed-access.md` says to
-  put it there. Kept as-is on purpose so no running deployment changes which
-  interface it binds; whether `.env` should decide the bind address is the
-  operator's call.
-- **`KAZMA_REALTIME_CODEC` is documented and does nothing.** No runtime path
-  imports `voice/realtime_codec.py`.
-- **`kubernetes/hub-deployment.yaml` cannot work**: no Dockerfile builds
-  `kazma/hub-api`, `hub.api.configure_api()` is called only by tests (every
-  endpoint 503s), and the probes hit paths the hub does not serve.
-- **Test-only duplicate of a live route.** `hitl_approval.create_hitl_approval_router`
-  mounts `GET /api/pending-approvals`, which the app serves from
-  `routes_direct/misc.py`; its tests exercise the copy production never runs.
-- **Unreferenced modules**: `skills/exporter.py`, `skills/file_merger.py`,
-  `safety/markup_guard.py`, `kazma_tui/footer.py`,
-  `email_manager/backends/base.py`.
-- **`documents/sandbox.py` uses `preexec_fn`** in a multi-threaded server, and
-  sitemaps fetched from the web are parsed with the stdlib XML parser.
+- **Memory decay scoring is not used to decide anything.**
+  `memory/macro_sleep.py:compute_retention` implements the V_retention score
+  (importance × trust, with access decaying by memory class), but every tier
+  move in the macro-sleep sweep is rule-based — TTLs, importance, access
+  counts. The sweep used to compute the score and throw it away; the dead call
+  was removed on 2026-09-23 and the docs no longer claim "decay scoring".
+  Wiring the score in would change which memories get archived, and archiving
+  drops their original text, so it is left for an explicit decision rather
+  than slipped in behind a cleanup.
 
 ## Prompt injection
 
