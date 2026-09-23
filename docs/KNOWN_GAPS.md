@@ -255,8 +255,40 @@ control proving the gate fails on the old code.
 | Chat memories archived to empty shells on day 30 however often they were recalled: every chat turn is importance 1 (never promoted), archival tested creation age only, and the "keep a summary" fallback used COALESCE on an empty string | `test_memory_v2_phase3.py` (in-use turn survives, stub kept, own summary kept, moves reach the mirrors); `test_only_the_archive_statement_drops_episode_text` |
 | The V_retention decay score decided nothing, and its λs were per-second (a "general" memory's usage term halved every ~70 s) | Removed with its five Settings knobs, decided 2026-09-23; `test_v2_defaults_present` keeps the knobs out |
 
-Nothing from this audit remains open. Memories already emptied by the old
-archival can only come back from backups taken before their archive date.
+All 341 emptied memories on the live install were restored on 2026-09-23:
+272 from local backups, 69 from the 2026-08-29 restic snapshot.
+
+### Found on 2026-09-23 from a weekly resilience report, and fixed
+
+| Closed | Gate |
+|---|---|
+| The report read one day of a weekly window (rotated logs ignored) | `test_ledger_reads_rotated_logs` |
+| "430 health-gated restarts" were single missed probes (there was 1 restart) | `test_ledger_signatures_match_lines_the_code_emits` (negative lines); `test_health_gated_signature_matches_the_supervisors_real_reason` |
+| Operator alerting, deep restore drill, restic maintenance reported "silent" (typo'd pattern, unmatched `deep:` prefix, success never logged) | `test_every_ledger_signature_matches_a_line_the_code_emits`; `test_clean_restic_maintenance_leaves_the_line_the_ledger_counts` |
+| A failed restore drill did not say which check failed | `DrillResult.summary()` names failed and unverified checks |
+| 70 event-loop stalls (one forced restart): HITL watchdog, X scheduler/poller/client, per-request session lookup, queue handlers, self-improvement recall, GC | `test_loop_stall_helpers_are_not_called_on_the_loop`; `tests/test_web_session_cache.py`; loop stalls now counted in the weekly report |
+| 169 health probes failed on port exhaustion with nothing recording who held the ports | the guard logs `health.port_exhaustion` (states + top owners) — `tests/test_guard_port_exhaustion.py` |
+
+**Still open — honest list:**
+
+- **Restic retention has never deleted a snapshot (decision pending).**
+  `forget` uses restic's default grouping (host + paths), and every universal
+  backup is a new `backups/universal/<epoch>` path, so 199 snapshots formed
+  199 groups of one and "keep 7 daily / 8 weekly / 12 monthly" kept all of
+  them. Grouping by host + tags applies the documented policy and would remove
+  141 of 199 on the first run (keep-daily 30 instead: 113). It deletes
+  backups, so it waits for the operator; the local repository is 4.6 GB.
+- **Port exhaustion is diagnosed, not fixed.** The next occurrence records
+  the processes holding sockets (338 BOUND sockets, 200 of them Docker's, at
+  the time of writing — not at a failure).
+- **132 httpx clients are built inside async functions without the shared
+  SSL context**, each loading the CA store on the loop. The LLM provider and
+  the X client share one context built off the loop; the rest do not yet.
+- **`_handle_micro_consolidation` does SQLite work on the loop** between
+  awaits of an async LLM extraction that shares the connections. Not in any
+  stall dump; threading it is a refactor, not a wrap.
+- **The deep restore drill failed once (2026-09-21) and its log did not name
+  the check.** It now does; the next weekly run is due around 2026-09-28.
 
 ## Prompt injection
 
