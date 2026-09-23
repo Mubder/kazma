@@ -1752,7 +1752,11 @@ the gate to pass. Full list with evidence: `docs/KNOWN_GAPS.md`.
   sync body (`KnowledgeIndex.search`) runs the body in `to_thread`. DNS is I/O:
   `await asyncio.to_thread(validate_url, …)` — keep the name so test patches
   still apply (`test_no_blocking_dns_in_async_functions`). Route walks with
-  loop-detecting fakes: `tests/test_kb_api_routes.py`.
+  loop-detecting fakes: `tests/test_kb_api_routes.py`. An
+  `httpx.AsyncClient(...)` built in async code passes
+  `verify=shared_ssl_context()` (`kazma_core.http_tls`, one context built in
+  a thread at boot) -- the default loads the CA bundle in the constructor,
+  on the loop (`test_async_http_clients_share_the_tls_context`).
 - **Every product module is reached** (`tests/test_orphan_modules.py`); a
   module only its own tests import fails, unless allowlisted with a reason.
 - **Debt ratchet:** `tests/test_debt_ratchet.py` holds the blind/silent
