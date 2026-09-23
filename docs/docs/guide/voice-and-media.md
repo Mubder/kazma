@@ -80,10 +80,10 @@ cancellation — **not** a server media plane and not a second brain; the
 LangGraph `/ws/voice` loop still owns the conversation. Telegram / Discord /
 Slack are still voice notes.
 
-OpenAI Realtime and Gemini Live are **not** the conversation brain. Optional
-REST STT/TTS codec: `KAZMA_REALTIME_CODEC=1` (`kazma_core.voice.realtime_codec`).
-Those two providers are skipped because they cannot stay codec-only without
-owning the tool loop.
+OpenAI Realtime and Gemini Live are **not used at all**: they cannot stay
+codec-only without owning the tool loop, which would bypass HITL. Voice always
+runs on the REST STT/TTS providers below, and there is no setting that changes
+that.
 
 Voice is a **single config block that controls all platforms**. When enabled,
 inbound audio is transcribed to text before reaching the agent. Optional

@@ -250,9 +250,9 @@ Docker Compose is the primary path. Bare `kazma serve` works for single-host dev
 
 No. Kazma is a stateful Python service. Don't attempt serverless packaging.
 
-### The Kubernetes manifests don't seem right.
+### Is there a Kubernetes manifest?
 
-They deploy a **Hub API** service (PostgreSQL + Redis), not the main agent. Don't apply them for the main agent. See [Deployment §4](deployment#4-kubernetes-hub-service-only--read-carefully).
+No. The old `kubernetes/` files described a separate Hub service this repo never built, and were removed. [Deployment §4](deployment#4-kubernetes) lists what a manifest for the main agent needs.
 
 ### Why does the container bind 0.0.0.0?
 

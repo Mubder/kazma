@@ -207,7 +207,6 @@ def _llm_extract_beliefs_from_memories(
     # Process in batches of 20
     BATCH = 20
     total_beliefs = 0
-    now = time.time()
 
     # Open the ops connection for audit logging
     try:

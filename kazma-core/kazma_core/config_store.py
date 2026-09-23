@@ -813,7 +813,7 @@ class ConfigStore:
                 raise
             return
         with self._lock:
-            conn = self._get_conn()
+            self._get_conn()
             # Run migrations instead of simple schema creation
             run_config_store_migrations(str(self._db_path))
         # SQLite is the live backend, so any in-table "this table is not read"

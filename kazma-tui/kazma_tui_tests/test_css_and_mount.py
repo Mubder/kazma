@@ -41,61 +41,28 @@ def _parse(css: str, *, label: str) -> None:
     ss.parse()
 
 
+def _tui_modules() -> list:
+    """Every module in kazma_tui, walked from the package itself.
+
+    This was a hand-written import list; deleting footer.py (an orphan)
+    broke it, and a new widget module would have been skipped silently.
+    """
+    import importlib
+    import pkgutil
+
+    import kazma_tui
+
+    modules = []
+    for info in pkgutil.walk_packages(kazma_tui.__path__, "kazma_tui."):
+        if info.name.rsplit(".", 1)[-1] == "__main__":
+            continue  # importing it launches the app
+        modules.append(importlib.import_module(info.name))
+    return modules
+
+
 def _widget_css_sources() -> list[tuple[str, str]]:
     """Every DEFAULT_CSS / HIGH_CONTRAST_CSS string defined in kazma_tui."""
-    from kazma_tui import (
-        chat,
-        dashboard,
-        documents,
-        editor,
-        files,
-        footer,
-        header,
-        memory_panel,
-        nav_rail,
-        settings_panel,
-        swarm,
-        traces,
-    )
-    from kazma_tui.widgets import (
-        accessibility,
-        command_bar,
-        command_palette,
-        confirm_dialog,
-        hitl_modal,
-        log_stream,
-        model_picker,
-        sparkline,
-        status_bar,
-        toast,
-        tutorial,
-    )
-
-    modules = [
-        chat,
-        dashboard,
-        documents,
-        editor,
-        files,
-        footer,
-        header,
-        memory_panel,
-        nav_rail,
-        settings_panel,
-        swarm,
-        traces,
-        accessibility,
-        command_bar,
-        command_palette,
-        confirm_dialog,
-        hitl_modal,
-        log_stream,
-        model_picker,
-        sparkline,
-        status_bar,
-        toast,
-        tutorial,
-    ]
+    modules = _tui_modules()
     found: list[tuple[str, str]] = []
     for mod in modules:
         for name, obj in inspect.getmembers(mod, inspect.isclass):

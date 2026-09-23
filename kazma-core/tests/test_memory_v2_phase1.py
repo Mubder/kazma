@@ -137,7 +137,14 @@ def test_v2_defaults_present():
     assert v2["trust_weight_user"] == 1.0
     assert v2["trust_weight_tool"] == 0.85
     assert v2["trust_weight_llm"] == 0.60
-    assert v2["decay_lambda_identity"] == 0.0001
+    # The V_retention knobs were removed with compute_retention (2026-09-23):
+    # no rule read them, and the λs were per-second. A knob that changes
+    # nothing must not come back into Settings.
+    for dead in (
+        "retention_importance_weight", "retention_access_weight",
+        "decay_lambda_identity", "decay_lambda_general", "decay_lambda_ephemeral",
+    ):
+        assert dead not in v2, dead
     assert v2["ppr_alpha"] == 0.15
     assert v2["procedural_quarantine_threshold"] == 0.40
 

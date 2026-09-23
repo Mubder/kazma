@@ -156,7 +156,6 @@ class FileCheckpointStore:
         rec = self.get(checkpoint_id)
         if rec is None:
             raise ValueError(f"unknown checkpoint {checkpoint_id}")
-        ws = Path(rec["workspace_root"])
         restored: list[str] = []
         for item in rec["files"]:
             raw = str(item.get("path") or "")

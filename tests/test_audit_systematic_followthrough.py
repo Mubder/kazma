@@ -150,10 +150,18 @@ def test_shipped_install_job_uses_the_lockfile_and_the_wheel() -> None:
 
 
 def test_lint_gate_covers_every_product_package() -> None:
+    import re
+
     text = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    gate = text.split("Run Ruff (syntax/undefined names — GATE)", 1)[1].split("Run Ruff (full", 1)[0]
+    # The gating step is found by its GATE marker, not its full name: the
+    # name gains a clause whenever a rule joins the gate (2026-09-23).
+    match = re.search(r"name: Run Ruff \([^)\n]*GATE\)", text)
+    assert match, "no gating Ruff step in ci.yml"
+    gate = text[match.end():].split("Run Ruff (full", 1)[0]
     for package in PACKAGES:
         assert package in gate
+    for rule in ("E9", "F82", "F841", "B033"):
+        assert rule in gate, f"{rule} left the gating Ruff selection"
 
 
 def test_isolated_rehearsal_refuses_the_live_database() -> None:

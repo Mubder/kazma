@@ -168,7 +168,6 @@ _NO_SPEECH_FOLD = frozenset({
     "شكرا",
     "شكرا لك",
     "شكرا لكم",
-    "شكرا لكم",
 })
 _FOLD_RE = re.compile(r"[^\w\u0600-\u06FF]+", re.UNICODE)
 

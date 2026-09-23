@@ -71,19 +71,16 @@ DEFAULT_MEMORY_CFG: dict[str, Any] = {
         "merge_knowledge_into_chat": True,
         # Mirror top KB hits into episodic memory after inject (soft merge)
         "promote_kb_to_episodes": True,
-        # Source trust weights (W_trust in V_retention formula §4.1)
+        # Source trust weights (belief_mutation: a lower-trust source may not
+        # supersede a higher-trust functional belief)
         "trust_weight_user": 1.0,
         "trust_weight_tool": 0.85,
         "trust_weight_llm": 0.60,
-        # Retention-score blend weights (ω1, ω2 in §4.1)
-        "retention_importance_weight": 0.60,
-        "retention_access_weight": 0.40,
-        # Decay constants (λ_type in §4.1) per derived memory_class.
-        # memory_class is DERIVED (resolution #4): no schema column.
-        "decay_lambda_identity": 0.0001,   # functional + importance≥4
-        "decay_lambda_general": 0.01,      # default
-        "decay_lambda_ephemeral": 0.10,    # importance≤2
-        # memory_class derivation thresholds (resolution #4)
+        # The V_retention blend weights and decay λs lived here. No rule read
+        # them, and the λs were per-second (a "general" memory's usage term
+        # halved every ~70 s); removed with compute_retention on 2026-09-23.
+        # memory_class derivation thresholds (resolution #4) — a label on
+        # belief metadata; memory_class is DERIVED, no schema column.
         "identity_min_importance": 4,
         "ephemeral_max_importance": 2,
         # Tier TTLs (days)
@@ -189,11 +186,6 @@ def _read_store_overlay() -> dict[str, Any]:
             "trust_weight_user",
             "trust_weight_tool",
             "trust_weight_llm",
-            "retention_importance_weight",
-            "retention_access_weight",
-            "decay_lambda_identity",
-            "decay_lambda_general",
-            "decay_lambda_ephemeral",
             "identity_min_importance",
             "ephemeral_max_importance",
             "recall_ttl_days",
@@ -284,16 +276,11 @@ _V2_BOOL_KEYS = (
     "merge_knowledge_into_chat",
     "promote_kb_to_episodes",
 )
-# Floats (trust weights, retention blend, decay λ, thresholds)
+# Floats (trust weights, thresholds)
 _V2_FLOAT_KEYS = (
     "trust_weight_user",
     "trust_weight_tool",
     "trust_weight_llm",
-    "retention_importance_weight",
-    "retention_access_weight",
-    "decay_lambda_identity",
-    "decay_lambda_general",
-    "decay_lambda_ephemeral",
     "procedural_quarantine_threshold",
     "entity_vector_merge_threshold",
     "ppr_alpha",

@@ -244,7 +244,6 @@ class CertificationBadgeSystem:
             "premium": "#eab308",
         }
         color = colors.get(level, "#6b7280")
-        label = BADGE_LEVELS.get(level, {}).get("label", f"Kazma-Certified {level.title()}")
 
         return f"""\
 <?xml version="1.0" encoding="UTF-8"?>

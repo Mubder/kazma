@@ -256,18 +256,117 @@ def test_procedural_record_and_quarantine(dbs):
 # ── Macro sleep / decay ───────────────────────────────────────────────────
 
 
-def test_retention_identity_beats_ephemeral():
-    from kazma_core.memory.macro_sleep import compute_retention
+def _chat_turn(p, eid, *, created_days, accessed_days=None, access=0, summary=""):
+    """An episode exactly as _mirror_turn_to_v2 writes an ordinary chat turn:
+    importance 1 and summary_text '' (empty, not NULL)."""
+    now = time.time()
+    p.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, "
+        "assistant_text, summary_text, tier, structural_importance, access_count, "
+        "last_accessed, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (eid, "default", "s1", 1, "What is my flight number to Doha?",
+         "QR 1071, departing 09:40.", summary, "episodic", 1, access,
+         None if accessed_days is None else now - 86400 * accessed_days,
+         now - 86400 * created_days),
+    )
+    p.commit()
+    return now
 
-    ident = compute_retention(
-        trust_weight=1.0, importance=5, access_count=10,
-        age_seconds=86400 * 365, memory_class="identity",
+
+def test_a_chat_turn_still_being_recalled_is_not_archived(dbs):
+    """Every chat turn is importance 1, so it can never be promoted; archival
+    tested created_at only, and a turn recalled daily lost its text on day 30."""
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    p, _ = dbs
+    now = _chat_turn(p, "in_use", created_days=40, accessed_days=1, access=12)
+    run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    row = p.execute("SELECT tier, user_text, assistant_text FROM episodes WHERE id='in_use'").fetchone()
+    assert row["tier"] == "episodic"
+    assert row["assistant_text"] == "QR 1071, departing 09:40."
+
+
+def test_an_archived_chat_turn_keeps_a_stub(dbs):
+    """summary_text '' is not NULL, so COALESCE kept nothing at all."""
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    p, _ = dbs
+    now = _chat_turn(p, "stale", created_days=60)
+    run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    row = p.execute(
+        "SELECT tier, user_text, assistant_text, summary_text FROM episodes WHERE id='stale'"
+    ).fetchone()
+    assert row["tier"] == "archived"
+    assert row["user_text"] is None and row["assistant_text"] is None
+    assert row["summary_text"] == "What is my flight number to Doha? — QR 1071, departing 09:40."
+
+
+def test_an_archived_turn_keeps_its_own_summary(dbs):
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    p, _ = dbs
+    now = _chat_turn(p, "summed", created_days=60, summary="Flight to Doha: QR 1071")
+    run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    row = p.execute("SELECT tier, summary_text FROM episodes WHERE id='summed'").fetchone()
+    assert (row["tier"], row["summary_text"]) == ("archived", "Flight to Doha: QR 1071")
+
+
+def test_sweep_moves_reach_the_shared_mirrors(dbs, monkeypatch):
+    """Archived rows used to keep full text in the Postgres state mirror and
+    stay searchable in a remote vector index; nothing propagated."""
+    import kazma_core.memory.backends as backends
+    import kazma_core.memory.state_backend as state_backend
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    mirrored: dict[str, dict] = {}
+    deleted: list[str] = []
+
+    class _Mirror:
+        def mirror_episode(self, row):
+            mirrored[row["id"]] = row
+            return True
+
+    class _RemoteIndex:
+        def delete(self, item_id, *, tenant_id="default"):
+            deleted.append(item_id)
+            return True
+
+    monkeypatch.setattr(state_backend, "get_state_backend", lambda: _Mirror())
+    monkeypatch.setattr(backends, "get_vector_backend", lambda conn=None: _RemoteIndex())
+
+    p, _ = dbs
+    now = _chat_turn(p, "gone", created_days=60)
+    p.execute(
+        "INSERT INTO episodes (id, tenant_id, session_id, turn_number, user_text, tier, "
+        "structural_importance, created_at) VALUES ('fresh','default','s1',2,'hi','working',1,?)",
+        (now - 86400 * 2,),
     )
-    ephem = compute_retention(
-        trust_weight=1.0, importance=1, access_count=0,
-        age_seconds=86400 * 30, memory_class="ephemeral",
-    )
-    assert ident > ephem
+    p.commit()
+    run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    assert mirrored["gone"]["tier"] == "archived" and mirrored["gone"]["user_text"] is None
+    assert mirrored["fresh"]["tier"] == "episodic"  # a plain tier move reaches it too
+    assert deleted == ["gone"]  # only archived rows leave the remote index
+
+
+def test_the_local_setup_touches_no_mirror(dbs, monkeypatch):
+    """Default: no state mirror, local vector index (filters tier in SQL)."""
+    import kazma_core.memory.backends as backends
+    from kazma_core.memory.config import DEFAULT_MEMORY_CFG
+    from kazma_core.memory.macro_sleep import run_macro_sleep
+
+    p, _ = dbs
+    local = backends.LocalSqliteVectorBackend(p)
+    calls: list[str] = []
+    monkeypatch.setattr(local, "delete", lambda *a, **k: calls.append("delete"))
+    monkeypatch.setattr(backends, "get_vector_backend", lambda conn=None: local)
+    now = _chat_turn(p, "gone", created_days=60)
+    stats = run_macro_sleep(p, cfg=DEFAULT_MEMORY_CFG, now=now)
+    assert stats["demoted_episodic"] == 1 and "sweep_error" not in stats
+    assert calls == []
 
 
 def test_macro_sleep_demotes_old_episodic(dbs):

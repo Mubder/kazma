@@ -177,26 +177,34 @@ def _sanitized_environment(extra: Mapping[str, str] | None) -> dict[str, str]:
 
 def _resource_setup(
     request: SandboxRequest,
-) -> tuple[object | None, bool, str | None]:
+) -> tuple[list[str], bool, str | None]:
+    """The command to launch, whether limits are enforced, and why not.
+
+    POSIX limits are applied by a launcher that sets them on itself and then
+    execs the command (``kazma_core.security.rlimits``). It used to be a
+    ``preexec_fn``, which runs Python between fork and exec in a
+    multi-threaded server — documented as able to deadlock the child (audit
+    2026-09-22). Strict: a limit that cannot be applied stops the run rather
+    than reporting ``resource_limits_enforced`` falsely.
+    """
+    command = list(request.command)
     requested = (
         request.memory_limit_bytes is not None or request.cpu_limit_seconds is not None
     )
-    if not requested:
-        return None, False, None
-    if os.name == "nt":
-        return None, False, None
+    if not requested or os.name == "nt":
+        return command, False, None
+    from kazma_core.security.rlimits import limited_command
 
-    def apply_limits() -> None:
-        import resource
-
-        if request.memory_limit_bytes is not None:
-            memory = int(request.memory_limit_bytes)
-            resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
-        if request.cpu_limit_seconds is not None:
-            cpu = int(request.cpu_limit_seconds)
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
-
-    return apply_limits, True, None
+    return (
+        limited_command(
+            command,
+            memory_bytes=request.memory_limit_bytes,
+            cpu_seconds=request.cpu_limit_seconds,
+            strict=True,
+        ),
+        True,
+        None,
+    )
 
 
 def _assign_windows_job(
@@ -372,13 +380,13 @@ def run_isolated_subprocess(request: SandboxRequest) -> SandboxResult:
     """Run a subprocess with bounded time/output and a scrubbed environment."""
     work_dir = _validate_request(request)
     environment = _sanitized_environment(request.env)
-    preexec_fn, limits_enforced, degraded_reason = _resource_setup(request)
+    launch_command, limits_enforced, degraded_reason = _resource_setup(request)
     creationflags = 0
     if os.name == "nt":
         creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)
     started = time.monotonic()
     process = subprocess.Popen(
-        list(request.command),
+        launch_command,
         cwd=str(work_dir),
         env=environment,
         stdin=subprocess.DEVNULL,
@@ -386,7 +394,6 @@ def run_isolated_subprocess(request: SandboxRequest) -> SandboxResult:
         stderr=subprocess.PIPE,
         start_new_session=os.name != "nt",
         creationflags=creationflags,
-        preexec_fn=preexec_fn,  # type: ignore[arg-type]
     )
     job: _WindowsJobHandle | None = None
     try:

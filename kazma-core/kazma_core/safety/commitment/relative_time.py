@@ -608,7 +608,6 @@ def parse_time_expressions(
     """Extract all time expressions from *text*. Pure parse — no anchoring."""
     norm = normalize_digits(text or "")
     exprs: list[TimeExpression] = []
-    now = request_at or datetime.now(timezone.utc)
 
     # --- Arabic (singular/dual/plural + بـ prefix) ---
     exprs.extend(_parse_ar(norm))

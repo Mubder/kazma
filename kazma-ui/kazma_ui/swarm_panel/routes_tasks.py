@@ -443,7 +443,7 @@ def register_tasks_routes(
                     worker.mark_dispatched(task)
                 try:
                     result = await swarm_manager.dispatch(name, task, context)
-                except Exception as exc:
+                except Exception:
                     logger.exception("[Swarm] delegated dispatch failed for worker '%s'", name)
                     result = {
                         "worker": name,

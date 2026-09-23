@@ -170,3 +170,120 @@ def test_federated_kb_hit_shape_from_rrf(monkeypatch):
     assert out[0]["source"] == "kb_rrf"
     assert out[0]["store"] == "knowledge"
     assert "oauth" in out[0]["content"]
+
+
+def _on_loop() -> bool:
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+@pytest.fixture()
+def crawl(kb, monkeypatch: pytest.MonkeyPatch):
+    """A real ``ingest_site`` over the tmp store/index, with the network faked out.
+
+    Records every index/store write made ON the event loop: indexing embeds
+    every chunk of a page, and it ran inline on the loop that serves every chat
+    stream, once per crawled page (AGENTS.md §26E).
+    """
+    import asyncio
+    import contextlib
+
+    import kazma_core.security.ssrf as ssrf
+    import kazma_core.stores.knowledge_ingest as ki
+
+    store, index = kb
+    on_loop: list[str] = []
+    real_index, real_prune = index.index, index.prune_sources_not_in
+
+    def index_chunks(*a, **k):
+        if _on_loop():
+            on_loop.append("index.index")
+        return real_index(*a, **k)
+
+    def prune(*a, **k):
+        if _on_loop():
+            on_loop.append("index.prune_sources_not_in")
+        return real_prune(*a, **k)
+
+    def validate_url(url, **_):
+        if _on_loop():
+            on_loop.append("validate_url")  # resolves DNS
+
+    pages = [f"https://docs.example/tree/{name}" for name in ("a", "b", "c")]
+
+    async def discover(seed, on_progress=None):
+        return list(pages)
+
+    async def extract(url):
+        return f"# Page {url[-1]}\n\n" + f"content for page {url} " * 20, "ok", ""
+
+    monkeypatch.setattr(index, "index", index_chunks)
+    monkeypatch.setattr(index, "prune_sources_not_in", prune)
+    monkeypatch.setattr(ki, "get_knowledge_index", lambda: index)
+    monkeypatch.setattr(ki, "get_knowledge_store", lambda: store)
+    monkeypatch.setattr(ssrf, "validate_url", validate_url)
+    monkeypatch.setattr(ki, "kb_discover_pages", discover)
+    monkeypatch.setattr(ki, "_extract_page", extract)
+    monkeypatch.setattr(ki, "_save_provenance", lambda *a: None)
+    monkeypatch.setattr(ki, "_kb_delay_ms", lambda: 0)
+    monkeypatch.setattr(ki, "_pw_browser_scope", contextlib.nullcontext)
+
+    def run_site():
+        async def _go():
+            return [u async for u in ki.ingest_site("lib", "https://docs.example/tree/")]
+
+        return asyncio.run(_go())
+
+    return type("Crawl", (), {"run_site": staticmethod(run_site), "on_loop": on_loop, "ki": ki})
+
+
+def test_site_crawl_indexes_off_the_event_loop(crawl):
+    done = crawl.run_site()[-1]
+    assert done.phase == "done" and done.fetched == 3 and done.ingested > 0
+    assert crawl.on_loop == []
+
+
+def test_page_ingest_indexes_off_the_event_loop(crawl):
+    import asyncio
+
+    result = asyncio.run(crawl.ki.ingest_url("lib", "https://docs.example/tree/a"))
+    assert result.pages_fetched == 1 and result.chunks_new > 0
+    assert crawl.on_loop == []
+
+
+def test_recrawl_counts_every_unchanged_page(crawl):
+    """The per-page check used the crawl's running `skipped` total, so after the
+    first unchanged page no later page could ever be counted: 3 → 1."""
+    first = crawl.run_site()[-1]
+    assert first.pages_unchanged == 0
+    second = crawl.run_site()[-1]
+    assert second.ingested == 0
+    assert second.pages_unchanged == 3
+
+
+def test_index_search_facades_run_off_the_event_loop(kb, monkeypatch: pytest.MonkeyPatch):
+    """`search` / `search_document` / `search_all` are async façades over
+    blocking work (FTS, vector query, query embedding) that ran inline."""
+    import asyncio
+
+    store, index = kb
+    calls: list[bool] = []
+
+    def raw_layers(*a, **k):
+        calls.append(_on_loop())
+        return [], []
+
+    monkeypatch.setattr(index, "_raw_layers", raw_layers)
+
+    async def _go():
+        await index.search("q", "lib")
+        await index.search_document("q", tenant_id="default", library_id="lib", document_id="d")
+        await index.search_all("q", ["lib"])
+
+    asyncio.run(_go())
+    assert calls == [False, False, False]

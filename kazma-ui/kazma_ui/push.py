@@ -187,6 +187,5 @@ async def notify_push_turn_complete(summary: str) -> int:
             logger.debug("[Push] send failed", exc_info=True)
             return False
 
-    loop = asyncio.get_running_loop()
-    results = await asyncio.gather(*(loop.run_in_executor(None, _send_one, s) for s in subs))
+    results = await asyncio.gather(*(asyncio.to_thread(_send_one, s) for s in subs))
     return sum(1 for ok in results if ok)

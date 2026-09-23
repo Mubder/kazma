@@ -1766,7 +1766,6 @@ class LLMProvider:
 
         usage = data.get("usage", {}) or {}
         prompt_tokens = usage.get("prompt_tokens", 0)
-        completion_tokens = usage.get("completion_tokens", 0)
         cached = 0
         details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
         if isinstance(details, dict):

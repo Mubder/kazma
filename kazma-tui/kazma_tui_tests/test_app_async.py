@@ -86,20 +86,6 @@ class TestHeaderBehavior:
             assert _FALLBACK_TEXT in text or "No config" in text
 
 
-class TestFooterBehavior:
-    """Test footer behavior without async app mounting."""
-
-    def test_footer_shortcuts_text(self) -> None:
-        """Footer must return shortcuts text."""
-        from kazma_tui.footer import CHAT_SHORTCUTS, KazmaFooter
-
-        widget = KazmaFooter()
-        text = widget._get_shortcuts_text()
-        assert len(text) > 0
-        for key, desc in CHAT_SHORTCUTS:
-            assert key.lower() in text.lower() or key in text
-
-
 # ---------------------------------------------------------------------------
 # Chat Interaction Tests (behavioral tests without mounting)
 # ---------------------------------------------------------------------------

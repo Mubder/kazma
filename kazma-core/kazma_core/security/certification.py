@@ -332,7 +332,11 @@ class KazmaCertification:
                 try:
                     text = p.read_text(encoding="utf-8")
                     if name.endswith(".json"):
+                        # This parsed the manifest and then never read it, so
+                        # JSON-manifest skills were named after their folder.
                         data = json.loads(text)
+                        declared = data.get("name") if isinstance(data, dict) else None
+                        return str(declared).strip() if declared else skill_path.name
                     else:
                         # Minimal YAML parse for name field
                         for line in text.splitlines():

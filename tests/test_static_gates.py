@@ -764,6 +764,309 @@ def test_discarded_fetch_gate_catches_the_audited_shape():
     assert _discarded_fetches(js) == [4, 16]
 
 
+# ── 2f. Work sent to a thread keeps the caller's context (2026-09-22) ─────
+#
+# ``loop.run_in_executor`` does not copy ContextVars; ``asyncio.to_thread``
+# does. The tenant, per-task workspace scope, thread id and HITL flags are all
+# ContextVars, so a sync tool run through the executor read no tenant and the
+# global workspace (tests/test_sync_tool_context.py). Every call is now
+# to_thread; a custom executor drops the context just the same, so the whole
+# API is off-limits in product code.
+
+
+def _context_dropping_executor_calls(tree: ast.AST) -> list[int]:
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr == "run_in_executor"
+    ]
+
+
+def test_no_context_dropping_executor_calls():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _context_dropping_executor_calls(tree)]
+    assert not offenders, (
+        "run_in_executor does not carry ContextVars into the thread — the "
+        "tenant, workspace scope and HITL flags are lost (audit 2026-09-22).\n"
+        "Fix: `await asyncio.to_thread(fn, *args)`.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_executor_gate_catches_the_tool_registry_shape():
+    """Negative control (§28): the pre-fix sync-tool path, and the fix passes."""
+    bad = "async def f(tool, args):\n    loop = asyncio.get_running_loop()\n    return await loop.run_in_executor(None, lambda: tool(**args))\n"
+    good = "async def f(tool, args):\n    return await asyncio.to_thread(tool, **args)\n"
+    assert _context_dropping_executor_calls(ast.parse(bad)) == [3]
+    assert _context_dropping_executor_calls(ast.parse(good)) == []
+
+
+# ── 2f'. No DNS resolution on the event loop (2026-09-23) ─────────────────
+#
+# ``validate_url`` resolves the host (``socket.getaddrinfo``) — milliseconds
+# normally, the resolver timeout when a name does not answer. 23 async
+# functions called it inline (read_url, web research, KB crawl, per-hop
+# redirect checks, model discovery, provider tests), each stalling every SSE
+# and WebSocket stream while it waited (AGENTS.md §26E). The fix keeps the
+# name — ``await asyncio.to_thread(validate_url, url, ...)`` — so the tests
+# that patch it still patch it.
+
+_BLOCKING_DNS_CALLS = frozenset({"validate_url", "getaddrinfo", "gethostbyname", "gethostbyname_ex"})
+
+
+def _blocking_dns_in_async(tree: ast.AST) -> list[int]:
+    lines: list[int] = []
+
+    def visit(node: ast.AST, in_async: bool) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.AsyncFunctionDef):
+                visit(child, True)
+            elif isinstance(child, (ast.FunctionDef, ast.Lambda)):
+                visit(child, False)  # a sync helper is what to_thread runs
+            else:
+                if in_async and isinstance(child, ast.Call):
+                    fn = child.func
+                    name = fn.id if isinstance(fn, ast.Name) else getattr(fn, "attr", "")
+                    if name in _BLOCKING_DNS_CALLS:
+                        lines.append(child.lineno)
+                visit(child, in_async)
+
+    visit(tree, False)
+    return lines
+
+
+def test_no_blocking_dns_in_async_functions():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _blocking_dns_in_async(tree)]
+    assert not offenders, (
+        "DNS resolution called directly inside an async function blocks the "
+        "event loop for every chat stream until the resolver answers.\n"
+        "Fix: `await asyncio.to_thread(validate_url, url, block_unresolved=True)`.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_dns_gate_catches_the_redirect_hop_shape():
+    """Negative control (§28): the pre-fix redirect loop, and the fix passes."""
+    bad = (
+        "async def hops(client, url):\n"
+        "    validate_url(url, block_unresolved=True)\n"
+        "    ips = socket.getaddrinfo(url, None)\n"
+        "    def later():\n"
+        "        return validate_url(url)\n"
+        "    return later\n"
+    )
+    good = (
+        "async def hops(client, url):\n"
+        "    await asyncio.to_thread(validate_url, url, block_unresolved=True)\n"
+        "def sync_path(url):\n"
+        "    validate_url(url)\n"
+    )
+    assert _blocking_dns_in_async(ast.parse(bad)) == [2, 3]
+    assert _blocking_dns_in_async(ast.parse(good)) == []
+
+
+# ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)
+#
+# Archival nulls an episode's raw text. The one statement that did it used
+# COALESCE(summary_text, ...) — and ordinary chat turns are written with
+# summary_text = '' (not NULL), so every archived chat turn kept nothing at
+# all. The fixed statement is memory/macro_sleep.py:_ARCHIVE_EPISODE_SQL; a
+# second path that nulls episode text would have to re-solve the stub, and
+# the first one got it wrong.
+
+_EPISODE_TEXT_NULLED = re.compile(r"\b(?:user_text|assistant_text)\s*=\s*NULL\b", re.IGNORECASE)
+_ARCHIVE_STATEMENT_HOME = "kazma-core/kazma_core/memory/macro_sleep.py"
+
+
+def _episode_text_drops(text: str, *, allowed_name: str | None) -> list[int]:
+    allowed: set[int] = set()
+    if allowed_name:
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == allowed_name for t in node.targets
+            ):
+                allowed.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return [
+        i for i, line in enumerate(text.splitlines(), 1)
+        if _EPISODE_TEXT_NULLED.search(line) and i not in allowed
+    ]
+
+
+def test_only_the_archive_statement_drops_episode_text():
+    offenders: list[str] = []
+    for path in _product_files():
+        rel = _rel(path)
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if not _EPISODE_TEXT_NULLED.search(text):
+            continue
+        home = rel.replace("\\", "/") == _ARCHIVE_STATEMENT_HOME
+        offenders += [
+            f"{rel}:{line}"
+            for line in _episode_text_drops(text, allowed_name="_ARCHIVE_EPISODE_SQL" if home else None)
+        ]
+    assert not offenders, (
+        "Episode text is nulled outside macro_sleep._ARCHIVE_EPISODE_SQL. Archive "
+        "through that statement: it keeps a stub, and the first hand-written "
+        "version kept nothing (summary_text '' is not NULL).\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_episode_text_gate_catches_a_second_archive_path():
+    """Negative control (§28): the pre-fix statement outside the constant."""
+    bad = (
+        "_ARCHIVE_EPISODE_SQL = (\n"
+        "    \"UPDATE episodes SET user_text=NULL, assistant_text=NULL WHERE id=?\"\n"
+        ")\n"
+        "SQL = \"UPDATE episodes SET tier='archived', user_text = NULL WHERE id=?\"\n"
+    )
+    assert _episode_text_drops(bad, allowed_name="_ARCHIVE_EPISODE_SQL") == [4]
+    assert _episode_text_drops(bad, allowed_name=None) == [2, 4]
+
+
+# ── 2g. Voice never hands the conversation to a Realtime/Live API ─────────
+#
+# OpenAI Realtime and Gemini Live run their own tool loop; Kazma cannot keep
+# them codec-only without bypassing HITL, turn_failed and the commitment
+# layer. voice/realtime_codec.py described that policy behind a
+# KAZMA_REALTIME_CODEC flag nothing read (removed 2026-09-23). The policy is
+# unconditional, so it is enforced here instead of in a flag.
+
+_REALTIME_API_MARKERS = re.compile(
+    r"v1/realtime|gpt-4o[\w.-]*realtime|BidiGenerateContent|live\.connect\(|aio\.live\b",
+    re.IGNORECASE,
+)
+
+
+def _realtime_api_uses(text: str) -> list[int]:
+    return [i for i, line in enumerate(text.splitlines(), 1) if _REALTIME_API_MARKERS.search(line)]
+
+
+def test_no_realtime_or_live_conversation_apis():
+    offenders: list[str] = []
+    for path in _product_files():
+        text = path.read_text(encoding="utf-8", errors="replace")
+        offenders += [f"{_rel(path)}:{line}" for line in _realtime_api_uses(text)]
+    assert not offenders, (
+        "A Realtime/Live API owns its own tool loop and would bypass HITL. "
+        "Voice uses REST STT/TTS only (voice/mode.py).\n  " + "\n  ".join(offenders)
+    )
+
+
+# ── 2h. Untrusted XML goes through the guarded parser (2026-09-22) ────────
+#
+# The stdlib parsers accept a DTD, and a DTD is where entity expansion and
+# external entities live. kazma_core.security.safe_xml refuses one before
+# parsing; everything else must call it rather than ElementTree directly.
+
+_SAFE_XML_HOME = "kazma-core/kazma_core/security/safe_xml.py"
+_XML_MODULES = {"ET", "ElementTree", "cElementTree", "etree", "minidom", "expat", "sax", "pulldom"}
+_XML_PARSE_CALLS = {"fromstring", "parse", "parseString", "iterparse", "XMLParser", "XML", "make_parser", "ParserCreate"}
+
+
+def _raw_xml_parses(tree: ast.AST) -> list[int]:
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr in _XML_PARSE_CALLS
+        and isinstance(n.func.value, (ast.Name, ast.Attribute))
+        and (getattr(n.func.value, "id", None) or getattr(n.func.value, "attr", None)) in _XML_MODULES
+    ]
+
+
+def test_untrusted_xml_uses_the_guarded_parser():
+    offenders: list[str] = []
+    for path in _product_files():
+        if _rel(path) == _SAFE_XML_HOME:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _raw_xml_parses(tree)]
+    assert not offenders, (
+        "Raw stdlib XML parsing accepts a DTD (entity expansion, external "
+        "entities). Use kazma_core.security.safe_xml.parse_untrusted_xml.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_xml_gate_catches_the_sitemap_shape():
+    """Negative control (§28): the pre-fix sitemap parse, and the fix passes."""
+    bad = "import xml.etree.ElementTree as ET\nroot = ET.fromstring(text)\ndoc = minidom.parseString(text)\n"
+    good = "root = parse_untrusted_xml(text)\n"
+    assert _raw_xml_parses(ast.parse(bad)) == [2, 3]
+    assert _raw_xml_parses(ast.parse(good)) == []
+
+
+# ── 2i. No Python between fork and exec (2026-09-22) ──────────────────────
+#
+# preexec_fn runs in the child after fork(); in a threaded process a lock held
+# by another thread at the fork can deadlock it before exec. The server is
+# always threaded. Limits go through kazma_core.security.rlimits instead.
+
+
+def _preexec_uses(tree: ast.AST) -> list[int]:
+    lines = [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and any(k.arg == "preexec_fn" for k in n.keywords)
+    ]
+    lines += [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and n.value == "preexec_fn"
+    ]
+    return sorted(lines)
+
+
+def test_no_preexec_fn():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _preexec_uses(tree)]
+    assert not offenders, (
+        "preexec_fn runs Python between fork and exec and can deadlock the "
+        "child in a threaded server. Use "
+        "kazma_core.security.rlimits.limited_command.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_preexec_gate_catches_both_spellings():
+    """Negative control (§28): the sandbox keyword and the code_exec dict key."""
+    bad = (
+        "p = subprocess.Popen(cmd, preexec_fn=apply_limits)\n"
+        'kwargs["preexec_fn"] = _set_limits\n'
+    )
+    assert _preexec_uses(ast.parse(bad)) == [1, 2]
+    assert _preexec_uses(ast.parse("p = subprocess.Popen(limited_command(cmd))\n")) == []
+
+
+def test_realtime_gate_catches_a_live_session():
+    """Negative control (§28)."""
+    assert _realtime_api_uses(
+        'url = "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview"\n'
+        "session = await client.aio.live.connect(model=m)\n"
+        "text = await transcribe(audio)\n"
+    ) == [1, 2]
+
+
 # ── 3. Exhaustive HITL tool tiers (F-04) ─────────────────────────────────
 
 def test_every_registered_tool_has_a_tier():

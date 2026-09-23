@@ -14,7 +14,7 @@ description: Kazma Deployment — code-audited reference (unified docs, v0.9+)
 |---|---|---|
 | **Docker Compose** (`docker-compose.yml` + `Dockerfile`) | The main Kazma agent + Web UI (uvicorn). | ✅ Primary, production-ready. |
 | **Windows native** (`setup.ps1`) | Local dev venv bootstrap. | ✅ Active. |
-| **Kubernetes** (`kubernetes/`) | A separate **Hub API** service — **not** the main Kazma agent. | ⚠ See §4. |
+| **Kubernetes** | No manifest ships; build one from the `Dockerfile`. | ⚠ See §4. |
 | **Cloudflare Pages / edge workers** | — | ❌ Not applicable. Kazma is a Python/uvicorn server, not an edge deployment. |
 | **Bare uvicorn** | The main agent. | ✅ `kazma serve` / `kazma-web`. |
 
@@ -66,7 +66,7 @@ curl -s http://localhost:9090/health/ready
 
 ### 2.4 `.dockerignore`
 
-Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`, `kubernetes/`, `docs/`, `*.md`, `.env`, `*.db`, build caches — keeping the image lean and secrets out.
+Excludes `archive/`, `__pycache__/`, `.venv/`, `.git/`, `tests/`, `kazma-data/`, `docs/`, `*.md`, `.env`, `*.db`, build caches — keeping the image lean and secrets out.
 
 ---
 
@@ -106,43 +106,25 @@ kazma serve
 
 ---
 
-## 4. Kubernetes (Hub service only — read carefully)
+## 4. Kubernetes
 
-The `kubernetes/` directory contains **two manifests**:
+No Kubernetes manifest ships with Kazma. The `kubernetes/` directory used to
+hold manifests for a separate "Hub API" image (`kazma/hub-api`) that this
+repository never built; its probes pointed at paths the service did not serve,
+and nothing configured the API outside tests. They were removed on 2026-09-23
+rather than left looking deployable.
 
-- `kubernetes/hub-deployment.yaml` — a `Namespace`, `Deployment` (3 replicas), `Service`, and `Ingress` for an image named **`kazma/hub-api:latest`**.
-- `kubernetes/hub-secrets.yaml` — a `Secret` with `database-url` (PostgreSQL) and `redis-url`.
+To run the **main agent** on Kubernetes, write a manifest around this repo's
+`Dockerfile` with:
 
-```yaml
-# Excerpt: hub-deployment.yaml
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-      - name: hub-api
-        image: kazma/hub-api:latest
-        ports:
-        - containerPort: 8000
-        env:
-        - name: DATABASE_URL       # PostgreSQL — NOT used by the main Kazma agent
-          valueFrom:
-            secretKeyRef: { name: hub-secrets, key: database-url }
-        - name: REDIS_URL          # Redis — NOT used by the main Kazma agent
-          valueFrom:
-            secretKeyRef: { name: hub-secrets, key: redis-url }
-        livenessProbe:
-          httpGet: { path: /api/v1/health, port: 8000 }
-```
-
-### ⚠ Critical caveats
-
-1. **These deploy a Hub service, not the main Kazma agent.** The image `kazma/hub-api:latest` is not built from this repo's `Dockerfile` and is not published from here.
-2. **The referenced infrastructure does not match the main codebase.** The main Kazma agent uses **SQLite (WAL)** everywhere (ConfigStore, checkpointer, TaskStore, snapshots, vector memory via ChromaDB). It does **not** read `DATABASE_URL` or `REDIS_URL`, and has **no PostgreSQL or Redis client**. These env vars belong to a separate (aspirational or external) Hub API service.
-3. **The health path `/api/v1/health`** differs from the main app's `/health/live` and `/health/ready` (`kazma-ui/.../health.py:94,104`).
-4. **Resource limits** (`256Mi–512Mi`, `250m–500m`) are reasonable for a stateless API but **too small** for the main agent if ChromaDB + sentence-transformers are loaded (those alone can exceed 512 Mi).
-
-**Recommendation:** treat `kubernetes/` as a starting point for deploying a **separate Hub API**. To deploy the **main Kazma agent** on Kubernetes, write a new manifest using the repo's `Dockerfile`, the `/health/live` probe, an explicit `KAZMA_SECRET`, a PVC for `kazma-data/` and the vector path, and resource limits adequate for the RAG extras (≥1 Gi memory).
+- liveness `GET /health/live` and readiness `GET /health/ready` (port 9090);
+- an explicit `KAZMA_SECRET` from a `Secret`, and `KAZMA_HOST=0.0.0.0` only
+  behind an ingress, with `KAZMA_TRUSTED_PROXIES` naming it (§3);
+- a PVC for `kazma-data/` and the vector path — state lives there, so run one
+  replica unless you have moved shared state to Postgres
+  (`KAZMA_DB_BACKEND=postgres`, see the Postgres guide);
+- at least 1 Gi of memory if the RAG extras (sentence-transformers, ChromaDB)
+  are installed.
 
 ---
 
@@ -279,7 +261,5 @@ See: [Configuration → `notifications`](configuration#notifications) for the fu
 ---
 
 
-- **`kubernetes/` deploys a Hub API, not the main agent**, and references PostgreSQL + Redis, which the main codebase does not use. Flagged prominently to prevent misdeployment.
 - **Volume path mismatch** (`/root/.kazma/...` vs the `kazma` user's home) in `docker-compose.yml` — set `KAZMA_VECTOR_PATH` explicitly to be safe.
 - **No Cloudflare/edge deployment path.** Kazma is a stateful Python service; don't attempt serverless packaging.
-- **Health path differs** between the K8s manifest (`/api/v1/health`) and the real app (`/health/live`).

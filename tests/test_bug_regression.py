@@ -363,16 +363,22 @@ class TestBug16_NoSyncSqliteInConstructor:
 
 
 class TestBug17_NotifyUsesExecutor:
-    """_notify() must use run_in_executor for stdio writes."""
+    """_notify() must write stdio off the event loop.
 
-    def test_notify_uses_run_in_executor(self):
+    It used ``loop.run_in_executor``; since 2026-09-22 every such call is
+    ``asyncio.to_thread``, which also carries ContextVars into the thread
+    (``test_static_gates.test_no_context_dropping_executor_calls``).
+    """
+
+    def test_notify_writes_off_the_loop(self):
         import inspect
 
         from kazma_core.mcp_client import MCPClient
 
         source = inspect.getsource(MCPClient._notify)
-        assert "run_in_executor" in source, "_notify() still uses synchronous stdin.write"
-        assert "proc.stdin.write" in source
+        assert "asyncio.to_thread(proc.stdin.write" in source, (
+            "_notify() writes stdin on the event loop again"
+        )
 
 
 # ── Bug 18: (removed) — guarded test_agent_discovery.py, which was deleted

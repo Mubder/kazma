@@ -982,6 +982,16 @@ def get_request_principal(request: Request) -> dict[str, Any] | None:
                 # closed while this reader still failed open).
                 "role": payload.get("role") or "viewer",
                 "user_id": payload.get("user_id") or "",
+                # A tenant the session was minted with (a local user's
+                # meta.tenant_id, or the OIDC tenant claim). The tenant
+                # middleware scopes the request by it. create_session stores
+                # "default" for an unbound session; that is no binding, so the
+                # request resolves exactly as it did before.
+                "tenant_id": (
+                    payload.get("tenant_id")
+                    if payload.get("tenant_id") not in (None, "", "default")
+                    else None
+                ),
                 "source": "session",
             }
         except Exception:

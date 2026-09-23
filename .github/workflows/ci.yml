@@ -47,8 +47,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install ruff
-      - name: Run Ruff (syntax/undefined names — GATE)
-        run: ruff check kazma-core/kazma_core/ kazma-gateway/kazma_gateway/ kazma-ui/kazma_ui/ kazma-cli/kazma_cli/ kazma-tui/kazma_tui/ kazma-skills/kazma_skills/ --select E9,F63,F7,F82
+      # F841 (unused local) and B033 (duplicate set item) joined the gate on
+      # 2026-09-23 after the product was cleaned to zero: several unused
+      # locals were hiding bugs (a JSON skill manifest parsed and ignored,
+      # validated ports discarded for the raw input).
+      - name: Run Ruff (syntax/undefined names/unused locals — GATE)
+        run: ruff check kazma-core/kazma_core/ kazma-gateway/kazma_gateway/ kazma-ui/kazma_ui/ kazma-cli/kazma_cli/ kazma-tui/kazma_tui/ kazma-skills/kazma_skills/ --select E9,F63,F7,F82,F841,B033
       - name: Run Ruff (full — advisory)
         run: ruff check kazma-core/kazma_core/ kazma-gateway/kazma_gateway/ kazma-ui/kazma_ui/ kazma-cli/kazma_cli/ kazma-tui/kazma_tui/ kazma-skills/kazma_skills/ --exit-zero
 

@@ -23,8 +23,9 @@ schema column, no extra LLM call:
   - importance ≤ ephemeral_max_importance              → 'ephemeral'
   - otherwise                                          → 'general'
 
-The derived class is stored in ``metadata_json.memory_class`` so the
-macro-consolidation decay job can read it without a schema change.
+The derived class is stored in ``metadata_json.memory_class`` as a label.
+Nothing decides on it today: it was meant for a macro-consolidation decay
+score that no rule ever read, removed on 2026-09-23 (``macro_sleep.py``).
 """
 
 from __future__ import annotations

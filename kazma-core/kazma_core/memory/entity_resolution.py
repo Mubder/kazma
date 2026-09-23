@@ -141,7 +141,6 @@ def resolve_entity(
             import numpy as np
 
             q = np.frombuffer(query_vector, dtype=np.float32)
-            qn = np.linalg.norm(q) + 1e-9
             best_id = None
             best_dist = float("inf")
             for eid, evec in candidate_vectors.items():

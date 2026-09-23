@@ -355,7 +355,6 @@ def build_memory_health() -> dict[str, Any]:
     ))
 
     # Neo4j dual-write / topology adapter
-    gmeta = v2.get("graph") if isinstance(v2.get("graph"), dict) else {}
     try:
         from kazma_core.memory.backends import get_backends_cfg
         from kazma_core.memory.graph_backend import get_graph_backend, graph_capability

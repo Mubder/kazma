@@ -100,8 +100,6 @@ async def _fire_due_posts() -> None:
 
 
 async def _fire_post(post: ScheduledXPost) -> None:
-    store = get_x_scheduled_store()
-
     # The post carries the tenant it was booked under. A background loop
     # has NO request context, so tenant-scoped vault entries (X OAuth keys
     # saved via Settings live under tenant 'default') were invisible here —

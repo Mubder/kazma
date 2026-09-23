@@ -678,7 +678,9 @@ def register_system_tools(registry: Any) -> None:
                 "directory — check that the tool is actually installed in "
                 "this environment."
             )
-        except Exception as exc:
+        except Exception:
+            # The model gets a generic message; the operator gets the cause.
+            logger.warning("[shell_exec] command execution failed", exc_info=True)
             return "Error: Shell command execution failed."
 
 

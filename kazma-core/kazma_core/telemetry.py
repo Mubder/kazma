@@ -221,8 +221,7 @@ class HardwareMonitor:
 
         Runs the blocking psutil calls in a thread executor.
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, _sync_cpu_ram)
+        return await asyncio.to_thread(_sync_cpu_ram)
 
     # ── GPU & VRAM (nvidia-smi) ────────────────────────────────────
 

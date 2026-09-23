@@ -335,8 +335,15 @@ class SnapshotRecorder:
         # H19: resolve once (data-dir anchored, cwd-independent). Relative
         # literals from legacy kazma.yaml configs normalize to the data dir.
         self._db_path = _resolve_db_path(db_path)
-        # In-memory LRU: key=(thread_id, iteration) → SnapshotRecord
+        # In-memory LRU: key=(thread_id, iteration) → SnapshotRecord.
+        # Guarded by _memory_lock for EVERY read and write: captures run in
+        # asyncio.to_thread (several turns at once) while the replay routes
+        # and /replay read on other threads. Unlocked, concurrent iteration
+        # and mutation raised "OrderedDict mutated during iteration" — inside
+        # capture() that failed the user's turn (audit 2026-09-22). SQLite
+        # I/O stays outside this lock; the store has its own.
         self._memory: OrderedDict[tuple[str, int], SnapshotRecord] = OrderedDict()
+        self._memory_lock = threading.RLock()
         # SQLite store (lazily created or injected); guarded so two
         # concurrent to_thread captures cannot double-create it.
         self._store: SnapshotStore | None = store
@@ -393,20 +400,20 @@ class SnapshotRecorder:
             model_used=model_used,
         )
 
-        # In-memory LRU
         key = (thread_id, iteration)
-        self._memory[key] = record
-        self._memory.move_to_end(key)
+        with self._memory_lock:
+            self._memory[key] = record
+            self._memory.move_to_end(key)
 
-        # Evict oldest if over cap (per-thread)
-        thread_keys = [k for k in self._memory if k[0] == thread_id]
-        while len(thread_keys) > self._max_snapshots:
-            oldest_key = thread_keys.pop(0)
-            del self._memory[oldest_key]
+            # Evict oldest if over cap (per-thread)
+            thread_keys = [k for k in self._memory if k[0] == thread_id]
+            while len(thread_keys) > self._max_snapshots:
+                oldest_key = thread_keys.pop(0)
+                del self._memory[oldest_key]
 
-        # Evict oldest globally if over global cap (M9)
-        while len(self._memory) > self._max_global_snapshots:
-            self._memory.popitem(last=False)
+            # Evict oldest globally if over global cap (M9)
+            while len(self._memory) > self._max_global_snapshots:
+                self._memory.popitem(last=False)
 
         # Write-through to SQLite
         try:
@@ -431,8 +438,10 @@ class SnapshotRecorder:
     ) -> SnapshotRecord | None:
         """Retrieve a snapshot, preferring in-memory over SQLite."""
         key = (thread_id, iteration)
-        if key in self._memory:
-            return self._memory[key]
+        with self._memory_lock:
+            cached = self._memory.get(key)
+        if cached is not None:
+            return cached
         # Fall back to SQLite
         try:
             store = self._get_store(db_path)
@@ -452,9 +461,10 @@ class SnapshotRecorder:
         seen: dict[tuple[str, int], SnapshotRecord] = {}
 
         # In-memory first
-        for key, rec in self._memory.items():
-            if key[0] == thread_id:
-                seen[key] = rec
+        with self._memory_lock:
+            for key, rec in self._memory.items():
+                if key[0] == thread_id:
+                    seen[key] = rec
 
         # SQLite
         try:
@@ -478,10 +488,11 @@ class SnapshotRecorder:
 
         Returns the total count of deleted records (memory + SQLite).
         """
-        mem_count = sum(1 for k in list(self._memory) if k[0] == thread_id)
-        for k in list(self._memory):
-            if k[0] == thread_id:
+        with self._memory_lock:
+            doomed = [k for k in self._memory if k[0] == thread_id]
+            for k in doomed:
                 del self._memory[k]
+        mem_count = len(doomed)
 
         db_count = 0
         try:
@@ -497,9 +508,8 @@ class SnapshotRecorder:
 
         Merges in-memory and SQLite thread sets.
         """
-        threads: set[str] = set()
-        for key in self._memory:
-            threads.add(key[0])
+        with self._memory_lock:
+            threads: set[str] = {key[0] for key in self._memory}
         try:
             store = self._get_store(db_path)
             threads.update(store.list_distinct_threads())

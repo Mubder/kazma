@@ -429,8 +429,7 @@ class _SyncWriterAdapter:
         self._stream.write(data)
 
     async def drain(self) -> None:
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self._stream.flush)
+        await asyncio.to_thread(self._stream.flush)
 
 
 class _SyncReaderAdapter:
@@ -446,12 +445,10 @@ class _SyncReaderAdapter:
         return self._stream.read(n)
 
     async def readline(self) -> bytes:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._stream.readline)
+        return await asyncio.to_thread(self._stream.readline)
 
     async def read(self, n: int = -1) -> bytes:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._stream.read, n)
+        return await asyncio.to_thread(self._stream.read, n)
 
 
 class _SyncProcessAdapter:
@@ -486,8 +483,7 @@ class _SyncProcessAdapter:
         self._proc.kill()
 
     async def wait(self) -> int:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._proc.wait)
+        return await asyncio.to_thread(self._proc.wait)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -1502,10 +1498,7 @@ class AsyncMCPManager:
                 # host asyncio subprocesses. Fall back to blocking Popen +
                 # executor-thread adapter — same JSON-RPC protocol, works on
                 # every event-loop policy.
-                loop = asyncio.get_running_loop()
-                popen: subprocess.Popen[bytes] = await loop.run_in_executor(
-                    None,
-                    lambda: subprocess.Popen(
+                popen: subprocess.Popen[bytes] = await asyncio.to_thread(lambda: subprocess.Popen(
                         command,
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,

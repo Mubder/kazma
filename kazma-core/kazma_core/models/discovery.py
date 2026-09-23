@@ -104,7 +104,7 @@ async def discover_ollama_models(base_url: str | None = None) -> ProviderInfo:
     # SSRF guard — allow private addresses for user-configured local providers
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
-        validate_url(tags_url, block_unresolved=True, allow_private=True)
+        await asyncio.to_thread(validate_url, tags_url, block_unresolved=True, allow_private=True)
     except SSRFError as exc:
         logger.warning("discover_ollama_models: SSRF blocked %r: %s", tags_url, exc)
         info.error = f"SSRF blocked: {exc}"
@@ -186,7 +186,7 @@ async def discover_lm_studio_models(
     # SSRF guard — allow private addresses for user-configured local providers
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
-        validate_url(models_url, block_unresolved=True, allow_private=True)
+        await asyncio.to_thread(validate_url, models_url, block_unresolved=True, allow_private=True)
     except SSRFError as exc:
         logger.warning("discover_lm_studio_models: SSRF blocked %r: %s", models_url, exc)
         return info
@@ -244,7 +244,7 @@ async def discover_custom_models(base_url: str) -> ProviderInfo:
     # SSRF guard — allow private addresses for user-configured providers
     try:
         from kazma_core.security.ssrf import SSRFError, validate_url
-        validate_url(models_url, block_unresolved=True, allow_private=True)
+        await asyncio.to_thread(validate_url, models_url, block_unresolved=True, allow_private=True)
     except SSRFError as exc:
         logger.warning("discover_custom_models: SSRF blocked %r: %s", models_url, exc)
         return info
@@ -329,7 +329,7 @@ async def _discover_openai_compatible(base_url: str, api_key: str | None, provid
         "1", "true", "on", "yes",
     )
     try:
-        validate_url(url, block_unresolved=True, allow_private=allow_priv)
+        await asyncio.to_thread(validate_url, url, block_unresolved=True, allow_private=allow_priv)
     except (SSRFError, ValueError) as exc:
         return ProviderInfo(
             name=provider, label=provider.title(), base_url=base_url, error=str(exc),

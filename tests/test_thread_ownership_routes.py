@@ -69,6 +69,17 @@ def store(monkeypatch: pytest.MonkeyPatch) -> _TenantStore:
 # ── Replay ──────────────────────────────────────────────────────────────────
 
 
+def _off_the_loop() -> None:
+    """The recorder and engine read SQLite and decode full states: never on the loop."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    raise AssertionError("snapshot I/O ran on the event loop")
+
+
 class _Snap:
     def __init__(self, thread_id: str) -> None:
         self.iteration, self.timestamp, self.model_used, self.id = 0, 0.0, "m", f"{thread_id}:0"
@@ -83,30 +94,43 @@ class _Recorder:
         self.cleared: list[str] = []
 
     def list_distinct_threads(self) -> list[str]:
+        _off_the_loop()
         return [MINE, OTHER]
 
     def list_snapshots(self, thread_id: str) -> list[_Snap]:
+        _off_the_loop()
         return [_Snap(thread_id)]
 
     def clear_snapshots(self, thread_id: str) -> int:
+        _off_the_loop()
         self.cleared.append(thread_id)
         return 1
 
 
 class _Engine:
     def replay_from(self, thread_id: str, iteration: int) -> dict[str, Any]:
+        _off_the_loop()
         return _Snap(thread_id).get_state()
 
     @staticmethod
     def compare_replays(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+        _off_the_loop()
         return {"a": a, "b": b}
+
+
+class _ReplayGraph:
+    async def aget_state(self, config: dict[str, Any]) -> Any:
+        return None
+
+    async def aupdate_state(self, config: dict[str, Any], values: dict[str, Any], **_: Any) -> None:
+        return None
 
 
 def _replay_client() -> tuple[TestClient, Any, _Recorder]:
     from kazma_ui.replay_routes import create_replay_router
 
     recorder = _Recorder()
-    router = create_replay_router(recorder=recorder, engine=_Engine(), graph=object())
+    router = create_replay_router(recorder=recorder, engine=_Engine(), graph=_ReplayGraph())
     app = FastAPI()
     app.include_router(router)
     return TestClient(app), router, recorder
@@ -146,6 +170,19 @@ def test_every_replay_route_fails_closed_when_ownership_is_unknown(store):
         assert resp.status_code == 403, (method, template, resp.status_code, resp.text)
         assert "private text" not in resp.text
     assert recorder.cleared == []
+
+
+def test_every_replay_route_serves_the_owner_without_blocking_the_loop(store):
+    """Walks the route table on the caller's own thread.
+
+    The fakes raise if touched on the event loop, so a route that reads
+    snapshots synchronously answers 500 here (audit 2026-09-22: every replay
+    route did, sharing a lock with the capture thread).
+    """
+    client, router, _ = _replay_client()
+    for method, template, path, body in _requests_for(router, MINE):
+        resp = client.request(method, path, json=body)
+        assert resp.status_code == 200, (method, template, resp.status_code, resp.text)
 
 
 def test_replay_still_serves_the_owner(store):

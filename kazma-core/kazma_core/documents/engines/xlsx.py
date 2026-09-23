@@ -7,7 +7,7 @@ profile supplies the shared theme and direction, so an Arabic workbook matches
 the Arabic DOCX/PDF/HTML/PPTX in design and direction.
 
 Layout (mirrors the heading-bar motif of the other formats):
-  - Row 1: branded title bar — merged across columns, accent fill, white bold.
+  - Row 1: branded title bar — merged across columns, ink fill, white bold.
   - Row 2: themed header band (heading fill, white bold).
   - Row 3+: data rows with alternating shading + grid.
   - Frozen title+header, RTL sheet view for Arabic, and print setup
@@ -44,13 +44,11 @@ class XlsxEngine:
         t = self.theme
         rtl = self.profile.rtl
         font_name = theme_fonts(rtl=rtl)["cs"]
-        accent_hex = str(t["accent"]).lstrip("#")
         header_hex = str(t["heading_fill"]).lstrip("#")
         body_color_hex = str(t["body"]).lstrip("#")
         grid_hex = str(t["table_grid"]).lstrip("#")
         alt_row_hex = str(t["table_row_bg"]).lstrip("#")
 
-        accent_fill = PatternFill(fill_type="solid", fgColor=accent_hex)
         header_fill = PatternFill(fill_type="solid", fgColor=header_hex)
         alt_fill = PatternFill(fill_type="solid", fgColor=alt_row_hex)
         header_fg = str(t.get("table_header_fg") or "#16223a").lstrip("#")

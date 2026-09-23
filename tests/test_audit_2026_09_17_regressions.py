@@ -107,8 +107,8 @@ def test_resolve_redirects_blocks_unresolved_hops():
         REPO_ROOT / "kazma-core" / "kazma_core" / "security" / "ssrf.py"
     ).read_text(encoding="utf-8")
     assert "block_unresolved: bool = True" in src
-    assert "validate_url(url, block_unresolved=block_unresolved)" in src
-    assert "validate_url(current, block_unresolved=block_unresolved)" in src
+    assert "to_thread(validate_url, url, block_unresolved=block_unresolved)" in src
+    assert "to_thread(validate_url, current, block_unresolved=block_unresolved)" in src
 
 
 def test_dialect_pipelines_do_not_call_the_llm():

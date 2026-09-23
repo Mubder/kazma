@@ -50,9 +50,11 @@ def voice_product_mode() -> str:
 def realtime_available() -> bool:
     """True when LiveKit duplex is configured (credentials + kill-switch).
 
-    OpenAI Realtime / Gemini Live as a conversation brain is **not**
-    available. Optional REST STT/TTS codec: ``voice.realtime_codec``
-    (``KAZMA_REALTIME_CODEC=1``).
+    OpenAI Realtime and Gemini Live are never used: they own a tool loop and
+    cannot stay codec-only without bypassing HITL, so voice always runs on the
+    REST STT/TTS mouths. There is no switch for this (a ``KAZMA_REALTIME_CODEC``
+    flag was documented but never read; removed 2026-09-23).
+    ``tests/test_static_gates.py`` keeps those APIs out of product code.
     """
     try:
         from kazma_core.voice.livekit import voice_duplex_enabled

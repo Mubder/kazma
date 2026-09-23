@@ -149,54 +149,34 @@ class TestHeaderEnglishOnly:
 # ── Footer Tests ─────────────────────────────────────────────────────
 
 
-class TestFooterImports:
-    """Verify footer module exists and is importable."""
-
-    def test_footer_module_exists(self) -> None:
-        """footer.py must be importable from kazma_tui."""
-        import kazma_tui.footer  # noqa: F401
-
-    def test_footer_has_shortcuts_widget(self) -> None:
-        """footer.py must expose a Footer widget class."""
-        from kazma_tui.footer import Footer
-
-        assert Footer is not None
-
-
 class TestFooter:
-    """VAL-TUI-004: Footer displays keyboard shortcuts."""
+    """VAL-TUI-004: the footer the app actually shows lists its shortcuts.
 
-    def test_footer_mentions_ctrl_q(self) -> None:
-        """Footer must reference Ctrl+Q for quit."""
-        from kazma_tui.footer import KazmaFooter
+    These tests used to check kazma_tui/footer.py's KazmaFooter, a widget the
+    app never mounted — it yields Textual's stock Footer, which renders the
+    app's own shown bindings. KazmaFooter replaced that live, context-aware
+    display with a hard-coded string, so it was removed (2026-09-23) and the
+    requirement is now checked against what the user sees.
+    """
 
-        widget = KazmaFooter()
-        text = widget._get_shortcuts_text()
-        assert "ctrl+q" in text.lower() or "ctrl-q" in text.lower() or "q" in text.lower()
+    def test_app_mounts_the_stock_footer(self) -> None:
+        import inspect
 
-    def test_footer_mentions_tab(self) -> None:
-        """Footer must reference shortcuts."""
-        from kazma_tui.footer import KazmaFooter
+        from kazma_tui.app import KazmaTUI
 
-        widget = KazmaFooter()
-        text = widget._get_shortcuts_text()
-        assert "enter" in text.lower() or len(text) > 0
+        assert "yield Footer()" in inspect.getsource(KazmaTUI.compose)
 
-    def test_footer_mentions_enter(self) -> None:
-        """Footer must reference Enter for send."""
-        from kazma_tui.footer import KazmaFooter
+    def test_footer_shows_quit_and_commands(self) -> None:
+        from kazma_tui.app import KazmaTUI
+        from textual.binding import Binding
 
-        widget = KazmaFooter()
-        text = widget._get_shortcuts_text()
-        assert "enter" in text.lower() or len(text) > 0
-
-    def test_footer_is_english_only(self) -> None:
-        """Footer source file must not contain Arabic or RTL characters."""
-        from pathlib import Path
-
-        footer_path = Path(__file__).resolve().parent.parent / "kazma_tui" / "footer.py"
-        content = footer_path.read_text(encoding="utf-8")
-        assert not _ARABIC_RANGES.search(content), "footer.py contains Arabic or RTL characters"
+        shown = {
+            b.key: b.description
+            for b in KazmaTUI.BINDINGS
+            if isinstance(b, Binding) and b.show
+        }
+        assert shown.get("ctrl+q") == "Quit"
+        assert "ctrl+p" in shown
 
 
 # ── Integration Tests ────────────────────────────────────────────────

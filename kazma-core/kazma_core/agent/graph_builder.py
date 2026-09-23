@@ -170,7 +170,20 @@ def build_supervisor_graph(
             merged = {**state, **result}
             # Capture does json.dumps(O(state)) + sync SQLite write on EVERY
             # supervisor iteration — run it off the event loop (M35).
-            record = await asyncio.to_thread(snapshot_recorder.capture, merged)
+            #
+            # A snapshot is observability. It must never fail the turn it is
+            # observing: this await had no guard, so a capture error (a race
+            # in the recorder's cache, a state json.dumps cannot encode)
+            # propagated out of the supervisor node and the user's turn died
+            # with it (audit 2026-09-22).
+            try:
+                record = await asyncio.to_thread(snapshot_recorder.capture, merged)
+            except Exception:
+                logger.warning(
+                    "[TimeTravel] snapshot capture failed; turn continues",
+                    exc_info=True,
+                )
+                record = None
             if record is not None:
                 result["snapshot_id"] = record.id
                 result["snapshot_iteration"] = merged.get("iteration", 0)

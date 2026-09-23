@@ -16,6 +16,7 @@ import logging
 logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 
 import sys
+from pathlib import Path
 
 from kazma_cli.banner import check_config, show_banner, show_help_brief, show_status
 
@@ -422,19 +423,45 @@ def _run_docs(args: list[str]) -> None:
         print("Available: build, serve")
 
 
+def _find_docs_dir() -> Path:
+    """The Docusaurus project to build or serve: ./docs, else the source checkout.
+
+    This used to be ``Path(__file__).parents[2] / "docs"`` alone — right in a
+    source checkout, and a path inside site-packages for anyone who installed
+    the wheel (audit 2026-09-22). The wheel does not ship the docs site, so
+    say so instead of failing on a directory that cannot exist.
+    """
+    for candidate in (Path.cwd() / "docs", Path(__file__).resolve().parents[2] / "docs"):
+        if (candidate / "package.json").is_file():
+            return candidate
+    print(
+        "Error: no docs/package.json found. `kazma docs` builds the Docusaurus "
+        "site from a Kazma source checkout — run it from the repository root."
+    )
+    sys.exit(1)
+
+
+def _npm_executable() -> str:
+    """``npm`` resolved on PATH (``npm.cmd`` on Windows, which bare ``npm`` misses)."""
+    import shutil
+
+    npm = shutil.which("npm")
+    if not npm:
+        print("Error: npm not found on PATH. Install Node.js to build the docs site.")
+        sys.exit(1)
+    return npm
+
+
 def _docs_build() -> None:
     """Build documentation site."""
     import subprocess
-    from pathlib import Path
 
-    docs_dir = Path(__file__).parent.parent.parent / "docs"
-    if not docs_dir.exists():
-        print("Error: docs/ directory not found")
-        sys.exit(1)
+    docs_dir = _find_docs_dir()
+    npm = _npm_executable()
 
     print("Installing dependencies...")
     result = subprocess.run(
-        ["npm", "install"],
+        [npm, "install"],
         cwd=str(docs_dir),
         capture_output=True,
         text=True,
@@ -445,7 +472,7 @@ def _docs_build() -> None:
 
     print("Building documentation...")
     result = subprocess.run(
-        ["npm", "run", "build"],
+        [npm, "run", "build"],
         cwd=str(docs_dir),
         capture_output=True,
         text=True,
@@ -460,16 +487,13 @@ def _docs_build() -> None:
 def _docs_serve(port: int = 3000) -> None:
     """Serve documentation locally."""
     import subprocess
-    from pathlib import Path
 
-    docs_dir = Path(__file__).parent.parent.parent / "docs"
-    if not docs_dir.exists():
-        print("Error: docs/ directory not found")
-        sys.exit(1)
+    docs_dir = _find_docs_dir()
+    npm = _npm_executable()
 
     print(f"Starting documentation server on port {port}...")
     subprocess.run(
-        ["npm", "run", "start", "--", "--port", str(port)],
+        [npm, "run", "start", "--", "--port", str(port)],
         cwd=str(docs_dir),
     )
 

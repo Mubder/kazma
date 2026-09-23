@@ -41,7 +41,12 @@ __all__ = ["HtmlEngine"]
 # Latin tokens commonly embedded in Arabic docs — isolate them so the bidi
 # algorithm keeps them LTR inside the RTL flow (cosmetic; CSS unicode-bidi
 # would handle most of this anyway, but explicit <bdi> is robust everywhere).
-_URL_RE = re.compile(r"(https?://[^\s<>\"']+)", re.IGNORECASE)
+# A URL ends on a character that can end a URL: sentence punctuation after it
+# (Latin or Arabic) belongs to the sentence, not the link. The old pattern
+# isolated "https://kazma.ai." with its full stop.
+_URL_RE = re.compile(r"(https?://[^\s<>\"']*[^\s<>\"'.,;:!?)\]،؛؟])", re.IGNORECASE)
+# Inline code and fenced blocks keep their backslashes verbatim.
+_CODE_SPAN_RE = re.compile(r"(```.*?```|`[^`\n]*`)", re.DOTALL)
 _STANDARDS_RE = re.compile(r"\b(ISO[\s/]*IEC[\s\-]*\d+(?:-\d+)?|NIST\s+\w+\s+\d+|ECMA-\d+)\b", re.IGNORECASE)
 
 
@@ -203,6 +208,7 @@ class HtmlEngine:
     /* Never leave one line of a paragraph alone across a page break. */
     p, li {{ orphans: 3; widows: 3; }}
     .math-display {{
+      display: block;
       direction: ltr !important; text-align: center; unicode-bidi: isolate;
       font-family: 'Cambria Math', 'Consolas', serif; font-size: 13pt;
       margin: 12px 0;
@@ -421,10 +427,14 @@ class HtmlEngine:
         pieces: list[str] = []
         for kind, chunk in split_display_math(text):
             if kind == "math":
+                # A span (styled display:block), not a <p>: the placeholder
+                # lands inside the paragraph markdown wraps around it, and a
+                # <p> inside a <p> is invalid — browsers close the outer one
+                # early and the rest of the sentence falls out of it.
                 pieces.append(
                     park(
-                        f'<p class="math-display" dir="ltr">'
-                        f"{_html_lib.escape(latex_to_unicode(chunk))}</p>"
+                        f'<span class="math-display" dir="ltr">'
+                        f"{_html_lib.escape(latex_to_unicode(chunk))}</span>"
                     )
                 )
                 continue
@@ -445,9 +455,25 @@ class HtmlEngine:
                         )
                     )
                 else:
-                    inner.append(c2)
+                    inner.append(HtmlEngine._unescape_dollars(c2))
             pieces.append("".join(inner))
         return "".join(pieces), held
+
+    @staticmethod
+    def _unescape_dollars(text: str) -> str:
+        """``\\$`` means a literal dollar sign; show ``$``, not ``\\$``.
+
+        Runs on text that is already known not to be math, so the dollar can
+        no longer open an inline formula. Python-Markdown does not treat ``$``
+        as escapable, so without this an exported report read ``\\$0.0035``.
+        Code spans and fences keep their backslashes (``echo \\$HOME``).
+        """
+        if "\\$" not in text:
+            return text
+        parts = _CODE_SPAN_RE.split(text)
+        return "".join(
+            part if i % 2 else part.replace("\\$", "$") for i, part in enumerate(parts)
+        )
 
     def _isolate(self, text: str) -> str:
         """Wrap URLs and Latin standard tokens in ``<bdi dir="ltr">`` so they

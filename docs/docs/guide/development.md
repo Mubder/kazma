@@ -22,7 +22,6 @@ kazma/
 ├── tests/               # Cross-cutting tests
 ├── examples/            # Example skills
 ├── scripts/             # Ops: migrate, smoke, guard, tools-catalog regen, …
-├── kubernetes/          # Sample K8s manifests (Hub service, not the main agent)
 ├── kazma.yaml           # Main config
 ├── kazma-permissions.yaml
 ├── kazma-security.yaml

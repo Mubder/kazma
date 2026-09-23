@@ -418,7 +418,6 @@ async def analyze_image(
     try:
         response = await provider.chat(messages)
     except Exception as exc:
-        exc_name = type(exc).__name__
         if "vision" in str(exc).lower() or "image" in str(exc).lower():
             return (
                 "Error: The configured model does not appear to support vision. "

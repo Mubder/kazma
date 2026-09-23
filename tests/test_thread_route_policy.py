@@ -61,11 +61,6 @@ POLICY: dict[tuple[str, str, str], tuple[str, str]] = {
     # HITL approvals.
     ("POST", "/api/approve/{thread_id}", MISC): ("owner", ""),
     ("GET", "/api/pending-approvals", MISC): ("owner", ""),
-    (
-        "GET",
-        "/api/pending-approvals",
-        "kazma-ui/kazma_ui/hitl_approval.py",
-    ): ("owner", "test-only factory, not mounted; filtered the same way"),
     ("POST", "/api/pending-approvals/clear", MISC): ("admin+owner", ""),
     ("DELETE", "/api/pending-approvals", MISC): ("admin+owner", ""),
     # Dashboard: the instance's whole checkpoint store.

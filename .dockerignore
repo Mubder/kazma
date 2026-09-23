@@ -7,7 +7,6 @@ __pycache__/
 .github/
 tests/
 kazma-data/
-kubernetes/
 docs/
 *.md
 !README.md

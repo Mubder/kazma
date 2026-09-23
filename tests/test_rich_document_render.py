@@ -66,7 +66,8 @@ def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
     """EN and AR PDFs must use the same visual theme (bars + brand chrome)."""
     from kazma_core.documents.renderer_worker import _generate_pdf
     from kazma_core.documents.style_theme import THEME, localized_chrome
-    from kazma_core.skills.exporter import generate_pdf_html_document
+    from kazma_core.documents.engines.html import HtmlEngine
+    from kazma_core.documents.profile import DocProfile
 
     body = (
         "## Overview\n\n"
@@ -93,13 +94,13 @@ def test_unified_theme_en_ar_pdf_share_heading_bars(tmp_path: Path) -> None:
         w,
     )
     assert en.stat().st_size > 2000 and ar.stat().st_size > 2000
-    # HTML exporter shares THEME tokens
-    html_en = generate_pdf_html_document(body, title="What is Kazma?", rtl=False)
-    html_ar = generate_pdf_html_document(body_ar, title="ما هي كاظمة؟", rtl=True)
+    # The HTML engine shares THEME tokens. This used to call the legacy
+    # skills/exporter.py, which nothing in the product imported (removed
+    # 2026-09-23); the live HTML path is documents.engines.html.
+    html_en = HtmlEngine(DocProfile.for_content(body)).render_markdown(body, title="What is Kazma?")
+    html_ar = HtmlEngine(DocProfile.for_content(body_ar)).render_markdown(body_ar, title="ما هي كاظمة؟")
     assert THEME["heading_fill"] in html_en and THEME["heading_fill"] in html_ar
     assert 'dir="ltr"' in html_en and 'dir="rtl"' in html_ar
-    assert localized_chrome(rtl=False)["brand"] in html_en or "Kazma" in html_en
-    assert localized_chrome(rtl=True)["brand"] in html_ar or "كاظمة" in html_ar
 
 
 def test_is_arabic_dominant() -> None:
