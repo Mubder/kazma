@@ -159,6 +159,12 @@ def test_reload_restores_answer_and_cot(live_server: str) -> None:
             page.locator(".message-assistant").first.wait_for(timeout=15000)
             body = page.locator(".message-assistant").first.inner_text()
             assert "300 seconds" in body
+            # The thoughts panel is painted by its own pass after the answer
+            # bubble; counting it the instant the bubble appeared failed about
+            # half the runs on an unchanged build (3/5 on 2026-09-23). Wait for
+            # it to a deadline — a panel that never comes still fails, here.
+            cot = page.locator(".kazma-cot-restored, .agent-progress").first
+            cot.wait_for(state="attached", timeout=15000)
             assert page.locator(".kazma-cot-restored, .agent-progress").count() >= 1
         finally:
             browser.close()
