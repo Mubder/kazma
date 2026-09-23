@@ -51,12 +51,6 @@ _NOT_GENERATE_VERBS = re.compile(
     re.IGNORECASE,
 )
 
-_READ_VERBS = re.compile(
-    r"\b(read|open|view|check|look\s+at|show\s+me|tell\s+me|what\s+is|explain)\b"
-    r"|اقرا|افتح|شاهد|اعرض|اشرح|ما هو",
-    re.IGNORECASE,
-)
-
 _DOCUMENT_ATTACHMENT_RE = re.compile(
     r"\.(pdf|docx|xlsx|pptx)$",
     re.IGNORECASE,
@@ -169,7 +163,6 @@ def detect_acts(
     acts: list[IntentAct] = []
     fmt = _extract_format(t)
     has_gen_verb = bool(_GENERATE_VERBS.search(t))
-    has_read_verb = bool(_READ_VERBS.search(t))
     has_not_gen_verb = bool(_NOT_GENERATE_VERBS.search(t))
     has_doc_att, att_fmt = _has_document_attachment(attachments)
 

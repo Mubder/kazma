@@ -626,7 +626,6 @@ def register_misc_routes(self: Any) -> None:
             # silent no-op when the wrong graph/checkpointer is wired.
             # Also snapshot messages + pending tools for scope grants / delta text.
             pre = None
-            pre_msg_count = 0
             pending_tool_name = ""
             pending_tools: list[Any] = []
             try:
@@ -664,10 +663,6 @@ def register_misc_routes(self: Any) -> None:
                         status_code=409,
                     )
                 if pre is not None:
-                    vals = getattr(pre, "values", None) or {}
-                    if isinstance(vals, dict):
-                        pre_msgs = vals.get("messages") or []
-                        pre_msg_count = len(pre_msgs) if isinstance(pre_msgs, list) else 0
                     for task in getattr(pre, "tasks", None) or []:
                         for intr in getattr(task, "interrupts", None) or []:
                             payload = getattr(intr, "value", None)

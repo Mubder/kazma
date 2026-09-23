@@ -3,7 +3,11 @@
 Runs as a ``macro_sleep`` task on the durable queue during idle periods.
 Implements the V_retention scoring (§4.1) and the tier lifecycle:
 
-  - **Decay** — compute V_retention per episode; flag low-retention rows.
+  - **V_retention** — ``compute_retention`` implements the score below, but
+    no tier decision uses it: every move here is rule-based (TTLs,
+    importance, access). Wiring it in changes which memories are archived
+    (their text is dropped), so it is a product decision, recorded in
+    docs/KNOWN_GAPS.md. The sweep used to compute it and discard it.
   - **Demote recall→episodic** — recall rows with no recent access for
     ``recall_demote_idle_days`` drop to episodic.
   - **Demote episodic→archived** — episodic rows past ``episodic_ttl_days``
@@ -124,17 +128,6 @@ def run_macro_sleep(
             last_touch = float(r["last_touch"] or now)
             age = max(0.0, now - last_touch)
             created_age = max(0.0, now - float(r["created_at"] or now))
-            # Derive memory_class from importance (episodes have no predicate_type)
-            mem_class = (
-                "identity" if importance >= int(v2.get("identity_min_importance", 4))
-                else "ephemeral" if importance <= int(v2.get("ephemeral_max_importance", 2))
-                else "general"
-            )
-            ret = compute_retention(
-                trust_weight=1.0, importance=importance,
-                access_count=access, age_seconds=age,
-                memory_class=mem_class, cfg=cfg,
-            )
             stats["scored_episodes"] += 1
 
             # Working-tier TTL → episodic (active buffer must not grow forever)

@@ -638,7 +638,6 @@ def _scan_file_for_dangerous_calls(filepath):
         for node in _ast.walk(tree):
             # Direct calls: os.system(...)
             if isinstance(node, _ast.Call):
-                func = node
                 # Attribute access: subprocess.run
                 if isinstance(node.func, _ast.Attribute):
                     for pair in _DANGEROUS_ATTRS:

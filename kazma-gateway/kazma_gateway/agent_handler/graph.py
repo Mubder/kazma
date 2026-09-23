@@ -327,7 +327,6 @@ def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # If last message is an assistant with tool_calls, check if all
         # tool_call_ids have matching tool responses in the NEXT message(s).
         if role == "assistant" and last.get("tool_calls"):
-            tc_ids = {tc.get("id") for tc in last["tool_calls"]}
             # Check next messages (they would follow this assistant msg)
             # But since this is the LAST message, there ARE no next messages.
             # This means tool responses are missing — drop this message.
@@ -336,7 +335,6 @@ def _clean_prior_messages(prior: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # If last message is a tool response, verify the preceding assistant
         # message's tool_calls are all accounted for.
         if role == "tool":
-            tool_call_id = last.get("tool_call_id")
             # Walk backwards to find the preceding assistant tool_calls message
             # and verify all its tool_call_ids have responses.
             idx = len(result) - 2

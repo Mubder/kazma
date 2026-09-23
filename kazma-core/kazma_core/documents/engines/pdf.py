@@ -194,7 +194,6 @@ class PdfEngine:
             ParagraphStyle, th, font, bold_font,
             title_size, heading_size, body_size,
         )
-        heading_fill = rich_styles["heading_fill"]
         body_size_actual = body_size
 
         def _bar(text_html: str, para_style: Any, *, fill: Any | None = None) -> Any:

@@ -282,7 +282,6 @@ async def _git_sync(action: str = "pull", branch: str | None = None, remote: str
             and the verify-mismatch path.
             """
             nonlocal token, auth_header
-            token_prefix = (token[:4] + "***") if token else "none"
             logger.info(
                 "[git_push_pull] Push auth failure — clearing token cache and re-minting for a single retry"
             )

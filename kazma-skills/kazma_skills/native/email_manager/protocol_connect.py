@@ -66,6 +66,7 @@ def connect_protocol(
     preset = get_preset(p if p != "generic" else "", proto)
     if proto == "imap":
         ih = (imap_host or preset.get("imap_host") or "").strip()
+        # Validated here (int() rejects a non-numeric port) and written below.
         ip = int(imap_port or preset.get("imap_port") or 993)
         if not ih and p == "generic":
             return {"ok": False, "error": "imap_host required for generic IMAP"}
@@ -91,10 +92,10 @@ def connect_protocol(
         vault_store("email.gmail.auth", proto, category="email")
         if proto == "imap":
             _set_env("EMAIL_IMAP_HOST", imap_host or preset.get("imap_host") or "imap.gmail.com")
-            _set_env("EMAIL_IMAP_PORT", str(imap_port or preset.get("imap_port") or 993))
+            _set_env("EMAIL_IMAP_PORT", str(ip))
         else:
             _set_env("EMAIL_POP_HOST", pop_host or preset.get("pop_host") or "pop.gmail.com")
-            _set_env("EMAIL_POP_PORT", str(pop_port or preset.get("pop_port") or 995))
+            _set_env("EMAIL_POP_PORT", str(pp))
         _set_env("EMAIL_SMTP_HOST", sh or "smtp.gmail.com")
         _set_env("EMAIL_SMTP_PORT", str(sp))
         return {
@@ -119,7 +120,7 @@ def connect_protocol(
             )
             _set_env(
                 "EMAIL_MS_IMAP_PORT",
-                str(imap_port or preset.get("imap_port") or 993),
+                str(ip),
             )
         else:
             _set_env(
@@ -128,7 +129,7 @@ def connect_protocol(
             )
             _set_env(
                 "EMAIL_MS_POP_PORT",
-                str(pop_port or preset.get("pop_port") or 995),
+                str(pp),
             )
         _set_env("EMAIL_MS_SMTP_HOST", sh or "smtp.office365.com")
         _set_env("EMAIL_MS_SMTP_PORT", str(sp))

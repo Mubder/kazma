@@ -34,9 +34,6 @@ async def run_research_then_document(
     Step 2: Build a new TurnDecision with document_generate + that file.
     Step 3: Run document handler.
     """
-    tool_executor = ctx.get("tool_executor")
-    llm = ctx.get("llm")
-
     # ── Step 1: Research ────────────────────────────────────────────
     from kazma_core.agent.intent.handlers.research import run_research_deep
 

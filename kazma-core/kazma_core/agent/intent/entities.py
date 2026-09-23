@@ -62,7 +62,6 @@ def resolve_entities(
     Never scans global directories by mtime. Never returns paths that
     failed the workspace access check.
     """
-    files: list[ResolvedFile] = []
     unresolved: list[str] = []
     ambiguous: list[str] = []
 

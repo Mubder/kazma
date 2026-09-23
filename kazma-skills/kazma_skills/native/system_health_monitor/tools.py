@@ -51,8 +51,8 @@ async def get_system_stats() -> str:
             "🖥️ **KAZMA SYSTEM HEALTH REPORT**",
             "==================================",
             f"⚡ **CPU Usage:** `{cpu_percent}%` ({cpu_count} logical cores)",
-            f"🧠 **RAM Usage:** `{ram_percent}%` (Used: {ram_used:.2f} GB / Total: {ram_total:.2f} GB)",
-            f"💽 **Disk Space (Workspace):** `{disk_percent}%` (Free: {disk_free:.2f} GB / Total: {disk_total:.2f} GB)",
+            f"🧠 **RAM Usage:** `{ram_percent}%` (Used: {ram_used:.2f} GB, Available: {ram_available:.2f} GB / Total: {ram_total:.2f} GB)",
+            f"💽 **Disk Space (Workspace):** `{disk_percent}%` (Used: {disk_used:.2f} GB, Free: {disk_free:.2f} GB / Total: {disk_total:.2f} GB)",
             "==================================",
             "✅ *System diagnostics check passed.*",
         ]

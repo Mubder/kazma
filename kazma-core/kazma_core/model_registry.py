@@ -984,8 +984,6 @@ class ModelRegistry:
         """
         stored = self._load_providers()
         defaults = self._default_provider_entries()
-        stored_by_name = {p.get("name", ""): p for p in stored}
-        defaults_by_name = {p.get("name", ""): p for p in defaults}
 
         merged: list[dict[str, Any]] = []
         seen: set[str] = set()
