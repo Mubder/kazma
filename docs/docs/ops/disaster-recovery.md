@@ -94,16 +94,29 @@ cost 3.8 GB, and each additional generation adds roughly **2 MB**.
 
 ### Retention
 
-Time-based, not count-based: **7 daily, 8 weekly, 12 monthly**, applied
-nightly by the `restic_maintenance` task, which also clears stale locks and
+Time-based, not count-based: **24 hourly, 30 daily, 8 weekly, 12 monthly**,
+applied by the `restic_maintenance` task, which also clears stale locks and
 runs `restic check`. "Keep the last 30" is thirty days or thirty hours
 depending on how often the loop ran — not a recovery guarantee.
+
+The policy is applied **per kind of backup** (`forget --group-by host,tags`:
+universal, pg, legacy, probe). restic's default groups by host + paths, and
+every universal backup is a new `backups/universal/<epoch>` directory — so
+each snapshot was its own group of one and, until 2026-09-23, retention never
+deleted anything (199 snapshots, 199 groups). Thirty dailies, not seven, is
+the operator's choice from the same day: 69 chat memories emptied between
+08-30 and 09-21 were recoverable only from a three-week-old snapshot.
+
+A clean run logs `[restic] maintenance ok: <local|remote> (forget --prune, check)`;
+before that line existed, a maintenance that never ran was indistinguishable
+from one that always succeeded.
 
 On-disk staging keeps only **2** generations; the history lives in restic.
 
 ### The passphrase
 
-`~/.kazma/restic.pass` decrypts **every** snapshot, local and offsite. It is
+`<install>/.kazma/restic.pass` (a non-empty legacy `~/.kazma/restic.pass`
+still wins) decrypts **every** snapshot, local and offsite. It is
 deliberately NOT `KAZMA_SECRET` — the defect being fixed was the vault key
 travelling with the data it protects.
 

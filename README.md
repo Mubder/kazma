@@ -4,7 +4,7 @@
 
   # Kazma Agent Framework
 
-  **Kazma is the self-hosted agent that can edit your repo, message your team, and schedule your life — and that will stop, ask, or fail honestly rather than invent an answer.**
+  **A self-hosted AI agent that can edit your repository, message your team and run your schedule — and that stops, asks, or fails honestly instead of inventing an answer.**
 
   <p align="center">
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square" alt="MIT License"></a>
@@ -16,26 +16,24 @@
     <a href="https://kazma.ai"><img src="https://img.shields.io/badge/Website-kazma.ai-06B6D4.svg?style=flat-square" alt="Website"></a>
   </p>
 
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/docs/guide/architecture.md">Architecture</a> ·
+  <a href="docs/INJECTION.md">Safety measurements</a> ·
+  <a href="docs/KNOWN_GAPS.md">Known gaps</a> ·
+  <a href="docs/docs/intro.md">Documentation</a>
+
 </div>
 
 ---
 
-## Quick start
+## Overview
 
-```powershell
-.\setup.ps1
-kazma serve
-```
-
-Open **`/`** — that is chat (not the dashboard). First-run asks for one provider key and one model. Inspectors (dashboard, swarm, memory, …) live under **More**.
-
-See [Quickstart](docs/docs/guide/quickstart.md).
-
----
-
-## ⚡ What it is
-
-Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before danger tools, a commitment layer that will not invent a date over your memory, and mouths on Web, TUI, CLI, Telegram, Discord, and Slack. When the model dies it says so (`⚠️`) instead of faking a reply.
+Kazma is an open-source, self-hosted agent platform. One LangGraph supervisor
+serves every surface — Web, TUI, CLI, Telegram, Discord and Slack — with
+human approval before dangerous actions, a commitment layer that resolves
+intent against memory before acting, and a long-term memory you can inspect
+and correct. When a model call fails, Kazma says so (`⚠️`) rather than
+producing a plausible reply.
 
 <!-- Metrics auto-verified from METRICS.md -->
 | Codebase Volume | Test Suite | Engineering Depth | Platforms Supported |
@@ -43,44 +41,114 @@ Kazma is an open-source, self-hosted agent: one LangGraph brain, HITL before dan
 | **~462K LOC** (367K Python code + 39K JS) | **8,294 test functions** (669 test files) | **3,771+ commits** across 7 packages | **Web, TUI, CLI, Telegram, Discord, Slack** |
 
 <p align="center">
-  <img src="docs/screenshots/dashboard.png" alt="Kazma Observability Dashboard & Control Plane" width="100%">
+  <img src="docs/screenshots/dashboard.png" alt="Kazma observability dashboard" width="100%">
 </p>
 
 ---
 
-## 🔬 Measured, not asserted
+## Quick start
 
-Most agent frameworks describe their safety. Kazma publishes the measurement,
-the method, and the results that do **not** flatter it.
+> **Prerequisites:** Python 3.11–3.14 (3.12 or 3.13 recommended). The setup
+> script installs [`uv`](https://docs.astral.sh/uv/) if it is missing.
 
-**Prompt injection, on [AgentDojo](https://agentdojo.spylab.ai)** — a public
-benchmark built by other people (Debenedetti et al., NeurIPS 2024), 996 runs per
-condition, every condition measured four times:
+```bash
+git clone https://github.com/Mubder/kazma.git
+cd kazma
+./setup.sh          # Linux / macOS / WSL   (Windows: .\setup.ps1)
+kazma serve         # http://127.0.0.1:9090
+```
 
-| condition | attack success | acted on the payload |
+The setup script creates `.venv`, syncs the `rag`, `dev` and `tui` extras,
+copies `.env.example` to `.env` if needed, and checks the core imports. On
+first run the web UI asks for one provider key and one model.
+
+| Page | URL |
+|---|---|
+| Chat | `http://127.0.0.1:9090/` |
+| Dashboard and control plane | `http://127.0.0.1:9090/dashboard` |
+| Web IDE | `http://127.0.0.1:9090/ide` |
+| Documents | `http://127.0.0.1:9090/documents` |
+| Memory and belief graph | `http://127.0.0.1:9090/memory` |
+
+Other entry points:
+
+```bash
+kazma ask "What files define the supervisor graph?"   # one-shot, streams to stdout
+kazma-tui                                              # terminal UI
+```
+
+<details>
+<summary><b>Manual installation (uv or pip)</b></summary>
+
+```bash
+# uv
+uv venv --python 3.13
+uv sync --extra rag --extra dev --extra tui     # or: uv sync --all-extras
+
+# pip — Linux / macOS / WSL
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[rag,dev,tui]"
+
+# pip — Windows PowerShell
+py -3.13 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e ".[rag,dev,tui]"
+```
+
+There is no `[cli]` extra — `kazma-cli` ships in the wheel. Provider keys
+other than `OPENAI_API_KEY` are set in **Settings → Providers** or
+`kazma.yaml`; see [Configuration](docs/docs/guide/configuration.md).
+
+</details>
+
+<details>
+<summary><b>Running under the supervisor (applying updates)</b></summary>
+
+On a host where the `KazmaAgent` guard supervises the server (Scheduled
+Task, systemd or launchd), apply a `git pull` with one command. Killing
+`python` or `uvicorn` by hand fights the guard.
+
+```bash
+.venv/bin/python scripts/service/kazma_guard.py --reload   # Windows: .venv\Scripts\python.exe
+.venv/bin/python scripts/service/kazma_guard.py --status
+```
+
+Wait for `Kazma is up. build …`. `--status` should report
+`supervision : active` and `server : healthy (ready)`. First-time install:
+`python scripts/service/kazma_guard.py --install`. On Windows, start through
+`kazma serve` or the guard rather than `python -m uvicorn`, which forces an
+event loop the Postgres checkpointer cannot use. What the guard does and does
+not restart for: [Deployment §6](docs/docs/guide/deployment.md).
+
+</details>
+
+Full guide: [Quickstart](docs/docs/guide/quickstart.md).
+
+---
+
+## Measured, not asserted
+
+Kazma publishes its safety measurements — the method, the numbers, and the
+results that do not flatter it.
+
+**Prompt injection on [AgentDojo](https://agentdojo.spylab.ai)**, a public
+benchmark by an independent group (Debenedetti et al., NeurIPS 2024), 996 runs
+per condition, each condition measured four times:
+
+| Condition | Attack success | Acted on the payload |
 |---|:---:|:---:|
-| undefended | 18.1% | 24.1% |
-| spotlighting — 4-character delimiter, from the literature | 11.6% | 18.6% |
+| Undefended | 18.1% | 24.1% |
+| Spotlighting — 4-character delimiter, from the literature | 11.6% | 18.6% |
 | **Kazma's fence** — ~800-character in-band banner | **10.4%** | **14.8%** |
 
-Fencing untrusted tool output **works** (p < 0.001 against undefended). It also
-**cannot be told apart from a four-character delimiter** (p = 0.39). Both
-sentences are on the page, because the second one is the one a reviewer needs.
+Fencing untrusted tool output **works** (p < 0.001 against undefended). It
+also **cannot be distinguished from a four-character delimiter** (p = 0.39).
+Both statements are reported because a reviewer needs the second one. The same
+page records that two of the four suites measure nothing on the model used,
+a favourable result that was refused, and a measured 5.7-point noise floor at
+temperature 0.
 
-What that page also reports, because leaving it out would make the rest worth
-less:
-
-- **Two of the four suites measure nothing** on the model used — their
-  undefended baselines sit at 2.9% and 0.3%, so there is no attack success for
-  a defense to reduce.
-- **A result we refused.** On one suite the fence beat spotlighting at
-  p = 0.032 — on a suite where spotlighting scored *worse than no defense at
-  all*. It is shown, and not counted.
-- **A measured noise floor.** Running an unchanged configuration four times
-  gives a 5.7-point spread at temperature 0. Anything smaller than that is not
-  a finding, including ours.
-
-Every figure re-derives from the committed run logs, with no API key:
+Every figure re-derives from the committed run logs, without an API key:
 
 ```bash
 scripts/agentdojo_bench.py --analyze --suite banking   # raw counts + obedience
@@ -89,25 +157,13 @@ scripts/agentdojo_bench.py --report slack,banking      # pooled figures + p-valu
 
 | | |
 |---|---|
-| [**Prompt injection: the numbers**](docs/INJECTION.md) | the full measurement, the payloads that still land, and a free offline reproduction |
-| [**Threat model**](docs/THREAT_MODEL.md) | what each boundary stops and — stated plainly — what it does not. Approval is consent, not containment |
-| [**Known gaps**](docs/KNOWN_GAPS.md) | open weaknesses, dated, so they do not depend on someone remembering |
+| [**Prompt injection: the numbers**](docs/INJECTION.md) | The full measurement, the payloads that still land, and a free offline reproduction |
+| [**Threat model**](docs/THREAT_MODEL.md) | What each boundary stops and, stated plainly, what it does not. Approval is consent, not containment |
+| [**Known gaps**](docs/KNOWN_GAPS.md) | Open weaknesses, dated, with the evidence for each |
 
 ---
 
-## 📖 Origin & Architectural Philosophy
-
-**Kazma** (كاظمة) was an ancient coastal oasis in Kuwait — a vital network of freshwater wells and a flourishing gateway connecting global trade routes between civilizations. In 633 CE, it was the site of the historic **Battle of Chains** (ذات السلاسل): an opposing army chained its ranks into a rigid, monolithic wall, which Khalid ibn al-Walid decisively dismantled through adaptive, decentralized maneuvering.
-
-Kazma's architecture reflects those foundational principles:
-
-- 🏜️ **The Wells (Cognitive Memory)** — Deep, persistent memory that retains context across months of sessions, allowing agents to draw from bi-temporal knowledge graphs rather than forgetting across turns.
-- 🚪 **The Gateway (Multi-Platform Control)** — A unified supervisor brain seamlessly routing execution between Web UI, Textual TUI, CLI, and team messaging channels (Telegram, Discord, Slack).
-- ⚔️ **Breaking the Chains (Decentralized Swarms)** — Monolithic, rigid pipelines inevitably fail in real-world deployments. Kazma replaces brittle linear chains with decentralized swarm dispatch patterns, dynamic worker autoscaling, and self-healing execution loops.
-
----
-
-## 🏛️ System Architecture
+## Architecture
 
 ```
                                  ┌──────────────────────────────────────────────────────────┐
@@ -118,8 +174,8 @@ Kazma's architecture reflects those foundational principles:
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
 │                                                   KAZMA GATEWAY & SUPERVISOR                                                │
 │  ┌───────────────────────────────┐     ┌───────────────────────────────┐     ┌───────────────────────────────────────────┐  │
-│  │     Platform Isolation        │ ──► │   LangGraph ReAct Supervisor  │ ◄─► │         Triple-Wired HITL Gate            │  │
-│  │ (SessionStore / Zero Leakage) │     │  (80% Compaction / Turn Ledger)│     │  (Graph Interrupt / Swarm Bus / Pipeline) │  │
+│  │     Platform Isolation        │ ──► │   LangGraph ReAct Supervisor  │ ◄─► │          Three-Path HITL Gate             │  │
+│  │ (SessionStore / Zero Leakage) │     │ (Context Trim / Turn Ledger)  │     │  (Graph Interrupt / Swarm Bus / Pipeline) │  │
 │  └───────────────────────────────┘     └───────────────┬───────────────┘     └───────────────────────────────────────────┘  │
 │                                                        │                                                                    │
 │  ┌───────────────────────────────┐     ┌───────────────┴───────────────┐     ┌───────────────────────────────────────────┐  │
@@ -130,13 +186,13 @@ Kazma's architecture reflects those foundational principles:
                                                          │
                                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                             AUTONOMOUS SWARM & MEMORY TIER                                                  │
+│                                              SWARM & MEMORY TIER                                                            │
 │  ┌─────────────────────────────────────────────┐                    ┌────────────────────────────────────────────────────┐  │
-│  │                SwarmEngine                  │                    │            Pure V2 Cognitive Memory                │  │
+│  │                SwarmEngine                  │                    │               V2 Cognitive Memory                  │  │
 │  │  • 6 Dispatch Patterns (Fan-Out/Pipeline/..)│                    │  • Bi-Temporal Belief Graph (valid_from/until)     │  │
 │  │  • Dynamic Autoscaler (Coder/Researcher/..) │                    │  • Local Ego-Graph Personalized PageRank (PPR)     │  │
-│  │  • ReliabilityRegistry (Breakers & Retries) │                    │  • Sparse (FTS5) + Dense (sqlite-vec / pgvector)  │  │
-│  │  • Best-Model-Per-Task Prompt Classifier    │                    │  • Parametric Action DAGs + 24h Auto-Consolidation │  │
+│  │  • ReliabilityRegistry (Breakers & Retries) │                    │  • Sparse (FTS5) + Dense (sqlite-vec / pgvector)   │  │
+│  │  • Best-Model-Per-Task Prompt Classifier    │                    │  • Procedural DAGs + 24h Reconsolidation           │  │
 │  └─────────────────────────────────────────────┘                    └────────────────────────────────────────────────────┘  │
 └────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────┘
                                                          │
@@ -147,221 +203,97 @@ Kazma's architecture reflects those foundational principles:
 └─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
----
-
-## 🌟 Core Capabilities
-
-### 🧠 Pure V2 Cognitive Memory Engine
-- **Bi-Temporal Beliefs**: Tracks factual assertions with both assertion time and validity time (`valid_from` / `valid_until`) to manage evolving knowledge without hallucination or historical corruption.
-- **Associative PPR Graph**: Multi-hop associative recall via Local Ego-Graph Personalized PageRank over belief entities.
-- **Hybrid Episode Retrieval**: Recalls past dialogues and actions using Reciprocal Rank Fusion (RRF) over lexical search (SQLite FTS5, or ILIKE on Postgres-primary) and dense embeddings (`sqlite-vec` on one node, **pgvector** when Postgres is on).
-- **Automated Ops & Hygiene**: Background task queue (`memory_ops.db`) for post-turn extraction, entity reconciliation, micro-consolidation, and automated backups — WAL-safe SQLite copies, `pg_dump` of Postgres and a JSONL export of the graph, snapshotted into deduplicated, encrypted [restic](https://restic.net) repositories (local + offsite) with time-based retention and a verified one-command restore. See [Disaster Recovery](docs/docs/ops/disaster-recovery.md).
-- **Prompt-Fenced Injection**: Wraps untrusted text in `<kazma:data untrusted>` fences that tell the model the enclosed content is observation data, never instructions. Covers recalled memories, compaction summaries, procedural hints, skill frontmatter, document knowledge, swarm phonebook entries, and — since the 2026-08-29 audit — fetched web pages (`read_url`), search results (`web_search`), saved research chunks, and third-party MCP resource bodies. Note this is a mitigation, not a guarantee: a fence lowers the authority of injected text, it does not make the model immune to it — **measured at 18.1% → 10.4% attack success on a public benchmark**, which is a real reduction and not an elimination. See [INJECTION.md](docs/INJECTION.md).
-
-### 🔁 Operator reload & Windows event loop
-- **Watched host:** after `git pull`, pick up code with `--reload` (see [Quick Start §4](#4-reload--status-watched-host--do-not-skip)). Do not kill `python`/`uvicorn` by hand.
-- **Windows:** the server runs a `SelectorEventLoop` so psycopg-async (LangGraph `AsyncPostgresSaver`) can connect. `python -m uvicorn` hardcodes Proactor on Windows and silently falls back to SQLite checkpoints — start via `kazma serve` / the guard, not raw uvicorn.
-- **Filesystem tools** (`file_search`, `file_read`, `file_list`, …) offload disk I/O off the event loop so a large tree cannot freeze SSE, WebSockets, or `/health/ready`.
-
-### 🐝 Swarm Orchestration & Dynamic Autoscaler
-- **6 Dispatch Patterns**: `dispatch` (single specialist), `broadcast` (all workers), `pipeline` (sequential handoffs with checkpoint gates), `fan-out` (parallel execution with aggregation/voting), `consult` (independent expert reviews + synthesis), and `conditional` (router-driven execution).
-- **Dynamic Autoscaling**: Zero pre-configured worker requirement. Automatically classifies task prompts and dynamically spins up specialized workers (`coder`, `researcher`, `generalist`) with best-model-per-task selection (coding, reasoning, vision).
-- **Reliability & Circuit Breakers**: Per-worker circuit breakers, half-open probes, exponential retry policies, output schema validators, and handoff cycle guards ($depth \le 5$).
-
-### 🛡️ Non-Stop Execution & Self-Healing Watchdog
-- **Heartbeat & Stall Detection**: `supervised_invoke()` watchdog tracks execution heartbeats across graph nodes and automatically mitigates stalls.
-- **Checkpoint Rollback & Reflection**: Automatically rolls back corrupted turns to clean checkpoint states and injects `[KAZMA RECOVERY]` system reflection notes to re-steer the model.
-- **Model Failover Chains**: Transparent multi-provider failover with per-provider cooldown timers and durable SQLite call ledgers (`kazma-data/llm_calls.db`).
-
-### 🔒 Triple-Wired HITL Safety Architecture
-
-> Fail-closed by default. `KAZMA_ALLOW_YOLO=1` turns the gate off for the 53
-> canonical danger tools that are not in `ALWAYS_HITL_TOOLS`, and approval is
-> **consent, not containment** — it does not sandbox what you approve. What each
-> boundary does and does not stop is written out in
-> [THREAT_MODEL.md](docs/THREAT_MODEL.md).
-- **Default-deny HITL (2026-08-29 audit):** unclassified tools are gated; a Settings `require_approval_for` list **adds** to the tier floor and can no longer un-gate `shell_exec` by omission. Behind a reverse proxy, set `KAZMA_TRUSTED_PROXIES` to the proxy's address (peer 127.0.0.1 is not a credential).
-- **Layer 1 (Graph Interrupt)**: Single-agent execution pauses at the LangGraph level before mutating actions (`file_write`, `shell_exec`, `vault_retrieve`). Resumable from Web, TUI, or chat channels.
-- **Layer 2 (Swarm Bus)**: Multi-agent and CLI swarm dispatches enforce fail-closed approval gates on platform adapters (`FanOutBusAdapter` across Telegram/Discord/Slack).
-- **Layer 3 (Pipeline Checkpoints)**: Multi-stage pipeline tasks pause at designated approval milestones.
-- **Security & Sandboxing**: HMAC-SHA256 skill verification, prompt-fenced Soul mutation deltas, and AES-256-GCM encrypted credential vault.
-
-### 📄 Enterprise Document Intelligence Platform
-- **Intake & Quarantine**: Content-addressed storage (CAS) with MIME/OOXML/PDF policy validation, macro rejection, and optional ClamAV malware scanning.
-- **Isolated Subprocess Processing**: Secure OCR and document parsing for PDF, DOCX, XLSX, and PPTX formats in isolated sub-processes.
-- **Document Ops**: Background job leases (`SKIP LOCKED`), dead-letter queues, format conversions, PDF split/merge/redaction, and one-click indexing into Knowledge Library corpora.
-
-### 💻 Dual IDE & Multi-Platform Gateway
-- **Web IDE & Textual TUI**: Integrated editor with syntax highlighting, multi-tab navigation, workspace-scoped terminal execution, and file-aware AI chat.
-- **Live In-Flight Steering**: Intercept and guide active operations in real time using `/steer` (soft nudge), `/steer!` (pause & inject), or `/abort`.
-- **Zero-Leak Platform Isolation**: Session identifiers (`chat_id`, `user_id`) remain isolated within `SessionStore` and never pollute LangGraph state.
-
-### 🌐 Arabic-Native & Cultural Alignment
-- **Majlis Protocol**: Native handling of Arabic nuances, formal MSA, and Gulf/Kuwaiti dialect expressions.
-- **Bilingual Interface**: Full Right-To-Left (RTL) Web and TUI interfaces with culturally aligned interaction models.
+Deep dives: [System architecture](docs/docs/guide/architecture.md) ·
+[Monorepo system map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) ·
+[Diagnosis map](docs/docs/ops/diagnosis-map.md).
 
 ---
 
-## 🆚 Why Kazma?
+## Capabilities
 
-| Capability | Kazma | LangChain / LangGraph | CrewAI | AutoGPT | n8n |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Architecture** | **Full-Stack Autonomous System** | Library / Graph Primitive | Multi-Agent Framework | Autonomous Agent | Workflow Automation |
-| **Cognitive Memory** | ✅ **Bi-temporal + PPR Graph** | ⚠️ Basic Vector Store | ⚠️ Simple RAG | ⚠️ Basic Memory | ❌ None |
-| **HITL Safety Gates** | ✅ **Triple-Wired (fail-closed by default — [what it does not stop](docs/THREAT_MODEL.md))** | ⚠️ Manual code wiring | ❌ None | ⚠️ Basic prompt | ⚠️ Workflow pause |
-| **Swarm Orchestration** | ✅ **6 Patterns + Autoscaler** | ⚠️ Custom Graph | ✅ Role-based | ❌ Single loop | ❌ Node based |
-| **Built-in Web & TUI IDE**| ✅ **Included (Dual Interface)** | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Observability Control Plane**| ✅ **Live Dashboard Included** | ⚠️ External (LangSmith) | ❌ None | ❌ None | ⚠️ Execution log |
-| **Document Intelligence**| ✅ **Quarantine + OCR + Redact**| ⚠️ Ad-hoc loaders | ❌ None | ❌ None | ⚠️ Basic parsers |
-| **Multi-Platform Gateways**| ✅ **Web, TUI, Telegram, Discord, Slack** | ❌ None | ❌ None | ❌ None | ⚠️ Webhook triggers |
-| **Arabic-Native & RTL** | ✅ **Full Native & Dialect Support** | ❌ None | ❌ None | ❌ None | ❌ None |
-| **Published safety measurements** | ✅ **[Public benchmark, noise floor, known gaps](docs/INJECTION.md)** | — | — | — | — |
-| **Self-Hosted License** | ✅ **MIT (100% Open Source)** | ✅ MIT | ✅ MIT | ✅ MIT | ⚠️ Fair-Code |
+### Safety and human approval
+- **Fail-closed approval gates.** Dangerous tools pause for a human on three
+  independent paths — the graph interrupt (chat), the swarm bus (multi-agent
+  and IDE) and pipeline checkpoints — backed by one gate registry, so an
+  approval always names the question it answers. Unclassified tools are gated
+  by default.
+- **Commitment layer.** Before a durable effect (a reminder, a post, a config
+  change) Kazma resolves it against memory; a model cannot overwrite what you
+  told it with something it inferred.
+- **Honest boundaries.** Approval is consent, not containment — it does not
+  sandbox what you approve. `KAZMA_ALLOW_YOLO=1` turns the gate off for most
+  danger tools. See the [Threat model](docs/THREAT_MODEL.md).
+- **Platform allowlists.** Telegram, Discord and Slack each take an
+  **Allowed user IDs** list (Settings → Connectors). Behind a reverse proxy,
+  declare it in `KAZMA_TRUSTED_PROXIES`.
+- **Supporting controls.** HMAC-verified skills, an AES-256-GCM credential
+  vault, and untrusted content — web pages, search results, recalled memory,
+  documents, MCP resources — wrapped in a prompt fence
+  ([measured above](#measured-not-asserted)).
 
-<sub>“—” means not assessed. We measured Kazma against a public benchmark; we have not
-run the same benchmark against these projects, so we do not claim a result for them.</sub>
+### Memory
+- **Bi-temporal beliefs** with assertion and validity time, so knowledge can
+  change without rewriting history.
+- **Associative recall** through a personalized-PageRank ego graph, and hybrid
+  episode retrieval (FTS5 plus dense vectors via `sqlite-vec`, or pgvector on
+  Postgres).
+- **Rule-based lifecycle.** Memories you still recall are never archived, and
+  an archived one keeps a summary. See [Memory](docs/docs/guide/memory-and-rag.md).
+- **Backups you can restore.** WAL-safe SQLite copies, a filtered `pg_dump`,
+  and graph exports, snapshotted into encrypted, deduplicated
+  [restic](https://restic.net) repositories (local and offsite), with a
+  daily restore drill. See [Disaster recovery](docs/docs/ops/disaster-recovery.md).
 
----
+### Swarm orchestration
+- **Six dispatch patterns:** dispatch, broadcast, pipeline (with checkpoint
+  gates), fan-out (with aggregation or voting), consult and conditional.
+- **Autoscaling** from templates with best-model-per-task selection — no
+  pre-registered workers required.
+- **Reliability:** per-worker circuit breakers with half-open probes, retry
+  policies, output validators and handoff-cycle guards.
 
-## 📸 Interface Showcase
+### Documents
+- **Quarantined intake:** content-addressed storage, MIME/OOXML/PDF policy
+  checks, macro rejection and optional ClamAV scanning.
+- **Isolated processing:** parsing and OCR for PDF, DOCX, XLSX and PPTX in
+  resource-limited subprocesses.
+- **Operations:** leased background jobs, dead-letter queues, conversion,
+  split/merge/redaction, and indexing into Knowledge Libraries. Arabic and
+  mixed-direction documents render correctly per block.
 
-Observability Dashboard — dark control plane (English and Arabic).
+### Workspace and interfaces
+- **Web IDE and TUI editor** with workspace-scoped execution and file-aware
+  chat; all writes go through the same approval gate.
+- **In-flight steering:** `/steer`, `/steer!` and `/abort` redirect a running
+  task.
+- **Platform isolation:** chat and user IDs stay in the session store and
+  never enter the agent's graph state.
+- **Arabic-native:** Gulf and Kuwaiti dialect handling and full
+  right-to-left Web and TUI interfaces.
 
-| English | Arabic |
-|---|---|
-| ![Observability Dashboard (English)](docs/screenshots/dashboard-en-dark.png) | ![Observability Dashboard (Arabic)](docs/screenshots/dashboard-ar-dark.png) |
-
----
-
-## 🚀 Quick Start
-
-> **Prerequisites:** Python 3.11–3.14 (3.12 or 3.13 recommended). `uv` is installed for you if missing.
-
-The install SoT is [Quickstart](docs/docs/guide/quickstart.md). Bootstrap scripts (`setup.ps1` / `setup.sh`) sync **rag + dev + tui**. There is no `[cli]` extra — `kazma-cli` is part of the wheel. Full optional extras: `uv sync --all-extras`.
-
-### 1. Installation
-
-```bash
-git clone https://github.com/Mubder/kazma.git
-cd kazma
-```
-
-**One command (recommended)**
-
-```powershell
-# Windows
-.\setup.ps1
-```
-
-```bash
-# Linux / macOS / WSL
-chmod +x setup.sh
-./setup.sh
-```
-
-Creates `.venv`, installs `uv` if needed, syncs `rag` + `dev` + `tui`, copies `.env.example` → `.env` when missing, and checks core imports.
-
-**Manual: `uv`**
-```bash
-uv venv --python 3.13
-uv sync --extra rag --extra dev --extra tui
-# Everything (torch, Playwright, WeasyPrint, Temporal, …):
-# uv sync --all-extras
-```
-
-**Manual: `pip` + `venv`**
-```bash
-# Linux / macOS / WSL
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[rag,dev,tui]"
-
-# Windows (PowerShell)
-py -3.13 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -e ".[rag,dev,tui]"
-```
-
-### 2. Environment Configuration
-
-```bash
-# Copy template environment file
-cp .env.example .env    # Linux / macOS
-Copy-Item .env.example .env  # Windows PowerShell
-```
-
-Edit `.env` to configure your preferred LLM provider key:
-```dotenv
-# OpenAI-compatible (also used as the generic env fallback):
-OPENAI_API_KEY=sk-...
-# Other providers (Anthropic, Gemini, DeepSeek, …) are keyed in
-# Settings → Providers / kazma.yaml — see docs/docs/guide/configuration.md
-```
-
-### 3. Launch Kazma
-
-```bash
-# Start the full Web UI & Gateway (http://127.0.0.1:9090)
-kazma serve
-
-# Run the agent without the web server (tokens stream to stdout)
-kazma ask "What files define the supervisor graph?"
-
-# Or launch the Terminal User Interface (TUI)
-kazma-tui
-```
-
-Navigate to:
-- **Dashboard & Control Plane**: `http://127.0.0.1:9090/`
-- **Web IDE**: `http://127.0.0.1:9090/ide`
-- **Document Intelligence**: `http://127.0.0.1:9090/documents`
-- **Memory & Belief Graph**: `http://127.0.0.1:9090/memory`
-
-### 4. Reload & status (watched host — do not skip)
-
-If `KazmaAgent` is supervising the process (Scheduled Task / systemd / launchd), **this is how you apply a pull**. Hand-killing `python` or `uvicorn` fights the guard: it either respawns the old port holder or reports healthy while serving stale code.
-
-```powershell
-# Apply new code (cold start typically 3–5 minutes; wait for "Kazma is up. build …")
-& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --reload
-
-# Watcher + /health/ready + pids
-& '.venv\Scripts\python.exe' scripts\service\kazma_guard.py --status
-```
-
-`--status` should show `supervision : active` and `server : healthy (ready)`. Do not Ctrl+C `--reload` unless you intend to abort the wait; the boot continues.
-
-Linux / macOS (same scripts):
-
-```bash
-.venv/bin/python scripts/service/kazma_guard.py --reload
-.venv/bin/python scripts/service/kazma_guard.py --status
-```
-
-First-time install of the watcher: `python scripts/service/kazma_guard.py --install` (delegates to `install_service.py`).
+### Operations
+- A **supervisor (guard)** that restarts on real failure, not on a missed
+  probe or a machine out of ports, and pages over Telegram.
+- A **weekly resilience report** that counts which recovery mechanisms
+  actually fired, including event-loop stalls.
+- A **deep health canary** (`/health/deep`) that performs a real round trip
+  through config, memory recall, workspace binding and the database.
 
 ---
 
-## 🐝 Swarm Orchestration in 30 Seconds
+## Swarm Orchestration in 30 seconds
 
 ```bash
-# 1. Dispatch a dynamic specialist task (Autoscaler selects best model)
 kazma swarm dispatch --workers auto "Analyze the codebase security posture and produce a report"
-
-# 2. Run a structured multi-stage pipeline
 kazma swarm pipeline --workers researcher,coder,validator "Implement an OAuth2 device code provider"
-
-# 3. Parallel consensus voting (Fan-Out)
 kazma swarm fanout --workers a,b,c --aggregation vote "Select optimal database schema indexing"
-
-# 4. View live telemetry and history
 kazma swarm history
 kazma swarm metrics
 ```
 
-Prefer a UI? The web **Swarm Panel** (`/swarm`) shows live dispatch telemetry,
-worker status, and task history — and the TUI has a Swarm tab. Enable the
-engine in `kazma.yaml`:
+The web **Swarm Panel** (`/swarm`) shows live dispatch telemetry, worker
+status and task history; the TUI has a Swarm tab. Enable the engine in
+`kazma.yaml`:
 
 ```yaml
 swarm:
@@ -370,66 +302,122 @@ swarm:
 ```
 
 **Multi-replica honesty: Jobs can multi-replica** (document jobs, via
-Postgres `SKIP LOCKED` claims); document *metadata* and the SQLite stores
-remain single-replica — see `docs/docs/guide/document-intelligence.md`.
+Postgres `SKIP LOCKED` claims); document metadata and the SQLite stores remain
+single-replica — see [Document Intelligence](docs/docs/guide/document-intelligence.md).
 
 ---
 
-## 📦 Monorepo Package Structure
+## Where Kazma fits
+
+Kazma is an application, not a library: it ships the agent, its interfaces,
+its memory and its operations together. It is a good fit if you want
+
+- one agent reachable from a browser, a terminal and your team's chat tools;
+- human approval in front of anything that writes, sends or executes;
+- long-lived memory you can inspect, correct and restore from backup;
+- to run it yourself, on your own hardware, under the MIT license.
+
+If you need a framework to compose your own agent from primitives, a library
+such as LangGraph — which Kazma is built on — is the better starting point.
+
+---
+
+## Interface
+
+Observability dashboard in English and Arabic:
+
+| English | Arabic |
+|---|---|
+| ![Observability dashboard (English)](docs/screenshots/dashboard-en-dark.png) | ![Observability dashboard (Arabic)](docs/screenshots/dashboard-ar-dark.png) |
+
+---
+
+## Repository layout
 
 | Package | Path | Description |
 |---|---|---|
-| **`kazma-core`** | [`kazma-core/`](file:///G:/GitHubRepos/kazma/kazma-core) | Agent runner, LLM provider matrix, SwarmEngine, V2 Cognitive Memory, IDE backend, Safety & Document services |
-| **`kazma-gateway`** | [`kazma-gateway/`](file:///G:/GitHubRepos/kazma/kazma-gateway) | Multi-platform adapters (Telegram, Discord, Slack), slash commands, in-flight task steering (`/steer`) |
-| **`kazma-ui`** | [`kazma-ui/`](file:///G:/GitHubRepos/kazma/kazma-ui) | FastAPI web application, SSE streaming chat, Observability Dashboard, Web IDE, and Memory console |
-| **`kazma-tui`** | [`kazma-tui/`](file:///G:/GitHubRepos/kazma/kazma-tui) | Textual-based rich terminal dashboard, interactive IDE, and Documents manager |
-| **`kazma-skills`** | [`kazma-skills/`](file:///G:/GitHubRepos/kazma/kazma-skills) | Native certified skills (Document Platform, Encrypted Vault, Deep Research, Crawler, Database) |
-| **`kazma-cli`** | [`kazma-cli/`](file:///G:/GitHubRepos/kazma/kazma-cli) | Unified command-line interface (`kazma ask`, `kazma acp`, `kazma swarm`, `kazma migrate`, `kazma serve`) |
+| **`kazma-core`** | [`kazma-core/`](kazma-core/) | Agent runner, provider layer, swarm engine, V2 memory, IDE backend, safety and document services |
+| **`kazma-gateway`** | [`kazma-gateway/`](kazma-gateway/) | Telegram, Discord and Slack adapters, slash commands, in-flight steering |
+| **`kazma-ui`** | [`kazma-ui/`](kazma-ui/) | FastAPI web application, streaming chat, dashboard, Web IDE, memory console |
+| **`kazma-tui`** | [`kazma-tui/`](kazma-tui/) | Textual terminal UI, editor and documents manager |
+| **`kazma-skills`** | [`kazma-skills/`](kazma-skills/) | Native skills (document platform, vault, research, crawler, database, …) |
+| **`kazma-cli`** | [`kazma-cli/`](kazma-cli/) | The `kazma` command (`serve`, `ask`, `swarm`, `migrate`, `docs`, ACP) |
 
 ---
 
-## 🧪 Testing & Verification
+## Engineering practice
 
-Kazma maintains rigorous test coverage with **~9,600 automated tests** across unit, integration, swarm reliability, and security layers. Whether they are currently passing is the [CI badge](https://github.com/Mubder/kazma/actions/workflows/ci.yml) at the top, not a number typed here:
+- **Every fix lands with a gate for its class.** A regression test for the
+  bug, a static check that enumerates the sibling code paths, and a negative
+  control proving the check fails on the old code. The rules are in
+  [`AGENTS.md`](AGENTS.md); the evidence for each is in
+  [Known gaps](docs/KNOWN_GAPS.md).
+- **Debt may only go down.** Blind and silent exception handlers are counted
+  by a ratchet that fails the build if the number rises.
+- **The event loop is protected.** Static gates keep blocking database, DNS,
+  TLS-setup and known-slow helper calls out of async code, and loop stalls
+  are recorded with full stacks and reported weekly.
+
+---
+
+## Testing
+
+The suite covers unit, integration, swarm reliability, security and browser
+(Playwright) layers. Whether it passes is the [CI badge](https://github.com/Mubder/kazma/actions/workflows/ci.yml),
+not a number written here.
 
 ```bash
-# Run complete test suite
-pytest
-
-# Code quality and type validation
+python scripts/fast_test.py        # full suite, chunked and crash-tolerant (~10 min)
+pytest tests/test_static_gates.py  # the class gates on their own
 ruff check kazma-core/
-mypy kazma-core/
 ```
+
+`scripts/fast_test.py` is the supported way to run everything: it isolates
+chunks so a native-library crash in one file cannot hide the results of the
+rest.
 
 ---
 
-## 📚 Documentation Reference
+## Documentation
 
 | Guide | Description |
 |---|---|
-| [System Architecture](docs/docs/guide/architecture.md) | In-depth breakdown of supervisor graph, ReAct loops, and engine internals |
-| [Monorepo System Map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) | Comprehensive structural map of all monorepo modules and dependencies |
-| [V2 Cognitive Memory](docs/docs/guide/memory-and-rag.md) | Bi-temporal belief stores, PPR graphs, and automated reconsolidation |
-| [Swarm Orchestration](docs/docs/guide/swarm-orchestration.md) | Dispatch patterns, reliability breakers, autoscaling, and worker lifecycle |
-| [Document Intelligence](docs/docs/guide/document-intelligence.md) | Secure ingestion pipelines, quarantined OCR, and redaction operations |
-| [Security & HITL](docs/docs/guide/security-and-safety.md) | Triple-wired approval architecture, prompt fencing, and vault encryption |
-| [Threat Model](docs/THREAT_MODEL.md) | What each boundary stops and — stated plainly — what it does not |
-| [Prompt Injection: the numbers](docs/INJECTION.md) | The measurements behind the fencing claim, including a public benchmark and the payloads that still land |
-| [Known Gaps](docs/KNOWN_GAPS.md) | Open weaknesses, dated, so they do not depend on someone remembering |
-| [Configuration Reference](docs/docs/guide/configuration.md) | Detailed `kazma.yaml`, environment variables, and provider settings |
+| [Documentation home](docs/docs/intro.md) | Map of every guide |
+| [System architecture](docs/docs/guide/architecture.md) | Supervisor graph, ReAct loop and engine internals |
+| [Monorepo system map](docs/ARCHITECTURE_AND_SYSTEM_MAP.md) | Every module and how they connect |
+| [Memory](docs/docs/guide/memory-and-rag.md) | Beliefs, recall, lifecycle and consolidation |
+| [Swarm orchestration](docs/docs/guide/swarm-orchestration.md) | Dispatch patterns, reliability and autoscaling |
+| [Document Intelligence](docs/docs/guide/document-intelligence.md) | Intake, quarantine, OCR and redaction |
+| [Security and HITL](docs/docs/guide/security-and-safety.md) | Approval paths, prompt fencing and the vault |
+| [Configuration](docs/docs/guide/configuration.md) · [Environment variables](docs/docs/reference/environment-variables.md) | `kazma.yaml`, Settings and the environment |
+| [Disaster recovery](docs/docs/ops/disaster-recovery.md) | Backups, retention and restore |
+| [Production checklist](docs/docs/ops/production-checklist.md) | Before exposing Kazma to other users |
+| [Threat model](docs/THREAT_MODEL.md) · [Prompt injection](docs/INJECTION.md) · [Known gaps](docs/KNOWN_GAPS.md) | What is protected, how well, and what is not |
+| [Changelog](CHANGELOG.md) | What changed and why |
 
 ---
 
-## 📬 Community & Contact
+## Origin of the name
 
-- 🌐 **Official Website**: [kazma.ai](https://kazma.ai)
-- 🐙 **GitHub Repository**: [github.com/Mubder/kazma](https://github.com/Mubder/kazma)
-- 💬 **Live Demonstration**: [kazma-demo.fly.dev](https://kazma-demo.fly.dev/)
-- 📧 **Pilots, Partnerships & Inquiries**: [admin@kazma.ai](mailto:admin@kazma.ai)
-- 🛡️ **Security Vulnerability Reporting**: [admin@kazma.ai](mailto:admin@kazma.ai) · [Security Advisory](https://github.com/Mubder/kazma/security/advisories/new)
+**Kazma** (كاظمة) was a coastal oasis in Kuwait — a network of freshwater
+wells and a gateway on the trade routes between civilizations. In 633 CE it
+was the site of the **Battle of Chains** (ذات السلاسل), where an army that had
+chained its ranks into one rigid wall was defeated by adaptive, decentralized
+manoeuvre. The architecture borrows the image: deep wells of memory, one
+gateway to many channels, and decentralized swarms instead of brittle
+pipelines.
 
 ---
 
-## 📜 License
+## Contributing, security and contact
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+- **Contributing:** see [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Security reports:** see [SECURITY.md](SECURITY.md), open a
+  [private advisory](https://github.com/Mubder/kazma/security/advisories/new),
+  or email [admin@kazma.ai](mailto:admin@kazma.ai).
+- **Website:** [kazma.ai](https://kazma.ai) · **Live demo:** [kazma-demo.fly.dev](https://kazma-demo.fly.dev/)
+- **Pilots and partnerships:** [admin@kazma.ai](mailto:admin@kazma.ai)
+
+## License
+
+Kazma is released under the [MIT License](LICENSE).

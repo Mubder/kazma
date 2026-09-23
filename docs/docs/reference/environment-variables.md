@@ -246,6 +246,7 @@ Optional package: Playwright via `pip install 'kazma[web]'` then `playwright ins
 | `KAZMA_OIDC_ISSUER` | unset | If SSO | OIDC issuer URL. |
 | `KAZMA_OIDC_CLIENT_ID` | unset | If SSO | Client id. |
 | `KAZMA_OIDC_CLIENT_SECRET` | unset | If SSO | Client secret (required for HS* `id_token`). |
+| `KAZMA_OIDC_TENANT_CLAIM` | unset | No | The `id_token` claim naming the user's Kazma tenant; bound to the session at login. Unset = every OIDC user shares the default tenant. |
 | `KAZMA_WS_GRAPH` | unset | No | `1` restores WS `send_prompt` / `approve_tool` as a second graph client (debug). Default: SSE only. |
 
 See [OIDC IdP Setup](../ops/oidc-setup) and [Multi-user SaaS](../products/multi-user-saas).
@@ -353,6 +354,21 @@ build if the code reads one of these and it is missing from **both**
 | `KAZMA_CHAOS_ENABLED` | unset | *Enables* fault-injection routes. Off by default; the router does not mount without it. | Test environments only — must stay off in production. |
 
 ---
+
+## Guard (supervisor, `scripts/service/kazma_guard.py`)
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `KAZMA_GUARD_CMD` | `serve.py` | Command the guard runs and supervises. |
+| `KAZMA_GUARD_CWD` | repo root | Working directory for it. |
+| `KAZMA_GUARD_HEALTH_URL` | `http://127.0.0.1:9090/health/ready` | Probe target. |
+| `KAZMA_GUARD_START_TIMEOUT` | `900` | Seconds allowed to first ready. |
+| `KAZMA_GUARD_INTERVAL` | `30` | Seconds between probes. |
+| `KAZMA_GUARD_PROBE_TIMEOUT` | — | Per-probe timeout. |
+| `KAZMA_GUARD_FAILURES` | `3` | Consecutive failed probes before a restart. Probes that cannot get a local port (`WinError 10048/10055`) never count — see [Deployment §6](../guide/deployment). |
+| `KAZMA_GUARD_PAGE_COOLDOWN_S` | — | Minimum gap between identical pages. |
+| `KAZMA_GUARD_LOG` / `KAZMA_GUARD_STATE` | `<install>/.kazma/` | Guard log and child-PID state file. |
+| `KAZMA_GUARD_TELEGRAM_TOKEN` / `KAZMA_GUARD_TELEGRAM_CHAT` | vault / `SWARM_*` | Direct Telegram paging, independent of the app. |
 
 ## Cost, chaos, tests
 

@@ -7,6 +7,19 @@ description: Operator guide for recent Kazma features — Hands 0.11, CodeMirror
 
 # Recent features guide
 
+**New in 2026-09-22/23 — reliability, not features.** Chat memories are no
+longer archived while you still recall them, and an archived one keeps a
+short stub instead of nothing ([Memory — episode lifecycle](./memory-and-rag)).
+The server's event loop no longer freezes on ~30 background paths (config and
+session reads, X polling, backups, TLS setup) — the guard's one forced restart
+that week was such a freeze. The Telegram **weekly resilience report** now
+covers the whole week, counts only real restarts, and includes event-loop
+stalls. Backups are pruned per kind with **30 daily** snapshots
+([Disaster recovery](../ops/disaster-recovery)). Discord and Slack take an
+**Allowed user IDs** list (Settings → Connectors); without one Discord
+accepts everyone and Slack no one. New symptoms and where to look:
+[Diagnosis map §1](../ops/diagnosis-map).
+
 **New in 2026-09-19:** [X auto-reply](./x-auto-reply) — mention the connected
 account and Kazma drafts a reply. Settings cards lock **against / support**;
 emoji is tone on a match and **side** when nothing matches (`شرايك` or 👍

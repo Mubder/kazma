@@ -103,8 +103,8 @@ Or UI: Graph store **Neo4j** → Save → **Test Neo4j** → **Sync beliefs → 
 
 | Job | Cadence |
 |-----|---------|
-| macro_sleep (decay / tiers) + ego-anchor backfill + FTS drift rebuild | ~6h |
-| backup + export (beliefs, episodes, merges, archive, audit JSONL) + mirror-drift warning | ~24h |
+| macro_sleep (rule-based tiers + archival; in-use memories are never archived) + ego-anchor backfill + FTS drift rebuild | ~6h |
+| backup + export (beliefs, episodes, merges, archive, audit JSONL) + mirror-drift warning | ~6h |
 | global reconsolidation (dedupe + re-embed + count recompute) | ~24h; **auto-partitions** large corpora |
 
 Dashboard: **Run reconsolidation**, queue **retry** / **Clear failed**, component health board.
