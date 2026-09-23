@@ -21,6 +21,16 @@ _pool: PostgresPool | None = None
 _lock = threading.Lock()
 
 
+def _without_nul(params: tuple | list | dict) -> tuple | list | dict:
+    """String parameters with U+0000 replaced by U+FFFD (Postgres rejects NUL)."""
+    def clean(v: object) -> object:
+        return v.replace("\x00", "�") if isinstance(v, str) and "\x00" in v else v
+
+    if isinstance(params, dict):
+        return {k: clean(v) for k, v in params.items()}
+    return type(params)(clean(v) for v in params)
+
+
 class PostgresPool:
     """Thin wrapper around psycopg ConnectionPool (sync, shared)."""
 
@@ -63,6 +73,11 @@ class PostgresPool:
             yield conn
 
     def execute(self, sql: str, params: tuple | list | dict | None = None) -> list[dict]:
+        # Postgres text cannot hold NUL: one raw U+0000 in any string
+        # parameter fails the whole statement. JSON parameters are cleaned
+        # where they are encoded (pg_helpers.json_dumps).
+        if params is not None:
+            params = _without_nul(params)
         with self.connection() as conn:
             with conn.cursor() as cur:
                 if params is None:

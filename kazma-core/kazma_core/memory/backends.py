@@ -578,7 +578,7 @@ class PgvectorBackend:
         if not item_id or not vec or not self._dsn:
             return False
         try:
-            import json as _json
+            from kazma_core.db.pg_helpers import json_dumps as _pg_json
 
             conn = self._connect()
             try:
@@ -601,7 +601,7 @@ class PgvectorBackend:
                         tenant_id,
                         tier,
                         emb,
-                        _json.dumps(meta or {}, ensure_ascii=False),
+                        _pg_json(meta or {}),  # NUL-free (pg_helpers.strip_nul)
                     ),
                 )
                 conn.commit()

@@ -27,6 +27,8 @@ from kazma_core.config_store import apply_sqlite_pragmas
 
 __all__ = ["TaskStore"]
 
+from kazma_core.db.pg_helpers import json_dumps as _pg_json
+
 logger = logging.getLogger(__name__)
 
 from kazma_core.paths import swarm_tasks_db as _swarm_tasks_db
@@ -221,7 +223,9 @@ class TaskStore:
         """
         result_json: str | None = None
         if task.result is not None:
-            result_json = task.result.to_json()
+            # Re-encoded NUL-free: worker output can carry tool text with
+            # U+0000, which Postgres jsonb rejects (pg_helpers.strip_nul).
+            result_json = _pg_json(json.loads(task.result.to_json()))
 
         cost = 0.0
         tokens = 0
@@ -231,15 +235,15 @@ class TaskStore:
 
         type_s = task.type.value if isinstance(task.type, TaskType) else str(task.type)
         status_s = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
-        workers_j = json.dumps(task.workers, ensure_ascii=False)
-        deps_j = json.dumps(getattr(task, "dependencies", []), ensure_ascii=False)
-        fb_j = json.dumps(getattr(task, "fallback_chain", []), ensure_ascii=False)
+        workers_j = _pg_json(task.workers)
+        deps_j = _pg_json(getattr(task, "dependencies", []))
+        fb_j = _pg_json(getattr(task, "fallback_chain", []))
         vs = (
-            json.dumps(getattr(task, "validation_schema", None), ensure_ascii=False)
+            _pg_json(getattr(task, "validation_schema", None))
             if getattr(task, "validation_schema", None)
             else ""
         )
-        meta_j = json.dumps(task.metadata, ensure_ascii=False, default=str)
+        meta_j = _pg_json(task.metadata)
         sort_at = task.completed_at or task.created_at or _utc_now_iso()
 
         with self._lock:
