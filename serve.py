@@ -20,17 +20,17 @@ def _is_loopback(host: str) -> bool:
 
 def _bootstrap_bind_and_secret() -> str:
     """Resolve host + secret. Never invent a well-known default secret."""
-    host = os.environ.get("KAZMA_HOST", "127.0.0.1").strip() or "127.0.0.1"
-
-    # Load .env AFTER the bind host is read: the host has only ever come from
-    # the process environment here, and changing that would change which
-    # interface a running deployment binds. Everything below (the secret, the
-    # exposure check, trusted proxies) used to see .env only because
-    # importing kazma_core ran a package-relative load_dotenv() (audit
-    # 2026-09-22); now it is explicit.
+    # .env first, so it decides the bind host, the secret, the exposure check
+    # and trusted proxies — the same as `kazma serve` and `kazma-web`. This
+    # launcher (the one kazma_guard runs) used to read KAZMA_HOST before any
+    # .env was loaded, so a KAZMA_HOST line there was silently ignored while
+    # docs/docs/ops/wsl-fixed-access.md told operators to put it there; the
+    # rest only saw .env because importing kazma_core ran a package-relative
+    # load_dotenv() (audit 2026-09-22).
     from kazma_core.env_files import load_env_files
 
     load_env_files()
+    host = os.environ.get("KAZMA_HOST", "127.0.0.1").strip() or "127.0.0.1"
     existing = (os.environ.get("KAZMA_SECRET") or "").strip()
 
     if existing == _KNOWN_BAD_SECRET:
