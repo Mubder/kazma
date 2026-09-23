@@ -210,6 +210,11 @@ jobs:
         # KeyError: 0 on every read-modify-write against Postgres. Fixed in
         # the same commit. That path had no CI coverage, which is exactly the
         # hole this job exists to close.
+        #
+        # test_pg_nul_safe.py (2026-09-24) was verified against a throwaway
+        # postgres:16 container: it passes on the fix and fails on the prior
+        # code with the live error (UntranslatableCharacter: \u0000 cannot be
+        # converted to text) -- a NUL in tool output stopped a chat saving.
         run: |
           python -m pytest -q --timeout=300 \
             tests/test_pg_backup.py \
@@ -228,6 +233,7 @@ jobs:
             tests/test_importer_atomicity.py \
             tests/test_memory_mirror.py \
             tests/test_task_store_workspace.py \
+            tests/test_pg_nul_safe.py \
             tests/test_audit_2026_09_17_regressions.py
         env:
           KAZMA_DB_BACKEND: postgres

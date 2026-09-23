@@ -40,5 +40,29 @@ def json_loads(val: Any, default: Any = None) -> Any:
     return default
 
 
+_NUL = "\x00"
+_REPLACEMENT = "�"
+
+
+def strip_nul(val: Any) -> Any:
+    """``val`` with every U+0000 in its strings (keys too) replaced by U+FFFD.
+
+    Postgres cannot store NUL in ``text``, and rejects the NUL escape in
+    ``json``/``jsonb`` ("unsupported Unicode escape sequence"). Tool output can
+    carry it -- binary blobs read as text -- and one NUL in a chat session made
+    every later save of that session fail (2026-09-23: "A reply was produced
+    but NOT saved to the transcript"). SQLite stores it fine, so the same
+    value behaved differently per backend unless it is cleaned here.
+    """
+    if isinstance(val, str):
+        return val.replace(_NUL, _REPLACEMENT) if _NUL in val else val
+    if isinstance(val, dict):
+        return {strip_nul(k): strip_nul(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [strip_nul(v) for v in val]
+    return val
+
+
 def json_dumps(val: Any) -> str:
-    return json.dumps(val, ensure_ascii=False, default=str)
+    """JSON for a Postgres json/jsonb parameter -- never containing NUL."""
+    return json.dumps(strip_nul(val), ensure_ascii=False, default=lambda o: strip_nul(str(o)))
