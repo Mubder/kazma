@@ -26,19 +26,27 @@ __all__ = ["LIMIT_FAILURE_EXIT", "limited_command"]
 LIMIT_FAILURE_EXIT = 125
 
 # Runs in the child. argv: <strict> <memory|-> <cpu|-> -- <command...>
+# Every limit is read back before the exec: setrlimit can succeed without
+# setting what was asked (a value it reinterprets), and a strict launcher
+# promises the limit is in force, not that the call returned. Each limit is
+# tried on its own, so a lenient launcher whose memory limit is refused still
+# applies the CPU limit.
 _LAUNCHER = """\
 import os, resource, sys
 strict, mem, cpu = sys.argv[1] == "1", sys.argv[2], sys.argv[3]
 cmd = sys.argv[5:]
-try:
-    if mem != "-":
-        resource.setrlimit(resource.RLIMIT_AS, (int(mem), int(mem)))
-    if cpu != "-":
-        resource.setrlimit(resource.RLIMIT_CPU, (int(cpu), int(cpu)))
-except (ValueError, OSError) as exc:
-    if strict:
-        sys.stderr.write("resource limits could not be applied: %s\\n" % exc)
-        sys.exit(125)
+for kind, value in ((resource.RLIMIT_AS, mem), (resource.RLIMIT_CPU, cpu)):
+    if value == "-":
+        continue
+    try:
+        limit = int(value)
+        resource.setrlimit(kind, (limit, limit))
+        if resource.getrlimit(kind) != (limit, limit):
+            raise ValueError("limit %d did not hold: %r" % (limit, resource.getrlimit(kind)))
+    except Exception as exc:
+        if strict:
+            sys.stderr.write("resource limits could not be applied: %s\\n" % exc)
+            sys.exit(125)
 os.execvp(cmd[0], cmd)
 """
 
@@ -57,7 +65,16 @@ def limited_command(
     :data:`LIMIT_FAILURE_EXIT`) when a limit cannot be applied, so a caller
     that reports "limits enforced" is never wrong about it. ``posix``
     overrides platform detection (tests).
+
+    Raises:
+        ValueError: a limit below 1. ``setrlimit`` reads a negative value as
+            unsigned — effectively unlimited — so a strict launcher used to
+            run the command unlimited while its caller reported the limit
+            enforced; zero kills the child before it starts.
     """
+    for name, value in (("memory_bytes", memory_bytes), ("cpu_seconds", cpu_seconds)):
+        if value is not None and int(value) < 1:
+            raise ValueError(f"{name} must be a positive limit or None, got {value!r}")
     argv = [str(part) for part in command]
     if posix is None:
         posix = os.name != "nt"
