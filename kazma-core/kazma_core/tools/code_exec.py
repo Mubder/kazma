@@ -54,7 +54,7 @@ DEFAULT_TIMEOUT = 30  # seconds
 MEMORY_LIMIT_MB = 512
 DEFAULT_DOCKER_IMAGE = "python:3.12-slim"
 
-# preexec_fn is only supported on POSIX platforms (Unix/Linux/macOS).
+# rlimits exist only on POSIX platforms (Unix/Linux/macOS); see _sandbox_argv.
 _IS_UNIX = sys.platform != "win32" and _resource_module is not None
 
 # Defense-in-depth for local fallback: block imports that enable network,
@@ -207,24 +207,28 @@ def reset_docker_probe() -> None:
     _docker_available = None
 
 
-def _set_limits() -> None:
-    """Set resource limits in the child process (pre-exec). POSIX only."""
-    if _resource_module is None:
-        return
+def _sandbox_argv(code_file: Path) -> list[str]:
+    """The interpreter command, run under memory/CPU limits on POSIX.
 
-    mem_bytes = MEMORY_LIMIT_MB * 1024 * 1024
-    try:
-        _resource_module.setrlimit(_resource_module.RLIMIT_AS, (mem_bytes, mem_bytes))  # type: ignore[attr-defined]
-    except (ValueError, OSError):
-        pass
+    The limits used to be set by a ``preexec_fn``, which runs Python between
+    fork and exec — documented as able to deadlock the child in a
+    multi-threaded process, which the server always is (audit 2026-09-22).
+    A launcher now sets them on itself and execs this command
+    (``kazma_core.security.rlimits``). Best-effort, as before: a limit the
+    host refuses does not stop the snippet. Windows uses a Job Object.
+    """
+    base = [sys.executable, "-I", str(code_file)]
+    if not _IS_UNIX:
+        return base
+    from kazma_core.security.rlimits import limited_command
 
-    try:
-        _resource_module.setrlimit(
-            _resource_module.RLIMIT_CPU,  # type: ignore[attr-defined]
-            (DEFAULT_TIMEOUT + 5, DEFAULT_TIMEOUT + 5),
-        )
-    except (ValueError, OSError):
-        pass
+    return limited_command(
+        base,
+        memory_bytes=MEMORY_LIMIT_MB * 1024 * 1024,
+        cpu_seconds=DEFAULT_TIMEOUT + 5,
+        strict=False,
+        posix=True,  # _IS_UNIX already made the platform decision
+    )
 
 
 def _assign_to_job_object(proc: Any) -> Any:
@@ -398,16 +402,9 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
         "cwd": exec_cwd,
         "env": child_env,
     }
-    if _IS_UNIX:
-        subprocess_kwargs["preexec_fn"] = _set_limits
-
+    argv = _sandbox_argv(code_file)
     try:
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-I",
-            str(code_file),
-            **subprocess_kwargs,
-        )
+        proc = await asyncio.create_subprocess_exec(*argv, **subprocess_kwargs)
 
         job_handle = None
         if sys.platform == "win32":
@@ -435,11 +432,9 @@ async def _run_local_subprocess(code_file: Path, tmp_dir: str, timeout: int) -> 
         sync_kwargs = subprocess_kwargs.copy()
         sync_kwargs["stdout"] = subprocess.PIPE
         sync_kwargs["stderr"] = subprocess.PIPE
-        if "preexec_fn" in sync_kwargs:
-            del sync_kwargs["preexec_fn"]
 
         def _run_sync() -> str:
-            p = subprocess.Popen([sys.executable, "-I", str(code_file)], **sync_kwargs)
+            p = subprocess.Popen(argv, **sync_kwargs)
             job = None
             if sys.platform == "win32":
                 job = _assign_to_job_object(p)

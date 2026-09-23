@@ -238,14 +238,24 @@ class TestCodeExecWindowsPortability:
         assert "sys.executable" in source, "local sandbox does not use sys.executable"
         assert '"python3"' not in source, "local sandbox still references 'python3'"
 
-    def test_preexec_fn_conditional_on_platform(self) -> None:
-        """preexec_fn must only be set on Unix, not unconditionally."""
-        source = inspect.getsource(code_exec)
-        # preexec_fn should not be passed unconditionally; it should be behind a
-        # platform check or a conditional variable.
-        assert "preexec_fn=_set_limits" not in source, (
-            "preexec_fn=_set_limits is hardcoded unconditionally"
-        )
+    def test_limits_wrap_the_command_only_on_posix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """POSIX limits come from the rlimit launcher, not preexec_fn (audit 2026-09-22).
+
+        This lock used to check that ``preexec_fn=_set_limits`` was set only on
+        Unix. preexec_fn is gone — it can deadlock the child in a threaded
+        server — and test_static_gates forbids it; the platform split is here.
+        """
+        from pathlib import Path
+
+        target = Path("snippet.py")
+        monkeypatch.setattr(code_exec, "_IS_UNIX", False)
+        assert code_exec._sandbox_argv(target) == [sys.executable, "-I", "snippet.py"]
+
+        monkeypatch.setattr(code_exec, "_IS_UNIX", True)
+        argv = code_exec._sandbox_argv(target)
+        assert argv[0] == sys.executable and argv[-3:] == [sys.executable, "-I", "snippet.py"]
+        assert str(code_exec.MEMORY_LIMIT_MB * 1024 * 1024) in argv
+        assert str(code_exec.DEFAULT_TIMEOUT + 5) in argv
 
     def test_no_posix_only_path_fallback(self) -> None:
         """PATH fallback must not be the POSIX-only /usr/bin:/bin."""
