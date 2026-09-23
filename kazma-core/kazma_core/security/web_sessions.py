@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import secrets
+import threading
 import time
 from typing import Any
 
@@ -30,6 +31,45 @@ logger = logging.getLogger(__name__)
 
 SESSION_COOKIE = "kazma-session"
 _DEFAULT_TTL = 14 * 24 * 3600  # 14 days
+
+# Read-through cache of session payloads (and misses), keyed by the stored
+# key. Every authenticated request resolves its session, and it did so with a
+# ConfigStore read -- a Postgres round trip on the event loop -- per request:
+# five loop-stall dumps caught it there. A revoke in this process evicts at
+# once, expiry is re-checked on every hit, and a revoke made by ANOTHER
+# process is seen within _CACHE_TTL_S.
+_CACHE_TTL_S = 30.0
+_CACHE_MAX = 2048
+_cache: dict[str, tuple[float, dict[str, Any] | None]] = {}
+_revoked: dict[str, float] = {}  # key -> until: no reader may re-seed it
+_cache_lock = threading.Lock()
+
+
+def _cache_get(key: str) -> tuple[bool, dict[str, Any] | None]:
+    with _cache_lock:
+        hit = _cache.get(key)
+    if hit is None or hit[0] < time.monotonic():
+        return False, None
+    return True, hit[1]
+
+
+def _cache_put(key: str, payload: dict[str, Any] | None) -> None:
+    with _cache_lock:
+        if payload is not None and _revoked.get(key, 0.0) > time.monotonic():
+            return  # read before the revoke landed; do not resurrect it
+        if len(_cache) >= _CACHE_MAX:
+            _cache.pop(next(iter(_cache)))
+        _cache[key] = (time.monotonic() + _CACHE_TTL_S, payload)
+
+
+def _cache_evict(key: str, *, revoked: bool = False) -> None:
+    with _cache_lock:
+        _cache.pop(key, None)
+        if revoked:
+            now = time.monotonic()
+            for k in [k for k, until in _revoked.items() if until < now]:
+                del _revoked[k]
+            _revoked[key] = now + _CACHE_TTL_S
 
 
 def use_opaque_sessions() -> bool:
@@ -100,11 +140,9 @@ def create_session(
         "user_id": user_id,
         "tenant_id": tenant,
     }
-    get_config_store().set(
-        f"web_session.{_hash(sid)}",
-        payload,
-        category="auth",
-    )
+    key = f"web_session.{_hash(sid)}"
+    get_config_store().set(key, payload, category="auth")
+    _cache_put(key, dict(payload))
     logger.info(
         "[web_sessions] created session actor=%s user=%s role=%s ttl=%ss",
         actor,
@@ -122,17 +160,22 @@ def get_session_payload(session_id: str | None) -> dict[str, Any] | None:
     from kazma_core.config_store import get_config_store
 
     key = f"web_session.{_hash(str(session_id).strip())}"
-    raw = get_config_store().get(key)
-    if not isinstance(raw, dict):
+    cached, raw = _cache_get(key)
+    if not cached:
+        raw = get_config_store().get(key)
+        raw = raw if isinstance(raw, dict) else None
+        _cache_put(key, raw)
+    if raw is None:
         return None
     exp = raw.get("expires_at")
     try:
         if exp is not None and time.time() > float(exp):
+            _cache_evict(key)
             get_config_store().delete(key)
             return None
     except (TypeError, ValueError):
         return None
-    return raw
+    return dict(raw)
 
 
 def validate_session(session_id: str | None) -> bool:
@@ -175,6 +218,7 @@ def purge_expired_sessions() -> int:
             continue
         try:
             store.delete(key)
+            _cache_evict(str(key))
             removed += 1
         except Exception:
             logger.debug("[web_sessions] could not delete %s", key, exc_info=True)
@@ -190,5 +234,7 @@ def revoke_session(session_id: str | None) -> None:
         return
     from kazma_core.config_store import get_config_store
 
-    get_config_store().delete(f"web_session.{_hash(str(session_id).strip())}")
+    key = f"web_session.{_hash(str(session_id).strip())}"
+    _cache_evict(key, revoked=True)  # tombstone first: no racing reader re-seeds it
+    get_config_store().delete(key)
     logger.info("[web_sessions] revoked session")

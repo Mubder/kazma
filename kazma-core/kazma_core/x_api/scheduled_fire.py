@@ -87,8 +87,10 @@ async def _loop(poll_interval: float) -> None:
 
 
 async def _fire_due_posts() -> None:
-    store = get_x_scheduled_store()
-    due = store.list_due()
+    # Every store call is a SQLite round trip: off the loop. list_due was
+    # caught holding the loop in six loop-stall dumps (2026-09-20..23).
+    store = await asyncio.to_thread(get_x_scheduled_store)
+    due = await asyncio.to_thread(store.list_due)
     for post in due:
         try:
             await _fire_post(post)
@@ -96,7 +98,7 @@ async def _fire_due_posts() -> None:
             raise
         except Exception:  # noqa: BLE001
             logger.exception("[x-schedule] unexpected error firing post %s", post.id)
-            store.mark_failed(post.id, "internal error")
+            await asyncio.to_thread(store.mark_failed, post.id, "internal error")
 
 
 async def _fire_post(post: ScheduledXPost) -> None:
@@ -122,11 +124,12 @@ async def _fire_post(post: ScheduledXPost) -> None:
 
 
 async def _fire_post_inner(post: ScheduledXPost) -> None:
-    store = get_x_scheduled_store()
+    store = await asyncio.to_thread(get_x_scheduled_store)
 
-    cfg = get_x_config()
+    cfg = await asyncio.to_thread(get_x_config)
     if not cfg.can_post():
-        store.mark_failed(
+        await asyncio.to_thread(
+            store.mark_failed,
             post.id,
             "X connector disabled or unconfigured at fire time (KAZMA_X_POST / Settings → X).",
         )
@@ -135,7 +138,7 @@ async def _fire_post_inner(post: ScheduledXPost) -> None:
 
     # Re-check right before sending: if the operator cancelled this post in the
     # window between the poll and now, do NOT publish it.
-    current = store.get(post.id)
+    current = await asyncio.to_thread(store.get, post.id)
     if current is None or current.status != STATUS_PENDING:
         return
 
@@ -144,29 +147,33 @@ async def _fire_post_inner(post: ScheduledXPost) -> None:
         tweet = await client.create_tweet(post.text, reply_to_id=post.reply_to_id)
     except XApiError as exc:
         if exc.status == 429:
-            attempts = store.bump_attempts(post.id)
+            attempts = await asyncio.to_thread(store.bump_attempts, post.id)
             if attempts >= _MAX_ATTEMPTS:
-                store.mark_failed(post.id, f"Rate-limited repeatedly ({attempts} attempts).")
+                await asyncio.to_thread(
+                    store.mark_failed, post.id, f"Rate-limited repeatedly ({attempts} attempts)."
+                )
                 await _notify_failure(post, "X kept rate-limiting the scheduled post.")
             else:
                 wait = _parse_retry_wait(exc)
                 import time as _time
 
-                store.defer(post.id, _time.time() + wait)
+                await asyncio.to_thread(store.defer, post.id, _time.time() + wait)
                 logger.warning(
                     "[x-schedule] post %s rate-limited; deferred %.0fs (attempt %d/%d)",
                     post.id, wait, attempts, _MAX_ATTEMPTS,
                 )
             return
         # Ambiguous / permanent failure — do NOT retry (double-post guard).
-        store.mark_failed(post.id, str(exc))
+        await asyncio.to_thread(store.mark_failed, post.id, str(exc))
         await _notify_failure(post, str(exc))
         return
 
     tweet_id = str(tweet.get("id") or "")
-    store.mark_fired(post.id, tweet_id)
+    await asyncio.to_thread(store.mark_fired, post.id, tweet_id)
     try:
-        get_ledger().record(tweet_id=tweet_id, text=post.text, handle=cfg.handle)
+        await asyncio.to_thread(
+            lambda: get_ledger().record(tweet_id=tweet_id, text=post.text, handle=cfg.handle)
+        )
     except Exception:  # noqa: BLE001
         logger.warning("[x-schedule] ledger record failed for %s", tweet_id, exc_info=True)
     logger.info("[x-schedule] fired scheduled post %s -> tweet %s", post.id, tweet_id)

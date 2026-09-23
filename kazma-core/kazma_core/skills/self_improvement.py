@@ -12,6 +12,7 @@ Security boundary:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any
@@ -173,7 +174,9 @@ class SelfImprovementSkill:
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
             _tenant = resolve_tenant_id("system", prefer_context=True)
-            results = search(f"{worker_name} pipeline {task[:100]}", limit=3, tenant_id=_tenant)
+            # Recall = SQLite + embedding: off the loop (loop-stall dumps
+            # caught its access bump on it, 2026-09-15).
+            results = await asyncio.to_thread(search, f"{worker_name} pipeline {task[:100]}", limit=3, tenant_id=_tenant)
             if results:
                 # Recalled content is untrusted (it originates from past
                 # conversation/tool output) and this prompt drives generation
@@ -264,7 +267,9 @@ Output ONLY the delta text, no preamble."""
             from kazma_core.safety.prompt_fence import format_untrusted_block
 
             _tenant = resolve_tenant_id("system", prefer_context=True)
-            results = search(f"{worker_name} failure {task[:100]}", limit=3, tenant_id=_tenant)
+            # Recall = SQLite + embedding: off the loop (loop-stall dumps
+            # caught its access bump on it, 2026-09-15).
+            results = await asyncio.to_thread(search, f"{worker_name} failure {task[:100]}", limit=3, tenant_id=_tenant)
             if results:
                 # See _analyze_success: recalled content is untrusted and feeds
                 # a persistent-delta generator, so it must be fenced.

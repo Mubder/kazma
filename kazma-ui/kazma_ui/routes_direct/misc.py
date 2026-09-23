@@ -686,7 +686,7 @@ def register_misc_routes(self: Any) -> None:
                 )
 
                 _actor_sid = request.cookies.get(_SC) or ""
-                _payload = get_session_payload(_actor_sid) or {}
+                _payload = await asyncio.to_thread(get_session_payload, _actor_sid) or {}
                 _role = str(_payload.get("role") or "user")
                 _sid_short = str(_payload.get("session_id") or _actor_sid or "")[:8]
                 actor = f"web:{_role}:{_sid_short}" if _sid_short else "web:token"

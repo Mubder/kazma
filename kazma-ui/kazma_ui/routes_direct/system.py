@@ -7,6 +7,7 @@ module changed. Registration order within this group is preserved.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -827,7 +828,7 @@ def register_system_routes(self: Any) -> None:
         try:
             from kazma_core.memory.backup import perform_native_backups
 
-            written = perform_native_backups(retention=10)
+            written = await asyncio.to_thread(perform_native_backups, retention=10)
             return {
                 "status": "success",
                 "manifest": {

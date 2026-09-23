@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -20,7 +21,7 @@ def _json(obj: dict) -> str:
 async def x_status() -> str:
     """Read-only connector status. Never returns secret values."""
     try:
-        cfg = get_x_config()
+        cfg = await asyncio.to_thread(get_x_config)
         ledger = get_ledger()
         import time
 

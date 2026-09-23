@@ -92,11 +92,20 @@ class DrillResult:
 
     def summary(self) -> str:
         passed = sum(c["status"] == "passed" for c in self.checks)
-        return (
+        text = (
             f"{self.verdict}: {passed}/{len(self.checks)} checks "
             f"passed for {Path(self.backup_dir).name or '(none)'}"
             f" ({len(self.failures)} failed, {len(self.unverified)} unverified)"
         )
+        # Name them. On 2026-09-21 the log said only "deep: FAIL: 3/4 checks
+        # passed", so which check failed survived only in a Telegram message.
+        for label, rows in (("failed", self.failures), ("unverified", self.unverified)):
+            if rows:
+                text += f"; {label}: " + ", ".join(
+                    c["check"] + (f" ({str(c['detail'])[:120]})" if c["detail"] else "")
+                    for c in rows[:6]
+                )
+        return text
 
 
 def _norm(rel: str) -> str:

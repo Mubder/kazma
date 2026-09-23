@@ -20,6 +20,7 @@ Policy applied at booking:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -194,7 +195,7 @@ async def publish_x_post(
     from kazma_core.x_api.ledger import get_ledger
     from kazma_core.x_api.policy import evaluate_post
 
-    cfg = get_x_config()
+    cfg = await asyncio.to_thread(get_x_config)
     body = (text or "").strip()
     decision = evaluate_post(body, cfg=cfg, reply_to_id=reply_to_id or "")
     if not decision.allow:
@@ -236,7 +237,7 @@ async def delete_x_post(*, tweet_id: str) -> tuple[bool, dict[str, Any]]:
     tid = (tweet_id or "").strip()
     if not tid:
         return False, {"deleted": False, "error": "tweet_id is required."}
-    cfg = get_x_config()
+    cfg = await asyncio.to_thread(get_x_config)
     decision = evaluate_delete(cfg=cfg)
     if not decision.allow:
         return False, {"deleted": False, "error": decision.reason}

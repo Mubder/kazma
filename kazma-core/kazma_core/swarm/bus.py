@@ -357,7 +357,7 @@ class SwarmMessageBus:
             try:
                 from kazma_core.safety.hitl import get_hitl_config
 
-                cfg = get_hitl_config({})
+                cfg = await asyncio.to_thread(get_hitl_config, {})
                 if "approval_timeout_seconds" in cfg:
                     timeout = float(cfg["approval_timeout_seconds"])
                 else:

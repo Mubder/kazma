@@ -177,7 +177,8 @@ def test_ledger_signatures_match_lines_the_code_emits():
         "universal backup": "[universal-backup] complete: 25 DBs, 952.9 MB",
         "guard restart": '{"event": "guard.restarting", "restarts": 2}',
         "foreign server detection": '{"event": "child.foreign_server_holds_port"}',
-        "health-gated restart": '{"event": "health.failed", "detail": "500"}',
+        "health-gated restart": '{"event": "guard.restarting", "reason": "unhealthy (500)"}',
+        "probe miss tolerated": '{"event": "health.recovered", "after_failures": 1}',
         "daily digest": "[digest] daily digest dispatched (812 chars)",
         "install restore": "[restore] RESTORED: 9/9 steps, generation 1787",
     }
@@ -185,6 +186,227 @@ def test_ledger_signatures_match_lines_the_code_emits():
     for mechanism, line in samples.items():
         sig = by_name[mechanism]
         assert re.search(sig.pattern, line, re.IGNORECASE), mechanism
+    # A missed probe answered by the next one is not a restart: the ledger
+    # reported 430 "health-gated restarts" in a week that had none.
+    blip = '{"event": "health.failed", "detail": "probe error: [WinError 10054]"}'
+    assert not re.search(by_name["health-gated restart"].pattern, blip, re.IGNORECASE)
+    exited = '{"event": "guard.restarting", "reason": "process exited (code 1)"}'
+    assert not re.search(by_name["health-gated restart"].pattern, exited, re.IGNORECASE)
+
+
+# -- every signature is derived from a line the code really emits ---------
+
+_REPO = __import__("pathlib").Path(__file__).resolve().parents[1]
+_LOG_METHODS = {"debug", "info", "warning", "error", "critical", "exception"}
+
+
+_SLOT = "\x00"
+
+
+def _render(node, fill: str = "1") -> str | None:
+    """A logger format string as it would print, placeholders filled with
+    ``fill`` ("1" satisfies both \\d and \\w in a pattern)."""
+    import ast
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return re.sub(r"%[-#0 +]*\d*(?:\.\d+)?[sdrfix]", fill, node.value)
+    if isinstance(node, ast.JoinedStr):
+        return "".join(
+            v.value if isinstance(v, ast.Constant) else fill for v in node.values
+        )
+    return None
+
+
+def _real_summaries() -> list[str]:
+    """What the result objects logged as ``"[tag] %s", res.summary()`` print."""
+    from kazma_core.backup.restore import RestoreResult
+    from kazma_core.backup.restore_drill import DrillResult
+
+    out = []
+    for status in (True, False, None):
+        d = DrillResult(backup_dir="(deep)")
+        d.add("check", status, "detail")
+        out.append(d.summary())
+    for ok in (True, False):
+        r = RestoreResult(ok=ok, target="t", generation=1)
+        r.add("step", ok)
+        out.append(r.summary())
+    return out
+
+
+def _func_name(node) -> str:
+    import ast
+
+    f = node.func
+    return f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+
+
+def _emitted_app_lines(roots) -> list[str]:
+    """Every line the code can log: logger format strings, ops-alert keys
+    (alert() logs "[ops_alert] <key> | <title>"), and result summaries."""
+    import ast
+
+    summaries = _real_summaries()
+    lines: list[str] = []
+    for root in roots:
+        for path in root.rglob("*.py"):
+            if "_tests" in path.parts or "tests" in path.parts or "__pycache__" in path.parts:
+                continue
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+            except SyntaxError:
+                continue
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not node.args:
+                    continue
+                name = _func_name(node)
+                if name in _LOG_METHODS and isinstance(node.func, ast.Attribute):
+                    text = _render(node.args[0])
+                    if text:
+                        lines.append(text)
+                    if any(
+                        isinstance(a, ast.Call) and _func_name(a) == "summary"
+                        for a in node.args[1:]
+                    ):
+                        slotted = _render(node.args[0], fill=_SLOT) or ""
+                        lines += [slotted.replace(_SLOT, s, 1).replace(_SLOT, "1") for s in summaries]
+                elif name in ("alert", "_alert"):
+                    key = node.args[0]
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        lines.append(f"[ops_alert] {key.value} | 1")
+    return lines
+
+
+def _guard_events() -> set[str]:
+    import ast
+
+    tree = ast.parse((_REPO / "scripts" / "service" / "kazma_guard.py").read_text(encoding="utf-8"))
+    events: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and re.fullmatch(r"[a-z_]+\.[a-z_]+", node.args[1].value)
+        ):
+            events.add(node.args[1].value)
+    return events
+
+
+def _unmatched_signatures(signatures, app_lines, guard_events) -> list[str]:
+    missing = []
+    for sig in signatures:
+        rx = re.compile(sig.pattern, re.IGNORECASE)
+        if '"event":' in sig.pattern:
+            head = sig.pattern.split(".*", 1)[0]  # the event clause
+            if not any(re.search(head, f'"event": "{e}"', re.IGNORECASE) for e in guard_events):
+                missing.append(sig.mechanism)
+        elif not any(rx.search(line) for line in app_lines):
+            missing.append(sig.mechanism)
+    return missing
+
+
+def test_every_ledger_signature_matches_a_line_the_code_emits():
+    """Derived from the source, not from samples a person typed.
+
+    Three signatures had drifted from their emitters by 2026-09-23 and each
+    made the weekly report lie: "[ops-alert]" (the code says "[ops_alert]"),
+    "[restore-drill] FAIL:" (the deep drill says "deep: FAIL:"), and restic
+    maintenance, which logged only on failure. The hand-written samples in
+    the test above all passed throughout.
+    """
+    app_lines = _emitted_app_lines(
+        [p for p in _REPO.glob("kazma-*/kazma_*") if p.is_dir()] + [_REPO / "scripts"]
+    )
+    assert len(app_lines) > 1000, "the source walk found almost nothing"
+    missing = _unmatched_signatures(fl.FIRING_SIGNATURES, app_lines, _guard_events())
+    assert not missing, f"signatures no code emits (copy them from the emitting line): {missing}"
+
+
+def test_the_signature_gate_catches_a_drifted_pattern():
+    """Negative control (§28): the pre-fix operator-alerting pattern, and a
+    guard event that does not exist."""
+    app_lines = ["[ops_alert] 1 | 1", "[universal-backup] complete: 1"]
+    stale = [
+        fl.Signature("operator alerting", r"\[ops-alert\]|\[alert\]"),
+        fl.Signature("renamed guard event", r'"event": "guard\.restarted"'),
+        fl.Signature("universal backup", r"\[universal-backup\] complete:"),
+    ]
+    assert _unmatched_signatures(stale, app_lines, {"guard.restarting"}) == [
+        "operator alerting", "renamed guard event",
+    ]
+
+
+def test_health_gated_signature_matches_the_supervisors_real_reason(tmp_path):
+    """The reason clause is a runtime value, so check it end to end: the
+    reason string _supervise returns, written by the guard's own writer."""
+    import ast
+    import importlib.util
+
+    src = (_REPO / "scripts" / "service" / "kazma_guard.py").read_text(encoding="utf-8")
+    sup = next(
+        n for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.FunctionDef) and n.name == "_supervise"
+    )
+    reasons = [
+        _render(n) for n in ast.walk(sup)
+        if isinstance(n, ast.Return) and isinstance(n.value, ast.JoinedStr)
+        for n in [n.value]
+    ]
+    unhealthy = [r for r in reasons if r and r.startswith("unhealthy")]
+    assert unhealthy, "_supervise no longer returns an 'unhealthy (...)' reason"
+
+    spec = importlib.util.spec_from_file_location("kazma_guard_for_ledger", _REPO / "scripts" / "service" / "kazma_guard.py")
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    log = guard.GuardLog(tmp_path / "guard.log")
+    log("warn", "guard.restarting", reason=unhealthy[0], in_s=5, restarts=1)
+    line = (tmp_path / "guard.log").read_text(encoding="utf-8")
+    sig = next(s for s in fl.FIRING_SIGNATURES if s.mechanism == "health-gated restart")
+    assert re.search(sig.pattern, line, re.IGNORECASE), line
+
+
+def test_clean_restic_maintenance_leaves_the_line_the_ledger_counts(monkeypatch, caplog):
+    """It logged only on failure: 23 clean runs in a week, and the report
+    said "restic maintenance: silent"."""
+    import asyncio
+    import logging
+
+    import kazma_core.backup.restic_repo as repo_mod
+    from kazma_core.memory import worker_bootstrap as wb
+
+    ok = SimpleNamespace(ok=True, error="")
+    monkeypatch.setattr(repo_mod, "restic_available", lambda: True)
+    monkeypatch.setattr(repo_mod, "ensure_password", lambda **_: ("pw", False))
+    monkeypatch.setattr(repo_mod, "repo_paths", lambda: {"local": "L", "remote": ""})
+    for fn in ("unlock_stale", "forget_prune", "check"):
+        monkeypatch.setattr(repo_mod, fn, lambda *a, **k: ok)
+    with caplog.at_level(logging.INFO):
+        assert asyncio.run(wb._handle_restic_maintenance({})) is True
+    sig = next(s for s in fl.FIRING_SIGNATURES if s.mechanism == "restic maintenance")
+    hits = [r.getMessage() for r in caplog.records if re.search(sig.pattern, r.getMessage())]
+    assert hits == ["[restic] maintenance ok: local (forget --prune, check)"]
+
+
+def test_ledger_reads_rotated_logs(tmp_path, monkeypatch):
+    """The app log rotates at midnight; the report is weekly. Reading only
+    kazma.log saw one day and called six days of backups silent."""
+    import kazma_core.paths as paths
+
+    home = tmp_path / ".kazma"
+    home.mkdir()
+    (home / "kazma.log").write_text("", encoding="utf-8")
+    (home / "kazma.log.2026-09-20").write_text(
+        '{"timestamp": "2999-01-01T00:00:00+00:00", '
+        '"message": "[universal-backup] complete: 25 DBs"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths, "user_home", lambda: home)
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path / "kazma-data")
+    assert home / "kazma.log.2026-09-20" in fl._log_paths()
+    counts = {e.mechanism: e.count for e in fl.scan_log(hours=1e9).entries}
+    assert counts["universal backup"] == 1
 
 
 def test_ledger_does_not_call_a_watched_mechanism_blind():

@@ -28,6 +28,7 @@ Classification is deliberately two-stage:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -748,7 +749,7 @@ async def classify(
     so the summon stays silent; ``unmatched=voice`` returns the voice
     catch-all. A ``*`` subject is a keyword hit and never reaches this.
     """
-    cfg = cfg or get_reply_config()
+    cfg = cfg or await asyncio.to_thread(get_reply_config)
     if not (text or "").strip():
         return None
     if not cfg.subjects:

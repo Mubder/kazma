@@ -7,6 +7,8 @@ Writes are **not** retried (a retry after a dropped 201 would double-post).
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import json
 import logging
 import time
@@ -65,6 +67,7 @@ def _default_audit_action(method: str, path: str) -> str:
     return f"{method.lower()} {path}"
 
 
+@functools.lru_cache(maxsize=1)
 def user_agent() -> str:
     try:
         from importlib.metadata import version
@@ -73,6 +76,11 @@ def user_agent() -> str:
     except Exception:
         ver = "0.10.0"
     return f"Kazma/{ver} (self-hosted; official X API v2)"
+
+
+async def _audit(**fields: Any) -> None:
+    """``log_x_event`` appends to x_audit.db (SQLite): keep it off the loop."""
+    await asyncio.to_thread(log_x_event, **fields)
 
 
 class XApiError(Exception):
@@ -123,17 +131,24 @@ class XClient:
         if json_body is not None:
             headers["Content-Type"] = "application/json; charset=utf-8"
         try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+            # One process-wide SSL context, built off the loop: constructing
+            # a client builds a fresh one otherwise, and that CA load is
+            # where two loop-stall dumps caught the mentions poller.
+            from kazma_core.llm_provider import _shared_ssl_context
+
+            async with httpx.AsyncClient(
+                timeout=timeout, follow_redirects=False, verify=await _shared_ssl_context()
+            ) as client:
                 resp = await client.request(method, url, headers=headers, json=json_body)
         except httpx.TimeoutException as exc:
-            log_x_event(
+            await _audit(
                 action=action, method=method, endpoint=path, status="network_error",
                 request_body=json_body, response_body={"error": "timeout"},
                 duration_ms=int((time.monotonic() - started) * 1000),
             )
             raise XApiError("X API timed out. Did not retry (avoids double-post).", transient=True) from exc
         except httpx.HTTPError as exc:
-            log_x_event(
+            await _audit(
                 action=action, method=method, endpoint=path, status="network_error",
                 request_body=json_body,
                 response_body={"error": type(exc).__name__},
@@ -152,7 +167,7 @@ class XClient:
 
         if resp.status_code in (200, 201):
             if not isinstance(parsed, dict):
-                log_x_event(
+                await _audit(
                     action=action, method=method, endpoint=path, status="error",
                     http_status=resp.status_code, request_body=json_body,
                     response_body={
@@ -169,7 +184,7 @@ class XClient:
             # audit line — the call had already worked (2026-09-17 tier probe).
             data = parsed.get("data") or {}
             single_id = data.get("id") if isinstance(data, dict) else None
-            log_x_event(
+            await _audit(
                 action=action, method=method, endpoint=path, status="success",
                 http_status=resp.status_code,
                 tweet_id=str(single_id or "") or audit_tweet_id,
@@ -185,7 +200,7 @@ class XClient:
         else:
             detail = body_text[:400]
 
-        log_x_event(
+        await _audit(
             action=action, method=method, endpoint=path, status="error",
             http_status=resp.status_code, tweet_id=audit_tweet_id,
             request_body=json_body,

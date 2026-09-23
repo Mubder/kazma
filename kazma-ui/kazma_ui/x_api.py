@@ -6,6 +6,7 @@ the same Origin + X-Requested-With CSRF pair as the email API.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -184,7 +185,7 @@ async def x_preview(body: XPreviewBody) -> JSONResponse:
         from kazma_core.x_api.config import get_x_config
         from kazma_core.x_api.policy import evaluate_post
 
-        cfg = get_x_config()
+        cfg = await asyncio.to_thread(get_x_config)
         text = body.text or ""
         decision = evaluate_post(text, cfg=cfg, reply_to_id=body.reply_to_id or "")
         return JSONResponse(
@@ -337,7 +338,7 @@ async def x_test() -> JSONResponse:
         from kazma_core.x_api.client import XApiError, XClient
         from kazma_core.x_api.config import get_x_config
 
-        cfg = get_x_config()
+        cfg = await asyncio.to_thread(get_x_config)
         if not cfg.credentials.complete():
             return JSONResponse(
                 {"ok": False, "error": "incomplete_credentials", "detail": "Save all four OAuth 1.0a keys first."},
