@@ -836,6 +836,100 @@ def test_no_realtime_or_live_conversation_apis():
     )
 
 
+# ── 2h. Untrusted XML goes through the guarded parser (2026-09-22) ────────
+#
+# The stdlib parsers accept a DTD, and a DTD is where entity expansion and
+# external entities live. kazma_core.security.safe_xml refuses one before
+# parsing; everything else must call it rather than ElementTree directly.
+
+_SAFE_XML_HOME = "kazma-core/kazma_core/security/safe_xml.py"
+_XML_MODULES = {"ET", "ElementTree", "cElementTree", "etree", "minidom", "expat", "sax", "pulldom"}
+_XML_PARSE_CALLS = {"fromstring", "parse", "parseString", "iterparse", "XMLParser", "XML", "make_parser", "ParserCreate"}
+
+
+def _raw_xml_parses(tree: ast.AST) -> list[int]:
+    return [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call)
+        and isinstance(n.func, ast.Attribute)
+        and n.func.attr in _XML_PARSE_CALLS
+        and isinstance(n.func.value, (ast.Name, ast.Attribute))
+        and (getattr(n.func.value, "id", None) or getattr(n.func.value, "attr", None)) in _XML_MODULES
+    ]
+
+
+def test_untrusted_xml_uses_the_guarded_parser():
+    offenders: list[str] = []
+    for path in _product_files():
+        if _rel(path) == _SAFE_XML_HOME:
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _raw_xml_parses(tree)]
+    assert not offenders, (
+        "Raw stdlib XML parsing accepts a DTD (entity expansion, external "
+        "entities). Use kazma_core.security.safe_xml.parse_untrusted_xml.\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_xml_gate_catches_the_sitemap_shape():
+    """Negative control (§28): the pre-fix sitemap parse, and the fix passes."""
+    bad = "import xml.etree.ElementTree as ET\nroot = ET.fromstring(text)\ndoc = minidom.parseString(text)\n"
+    good = "root = parse_untrusted_xml(text)\n"
+    assert _raw_xml_parses(ast.parse(bad)) == [2, 3]
+    assert _raw_xml_parses(ast.parse(good)) == []
+
+
+# ── 2i. No Python between fork and exec (2026-09-22) ──────────────────────
+#
+# preexec_fn runs in the child after fork(); in a threaded process a lock held
+# by another thread at the fork can deadlock it before exec. The server is
+# always threaded. Limits go through kazma_core.security.rlimits instead.
+
+
+def _preexec_uses(tree: ast.AST) -> list[int]:
+    lines = [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and any(k.arg == "preexec_fn" for k in n.keywords)
+    ]
+    lines += [
+        n.lineno
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Constant) and n.value == "preexec_fn"
+    ]
+    return sorted(lines)
+
+
+def test_no_preexec_fn():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _preexec_uses(tree)]
+    assert not offenders, (
+        "preexec_fn runs Python between fork and exec and can deadlock the "
+        "child in a threaded server. Use "
+        "kazma_core.security.rlimits.limited_command.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_preexec_gate_catches_both_spellings():
+    """Negative control (§28): the sandbox keyword and the code_exec dict key."""
+    bad = (
+        "p = subprocess.Popen(cmd, preexec_fn=apply_limits)\n"
+        'kwargs["preexec_fn"] = _set_limits\n'
+    )
+    assert _preexec_uses(ast.parse(bad)) == [1, 2]
+    assert _preexec_uses(ast.parse("p = subprocess.Popen(limited_command(cmd))\n")) == []
+
+
 def test_realtime_gate_catches_a_live_session():
     """Negative control (§28)."""
     assert _realtime_api_uses(
