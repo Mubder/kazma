@@ -108,13 +108,38 @@ database.
 
 | Cadence | Work |
 |---------|------|
-| ~6h | `macro_sleep` (decay / tier moves) + ego-anchor backfill + FTS drift COUNT (`*_docsize` vs base; rebuild on mismatch) |
+| ~6h | `macro_sleep` (rule-based tier moves + archival, below) + ego-anchor backfill + FTS drift COUNT (`*_docsize` vs base; rebuild on mismatch) |
 | **~6h** (not 24h) | `native_backup` + JSONL/GraphML/episodes/merges/audit export + `native_pg_backup` + mirror-drift warning. Universal backup **checks** PG dump freshness; it does not dump twice. |
 | ~24h | `global_reconsolidation` (dedupe + re-embed; **partitioned** for large corpora; recomputes entity counts) |
 | ~15m | commitment GC (TTL + soul-pending) **and** HITL-gate TTL sweep — no extra sweeper |
 | (also from this boot) | session purge, daily digest, weekly firing ledger, restore drill |
 
 Huge corpus: subject-hash partitions + chained queue tasks (see `global_reconsolidation.py`).
+
+### Episode lifecycle and archival (`macro_sleep.py`)
+
+Every move is a rule on TTLs, importance and use — there is no decay score
+(`compute_retention` was removed on 2026-09-23: nothing read it, and its decay
+rates were per-second).
+
+| Move | Rule |
+|------|------|
+| working → episodic | after `working_ttl_hours` (24) |
+| episodic → recall | importance ≥ `promote_to_recall_min_importance` (3) **and** access ≥ `promote_to_recall_min_access` (2) |
+| recall → episodic | not recalled for `recall_demote_idle_days` (30) |
+| → archived | stale on **both** clocks — created more than the TTL ago **and** not recalled within it — and below the promote floor. A memory still being recalled is never archived. |
+
+Archiving drops the raw text and keeps a stub in `summary_text` (the summary
+if there is one, else the start of the question — answer); it is the one
+statement allowed to do so (`_ARCHIVE_EPISODE_SQL`, enforced by a static
+gate). Tier moves also reach the optional Postgres state mirror, and archived
+rows leave a remote vector index.
+
+**Why this matters:** every ordinary chat turn is written at importance 1, so it
+can never be promoted. Until 2026-09-23 archival tested creation age only and
+the stub fallback used `COALESCE` on an empty string, so every chat memory
+became an empty shell on day 30 however often it was recalled. The live
+install had 341 such shells; all were restored from backups.
 
 Export writes `kazma_beliefs_latest.jsonl`, GraphML, plus episodes, `beliefs_archive`, `entity_merges` (+ archive), and `memory_audit_log` (per-tenant filenames when not `default`). Native `.db` backups remain the restore SoT.
 

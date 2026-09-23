@@ -1,5 +1,59 @@
 # CHANGELOG
 
+## An audit closed class by class, and a week of reports that were wrong (2026-09-22/23)
+
+**The audit (2026-09-22).** Every finding was a correct fix in one sibling and
+missing from the next — Discord re-delivered a burst's last message N times
+while Slack and Telegram chained correctly; replay, chat-control and
+`/api/sessions` routes skipped the ownership check the approval route had;
+six copies of the admin check disagreed on failure. Each closed with a gate
+that enumerates the siblings from source, plus a negative control that fails
+on the old code (AGENTS §35; full table in `docs/KNOWN_GAPS.md`). Also: `.env`
+loading moved out of import time into entry points; web sessions carry a
+tenant; 43 UI writes stopped discarding the response; stdlib XML parsing of
+fetched sitemaps (DTDs accepted) and `preexec_fn` in two sandboxes removed;
+dead modules deleted; unused locals that hid bugs fixed and F841/B033 added
+to CI's gating Ruff; a ratchet on blind/silent exception handlers.
+
+**Memory.** Every chat turn is stored at importance 1, archival tested
+creation age only, and the "keep a summary" fallback used `COALESCE` on an
+empty string — so every chat memory became an empty shell on day 30 however
+often it was recalled. 341 on the live install; all restored (272 from local
+backups, 69 from a restic snapshot). Archival now needs a memory to be stale
+on both clocks and always keeps a stub; the unused, per-second V_retention
+score and its Settings knobs are gone.
+
+**Event loop.** The knowledge-base API, crawl indexing and index search ran
+SQLite/embedding on the loop; 23 async functions resolved DNS inline. Then
+70 loop-stall dumps (one forced restart) traced to sync helpers called from
+async code — the HITL watchdog, X scheduler/poller/client, the per-request
+session lookup (now a 30 s cache with immediate revoke), queue handlers,
+memory consolidation — and 131 `httpx.AsyncClient`s loading the CA bundle
+per client (`kazma_core.http_tls`: one context, built at boot). Gates:
+`test_no_blocking_dns_in_async_functions`,
+`test_loop_stall_helpers_are_not_called_on_the_loop`,
+`test_async_http_clients_share_the_tls_context`.
+
+**The weekly resilience report lied both ways.** It read one day of a
+week's logs (rotation), counted failed probes as restarts (430 vs 1),
+and never matched `[ops_alert]`, the deep drill's `deep: FAIL:`, or restic
+maintenance (which logged only on failure). Signatures are now checked
+against the lines the code emits; loop stalls and machine-level probe
+failures are counted.
+
+**Backups.** `restic forget` grouped by host+paths and every backup is a new
+path, so retention never deleted a snapshot (199 in 199 groups). Grouped by
+kind now, with 30 dailies (restic's dry run: keep 90, remove 110). A failed
+drill names its checks.
+
+**Guard.** 169 of 257 failed probes were the machine out of ephemeral ports
+(Windows Tcpip 4231/4227/4266), not Kazma. Those probes no longer count
+toward a restart; the guard logs who holds the sockets and pages once.
+
+**Also:** rlimits launcher verified on Linux (a negative limit used to mean
+"unlimited" under a strict launcher); a flaky e2e reload test waits to a
+deadline; Slack errors keep their type; Discord/Slack allowlists documented.
+
 ## A cache that lied about disk, and a registry that took writes (2026-09-21)
 
 Both found by running Kazma against itself and checking the replay against the
@@ -104,7 +158,8 @@ workspace, and three tools never read the `root` argument at all. The server
 now pins its root at precedence 1 of `resolve_active_root`, the rung the
 swarm's per-task scope already uses. Removing the `xfail` that covered this
 exposed four more defects behind it: `shlex.split` silently ate every Windows
-path in `shell_exec` (`git -C C:epo` became `C:repo`, mangled and then
+path in `shell_exec` (`git -C C:
+epo` became `C:repo`, mangled and then
 run); `run_tests` invoked an interpreter the policy forbids, so it could never
 have worked; `pytest`/`ruff`/`mypy` were allowlisted but unreachable in any
 venv install, failing *after* the human approved; and on Windows the child

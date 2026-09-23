@@ -91,8 +91,8 @@ message uses. It resolves nothing by hand, and it does not write.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/dashboard/status` | Dashboard overview. (`dashboard.py:177`) |
-| `GET` | `/api/sessions` | Sessions list. (line 221) |
-| `POST` | `/api/sessions/clear-all` | Clear sessions. (line 330) |
+| `GET` | `/api/sessions` | Sessions list — **admin only** (it lists every user's threads). (line 221) |
+| `POST` | `/api/sessions/clear-all` | Clear sessions — **admin only**. (line 330) |
 
 ### 2.5 Swarm
 

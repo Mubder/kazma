@@ -171,6 +171,15 @@ On Windows, start via `kazma serve` or the guard — not `python -m uvicorn`.
 Uvicorn 0.36+ hardcodes `ProactorEventLoop`, and psycopg-async then cannot
 open the Postgres checkpointer.
 
+**What the guard counts.** It probes `/health/ready` every 30 s and restarts
+Kazma after **3 consecutive** failed probes (`guard.restarting` with reason
+`unhealthy (…)`). A single miss answered by the next probe is logged as
+`health.recovered` and nothing else. A probe that cannot even get a local
+port (`WinError 10048` / `10055` — the machine is out of ephemeral ports) is
+logged as `health.probe_unrunnable` with a snapshot of who holds the sockets
+(`health.port_exhaustion`), is **not** counted toward a restart, and pages
+once if it lasts ~5 minutes: restarting Kazma cannot free a port.
+
 ---
 
 ## 7. Health endpoints
