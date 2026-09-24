@@ -65,9 +65,10 @@ function makeDocument() {
           self.className = self._classes()
             .filter((x) => cs.indexOf(x) < 0).join(" ");
         },
-        toggle(c) {
-          if (this.contains(c)) { this.remove(c); return false; }
-          this.add(c); return true;
+        toggle(c, force) {
+          const on = force === undefined ? !this.contains(c) : !!force;
+          if (on) this.add(c); else this.remove(c);
+          return on;
         },
       };
     }
@@ -187,7 +188,18 @@ function makeDocument() {
       while (n) { if (n === this) return true; n = n.parentNode; }
       return false;
     }
-    addEventListener() { /* no event loop in this shim */ }
+    // Listeners are kept so a test can fire them with click(); nothing in
+    // the shim ever fires one on its own (there is no event loop).
+    addEventListener(type, fn) {
+      (this._listeners || (this._listeners = {}))[type] =
+        ((this._listeners || {})[type] || []).concat([fn]);
+    }
+    click() {
+      const ev = { target: this, stopPropagation() {}, preventDefault() {} };
+      for (let n = this; n; n = n.parentNode) {
+        for (const fn of ((n._listeners || {}).click || [])) fn.call(n, ev);
+      }
+    }
     getBoundingClientRect() { return { top: 0, bottom: 0, left: 0, right: 0 }; }
     scrollIntoView() { /* no layout */ }
   }

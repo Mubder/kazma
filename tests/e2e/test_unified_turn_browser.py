@@ -794,3 +794,58 @@ def test_approving_does_not_swap_the_text_under_the_reader(
             "the answer region was REPLACED across an approval rather than "
             f"grown: {before[:60]!r} -> {after[:60]!r}"
         )
+
+
+_CARD_STATE_JS = """() => {
+  var c = document.querySelector('.turn-approvals-rows .hitl-approval-card');
+  if (!c) return null;
+  var h = c.querySelector('.hitl-approval-header');
+  return {
+    collapsed: c.classList.contains('hitl-collapsed'),
+    live: c.querySelectorAll('button:not([disabled])').length,
+    bodyShown: !!(c.querySelector('.hitl-approval-body')
+      && c.querySelector('.hitl-approval-body').offsetParent),
+    headerCursor: h ? getComputedStyle(h).cursor : '',
+  };
+}"""
+
+
+def test_a_settled_card_opens_and_closes_from_its_header(page) -> None:
+    """Reported 2026-09-24: a settled approval card could be expanded from
+    its one-line bar, and then never collapsed again -- clicking the
+    header did nothing. The header is the toggle in BOTH directions."""
+    pg = page
+    pg.evaluate("() => { try { sessionStorage.clear(); } catch (e) {} }")
+    pg.evaluate("() => window.KazmaChat.newSession()")
+    pg.wait_for_timeout(800)
+    _send(pg, PROMPT)
+    _wait_for_pending_row(pg)
+    pg.click(".turn-approvals-rows .hitl-approval-card button:not([disabled])")
+    pg.wait_for_function(
+        "() => { const c = document.querySelector("
+        "'.turn-approvals-rows .hitl-approval-card');"
+        " return !!c && c.classList.contains('hitl-collapsed'); }",
+        timeout=60000,
+    )
+    header = ".turn-approvals-rows .hitl-approval-card .hitl-approval-header"
+    pg.click(header)
+    pg.wait_for_timeout(300)
+    opened = pg.evaluate(_CARD_STATE_JS)
+    assert opened and not opened["collapsed"] and opened["bodyShown"], opened
+    assert opened["headerCursor"] == "pointer", (
+        f"an expanded card's header must still read as clickable: {opened}"
+    )
+    pg.click(header)
+    pg.wait_for_timeout(300)
+    closed = pg.evaluate(_CARD_STATE_JS)
+    assert closed and closed["collapsed"] and not closed["bodyShown"], (
+        f"the expanded card did not collapse from its header: {closed}"
+    )
+    # And it stays where the reader put it across the renders that follow.
+    pg.wait_for_timeout(3000)
+    assert pg.evaluate(_CARD_STATE_JS)["collapsed"] is True
+    pg.click(header)
+    pg.wait_for_timeout(3000)
+    assert pg.evaluate(_CARD_STATE_JS)["collapsed"] is False, (
+        "a re-render snapped the card shut under the reader"
+    )

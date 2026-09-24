@@ -5209,11 +5209,43 @@
     }
   }
 
-  /** Collapse a claimed card to a one-line CoT-style bar (click to expand).
+  /** Which gate a card's fold preference is stored under. */
+  function _hitlFoldKey(card) {
+    try {
+      return String(card.getAttribute('data-interrupt-id') ||
+        card.getAttribute('data-gate-key') || '');
+    } catch (e) { return ''; }
+  }
+
+  /** Is this decided card open? The reader decides; collapsed by default. */
+  function _hitlCardOpen(card) {
+    if (card.__hitlOpen != null) return !!card.__hitlOpen;
+    var key = _hitlFoldKey(card);
+    var prefs = _turnPrefs();
+    return !!(key && prefs && prefs.isExpanded('', 'hitl:' + key, false));
+  }
+
+  function _syncHitlFold(card, header) {
+    var open = _hitlCardOpen(card);
+    card.classList.toggle('hitl-collapsed', !open);
+    var ch = header.querySelector('.hitl-collapse-chevron');
+    if (ch) ch.textContent = open ? '▾' : '▸';
+    header.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  /** Fold a decided card to a one-line CoT-style bar; the header toggles it.
    *  Keeps the decision visible in the timeline without a full card body
    *  sitting between the CoT and the streamed reply. The header chip is
    *  re-synced on every call so later state changes ("Resolving…" →
-   *  "Approved") stay visible while collapsed. */
+   *  "Approved") stay visible while collapsed.
+   *
+   *  The fold belongs to the reader (AGENTS.md §31): collapsed by default,
+   *  then only a click changes it, stored in turn_preferences like the
+   *  thoughts fold. This used to ADD hitl-collapsed on every call, and the
+   *  painter calls it on every state change -- so a card opened while it
+   *  read "Approved — running…" snapped shut when the tools finished, and
+   *  an open card offered no chevron or cursor to close it again
+   *  (reported 2026-09-24). */
   function _collapseClaimedHitlCard(card) {
     if (!card) return;
     var header = card.querySelector('.hitl-approval-header');
@@ -5231,25 +5263,30 @@
       if (chip.textContent !== txt) chip.textContent = txt;
       chip.className = 'hitl-collapse-chip ' + cls;
     }
-    if (card.classList.contains('hitl-collapsed')) return;
-    card.classList.add('hitl-collapsed');
+    // Re-added on every call: the painter assigns className wholesale.
+    card.classList.add('hitl-collapsible');
     if (!header.querySelector('.hitl-collapse-chevron')) {
       var chev = document.createElement('span');
       chev.className = 'hitl-collapse-chevron';
       chev.setAttribute('aria-hidden', 'true');
-      chev.textContent = '▸';
       header.appendChild(chev);
     }
+    // Wired before anything can return early: a card that arrived already
+    // carrying hitl-collapsed used to skip this and never open at all.
     if (!card.__hitlCollapseWired) {
       card.__hitlCollapseWired = true;
       header.addEventListener('click', function (e) {
         if (e.target.closest('button')) return;
-        var nowCollapsed = card.classList.toggle('hitl-collapsed');
-        var ch = header.querySelector('.hitl-collapse-chevron');
-        if (ch) ch.textContent = nowCollapsed ? '▸' : '▾';
+        var next = !_hitlCardOpen(card);
+        card.__hitlOpen = next;
+        var key = _hitlFoldKey(card);
+        var prefs = _turnPrefs();
+        if (key && prefs) prefs.setExpanded('', 'hitl:' + key, next);
+        _syncHitlFold(card, header);
         e.stopPropagation();
       });
     }
+    _syncHitlFold(card, header);
   }
 
   /** A pending approval card must be SEEN, not just rendered: if the
