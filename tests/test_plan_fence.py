@@ -23,6 +23,7 @@ from kazma_core.agent.plan_fence import (
     rewrite_terminal_assistant_message,
     should_execute_plan_only_hop,
     split_plan_and_prose,
+    tools_ran_this_turn,
     user_reply_text,
 )
 from kazma_core.agent.state import SupervisorState, initial_supervisor_state
@@ -490,3 +491,102 @@ async def test_respond_unglues_terminal_plan_fence(monkeypatch):
     assert "```Saved" not in last["content"]
     assert "Saved." in last["content"]
     assert "```\n\nSaved." in last["content"] or "personal Grok" in last["content"]
+
+
+# ── 2026-09-24: a report that restates its plan is the answer ───────────
+#
+# Live turn e99d06a0b33f: four x_post calls ran after approval, the model
+# wrote "```plan ...``` The fix worked -- all four landed", and the
+# auto-continue treated it as a stall because it tested has_plan_fence
+# alone. The model re-checked X, then answered three times in different
+# words; the last was "Nothing is stopped -- the task is already complete".
+
+_RESTATED = (
+    "```plan\n- Re-check X connector\n- Re-fire the four drafts\n"
+    "- Report what landed\n```\n\nThe fix worked -- all four landed."
+)
+_AFTER_POSTS = [
+    {"role": "system", "content": "You are Kazma."},
+    {"role": "user", "content": "try again, I think I fixed the code"},
+    {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [{
+            "id": "c1", "type": "function",
+            "function": {"name": "x_post", "arguments": "{}"},
+        }],
+    },
+    {"role": "tool", "tool_call_id": "c1", "name": "x_post", "content": '{"posted": true}'},
+]
+
+
+def _hop(content, *, tools_ran, continues=0):
+    return should_execute_plan_only_hop(
+        content=content,
+        has_tool_calls=False,
+        tools_available=True,
+        plan_mode_kind="off",
+        plan_only_continues=continues,
+        iteration=1,
+        max_iterations=15,
+        tools_ran=tools_ran,
+    )
+
+
+def test_a_report_that_restates_its_plan_is_the_answer():
+    assert _hop(_RESTATED, tools_ran=True) is False
+
+
+def test_a_plan_with_a_promise_and_no_action_still_continues():
+    """ "Posting now." with no tool call is the 2026-08-26 stall, reworded."""
+    assert _hop("```plan\n- Post it\n```\n\nPosting now.", tools_ran=False) is True
+
+
+def test_a_bare_plan_after_tools_still_continues():
+    assert _hop("```plan\n- Post the second one\n```", tools_ran=True) is True
+
+
+def test_the_execute_nudge_is_not_where_the_turn_began():
+    assert tools_ran_this_turn(_AFTER_POSTS) is True
+    nudged = _AFTER_POSTS + [
+        {"role": "assistant", "content": "```plan\n- Next\n```"},
+        {"role": "user", "content": PLAN_EXECUTE_CONTINUE},
+    ]
+    assert tools_ran_this_turn(nudged) is True, "the nudge reset the turn boundary"
+    fresh = _AFTER_POSTS + [{"role": "user", "content": "now draft three more"}]
+    assert tools_ran_this_turn(fresh) is False
+
+
+@pytest.mark.asyncio
+async def test_supervisor_finishes_on_a_report_that_restates_its_plan():
+    """The real node, the live shape: no forced continue, no second answer."""
+    from kazma_core.agent.graph_builder import supervisor_node
+    from kazma_core.agent.state import NodeName
+
+    llm = _ScriptedLLM([_Response(content=_RESTATED)])
+    tools = [{
+        "type": "function",
+        "function": {"name": "x_post", "parameters": {"type": "object", "properties": {}}},
+    }]
+    out = await supervisor_node(
+        {
+            "messages": list(_AFTER_POSTS),
+            "iteration": 1,
+            "max_iterations": 15,
+            "plan_only_continues": 0,
+        },
+        llm=llm,
+        system_prompt="You are Kazma.",
+        tool_definitions=tools,
+        tool_executor=None,
+        cost_breaker=_FakeCostBreaker(),
+        authority=_FakeAuthority(),
+        tracer=_FakeTracer(),
+    )
+    assert out.get("next_node") != NodeName.SUPERVISOR, "forced another iteration"
+    assert int(out.get("plan_only_continues") or 0) == 0
+    assert not any(
+        "KAZMA_PLAN_EXECUTE" in str(m.get("content") or "")
+        for m in out.get("messages") or []
+        if isinstance(m, dict)
+    )

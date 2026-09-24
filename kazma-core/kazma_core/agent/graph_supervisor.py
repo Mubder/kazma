@@ -18,11 +18,13 @@ from kazma_core.agent.graph_helpers import (
     sanitize_tool_chains,
 )
 from kazma_core.agent.plan_fence import (
+    AUTO_CONTINUE_PROMPT,
     PLAN_EXECUTE_CONTINUE,
     PLAN_EXECUTE_FINAL,
     normalize_plan_fence,
     should_execute_plan_only_hop,
     split_plan_and_prose as _split_plan_fence,
+    tools_ran_this_turn,
 )
 from kazma_core.agent.state import NodeName, PendingToolCall, SupervisorState
 from kazma_core.agent.task_ledger import (
@@ -1852,6 +1854,7 @@ async def supervisor_node(
             plan_only_continues=int(state.get("plan_only_continues") or 0),
             iteration=int(iteration or 0),
             max_iterations=max_iter,
+            tools_ran=tools_ran_this_turn(messages),
         ):
             logger.info(
                 "[Supervisor] plan-only hop with no tools (iteration=%d) — "
@@ -1896,7 +1899,7 @@ async def supervisor_node(
         if is_auto and iteration + 1 < max_iter and content:
             logger.info("[Supervisor] Auto-continue active (iteration=%d/%d) — looping back to supervisor", iteration + 1, max_iter)
             assistant_msg = {"role": "assistant", "content": content}
-            continuation_msg = {"role": "user", "content": "Please proceed automatically with the remaining steps and complete the task."}
+            continuation_msg = {"role": "user", "content": AUTO_CONTINUE_PROMPT}
             return {
                 **breaker_reset,
                 **intent_patch,

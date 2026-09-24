@@ -55,10 +55,12 @@ def _builder() -> str:
     src = (STATIC / "js" / "chat.js").read_text(encoding="utf-8")
     start = src.index("  function _detailHtml(")
     end = src.index("  function _stepRowHtml(", start)
-    consts = "".join(
-        f"var {name} = {re.search(rf'var {name} = (\d+);', src).group(1)};\n"
-        for name in ("TOOL_DETAIL_MAX", "STEP_DETAIL_CLAMP_AT")
-    )
+    consts = ""
+    for name in ("TOOL_DETAIL_MAX", "STEP_DETAIL_CLAMP_AT"):
+        # Built outside the f-string: Python 3.11 (CI) rejects a backslash
+        # inside an f-string expression; 3.12 accepts it.
+        value = re.search(r"var " + name + r" = (\d+);", src).group(1)
+        consts += f"var {name} = {value};\n"
     return consts + src[start:end]
 
 
