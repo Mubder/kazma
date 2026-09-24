@@ -127,7 +127,7 @@ def test_indent_guides_are_installed() -> None:
 # encoding kwarg. Keyed by "<path>:<line>" to stay honest if the code moves.
 _NOT_PATHLIB = {
     # ImportBundle.read_text(name) reads a member out of the migration bundle.
-    "kazma-core/kazma_core/migration/importer.py:241",
+    "kazma-core/kazma_core/migration/importer.py:243",
 }
 
 

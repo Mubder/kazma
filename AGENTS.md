@@ -1414,7 +1414,13 @@ wins over whatever the model holds in context. The iteration-0 nudge in
 `graph_supervisor.py` is advisory only and must never be the thing
 standing between a draft and the wire. A scheduled post
 (`x_schedule_post`) is the same incident with a delay — it is on the
-required list for exactly that reason. The HITL card (Web `renderHitlCard`
+required list for exactly that reason. The tool worker's proposal check
+(`_commitment_resolve_gate`) passes ONLY the publish calls the resolver
+verified in the same pass and refuses the rest (commitment layer off). It
+must never refuse a verified call: from 2026-09-17 to 2026-09-24 it refused
+every one, no chat post went out, and an eval test had locked that in as a
+"property". `tests/test_x_post_proposal_gate.py` +
+`test_a_verified_publish_stops_at_the_approval_card` pin both halves. The HITL card (Web `renderHitlCard`
 + gateway `_build_approval_prompt`) renders the stored proposal text, so
 what the user approves is what publishes.
 

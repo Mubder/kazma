@@ -103,6 +103,10 @@ def _commitment_resolve_gate(
     from langgraph.types import interrupt  # not imported at module level
     semantic_blocked: list[ToolResult] = []
     semantic_hold: list[tuple[PendingToolCall, Any]] = []
+    # Publish calls the resolver verified against a stored proposal in THIS
+    # pass (their text is now the stored text). Keyed by object identity: a
+    # provider may send an empty tool-call id. See the proposal check below.
+    _proposal_verified: set[int] = set()
     try:
         from datetime import datetime as _dt, timezone as _tz
         from kazma_core.safety.commitment import authorize_effect as _authz
@@ -212,6 +216,22 @@ def _commitment_resolve_gate(
                     elif _dec.rewritten_args is not None:
                         _tc["arguments"] = _dec.rewritten_args
                         _kept.append(_tc)
+                        # For a publish tool, an allow WITH rewritten args is
+                        # _resolve_proposal_backed_post having replaced the
+                        # text with the stored proposal -- the one outcome
+                        # that may post.
+                        try:
+                            from kazma_core.safety.commitment.proposals import (
+                                is_proposal_tool as _is_prop,
+                            )
+
+                            if _is_prop(_tname):
+                                _proposal_verified.add(id(_tc))
+                        except ImportError:
+                            # Unverified stays blocked by the check below.
+                            logger.error(
+                                "[ToolWorker] proposals module missing", exc_info=True
+                            )
                     else:
                         _kept.append(_tc)
                 pending = _kept
@@ -234,19 +254,36 @@ def _commitment_resolve_gate(
                 if str(tc.get("id") or "") in active_ids or not tc.get("id")
             ]
 
-    # Dynamic proposal check
+    # Proposal check: a publish tool runs only if the resolver above verified
+    # it against a stored proposal in this pass. That is the designed route
+    # (save_proposal -> x_post(proposal_id) -> stored text wins -> approval
+    # card). What is left unverified -- the commitment layer switched off, so
+    # authorize_effect returned a plain allow -- would post whatever text the
+    # model holds, the 2026-08-30 incident, and stays blocked.
+    #
+    # This used to block EVERY publish call. It was dead code from 2026-09-04
+    # (ImportError swallowed) until 2026-09-17, and from then on it refused
+    # posts the resolver had just verified: no chat post executed between
+    # 2026-09-17 and 2026-09-24, and the model was told to "approve the
+    # queued cards", which did not exist.
     if pending:
         try:
             from kazma_core.safety.commitment.proposals import is_proposal_tool
-            _tenant = state.get("tenant_id") or "default"
             _still_open = []
             for _tc in pending:
                 _tname = str(_tc.get("name") or "")
-                if is_proposal_tool(_tname):
+                if is_proposal_tool(_tname) and id(_tc) not in _proposal_verified:
                     semantic_blocked.append(ToolResult(
                         tool_call_id=str(_tc.get("id") or ""),
                         name=_tname,
-                        content=f"Proposal tool '{_tname}' is managed by the commitment engine and cannot be invoked directly.",
+                        content=(
+                            f"Not posted: {_tname} runs only after the commitment "
+                            "layer verifies it against a stored proposal "
+                            "(save_proposal, then this tool with proposal_id), and "
+                            "it did not verify this call -- the layer may be "
+                            "switched off (KAZMA_COMMITMENT_ENABLED=0). Nothing is "
+                            "queued for approval. Do not retry; tell the user."
+                        ),
                         is_error=True,
                         duration_ms=0,
                         outcome="terminal",

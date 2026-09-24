@@ -448,15 +448,17 @@ async def test_every_shipped_danger_tool_is_stopped_before_it_runs(
       This is the path for the other 55 danger tools.
 
     * **The proposal gate** — ``x_post`` / ``x_schedule_post`` /
-      ``book_x_post`` are owned by the commitment engine and cannot be
-      invoked as ordinary tool calls *at all*. ``_commitment_resolve_gate``
-      strips them from ``pending`` unconditionally, before the safe/danger
-      split, so they never reach ``interrupt()``. That is strictly
-      **stronger** than an interrupt: with an interrupt there is an answer
-      the operator can give that runs the call, and here there is not. The
-      real publish path resolves the stored drafts onto an approval card
-      (``graph_tool_worker`` S1-3), so the human check still happens — it
-      happens on text that was persisted, not on text the model re-typed.
+      ``book_x_post`` post only text verified against a stored proposal.
+      Called here with no ``proposal_id``, the commitment resolver refuses
+      them before the safe/danger split, so they never reach
+      ``interrupt()``. With a verified id they DO reach it, showing the
+      stored text on the card — that is the only chat publish path, and
+      ``test_a_verified_publish_stops_at_the_approval_card`` pins it.
+
+    (Until 2026-09-24 this said the gate strips publish tools
+    "unconditionally" and that some other path publishes. There was none:
+    the unconditional strip blocked every chat post from 2026-09-17, and
+    this test locked that in.)
 
     This test previously asserted the *mechanism* ("did it interrupt?")
     rather than the property, so the two X tools failed it while being more
@@ -512,10 +514,9 @@ async def test_every_shipped_danger_tool_is_stopped_before_it_runs(
 
     if is_proposal_tool(tool):
         assert not raised, (
-            f"{tool} reached interrupt() — the proposal gate is supposed to "
-            f"strip it from `pending` before the safe/danger split. If that "
-            f"filter moved, a raw publish call is one operator click from "
-            f"going out with model-retyped text."
+            f"{tool} reached interrupt() with no proposal_id — an unverified "
+            f"publish is one operator click from going out with model-retyped "
+            f"text. The commitment resolver must refuse it first."
         )
         blocks = [
             m for m in ((out or {}).get("messages") or [])
@@ -523,9 +524,8 @@ async def test_every_shipped_danger_tool_is_stopped_before_it_runs(
         ]
         assert blocks, f"{tool} was neither gated nor refused — it vanished"
         assert any(
-            "cannot be invoked directly" in str(m.get("content") or "")
-            for m in blocks
-        ), f"{tool} was not refused by the proposal gate: {blocks}"
+            "proposal" in str(m.get("content") or "").lower() for m in blocks
+        ), f"{tool} was not refused for lacking a verified proposal: {blocks}"
         return
 
     assert raised, f"{tool} is shipped as danger but did not interrupt for HITL"
@@ -543,21 +543,20 @@ async def test_every_shipped_danger_tool_is_stopped_before_it_runs(
     ids=["no-args", "raw-text", "unresolvable-id", "plausible-id-plus-text"],
 )
 @pytest.mark.asyncio
-async def test_publish_tools_cannot_be_invoked_directly_in_any_shape(
+async def test_an_unverified_publish_is_refused_in_any_shape(
     args: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A publish tool must be refused whatever the model puts in ``arguments``.
+    """No argument shape posts text that is not a stored proposal.
 
-    ``_commitment_resolve_gate``'s proposal filter never inspects arguments —
-    it keys on the tool NAME alone — which is what makes "you cannot post by
-    calling x_post" a property rather than a validation rule with edge cases.
-    This pins that: no argument shape, including a well-formed-looking
-    ``proposal_id``, gets a raw publish past the gate.
+    None of these resolve to a stored draft: no id, raw text, an id that
+    does not exist, and a well-formed-looking id with re-typed text. Each
+    must be refused before the safe/danger split and never execute.
 
-    The gate's own docstring records why this needs a lock: the module did
-    not exist until 2026-09-17, and from 2026-09-04 the tool worker imported
-    it inside ``except Exception: pass``, so the import raised on every turn
-    and the filter never ran for two weeks.
+    This used to be "publish tools cannot be invoked directly in any shape",
+    asserting the gate refused them by NAME alone. That was the defect, not
+    the property: it refused verified posts too, and no chat post executed
+    from 2026-09-17 until 2026-09-24. The verified shape is pinned by
+    ``test_a_verified_publish_stops_at_the_approval_card``.
     """
     from kazma_core.agent.graph_tool_worker import tool_worker_node
     from kazma_core.safety.commitment.proposals import PROPOSAL_TOOLS
@@ -596,9 +595,95 @@ async def test_publish_tools_cannot_be_invoked_directly_in_any_shape(
             for m in (out.get("messages") or [])
             if isinstance(m, dict) and m.get("role") == "tool"
         ]
-        assert any("cannot be invoked directly" in r for r in refusals), (
+        assert any("proposal" in r.lower() for r in refusals), (
             f"{tool} was not refused with args={args}: {refusals}"
         )
+
+
+@pytest.mark.eval
+@pytest.mark.parametrize("tool", ["x_post", "x_schedule_post"])
+@pytest.mark.asyncio
+async def test_a_verified_publish_stops_at_the_approval_card(
+    tool: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one chat publish path: a stored proposal, then the operator.
+
+    save_proposal -> ``tool(proposal_id=...)`` -> the resolver swaps in the
+    stored text -> the HITL card shows THAT text -> nothing runs until the
+    operator answers. Live 2026-09-24: this path was blocked outright, and
+    the model told the user to approve cards that did not exist.
+    """
+    from kazma_core.agent import artifacts
+    from kazma_core.agent.graph_tool_worker import tool_worker_node
+
+    stored = "The draft the user approved, stored verbatim."
+    # The pack's autouse fixture switches the commitment layer OFF, which is
+    # exactly the state that must refuse. Production runs it ON (default).
+    monkeypatch.setenv("KAZMA_COMMITMENT_ENABLED", "1")
+    monkeypatch.setenv("KAZMA_MEMORY_OPS_DB", str(tmp_path / "ops.db"))
+    monkeypatch.setenv("KAZMA_ARTIFACTS_DB", str(tmp_path / "agent_artifacts.db"))
+    artifacts.reset_artifact_store()
+    try:
+        pid = artifacts.get_artifact_store().save_proposal(
+            "default", f"eval-verified-{tool}", "tweets", [stored]
+        )["proposal_id"]
+
+        executed: list[str] = []
+
+        class _Exec:
+            async def execute(self, name: str, arguments: dict) -> dict:
+                executed.append(name)
+                return {"content": "posted", "is_error": False}
+
+        cards: list[Any] = []
+
+        def _irq(payload: Any) -> Any:
+            cards.append(payload)
+            raise RuntimeError("HITL_INTERRUPT")
+
+        monkeypatch.setattr("langgraph.types.interrupt", _irq)
+
+        raised = False
+        out: Any = None
+        try:
+            out = await tool_worker_node(
+                {
+                    "messages": [{"role": "user", "content": "post the approved draft"}],
+                    "tool_calls_pending": [{
+                        "id": "c1",
+                        "name": tool,
+                        "arguments": {
+                            "text": "the model re-typed this",
+                            "proposal_id": f"{pid}:1",
+                            "scheduled_at": "2030-01-01T09:00:00+00:00",
+                        },
+                    }],
+                    "iteration": 1,
+                    "thread_id": f"eval-verified-{tool}",
+                    "tenant_id": "default",
+                },
+                tool_executor=_Exec(),
+                tracer=_NoopTracer(),
+                hitl_config={
+                    "enabled": True,
+                    "require_approval_for": sorted(shipped_danger_tools()),
+                },
+            )
+        except RuntimeError as exc:
+            raised = "HITL_INTERRUPT" in str(exc)
+
+        assert executed == [], f"{tool} posted before the operator answered"
+        refusals = [
+            str(m.get("content") or "")
+            for m in ((out or {}).get("messages") or [])
+            if isinstance(m, dict) and m.get("role") == "tool"
+        ]
+        assert raised, f"a verified {tool} never reached the approval card: {refusals}"
+        card = json.dumps(cards, default=str, ensure_ascii=False)
+        assert stored in card, "the card must show the STORED text"
+        assert "the model re-typed this" not in card, "re-typed text reached the card"
+    finally:
+        artifacts.reset_artifact_store()
 
 
 @pytest.mark.eval
