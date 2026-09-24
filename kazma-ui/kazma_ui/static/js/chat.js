@@ -111,6 +111,35 @@
     return s;
   }
 
+  /** CLDR plural category: the same rule as i18n.get_arabic_plural_form /
+   *  t_plural (six forms for Arabic, one/other for everything else). */
+  function _pluralCategory(n) {
+    var lang = String(document.documentElement.getAttribute('lang') || 'en')
+      .slice(0, 2).toLowerCase();
+    var x = Math.abs(Number(n) || 0);
+    if (lang !== 'ar') return x === 1 ? 'one' : 'other';
+    if (x === 0) return 'zero';
+    if (x === 1) return 'one';
+    if (x === 2) return 'two';
+    var mod100 = Math.floor(x) % 100;
+    if (mod100 >= 3 && mod100 <= 10) return 'few';
+    if (mod100 >= 11 && mod100 <= 99) return 'many';
+    return 'other';
+  }
+
+  /** A count with its noun, in the page language: "1 tool", "10 tools",
+   *  Arabic dual and plural forms. THE way to print a count -- the forms
+   *  come from the catalog (chat.<base>.<category>) via CHAT_I18N.plural.
+   *  Hand-built "n + ' ' + noun" labels printed "1 approvals", "3 3 tools"
+   *  and, through the wrong key, "1 step" for one tool (2026-09-24);
+   *  tests/test_count_labels.py keeps them from coming back. */
+  function tiCount(base, n, oneEn, otherEn) {
+    var forms = (((window.CHAT_I18N || {}).plural) || {})[base] || {};
+    var cat = _pluralCategory(n);
+    var s = forms[cat] || forms.other || (Number(n) === 1 ? oneEn : otherEn);
+    return String(s).replace(/\{n\}/g, String(n));
+  }
+
   function generateSessionId() {
     try {
       if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -4130,11 +4159,10 @@
         // One line that stays readable when the panel is collapsed.
         var parts = [ti('done', 'Done')];
         if (_progressToolCount > 0) {
-          parts.push(_progressToolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: _progressToolCount }));
+          parts.push(tiCount('count_tools', _progressToolCount, '{n} tool', '{n} tools'));
         }
         if (_progressStepCount > 0) {
-          parts.push(_progressStepCount + ' ' + (_progressStepCount === 1
-            ? ti('step', 'step') : ti('steps', 'steps')));
+          parts.push(tiCount('count_steps', _progressStepCount, '{n} step', '{n} steps'));
         }
         if (elapsed) parts.push(elapsed);
         if (_lastTurnStats) {
@@ -4274,14 +4302,13 @@
     }
     var stepCount = (rows.match(/<li /g) || []).length;
     var toolCount = (rows.match(/data-kind="tool"/g) || []).length;
-    var stepWord = stepCount === 1 ? ti('step', 'step') : ti('steps', 'steps');
     _panelSeq += 1;
     var bodyId = 'agent-progress-body-' + _panelSeq;
     // Header mirrors the live summary bar shape: "N tools · M steps" (+usage
     // when the server stamped per-turn tokens/cost on the message).
     var headBits = [];
-    if (toolCount) headBits.push(toolCount + ' ' + tiFmt('summary_tools', '{n} tools', { n: toolCount }));
-    headBits.push(stepCount + ' ' + stepWord);
+    if (toolCount) headBits.push(tiCount('count_tools', toolCount, '{n} tool', '{n} tools'));
+    headBits.push(tiCount('count_steps', stepCount, '{n} step', '{n} steps'));
     panel.innerHTML =
       '<div class="agent-progress-header" role="button" tabindex="0" title="' + escapeHtml(ti('cot_title', 'Thinking & Activity')) + '"' +
         ' aria-expanded="false" aria-controls="' + bodyId + '">' +
@@ -7111,15 +7138,13 @@
     var bits = [];
     var c = model.counts;
     if (c.tools) {
-      bits.push(c.tools + ' ' + (c.tools === 1
-        ? ti('step', 'tool')
-        : tiFmt('summary_tools', '{n} tools', { n: c.tools }).replace(/^\d+\s*/, '')));
+      bits.push(tiCount('count_tools', c.tools, '{n} tool', '{n} tools'));
     }
     if (c.pending) {
       bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
         { n: c.pending }));
     } else if (c.gates) {
-      bits.push(c.gates + ' ' + ti('approvals', 'approvals'));
+      bits.push(tiCount('count_approvals', c.gates, '{n} approval', '{n} approvals'));
     }
     return bits.join(' \u00B7 ');
   }
@@ -7350,11 +7375,9 @@
       var bits = [];
       if (thoughtN) bits.push(ti('thoughts', 'Thoughts'));
       if (_progressToolCount) {
-        bits.push(_progressToolCount + ' ' +
-          (_progressToolCount === 1 ? ti('step', 'tool') : ti('summary_tools', 'tools').replace('{n} ', '')));
+        bits.push(tiCount('count_tools', _progressToolCount, '{n} tool', '{n} tools'));
       }
-      bits.push(_progressStepCount + ' ' +
-        (_progressStepCount === 1 ? ti('step', 'step') : ti('steps', 'steps')));
+      bits.push(tiCount('count_steps', _progressStepCount, '{n} step', '{n} steps'));
       countEl.textContent = bits.join(' \u00B7 ');
     }
   }
@@ -7481,9 +7504,7 @@
     var title = ti('approvals', 'Approvals');
     if (titleEl && titleEl.textContent !== title) titleEl.textContent = title;
     var bits = [];
-    bits.push(total === 1
-      ? ti('one_request', '1 request')
-      : tiFmt('n_requests', '{n} requests', { n: total }));
+    bits.push(tiCount('count_requests', total, '{n} request', '{n} requests'));
     if (pending) {
       bits.push(tiFmt('awaiting_decisions', '{n} awaiting your decision',
         { n: pending }));

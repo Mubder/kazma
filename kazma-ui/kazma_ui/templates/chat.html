@@ -267,6 +267,16 @@ function setupWall() {
     plan: {{ t('chat.plan') | tojson }},
     step: {{ t('chat.step') | tojson }},
     steps: {{ t('chat.steps') | tojson }},
+    // Every form of each count label in this page's language; chat.js
+    // tiCount picks one with t_plural's CLDR rule (i18n.plural_forms).
+    plural: {
+      count_tools: {{ plural_forms('chat.count_tools') | tojson }},
+      count_steps: {{ plural_forms('chat.count_steps') | tojson }},
+      count_approvals: {{ plural_forms('chat.count_approvals') | tojson }},
+      count_requests: {{ plural_forms('chat.count_requests') | tojson }}
+    },
+    awaiting_decisions: {{ t('chat.awaiting_decisions') | tojson }},
+    approvals: {{ t('chat.approvals_title') | tojson }},
     done: {{ t('chat.done') | tojson }},
     stopped: {{ t('chat.stopped') | tojson }},
     running: {{ t('chat.running') | tojson }},

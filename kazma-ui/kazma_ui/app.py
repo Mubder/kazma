@@ -485,6 +485,7 @@ class KazmaAppBuilder:
         import contextvars
         import json as _json
         from kazma_ui.i18n import make_translator as _make_translator, TRANSLATIONS
+        from kazma_ui.i18n import plural_forms as _plural_forms
 
         _startup_lang = _lang
         self._current_lang = contextvars.ContextVar("_current_lang", default=_startup_lang)
@@ -532,6 +533,11 @@ class KazmaAppBuilder:
         # can call a client-side t() — server-side t() only covers Jinja2.
         _translations_json = _json.dumps(TRANSLATIONS, ensure_ascii=False)
         self.templates.env.globals["t"] = _dynamic_translate
+        # Every plural form of a count label in the request's language;
+        # chat.js tiCount picks one with t_plural's CLDR rule.
+        self.templates.env.globals["plural_forms"] = (
+            lambda key: _plural_forms(key, self._current_lang.get())
+        )
         self.templates.env.globals["lang"] = _dynamic_lang
         self.templates.env.globals["dir"] = _dynamic_dir
         self.templates.env.globals["theme"] = _dynamic_theme

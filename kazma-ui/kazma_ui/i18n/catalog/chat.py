@@ -348,6 +348,42 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "ar": "{n} أدوات",
         "en": "{n} tools",
     },
+    # Count labels: every form, picked by chat.js tiCount with t_plural's
+    # CLDR rule (i18n.plural_forms). One way to print a count -- the
+    # hand-built ones printed "1 approvals", "3 3 tools" and, through the
+    # wrong key, "1 step" for one tool (2026-09-24).
+    "chat.count_tools.zero": {"ar": "لا أدوات", "en": "{n} tools"},
+    "chat.count_tools.one": {"ar": "أداة واحدة", "en": "{n} tool"},
+    "chat.count_tools.two": {"ar": "أداتان", "en": "{n} tools"},
+    "chat.count_tools.few": {"ar": "{n} أدوات", "en": "{n} tools"},
+    "chat.count_tools.many": {"ar": "{n} أداةً", "en": "{n} tools"},
+    "chat.count_tools.other": {"ar": "{n} أداة", "en": "{n} tools"},
+    "chat.count_steps.zero": {"ar": "لا خطوات", "en": "{n} steps"},
+    "chat.count_steps.one": {"ar": "خطوة واحدة", "en": "{n} step"},
+    "chat.count_steps.two": {"ar": "خطوتان", "en": "{n} steps"},
+    "chat.count_steps.few": {"ar": "{n} خطوات", "en": "{n} steps"},
+    "chat.count_steps.many": {"ar": "{n} خطوةً", "en": "{n} steps"},
+    "chat.count_steps.other": {"ar": "{n} خطوة", "en": "{n} steps"},
+    "chat.count_approvals.zero": {"ar": "لا موافقات", "en": "{n} approvals"},
+    "chat.count_approvals.one": {"ar": "موافقة واحدة", "en": "{n} approval"},
+    "chat.count_approvals.two": {"ar": "موافقتان", "en": "{n} approvals"},
+    "chat.count_approvals.few": {"ar": "{n} موافقات", "en": "{n} approvals"},
+    "chat.count_approvals.many": {"ar": "{n} موافقةً", "en": "{n} approvals"},
+    "chat.count_approvals.other": {"ar": "{n} موافقة", "en": "{n} approvals"},
+    "chat.count_requests.zero": {"ar": "لا طلبات", "en": "{n} requests"},
+    "chat.count_requests.one": {"ar": "طلب واحد", "en": "{n} request"},
+    "chat.count_requests.two": {"ar": "طلبان", "en": "{n} requests"},
+    "chat.count_requests.few": {"ar": "{n} طلبات", "en": "{n} requests"},
+    "chat.count_requests.many": {"ar": "{n} طلبًا", "en": "{n} requests"},
+    "chat.count_requests.other": {"ar": "{n} طلب", "en": "{n} requests"},
+    "chat.awaiting_decisions": {
+        "ar": "{n} بانتظار قرارك",
+        "en": "{n} awaiting your decision",
+    },
+    "chat.approvals_title": {
+        "ar": "الموافقات",
+        "en": "Approvals",
+    },
     "chat.thinking": {
         "ar": "كاظمه تفكر…",
         "en": "Kazma is thinking…",

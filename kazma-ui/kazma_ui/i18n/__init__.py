@@ -20,7 +20,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TRANSLATIONS", "get_arabic_plural_form", "t_plural", "t", "make_translator"]
+__all__ = [
+    "PLURAL_CATEGORIES",
+    "TRANSLATIONS",
+    "get_arabic_plural_form",
+    "make_translator",
+    "plural_forms",
+    "t",
+    "t_plural",
+]
 
 # ---------------------------------------------------------------------------
 # Translation dictionaries
@@ -103,6 +111,30 @@ def t_plural(key: str, count: int | float, lang: str = "en", **kwargs: Any) -> s
     return key
 
 
+#: CLDR plural categories, in the order ``get_arabic_plural_form`` tests them.
+PLURAL_CATEGORIES: tuple[str, ...] = ("zero", "one", "two", "few", "many", "other")
+
+
+def plural_forms(key: str, lang: str = "en") -> dict[str, str]:
+    """Every plural form of *key* in *lang*, for a client that picks the form.
+
+    Catalog entries follow ``t_plural``'s convention (``<key>.<category>``).
+    chat.js ``tiCount`` picks the category with the same rule as
+    ``get_arabic_plural_form`` / ``t_plural``, so a count reads the same in
+    the browser as on the server. A missing language falls back to English
+    form by form; a missing form is simply absent (the client falls back to
+    ``other``).
+    """
+    out: dict[str, str] = {}
+    for category in PLURAL_CATEGORIES:
+        entry = TRANSLATIONS.get(f"{key}.{category}")
+        if entry:
+            text = entry.get(lang) or entry.get("en")
+            if text:
+                out[category] = text
+    return out
+
+
 def make_translator(lang: str = "en"):
     """Return closures bound to *lang* for use as Jinja2 globals."""
 
@@ -136,6 +168,7 @@ def _patch_jinja2_templates() -> None:
             env = self.env
             env.globals.setdefault("t", make_translator("en"))
             env.globals.setdefault("t_plural", lambda key, count, **kw: t_plural(key, count, lang="en", **kw))
+            env.globals.setdefault("plural_forms", lambda key: plural_forms(key, "en"))
             env.globals.setdefault("lang", lambda: "en")
             env.globals.setdefault("dir", lambda: "ltr")
         except Exception as exc:
