@@ -590,3 +590,25 @@ async def test_supervisor_finishes_on_a_report_that_restates_its_plan():
         for m in out.get("messages") or []
         if isinstance(m, dict)
     )
+
+
+# ── 2026-09-24: an unlabelled leading plan fence (shared with chat.js) ──
+
+
+def test_bare_leading_fence_shared_fixture():
+    """ONE fixture for both languages (AGENTS.md section 31)."""
+    import json
+
+    fixture = (
+        Path(__file__).resolve().parent / "fixtures" / "plan_fence" / "bare_leading_fence.json"
+    )
+    cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
+    assert len(cases) >= 5
+    for case in cases:
+        plan, prose = split_plan_and_prose(case["input"])
+        assert plan.strip() == case["plan"].strip(), case["name"]
+        assert prose.strip() == case["prose"].strip(), case["name"]
+    # What gets persisted puts the closer on its own line, then the answer.
+    out = normalize_plan_fence(cases[0]["input"])
+    assert out.startswith("```plan\n")
+    assert "\n```\n\nHere's the full inventory" in out

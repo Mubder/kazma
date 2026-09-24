@@ -3589,7 +3589,7 @@
    * glued closer (```Saved.) that CommonMark never closes.
    */
   function splitPlanAndProse(text) {
-    var s = String(text || '');
+    var s = _labelBarePlanFence(String(text || ''));
     if (!s.trim()) return { plan: '', prose: '' };
     // ALL ```plan fences are workbench scaffolding, never content. Later
     // fences WIN — the model re-plans mid-turn, and a reply carrying five
@@ -3636,6 +3636,26 @@
       return { plan: mdSplit.plan, prose: mdSplit.prose };
     }
     return { plan: '', prose: s.trim() };
+  }
+
+  /** Relabel a leading unlabelled fence that holds only a list as ```plan.
+   *  It is the plan the model forgot to label: live 2026-09-24 a bare ```
+   *  plan with its closer glued to the answer (```Here's ...) never closed,
+   *  and the whole reply rendered as one code block. Mirrors
+   *  plan_fence._label_bare_plan_fence exactly; both read
+   *  tests/fixtures/plan_fence/bare_leading_fence.json. */
+  function _labelBarePlanFence(s) {
+    var open = /^(\s*)```[ \t]*\n/.exec(s);
+    if (!open) return s;
+    var rest = s.slice(open[0].length);
+    var close = rest.indexOf('```');
+    if (close < 0) return s;
+    var lines = rest.slice(0, close).split('\n').filter(function (l) { return l.trim(); });
+    if (!lines.length) return s;
+    for (var i = 0; i < lines.length; i++) {
+      if (!/^\s*(?:[-*]|\d+[.)])\s+\S/.test(lines[i])) return s;
+    }
+    return open[1] + '```plan\n' + rest;
   }
 
   function _splitListThenProse(body) {

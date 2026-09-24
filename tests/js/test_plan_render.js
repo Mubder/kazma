@@ -197,4 +197,25 @@ function mdPre(langLabel, code) {
   assert("strip: plan-only turn returns raw (widget path)", po === planOnly, JSON.stringify(po));
 }
 
+// ── 11. An unlabelled leading plan fence (shared fixture with Python) ─────
+// Live 2026-09-24: the plan under a bare ``` with the closer glued to the
+// answer rendered the whole reply as one code block. Same file as
+// tests/test_plan_fence.py::test_bare_leading_fence_shared_fixture.
+{
+  const fixture = JSON.parse(fs.readFileSync(path.join(
+    __dirname, "..", "fixtures", "plan_fence", "bare_leading_fence.json"), "utf8"));
+  assert("bare fence: fixture has cases", fixture.cases.length >= 5);
+  for (const c of fixture.cases) {
+    const got = api.splitPlanAndProse(c.input);
+    assert("bare fence plan: " + c.name, String(got.plan).trim() === c.plan.trim(),
+      JSON.stringify(got.plan));
+    assert("bare fence prose: " + c.name, String(got.prose).trim() === c.prose.trim(),
+      JSON.stringify(got.prose));
+  }
+  const shown = api.stripPlanFenceForDisplay(fixture.cases[0].input);
+  assert("bare fence: the answer, not a code block, is what renders",
+    shown.indexOf("```") < 0 && shown.indexOf("Here's the full inventory") === 0,
+    JSON.stringify(shown.slice(0, 80)));
+}
+
 process.exit(fail ? 1 : 0);
