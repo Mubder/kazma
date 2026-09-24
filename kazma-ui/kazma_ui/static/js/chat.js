@@ -3529,18 +3529,35 @@
     }
   }
 
+  /** Tools whose row may carry a file chip, and the verb it says. Every
+   *  entry is a WRITE_FS tool in the server's side-effect registry
+   *  (safety/side_effects.py; tests/test_file_chip.py checks the parity).
+   *  A tool not listed gets no chip. Guessing from the name and from any
+   *  slash in the result put "WROTE Asia/Kuwait" on x_list_scheduled -- a
+   *  read whose output held a timezone (2026-09-24). */
+  var _FILE_CHIP_OPS = {
+    file_write: 'wrote',
+    file_append: 'wrote',
+    file_apply_patch: 'patched',
+    file_apply_patch_set: 'patched',
+    file_delete: 'deleted',
+    generate_pdf: 'wrote',
+    generate_docx: 'wrote',
+    generate_xlsx: 'wrote'
+  };
+
+  function _fileChipOp(toolName) {
+    var n = String(toolName || '').toLowerCase().trim();
+    return Object.prototype.hasOwnProperty.call(_FILE_CHIP_OPS, n) ? _FILE_CHIP_OPS[n] : '';
+  }
+
   function _extractPathFromTool(toolName, detail) {
-    var n = String(toolName || '').toLowerCase();
-    if (n.indexOf('file_write') < 0 && n.indexOf('file_delete') < 0 &&
-        n.indexOf('write') < 0 && n.indexOf('delete') < 0) {
-      // still try path-like detail for shell redirects etc.
-      if (!detail || detail.indexOf('/') < 0 && detail.indexOf('\\') < 0) return '';
-    }
+    if (!_fileChipOp(toolName)) return '';
     var s = String(detail || '');
-    // JSON {"path": "..."}
-    var m = s.match(/"path"\s*:\s*"([^"]+)"/);
+    // JSON {"path": "..."} (arguments) first, then the file the result names.
+    var m = s.match(/"(?:path|file_path|output_path)"\s*:\s*"([^"]+)"/);
     if (m) return m[1];
-    m = s.match(/'path'\s*:\s*'([^']+)'/);
+    m = s.match(/'(?:path|file_path|output_path)'\s*:\s*'([^']+)'/);
     if (m) return m[1];
     // Bare path-ish token
     m = s.match(/(?:^|[\s"'])([A-Za-z]:\\[^\s"']+|\/[\w.\-\/]+|[\w.\-]+\/[\w.\-\/]+)/);
@@ -4043,8 +4060,7 @@
         fileChip =
           '<div class="file-diff-chip" title="' + escapeHtml(pathGuess) + '">' +
             '<span class="file-diff-op">' +
-              (state === 'failed' ? 'failed'
-                : (rawTitle.toLowerCase().indexOf('delete') >= 0 ? 'deleted' : 'wrote')) +
+              (state === 'failed' ? 'failed' : _fileChipOp(rawTitle)) +
             '</span> ' +
             '<code class="file-diff-path">' + escapeHtml(pathGuess) + '</code>' +
           '</div>';
