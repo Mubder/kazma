@@ -82,3 +82,19 @@ def test_a_swarm_task_with_nul_in_prompt_and_metadata_still_saves(tmp_path):
     assert loaded.prompt.startswith("summarise")
     assert loaded.metadata["note"].startswith("blob")
     store.close()
+
+
+def test_a_task_filter_containing_nul_is_a_query_not_an_error(tmp_path):
+    """The workers/metadata ``@> %s::jsonb`` filters are encoded the same way."""
+    from kazma_core.swarm.task import SwarmTask, TaskType
+    from kazma_core.swarm.task_store import TaskStore
+
+    store = TaskStore(db_path=str(tmp_path / "swarm_tasks.db"))
+    store.persist_task(SwarmTask(prompt="p", type=TaskType.DISPATCH, workers=["alpha"]))
+    rows, total = store.list_tasks(
+        worker="alpha" + NUL,
+        metadata_filter={"note": "x" + NUL, "tenant_id": "*"},
+        include_count=True,
+    )
+    assert rows == [] and total == 0
+    store.close()

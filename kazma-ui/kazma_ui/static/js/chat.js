@@ -1800,6 +1800,11 @@
         _stale[_si].removeAttribute('data-turn-id');
       }
     } catch (eStale) { /* ignore */ }
+    // The registry twin of the strip above. A previous turn that broke
+    // before the server named it is still bound under 'live'; left there,
+    // this turn's frames resolve to that bubble (2026-09-24).
+    var TVp = _turnView();
+    if (TVp && typeof TVp.releasePlaceholder === 'function') TVp.releasePlaceholder();
   }
 
   /**
