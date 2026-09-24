@@ -71,6 +71,27 @@
     return String(part.call_id || part.tool_call_id || '');
   }
 
+  /** A key-less "running" tool part that a later stamp of its tool
+   *  finished. Key-less parts key on name + state + text, so a running
+   *  stamp and its done stamp never merge; producers that dropped the call
+   *  id wrote exactly that pair and "Running..." stuck beside the finished
+   *  row (turn e99d06a0b33f, 2026-09-24). Keyed parts are never touched; a
+   *  key-less running part with no finished twin stays. Mirrors
+   *  turn_document.py `_stale_running_twin`. */
+  function staleRunningTwin(parts, i) {
+    var p = parts[i];
+    if (!p || toolCallIdOf(p) || String(p.state || '') !== 'running') return false;
+    var name = String(p.name || p.title || '');
+    for (var j = i + 1; j < parts.length; j++) {
+      var later = parts[j];
+      if (later && typeof later === 'object' &&
+          String(later.type || '') === 'tool' &&
+          String(later.name || later.title || '') === name &&
+          (later.state === 'done' || later.state === 'failed')) return true;
+    }
+    return false;
+  }
+
   /**
    * Activity rows for the workbench.
    *
@@ -111,6 +132,7 @@
           state: 'done',
         });
       } else if (kind === 'tool') {
+        if (staleRunningTwin(parts, i)) continue;
         row = {
           id: partKey(p),
           kind: 'tool',
@@ -323,8 +345,32 @@
     if (!newT) out.text = oldT;
     else if (!oldT || newT === oldT || newT.indexOf(oldT) !== -1) out.text = newT;
     else if (oldT.indexOf(newT) !== -1) out.text = oldT;
-    else out.text = oldT.replace(/\s+$/, '') + '\n\n' + newT;
+    else {
+      var cut = earlierCutOf(oldT, newT);
+      out.text = cut !== null ? oldT.slice(0, cut) + newT
+        : oldT.replace(/\s+$/, '') + '\n\n' + newT;
+    }
     return out;
+  }
+
+  /** Shortest overlap that counts as "the same narration, later". */
+  var REASONING_MIN_OVERLAP = 64;
+
+  /** Where `old` ends with an earlier cut of `nw`, or null. A durable
+   *  checkpoint stores the narration mid-stream and the full narration
+   *  arrives later; appending it printed the notes twice, the first copy
+   *  stopping mid-sentence (turn e99d06a0b33f, 2026-09-24). Mirrors
+   *  turn_document.py `_earlier_cut_of`; shared cases in
+   *  tests/fixtures/unified_turn/merge/reasoning_merge.json. */
+  function earlierCutOf(old, nw) {
+    if (nw.length < REASONING_MIN_OVERLAP) return null;
+    var probe = nw.slice(0, REASONING_MIN_OVERLAP);
+    var at = old.indexOf(probe);
+    while (at >= 0) {
+      if (nw.indexOf(old.slice(at)) === 0) return at;
+      at = old.indexOf(probe, at + 1);
+    }
+    return null;
   }
 
   /** Merge one gate's part with a newer stamp of the SAME gate.

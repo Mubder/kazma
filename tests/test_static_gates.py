@@ -1150,6 +1150,68 @@ def test_chat_save_gate_catches_a_bypass():
     assert not _session_write_violations(ast.parse(elsewhere), _SESSION_MANAGER)
 
 
+# ── 2f'''''''. Every tool activity row carries its call id (2026-09-24)
+#
+# A tool row or part without an id is keyed name + state + text
+# (turn_document._part_key), so a call's running and done stamps can never
+# merge: "Running..." stuck beside "Done" on every call two capturers wrote
+# (tests/test_tool_activity_identity.py). Any dict literal that builds a
+# tool row/part must carry "id" / "call_id", or a spread that adds one.
+
+_TOOL_ID_KEYS = {"id", "call_id", "tool_call_id"}
+
+
+def _tool_literals_without_identity(tree: ast.AST) -> list[int]:
+    lines: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Dict):
+            continue
+        is_tool = has_id = False
+        for key, value in zip(node.keys, node.values):
+            if key is None:
+                src = ast.unparse(value)
+                if "call_id" in src or "tool#" in src:
+                    has_id = True
+                continue
+            if isinstance(key, ast.Constant) and key.value in _TOOL_ID_KEYS:
+                has_id = True
+            if (
+                isinstance(key, ast.Constant)
+                and key.value in ("kind", "type")
+                and isinstance(value, ast.Constant)
+                and value.value == "tool"
+            ):
+                is_tool = True
+        if is_tool and not has_id:
+            lines.append(node.lineno)
+    return lines
+
+
+def test_tool_rows_carry_their_call_id():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{n}" for n in _tool_literals_without_identity(tree)]
+    assert not offenders, (
+        "A tool activity row/part with no call id: its running and done "
+        "stamps will never merge.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_tool_row_gate_catches_a_row_without_an_id():
+    """Negative control (section 28): the pre-fix sse_chat capture."""
+    bad = "rows.append({'kind': 'tool', 'title': 'x_post', 'state': 'running'})\n"
+    assert _tool_literals_without_identity(ast.parse(bad)) == [1]
+    keyed = "rows.append({'id': 'tool#' + cid, 'kind': 'tool', 'state': 'done'})\n"
+    spread = "rows.append({**({'id': 'tool#' + cid} if cid else {}), 'kind': 'tool'})\n"
+    part = "parts.append({'type': 'tool', 'name': 'x', 'call_id': cid})\n"
+    for ok in (keyed, spread, part):
+        assert not _tool_literals_without_identity(ast.parse(ok)), ok
+
+
 # ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)
 #
 # Archival nulls an episode's raw text. The one statement that did it used

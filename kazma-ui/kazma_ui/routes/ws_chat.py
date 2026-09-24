@@ -233,7 +233,12 @@ def _record_ws_activity(
                 or data.get("inputs")
                 or ""
             )
+            # Keyed by the call id, so this call's running and done rows are
+            # ONE part (turn_document._part_key). Without it the id fell back
+            # to name + state + text and "Running..." stuck beside "Done".
+            call_id = str(data.get("tool_call_id") or "")
             activity_log.append({
+                **({"id": "tool#" + call_id} if call_id else {}),
                 "kind": "tool",
                 "title": str(data.get("tool_name") or "tool"),
                 "detail": detail[:1000],

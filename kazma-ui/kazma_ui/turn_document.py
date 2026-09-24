@@ -238,8 +238,36 @@ def merge_reasoning_part(
     elif new in old:
         out["text"] = old
     else:
-        out["text"] = old.rstrip() + "\n\n" + new
+        cut = _earlier_cut_of(old, new)
+        out["text"] = old[:cut] + new if cut is not None else old.rstrip() + "\n\n" + new
     return out
+
+
+#: Shortest overlap that counts as "the same narration, later". Shorter
+#: overlaps are coincidences ("OK" ending one note and starting the next).
+REASONING_MIN_OVERLAP = 64
+
+
+def _earlier_cut_of(old: str, new: str) -> int | None:
+    """Where *old* ends with an earlier cut of *new*, or None.
+
+    A durable checkpoint stores the narration mid-stream; the full narration
+    arrives later. When the old text is "earlier notes + that cut", neither
+    contains the other, and appending printed the notes twice -- the first
+    copy stopping mid-sentence (turn e99d06a0b33f, 2026-09-24). The earliest
+    such position wins, so the whole stale tail is replaced. Mirrors
+    turn_document.js ``earlierCutOf``; shared cases in
+    tests/fixtures/unified_turn/merge/reasoning_merge.json.
+    """
+    if len(new) < REASONING_MIN_OVERLAP:
+        return None
+    probe = new[:REASONING_MIN_OVERLAP]
+    at = old.find(probe)
+    while at >= 0:
+        if new.startswith(old[at:]):
+            return at
+        at = old.find(probe, at + 1)
+    return None
 
 
 def merge_hitl_part(
@@ -311,6 +339,32 @@ def text_of(parts: list[dict[str, Any]] | None) -> str:
     return text
 
 
+def _stale_running_twin(parts: list[dict[str, Any]], i: int) -> bool:
+    """A key-less "running" tool part that a later stamp of its tool finished.
+
+    Key-less tool parts are keyed name + state + text (``_part_key``), so a
+    running stamp and its done stamp never merge. Producers that dropped the
+    call id wrote exactly that pair, and the workbench showed "Running..."
+    forever beside the finished row (turn e99d06a0b33f, 2026-09-24). The
+    producers carry the id now; this keeps rows already stored that way
+    honest. A keyed part is never touched -- its stamps merge by id -- and a
+    key-less running part with no finished twin stays, because nothing here
+    says it is over. Mirrors ``turn_document.js:staleRunningTwin``.
+    """
+    p = parts[i]
+    if tool_call_id_of(p) or str(p.get("state") or "") != "running":
+        return False
+    name = str(p.get("name") or p.get("title") or "")
+    for later in parts[i + 1:]:
+        if (
+            str(later.get("type") or "") == "tool"
+            and str(later.get("name") or later.get("title") or "") == name
+            and str(later.get("state") or "") in ("done", "failed")
+        ):
+            return True
+    return False
+
+
 def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Workbench rows the restored CoT accordion already knows how to render.
 
@@ -322,9 +376,8 @@ def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     ``turn_document.js:activityOf``.
     """
     rows: list[dict[str, Any]] = []
-    for p in parts or []:
-        if not isinstance(p, dict):
-            continue
+    parts = [p for p in (parts or []) if isinstance(p, dict)]
+    for i, p in enumerate(parts):
         kind = str(p.get("type") or "")
         if kind == "reasoning":
             detail = str(p.get("text") or "")
@@ -338,6 +391,8 @@ def activity_of(parts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
                 "state": "done",
             })
         elif kind == "tool":
+            if _stale_running_twin(parts, i):
+                continue
             rows.append({
                 "id": part_key_str(p),
                 "kind": "tool",
