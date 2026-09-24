@@ -1009,6 +1009,72 @@ def test_tls_gate_catches_a_default_client():
     assert _unshared_async_clients(ast.parse(good)) == []
 
 
+# ── 2f'''''. JSON bound for Postgres is encoded NUL-free (2026-09-24)
+#
+# Postgres rejects the NUL escape in json/jsonb. A tool result carrying one
+# made every later save of a chat fail ("A reply was produced but NOT saved
+# to the transcript"). pg_helpers.json_dumps strips it; a raw json.dumps in a
+# function that writes ::json / ::jsonb does not.
+
+_JSON_CAST = re.compile(r"::jsonb?\b", re.IGNORECASE)
+
+
+def _raw_json_dumps_beside_json_casts(tree: ast.AST) -> list[int]:
+    lines: list[int] = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        casts = any(
+            isinstance(n, ast.Constant) and isinstance(n.value, str) and _JSON_CAST.search(n.value)
+            for n in ast.walk(fn)
+        )
+        if not casts:
+            continue
+        for n in ast.walk(fn):
+            if (
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "dumps"
+                and isinstance(n.func.value, ast.Name)
+                and n.func.value.id in ("json", "_json")
+            ):
+                lines.append(n.lineno)
+    return sorted(set(lines))
+
+
+def test_postgres_json_is_encoded_without_nul():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += [f"{_rel(path)}:{line}" for line in _raw_json_dumps_beside_json_casts(tree)]
+    assert not offenders, (
+        "json.dumps next to a ::json/::jsonb write: a NUL in the data fails the "
+        "whole statement on Postgres.\nFix: `from kazma_core.db.pg_helpers import "
+        "json_dumps`.\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_postgres_json_gate_catches_a_raw_dumps():
+    """Negative control (§28): the pre-fix swarm task filter."""
+    bad = (
+        "def query(worker):\n"
+        "    sql = 'SELECT * FROM t WHERE workers @> %s::jsonb'\n"
+        "    return sql, [json.dumps([worker])]\n"
+    )
+    good = (
+        "def query(worker):\n"
+        "    sql = 'SELECT * FROM t WHERE workers @> %s::jsonb'\n"
+        "    return sql, [json_dumps([worker])]\n"
+        "def unrelated():\n"
+        "    return json.dumps({})\n"
+    )
+    assert _raw_json_dumps_beside_json_casts(ast.parse(bad)) == [3]
+    assert _raw_json_dumps_beside_json_casts(ast.parse(good)) == []
+
+
 # ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)
 #
 # Archival nulls an episode's raw text. The one statement that did it used

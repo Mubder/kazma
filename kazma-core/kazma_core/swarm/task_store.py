@@ -407,10 +407,10 @@ class TaskStore:
                     params.append(task_type)
                 if worker:
                     conditions.append("workers @> %s::jsonb")
-                    params.append(json.dumps([worker]))
+                    params.append(_pg_json([worker]))
                 if metadata_filter:
                     conditions.append("metadata @> %s::jsonb")
-                    params.append(json.dumps(metadata_filter))
+                    params.append(_pg_json(metadata_filter))
                 where_clause = ("WHERE " + " AND ".join(conditions)) if conditions else ""
                 total = 0
                 if include_count:

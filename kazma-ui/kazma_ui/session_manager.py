@@ -467,6 +467,8 @@ class SessionManager:
                 )
                 return
 
+            from kazma_core.db.pg_helpers import json_dumps
+
             assert self._conn is not None
             with self._conn:
                 self._conn.execute(
@@ -489,7 +491,8 @@ class SessionManager:
                     (
                         session.tenant_id,
                         session.session_id,
-                        json.dumps(session.messages, ensure_ascii=False),
+                        # Same encoder as Postgres: NUL-free on both backends.
+                        json_dumps(session.messages),
                         session.created_at,
                         session.total_cost,
                         session.total_tokens,

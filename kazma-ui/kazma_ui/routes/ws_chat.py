@@ -2492,8 +2492,10 @@ def create_ws_chat_router(
                             _resolution_time = datetime.now(UTC).isoformat()
                             # Postgres jsonb_set requires a *JSON* value, not a
                             # bare string token (error: Token "approved" is invalid).
-                            _hitl_state_json = json.dumps(_hitl_state)
-                            _resolution_json = json.dumps(_resolution_time)
+                            from kazma_core.db.pg_helpers import json_dumps as _pg_json
+
+                            _hitl_state_json = _pg_json(_hitl_state)
+                            _resolution_json = _pg_json(_resolution_time)
                             try:
                                 cp = getattr(graph_inst, "checkpointer", None)
                                 if cp is not None:
