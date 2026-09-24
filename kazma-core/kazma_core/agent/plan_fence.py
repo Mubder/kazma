@@ -24,6 +24,7 @@ import re
 from typing import Any
 
 __all__ = [
+    "AUTO_CONTINUE_PROMPT",
     "PLAN_EXECUTE_CONTINUE",
     "PLAN_EXECUTE_FINAL",
     "has_plan_fence",
@@ -34,6 +35,7 @@ __all__ = [
     "rewrite_terminal_assistant_message",
     "should_execute_plan_only_hop",
     "split_plan_and_prose",
+    "tools_ran_this_turn",
     "user_reply_text",
 ]
 
@@ -220,6 +222,39 @@ def pick_user_facing_text(*candidates: str | None) -> str:
     return normalize_plan_fence(scored[0][3])
 
 
+#: The supervisor's generic auto-continue prompt. A user-role message the
+#: graph writes, not the user -- see ``tools_ran_this_turn``.
+AUTO_CONTINUE_PROMPT = (
+    "Please proceed automatically with the remaining steps and complete the task."
+)
+
+
+def _is_graph_nudge(text: str) -> bool:
+    t = (text or "").strip()
+    return t.startswith("[KAZMA_") or t == AUTO_CONTINUE_PROMPT
+
+
+def tools_ran_this_turn(messages: list[dict[str, Any]] | None) -> bool:
+    """True when a tool result sits after the user's last real message.
+
+    The execute nudges are user-role messages too (``[KAZMA_...]`` and the
+    auto-continue prompt), and they are not where the turn began: counting
+    one as the boundary would make a turn that already acted look untouched.
+    """
+    for m in reversed(list(messages or [])):
+        if not isinstance(m, dict):
+            continue
+        role = m.get("role") or m.get("type")
+        if role in ("tool", "function"):
+            return True
+        if role in ("user", "human"):
+            content = m.get("content")
+            if isinstance(content, str) and _is_graph_nudge(content):
+                continue
+            return False
+    return False
+
+
 def should_execute_plan_only_hop(
     *,
     content: str,
@@ -229,13 +264,22 @@ def should_execute_plan_only_hop(
     plan_only_continues: int,
     iteration: int,
     max_iterations: int,
+    tools_ran: bool = False,
 ) -> bool:
-    """True when the model wrote a workbench plan and stopped without tools.
+    """True when the model wrote a workbench plan and stopped without acting.
 
     Plan mode (``plan_mode_kind=='plan'``) is inspect-only — do not execute.
     Two auto-continues per turn (``plan_only_continues``): providers that
     re-emit the identical plan after the first nudge used to end the turn
-    with the task silently dropped.
+    with the task silently dropped (2026-08-26).
+
+    A plan with nothing after it is a stall at any point. A plan WITH prose
+    is a stall only before anything was done (``tools_ran`` False: "Posting
+    now." with no tool call). After tools ran it is the report, often
+    restating the plan it just carried out. This tested ``has_plan_fence``
+    alone, and on 2026-09-24 it forced a finished X-post turn to continue
+    twice: the model re-checked X, then answered three times in different
+    words, the last one "Nothing is stopped — the task is already complete".
     """
     if has_tool_calls:
         return False
@@ -247,7 +291,9 @@ def should_execute_plan_only_hop(
         return False
     if int(iteration) + 1 >= max(1, int(max_iterations or 15)):
         return False
-    return has_plan_fence(content)
+    if is_plan_only(content):
+        return True
+    return has_plan_fence(content) and not tools_ran
 
 
 def rewrite_terminal_assistant_message(
