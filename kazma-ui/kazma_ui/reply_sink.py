@@ -541,9 +541,14 @@ def upsert_reply(
             alert(
                 "reply.persist_failed",
                 "A reply was produced but NOT saved to the transcript.",
+                # The old text ("still in the checkpoint") read as safe to
+                # restart. It is not: the checkpoint copy is recovered only
+                # while this is the chat's LAST turn, and a restart on that
+                # advice lost a finished answer on 2026-09-24.
                 f"session={str(session_id)[:12]} turn={str(turn_id)[:12]} "
-                f"chars={len(text)}. The answer is still in the checkpoint; "
-                f"a reload may show it missing.",
+                f"chars={len(text)}. It may exist only in memory: do not "
+                f"restart Kazma until this is fixed. The checkpoint copy is "
+                f"recovered only while this is the chat's last turn.",
                 severity="error",
             )
         except Exception:
