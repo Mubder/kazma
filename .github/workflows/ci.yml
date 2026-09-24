@@ -441,7 +441,8 @@ jobs:
           python -m pytest -q --timeout=300 \
             tests/e2e/test_delivery_v2_e2e.py \
             tests/e2e/test_e2e_playwright.py \
-            tests/e2e/test_memory_playwright.py
+            tests/e2e/test_memory_playwright.py \
+            tests/e2e/test_step_detail_clamp.py
         env:
           KAZMA_DB_BACKEND: sqlite
 

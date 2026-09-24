@@ -157,24 +157,36 @@ class TestAStepRowStaysOneLine:
         assert "var brk = t.indexOf(" in chat
 
     def test_the_one_line_clamp_exists_and_is_tighter_than_the_default(self):
+        """One line for a gist row, three by default -- counted in LINES.
+
+        This used to read ``max-height: Nem`` off the rules and require the
+        gist's to be <= 2.0em. That locked in the bug: 1.5em on a padded
+        border-box row left 0.06 of a line for the text, and the rows drew
+        as half-cut strips (reported 2026-09-24). What the reader sees is
+        measured in a browser now (tests/e2e/test_step_detail_clamp.py);
+        this keeps the rules themselves honest.
+        """
         import re
 
         css = self._read("kazma-ui", "kazma_ui", "static", "css", "kazma.css")
 
-        def max_height(selector: str) -> float:
-            start = css.index(selector + " {")
-            block = css[start : css.index("}", start)]
-            found = re.search(r"max-height:\s*([\d.]+)em", block)
-            assert found, f"no em max-height on {selector}"
-            return float(found.group(1))
+        def line_clamp(selector: str) -> int:
+            found = [
+                int(v)
+                for block in re.findall(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+                for v in re.findall(r"-webkit-line-clamp:\s*(\d+)", block)
+            ]
+            assert found, f"no line clamp on {selector}"
+            return found[-1]
 
-        gist = max_height(".agent-progress-step .step-detail.is-clamped.has-gist")
-        default = max_height(".agent-progress-step .step-detail")
-        assert gist < default, (
-            f"the gist clamp ({gist}em) is not tighter than the default "
-            f"({default}em), so rows are still multi-line"
+        gist = line_clamp(
+            ".agent-progress-step .step-detail.is-clamped.has-gist > .step-detail-text"
         )
-        assert gist <= 2.0, "a collapsed row should be one line"
+        default = line_clamp(
+            ".agent-progress-step .step-detail.is-clamped > .step-detail-text"
+        )
+        assert gist == 1, "a collapsed gist row is one whole line"
+        assert default == 3 and gist < default
 
     def test_the_raw_value_is_still_reachable(self):
         """One line collapsed, everything on expand. The toggle only swaps
