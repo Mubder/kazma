@@ -4290,12 +4290,23 @@
     }
   }
 
-  /** The ONE place a disclosure preference is written: a reader gesture. */
+  /** The ONE place a disclosure preference is written, and only from a
+   *  reader gesture (AGENTS.md section 31). Callers: _toggleActivityFold
+   *  (the thoughts fold) and a decided approval card's header click.
+   *  tests/test_turn_ledger_abc.py counts the setExpanded call sites.
+   *  Returns false when there is no store (blocked site data). */
+  function _writeFoldPreference(turnId, name, open) {
+    var prefs = _turnPrefs();
+    if (!prefs) return false;
+    prefs.setExpanded(String(turnId || ''), name, !!open);
+    return true;
+  }
+
   function _toggleActivityFold(panel, turnId) {
     var prefs = _turnPrefs();
     var open = !panel.classList.contains('is-collapsed');
     var next = !open;
-    if (prefs) prefs.setExpanded(String(turnId || ''), 'activity', next);
+    _writeFoldPreference(turnId, 'activity', next);
     _applyActivityFold(panel, turnId);
     if (!prefs) {
       // No store (blocked site data): honour the click for this paint at
@@ -5343,8 +5354,7 @@
         var next = !_hitlCardOpen(card);
         card.__hitlOpen = next;
         var key = _hitlFoldKey(card);
-        var prefs = _turnPrefs();
-        if (key && prefs) prefs.setExpanded('', 'hitl:' + key, next);
+        if (key) _writeFoldPreference('', 'hitl:' + key, next);
         _syncHitlFold(card, header);
         e.stopPropagation();
       });

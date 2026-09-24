@@ -37,16 +37,19 @@ MemStorage.prototype.getItem = function (k) {
 };
 MemStorage.prototype.setItem = function (k, v) { this.map[k] = String(v); };
 
-// The fold functions, exactly as shipped.
-const src = fs.readFileSync(path.join(JS, "chat.js"), "utf8");
+// The fold functions, exactly as shipped -- and the ONE preference writer
+// they call (_writeFoldPreference, shared with the thoughts fold).
+const src = fs.readFileSync(path.join(JS, "chat.js"), "utf8").replace(/\r\n/g, "\n");
 const start = src.indexOf("  function _hitlFoldKey(");
 const end = src.indexOf("  function _revealHitlCard(");
-ok("fold functions are extractable", start > 0 && end > start);
+const wStart = src.indexOf("  function _writeFoldPreference(");
+const wEnd = src.indexOf("  function _toggleActivityFold(", wStart);
+ok("fold functions are extractable", start > 0 && end > start && wStart > 0 && wEnd > wStart);
 
 function load(prefs, doc) {
   // eslint-disable-next-line no-new-func
   return new Function("_turnPrefs", "document",
-    src.slice(start, end) +
+    src.slice(wStart, wEnd) + src.slice(start, end) +
     "\nreturn { collapse: _collapseClaimedHitlCard, open: _hitlCardOpen };"
   )(() => prefs, doc);
 }
