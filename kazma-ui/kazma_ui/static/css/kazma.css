@@ -2217,6 +2217,7 @@ tbody tr:last-child td {
   white-space: pre-wrap;
   font-size: 0.86rem;
   line-height: 1.45;
+  --sd-line: 1.45em; /* keep in step with line-height: the clamps count it */
 }
 /* A RENDERED thought. `pre-wrap` above is for escaped source; markdown
    already emits <p>/<pre>, so keeping it doubles every blank line. */
@@ -2227,8 +2228,10 @@ tbody tr:last-child td {
 }
 /* A row in a collapsed fold, not an article: no outer margins, code
    scrolls rather than widening the panel, headings do not shout. */
-.step-detail-md > *:first-child { margin-top: 0; }
-.step-detail-md > *:last-child { margin-bottom: 0; }
+.step-detail-md > *:first-child,
+.step-detail-md > .step-detail-text > *:first-child { margin-top: 0; }
+.step-detail-md > *:last-child,
+.step-detail-md > .step-detail-text > *:last-child { margin-bottom: 0; }
 .step-detail-md p { margin: 0 0 0.4em; }
 .step-detail-md ul,
 .step-detail-md ol { margin: 0 0 0.4em; padding-inline-start: 1.25em; }
@@ -2781,19 +2784,21 @@ details.kazma-working > summary {
   unicode-bidi: isolate;
   direction: ltr;
 }
-/* A gist-led detail collapses to its first line only. Three lines of raw
-   JSON per tool row is what pushed the reply itself below the fold. */
-.agent-progress-step .step-detail.is-clamped.has-gist {
-  max-height: 1.5em;
-}
 .agent-progress-step .step-detail {
+  /* One line of this box, and its vertical chrome (padding + border).
+     Every height below is whole lines PLUS the chrome: under the global
+     box-sizing: border-box, a max-height in em alone is spent on padding
+     and border first. See the clamp rules further down. */
+  --sd-line: 1.5em;
+  --sd-chrome: calc(2 * 6px + 2px);
+  line-height: 1.5;
   margin-top: 4px;
   font-size: 0.72rem;
   color: var(--text-muted);
   font-family: var(--font-mono, ui-monospace, monospace);
   white-space: pre-wrap;
   word-break: break-word;
-  max-height: 3.6em;
+  max-height: calc(3 * var(--sd-line) + var(--sd-chrome));
   overflow: hidden;
   padding: 6px 8px;
   border-radius: 6px;
@@ -2858,9 +2863,46 @@ details.kazma-working > summary {
   background: var(--danger-subtle);
 }
 
-/* Long tool results clamp with a "show more" toggle (shared builder
-   renders .is-clamped + button when detail exceeds the JS threshold). */
-.agent-progress-step .step-detail.is-clamped { max-height: 3.6em; overflow: hidden; }
+/* Long details clamp with a "show more" toggle (shared builder renders
+   .is-clamped + button when detail exceeds the JS threshold).
+
+   A clamped detail shows WHOLE lines: three, or one for a gist-led tool
+   row (three lines of raw JSON per row is what pushed the reply below the
+   fold). It used to be max-height: 3.6em / 1.5em, which border-box spent
+   on 14px of padding and border first: measured 1.36 and 0.06 visible
+   lines -- the half-drawn "List files · Done · Show more" rows, text
+   unreadable (reported 2026-09-24). line-clamp ends the box on a line
+   boundary whatever the padding, wrapping or paragraph margins; the
+   max-height is the fallback.
+
+   The clamp sits on the INNER .step-detail-text, which has no padding.
+   Overflow is clipped at the padding edge, so clamping the padded box let
+   the top of the next line show through its bottom padding.
+   tests/e2e/test_step_detail_clamp.py measures this in a real browser. */
+.agent-progress-step .step-detail.is-clamped {
+  max-height: none;
+  overflow: visible;
+}
+.agent-progress-step .step-detail.is-clamped > .step-detail-text {
+  max-height: calc(3 * var(--sd-line));
+  overflow: hidden;
+}
+.agent-progress-step .step-detail.is-clamped.has-gist > .step-detail-text {
+  max-height: var(--sd-line);
+}
+@supports (-webkit-line-clamp: 1) {
+  .agent-progress-step .step-detail.is-clamped > .step-detail-text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    /* Paragraph margins in a rendered thought make three lines taller than
+       3 * --sd-line; the clamp, not the height, decides here. */
+    max-height: none;
+  }
+  .agent-progress-step .step-detail.is-clamped.has-gist > .step-detail-text {
+    -webkit-line-clamp: 1;
+  }
+}
 .step-show-more {
   margin-top: 2px;
   background: none;

@@ -180,9 +180,13 @@ def persist_reply(
             alert(
                 "reply.persist_failed",
                 "A reply was produced but NOT saved to the transcript.",
+                # Same wording as reply_sink: the old "still in the
+                # checkpoint" read as safe to restart, and it is not.
                 f"session={str(session_id)[:12]} turn={str(reply_turn_id)[:12]} "
-                f"chars={len(str(content or ''))}. The answer is still in the "
-                f"checkpoint; a reload may show it missing.",
+                f"chars={len(str(content or ''))}. It may exist only in "
+                f"memory: do not restart Kazma until this is fixed. The "
+                f"checkpoint copy is recovered only while this is the chat's "
+                f"last turn.",
                 severity="error",
             )
         except Exception:

@@ -3942,7 +3942,7 @@
       var openIt = forceExpanded || t.length <= STEP_DETAIL_CLAMP_AT;
       return '<div class="step-detail step-detail-md' +
         (openIt ? ' is-expanded' : ' is-clamped') + '">' +
-        KS.markdown(_scrubDsml(t)) + '</div>' +
+        '<div class="step-detail-text">' + KS.markdown(_scrubDsml(t)) + '</div></div>' +
         (openIt ? '' :
           '<button type="button" class="step-show-more" data-open="0">' +
           escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>');
@@ -3957,11 +3957,16 @@
     // to read an answer that used to arrive in view.
     var brk = t.indexOf('\n');
     var hasGist = brk > 0 && brk <= 120;
+    // The text sits in an inner element with no padding, and THAT is what
+    // clamps: overflow is clipped at the padding edge, so clamping the
+    // padded box itself let the next line show through the bottom padding
+    // (2026-09-24, the half-drawn "Show more" rows).
     if (forceExpanded || (!hasGist && t.length <= STEP_DETAIL_CLAMP_AT)) {
-      return '<div class="step-detail is-expanded">' + escapeHtml(t) + '</div>';
+      return '<div class="step-detail is-expanded"><div class="step-detail-text">' +
+        escapeHtml(t) + '</div></div>';
     }
     return '<div class="step-detail is-clamped' + (hasGist ? ' has-gist' : '') +
-      '">' + escapeHtml(t) + '</div>' +
+      '"><div class="step-detail-text">' + escapeHtml(t) + '</div></div>' +
       '<button type="button" class="step-show-more" data-open="0">' +
       escapeHtml(ti('show_more', 'Show more \u25BE')) + '</button>';
   }
