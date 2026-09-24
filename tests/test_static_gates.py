@@ -1075,6 +1075,81 @@ def test_postgres_json_gate_catches_a_raw_dumps():
     assert _raw_json_dumps_beside_json_casts(ast.parse(good)) == []
 
 
+# ── 2f''''''. Every chat save can fall back to the spool (2026-09-24)
+#
+# A save the database refused used to live only in memory; a restart then
+# discarded a finished answer. SessionManager._write_durably spools what the
+# primary store refuses, so it is the only way in: _upsert_db is called by
+# it and by the boot drain, and nothing else writes kazma_chat_sessions.
+
+_SESSION_MANAGER = "kazma-ui/kazma_ui/session_manager.py"
+_SESSION_PRIMARY_WRITERS = {"_write_durably", "_drain_spool"}
+_SESSION_WRITE_SQL = re.compile(
+    r"(INSERT(\s+OR\s+\w+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+kazma_chat_sessions\b",
+    re.IGNORECASE,
+)
+
+
+def _session_write_violations(tree: ast.AST, rel: str) -> list[str]:
+    out: list[str] = []
+
+    def visit(node: ast.AST, fn: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            name = fn
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                name = child.name
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == "_upsert_db"
+                and (rel != _SESSION_MANAGER or fn not in _SESSION_PRIMARY_WRITERS)
+            ):
+                out.append(f"{rel}:{child.lineno} {fn or '<module>'}() calls _upsert_db")
+            if (
+                rel != _SESSION_MANAGER
+                and isinstance(child, ast.Constant)
+                and isinstance(child.value, str)
+                and _SESSION_WRITE_SQL.search(child.value)
+            ):
+                out.append(f"{rel}:{child.lineno} writes kazma_chat_sessions directly")
+            visit(child, name)
+
+    visit(tree, "")
+    return out
+
+
+def test_chat_saves_go_through_the_spool():
+    offenders: list[str] = []
+    for path in _product_files():
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        offenders += _session_write_violations(tree, _rel(path))
+    assert not offenders, (
+        "A chat-session write that bypasses SessionManager._write_durably: if "
+        "the database refuses it, the reply lives only in memory and a restart "
+        "loses it.\nFix: call put() / _write_durably().\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_chat_save_gate_catches_a_bypass():
+    """Negative control (§28): the pre-spool put(), and a second writer."""
+    bypass = (
+        "class SessionManager:\n"
+        "    def put(self, s):\n"
+        "        self._upsert_db(s)\n"
+        "    def _write_durably(self, s):\n"
+        "        self._upsert_db(s)\n"
+    )
+    assert _session_write_violations(ast.parse(bypass), _SESSION_MANAGER) == [
+        f"{_SESSION_MANAGER}:3 put() calls _upsert_db"
+    ]
+    elsewhere = "SQL = 'INSERT INTO kazma_chat_sessions (session_id) VALUES (%s)'\n"
+    assert _session_write_violations(ast.parse(elsewhere), "kazma-ui/kazma_ui/x.py")
+    assert not _session_write_violations(ast.parse(elsewhere), _SESSION_MANAGER)
+
+
 # ── 2f''. One statement drops episode text, and it keeps a stub (2026-09-23)
 #
 # Archival nulls an episode's raw text. The one statement that did it used

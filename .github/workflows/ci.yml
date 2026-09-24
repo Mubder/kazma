@@ -215,6 +215,11 @@ jobs:
         # postgres:16 container: it passes on the fix and fails on the prior
         # code with the live error (UntranslatableCharacter: \u0000 cannot be
         # converted to text) -- a NUL in tool output stopped a chat saving.
+        #
+        # test_session_spool.py (2026-09-24), same throwaway container: a save
+        # Postgres genuinely refuses is spooled, survives a restart and is
+        # written through once the database accepts it (9 passed there; its
+        # genuine-refusal test skips on SQLite, so this job is where it runs).
         run: |
           python -m pytest -q --timeout=300 \
             tests/test_pg_backup.py \
@@ -234,6 +239,7 @@ jobs:
             tests/test_memory_mirror.py \
             tests/test_task_store_workspace.py \
             tests/test_pg_nul_safe.py \
+            tests/test_session_spool.py \
             tests/test_audit_2026_09_17_regressions.py
         env:
           KAZMA_DB_BACKEND: postgres
