@@ -47,6 +47,7 @@ _PATH_REWRITE_TARGETS: list[tuple[str, list[tuple[str, str]]]] = [
     ("snapshots.db", [("snapshots", "state_json")]),
     # chat history — tool results / file refs inside the messages JSON.
     ("chat_sessions.db", [("sessions", "messages")]),
+    ("chat_sessions_spool.db", [("spool", "payload")]),
     # memory_state.db — entities/episodes/beliefs may cite source files.
     ("memory_state.db", [
         ("entities", "metadata_json"),
@@ -89,6 +90,7 @@ _BUNDLE_DB_TO_DEST_RESOLVER = {
     "knowledge_graph.db": "knowledge_graph_db",
     "vault.db": "vault_db_path",
     "chat_sessions.db": None,  # plain data_dir join
+    "chat_sessions_spool.db": None,
     "cron.db": None,
     "sessions.db": None,
     "sandbox_emails.db": None,

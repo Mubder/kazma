@@ -21,6 +21,7 @@ import sys
 import threading
 import uuid
 import contextlib
+import dataclasses
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -199,10 +200,29 @@ class SessionManager:
     both the in-memory cache and SQLite database.
     """
 
-    def __init__(self, max_sessions: int = MAX_SESSIONS, db_path: str = ":memory:") -> None:
+    def __init__(
+        self,
+        max_sessions: int = MAX_SESSIONS,
+        db_path: str = ":memory:",
+        spool_path: str | None = None,
+    ) -> None:
         self._max_sessions = max_sessions
         self._sessions: OrderedDict[str, ChatSession] = OrderedDict()
         self.db_path = db_path
+        # Saves the primary store refuses land here instead of living only
+        # in memory (see session_spool.py). Opened before the first load so
+        # every read overlays it.
+        from kazma_ui.session_spool import SessionSpool, spool_path_for
+
+        self._spool: SessionSpool | None
+        try:
+            self._spool = SessionSpool(spool_path or spool_path_for(db_path))
+        except (sqlite3.Error, OSError):
+            logger.exception(
+                "[SessionManager] session spool unavailable; a refused save "
+                "will live only in memory until it succeeds"
+            )
+            self._spool = None
         # Guard OrderedDict + sqlite across threadpool/async (audit M15)
         self._lock = threading.RLock()
         # T4: per-session mutation locks so read-modify-write sequences from
@@ -236,8 +256,8 @@ class SessionManager:
             try:
                 self._conn.execute("PRAGMA synchronous=NORMAL")
                 self._conn.execute("PRAGMA wal_autocheckpoint=100")
-            except Exception:
-                pass
+            except sqlite3.Error:
+                logger.debug("[SessionManager] pragma tuning skipped", exc_info=True)
 
         # Create schemas and load sessions
         with self._lock:
@@ -245,6 +265,7 @@ class SessionManager:
                 self._create_tables()
             # Cap warm cache: load newest N only (full history still on disk)
             self._load_all_from_db(limit=min(max_sessions, 2000))
+            self._drain_spool()
         logger.info(
             "[SessionManager] Loaded %d sessions from %s",
             len(self._sessions),
@@ -305,7 +326,7 @@ class SessionManager:
                 messages = json.loads(messages_raw) if messages_raw else []
             except Exception:
                 messages = []
-        return ChatSession(
+        session = ChatSession(
             session_id=str(session_id),
             messages=messages,
             created_at=created_at or "",
@@ -318,6 +339,160 @@ class SessionManager:
             archived=bool(archived),
             pinned=bool(pinned),
         )
+        # Every read of the primary store passes through here, so this is
+        # the one place a spooled save is laid over what the primary has.
+        return self._with_spool(session)
+
+    # ── Spool (saves the primary store refused) ─────────────────────
+
+    @staticmethod
+    def _session_from_payload(payload: dict[str, Any]) -> ChatSession:
+        names = {f.name for f in dataclasses.fields(ChatSession)}
+        kwargs = {k: v for k, v in payload.items() if k in names}
+        if not isinstance(kwargs.get("messages"), list):
+            kwargs["messages"] = []
+        return ChatSession(**kwargs)
+
+    def _with_spool(self, session: ChatSession) -> ChatSession:
+        spool = self._spool
+        tenant_id = session.tenant_id or "default"
+        if spool is None or not spool.has(tenant_id, session.session_id):
+            return session
+        spooled = spool.get(tenant_id, session.session_id)
+        if spooled is None:
+            return session
+        from kazma_ui.session_spool import merge_spooled
+
+        return self._session_from_payload(
+            merge_spooled(dataclasses.asdict(session), spooled)
+        )
+
+    def _spooled_only(self, tenant_id: str, session_id: str) -> ChatSession | None:
+        """A session whose every save was refused: it exists only in the spool."""
+        spool = self._spool
+        if spool is None:
+            return None
+        payload = spool.get(tenant_id, session_id)
+        return self._session_from_payload(payload) if payload else None
+
+    def _add_spooled_only(self, dest: dict[str, ChatSession]) -> None:
+        spool = self._spool
+        if spool is None:
+            return
+        for tenant_id, session_id in spool.keys():
+            key = f"{tenant_id}:{session_id}"
+            if key not in dest:
+                # Through the merging load: the session may have a primary
+                # row that fell outside this load's LIMIT.
+                loaded = self._load_one_from_db(tenant_id, session_id)
+                if loaded is not None:
+                    dest[key] = loaded
+
+    def _spool_discard(self, tenant_id: str, session_id: str) -> None:
+        if self._spool is not None:
+            try:
+                self._spool.discard(tenant_id, session_id)
+            except sqlite3.Error:
+                logger.warning(
+                    "[SessionManager] spool discard failed for %s:%s",
+                    tenant_id,
+                    session_id,
+                    exc_info=True,
+                )
+
+    def _write_durably(self, session: ChatSession) -> None:
+        """Write the primary store; if it refuses, the spool keeps the session.
+
+        Raises only when BOTH refuse. The primary write stays the one path
+        (``_upsert_db``); nothing else may call it, which
+        ``test_session_saves_go_through_the_spool`` enforces.
+        """
+        tenant_id = session.tenant_id or "default"
+        try:
+            self._upsert_db(session)
+        except Exception as exc:
+            if not self._spool_session(session, exc):
+                raise
+            return
+        # The session just written carried any spooled rows (every load
+        # overlays the spool), so the entry is now redundant.
+        spool = self._spool
+        if spool is not None and spool.has(tenant_id, session.session_id):
+            self._spool_discard(tenant_id, session.session_id)
+            logger.info(
+                "[SessionManager] spooled session %s written to the primary store",
+                session.session_id,
+            )
+
+    def _spool_session(self, session: ChatSession, exc: BaseException) -> bool:
+        spool = self._spool
+        if spool is None:
+            return False
+        tenant_id = session.tenant_id or "default"
+        try:
+            spool.save(
+                tenant_id,
+                session.session_id,
+                dataclasses.asdict(session),
+                error=f"{type(exc).__name__}: {exc}",
+            )
+        except (sqlite3.Error, OSError, ValueError):
+            logger.exception(
+                "[SessionManager] spool ALSO refused session=%s; the save is lost "
+                "if this process stops before a retry succeeds",
+                session.session_id,
+            )
+            return False
+        logger.error(
+            "[SessionManager] primary store refused session=%s (%s: %s); kept in "
+            "the local spool %s",
+            session.session_id,
+            type(exc).__name__,
+            exc,
+            spool.path,
+        )
+        # ops_alerts.alert never raises (AGENTS.md §33).
+        from kazma_core.observability.ops_alerts import alert
+
+        alert(
+            "session.persist_spooled",
+            "The database refused a chat save; it is kept in the local spool.",
+            f"session={session.session_id[:12]} error={type(exc).__name__}. "
+            "Nothing is lost: the chat shows it on reload and it is written "
+            "to the database once the database accepts it.",
+            severity="warning",
+        )
+        return True
+
+    def _drain_spool(self) -> None:
+        """Retry every spooled session against the primary store (boot)."""
+        spool = self._spool
+        if spool is None:
+            return
+        for tenant_id, session_id in sorted(spool.keys()):
+            try:
+                session = self._load_one_from_db(tenant_id, session_id)
+                if session is None:
+                    continue
+                self._upsert_db(session)
+            except Exception as exc:
+                logger.warning(
+                    "[SessionManager] spooled session %s:%s still refused (%s: %s); "
+                    "it stays in the spool and is served from there",
+                    tenant_id,
+                    session_id,
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+            self._spool_discard(tenant_id, session_id)
+            key = f"{tenant_id}:{session_id}"
+            self._sessions[key] = session
+            logger.info(
+                "[SessionManager] spooled session %s:%s written to the primary store",
+                tenant_id,
+                session_id,
+            )
 
     def _load_all_from_db(
         self, limit: int | None = None, target: dict[str, ChatSession] | None = None
@@ -337,6 +512,15 @@ class SessionManager:
         "A reply was produced but NOT saved to the transcript."
         """
         dest = self._sessions if target is None else target
+        try:
+            self._load_all_from_primary(limit=limit, dest=dest)
+        finally:
+            # A session whose every save was refused has no primary row at all.
+            self._add_spooled_only(dest)
+
+    def _load_all_from_primary(
+        self, *, limit: int | None, dest: dict[str, ChatSession]
+    ) -> None:
         if self._pg:
             from kazma_core.db.pg_helpers import get_pool
 
@@ -424,6 +608,7 @@ class SessionManager:
                         "DELETE FROM sessions WHERE tenant_id = ? AND session_id = ?",
                         (tenant_id, session_id),
                     )
+            self._spool_discard(tenant_id, session_id)
 
     # ── DB helpers ──────────────────────────────────────────────────
 
@@ -505,8 +690,8 @@ class SessionManager:
                 )
             try:
                 self._conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-            except Exception:
-                pass
+            except sqlite3.Error:
+                logger.debug("[SessionManager] passive checkpoint skipped", exc_info=True)
         except Exception:
             logger.exception(
                 "[SessionManager] upsert failed session=%s path=%s",
@@ -518,7 +703,14 @@ class SessionManager:
     # ── core CRUD ──────────────────────────────────────────────────
 
     def _load_one_from_db(self, tenant_id: str, session_id: str) -> ChatSession | None:
-        """Load a single session row (cache miss path)."""
+        """Load a single session (cache miss path): primary row, else the spool."""
+        loaded = self._load_one_from_primary(tenant_id, session_id)
+        if loaded is not None:
+            return loaded
+        return self._spooled_only(tenant_id, session_id)
+
+    def _load_one_from_primary(self, tenant_id: str, session_id: str) -> ChatSession | None:
+        """Load a single primary-store row (overlaid by ``_session_from_row``)."""
         try:
             if self._pg:
                 from kazma_core.db.pg_helpers import get_pool
@@ -605,9 +797,23 @@ class SessionManager:
             session = ChatSession(session_id=sid, tenant_id=tenant_id)
             self._sessions[key] = session
             if durable:
-                self._upsert_db(session)
+                self._write_durably(session)
             self._evict_if_needed(tenant_id)
             return session
+
+    def _spooled_by_thread(self, tenant_id: str, thread_id: str) -> ChatSession | None:
+        """A spool-only session found by its thread (every save was refused)."""
+        spool = self._spool
+        if spool is None:
+            return None
+        for t, sid in spool.keys():
+            if t != tenant_id:
+                continue
+            loaded = self._spooled_only(t, sid)
+            if loaded is not None and loaded.thread_id == thread_id:
+                self._sessions[f"{t}:{sid}"] = loaded
+                return loaded
+        return None
 
     def get_by_thread_id(self, thread_id: str) -> ChatSession | None:
         """Return the current tenant's session associated with ``thread_id``."""
@@ -631,7 +837,7 @@ class SessionManager:
                         (tenant_id, thread_id),
                     )
                     if not row:
-                        return None
+                        return self._spooled_by_thread(tenant_id, thread_id)
                     loaded = self._session_from_row(
                         row["tenant_id"], row["session_id"], row["messages"],
                         row["created_at"], row["total_cost"], row["total_tokens"],
@@ -647,7 +853,7 @@ class SessionManager:
                         (tenant_id, thread_id),
                     ).fetchone()
                     if not row:
-                        return None
+                        return self._spooled_by_thread(tenant_id, thread_id)
                     loaded = self._session_from_row(*row)
             except Exception:
                 logger.debug(
@@ -675,7 +881,7 @@ class SessionManager:
             self._sessions[key] = session
             # LRU: mark as most-recently-used.
             self._sessions.move_to_end(key)
-            self._upsert_db(session)
+            self._write_durably(session)
             self._evict_if_needed(tenant_id)
 
     def _refresh_from_db(self, session_id: str) -> None:
@@ -770,6 +976,8 @@ class SessionManager:
                         "DELETE FROM sessions WHERE tenant_id = ? AND session_id = ?",
                         (tenant_id, session_id),
                     )
+            # Otherwise the next load would bring the deleted chat back.
+            self._spool_discard(tenant_id, session_id)
 
     def _hydrate_from_checkpoints_db(self) -> None:
         """Auto-discover platform gateway sessions (gw-*) from checkpoints (Postgres or SQLite)."""
@@ -821,7 +1029,7 @@ class SessionManager:
                 )
                 key = f"default:{thread_id}"
                 self._sessions[key] = sess
-                self._upsert_db(sess)
+                self._write_durably(sess)
         except Exception as exc:
             logger.debug("[SessionManager] _hydrate_from_checkpoints_db skipped: %s", exc)
 
@@ -970,7 +1178,7 @@ class SessionManager:
             if session is None:
                 return None
             session.title = title.strip()[:120]
-            self._upsert_db(session)
+            self._write_durably(session)
             return session
 
     def set_archived(self, session_id: str, archived: bool) -> ChatSession | None:
@@ -980,7 +1188,7 @@ class SessionManager:
             if session is None:
                 return None
             session.archived = archived
-            self._upsert_db(session)
+            self._write_durably(session)
             return session
 
     def set_pinned(self, session_id: str, pinned: bool) -> ChatSession | None:
@@ -990,7 +1198,7 @@ class SessionManager:
             if session is None:
                 return None
             session.pinned = pinned
-            self._upsert_db(session)
+            self._write_durably(session)
             return session
 
     # ── convenience helpers used by SSE transport ──────────────────
@@ -1024,7 +1232,7 @@ class SessionManager:
 
             # LRU: mark as most-recently-used.
             self._sessions.move_to_end(key)
-            self._upsert_db(session)
+            self._write_durably(session)
             self._evict_if_needed(tenant_id)
             return session
 
@@ -1052,10 +1260,17 @@ class SessionManager:
         ]
         for key in keys_to_remove:
             self._sessions.pop(key, None)
+        if self._spool is not None:
+            for t, sid in self._spool.keys():
+                if t == tenant_id:
+                    self._spool_discard(t, sid)
 
     def close(self) -> None:
         """Explicitly close the database connection and flush WAL checkpoint."""
         with self._lock:
+            if self._spool is not None:
+                self._spool.close()
+                self._spool = None
             if self._conn is not None:
                 try:
                     self._conn.execute("PRAGMA wal_checkpoint(FULL)")
@@ -1121,6 +1336,11 @@ def reset_session_manager() -> SessionManager:
             _session_manager._conn.close()
         except Exception as exc:
             logging.getLogger(__name__).debug("session manager close: %s", exc)
+    if _session_manager is not None and getattr(_session_manager, "_spool", None) is not None:
+        # Open, the file cannot be removed on Windows and the next instance
+        # would inherit this one's spooled sessions.
+        _session_manager._spool.close()
+        _session_manager._spool = None
 
     try:
         from kazma_core.paths import data_dir
@@ -1151,12 +1371,15 @@ def reset_session_manager() -> SessionManager:
         except Exception:
             _test_dir = "kazma-data"
         db_path = os.path.join(_test_dir, f"chat_sessions_test_{os.getpid()}.db")
-        if os.path.exists(db_path):
-            try:
-                os.remove(db_path)
-            except Exception as exc:
-                logging.getLogger(__name__).debug("test session db remove: %s", exc)
-        _register_test_db_cleanup(db_path)
+        from kazma_ui.session_spool import spool_path_for
+
+        for _path in (db_path, spool_path_for(db_path)):
+            if os.path.exists(_path):
+                try:
+                    os.remove(_path)
+                except OSError as exc:
+                    logging.getLogger(__name__).debug("test session db remove: %s", exc)
+            _register_test_db_cleanup(_path)
 
     _session_manager = SessionManager(db_path=db_path)
     if "pytest" in sys.modules or os.environ.get("PYTEST_CURRENT_TEST"):

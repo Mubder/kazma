@@ -72,6 +72,9 @@ _DATA_DBS: list[tuple[str, str]] = [
 # SQLite data files resolved by a plain data_dir() join (no dedicated resolver).
 _DATA_DIR_DBS = (
     "chat_sessions.db",
+    # Saves the primary store refused (kazma_ui/session_spool.py); a
+    # migration that left it behind would drop them.
+    "chat_sessions_spool.db",
     "cron.db",
     "sessions.db",
     "sandbox_emails.db",
