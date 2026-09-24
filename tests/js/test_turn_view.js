@@ -574,6 +574,44 @@ function feed(events, turnId) {
     b2.querySelector(".message-text").getAttribute("data-md") === "second answer");
 }
 
+// INCIDENT 2026-09-24 — a turn that broke before the server named it.
+// It was never promoted, so its bubble stayed registered under 'live' and
+// still connected; the next turn's answer painted inside it. Driven through
+// the real chat.js _resetTurnState, not a copy of its intent.
+{
+  const env = newEnv();
+  const broken = env.assistantBubble({});
+  env.ROOT.appendChild(broken);
+  env.view.bind("live", broken);
+
+  const chatSrc = fs.readFileSync(
+    path.join(__dirname, "..", "..", "kazma-ui", "kazma_ui", "static", "js", "chat.js"), "utf8"
+  );
+  const start = chatSrc.indexOf("  function _resetTurnState(");
+  const end = chatSrc.indexOf("  function beginTurn(");
+  assert("_resetTurnState is extractable", start > 0 && end > start);
+  const resetTurnState = new Function(
+    "_turnView", "messagesEl",
+    "var currentMsgEl, _liveTurnId, _turnPainted, _progressEl, _progressStepCount," +
+    " _progressToolCount, _planItems, _planParsedFromText, _lastTurnStats, _docs = {};" +
+    " var window = {};\n" +
+    chatSrc.slice(start, end).replace(/\/\*\*[\s\S]*$/, "") +
+    "\nreturn _resetTurnState;"
+  )(() => env.view, env.ROOT);
+
+  resetTurnState();
+  assert("a new turn releases the broken turn's placeholder",
+    env.view.elFor("live") === null);
+
+  const fresh = env.assistantBubble({});
+  env.ROOT.appendChild(fresh);
+  env.view.bind("live", fresh);
+  const named = env.view.promote("live", "turn-43");
+  assert("the new turn's answer goes to its own bubble", named === fresh);
+  assert("the broken turn's bubble is left alone",
+    broken.isConnected !== false && env.view.elFor("turn-43") !== broken);
+}
+
 {
   const env = newEnv();
   const bubble = env.assistantBubble({ turnId: "t1" });

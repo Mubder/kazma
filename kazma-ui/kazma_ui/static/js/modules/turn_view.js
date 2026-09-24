@@ -312,6 +312,20 @@
       byTurn = {};
     }
 
+    /** A new turn is starting: 'live' stops meaning the previous one.
+     *
+     *  The placeholder is not a turn, so this is not the per-turn release
+     *  the note above rules out. A turn that broke before the server named
+     *  it (no stamped frame, no promote) leaves its bubble registered under
+     *  'live' and still connected, so elFor's isConnected check never
+     *  evicts it — and the next turn's unstamped frames, then its promote,
+     *  land in the old bubble (2026-09-24: one answer painted inside the
+     *  previous, never-completed turn). The bubble stays in the transcript;
+     *  only the key goes. */
+    function releasePlaceholder() {
+      delete byTurn.live;
+    }
+
     // ── Adoption ──────────────────────────────────────────
 
     /**
@@ -712,6 +726,7 @@
       elFor: elFor,
       promote: promote,
       releaseAll: releaseAll,
+      releasePlaceholder: releasePlaceholder,
       adopt: adopt,
       render: render,
       slot: slot,
