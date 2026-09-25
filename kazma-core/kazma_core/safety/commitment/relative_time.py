@@ -29,6 +29,7 @@ Design notes
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 from dataclasses import dataclass, field
@@ -211,7 +212,16 @@ _GENERIC_PREDICATE_HEADS = frozenset({
     "user", "owner", "person", "account", "current", "preferred", "default",
     "primary", "daily", "weekly", "monthly", "yearly", "next", "last",
     "system", "agent", "session", "email", "phone", "address", "value",
+    # Short heads became matchable when matching went whole-word (2026-09-25);
+    # these are the short ones that still say nothing about a subject.
+    "due", "end", "day", "date", "time", "new", "old", "top", "set", "get",
+    "app", "api", "key", "url", "age", "home", "work", "main", "plan",
 })
+
+#: Shortest head that can stand for its predicate. Five while aliases were
+#: matched as raw substrings ("cursor" inside "cursory"); whole-word matching
+#: makes three safe, so `tax_due` is found by "tax" as well as by "tax due".
+_MIN_HEAD_LEN = 3
 
 
 def event_aliases(predicate: str, lang: str = "en") -> list[str]:
@@ -242,7 +252,7 @@ def event_aliases(predicate: str, lang: str = "en") -> list[str]:
         # Only a distinctive head. "user_timezone" → "user" would match almost
         # any sentence, and a false subject match turns an unrelated reminder
         # into a conflict.
-        if len(head) >= 5 and head not in _GENERIC_PREDICATE_HEADS:
+        if len(head) >= _MIN_HEAD_LEN and head not in _GENERIC_PREDICATE_HEADS:
             out.append(head)
     # de-dup, preserve order
     seen: set[str] = set()
@@ -719,6 +729,31 @@ def detect_conflicts(
 # Event matching
 # ──────────────────────────────────────────────────────────────────────────
 
+@functools.lru_cache(maxsize=512)
+def _latin_alias_re(alias: str) -> re.Pattern[str]:
+    # Whole word on the left; on the right the common English endings are
+    # allowed, so "grok resets" and "subscription renewed" still match.
+    return re.compile(rf"(?<![a-z0-9]){re.escape(alias)}(?:s|es|d|ed|ing)?(?![a-z0-9])")
+
+
+def _alias_in_text(alias: str, norm: str) -> bool:
+    """Does the (lower-cased, digit-normalised) text mention *alias*?
+
+    This was a raw substring test while the table above promised word
+    boundaries, so the head alias "cursor" matched "a cursory look" and pulled
+    an unrelated reminder into the cursor-reset date check -- and short heads
+    had to be banned outright. Latin-script aliases now match as whole words.
+    Arabic ones stay substring on purpose: Arabic attaches clitics to the word
+    itself (و، ب، ل، ال), so "وانتهاء الاشتراك" has no boundary before the alias.
+    """
+    a = alias.lower()
+    if not a:
+        return False
+    if not a.isascii():
+        return a in norm
+    return _latin_alias_re(a).search(norm) is not None
+
+
 def _match_events(
     text: str, memory_beliefs: list[dict[str, Any]],
 ) -> list[tuple[str, datetime | None, str]]:
@@ -735,7 +770,7 @@ def _match_events(
             continue
         for lang in ("en", "ar"):
             for alias in event_aliases(pred, lang=lang):
-                if alias and alias.lower() in norm:
+                if _alias_in_text(alias, norm):
                     obj = str(b.get("object") or "")
                     event_at = parse_belief_date(obj)
                     hits.append((pred, event_at, alias))
