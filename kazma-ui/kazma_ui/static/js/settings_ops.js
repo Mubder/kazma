@@ -504,6 +504,19 @@
             } catch (e) { /* keep defaults */ }
         },
 
+        async loadSwarmRetention() {
+            try {
+                const data = await this._fetch('/api/settings/swarm/task-retention');
+                if (data && typeof data.days === 'number') {
+                    this.swarmRetention = {
+                        days: data.days,
+                        default: typeof data.default === 'number' ? data.default : 30,
+                        max: typeof data.max === 'number' ? data.max : 3650,
+                    };
+                }
+            } catch (e) { /* keep defaults */ }
+        },
+
         async loadPackages() {
             this.pkgLoading = true;
             try {

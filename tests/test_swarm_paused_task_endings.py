@@ -175,6 +175,11 @@ async def test_a_paused_task_with_no_checkpoint_is_closed_by_reject(db, boot, ne
     assert "no checkpoint was pending" in (result.error or "")
     assert _status_on_disk(db, task_id) == "failed"
     assert task_id not in _paused_on_disk(db)
+    store = TaskStore(db_path=db)
+    try:
+        assert store.get_task(task_id).completed_at, "an ended task records when (retention dates by it)"
+    finally:
+        store.close()
 
 
 @pytest.mark.asyncio

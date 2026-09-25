@@ -1512,6 +1512,10 @@ class SwarmEngine:
                     def _mark_failed(task: SwarmTask) -> None:
                         task.status = TaskStatus.FAILED
                         task.result = result
+                        # The handler stamps this for a checkpointed task; a
+                        # task with no checkpoint ends here and must say when,
+                        # or retention dates it by its creation.
+                        task.completed_at = task.completed_at or _utc_now_iso()
 
                     updated = _hist_update_task(
                         self._task_history,

@@ -2057,6 +2057,17 @@
             <button class="btn btn-primary" @click="saveLogging()">{{ t('settings.save_logging') }}</button>
         </div>
 
+        <!-- Swarm task history retention -->
+        <div class="settings-group">
+            <h3>{{ t('settings.swarm_retention_title') }}</h3>
+            <div class="form-group">
+                <label>{{ t('settings.swarm_retention_days') }}</label>
+                <input type="number" class="form-input" x-model.number="swarmRetention.days" min="0" :max="swarmRetention.max" step="1" style="max-width:200px">
+                <div class="form-hint">{{ t('settings.swarm_retention_hint') }}</div>
+            </div>
+            <button class="btn btn-primary" @click="saveSwarmRetention()" :disabled="swarmRetentionSaving">{{ t('settings.save_swarm_retention') }}</button>
+        </div>
+
         <!-- Proxy Provider -->
         <div class="settings-group">
             <h3>{{ t('settings.proxy_title') }}</h3>

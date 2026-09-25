@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## Swarm task history is kept for 30 days, and you can change it (2026-09-25)
+
+Finished swarm tasks (completed, failed, cancelled, timed out) older than
+**30 days** are now deleted, checked every 15 minutes. Change it in
+**Settings → System → Swarm task history**; **0** keeps every task. Paused,
+pending and running tasks are never deleted.
+
+Until now the pruning routine existed with nothing calling it, so history was
+never pruned at all. It now runs on the same 15-minute maintenance cadence as
+the other cleanups, which were rewritten to share one runner: a sweep that
+fails is logged and the others still run.
+
 ## Postgres runs more of the suite, and swarm pruning counts what it deletes (2026-09-25)
 
 The CI Postgres job now runs 282 tests in 31 files (from 250 in 26): today's

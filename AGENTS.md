@@ -492,8 +492,12 @@ left backups/export inert). Current boot list:
   from macro_sleep so a slow disk on backup can't stall decay.
 - **24h reconsolidation:** `global_reconsolidation` (dedupe + re-embed of
   beliefs, subject-hash partitioned).
-- **15-min commitment GC:** TTL expiry + tiered retention (§20). Also
-  rides HITL-gate TTL sweep — no new sweeper loop.
+- **15-min commitment GC:** TTL expiry + tiered retention (§20). Every
+  sweep on this cadence is one entry of `_MAINTENANCE_SWEEPS` (commitment GC,
+  artifact GC, HITL-gate TTL, memory task-queue purge, swarm task retention —
+  `swarm.task_retention_days`, default 30, 0 keeps all), run by ONE isolated
+  runner so a failing sweep never stops the rest. A new periodic cleanup is a
+  new entry there, never a new loop (`tests/test_swarm_task_retention.py`).
 - **Session purge, daily digest, weekly firing ledger, restore drill:**
   started here too; do not assume "the four original loops" is the set.
 All `enqueue_task(...)` loops: the durable worker drains the actual work, so

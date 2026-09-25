@@ -349,6 +349,25 @@
             this.saving = false;
         },
 
+        async saveSwarmRetention() {
+            this.swarmRetentionSaving = true;
+            try {
+                await window.kazmaSave('/api/settings/single', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        key: 'swarm.task_retention_days',
+                        value: this.swarmRetention.days,
+                        category: 'swarm',
+                    }),
+                });
+                showToast((window.t && window.t('settings.swarm_retention_saved')) || 'Swarm task retention saved', 'success');
+            } catch (e) {
+                showToast(e.message || 'Save failed', 'error');
+            }
+            this.swarmRetentionSaving = false;
+        },
+
         async loadProxy() {
             try {
                 const data = await this._fetch('/api/settings/proxy');

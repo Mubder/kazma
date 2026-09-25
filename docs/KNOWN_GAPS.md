@@ -424,11 +424,11 @@ Writing each of the 148 undescribed variables from its call site:
 - **`KAZMA_MEMORY_CONFLICT_POLICY=origin_wins` and `fail_closed` behave the
   same** (both skip a write to a row another region owns; only the logged
   reason differs).
-- **Swarm task history is never pruned.** `TaskStore.prune_tasks` (audit M3:
-  delete finished tasks older than 30 days) exists, is tested on both
-  backends, and nothing calls it — the routine-with-no-caller shape of §15.
-  Not wired, because doing so starts deleting task history on the next
-  reload: the owner decides the retention (a setting, or leave it unbounded).
+- **~~Swarm task history is never pruned.~~** Closed 2026-09-25 (owner's
+  choice: a setting, 30 days). `swarm.task_retention_days` (Settings → System;
+  0 keeps all) is applied by the 15-minute maintenance sweep, which now counts
+  timed-out tasks as finished too. `tests/test_swarm_task_retention.py`
+  checks the sweep is on the cadence the server starts.
 
 ## Prompt injection
 

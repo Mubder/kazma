@@ -251,6 +251,20 @@ WHERE EXISTS (SELECT 1 FROM json_each(workers) WHERE value = ?)
 ```
 
 This avoids substring false-positives (e.g. worker `"a"` matching `"ab"`).
+On Postgres the same filter is JSONB containment (`workers @> '["a"]'`);
+`tests/test_task_store_backends.py` holds both backends to the same answers.
+
+### 6.5 Retention (how long finished tasks are kept)
+
+Settings → System → **Swarm task history**, stored as
+`swarm.task_retention_days` (default **30**; **0** keeps every task; at most
+3650). Every 15 minutes the maintenance sweep
+(`memory.worker_bootstrap._MAINTENANCE_SWEEPS`) deletes completed, failed,
+cancelled and timed-out tasks older than that. Paused, pending and running
+tasks are never deleted. The value is read at each sweep, so a change applies
+within 15 minutes, and `PUT /api/settings/single` refuses anything that is not
+a whole number of days from 0 to 3650. Until 2026-09-25 the pruning routine
+existed with nothing calling it, so history was never pruned.
 
 ---
 

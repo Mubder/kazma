@@ -25,7 +25,23 @@ from kazma_core.swarm.task import (
 
 from kazma_core.config_store import apply_sqlite_pragmas
 
-__all__ = ["TaskStore"]
+__all__ = [
+    "DEFAULT_TASK_RETENTION_DAYS",
+    "MAX_TASK_RETENTION_DAYS",
+    "TASK_RETENTION_KEY",
+    "TaskStore",
+    "parse_task_retention_days",
+    "prune_finished_tasks",
+    "task_retention_days",
+]
+
+#: Settings key: days finished swarm tasks are kept; ``0`` keeps every task.
+TASK_RETENTION_KEY = "swarm.task_retention_days"
+DEFAULT_TASK_RETENTION_DAYS = 30
+MAX_TASK_RETENTION_DAYS = 3650
+
+#: Statuses a task never leaves, and so the only ones retention deletes.
+_FINISHED_STATUSES = ("completed", "failed", "cancelled", "timeout")
 
 from kazma_core.db.pg_helpers import json_dumps as _pg_json
 
@@ -474,10 +490,12 @@ class TaskStore:
         return tasks
 
     def prune_tasks(self, retention_days: int = 30) -> int:
-        """Prune terminal swarm tasks older than retention_days (audit M3).
+        """Prune finished swarm tasks older than retention_days (audit M3).
 
-        Deletes completed, failed, or cancelled tasks where sort_at is older
-        than the retention cutoff.
+        Deletes completed, failed, cancelled and timed-out tasks whose
+        sort_at is older than the cutoff; paused, pending and running tasks
+        are never touched. ``retention_days`` is at least 1 here — "keep
+        everything" is :func:`prune_finished_tasks` not calling this.
         """
         from datetime import timedelta
         cutoff = (datetime.now(UTC) - timedelta(days=max(1, int(retention_days)))).isoformat()
@@ -490,10 +508,10 @@ class TaskStore:
                 # delete of any size came back as [] and this reported 0.
                 res = get_pool().execute(
                     """DELETE FROM kazma_swarm_tasks
-                       WHERE status IN ('completed', 'failed', 'cancelled')
+                       WHERE status = ANY(%s)
                          AND COALESCE(sort_at, completed_at, created_at) < %s
                        RETURNING id""",
-                    (cutoff,),
+                    (list(_FINISHED_STATUSES), cutoff),
                 )
                 deleted = len(res)
                 if deleted:
@@ -501,11 +519,12 @@ class TaskStore:
                 return deleted
 
             conn = self._get_conn()
+            marks = ", ".join("?" for _ in _FINISHED_STATUSES)
             cur = conn.execute(
-                """DELETE FROM swarm_tasks
-                   WHERE status IN ('completed', 'failed', 'cancelled')
+                f"""DELETE FROM swarm_tasks
+                   WHERE status IN ({marks})
                      AND COALESCE(sort_at, completed_at, created_at) < ?""",
-                (cutoff,),
+                (*_FINISHED_STATUSES, cutoff),
             )
             conn.commit()
             deleted = cur.rowcount
@@ -846,3 +865,77 @@ class TaskStore:
         if "workspace_id" in row.keys() and row["workspace_id"]:
             task.workspace_id = row["workspace_id"]
         return task
+
+
+# ---------------------------------------------------------------------------
+# Retention: how long finished tasks are kept
+# ---------------------------------------------------------------------------
+
+#: Bad values already warned about, so a misconfiguration is reported once
+#: rather than on every 15-minute sweep.
+_warned_retention_values: set[str] = set()
+
+
+def parse_task_retention_days(value: Any) -> int | None:
+    """*value* as whole days from 0 to 3650, or ``None`` when it is not one."""
+    if isinstance(value, bool):
+        return None
+    try:
+        days = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return days if 0 <= days <= MAX_TASK_RETENTION_DAYS else None
+
+
+def task_retention_days(config_store: Any = None) -> int:
+    """Days finished swarm tasks are kept (Settings ``swarm.task_retention_days``).
+
+    ``0`` keeps every task; unset gives the default of 30. Read live, so a
+    change in Settings applies at the next sweep. A stored value that is not a
+    whole number of days falls back to the default, with one warning.
+    """
+    if config_store is None:
+        from kazma_core.config_store import get_config_store
+
+        config_store = get_config_store()
+    raw = config_store.get(TASK_RETENTION_KEY)
+    if raw is None or str(raw).strip() == "":
+        return DEFAULT_TASK_RETENTION_DAYS
+    days = parse_task_retention_days(raw)
+    if days is None:
+        if str(raw) not in _warned_retention_values:
+            _warned_retention_values.add(str(raw))
+            logger.warning(
+                "[TaskStore] %s=%r is not a whole number of days from 0 to %d; "
+                "keeping finished swarm tasks for %d days",
+                TASK_RETENTION_KEY, raw, MAX_TASK_RETENTION_DAYS, DEFAULT_TASK_RETENTION_DAYS,
+            )
+        return DEFAULT_TASK_RETENTION_DAYS
+    return days
+
+
+def prune_finished_tasks(store: TaskStore | None = None) -> int:
+    """Apply the retention setting: delete finished tasks older than it.
+
+    Runs on the 15-minute maintenance cadence (``memory.worker_bootstrap``),
+    against the running swarm engine's store when there is one. Returns how
+    many tasks were deleted — always 0 when the setting keeps every task.
+    ``prune_tasks`` existed for months with no caller, so history was never
+    pruned at all (2026-09-25).
+    """
+    days = task_retention_days()
+    if days == 0:
+        return 0
+    if store is not None:
+        return store.prune_tasks(retention_days=days)
+    from kazma_core.swarm.engine import get_swarm_engine
+
+    engine = get_swarm_engine()
+    running = getattr(engine, "task_store", None) if engine is not None else None
+    if running is not None:
+        return running.prune_tasks(retention_days=days)
+    own = TaskStore()
+    try:
+        return own.prune_tasks(retention_days=days)
+    finally:
+        own.close()
